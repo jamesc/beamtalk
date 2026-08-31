@@ -1713,6 +1713,15 @@ scan_for_second_top_level_statement([], _Depth, _InString) ->
 %% would wrongly end the string one character early on that escaped quote).
 scan_for_second_top_level_statement([$\\, _Escaped | Rest], Depth, true) ->
     scan_for_second_top_level_statement(Rest, Depth, true);
+%% Mirrors lex_character/0 (source_analysis/lexer.rs): outside a string, `$`
+%% starts a one-character literal (`$(`, `$"`, `$\n`, ...) whose payload
+%% character is consumed atomically and must never itself be read as a
+%% bracket/quote/period — `$(` is the character `(`, not an opening
+%% bracket that leaves `Depth` permanently unbalanced.
+scan_for_second_top_level_statement([$$, $\\, _Escaped | Rest], Depth, false) ->
+    scan_for_second_top_level_statement(Rest, Depth, false);
+scan_for_second_top_level_statement([$$, _Payload | Rest], Depth, false) ->
+    scan_for_second_top_level_statement(Rest, Depth, false);
 scan_for_second_top_level_statement([$" | Rest], Depth, InString) ->
     scan_for_second_top_level_statement(Rest, Depth, not InString);
 scan_for_second_top_level_statement([_ | Rest], Depth, true) ->

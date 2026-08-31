@@ -812,6 +812,25 @@ extract_assignment_escaped_quote_in_string_is_still_one_statement_test() ->
     Src3 = "s := \"a\\\\\". y := 2",
     ?assertEqual(none, beamtalk_repl_eval:extract_assignment(Src3)).
 
+%% BT-3368 regression guard (review follow-up): a `$`-prefixed character
+%% literal (`$(`, `$"`, `$\n`, ... — see `lex_character/0`,
+%% `source_analysis/lexer.rs`) must be consumed atomically, never letting
+%% its payload character be read as a real bracket/quote — otherwise a
+%% `$(`/`$[`/`${` inside one statement permanently unbalances `Depth` and
+%% masks a real second top-level statement later in the same call.
+extract_assignment_character_literal_payload_is_not_a_bracket_test() ->
+    %% Genuinely two statements — the bracket-payload character literal in
+    %% the first one must not swallow the real top-level `.` separator.
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("x := $( class. y := 2")),
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("x := $[ class. y := 2")),
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("x := ${ class. y := 2")),
+    %% A single statement using a bracket- or quote-payload character
+    %% literal must still resolve correctly (no false bail either).
+    ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $( class")),
+    ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $\" class")),
+    %% Escaped-payload form (`$\c`) consumes all three characters together.
+    ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $\\( class")).
+
 %% ===================================================================
 %% compile_expression_via_port catch clauses (BT-627)
 %% ===================================================================
