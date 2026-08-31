@@ -62,8 +62,17 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
             // same trust fire again on a later lookup instead of only once at
             // creation. Logged rather than blocked outright; narrowing this
             // further (e.g. requiring the resolved directory to independently
-            // look like the same project) is left as a follow-up.
-            if !metadata.project_path.is_absolute() {
+            // look like the same project) is left as a follow-up (BT-3355).
+            //
+            // Gated on no node currently running for this workspace: healing
+            // only ever fires for legacy, not-yet-corrected metadata, so a
+            // live, correctly-configured workspace can never have its on-disk
+            // `project_path` corrupted invisibly out from under it.
+            let node_is_running = get_node_info(workspace_id)
+                .ok()
+                .flatten()
+                .is_some_and(|info| is_node_running(&info, Some(workspace_id)));
+            if !metadata.project_path.is_absolute() && !node_is_running {
                 if let Ok(canonical_project_path) = project_path.canonicalize() {
                     let healed = WorkspaceMetadata {
                         project_path: canonical_project_path,
