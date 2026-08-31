@@ -54,7 +54,7 @@ Prefer `stdlib/test/*.bt` (BUnit TestCase) for new tests. Use `stdlib/bootstrap-
 ## Architecture
 
 - **DDD contexts:** Language Service, Compilation, Runtime, REPL.
-- **Dependencies flow down only** — `beamtalk-core` never imports `beamtalk-cli` or `beamtalk-lsp`.
+- **Dependencies flow down only** — `beamtalk-core` (Compilation: `ast`, `source_analysis`, `unparse`, `semantic_analysis`, `compilation`) never imports `beamtalk-cli`, `beamtalk-lsp`, `beamtalk-codegen` (Code Generation), or `beamtalk-language-service` (Language Service: `queries` + `language_service`) — the latter two depend on `beamtalk-core`, never the reverse, and it's cargo-enforced (a wrong-direction edge is a cyclic-package-dependency compile error). See `docs/development/architecture-principles.md` §1 and `docs/ADR/0117-beamtalk-core-crate-split.md`.
 - **Never** panic/`unwrap()` on user input, or add deps without justification.
 - **Always** return `(Result, Vec<Diagnostic>)` for user-facing operations.
 
