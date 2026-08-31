@@ -50,8 +50,15 @@ impl ReplClient {
     /// Returns `true` if the previous session was resumed, `false` if a fresh
     /// session was established.
     pub(crate) fn reconnect(&mut self) -> Result<bool> {
+        self.reconnect_with_retries(super::MAX_CONNECT_RETRIES, super::RETRY_DELAY_MS)
+    }
+
+    /// [`reconnect`](Self::reconnect)'s retry loop, parameterized on attempt
+    /// count/delay so tests can exhaust retries against a dead server without
+    /// paying `MAX_CONNECT_RETRIES * RETRY_DELAY_MS` of real wall-clock time.
+    fn reconnect_with_retries(&mut self, max_retries: u32, retry_delay_ms: u64) -> Result<bool> {
         let requested_session = self.session_id.clone();
-        for attempt in 1..=super::MAX_CONNECT_RETRIES {
+        for attempt in 1..=max_retries {
             match ProtocolClient::connect_with_resume(
                 &self.host,
                 self.port,
@@ -67,10 +74,10 @@ impl ReplClient {
                     return Ok(resumed);
                 }
                 Err(e) => {
-                    if attempt == super::MAX_CONNECT_RETRIES {
+                    if attempt == max_retries {
                         return Err(e);
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(super::RETRY_DELAY_MS));
+                    std::thread::sleep(std::time::Duration::from_millis(retry_delay_ms));
                 }
             }
         }
@@ -520,10 +527,14 @@ mod tests {
         });
         let mut client = ReplClient::connect("127.0.0.1", handler_port, "cookie").expect("connect");
         accepted.join().expect("server thread");
-        // Nothing is listening on this port any more, so every reconnect
-        // attempt (MAX_CONNECT_RETRIES of them) fails with a connect error.
+        // Nothing is listening on this port any more, so every attempt fails
+        // with a connect error. Uses `reconnect_with_retries` directly (2
+        // attempts, 5ms apart) rather than the real `reconnect()` — which
+        // would otherwise pay `MAX_CONNECT_RETRIES * RETRY_DELAY_MS` (10 *
+        // 500ms) of real wall-clock time to exercise the same exhausted-retry
+        // path this test cares about.
         let err = client
-            .reconnect()
+            .reconnect_with_retries(2, 5)
             .expect_err("reconnect should exhaust retries and fail");
         assert!(err.to_string().contains("Failed to connect"));
     }
