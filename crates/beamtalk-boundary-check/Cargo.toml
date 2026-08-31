@@ -25,7 +25,7 @@ path = "src/main.rs"
 # text scanner would hit (Rust source is full of `{}` inside string
 # literals — format!() calls, error messages, etc.). Build-time only,
 # not shipped in any release artifact.
-syn = { version = "2", features = ["full", "visit"] }
+syn = { version = "3", features = ["full", "visit"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 
 [dev-dependencies]
