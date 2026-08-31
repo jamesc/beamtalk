@@ -359,3 +359,44 @@ fn run_create_background(
 
     Ok(())
 }
+
+/// Tests covering the parts of this module reachable without a
+/// `BEAMTALK_HOME`-style test override (BT-3349's own description tracks
+/// adding one): `run_create`'s and `run_list`/`run_status`'s success paths
+/// still need it, since they read/write `~/.beamtalk/workspaces/` in ways
+/// that can't be pointed at a hermetic tempdir yet.
+///
+/// `run_create_background`'s "already running" short-circuit is reachable
+/// today because `workspace_id_for_project(_, Some(name))` (see
+/// `storage::workspace_id_for`) ignores `project_path` entirely when a name
+/// is given — it just validates and returns the name — so a uniquely-named
+/// on-disk fixture guarantees a workspace ID collision with nothing else.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::WorkspaceFixture;
+
+    #[test]
+    fn run_create_background_already_running_short_circuits() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        let fixture = WorkspaceFixture::new("cli-already-running", port, std::process::id());
+
+        // `port: 0` / no startup flags: the "already running" branch returns
+        // before any of them would matter.
+        run_create_background(&fixture.id, 0, None, false, None, false)
+            .expect("already-running workspace should short-circuit to Ok");
+    }
+
+    #[test]
+    fn run_create_background_already_running_warns_on_ignored_startup_flags() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        let fixture = WorkspaceFixture::new("cli-already-running-flags", port, std::process::id());
+
+        // Passing --persistent against an already-running workspace hits the
+        // "startup flags have no effect" warning branch, but still succeeds.
+        run_create_background(&fixture.id, 0, None, true, None, false)
+            .expect("already-running workspace should short-circuit to Ok even with flags set");
+    }
+}
