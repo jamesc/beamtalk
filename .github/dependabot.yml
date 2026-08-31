@@ -23,6 +23,16 @@ updates:
     commit-message:
       prefix: "deps"
       include: "scope"
+    # `beamtalk-lsp`'s dev-dependency on `tower` exists only to reuse the
+    # exact `tower` version already pinned transitively by `tower-lsp`
+    # (0.20.0 depends on `tower ^0.4`) so its `ServiceExt` impls apply to
+    # `tower_lsp::LspService` in tests. A `tower` bump that `tower-lsp`
+    # hasn't followed resolves a second, incompatible `tower` major version
+    # and breaks that trait resolution — see PR #3627. Ignore it until
+    # `tower-lsp` itself moves past `tower 0.4`.
+    ignore:
+      - dependency-name: "tower"
+        versions: [">=0.5.0"]
     # Group Rust updates by type
     groups:
       rust-dependencies:
