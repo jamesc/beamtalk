@@ -918,7 +918,6 @@ fn standalone_method_leading_comment_attached() {
 // ========================================================================
 
 use crate::source_analysis::parse_method;
-use crate::unparse::unparse_method;
 
 fn parse_method_ok(source: &str) -> crate::ast::MethodDefinition {
     let tokens = lex_with_eof(source);
@@ -1010,53 +1009,10 @@ fn parse_method_preserves_leading_section_banner() {
     );
 }
 
-#[test]
-fn parse_method_unparse_drops_banner_keeps_doc() {
-    // unparse_method is what gets STORED as the live method `__source__`, and it
-    // must match the method's byte span — which starts at the `///` doc block and
-    // excludes a leading `//` section banner (the banner is inter-method file
-    // structure, not part of the method). So unparse_method drops the banner but
-    // keeps the doc comment; whole-file unparse preserves the banner in place
-    // (BT-2594; banners become first-class categories in BT-2601).
-    let src = "// --- Execution CRUD ---\n\
-               \n\
-               /// Store a new workflow execution.\n\
-               /// Raises if the workflowId already exists.\n\
-               createExecution: execution :: Object -> Object =>\n\
-               \x20\x20execution";
-    let m = parse_method_ok(src);
-    let out = unparse_method(&m);
-    assert!(
-        !out.contains("--- Execution CRUD ---"),
-        "unparse_method should drop the leading section banner so the stored \
-         source matches the method's byte span:\n{out}"
-    );
-    assert!(
-        out.contains("/// Store a new workflow execution."),
-        "unparse dropped the first doc line:\n{out}"
-    );
-    assert!(
-        out.contains("/// Raises if the workflowId already exists."),
-        "unparse dropped a doc line:\n{out}"
-    );
-}
-
-#[test]
-fn parse_method_roundtrip_is_idempotent() {
-    // parse -> unparse -> parse -> unparse must be stable: this is the property
-    // that a method surviving N saves keeps its source intact (no per-save
-    // erosion of the leading comment block).
-    let src = "// --- Execution CRUD ---\n\
-               \n\
-               /// Store a new workflow execution.\n\
-               createExecution: execution :: Object -> Object =>\n\
-               \x20\x20execution";
-    let once = unparse_method(&parse_method_ok(src));
-    let twice = unparse_method(&parse_method_ok(&once));
-    let thrice = unparse_method(&parse_method_ok(&twice));
-    assert_eq!(once, twice, "method source not idempotent after 2nd save");
-    assert_eq!(twice, thrice, "method source not idempotent after 3rd save");
-}
+// `parse_method_unparse_drops_banner_keeps_doc` and
+// `parse_method_roundtrip_is_idempotent` moved to `crate::unparse`'s own test
+// tree (BT-3346, ADR 0117 Phase 4) — both round-trip through `unparse_method`,
+// which `source_analysis`'s test tree no longer references.
 
 #[test]
 fn parse_method_rejects_non_method() {

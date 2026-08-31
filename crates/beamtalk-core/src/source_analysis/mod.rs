@@ -50,9 +50,11 @@ mod token;
 #[cfg(test)]
 mod lexer_property_tests;
 
-// Shared `.bt` corpus-walking helpers for the corpus test suites below.
+// Shared `.bt` corpus-walking helpers for the corpus test suites below, and
+// for `crate::unparse`'s corpus conformance tests (BT-3346) — `pub(crate)`
+// rather than private so both can reach it.
 #[cfg(test)]
-mod corpus_test_support;
+pub(crate) mod corpus_test_support;
 
 // Corpus-wide divider validation for method categories (BT-2601 recognizer,
 // BT-2626 stdlib-wide curation).

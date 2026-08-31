@@ -3150,33 +3150,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn match_exhaustive_unparse_round_trips_keyword() {
-        let formatted = crate::unparse::format_source("x matchExhaustive: [#a -> 1; #b -> 2]")
-            .expect("formatting should succeed");
-        assert!(
-            formatted.contains("matchExhaustive:"),
-            "unparse output should preserve matchExhaustive: keyword, got: {formatted}"
-        );
-        assert!(
-            !formatted.contains(" match: ["),
-            "unparse output must not downgrade matchExhaustive: to match:, got: {formatted}"
-        );
-    }
-
-    #[test]
-    fn plain_match_unparse_does_not_gain_exhaustive_keyword() {
-        let formatted = crate::unparse::format_source("x match: [#a -> 1; #b -> 2]")
-            .expect("formatting should succeed");
-        assert!(
-            formatted.contains(" match: ["),
-            "plain match: should round-trip unchanged, got: {formatted}"
-        );
-        assert!(
-            !formatted.contains("matchExhaustive:"),
-            "plain match: must not gain the exhaustive keyword, got: {formatted}"
-        );
-    }
+    // `match_exhaustive_unparse_round_trips_keyword` and
+    // `plain_match_unparse_does_not_gain_exhaustive_keyword` moved to
+    // `crate::unparse`'s own test tree (BT-3346, ADR 0117 Phase 4) — both
+    // exercise `unparse::format_source`, which `source_analysis`'s test tree
+    // no longer references.
 
     // ========================================================================
     // BT-2767: expect().unwrap() hardening — guard-bypass regression tests
