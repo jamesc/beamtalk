@@ -34,19 +34,23 @@ pub struct ClassModifiers {
     pub is_internal: bool,
 }
 
-/// The kind of supervisor based on ancestry (BT-1218, ADR 0059 Phase 1).
+/// The kind of supervisor based on ancestry (BT-1218, ADR 0059 Phase 1;
+/// `Child` added BT-3366, ADR 0118).
 ///
 /// Set by semantic analysis when a class is found to inherit from
-/// `Supervisor` or `DynamicSupervisor` (which are themselves `Object`
-/// subclasses, not `Actor` subclasses). `None` for all other classes —
-/// including non-supervisor `Actor` subclasses and non-supervisor classes
-/// that do not descend from `Supervisor` or `DynamicSupervisor`.
+/// `Supervisor`, `DynamicSupervisor`, or `ChildSupervisor` (which are
+/// themselves `Object` subclasses, not `Actor` subclasses). `None` for all
+/// other classes — including non-supervisor `Actor` subclasses and
+/// non-supervisor classes that do not descend from any of the three.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SupervisorKind {
     /// Inherits from `Supervisor` (static child list).
     Static,
-    /// Inherits from `DynamicSupervisor` (children added at runtime).
+    /// Inherits from `DynamicSupervisor` (homogeneous pool, `simple_one_for_one`).
     Dynamic,
+    /// Inherits from `ChildSupervisor` (heterogeneous runtime-added children,
+    /// each with its own persistent OTP child spec under `one_for_one`).
+    Child,
 }
 
 /// The kind of class based on its declaration form (ADR 0042).

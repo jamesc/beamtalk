@@ -252,6 +252,7 @@ pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarch
     }
     if hierarchy.is_supervisor_subclass(class_name)
         || hierarchy.is_dynamic_supervisor_subclass(class_name)
+        || hierarchy.is_child_supervisor_subclass(class_name)
     {
         return false;
     }

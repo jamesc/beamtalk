@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: dedicated single-child ChildSupervisor for the
+// config-preserving-restart regression test in child_supervisor.btscript
+// (BT-3366).
+
+ChildSupervisor(E2EChildSupNamedWorker) subclass: E2EChildSupRestartPool
+
+  class childClass -> Class => E2EChildSupNamedWorker

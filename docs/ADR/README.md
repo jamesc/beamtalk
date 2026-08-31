@@ -144,6 +144,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0115](0115-xref-receiver-type-key.md) | Receiver-Type Key for `senders_of/1` Lookup | Implemented | 2026-08-20 |
 | [0116](0116-number-on-the-left-arithmetic-coercion.md) | Double-Dispatch Coercion for Number-on-the-Left Arithmetic | Accepted | 2026-08-25 |
 | [0117](0117-beamtalk-core-crate-split.md) | Splitting `beamtalk-core` into Sub-Crates | Proposed | 2026-08-30 |
+| [0118](0118-child-supervisor.md) | ChildSupervisor — Config-Preserving Runtime-Added Children | Implemented | 2026-08-31 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

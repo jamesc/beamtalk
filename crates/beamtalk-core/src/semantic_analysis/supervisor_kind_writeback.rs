@@ -25,11 +25,14 @@ pub fn apply_supervisor_kind_writeback(module: &mut Module, hierarchy: &ClassHie
     for class in &mut module.classes {
         let name = class.name.name.as_str();
         // Always reassign so the pass is idempotent: a class that no longer inherits
-        // from Supervisor/DynamicSupervisor (e.g. after a module edit) must not keep
-        // a stale SupervisorKind from a previous run. Check DynamicSupervisor first
-        // so a future DynamicSupervisor <: Supervisor reclassification stays accurate.
+        // from Supervisor/DynamicSupervisor/ChildSupervisor (e.g. after a module edit)
+        // must not keep a stale SupervisorKind from a previous run. Check
+        // DynamicSupervisor and ChildSupervisor first so a future
+        // DynamicSupervisor/ChildSupervisor <: Supervisor reclassification stays accurate.
         class.supervisor_kind = if hierarchy.is_dynamic_supervisor_subclass(name) {
             Some(SupervisorKind::Dynamic)
+        } else if hierarchy.is_child_supervisor_subclass(name) {
+            Some(SupervisorKind::Child)
         } else if hierarchy.is_supervisor_subclass(name) {
             Some(SupervisorKind::Static)
         } else {
@@ -79,6 +82,21 @@ mod tests {
         assert_eq!(
             module.classes[0].supervisor_kind,
             Some(SupervisorKind::Dynamic)
+        );
+    }
+
+    /// BT-3366 / ADR 0118: `ChildSupervisor subclass:` gets `SupervisorKind::Child`.
+    #[test]
+    fn test_child_supervisor_subclass_gets_child_kind() {
+        let source = "ChildSupervisor subclass: MonitorSupervisor";
+        let tokens = lex_with_eof(source);
+        let (mut module, _) = parse(tokens);
+        let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
+        let hierarchy = hierarchy_result.unwrap();
+        apply_supervisor_kind_writeback(&mut module, &hierarchy);
+        assert_eq!(
+            module.classes[0].supervisor_kind,
+            Some(SupervisorKind::Child)
         );
     }
 

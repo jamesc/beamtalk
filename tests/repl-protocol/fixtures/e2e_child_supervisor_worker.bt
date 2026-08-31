@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: permanent-restart worker for ChildSupervisor lifecycle tests
+// (startChild/count/terminateChild) (BT-3366). `value` is set via
+// spawnWith: #{#value => N}.
+
+Actor subclass: E2EChildSupWorker
+  state: value = 0
+
+  class supervisionPolicy -> Symbol => #permanent
+
+  getValue => self.value
+
+  increment => self.value := self.value + 1

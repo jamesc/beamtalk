@@ -289,7 +289,7 @@ ProtoObject (minimal — identity, DNU)
 
 1. **Protocol provider** — common methods inherited by all Value and Actor subclasses: `isNil`, `respondsTo:`, `printString`, `hash`, `error:`, `yourself`, `show:`, `showCr:` (debug output to Transcript; replaces the former `trace:`/`traceCr:` which are deprecated aliases)
 2. **FFI namespace** — zero-overhead class-method wrappers around Erlang modules and OTP primitives (e.g., `Json`, `System`, `File`, `Ets`, `Random`). No instances, no process
-3. **Abstract extension point** — framework contracts designed for subclassing, where subclasses define methods but hold no data (e.g., `Supervisor`, `DynamicSupervisor`)
+3. **Abstract extension point** — framework contracts designed for subclassing, where subclasses define methods but hold no data (e.g., `Supervisor`, `DynamicSupervisor`, `ChildSupervisor`)
 
 ```beamtalk
 // FFI namespace — wraps Erlang modules as class methods
@@ -1651,10 +1651,10 @@ The `a`/`an` article prefix (the old `a Point` / ungrammatical `a Integer` defau
 |------------|-----------------------|---------|
 | **Value** (immutable data) | `ClassName(field: value, ...)` — class-headed, **labelled** fields, in sorted field order | `Point(x: 3, y: 4)`; no fields → `Point()` |
 | **Actor** (live process) | `Actor(ClassName, pid)` — kind-headed, **positional** | `Actor(Counter, 0.123.0)` |
-| **Supervisor** (supervising process) | `Supervisor(ClassName, pid)` / `DynamicSupervisor(ClassName, pid)` | `Supervisor(WebApp, 0.200.0)` |
+| **Supervisor** (supervising process) | `Supervisor(ClassName, pid)` / `DynamicSupervisor(ClassName, pid)` / `ChildSupervisor(ClassName, pid)` | `Supervisor(WebApp, 0.200.0)` |
 | **Object** (plain reference) | bare `ClassName`, or a class-defined form | `FileHandle`, or e.g. `#Pid<0.123.0>` for raw primitives |
 
-Value forms carry `field:` **labels** while process forms are **positional**; the process heads (`Actor` / `Supervisor` / `DynamicSupervisor`) are **reserved kind words** no user Value class may shadow, so the two shapes are unambiguous. Raw platform primitives (`Pid`, `Port`, `Reference`, `Tuple`) keep their Erlang-native `#Pid<…>` / `#Port<…>` rendering — they *are* Erlang terms.
+Value forms carry `field:` **labels** while process forms are **positional**; the process heads (`Actor` / `Supervisor` / `DynamicSupervisor` / `ChildSupervisor`) are **reserved kind words** no user Value class may shadow, so the two shapes are unambiguous. Raw platform primitives (`Pid`, `Port`, `Reference`, `Tuple`) keep their Erlang-native `#Pid<…>` / `#Port<…>` rendering — they *are* Erlang terms.
 
 Nested `Value` fields expand recursively (so `Line(from: Point(x: 0, y: 0), to: Point(x: 3, y: 4))` shows in full), each rendered via its own `printString` (Debug form — strings stay quoted), bounded by depth (default 5), width, and total-length caps with a cycle guard; truncated positions render as `...`.
 
@@ -2574,9 +2574,19 @@ No `state:` for the timer reference, no `terminate:` cleanup needed — the link
 
 ---
 
-## Supervision Trees (ADR 0059)
+## Supervision Trees (ADR 0059, ADR 0118)
 
-Beamtalk provides declarative OTP supervision trees via `Supervisor subclass:` and `DynamicSupervisor subclass:`. This is the Beamtalk idiom for "let it crash" fault tolerance — define which actors should be restarted automatically, and how.
+Beamtalk provides declarative OTP supervision trees via `Supervisor subclass:`, `DynamicSupervisor subclass:`, and `ChildSupervisor subclass:`. This is the Beamtalk idiom for "let it crash" fault tolerance — define which actors should be restarted automatically, and how.
+
+**Which one do I use?**
+
+| | Children known at... | Children are... | Crash restart replays... |
+|---|---|---|---|
+| **`Supervisor`** | class-definition time (`class children`) | a fixed, named list | that child's own declared config |
+| **`DynamicSupervisor`** | runtime (`startChild`/`startChild:`) | a homogeneous, anonymous pool of one actor class | the shared template's args — **never** the specific args a `startChild:` call passed |
+| **`ChildSupervisor`** | runtime (`startChild`/`startChild:`) | heterogeneous — differently-configured instances of one actor class | **that specific child's own original `startChild:` args** (ADR 0118) |
+
+Reach for `ChildSupervisor` specifically when you need OTP-native "restart preserves this child's original config" for runtime-added children — the one case `DynamicSupervisor`'s `simple_one_for_one` strategy cannot provide, regardless of what args were passed at start time.
 
 ### Static Supervisor
 
@@ -2718,6 +2728,39 @@ pool stop
 WorkerPool current                  // => nil
 ```
 
+### Child Supervisor (ADR 0118)
+
+Subclass `ChildSupervisor` when runtime-added children need their own, differing configuration to survive a crash — something `DynamicSupervisor`'s `simple_one_for_one` strategy cannot provide (it can only ever replay one shared template's args). `ChildSupervisor` is backed by a plain OTP `one_for_one` supervisor: every `startChild:` call registers a distinct, permanent OTP child spec, so a crash-triggered restart replays *that specific child's* original args — the same config-preserving guarantee `supervisionPolicy` already gives static `Supervisor` children.
+
+```beamtalk
+ChildSupervisor(Monitor) subclass: MonitorSupervisor
+  class childClass => Monitor
+```
+
+```beamtalk
+sup := (MonitorSupervisor supervise) unwrap
+// => ChildSupervisor(MonitorSupervisor, _)
+
+// Each child gets its own config — unlike DynamicSupervisor, these do not
+// share a template, so they can be started with completely different args.
+m1 := (sup startChild: #{#check => #diskSpace, #threshold => 90}) unwrap
+m2 := (sup startChild: #{#check => #cpuLoad, #threshold => 80}) unwrap
+sup count                           // => 2
+
+// If m1 crashes, OTP restarts it with `#{#check => #diskSpace, #threshold => 90}`
+// again — automatically, no onExit:/manual-respawn code required.
+
+// terminateChild: also deletes the child's now-unused permanent spec, so
+// repeated add/remove cycles never leak spec entries (unlike DynamicSupervisor,
+// where deleting the shared simple_one_for_one template would crash the supervisor).
+(sup terminateChild: m1) unwrap     // => nil
+sup count                           // => 1
+
+sup stop
+```
+
+`ChildSupervisor`, like `DynamicSupervisor`, has no `children`/`which:`-style listing method — only `count`. To reach a specific child again after a crash (when its pid has changed), use named registration (`Actor>>registerAs:` / `Actor class>>named:`, [ADR 0079](#actor-named-registration-adr-0079)) rather than holding onto the stale handle `startChild:` returned.
+
 ### Nested Supervisors
 
 Supervisors can be nested — include another supervisor class in `children`:
@@ -2747,6 +2790,9 @@ Supervisor lifecycle methods that can fail at a startup / registry boundary retu
 | `DynamicSupervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
 | `DynamicSupervisor>>startChild` / `startChild: args` | `-> Result(C, Error)` | `#child_start_failed`, `#stale_handle` |
 | `DynamicSupervisor>>terminateChild: child` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
+| `ChildSupervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
+| `ChildSupervisor>>startChild` / `startChild: args` | `-> Result(C, Error)` | `#child_start_failed`, `#stale_handle` |
+| `ChildSupervisor>>terminateChild: child` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
 
 `stop`, `current`, `children`, and `count` are **unchanged** — they are teardown / lookup / inspection operations over an already-valid handle and follow let-it-crash semantics (teardown) or nil-on-miss (lookup), matching the rules established in [ADR 0079](ADR/0079-named-actor-registration.md) for the parallel `Actor` surface.
 
@@ -2816,6 +2862,7 @@ See [ADR 0080](ADR/0080-supervisor-lifecycle-result.md) §Migration Path for the
 |----------|------|
 | `Supervisor subclass:` | `-behaviour(supervisor)` with `one_for_one` |
 | `DynamicSupervisor(C) subclass:` | `-behaviour(supervisor)` with `simple_one_for_one` |
+| `ChildSupervisor(C) subclass:` | `-behaviour(supervisor)` with plain `one_for_one`, no template — each `startChild:` registers its own permanent child spec |
 | `supervise` | `supervisor:start_link({local, Module}, Module, [])` |
 | `current` | `whereis(Module)` |
 | `count` | `supervisor:count_children/1` (active count) |
@@ -3168,10 +3215,10 @@ x match: [
 
 **Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`).
 
-**Phase A scope (ADR 0107):** type patterns are restricted to concrete/leaf classes only — `binding :: SomeClass` where `SomeClass` has subclasses is a compile error (`"SomeClass has subclasses; type patterns are not yet supported for non-leaf classes"`), never silently-wrong matching. Subclass-polymorphic matching (`binding :: Shape` where `Shape` has subclasses `Circle`/`Square`) is deferred to a future ADR 0107 Phase B. Supported classes today: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean` (uses the `is_boolean/1` BIF; `True`/`False` use exact atom guards — all three are stdlib primitives that bypass the leaf-restriction via a BIF/atom-guard check, not the user-class hierarchy check a `Shape`/`Circle`-style class would go through), `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, user-defined `Value` subclasses, `Actor` subclasses, and `Supervisor`/`DynamicSupervisor` subclasses (BT-2870).
+**Phase A scope (ADR 0107):** type patterns are restricted to concrete/leaf classes only — `binding :: SomeClass` where `SomeClass` has subclasses is a compile error (`"SomeClass has subclasses; type patterns are not yet supported for non-leaf classes"`), never silently-wrong matching. Subclass-polymorphic matching (`binding :: Shape` where `Shape` has subclasses `Circle`/`Square`) is deferred to a future ADR 0107 Phase B. Supported classes today: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean` (uses the `is_boolean/1` BIF; `True`/`False` use exact atom guards — all three are stdlib primitives that bypass the leaf-restriction via a BIF/atom-guard check, not the user-class hierarchy check a `Shape`/`Circle`-style class would go through), `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, user-defined `Value` subclasses, `Actor` subclasses, and `Supervisor`/`DynamicSupervisor`/`ChildSupervisor` subclasses (BT-2870; `ChildSupervisor` added BT-3366).
 
 Four runtime-representation nuances (see ADR 0107 Implementation for the full codegen rationale):
-- **`Supervisor`/`DynamicSupervisor` subclasses use a distinct runtime shape.** A live supervisor reference is a 4-tuple tagged `'beamtalk_supervisor'` (not `'beamtalk_object'` like Actor subclasses, and not a tagged map like Value subclasses). `x :: MySupervisorSubclass` compiles to a tuple-tag check accepting `'beamtalk_supervisor'` at `element(1)` before comparing `element(2)` against the class name (BT-2870).
+- **`Supervisor`/`DynamicSupervisor`/`ChildSupervisor` subclasses use a distinct runtime shape.** A live supervisor reference is a 4-tuple tagged `'beamtalk_supervisor'` (not `'beamtalk_object'` like Actor subclasses, and not a tagged map like Value subclasses). `x :: MySupervisorSubclass` compiles to a tuple-tag check accepting `'beamtalk_supervisor'` at `element(1)` before comparing `element(2)` against the class name (BT-2870).
 - **`Character` is not a supported type pattern.** It compiles to a plain Erlang integer with no runtime tag distinguishing it from `Integer`, so `x :: Character` could never be told apart from `x :: Integer` at runtime — use `x :: Integer` instead.
 - **`Dictionary` has no `'$beamtalk_class'` tag** — it's a bare Erlang map, unlike tagged `Value`/sealed-class instances (which are also maps, but with a class tag). `x :: Dictionary` is fully supported, but compiles to a different check shape under the hood (a nested map-key test) so it doesn't false-positive on every other map-backed value.
 - **A `Symbol` type pattern excludes `nil` and booleans.** `nil`, `true`/`false`, and symbols are all plain Erlang atoms with no distinguishing runtime tag, so `nil match: [s :: Symbol -> ...]` does **not** match, and a `Symbol` arm can never accidentally shadow a `nil ->` or `b :: Boolean` arm regardless of arm order.
@@ -5077,7 +5124,7 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 |-------|-------------|
 | **Actor** | Base class for all actors (BEAM processes) |
 | **Server** | Abstract Actor subclass for BEAM-level OTP interop (`handleInfo:`) ([ADR 0065](ADR/0065-complete-otp-primitives-actor-lifecycle.md)) |
-| **Supervisor**, **DynamicSupervisor** | OTP supervision trees ([ADR 0059](ADR/0059-supervision-tree-syntax.md)) |
+| **Supervisor**, **DynamicSupervisor**, **ChildSupervisor** | OTP supervision trees ([ADR 0059](ADR/0059-supervision-tree-syntax.md), [ADR 0118](ADR/0118-child-supervisor.md)) |
 | **AtomicCounter** | Lock-free shared counter |
 | **Timer** | Periodic and one-shot timers (linked to calling process via `spawn_link`) |
 | **Parallel** | Block-based fan-out/join combinators (`all:`, `all:timeout:`, `any:`) — spawns one linked+monitored process per block, blocks the caller, returns plain `Result` values; no awaitable future/promise value is ever exposed (BT-2974) |
