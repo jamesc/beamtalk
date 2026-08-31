@@ -2665,3 +2665,60 @@ ffi_boundary_preserves_wrapped_error_test() ->
             end,
         ?assertEqual({dispatch_error, 'exists:'}, Got)
     end).
+
+%%% ============================================================================
+%%% open:mode:do: type guard arms — path and mode type checks
+%%%
+%%% open_mode_non_atom_mode_raises_test and open_mode_non_binary_path_raises_test
+%%% (BT-2975) cover the 2-arg open:mode: guards. The 3-arg open:mode:do: has
+%%% its own separate function clauses (source lines 570-573) that are exercised
+%%% here for the first time.
+%%% ============================================================================
+
+open_mode_do_non_atom_mode_raises_test() ->
+    %% Binary path + binary mode (not atom) + valid block → raises type_error.
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file:'open:mode:do:'(<<"x.txt">>, <<"read">>, fun(_H) -> ok end)
+    ).
+
+open_mode_do_non_binary_path_raises_test() ->
+    %% Non-binary path → raises type_error regardless of mode or block.
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file:'open:mode:do:'(42, read, fun(_H) -> ok end)
+    ).
+
+%%% ============================================================================
+%%% do_open: ensure_parent_dir failure path
+%%%
+%%% When a write/append-mode open cannot create the parent directory — because
+%%% a path component is a regular file that blocks directory creation —
+%%% do_open returns {error, io_error} via source lines 615-621. Both
+%%% open:mode: and open:mode:do: share this path through do_open/3; we test
+%%% via open:mode: to keep the setup straightforward.
+%%% ============================================================================
+
+open_mode_ensure_parent_dir_failure_test() ->
+    BlockingFile = "_bt_eunit_open_parent_blocked",
+    try
+        ok = file:write_file(BlockingFile, <<"blocker">>),
+        %% Treat BlockingFile as if it were a directory: ensure_parent_dir will
+        %% call filelib:ensure_dir/1 which tries to create BlockingFile as a
+        %% directory — and fails because it already exists as a regular file.
+        NestedPath = list_to_binary(BlockingFile ++ "/cannot_create.txt"),
+        R = beamtalk_file:'open:mode:'(NestedPath, write),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{
+                    '$beamtalk_class' := _,
+                    error := #beamtalk_error{kind = io_error}
+                }
+            },
+            R
+        )
+    after
+        file:delete(BlockingFile)
+    end.
