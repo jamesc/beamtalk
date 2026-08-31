@@ -62,9 +62,20 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
         .into_diagnostic()?
         .as_secs();
 
+    // Canonicalize before storing: `metadata.json`'s `project_path` must always
+    // be an absolute, canonical path, never a bare relative string like "."
+    // (BT-3332). A relative stored path later resolves against whichever
+    // process happens to read it back, not wherever the workspace was
+    // actually created, letting an unrelated caller collide with it. Every
+    // caller of `create_workspace_impl` derives `workspace_id` from
+    // `workspace_id_for`, which already canonicalizes `project_path` when
+    // generating the ID from the path (the `workspace_name` branch skips
+    // that, so canonicalize here too rather than assume it happened upstream).
+    let canonical_project_path = project_path.canonicalize().into_diagnostic()?;
+
     let metadata = WorkspaceMetadata {
         workspace_id: workspace_id.to_string(),
-        project_path: project_path.to_path_buf(),
+        project_path: canonical_project_path,
         created_at: now,
     };
 
@@ -371,6 +382,17 @@ pub(super) fn find_workspace_by_project_path(project_path: &Path) -> Result<Opti
             continue;
         };
 
+        // Defense in depth (BT-3332): a stored `project_path` that isn't already
+        // absolute can only come from metadata written before workspace creation
+        // started canonicalizing it. Canonicalizing it *here* would resolve it
+        // against this process's own cwd rather than wherever the workspace was
+        // actually created — turning a relative entry like "." into a wildcard
+        // that matches every caller. Skip such entries instead of risking a
+        // false match.
+        if !metadata.project_path.is_absolute() {
+            continue;
+        }
+
         // Compare canonicalized paths to handle symlinks/relative paths
         let matches = match (&target_canon, metadata.project_path.canonicalize().ok()) {
             (Some(a), Some(b)) => a == &b,
@@ -408,5 +430,63 @@ pub(crate) fn resolve_workspace_id_or_cwd(name_or_id: Option<&str>) -> Result<St
         let project_root = discovery::discover_project_root(&cwd);
         Ok(find_workspace_by_project_path(&project_root)?
             .unwrap_or(beamtalk_workspace::generate_workspace_id(&project_root)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for BT-3332.
+    ///
+    /// Before the fix, `beamtalk run .` wrote workspace metadata with a bare
+    /// relative `project_path` of `"."` (see `create_workspace_impl`, which now
+    /// canonicalizes before writing). `find_workspace_by_project_path` then
+    /// canonicalized that stored `"."` too, but `Path::canonicalize` resolves a
+    /// relative path against *the calling process's own cwd* — and
+    /// `resolve_workspace_id_or_cwd` always queries with a path derived from
+    /// that same cwd. So a stored `"."` acted as a wildcard: it matched
+    /// whichever directory the querying process happened to be running from,
+    /// regardless of where the workspace was actually created.
+    ///
+    /// This test reproduces the buggy metadata shape directly via
+    /// `save_workspace_metadata` (bypassing `create_workspace_impl`, which no
+    /// longer produces it) for two separate workspaces, then confirms
+    /// `find_workspace_by_project_path` — queried with this process's own cwd,
+    /// exactly as `resolve_workspace_id_or_cwd` does — matches neither.
+    #[test]
+    fn test_find_workspace_by_project_path_rejects_relative_stored_path() {
+        let pid = std::process::id();
+        let ws_id_a = format!("test_bt3332_relpath_a_{pid}");
+        let ws_id_b = format!("test_bt3332_relpath_b_{pid}");
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        for (ws_id, relative_path) in [(&ws_id_a, "."), (&ws_id_b, "./.")] {
+            save_workspace_metadata(&WorkspaceMetadata {
+                workspace_id: ws_id.clone(),
+                project_path: PathBuf::from(relative_path),
+                created_at: now,
+            })
+            .unwrap();
+        }
+
+        // The exact query `resolve_workspace_id_or_cwd(None)` performs: this
+        // process's own cwd. Under the pre-fix code, both stored "." entries
+        // would canonicalize to this same directory and "match" it.
+        let cwd = std::env::current_dir().unwrap();
+
+        let result = find_workspace_by_project_path(&cwd).unwrap();
+        assert!(
+            result.is_none(),
+            "a relative stored project_path must never wildcard-match the \
+             querying process's own cwd, got {result:?}"
+        );
+
+        let _ = fs::remove_dir_all(workspace_dir(&ws_id_a).unwrap());
+        let _ = fs::remove_dir_all(workspace_dir(&ws_id_b).unwrap());
     }
 }
