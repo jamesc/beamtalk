@@ -109,8 +109,7 @@ mod value_type_codegen;
 mod variable_context;
 
 // Re-export utility functions for IDE queries
-pub use beamtalk_cerl_doc::escape::escape_atom_chars;
-pub use util::escape_erlang_string;
+pub use beamtalk_cerl_doc::escape::{escape_atom_chars, escape_erlang_string};
 pub use util::to_module_name;
 
 use crate::ast::{Block, ClassKind, Expression, MessageSelector, Module, WellKnownSelector};

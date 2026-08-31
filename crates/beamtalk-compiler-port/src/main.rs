@@ -900,8 +900,11 @@ fn byte_offset_to_col(source: &str, offset: u32) -> u32 {
 ///
 /// When the error carries a `Span`, formats the location as `"line N, col C"`
 /// using the source text. Falls back to the default `Display` format otherwise.
-fn format_codegen_error(e: &beamtalk_core::erlang::CodeGenError, source: &str) -> String {
-    use beamtalk_core::erlang::CodeGenError;
+fn format_codegen_error(
+    e: &beamtalk_core::codegen::core_erlang::CodeGenError,
+    source: &str,
+) -> String {
+    use beamtalk_core::codegen::core_erlang::CodeGenError;
     match e {
         CodeGenError::UnsupportedFeature {
             feature,
@@ -1499,7 +1502,7 @@ fn derive_class_module_name(
     if let Some(name) = module_name_override {
         return name.to_string();
     }
-    let base_name = beamtalk_core::erlang::to_module_name(class_name);
+    let base_name = beamtalk_core::codegen::core_erlang::to_module_name(class_name);
     if stdlib_mode {
         format!("bt@stdlib@{base_name}")
     } else {
@@ -1602,13 +1605,14 @@ fn handle_inline_class_definition(
         }
     };
 
-    let mut codegen_options = beamtalk_core::erlang::CodegenOptions::new(&class_module_name)
-        .with_workspace_mode(true)
-        .with_source(source)
-        .with_class_superclass_index(class_superclass_index.clone())
-        .with_class_module_index(class_module_index)
-        .with_class_hierarchy(pre_class_hierarchy)
-        .with_pre_loaded_aliases(pre_loaded_aliases);
+    let mut codegen_options =
+        beamtalk_core::codegen::core_erlang::CodegenOptions::new(&class_module_name)
+            .with_workspace_mode(true)
+            .with_source(source)
+            .with_class_superclass_index(class_superclass_index.clone())
+            .with_class_module_index(class_module_index)
+            .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases);
     if let Some(analysis) = analysis {
         // BT-3125: prepare the AST at the driver boundary using the same
         // analysis handed off to codegen just below — codegen no longer
@@ -1620,7 +1624,7 @@ fn handle_inline_class_definition(
         );
         codegen_options = codegen_options.with_analysis(analysis);
     }
-    match beamtalk_core::erlang::generate_module(&module, codegen_options) {
+    match beamtalk_core::codegen::core_erlang::generate_module(&module, codegen_options) {
         Ok(code) => class_definition_ok_response(
             &code,
             &class_module_name,
@@ -1681,13 +1685,14 @@ fn handle_inline_protocol_definition(
         .map(|p| p.name.name.to_string())
         .collect();
 
-    let mut codegen_options = beamtalk_core::erlang::CodegenOptions::new(&protocol_module_name)
-        .with_workspace_mode(true)
-        .with_source(source)
-        .with_class_superclass_index(class_superclass_index.clone())
-        .with_class_module_index(class_module_index)
-        .with_class_hierarchy(pre_class_hierarchy)
-        .with_pre_loaded_aliases(pre_loaded_aliases);
+    let mut codegen_options =
+        beamtalk_core::codegen::core_erlang::CodegenOptions::new(&protocol_module_name)
+            .with_workspace_mode(true)
+            .with_source(source)
+            .with_class_superclass_index(class_superclass_index.clone())
+            .with_class_module_index(class_module_index)
+            .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases);
     // BT-3125: no `lower_module_for_codegen` call needed here — both callers
     // only reach this function once `module.classes` is confirmed empty (a
     // protocol-only compile), and the writeback trio only ever touches
@@ -1695,7 +1700,7 @@ fn handle_inline_protocol_definition(
     if let Some(analysis) = analysis {
         codegen_options = codegen_options.with_analysis(analysis);
     }
-    match beamtalk_core::erlang::generate_module(module, codegen_options) {
+    match beamtalk_core::codegen::core_erlang::generate_module(module, codegen_options) {
         Ok(code) => protocol_definition_ok_response(
             &code,
             &protocol_module_name,
@@ -1934,14 +1939,15 @@ fn handle_compile(request: &Map) -> Term {
 
     // Generate Core Erlang
     let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
-    let mut codegen_options = beamtalk_core::erlang::CodegenOptions::new(&module_name)
-        .with_workspace_mode(workspace_mode)
-        .with_source(&source)
-        .with_class_module_index(class_module_index)
-        .with_class_superclass_index(class_superclass_index)
-        .with_class_hierarchy(pre_class_hierarchy)
-        .with_pre_loaded_aliases(pre_loaded_aliases)
-        .with_source_path_opt(source_path.as_deref());
+    let mut codegen_options =
+        beamtalk_core::codegen::core_erlang::CodegenOptions::new(&module_name)
+            .with_workspace_mode(workspace_mode)
+            .with_source(&source)
+            .with_class_module_index(class_module_index)
+            .with_class_superclass_index(class_superclass_index)
+            .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases)
+            .with_source_path_opt(source_path.as_deref());
     // BT-3123: only trust `analysis` (computed pre-merge) when nothing was
     // merged into `module` afterward — see `had_standalone_method_definitions`'s
     // doc above.
@@ -1956,7 +1962,7 @@ fn handle_compile(request: &Map) -> Term {
         );
         codegen_options = codegen_options.with_analysis(analysis);
     }
-    match beamtalk_core::erlang::generate_module(&module, codegen_options) {
+    match beamtalk_core::codegen::core_erlang::generate_module(&module, codegen_options) {
         Ok(code) => compile_ok_response(
             &code,
             &module_name,
@@ -2194,7 +2200,7 @@ fn handle_compile_method(request: &Map) -> Term {
         &analysis.class_hierarchy,
         &analysis.method_return_types,
     );
-    let codegen_options = beamtalk_core::erlang::CodegenOptions::new(&module_name)
+    let codegen_options = beamtalk_core::codegen::core_erlang::CodegenOptions::new(&module_name)
         .with_workspace_mode(workspace_mode)
         .with_source(&merged_class_source)
         .with_class_module_index(class_module_index)
@@ -2205,7 +2211,7 @@ fn handle_compile_method(request: &Map) -> Term {
         // BT-3123: `analysis` was computed on `merged_module` with no
         // mutation since — always safe to hand off.
         .with_analysis(analysis);
-    match beamtalk_core::erlang::generate_module(&merged_module, codegen_options) {
+    match beamtalk_core::codegen::core_erlang::generate_module(&merged_module, codegen_options) {
         Ok(code) => compile_method_ok_response(
             &code,
             &module_name,

@@ -1652,7 +1652,7 @@ fn compile_file(
         module_name,
         core_file,
         options,
-        &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+        &beamtalk_core::codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
         ctx,
         cached_ast,
     )?;
