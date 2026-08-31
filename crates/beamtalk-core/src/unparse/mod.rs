@@ -2146,6 +2146,11 @@ fn join_docs_vec(docs: Vec<Document<'static>>, sep: &'static str) -> Vec<Documen
 #[cfg(test)]
 mod property_tests;
 
+// Corpus-wide conformance tests against the byte-span resolver and the
+// method-source send walker (moved from `source_analysis`, BT-3346).
+#[cfg(test)]
+mod corpus_conformance_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2189,6 +2194,37 @@ mod tests {
         let pass1 = format_source(source).expect("pass1 should succeed");
         let pass2 = format_source(&pass1).expect("pass2 should succeed");
         assert_eq!(pass1, pass2, "format_source must be idempotent");
+    }
+
+    // --- `matchExhaustive:` unparse round-trip (BT-2763 / ADR 0106; moved
+    // from `source_analysis::parser::expressions`, BT-3346 / ADR 0117 Phase 4) ---
+
+    #[test]
+    fn match_exhaustive_unparse_round_trips_keyword() {
+        let formatted = format_source("x matchExhaustive: [#a -> 1; #b -> 2]")
+            .expect("formatting should succeed");
+        assert!(
+            formatted.contains("matchExhaustive:"),
+            "unparse output should preserve matchExhaustive: keyword, got: {formatted}"
+        );
+        assert!(
+            !formatted.contains(" match: ["),
+            "unparse output must not downgrade matchExhaustive: to match:, got: {formatted}"
+        );
+    }
+
+    #[test]
+    fn plain_match_unparse_does_not_gain_exhaustive_keyword() {
+        let formatted =
+            format_source("x match: [#a -> 1; #b -> 2]").expect("formatting should succeed");
+        assert!(
+            formatted.contains(" match: ["),
+            "plain match: should round-trip unchanged, got: {formatted}"
+        );
+        assert!(
+            !formatted.contains("matchExhaustive:"),
+            "plain match: must not gain the exhaustive keyword, got: {formatted}"
+        );
     }
 
     // --- Difference type annotation unparsing (BT-2742) ---
@@ -4839,6 +4875,70 @@ mod tests {
             reindent_method_source("  ", "class spawn => self new\n"),
             "  class spawn => self new\n"
         );
+    }
+
+    // --- unparse_method round-trip (moved from source_analysis's
+    // `parser::tests::method_tests`, BT-3346 / ADR 0117 Phase 4) ---
+
+    /// Parses a single bare method definition (`Class >> ` header not
+    /// required — the live-image "compile one method" idiom), failing loudly
+    /// on any parse error.
+    fn parse_method_ok(source: &str) -> crate::ast::MethodDefinition {
+        let (method, diagnostics) = parse_method(lex_with_eof(source));
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected parse errors: {errors:?}");
+        method.expect("expected a single method definition")
+    }
+
+    #[test]
+    fn parse_method_unparse_drops_banner_keeps_doc() {
+        // unparse_method is what gets STORED as the live method `__source__`, and it
+        // must match the method's byte span — which starts at the `///` doc block and
+        // excludes a leading `//` section banner (the banner is inter-method file
+        // structure, not part of the method). So unparse_method drops the banner but
+        // keeps the doc comment; whole-file unparse preserves the banner in place
+        // (BT-2594; banners become first-class categories in BT-2601).
+        let src = "// --- Execution CRUD ---\n\
+                   \n\
+                   /// Store a new workflow execution.\n\
+                   /// Raises if the workflowId already exists.\n\
+                   createExecution: execution :: Object -> Object =>\n\
+                   \x20\x20execution";
+        let m = parse_method_ok(src);
+        let out = unparse_method(&m);
+        assert!(
+            !out.contains("--- Execution CRUD ---"),
+            "unparse_method should drop the leading section banner so the stored \
+             source matches the method's byte span:\n{out}"
+        );
+        assert!(
+            out.contains("/// Store a new workflow execution."),
+            "unparse dropped the first doc line:\n{out}"
+        );
+        assert!(
+            out.contains("/// Raises if the workflowId already exists."),
+            "unparse dropped a doc line:\n{out}"
+        );
+    }
+
+    #[test]
+    fn parse_method_roundtrip_is_idempotent() {
+        // parse -> unparse -> parse -> unparse must be stable: this is the property
+        // that a method surviving N saves keeps its source intact (no per-save
+        // erosion of the leading comment block).
+        let src = "// --- Execution CRUD ---\n\
+                   \n\
+                   /// Store a new workflow execution.\n\
+                   createExecution: execution :: Object -> Object =>\n\
+                   \x20\x20execution";
+        let once = unparse_method(&parse_method_ok(src));
+        let twice = unparse_method(&parse_method_ok(&once));
+        let thrice = unparse_method(&parse_method_ok(&twice));
+        assert_eq!(once, twice, "method source not idempotent after 2nd save");
+        assert_eq!(twice, thrice, "method source not idempotent after 3rd save");
     }
 
     // --- unparse_literal_display (BT-3088) ---
