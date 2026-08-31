@@ -17,9 +17,34 @@ categories = ["development-tools"]
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+# why: BT-3331 — `test_support`'s shared loopback WS handshake double needs
+# an async runtime/WS implementation in the normal dependency graph, not
+# just dev-dependencies, so it compiles for dependent crates that opt in via
+# the `test` feature below. Optional: stays out of the default (production)
+# build. beamtalk-lsp/beamtalk-mcp already depend on all three normally
+# (their own async servers), so this adds nothing new to their build graph.
+tokio = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+futures-util = { version = "0.3", optional = true }
 
 [dev-dependencies]
 insta.workspace = true
+# why: BT-3331 — this crate's own `#[cfg(test)]` build (e.g. `cargo test`/
+# `clippy --all-targets` without `--features test`) compiles `test_support`
+# too (it's gated on `cfg(any(test, feature = "test"))`), so these need to be
+# unconditionally present here as well, not just behind the optional
+# `[dependencies]` entries above that dependent crates opt into.
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util = "0.3"
+
+[features]
+default = []
+## Expose `test_support` (the shared loopback WS auth-handshake double, BT-3331)
+## for use in dependent crates' dev-dependencies. Add
+## `beamtalk-repl-protocol = { workspace = true, features = ["test"] }` to the
+## dependent crate's `[dev-dependencies]` section to enable this.
+test = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
 
 [lints]
 workspace = true

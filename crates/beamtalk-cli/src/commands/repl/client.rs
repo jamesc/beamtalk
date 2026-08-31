@@ -413,17 +413,20 @@ mod tests {
     /// before handing subsequent parsed request frames to `handler`, which
     /// may reply on the same socket. Returns the bound port.
     ///
-    /// This is a third hand-rolled instance of the same ADR 0020 handshake
-    /// double already written for `beamtalk-lsp/src/runtime.rs`'s
-    /// `FakeWorkspace`/`spawn_workspace` and `beamtalk-mcp/src/server.rs`'s
-    /// `FakeRepl`/`spawn_fake_repl` — BT-3331 tracks consolidating those two.
-    /// Deliberately not reused as-is here: both of those are `tokio`-async
+    /// This is the same ADR 0020 handshake double `beamtalk-lsp/src/runtime.rs`
+    /// (`FakeWorkspace`/`spawn_workspace`) and `beamtalk-mcp/src/server.rs`
+    /// (`FakeRepl`/`spawn_fake_repl`) now share via
+    /// `beamtalk_repl_protocol::test_support` (BT-3331) — deliberately NOT
+    /// reused here too: that shared implementation is `tokio`-async
     /// (`tokio::net::TcpListener` / `tokio_tungstenite`), while `ReplClient`
     /// and the rest of `beamtalk-cli`'s REPL transport are synchronous
-    /// (`std::net::TcpStream` + blocking `tungstenite`) with no `tokio`
-    /// dependency to justify pulling in for tests only. BT-3331 has been
-    /// updated to note this sync variant so its extraction accounts for the
-    /// async/sync split rather than assuming a single shared shape.
+    /// (`std::net::TcpStream` + blocking `tungstenite`), with no `tokio`
+    /// dependency anywhere else in this crate to justify pulling one in for
+    /// tests only. BT-3331's own investigation concluded this stays a third,
+    /// separate implementation rather than a shared async/sync-parameterized
+    /// one — the two transports differ enough (blocking reads on the same
+    /// thread vs. an async task) that unifying them would cost more than the
+    /// ~70 lines of duplication it would save.
     fn spawn_auth_ok_server(
         handler: impl Fn(serde_json::Value, &mut WebSocket<std::net::TcpStream>) + Send + Sync + 'static,
     ) -> u16 {
