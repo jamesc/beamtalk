@@ -52,8 +52,15 @@ pub fn run(
 ) -> Result<()> {
     info!("Starting run command");
 
-    // Determine project root (always current directory for run)
-    let project_root = Utf8PathBuf::from(".");
+    // Determine project root (always current directory for run). Canonicalized
+    // to an absolute path — service-mode workspace metadata's `project_path`
+    // must never be a bare relative string like "." (BT-3332): a relative
+    // stored path resolves against whichever process later reads it, not
+    // wherever `beamtalk run .` was originally invoked from, which lets an
+    // unrelated later invocation collide with a stale workspace.
+    let project_root = Utf8PathBuf::from(".")
+        .canonicalize_utf8()
+        .map_err(|e| miette!("Failed to resolve current directory: {e}"))?;
 
     let Some(pkg) = manifest::find_manifest(&project_root)? else {
         return Err(miette!(
