@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3365: DynamicSupervisor over a childClass whose supervisionSpec bakes
+// default args via withArgs: — fixture for
+// dynamic_supervisor_start_child_args_test.bt.
+
+DynamicSupervisor(BakedArgsCounter) subclass: DynamicSupervisorBakedArgs
+
+  class childClass => BakedArgsCounter
