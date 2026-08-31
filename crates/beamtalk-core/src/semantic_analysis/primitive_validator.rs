@@ -401,6 +401,132 @@ mod tests {
         );
     }
 
+    // BT-3347: the tests below exercise `validate_expr`'s recursive match arms —
+    // previously only the top-level "primitive as the entire statement" shape
+    // was tested, so every arm that *recurses into a subexpression* (rather
+    // than being the primitive itself) was untested. Each `@primitive "+"`
+    // here uses a quoted selector, so it always contributes exactly one
+    // "Primitives can only be declared" diagnostic (no intrinsic-name check).
+
+    #[test]
+    fn primitive_in_assignment_value_validated() {
+        let source = "Object subclass: T\n  m =>\n    x := @primitive \"+\"";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert!(diags[0].message.contains("Primitives can only be declared"));
+    }
+
+    #[test]
+    fn primitive_in_message_send_receiver_and_argument_validated() {
+        let source = "Object subclass: T\n  m => @primitive \"+\" foo: @primitive \"+\"";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(
+            diags.len(),
+            2,
+            "expected one diagnostic each for the receiver and the argument, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn primitive_in_block_body_validated() {
+        // Assignment{value: Block} — exercises both the Assignment and Block arms.
+        let source = "Object subclass: T\n  m =>\n    blk := [@primitive \"+\"]";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+    }
+
+    #[test]
+    fn primitive_in_return_value_validated() {
+        let source = "Object subclass: T\n  m =>\n    ^@primitive \"+\".\n    99";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+    }
+
+    #[test]
+    fn primitive_in_parenthesized_expr_validated() {
+        let source = "Object subclass: T\n  m => (@primitive \"+\")";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+    }
+
+    #[test]
+    fn primitive_in_destructure_assignment_value_validated() {
+        let source = "Object subclass: T\n  m =>\n    #(a, b) := @primitive \"+\"";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+    }
+
+    #[test]
+    fn field_access_expression_does_not_interfere_with_primitive_validation() {
+        // Also exercises the `state.default_value` iteration in `validate_primitives`
+        // with an actual (non-primitive) default, which no prior test reached.
+        let source =
+            "Object subclass: T\n  state: x = 0\n  m =>\n    self.x.\n    @primitive \"+\"";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(
+            diags.len(),
+            1,
+            "field access itself should not produce a diagnostic, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn primitive_in_cascade_message_argument_validated() {
+        let source = "Object subclass: T\n  m => 1 foo: 2; bar: @primitive \"+\"";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+    }
+
+    #[test]
+    fn primitive_in_match_value_guard_and_arm_body_validated() {
+        // Covers both the `Some(guard)` and (via the second, guard-less arm) the
+        // implicit "no guard" path, plus the arm-body recursion.
+        let source = "Object subclass: T\n  m => x match: [n when: [@primitive \"+\"] -> @primitive \"+\"; _ -> 0]";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 2, "got: {diags:?}");
+    }
+
+    #[test]
+    fn primitive_in_map_literal_key_and_value_validated() {
+        let source = "Object subclass: T\n  m => #{@primitive \"+\" => @primitive \"+\"}";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 2, "got: {diags:?}");
+    }
+
+    #[test]
+    fn primitive_in_list_literal_elements_and_cons_tail_validated() {
+        let source = "Object subclass: T\n  m =>\n    #(@primitive \"+\" | @primitive \"+\").\n    #(@primitive \"+\")";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 3, "got: {diags:?}");
+    }
+
+    #[test]
+    fn primitive_in_array_literal_elements_validated() {
+        let source = "Object subclass: T\n  m => #[@primitive \"+\"]";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+    }
+
+    #[test]
+    fn primitive_in_string_interpolation_segment_validated() {
+        let source = "Object subclass: T\n  m => \"a{@primitive \"+\"}a\"";
+        let module = parse_bt(source);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+    }
+
     #[test]
     fn primitive_in_state_default_validated() {
         // @primitive in a state default value is caught by the parser (not in method body),
