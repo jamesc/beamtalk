@@ -71,7 +71,17 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
     // `workspace_id_for`, which already canonicalizes `project_path` when
     // generating the ID from the path (the `workspace_name` branch skips
     // that, so canonicalize here too rather than assume it happened upstream).
-    let canonical_project_path = project_path.canonicalize().into_diagnostic()?;
+    //
+    // Falls back to the raw path rather than erroring when canonicalization
+    // fails (e.g. a named workspace created against a not-yet-existing
+    // directory) — that matches this function's pre-fix behavior of never
+    // rejecting workspace creation on account of `project_path`.
+    // `find_workspace_by_project_path`'s defense-in-depth check already
+    // treats a non-absolute stored path as unmatchable, so a raw fallback
+    // here can't reintroduce the wildcard-match bug.
+    let canonical_project_path = project_path
+        .canonicalize()
+        .unwrap_or_else(|_| project_path.to_path_buf());
 
     let metadata = WorkspaceMetadata {
         workspace_id: workspace_id.to_string(),
@@ -454,11 +464,28 @@ mod tests {
     /// longer produces it) for two separate workspaces, then confirms
     /// `find_workspace_by_project_path` — queried with this process's own cwd,
     /// exactly as `resolve_workspace_id_or_cwd` does — matches neither.
+    /// Removes a workspace's on-disk directory on drop, including when the
+    /// test panics (e.g. the very assertion this test guards against) — a
+    /// bare cleanup call after the assertion would otherwise never run and
+    /// leak `~/.beamtalk/workspaces/*` fixture directories.
+    struct CleanupWorkspaceDirs<'a>(&'a [String]);
+
+    impl Drop for CleanupWorkspaceDirs<'_> {
+        fn drop(&mut self) {
+            for ws_id in self.0 {
+                if let Ok(dir) = workspace_dir(ws_id) {
+                    let _ = fs::remove_dir_all(dir);
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_find_workspace_by_project_path_rejects_relative_stored_path() {
         let pid = std::process::id();
         let ws_id_a = format!("test_bt3332_relpath_a_{pid}");
         let ws_id_b = format!("test_bt3332_relpath_b_{pid}");
+        let _cleanup = CleanupWorkspaceDirs(&[ws_id_a.clone(), ws_id_b.clone()]);
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -485,8 +512,5 @@ mod tests {
             "a relative stored project_path must never wildcard-match the \
              querying process's own cwd, got {result:?}"
         );
-
-        let _ = fs::remove_dir_all(workspace_dir(&ws_id_a).unwrap());
-        let _ = fs::remove_dir_all(workspace_dir(&ws_id_b).unwrap());
     }
 }
