@@ -60,7 +60,7 @@ TestCase subclass: SubprocessTest
       "echo $BT_TEST_SEED; pwd"
     ] ifFalse: ["echo %BT_TEST_SEED%& cd"]
 
-  envDir => self.isUnix ifTrue: ["/tmp"] ifFalse: [System getEnv: "TEMP"]
+  envDir => File tempDirectory
 
   // cat executable: echoes stdin to stdout.
   // On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (built-in
