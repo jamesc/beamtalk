@@ -91,6 +91,16 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
                 .is_some_and(|info| is_node_running(&info, Some(workspace_id)));
             if !metadata.project_path.is_absolute() && !node_is_running {
                 let current_fingerprint = project_fingerprint(project_path);
+                // `None` (legacy metadata, or no manifest at the last successful
+                // record) stays fully ungated, same as pre-BT-3355: a heal that
+                // fires from the wrong directory here adopts that wrong
+                // project's fingerprint below, entrenching the mistake for
+                // future heal checks rather than self-correcting. Accepted as
+                // this fix's scope boundary (mirrors the pre-existing
+                // creation-time fallback's same caller-supplied-path trust) —
+                // narrowing it further would need the "no fingerprint yet"
+                // case to independently verify identity too, which is exactly
+                // the confirmation this field doesn't have yet to check against.
                 let identity_confirmed = match &metadata.project_fingerprint {
                     None => true,
                     Some(recorded) => current_fingerprint.as_ref() == Some(recorded),
