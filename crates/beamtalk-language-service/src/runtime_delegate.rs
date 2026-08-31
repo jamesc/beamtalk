@@ -24,7 +24,7 @@
 //!   `ReferencesTo`) plus their selector / class-name argument.
 //! * [`NavSite`] — a single result row (class, method, line, source-file).
 //! * [`nav_site_to_location`] — converts a `NavSite` to a
-//!   [`crate::language_service::Location`] by canonicalising the runtime's
+//!   [`crate::Location`] by canonicalising the runtime's
 //!   `sourceFile` path against LSP workspace roots.
 //!
 //! The async transport (WebSocket / REPL op) and the per-method dispatch
@@ -61,7 +61,7 @@
 //! have no backing `.bt` file; consumers must treat the row as
 //! non-navigable in that case.
 
-use crate::language_service::Position;
+use crate::Position;
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 #[cfg(feature = "serde")]

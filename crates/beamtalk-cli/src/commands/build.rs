@@ -324,7 +324,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
 /// --stdlib-mode <dir>`, what `just dialyzer-specs` runs over a flat copy of
 /// `stdlib/src/*.bt` in a bare temp dir — reports the same identity
 /// `build_stdlib::stdlib_compiler_options` (BT-2964) and the LSP's
-/// [`STDLIB_PACKAGE_MARKER`](beamtalk_core::language_service::STDLIB_PACKAGE_MARKER)
+/// [`STDLIB_PACKAGE_MARKER`](beamtalk_language_service::STDLIB_PACKAGE_MARKER)
 /// use. (`test_internal_alias_resolves_cross_file_within_stdlib` pins
 /// `build_stdlib`'s hardcoded literal to that constant so the two stdlib
 /// compile paths cannot drift apart.)
@@ -344,7 +344,7 @@ fn package_identity(
 ) -> Option<&str> {
     pkg_manifest
         .map(|pkg| pkg.name.as_str())
-        .or_else(|| stdlib_mode.then_some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER))
+        .or_else(|| stdlib_mode.then_some(beamtalk_language_service::STDLIB_PACKAGE_MARKER))
 }
 
 /// Phase 1-3: Discover source files, resolve the project root and manifest,
@@ -3753,7 +3753,7 @@ mod tests {
         // and the LSP's `STDLIB_PACKAGE_MARKER` name it.
         assert_eq!(
             package_identity(None, true),
-            Some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER)
+            Some(beamtalk_language_service::STDLIB_PACKAGE_MARKER)
         );
         assert_eq!(package_identity(None, false), None);
     }
@@ -3807,7 +3807,7 @@ mod tests {
             .expect("stdlib-mode build should collect cross-file aliases");
         assert_eq!(
             restart_alias.package.as_deref(),
-            Some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER),
+            Some(beamtalk_language_service::STDLIB_PACKAGE_MARKER),
             "the alias stamp must match the `current_package` `build` sets, or \
              `add_pre_loaded`'s boundary check drops internal stdlib aliases"
         );

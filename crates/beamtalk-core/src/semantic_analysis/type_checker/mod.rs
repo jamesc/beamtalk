@@ -55,7 +55,10 @@ mod narrowing;
 pub mod native_type_registry;
 pub mod native_types;
 mod protocol;
-pub(crate) mod sendability;
+// BT-3361 (ADR 0117 Decision step 5): widened from `pub(crate)` —
+// `hover_tier_label` is reached by `beamtalk-language-service`'s
+// `queries::hover_provider` from the standalone crate now.
+pub mod sendability;
 #[cfg(test)]
 mod tests;
 mod type_resolver;
@@ -375,7 +378,7 @@ pub fn infer_types_and_returns(
 /// tagged with the alias's display name (see [`TypeProvenance::Aliased`]) —
 /// instead of an unresolved nominal class.
 ///
-/// Used by [`crate::queries::hover_provider`] so hover on an alias-typed
+/// Used by `beamtalk-language-service`'s `queries::hover_provider` so hover on an alias-typed
 /// binding shows `RestartStrategy (#temporary | #transient | #permanent)`
 /// rather than either the bare expansion or an "unresolved class" mis-read.
 /// `alias_registry = None` is identical to [`infer_types_and_returns`].

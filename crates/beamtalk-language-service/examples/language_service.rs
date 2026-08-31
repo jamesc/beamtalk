@@ -6,7 +6,7 @@
 //! This example shows how to use the language service to get
 //! diagnostics, completions, hover info, and navigation features.
 
-use beamtalk_core::language_service::{LanguageService, Position, SimpleLanguageService};
+use beamtalk_language_service::{LanguageService, Position, SimpleLanguageService};
 use camino::Utf8PathBuf;
 
 fn main() {

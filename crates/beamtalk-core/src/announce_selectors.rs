@@ -26,8 +26,12 @@ const ANNOUNCE_SELECTORS: [&str; 3] = ["announce:", "announceAndWait:", "announc
 
 /// Whether `selector_name` is one of the recognised announce selectors
 /// (`announce:`, `announceAndWait:`, `announceAndWait:timeout:`).
+///
+/// BT-3361: widened from `pub(crate)` to `pub` — `queries::announce_sites_query`
+/// (Language Service) reaches this from the standalone `beamtalk-language-service`
+/// crate now, so `pub(crate)` visibility is no longer reachable.
 #[must_use]
-pub(crate) fn is_announce_selector(selector_name: &str) -> bool {
+pub fn is_announce_selector(selector_name: &str) -> bool {
     ANNOUNCE_SELECTORS.contains(&selector_name)
 }
 

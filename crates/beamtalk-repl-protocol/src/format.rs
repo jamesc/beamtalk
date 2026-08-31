@@ -27,9 +27,10 @@
 //! The LSP server emits structured `lsp_types::Diagnostic` values, not
 //! free-form text. The diagnostic-message construction in LSP shares
 //! conceptual structure (`message + notes + hint`) with these formatters but
-//! operates on a different input type (`beamtalk_core::language_service::Diagnostic`).
-//! Including LSP would force a `beamtalk-core` dependency on this crate and
-//! is deliberately out of scope here.
+//! operates on a different input type (`beamtalk_language_service::Diagnostic`).
+//! Including LSP would force a `beamtalk-language-service` (and transitively
+//! `beamtalk-core`) dependency on this crate and is deliberately out of
+//! scope here.
 
 use crate::response::{ActorInfo, ClassInfo, ModuleInfo};
 

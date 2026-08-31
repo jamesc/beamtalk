@@ -43,8 +43,8 @@
 //! `docs/development/surface-parity.md`'s `nav-symbols` row, which documents
 //! the same AST-only scope for BT-2601's outline nesting).
 
-use crate::ast::Module;
-use crate::source_analysis::{self, Span};
+use beamtalk_core::ast::Module;
+use beamtalk_core::source_analysis::{self, Span};
 
 /// Computes folding ranges for every class in `module`: divider-category
 /// ranges (BT-3237) plus class-body and method-body ranges (BT-3260, the
@@ -127,7 +127,7 @@ fn push_multiline_range(ranges: &mut Vec<Span>, span: Span, source: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::{lex_with_eof, parse};
+    use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
     fn parse_module(source: &str) -> Module {
         let tokens = lex_with_eof(source);
@@ -256,7 +256,7 @@ Object subclass: Counter
         let category = symbols[0]
             .children
             .iter()
-            .find(|c| c.kind == crate::language_service::DocumentSymbolKind::Category)
+            .find(|c| c.kind == crate::DocumentSymbolKind::Category)
             .expect("one category symbol");
         // The category range is pushed first, ahead of the class-body range
         // (`bar`/`baz` are single-line, so neither contributes its own).

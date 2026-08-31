@@ -48,8 +48,8 @@
 //! contribute results. A completely unparseable source returns an empty list.
 //! Callers treat "no accesses found" identically to "could not parse".
 
-use crate::ast::{Expression, Pattern, StringSegment};
-use crate::source_analysis::{Span, lex_with_eof, parse};
+use beamtalk_core::ast::{Expression, Pattern, StringSegment};
+use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
 /// Used to translate line numbers from wrapped-source to input-source space.
@@ -108,7 +108,7 @@ fn collect_field_lines(method_source: &str, field_name: &str, kind: AccessKind) 
 
     let mut wrapped_lines = Vec::new();
 
-    crate::ast_walker::for_each_expr_seq(&module, |seq| {
+    beamtalk_core::ast_walker::for_each_expr_seq(&module, |seq| {
         for stmt in seq {
             collect_access_lines(
                 &stmt.expression,
@@ -140,7 +140,7 @@ fn is_self_receiver(receiver: &Expression) -> bool {
 /// walked so a nested access in the receiver is still found.
 fn collect_field_access(
     receiver: &Expression,
-    field: &crate::ast::Identifier,
+    field: &beamtalk_core::ast::Identifier,
     span: Span,
     field_name: &str,
     kind: AccessKind,

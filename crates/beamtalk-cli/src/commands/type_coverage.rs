@@ -13,9 +13,9 @@
 
 use crate::commands::OutputFormat;
 use crate::commands::build::collect_source_files_from_dir;
-use beamtalk_core::language_service::{ByteOffset, Position};
 use beamtalk_core::semantic_analysis::{ClassHierarchy, CoverageReport, infer_types};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_language_service::{ByteOffset, Position};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result};
 

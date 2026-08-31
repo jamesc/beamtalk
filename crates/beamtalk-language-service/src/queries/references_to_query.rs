@@ -34,14 +34,14 @@
 //!
 //! [`ReferenceHit`] and [`find_all_references_in_source`] (the unfiltered
 //! all-references walker used by xref codegen) live in
-//! [`crate::method_source_walker`], a shared leaf below both this Language
+//! [`beamtalk_core::method_source_walker`], a shared leaf below both this Language
 //! Service context and Code Generation. They are re-exported here so
 //! Language Service callers can keep their existing import paths.
 
-pub use crate::method_source_walker::{ReferenceHit, find_all_references_in_source};
+pub use beamtalk_core::method_source_walker::{ReferenceHit, find_all_references_in_source};
 
-use crate::ast::{Expression, Pattern, StringSegment, TypeAnnotation};
-use crate::source_analysis::{lex_with_eof, parse};
+use beamtalk_core::ast::{Expression, Pattern, StringSegment, TypeAnnotation};
+use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
 const PREFIX_LINES: u32 = 1;
 const SYNTHETIC_PREFIX: &str = "Object subclass: __SyntheticReferencesScope\n";

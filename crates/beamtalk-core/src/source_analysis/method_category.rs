@@ -64,8 +64,9 @@
 //!
 //! # Known limitations (BT-2601 code review)
 //!
-//! - **Fields are not nested into categories.** [`crate::queries::document_symbols_provider`]
-//!   still renders a class's `state:`/`classState:` fields as flat, top-level
+//! - **Fields are not nested into categories.** `beamtalk-language-service`'s
+//!   `queries::document_symbols_provider` still renders a class's
+//!   `state:`/`classState:` fields as flat, top-level
 //!   children of the class symbol regardless of where dividers place them.
 //!   A divider written directly above a field (rather than a method) is
 //!   still recognized (see above) and its category's `span` — the divider
@@ -143,11 +144,11 @@ impl MethodCategory {
     /// with every method in the category, in source order.
     ///
     /// Shared by every consumer that needs "the range this category covers"
-    /// — [`crate::queries::document_symbols_provider`] (the
-    /// `DocumentSymbolKind::Category` container) and
-    /// [`crate::queries::folding_range_provider`] (BT-3237) both call this
-    /// rather than re-deriving the merge, so outline and foldingRange always
-    /// agree exactly.
+    /// — `beamtalk-language-service`'s `queries::document_symbols_provider`
+    /// (the `DocumentSymbolKind::Category` container) and
+    /// `queries::folding_range_provider` (BT-3237) both call this rather than
+    /// re-deriving the merge, so outline and foldingRange always agree
+    /// exactly.
     ///
     /// Returns `None` when there is neither a located `divider_span` nor any
     /// methods to merge. For a *named* category this should not happen in

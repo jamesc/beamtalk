@@ -15,7 +15,7 @@
 //! - **`HoverInfo`** - Information to display on hover
 //! - **`Diagnostic`** - An error or warning message
 
-use crate::source_analysis::{Diagnostic as ParseDiagnostic, Span};
+use beamtalk_core::source_analysis::{Diagnostic as ParseDiagnostic, Span};
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 

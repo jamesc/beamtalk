@@ -20,6 +20,12 @@ path = "src/main.rs"
 
 [dependencies]
 beamtalk-core = { workspace = true, features = ["serde"] }
+# why: ADR 0117 step 5 (BT-3361) — `LanguageService`/`SimpleLanguageService`
+# and the `queries`/`runtime_delegate` (nav-query) APIs moved out of
+# `beamtalk-core` into their own crate; `serde` enables `Deserialize` on the
+# nav-query request/response types this server decodes over the runtime
+# WebSocket link.
+beamtalk-language-service = { workspace = true, features = ["serde"] }
 # why: BT-3340 (ADR 0117 Decision step 2) — `project` (root discovery) moved
 # out of `beamtalk-core` into a standalone crate.
 beamtalk-project.workspace = true

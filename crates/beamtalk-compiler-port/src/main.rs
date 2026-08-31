@@ -1226,7 +1226,7 @@ fn parse_and_check_expression(
 
     let known_var_refs: Vec<&str> = known_vars.iter().map(String::as_str).collect();
     let (mut all_diagnostics, analysis) =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_analysis(
+        beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &module,
             parse_diagnostics,
             &known_var_refs,
@@ -1792,7 +1792,7 @@ fn handle_compile(request: &Map) -> Term {
     // hierarchy, semantic facts, and inferred method return types from
     // scratch.
     let (mut all_diagnostics, analysis) =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_analysis(
+        beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &module,
             parse_diagnostics,
             &[],
@@ -2137,7 +2137,7 @@ fn handle_compile_method(request: &Map) -> Term {
     // further mutation happens before the codegen call below, so it's always
     // safe to thread through via `CodegenOptions::with_analysis`.
     let (mut all_diagnostics, analysis) =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_analysis(
+        beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &merged_module,
             merged_parse_diags,
             &[],
@@ -2275,7 +2275,7 @@ fn handle_diagnostics(request: &Map) -> Term {
         // it as an unknown nominal class instead of picking up the
         // redefinition, defeating the whole point of re-checking it.
         let pre_loaded_aliases = extract_known_type_aliases(request);
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_referenced_aliases(
+        beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_referenced_aliases(
             &module,
             parse_diagnostics,
             &[],
@@ -2351,7 +2351,7 @@ fn resolve_completion_type_response(
         hierarchy.add_from_beam_meta(pre_class_hierarchy);
     }
 
-    match beamtalk_core::queries::completion_provider::resolve_expression_type(
+    match beamtalk_language_service::queries::completion_provider::resolve_expression_type(
         expression,
         &hierarchy,
         Some(native_type_registry),
@@ -2384,7 +2384,9 @@ fn handle_find_senders_in_source(request: &Map) -> Term {
         return error_response(&["Missing or invalid 'selector' field".to_string()]);
     };
 
-    let lines = beamtalk_core::queries::senders_query::find_senders_in_source(&source, &selector);
+    let lines = beamtalk_language_service::queries::senders_query::find_senders_in_source(
+        &source, &selector,
+    );
     ok_lines_response(&lines)
 }
 
@@ -2412,19 +2414,20 @@ fn handle_find_all_sends_in_source(request: &Map) -> Term {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
     };
 
-    let sends = beamtalk_core::queries::all_sends_query::find_all_sends_in_source(&source);
+    let sends =
+        beamtalk_language_service::queries::all_sends_query::find_all_sends_in_source(&source);
     let send_terms: Vec<Term> = sends
         .iter()
         .map(|hit| {
             let recv = match hit.receiver {
-                beamtalk_core::queries::all_sends_query::ReceiverKind::SelfReceiver => atom("self"),
-                beamtalk_core::queries::all_sends_query::ReceiverKind::SuperReceiver => {
+                beamtalk_language_service::queries::all_sends_query::ReceiverKind::SelfReceiver => atom("self"),
+                beamtalk_language_service::queries::all_sends_query::ReceiverKind::SuperReceiver => {
                     atom("super")
                 }
-                beamtalk_core::queries::all_sends_query::ReceiverKind::ErlangFfi => {
+                beamtalk_language_service::queries::all_sends_query::ReceiverKind::ErlangFfi => {
                     atom("erlang_ffi")
                 }
-                beamtalk_core::queries::all_sends_query::ReceiverKind::Other => atom("other"),
+                beamtalk_language_service::queries::all_sends_query::ReceiverKind::Other => atom("other"),
             };
             let target_module = hit.target_module.as_deref().unwrap_or("");
             Term::from(Map::from([
@@ -2469,7 +2472,9 @@ fn handle_find_announce_sites_in_source(request: &Map) -> Term {
     };
 
     let sites =
-        beamtalk_core::queries::announce_sites_query::find_announce_sites_in_source(&source);
+        beamtalk_language_service::queries::announce_sites_query::find_announce_sites_in_source(
+            &source,
+        );
     let site_terms: Vec<Term> = sites
         .iter()
         .map(|hit| {
@@ -2512,10 +2517,11 @@ fn handle_find_references_to_in_source(request: &Map) -> Term {
         return error_response(&["Missing or invalid 'class_name' field".to_string()]);
     };
 
-    let lines = beamtalk_core::queries::references_to_query::find_references_to_in_source(
-        &source,
-        &class_name,
-    );
+    let lines =
+        beamtalk_language_service::queries::references_to_query::find_references_to_in_source(
+            &source,
+            &class_name,
+        );
     ok_lines_response(&lines)
 }
 
@@ -2541,7 +2547,9 @@ fn handle_find_field_readers_in_source(request: &Map) -> Term {
     };
 
     let lines =
-        beamtalk_core::queries::field_accesses_query::find_field_readers_in_source(&source, &field);
+        beamtalk_language_service::queries::field_accesses_query::find_field_readers_in_source(
+            &source, &field,
+        );
     ok_lines_response(&lines)
 }
 
@@ -2567,7 +2575,9 @@ fn handle_find_field_writers_in_source(request: &Map) -> Term {
     };
 
     let lines =
-        beamtalk_core::queries::field_accesses_query::find_field_writers_in_source(&source, &field);
+        beamtalk_language_service::queries::field_accesses_query::find_field_writers_in_source(
+            &source, &field,
+        );
     ok_lines_response(&lines)
 }
 
@@ -2600,7 +2610,7 @@ fn handle_find_ffi_sites_in_source(request: &Map) -> Term {
     // `arity` is optional: absent (or non-integer) means "match any arity".
     let arity = map_get(request, "arity").and_then(term_to_usize);
 
-    let lines = beamtalk_core::queries::ffi_sites_query::find_ffi_sites_in_source(
+    let lines = beamtalk_language_service::queries::ffi_sites_query::find_ffi_sites_in_source(
         &source, &module, &function, arity,
     );
     ok_lines_response(&lines)
@@ -2754,7 +2764,7 @@ fn handle_reindent_method_source(request: &Map) -> Term {
 /// `beamtalk_xref:senders_of/1` only carries a *line* number per sending
 /// method, and a whole-method span is too coarse to splice a single send's
 /// selector token(s) without corrupting the rest of the body; see
-/// [`beamtalk_core::queries::selector_rename_query::find_selector_send_spans`]
+/// [`beamtalk_language_service::queries::selector_rename_query::find_selector_send_spans`]
 /// for the full "why not regex" rationale (a multi-keyword selector like
 /// `at:put:` can have arbitrary nested expressions between its keyword
 /// parts).
@@ -2785,11 +2795,12 @@ fn handle_find_selector_send_spans(request: &Map) -> Term {
         return error_response(&["Missing or invalid 'new_selector' field".to_string()]);
     };
 
-    let occurrences = beamtalk_core::queries::selector_rename_query::find_selector_send_spans(
-        &method_source,
-        &old_selector,
-        &new_selector,
-    );
+    let occurrences =
+        beamtalk_language_service::queries::selector_rename_query::find_selector_send_spans(
+            &method_source,
+            &old_selector,
+            &new_selector,
+        );
 
     let occurrence_terms: Vec<Term> = occurrences
         .iter()
@@ -2808,7 +2819,7 @@ fn handle_find_selector_send_spans(request: &Map) -> Term {
 /// Shared `#{start, end, new_text}` term builder for both selector-rename
 /// span commands (`find_selector_send_spans`, `find_definition_selector_spans`).
 fn selector_send_span_terms(
-    spans: &[beamtalk_core::queries::selector_rename_query::SelectorSendSpan],
+    spans: &[beamtalk_language_service::queries::selector_rename_query::SelectorSendSpan],
 ) -> Vec<Term> {
     spans
         .iter()
@@ -2834,7 +2845,7 @@ fn selector_send_span_terms(
 /// class's current full source, resolve `(old_selector, side)`'s own
 /// method-definition selector-token span(s) — a narrow splice target, never
 /// the whole method body. See
-/// [`beamtalk_core::queries::selector_rename_query::find_definition_selector_spans`]'s
+/// [`beamtalk_language_service::queries::selector_rename_query::find_definition_selector_spans`]'s
 /// doc for why a whole-body replacement here would corrupt the method's own
 /// parameter names/logic on rewrite, and for how the unary/binary case
 /// (which carries no dedicated selector span from the parser) is resolved.
@@ -2853,8 +2864,8 @@ fn selector_send_span_terms(
 /// => <atom>, ...}`, mirroring `resolve_method_span`'s own error shape
 /// exactly (same [`SpanResolveError`] variants, same `method_span_error_response`).
 fn handle_find_definition_selector_spans(request: &Map) -> Term {
-    use beamtalk_core::queries::selector_rename_query::find_definition_selector_spans;
     use beamtalk_core::source_analysis::MethodSide;
+    use beamtalk_language_service::queries::selector_rename_query::find_definition_selector_spans;
 
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);

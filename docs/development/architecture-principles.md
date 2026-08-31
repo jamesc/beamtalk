@@ -36,26 +36,34 @@ The beamtalk codebase is organized into **layers with unidirectional dependencie
 │ beamtalk-exec (library)             │  ← REPL/execution engine
 │ beamtalk-workspace (library)        │  ← Workspace/session management
 ├─────────────────────────────────────┤
-│ beamtalk-core (library)             │  ← Compiler core (reusable)
-│  ├─ queries/     (Language Service) │
+│ beamtalk-language-service (library) │  ← Language Service (queries, IDE API)
+├─────────────────────────────────────┤
+│ beamtalk-core (library)             │  ← Compiler core (Compilation, reusable)
 │  ├─ parse/       (Lexer, Parser)    │
 │  ├─ analyse/     (Semantic Analysis)│
 │  └─ codegen/     (Core Erlang gen)  │
 └─────────────────────────────────────┘
 ```
 
+`beamtalk-language-service` (BT-3361, ADR 0117 Decision step 5) depends on
+`beamtalk-core`, never the reverse — the same downward-only rule as every
+other layer here, now cargo-enforced for this specific boundary instead of
+only convention. `beamtalk-cli`/`beamtalk-lsp`/`beamtalk-mcp`/
+`beamtalk-compiler-port`/`beamtalk-lint` all depend on it directly for
+`LanguageService`/`SimpleLanguageService` and the `queries` API.
+
 ### Rules
 
 **✅ ALLOWED:**
 - `beamtalk-cli` depends on `beamtalk-core`
 - `beamtalk-lsp` depends on `beamtalk-core`
-- `queries` depends on `parse`, `analyse`, `codegen`
+- `beamtalk-language-service` depends on `beamtalk-core` (`parse`, `analyse`, `compilation`)
 - `codegen` depends on `parse` (needs AST types)
 
 **❌ FORBIDDEN:**
 - `beamtalk-core` importing `beamtalk-cli`
 - `parse` importing `codegen`
-- `codegen` importing `queries`
+- `beamtalk-core` importing `beamtalk-language-service`
 
 ### Rationale
 
@@ -85,22 +93,29 @@ use beamtalk_cli::repl::ReplContext; // ❌ WRONG!
 
 **Action on violation:** Flag in code review, refactor immediately.
 
-**Exception — `beamtalk-core`'s own Compilation/Language Service boundary is
-automatically enforced.** ADR 0117 found this diagram's `queries/ (Language
-Service)` line had silently drifted out of sync with the code (a
-`semantic_analysis → queries` production edge, plus an extensive `queries ⇄
-language_service` cycle, existed with nothing to catch them) — exactly the
-failure mode "document only" accepts the risk of. `just check-boundary`
-(`crates/beamtalk-boundary-check`, BT-3339) now fails CI if a production
-`use`/fully-qualified edge inside `beamtalk-core` crosses from the
-Compilation bounded context (`ast`, `source_analysis`, `unparse`, `codegen`,
-`semantic_analysis`, `compilation`) into Language Service (`queries`,
-`language_service`, `lint`); the reverse direction is unrestricted. This
+**Exception — the Compilation/Language Service boundary is automatically
+enforced.** ADR 0117 found this diagram's `queries/ (Language Service)` line
+had silently drifted out of sync with the code (a `semantic_analysis →
+queries` production edge, plus an extensive `queries ⇄ language_service`
+cycle, existed with nothing to catch them) — exactly the failure mode
+"document only" accepts the risk of. `just check-boundary`
+(`crates/beamtalk-boundary-check`, BT-3339) fails CI if a production
+`use`/fully-qualified edge inside `beamtalk-core` crosses into a
+Language-Service-named module; the reverse direction is unrestricted. This
 doesn't change the "document only" decision for the coarser binary/library
-boundary above — only for this specific, already-drifted-once edge. See
-`docs/ADR/0117-beamtalk-core-crate-split.md`; the layer diagram above still
-reflects that ADR's *aspirational* module names (`parse`/`analyse`) rather
-than the real ones, corrected as later phases of that ADR land.
+boundary above — only for this specific, already-drifted-once edge.
+
+BT-3361 (ADR 0117 Decision step 5) went a step further: `language_service`
+and its `queries` submodule moved out of `beamtalk-core` entirely into the
+standalone `beamtalk-language-service` crate (`beamtalk-core`'s Compilation
+bounded context — `ast`, `source_analysis`, `unparse`, `codegen`,
+`semantic_analysis`, `compilation` — never depends on it), so this direction
+is now **cargo-enforced** for any cross-crate edge, on top of what
+`check-boundary` already caught for the intra-crate case. `check-boundary`
+keeps `queries`/`language_service` (alongside `lint`, moved out earlier by
+BT-3340) in its module list purely as a regression guard — see
+`crates/beamtalk-boundary-check/README.md`. See
+`docs/ADR/0117-beamtalk-core-crate-split.md`.
 
 ---
 

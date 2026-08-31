@@ -19,11 +19,11 @@
 //! └── stdlib class names (pre-indexed from lib/*.bt)
 //! ```
 
-use crate::compilation::extension_index::ExtensionIndex;
-use crate::semantic_analysis::{
+use beamtalk_core::compilation::extension_index::ExtensionIndex;
+use beamtalk_core::semantic_analysis::{
     AliasInfo, AliasRegistry, ClassHierarchy, ProtocolInfo, ProtocolRegistry, SemanticError,
 };
-use crate::source_analysis::{Diagnostic, lex_with_eof, parse};
+use beamtalk_core::source_analysis::{Diagnostic, lex_with_eof, parse};
 use camino::{Utf8Path, Utf8PathBuf};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -636,7 +636,7 @@ impl ProjectIndex {
     pub fn cross_file_class_infos_for(
         &self,
         file: &Utf8PathBuf,
-    ) -> Vec<crate::semantic_analysis::class_hierarchy::ClassInfo> {
+    ) -> Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> {
         let current_file_classes: std::collections::HashSet<&EcoString> = self
             .file_classes
             .get(file)
@@ -1069,7 +1069,7 @@ mod tests {
         index.update_file(Utf8PathBuf::from("aliases.bt"), &alias_hierarchy);
         index.update_file_aliases(
             Utf8PathBuf::from("aliases.bt"),
-            crate::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module),
+            beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module),
         );
         assert!(index.alias_registry().has_alias("RestartStrategy"));
 
@@ -1097,7 +1097,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file, infos);
 
         assert!(index.alias_registry().has_alias("RestartStrategy"));
@@ -1112,7 +1112,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file.clone(), infos);
         assert!(index.alias_registry().has_alias("Foo"));
 
@@ -1121,7 +1121,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file, infos);
 
         assert!(index.alias_registry().has_alias("Bar"));
@@ -1147,7 +1147,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(dep_file.clone(), &hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(dep_file.clone(), infos);
 
         let dep_infos = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
@@ -1162,7 +1162,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(project_file.clone(), &hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(project_file, infos);
 
         let project_infos = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
@@ -1206,7 +1206,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(stdlib_file.clone(), &hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(stdlib_file.clone(), infos);
 
         let reindexed = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
@@ -1245,7 +1245,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(stdlib_file.clone(), &hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(stdlib_file, infos);
 
         let seen = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
@@ -1273,7 +1273,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(stdlib_file.clone(), &hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(stdlib_file.clone(), infos);
 
         index.mark_stdlib_file(stdlib_file);
@@ -1301,7 +1301,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file.clone(), infos);
 
         // Indexed before any root is known — fallback marker for now.
@@ -1342,14 +1342,14 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file_a.clone(), &hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file_a.clone(), infos);
 
         let tokens = lex_with_eof("internal type Foo = String");
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file_b.clone(), &hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file_b.clone(), infos);
 
         assert_eq!(
@@ -1393,7 +1393,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file.clone(), infos);
         assert!(index.alias_registry().has_alias("RestartStrategy"));
 
@@ -1418,7 +1418,8 @@ mod tests {
         let (alias_module, _) = parse(alias_tokens);
         let alias_hierarchy = ClassHierarchy::build(&alias_module).0.unwrap();
         index.update_file(Utf8PathBuf::from("alias_foo.bt"), &alias_hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module);
+        let infos =
+            beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module);
         index.update_file_aliases(Utf8PathBuf::from("alias_foo.bt"), infos);
 
         assert!(
@@ -1445,7 +1446,8 @@ mod tests {
         let (alias_module, _) = parse(alias_tokens);
         let alias_hierarchy = ClassHierarchy::build(&alias_module).0.unwrap();
         index.update_file(Utf8PathBuf::from("alias_foo.bt"), &alias_hierarchy);
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module);
+        let infos =
+            beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module);
         index.update_file_aliases(Utf8PathBuf::from("alias_foo.bt"), infos);
         assert!(index.alias_registry().has_alias("Foo"));
 

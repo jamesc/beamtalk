@@ -31,7 +31,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, info, warn};
 
-use beamtalk_core::language_service::{
+use beamtalk_language_service::{
     NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolsResponse,
 };
 use beamtalk_repl_protocol::{ReplResponse, RequestBuilder, handshake};
@@ -182,7 +182,7 @@ pub struct ClassChangedEvent {
 /// BT-2779) — mirrors `beamtalk_recheck:site_ref()`
 /// (`runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl`). `line` is
 /// the 1-based line xref recorded for the call site, not a byte offset —
-/// same precedent as [`beamtalk_core::language_service::NavSite`].
+/// same precedent as [`beamtalk_language_service::NavSite`].
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ReloadSite {
     /// Selector of the caller method containing the site.

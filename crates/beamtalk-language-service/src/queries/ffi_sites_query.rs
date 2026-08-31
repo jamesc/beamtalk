@@ -20,9 +20,9 @@
 //! `(Erlang lists) reverse: xs` parses as a nested [`Expression::MessageSend`]
 //! whose root receiver is the `Erlang` class reference. The receiver
 //! recognition is shared with codegen and semantic analysis via
-//! [`crate::ffi_receiver`] (BT-3079); the function/arity derivation below
+//! [`beamtalk_core::ffi_receiver`] (BT-3079); the function/arity derivation below
 //! matches the existing FFI machinery in
-//! [`crate::semantic_analysis::validators::structural_validators`] (BT-1726):
+//! [`beamtalk_core::semantic_analysis::validators::structural_validators`] (BT-1726):
 //!
 //! - The **module** is recovered from the receiver: `Erlang <module>` (or
 //!   `(Erlang <module>)`) is a `MessageSend` whose receiver is
@@ -40,7 +40,7 @@
 //! Class-protocol selectors such as `Erlang class` / `Erlang new` are NOT FFI
 //! module lookups (they dispatch to the class protocol), so they are never
 //! reported — recognition is delegated to the single shared implementation in
-//! [`crate::ffi_receiver`] (BT-3079), which codegen and the validators also use.
+//! [`beamtalk_core::ffi_receiver`] (BT-3079), which codegen and the validators also use.
 //!
 //! # Parsing strategy
 //!
@@ -58,9 +58,9 @@
 //! Callers treat "no sites found" identically to "could not parse".
 
 use super::selector_span;
-use crate::ast::{Expression, MessageSelector, Pattern, StringSegment};
-use crate::semantic_analysis::validators::{erlang_arity, erlang_function_name};
-use crate::source_analysis::{Span, lex_with_eof, parse};
+use beamtalk_core::ast::{Expression, MessageSelector, Pattern, StringSegment};
+use beamtalk_core::semantic_analysis::validators::{erlang_arity, erlang_function_name};
+use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
 /// Used to translate line numbers from wrapped-source to input-source space.
@@ -103,7 +103,7 @@ pub fn find_ffi_sites_in_source(
 
     let mut wrapped_lines = Vec::new();
 
-    crate::ast_walker::for_each_expr_seq(&parsed, |seq| {
+    beamtalk_core::ast_walker::for_each_expr_seq(&parsed, |seq| {
         for stmt in seq {
             collect_ffi_sites(&stmt.expression, &target, &wrapped, &mut wrapped_lines);
         }
@@ -135,9 +135,9 @@ struct FfiTarget<'a> {
 /// as module lookups.
 ///
 /// BT-3079: delegates to the single shared recognizer in
-/// [`crate::ffi_receiver`].
+/// [`beamtalk_core::ffi_receiver`].
 fn extract_erlang_module(expr: &Expression) -> Option<&str> {
-    crate::ffi_receiver::erlang_module_of_receiver(expr)
+    beamtalk_core::ffi_receiver::erlang_module_of_receiver(expr)
 }
 
 /// Determine the line number to report for a matching FFI call site. Uses the

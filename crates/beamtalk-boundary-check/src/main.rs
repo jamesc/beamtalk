@@ -89,17 +89,28 @@ const COMPILATION_MODULES: &[&str] = &[
 ];
 
 /// The Language Service bounded context — the consumer. Compilation must
-/// never import from these in production code. `lint` is listed here as a
-/// regression guard, not an active target: BT-3340 (ADR 0117 Decision step
-/// 2, landing after BT-3339 first wrote this list) extracted it out of
-/// `beamtalk-core` entirely into the standalone `beamtalk-lint` crate — see
-/// that crate's own module header (`crates/beamtalk-lint/src/lib.rs`) for
-/// why the move was safe (it depended only on Compilation-context modules,
-/// with no back-edges) — so no `crate::lint::...` edge can exist under
-/// `CORE_SRC` any more. Keeping the name here costs nothing and means this
-/// checker would immediately flag it if a `lint` module were ever
-/// reintroduced inside `beamtalk-core` by mistake. BT-3353 is the issue that
-/// corrected this comment once the module actually left.
+/// never import from these in production code. All three names are now
+/// regression guards, not active targets — none of these directories exist
+/// under `CORE_SRC` any more:
+///
+/// - `lint`: BT-3340 (ADR 0117 Decision step 2) extracted it into the
+///   standalone `beamtalk-lint` crate — see that crate's own module header
+///   (`crates/beamtalk-lint/src/lib.rs`) for why the move was safe (it
+///   depended only on Compilation-context modules, with no back-edges).
+///   BT-3353 corrected this comment once the module actually left.
+/// - `queries` and `language_service`: BT-3361 (ADR 0117 Decision step 5)
+///   extracted the whole Language Service module tree — `language_service`
+///   and its `queries` submodule — into the standalone
+///   `beamtalk-language-service` crate, which depends on `beamtalk-core`
+///   (never the reverse); that direction is now cargo-enforced by the crate
+///   graph itself for any *cross-crate* edge, on top of what this checker
+///   already caught for the intra-crate edges these two names once named.
+///
+/// Keeping all three names here costs nothing and means this checker would
+/// immediately flag it if any of them were ever reintroduced as a module
+/// inside `beamtalk-core` by mistake — see [`check_module_list_drift`],
+/// which independently guarantees `files_scanned` (and the compiled-in
+/// `COMPILATION_MODULES` set) can't quietly go stale as directories move.
 const LANGUAGE_SERVICE_MODULES: &[&str] = &["queries", "language_service", "lint"];
 
 /// Top-level `beamtalk-core/src` modules that belong to neither bounded

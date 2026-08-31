@@ -26,16 +26,16 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol hover requests
 
-use crate::ast::{
+use crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases;
+use crate::{HoverInfo, Position};
+use beamtalk_core::ast::{
     ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module, Pattern,
     StateDeclaration,
 };
-use crate::language_service::{HoverInfo, Position};
-use crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases;
-use crate::semantic_analysis::type_checker::TypeMap;
-use crate::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
-use crate::semantic_analysis::{AliasRegistry, ClassHierarchy, InferredType};
-use crate::source_analysis::Span;
+use beamtalk_core::semantic_analysis::type_checker::TypeMap;
+use beamtalk_core::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
+use beamtalk_core::semantic_analysis::{AliasRegistry, ClassHierarchy, InferredType};
+use beamtalk_core::source_analysis::Span;
 
 /// Computes hover information at a given position.
 ///
@@ -60,8 +60,8 @@ use crate::source_analysis::Span;
 /// # Examples
 ///
 /// ```
-/// use beamtalk_core::queries::hover_provider::compute_hover;
-/// use beamtalk_core::language_service::Position;
+/// use beamtalk_language_service::queries::hover_provider::compute_hover;
+/// use beamtalk_language_service::Position;
 /// use beamtalk_core::semantic_analysis::ClassHierarchy;
 /// use beamtalk_core::source_analysis::{lex_with_eof, parse};
 ///
@@ -230,7 +230,9 @@ fn find_hover_in_declarations(
                     return Some(HoverInfo::new(
                         format!(
                             "Type annotation: `{}`",
-                            crate::unparse::unparse_type_annotation_display(type_annotation)
+                            beamtalk_core::unparse::unparse_type_annotation_display(
+                                type_annotation
+                            )
                         ),
                         type_span,
                     ));
@@ -270,7 +272,7 @@ fn find_hover_in_declarations(
 /// `internal type Name = ...`) declaration (ADR 0108 Phase 8, BT-2901).
 /// Shows the RHS as written (mirrors [`state_declaration_hover_info`]'s
 /// shape) plus the doc comment, if any.
-fn alias_definition_hover_info(alias: &crate::ast::TypeAliasDefinition) -> HoverInfo {
+fn alias_definition_hover_info(alias: &beamtalk_core::ast::TypeAliasDefinition) -> HoverInfo {
     let keyword = if alias.is_internal {
         "internal type"
     } else {
@@ -279,7 +281,7 @@ fn alias_definition_hover_info(alias: &crate::ast::TypeAliasDefinition) -> Hover
     let title = format!(
         "`{keyword} {} = {}`",
         alias.name.name,
-        crate::unparse::unparse_type_annotation_display(&alias.annotation)
+        beamtalk_core::unparse::unparse_type_annotation_display(&alias.annotation)
     );
     let mut hover = HoverInfo::new(title, alias.name.span);
 
@@ -316,7 +318,7 @@ fn find_hover_on_method_signature(
             if let Some(type_annotation) = &parameter.type_annotation {
                 hover = hover.with_documentation(format!(
                     "Type: `{}`",
-                    crate::unparse::unparse_type_annotation_display(type_annotation)
+                    beamtalk_core::unparse::unparse_type_annotation_display(type_annotation)
                 ));
             }
             return Some(hover);
@@ -328,7 +330,7 @@ fn find_hover_on_method_signature(
                 return Some(HoverInfo::new(
                     format!(
                         "Type annotation: `{}`",
-                        crate::unparse::unparse_type_annotation_display(type_annotation)
+                        beamtalk_core::unparse::unparse_type_annotation_display(type_annotation)
                     ),
                     type_span,
                 ));
@@ -342,7 +344,7 @@ fn find_hover_on_method_signature(
             return Some(HoverInfo::new(
                 format!(
                     "Return type: `{}`",
-                    crate::unparse::unparse_type_annotation_display(return_type)
+                    beamtalk_core::unparse::unparse_type_annotation_display(return_type)
                 ),
                 return_span,
             ));
@@ -411,7 +413,7 @@ fn state_declaration_hover_info(state: &StateDeclaration) -> HoverInfo {
         format!(
             "`{} :: {}`",
             state.name.name,
-            crate::unparse::unparse_type_annotation_display(ty)
+            beamtalk_core::unparse::unparse_type_annotation_display(ty)
         )
     } else {
         format!("`{}`", state.name.name)
@@ -433,14 +435,14 @@ fn state_declaration_hover_info(state: &StateDeclaration) -> HoverInfo {
 }
 
 /// Renders a method declaration's display signature (BT-3097): builds
-/// [`crate::unparse::SignatureParam`]s from the AST (type text rendered via
-/// [`crate::unparse::unparse_type_annotation_display`], the same renderer
+/// [`beamtalk_core::unparse::SignatureParam`]s from the AST (type text rendered via
+/// [`beamtalk_core::unparse::unparse_type_annotation_display`], the same renderer
 /// `bt fmt` and the doc extractor use) and composes them with the shared
-/// [`crate::unparse::render_signature_text`] core. Hover shows no
+/// [`beamtalk_core::unparse::render_signature_text`] core. Hover shows no
 /// `sealed`/`internal` prefix and no trailing ` =>` — just the plain
 /// declaration shape, matching this function's pre-BT-3097 output.
 fn method_signature(method: &MethodDefinition) -> String {
-    use crate::unparse::{
+    use beamtalk_core::unparse::{
         SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
         unparse_type_annotation_display,
     };
@@ -729,7 +731,7 @@ fn find_hover_in_expr(
                 // expansion instead of falling back to `Tier::Unknown` for
                 // the opaque alias name.
                 if let Some(tier) = inferred.and_then(|ty| {
-                    crate::semantic_analysis::type_checker::sendability::hover_tier_label(
+                    beamtalk_core::semantic_analysis::type_checker::sendability::hover_tier_label(
                         ty,
                         hierarchy,
                         alias_registry,
@@ -774,7 +776,7 @@ fn find_hover_in_expr(
                 // Render the literal via `unparse_literal_display` — the single
                 // source of truth for literal-to-source rendering (BT-3088) —
                 // so hover text agrees with Beamtalk quoting/escaping rules.
-                let rendered = crate::unparse::unparse_literal_display(lit);
+                let rendered = beamtalk_core::unparse::unparse_literal_display(lit);
                 let info = match lit {
                     Literal::Integer(_) => format!("Integer: `{rendered}`"),
                     Literal::Float(_) => format!("Float: `{rendered}`"),
@@ -963,11 +965,11 @@ fn find_hover_in_expr(
                     // are single bare identifiers), so it falls straight
                     // through to its own `Display`.
                     let display: String = match &ty {
-                        crate::semantic_analysis::class_hierarchy::DeclaredType::Simple(name) => {
-                            alias_registry
-                                .and_then(|registry| registry.resolve_display_name(name))
-                                .map_or_else(|| ty.to_string(), |s| s.to_string())
-                        }
+                        beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType::Simple(
+                            name,
+                        ) => alias_registry
+                            .and_then(|registry| registry.resolve_display_name(name))
+                            .map_or_else(|| ty.to_string(), |s| s.to_string()),
                         _ => ty.to_string(),
                     };
                     format!("`{} :: {display}`", field.name)
@@ -1212,7 +1214,7 @@ fn find_hover_in_expr(
             if offset >= span.start() && offset < span.end() {
                 // Check interpolated expressions for hover targets
                 for segment in segments {
-                    if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                    if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment {
                         if let Some(info) = find_hover_in_expr(
                             expr,
                             offset,
@@ -1346,10 +1348,12 @@ fn ffi_selector_hover_info(
 
     let provenance = if let Some(sig) = sig {
         match sig.provenance {
-            crate::semantic_analysis::type_checker::TypeProvenance::Extracted => {
+            beamtalk_core::semantic_analysis::type_checker::TypeProvenance::Extracted => {
                 "auto-extracted from `.beam`"
             }
-            crate::semantic_analysis::type_checker::TypeProvenance::Declared(_) => "from stub file",
+            beamtalk_core::semantic_analysis::type_checker::TypeProvenance::Declared(_) => {
+                "from stub file"
+            }
             _ => "native type registry",
         }
     } else {
@@ -1407,8 +1411,10 @@ fn extract_erlang_module_name(receiver: &Expression, type_map: &TypeMap) -> Opti
 /// is the same shared core, driven by `SignatureParam { name: None, .. }`
 /// (see the module's Family-B parity fixture in
 /// `unparse::signature_text::tests`).
-fn method_info_signature(method: &crate::semantic_analysis::class_hierarchy::MethodInfo) -> String {
-    use crate::unparse::{
+fn method_info_signature(
+    method: &beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo,
+) -> String {
+    use beamtalk_core::unparse::{
         SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
     };
 
@@ -1658,9 +1664,9 @@ fn class_reference_hover_info(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_service::ByteOffset;
-    use crate::semantic_analysis::ClassHierarchy;
-    use crate::source_analysis::{lex_with_eof, parse};
+    use crate::ByteOffset;
+    use beamtalk_core::semantic_analysis::ClassHierarchy;
+    use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
     /// Parse source and compute hover with a fresh hierarchy.
     fn hover_at(source: &str, position: Position) -> Option<HoverInfo> {
@@ -1747,8 +1753,8 @@ mod tests {
     /// instead of silently omitting the tier line for the opaque alias name.
     #[test]
     fn hover_shows_composed_handle_scope_for_alias_typed_value_field() {
-        use crate::semantic_analysis::alias_registry::AliasRegistry;
-        use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+        use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
+        use beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry;
 
         let src = "type PortAlias = Port\ntyped Value subclass: Wrapper\n  field: p :: PortAlias = nil\n\n\
                    Object subclass: M\n  run: w :: Wrapper =>\n    w printString\n";
@@ -1917,8 +1923,8 @@ mod tests {
 
     #[test]
     fn hover_on_primitive_quoted() {
-        use crate::ast::Expression;
-        use crate::source_analysis::Span;
+        use beamtalk_core::ast::Expression;
+        use beamtalk_core::source_analysis::Span;
 
         let ctx = HoverClassContext::TopLevel;
         let hierarchy = ClassHierarchy::with_builtins();
@@ -1938,8 +1944,8 @@ mod tests {
 
     #[test]
     fn hover_on_primitive_unquoted() {
-        use crate::ast::Expression;
-        use crate::source_analysis::Span;
+        use beamtalk_core::ast::Expression;
+        use beamtalk_core::source_analysis::Span;
 
         let ctx = HoverClassContext::TopLevel;
         let hierarchy = ClassHierarchy::with_builtins();
@@ -2677,8 +2683,8 @@ mod tests {
 
     #[test]
     fn ffi_hover_shows_typed_signature_from_registry() {
-        use crate::semantic_analysis::type_checker::TypeProvenance;
-        use crate::semantic_analysis::type_checker::native_type_registry::{
+        use beamtalk_core::semantic_analysis::type_checker::TypeProvenance;
+        use beamtalk_core::semantic_analysis::type_checker::native_type_registry::{
             FunctionSignature, NativeTypeRegistry, ParamType,
         };
 
@@ -2740,8 +2746,8 @@ mod tests {
     /// everything built from its result stayed `Dynamic(UntypedFfi)`.
     #[test]
     fn ffi_hover_on_downstream_expression_shows_propagated_type() {
-        use crate::semantic_analysis::type_checker::TypeProvenance;
-        use crate::semantic_analysis::type_checker::native_type_registry::{
+        use beamtalk_core::semantic_analysis::type_checker::TypeProvenance;
+        use beamtalk_core::semantic_analysis::type_checker::native_type_registry::{
             FunctionSignature, NativeTypeRegistry, ParamType,
         };
 
@@ -2851,7 +2857,7 @@ mod tests {
     /// aliases) `analyse_full` uses (see `alias_registry.rs`'s module doc).
     fn alias_registry_for(module: &Module, hierarchy: &ClassHierarchy) -> AliasRegistry {
         let protocol_registry =
-            crate::semantic_analysis::protocol_registry::ProtocolRegistry::new();
+            beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::new();
         let mut registry = AliasRegistry::new();
         let diags = registry.register_module(module, hierarchy, &protocol_registry);
         assert!(diags.is_empty(), "unexpected alias diagnostics: {diags:?}");

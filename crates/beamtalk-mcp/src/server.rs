@@ -218,7 +218,7 @@ async fn doc_method_categories(client: &ReplClient, class: &str) -> Option<serde
     if response.is_error() {
         return None;
     }
-    let payload: beamtalk_core::language_service::NavSymbolsResponse =
+    let payload: beamtalk_language_service::NavSymbolsResponse =
         serde_json::from_value(response.value?).ok()?;
     let source_file = payload
         .classes
@@ -2693,7 +2693,9 @@ fn run_module_analysis(
             .filter(|d| d.category.is_some()),
     );
 
-    beamtalk_core::queries::diagnostic_provider::apply_expect_directives(module, &mut diags);
+    beamtalk_language_service::queries::diagnostic_provider::apply_expect_directives(
+        module, &mut diags,
+    );
 
     // BT-3257: mirrors `compute_project_diagnostics_with_analysis`'s
     // placement — appended after `apply_expect_directives` because a
