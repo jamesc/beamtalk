@@ -513,4 +513,43 @@ mod tests {
              querying process's own cwd, got {result:?}"
         );
     }
+
+    /// Regression test for BT-3332 review feedback: `create_workspace_impl`'s
+    /// fallback to the raw `project_path` when `canonicalize()` fails (e.g. a
+    /// named workspace created against a directory that doesn't exist yet)
+    /// must not reintroduce the wildcard-match bug this PR fixes.
+    #[test]
+    fn test_create_workspace_impl_falls_back_to_raw_path_when_canonicalize_fails() {
+        let pid = std::process::id();
+        let ws_id = format!("test_bt3332_fallback_{pid}");
+        let _cleanup = CleanupWorkspaceDirs(std::slice::from_ref(&ws_id));
+
+        // Relative and guaranteed not to exist anywhere on disk, so
+        // `canonicalize()` fails inside `create_workspace_impl` and it falls
+        // back to storing this raw path.
+        let nonexistent_relative = PathBuf::from("bt3332-nonexistent-dir-should-never-exist");
+
+        let metadata = create_workspace_impl(&ws_id, &nonexistent_relative).unwrap();
+        assert_eq!(
+            metadata.project_path, nonexistent_relative,
+            "canonicalize() failure should fall back to storing the raw path unchanged"
+        );
+        assert!(
+            !metadata.project_path.is_absolute(),
+            "this case's fallback path is relative — exactly what \
+             find_workspace_by_project_path's is_absolute() guard must reject"
+        );
+
+        // Query with the identical relative value: even a byte-for-byte match
+        // must be rejected, because find_workspace_by_project_path skips any
+        // non-absolute stored project_path before it ever reaches path
+        // comparison (BT-3332's defense-in-depth check).
+        let result = find_workspace_by_project_path(&nonexistent_relative).unwrap();
+        assert_ne!(
+            result,
+            Some(ws_id.clone()),
+            "a non-absolute stored project_path must never match, even a \
+             byte-identical query"
+        );
+    }
 }
