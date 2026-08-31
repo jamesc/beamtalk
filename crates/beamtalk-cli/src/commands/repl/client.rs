@@ -401,91 +401,9 @@ impl ReplClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::{spawn_auth_error_server, spawn_auth_ok_server};
     use std::net::TcpListener;
-    use tungstenite::{Message, WebSocket};
-
-    /// Spawn a minimal fake workspace backend on an OS-assigned port.
-    ///
-    /// Accepts connections in a loop (one background thread per connection,
-    /// since [`ReplClient::interrupt`] opens a *second* connection alongside
-    /// the main one). Each connection completes the real auth handshake
-    /// (`auth-required` -> read `auth` -> `auth_ok` -> `session-started`)
-    /// before handing subsequent parsed request frames to `handler`, which
-    /// may reply on the same socket. Returns the bound port.
-    ///
-    /// This is the same ADR 0020 handshake double `beamtalk-lsp/src/runtime.rs`
-    /// (`FakeWorkspace`/`spawn_workspace`) and `beamtalk-mcp/src/server.rs`
-    /// (`FakeRepl`/`spawn_fake_repl`) now share via
-    /// `beamtalk_repl_protocol::test_support` (BT-3331) — deliberately NOT
-    /// reused here too: that shared implementation is `tokio`-async
-    /// (`tokio::net::TcpListener` / `tokio_tungstenite`), while `ReplClient`
-    /// and the rest of `beamtalk-cli`'s REPL transport are synchronous
-    /// (`std::net::TcpStream` + blocking `tungstenite`), with no `tokio`
-    /// dependency anywhere else in this crate to justify pulling one in for
-    /// tests only. BT-3331's own investigation concluded this stays a third,
-    /// separate implementation rather than a shared async/sync-parameterized
-    /// one — the two transports differ enough (blocking reads on the same
-    /// thread vs. an async task) that unifying them would cost more than the
-    /// ~70 lines of duplication it would save.
-    fn spawn_auth_ok_server(
-        handler: impl Fn(serde_json::Value, &mut WebSocket<std::net::TcpStream>) + Send + Sync + 'static,
-    ) -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
-        let port = listener.local_addr().expect("local_addr").port();
-        let handler = std::sync::Arc::new(handler);
-        std::thread::spawn(move || {
-            for stream in listener.incoming().flatten() {
-                let handler = std::sync::Arc::clone(&handler);
-                std::thread::spawn(move || {
-                    let Ok(mut ws) = tungstenite::accept(stream) else {
-                        return;
-                    };
-                    let send = |ws: &mut WebSocket<std::net::TcpStream>, v: serde_json::Value| {
-                        let _ = ws.send(Message::Text(v.to_string().into()));
-                    };
-                    send(&mut ws, serde_json::json!({"op": "auth-required"}));
-                    if ws.read().is_err() {
-                        return;
-                    }
-                    send(&mut ws, serde_json::json!({"type": "auth_ok"}));
-                    send(
-                        &mut ws,
-                        serde_json::json!({"op": "session-started", "session": "sess-test"}),
-                    );
-                    while let Ok(Message::Text(text)) = ws.read() {
-                        if let Ok(req) = serde_json::from_str(&text) {
-                            handler(req, &mut ws);
-                        }
-                    }
-                });
-            }
-        });
-        port
-    }
-
-    /// Spawn a fake backend that rejects auth with the given message.
-    fn spawn_auth_error_server(message: &'static str) -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
-        let port = listener.local_addr().expect("local_addr").port();
-        std::thread::spawn(move || {
-            if let Ok((stream, _)) = listener.accept() {
-                if let Ok(mut ws) = tungstenite::accept(stream) {
-                    let _ = ws.send(Message::Text(
-                        serde_json::json!({"op": "auth-required"})
-                            .to_string()
-                            .into(),
-                    ));
-                    let _ = ws.read();
-                    let _ = ws.send(Message::Text(
-                        serde_json::json!({"type": "auth_error", "message": message})
-                            .to_string()
-                            .into(),
-                    ));
-                }
-            }
-        });
-        port
-    }
+    use tungstenite::Message;
 
     #[test]
     fn connect_to_unbound_port_fails_with_connect_error() {

@@ -66,6 +66,8 @@ pub mod test;
 pub mod test_docs;
 pub mod test_metamorphic;
 pub mod test_stdlib;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub(crate) mod toml_utils;
 pub mod transcript;
 pub mod type_coverage;

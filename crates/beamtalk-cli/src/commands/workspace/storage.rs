@@ -109,7 +109,7 @@ pub fn workspace_id_for(project_path: &Path, workspace_name: Option<&str>) -> Re
 }
 
 /// Get the base directory for all workspaces (`~/.beamtalk/workspaces/`).
-pub(super) fn workspaces_base_dir() -> Result<PathBuf> {
+pub(crate) fn workspaces_base_dir() -> Result<PathBuf> {
     beamtalk_workspace::workspaces_base_dir()
 }
 

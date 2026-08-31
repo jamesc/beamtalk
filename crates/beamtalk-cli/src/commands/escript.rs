@@ -475,4 +475,109 @@ mod tests {
         assert!(src.contains("dispatch(ClassPid, 'run', [])"));
         assert!(!src.contains("BinArgs"));
     }
+
+    // -- collect_project_modules --------------------------------------------
+
+    /// Build a unique scratch directory under the OS temp dir, removed on
+    /// drop even on panic (RAII), so parallel `cargo test` threads never
+    /// collide and a failing assertion never leaves stray files behind.
+    struct ScratchDir {
+        path: Utf8PathBuf,
+    }
+
+    impl ScratchDir {
+        fn new(label: &str) -> Self {
+            static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+                .expect("temp dir is valid UTF-8")
+                .join(format!("bt3349-escript-{label}-{}-{n}", std::process::id()));
+            std::fs::create_dir_all(path.as_std_path()).expect("create scratch dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(self.path.as_std_path());
+        }
+    }
+
+    #[test]
+    fn test_collect_project_modules_empty_dir_returns_empty_vec() {
+        let dir = ScratchDir::new("empty");
+        let modules = collect_project_modules(&dir.path).expect("collect");
+        assert!(modules.is_empty());
+    }
+
+    #[test]
+    fn test_collect_project_modules_filters_and_sorts_bt_beams() {
+        let dir = ScratchDir::new("filter-sort");
+        for name in [
+            "bt@app@zebra.beam",
+            "bt@app@ant.beam",
+            "not_project.beam",
+            "readme.txt",
+        ] {
+            std::fs::write(dir.path.join(name).as_std_path(), b"").expect("write beam stub");
+        }
+        let modules = collect_project_modules(&dir.path).expect("collect");
+        assert_eq!(modules, vec!["bt@app@ant", "bt@app@zebra"]);
+    }
+
+    #[test]
+    fn test_collect_project_modules_rejects_invalid_module_name() {
+        let dir = ScratchDir::new("invalid-name");
+        // A `bt@` file whose stripped name is not a valid Erlang atom (space,
+        // deliberately malformed as if a build produced a stray artifact).
+        std::fs::write(dir.path.join("bt@bad name.beam").as_std_path(), b"")
+            .expect("write beam stub");
+        let err = collect_project_modules(&dir.path).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid module name"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_collect_project_modules_missing_dir_errors() {
+        let dir = ScratchDir::new("missing-parent");
+        let missing = dir.path.join("does-not-exist");
+        let err = collect_project_modules(&missing).unwrap_err();
+        assert!(
+            err.to_string().contains("Failed to read project ebin"),
+            "got: {err}"
+        );
+    }
+
+    // -- set_executable ------------------------------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn test_set_executable_sets_unix_mode_bits() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = ScratchDir::new("set-executable");
+        let file = dir.path.join("my_escript");
+        std::fs::write(file.as_std_path(), b"#!/usr/bin/env escript\n").expect("write escript");
+        // Start from a non-executable mode to prove `set_executable` changes it.
+        std::fs::set_permissions(file.as_std_path(), std::fs::Permissions::from_mode(0o644))
+            .expect("set initial perms");
+
+        set_executable(file.as_std_path()).expect("set_executable should succeed");
+
+        let mode = std::fs::metadata(file.as_std_path())
+            .expect("stat")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o755);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_set_executable_missing_file_errors() {
+        let dir = ScratchDir::new("set-executable-missing");
+        let missing = dir.path.join("does-not-exist");
+        assert!(set_executable(missing.as_std_path()).is_err());
+    }
 }
