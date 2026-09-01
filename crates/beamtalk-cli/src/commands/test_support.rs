@@ -23,7 +23,9 @@
 //! not a parameterization of the loop [`spawn_auth_ok_server`] below runs.
 
 use std::net::TcpListener;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use tungstenite::{Message, WebSocket};
 
@@ -39,18 +41,78 @@ pub(crate) fn unique_ws_id(label: &str) -> String {
     format!("bt3349-{label}-{}-{n}", std::process::id())
 }
 
+/// Guards concurrent access to the real `~/.beamtalk` directory versus a
+/// `BEAMTALK_HOME`-overridden hermetic tempdir, across this crate's whole
+/// test binary (BT-3370). `cargo test` runs tests as threads within one
+/// process by default, and `std::env::set_var`/`remove_var` are
+/// process-global — so a test that temporarily overrides `BEAMTALK_HOME`
+/// would otherwise race every non-overriding test's real-directory
+/// reads/writes for as long as the override is set. Real-directory tests
+/// take the shared read side (so they keep running in parallel with each
+/// other, same as before this lock existed); a `BEAMTALK_HOME` override
+/// takes the exclusive write side for its duration, so it never overlaps a
+/// real-directory test.
+static BEAMTALK_HOME_LOCK: RwLock<()> = RwLock::new(());
+
+/// Acquire the shared (real-directory) side of [`BEAMTALK_HOME_LOCK`]. Every
+/// test that reads/writes the real `~/.beamtalk` directory — directly, or
+/// via [`WorkspaceFixture`] — must hold this for its whole body: bind it to
+/// a local so it lives long enough, e.g. `let _guard = real_home_guard();`.
+/// A poisoned lock (some other guarded test panicked while holding it) is
+/// still safe to read through here — the panic is that test's own
+/// assertion failure, not a corrupted directory.
+pub(crate) fn real_home_guard() -> RwLockReadGuard<'static, ()> {
+    BEAMTALK_HOME_LOCK
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// RAII guard that overrides `BEAMTALK_HOME` to `dir` for its lifetime,
+/// restoring the previous value (or unsetting it) on drop. Holds the
+/// exclusive write side of [`BEAMTALK_HOME_LOCK`] for that whole lifetime,
+/// so construction blocks until every in-flight real-directory
+/// ([`real_home_guard`]) test has finished, and no new one can start until
+/// this guard drops.
+pub(crate) struct BeamtalkHomeOverride {
+    _lock: RwLockWriteGuard<'static, ()>,
+    prev: Option<String>,
+}
+
+impl BeamtalkHomeOverride {
+    pub(crate) fn new(dir: &Path) -> Self {
+        let lock = BEAMTALK_HOME_LOCK
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        let prev = std::env::var("BEAMTALK_HOME").ok();
+        // SAFETY: the exclusive write lock above guarantees no other thread is
+        // reading BEAMTALK_HOME or the directory it controls concurrently.
+        unsafe { std::env::set_var("BEAMTALK_HOME", dir) };
+        Self { _lock: lock, prev }
+    }
+}
+
+impl Drop for BeamtalkHomeOverride {
+    fn drop(&mut self) {
+        match &self.prev {
+            // SAFETY: still holding the exclusive write lock (`_lock` drops after
+            // this method returns, not before).
+            Some(v) => unsafe { std::env::set_var("BEAMTALK_HOME", v) },
+            // SAFETY: see above.
+            None => unsafe { std::env::remove_var("BEAMTALK_HOME") },
+        }
+    }
+}
+
 /// RAII guard owning a real (but uniquely-named) workspace directory under
 /// `~/.beamtalk/workspaces/`, matching the pattern already used by
-/// `storage.rs`'s and `node_state.rs`'s own tests. `beamtalk_home`'s
-/// `BEAMTALK_HOME` override (BT-3364) now exists, but this fixture doesn't
-/// use it: adopting it here needs a serialization strategy shared with every
-/// other non-`#[serial]` test that touches the real `~/.beamtalk` directory,
-/// or a test that sets it races this fixture's real-directory reads/writes
-/// (BT-3370 tracks that adoption). Removes the directory and lockfile on
-/// drop, including on panic, so a failing assertion never leaves real state
-/// behind.
+/// `storage.rs`'s and `node_state.rs`'s own tests. Holds the shared
+/// (real-directory) side of [`BEAMTALK_HOME_LOCK`] for its whole lifetime
+/// (BT-3370), so it can never run concurrently with a [`BeamtalkHomeOverride`].
+/// Removes the directory and lockfile on drop, including on panic, so a
+/// failing assertion never leaves real state behind.
 pub(crate) struct WorkspaceFixture {
     pub(crate) id: String,
+    _guard: RwLockReadGuard<'static, ()>,
 }
 
 impl WorkspaceFixture {
@@ -61,6 +123,7 @@ impl WorkspaceFixture {
     pub(crate) fn new(label: &str, port: u16, pid: u32) -> Self {
         use super::workspace::storage::{save_node_info, save_workspace_cookie};
 
+        let guard = real_home_guard();
         let id = unique_ws_id(label);
         super::workspace::storage::save_workspace_metadata(&WorkspaceMetadata {
             workspace_id: id.clone(),
@@ -82,7 +145,7 @@ impl WorkspaceFixture {
             },
         )
         .expect("save node info");
-        Self { id }
+        Self { id, _guard: guard }
     }
 }
 

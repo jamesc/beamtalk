@@ -363,6 +363,7 @@ mod tests {
     /// Verify that `get_workspace_metadata` returns a clear error for an empty file (BT-1058).
     #[test]
     fn test_get_workspace_metadata_empty_file_returns_error() {
+        let _guard = crate::commands::test_support::real_home_guard();
         let ws_id = format!("test_empty_metadata_{}", std::process::id());
         let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
         fs::create_dir_all(&ws_dir).unwrap();
@@ -385,6 +386,7 @@ mod tests {
     /// Verify that `get_workspace_metadata` returns a clear error for a whitespace-only file.
     #[test]
     fn test_get_workspace_metadata_whitespace_file_returns_error() {
+        let _guard = crate::commands::test_support::real_home_guard();
         let ws_id = format!("test_ws_metadata_{}", std::process::id());
         let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
         fs::create_dir_all(&ws_dir).unwrap();
@@ -410,6 +412,7 @@ mod tests {
     /// (BT-2057).
     #[test]
     fn test_remove_stale_runtime_files_removes_starting_tombstone() {
+        let _guard = crate::commands::test_support::real_home_guard();
         let ws_id = format!("test_stale_tombstone_{}", std::process::id());
         let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
         fs::create_dir_all(&ws_dir).unwrap();
@@ -454,6 +457,7 @@ mod tests {
     /// message to reference valid diagnostics (BT-2057).
     #[test]
     fn test_remove_stale_runtime_files_preserves_startup_log_across_retries() {
+        let _guard = crate::commands::test_support::real_home_guard();
         let ws_id = format!("test_stale_preserve_log_{}", std::process::id());
         let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
         fs::create_dir_all(&ws_dir).unwrap();
@@ -485,6 +489,7 @@ mod tests {
     /// the files are already absent (e.g. after a clean shutdown) must not error.
     #[test]
     fn test_remove_stale_runtime_files_idempotent_on_missing_files() {
+        let _guard = crate::commands::test_support::real_home_guard();
         let ws_id = format!("test_stale_idempotent_{}", std::process::id());
         let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
         fs::create_dir_all(&ws_dir).unwrap();

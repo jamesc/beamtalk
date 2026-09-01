@@ -575,12 +575,27 @@ mod tests {
     /// Removes a workspace's on-disk directory on drop, including when the
     /// test panics (e.g. the very assertion this test guards against) — a
     /// bare cleanup call after the assertion would otherwise never run and
-    /// leak `~/.beamtalk/workspaces/*` fixture directories.
-    struct CleanupWorkspaceDirs<'a>(&'a [String]);
+    /// leak `~/.beamtalk/workspaces/*` fixture directories. Also holds the
+    /// shared (real-directory) side of `test_support`'s `BEAMTALK_HOME` guard
+    /// for its whole lifetime (BT-3370), since every test in this module
+    /// constructs one of these as its first step.
+    struct CleanupWorkspaceDirs<'a> {
+        ids: &'a [String],
+        _guard: std::sync::RwLockReadGuard<'static, ()>,
+    }
+
+    impl<'a> CleanupWorkspaceDirs<'a> {
+        fn new(ids: &'a [String]) -> Self {
+            Self {
+                ids,
+                _guard: crate::commands::test_support::real_home_guard(),
+            }
+        }
+    }
 
     impl Drop for CleanupWorkspaceDirs<'_> {
         fn drop(&mut self) {
-            for ws_id in self.0 {
+            for ws_id in self.ids {
                 if let Ok(dir) = workspace_dir(ws_id) {
                     let _ = fs::remove_dir_all(dir);
                 }
@@ -593,7 +608,8 @@ mod tests {
         let pid = std::process::id();
         let ws_id_a = format!("test_bt3332_relpath_a_{pid}");
         let ws_id_b = format!("test_bt3332_relpath_b_{pid}");
-        let _cleanup = CleanupWorkspaceDirs(&[ws_id_a.clone(), ws_id_b.clone()]);
+        let ws_ids = [ws_id_a.clone(), ws_id_b.clone()];
+        let _cleanup = CleanupWorkspaceDirs::new(&ws_ids);
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -631,7 +647,7 @@ mod tests {
     fn test_create_workspace_impl_falls_back_to_raw_path_when_canonicalize_fails() {
         let pid = std::process::id();
         let ws_id = format!("test_bt3332_fallback_{pid}");
-        let _cleanup = CleanupWorkspaceDirs(std::slice::from_ref(&ws_id));
+        let _cleanup = CleanupWorkspaceDirs::new(std::slice::from_ref(&ws_id));
 
         // Relative and guaranteed not to exist anywhere on disk, so
         // `canonicalize()` fails inside `create_workspace_impl` and it falls
@@ -685,7 +701,7 @@ mod tests {
     fn test_create_workspace_impl_self_heals_relative_project_path_once_directory_exists() {
         let pid = std::process::id();
         let ws_id = format!("test_bt3354_selfheal_{pid}");
-        let _cleanup = CleanupWorkspaceDirs(std::slice::from_ref(&ws_id));
+        let _cleanup = CleanupWorkspaceDirs::new(std::slice::from_ref(&ws_id));
 
         let relative_dir = PathBuf::from(format!("bt3354-selfheal-dir-{pid}"));
         let _dir_cleanup = CleanupDir(relative_dir.clone());
@@ -726,7 +742,7 @@ mod tests {
     fn test_create_workspace_impl_rejects_heal_from_wrong_project_directory() {
         let pid = std::process::id();
         let ws_id = format!("test_bt3355_wrong_dir_{pid}");
-        let _cleanup = CleanupWorkspaceDirs(std::slice::from_ref(&ws_id));
+        let _cleanup = CleanupWorkspaceDirs::new(std::slice::from_ref(&ws_id));
 
         // The workspace's real project, with its own beamtalk.toml.
         let real_dir = PathBuf::from(format!("bt3355-real-project-{pid}"));
@@ -811,7 +827,7 @@ mod tests {
         // "the project directory", since it's real, absolute, and stable.
         let project_dir = std::env::current_dir().unwrap();
         let ws_id = beamtalk_workspace::generate_workspace_id(&project_dir).unwrap();
-        let _cleanup = CleanupWorkspaceDirs(std::slice::from_ref(&ws_id));
+        let _cleanup = CleanupWorkspaceDirs::new(std::slice::from_ref(&ws_id));
 
         // Seed metadata exactly as a pre-BT-3332 binary would have: correct id,
         // but a bare relative `project_path`.

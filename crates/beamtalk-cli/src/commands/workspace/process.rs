@@ -811,4 +811,31 @@ mod tests {
         let result = read_pid_file("bt-3326-nonexistent-workspace-test-fixture");
         assert!(matches!(result, Ok(None)));
     }
+
+    // --- wait_for_tcp_ready ---
+
+    /// `wait_for_tcp_ready`'s success path (BT-3370): a live BEAM node isn't
+    /// actually needed here, since the function itself only ever talks to a
+    /// generic WebSocket endpoint (Phase 1 TCP connect, Phase 2 `ProtocolClient`
+    /// auth + `{"op":"health"}` request) — `spawn_auth_ok_server`'s fake server
+    /// speaks the same wire protocol. `pid` is this test's own process ID, so
+    /// `is_process_alive` never trips the crash-detection branches.
+    #[test]
+    fn wait_for_tcp_ready_succeeds_against_a_healthy_fake_server() {
+        let port = crate::commands::test_support::spawn_auth_ok_server(|_req, ws| {
+            let _ = ws.send(tungstenite::Message::Text(
+                serde_json::json!({"op": "health-ok"}).to_string().into(),
+            ));
+        });
+
+        wait_for_tcp_ready(
+            "wait-ready-test",
+            "127.0.0.1",
+            port,
+            std::process::id(),
+            "test-cookie",
+            None,
+        )
+        .expect("wait_for_tcp_ready should succeed against a healthy fake server");
+    }
 }

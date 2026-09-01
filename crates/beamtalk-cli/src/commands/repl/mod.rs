@@ -616,6 +616,7 @@ mod timeout_warning_tests {
 /// Result of handling a single REPL command line.
 ///
 /// Returned by [`handle_repl_command`] to tell the main loop what to do next.
+#[derive(Debug, PartialEq, Eq)]
 enum CommandResult {
     /// The line was a command and has been handled; continue the loop.
     Handled,
@@ -1661,6 +1662,336 @@ mod tests {
         assert!(result.contains("test error"));
         assert!(result.contains(color::RED));
         assert!(result.contains(color::RESET));
+    }
+
+    // --- handle_repl_command dispatch (BT-3370) ---
+    //
+    // These drive `handle_repl_command` (and the non-stdin-gated handlers it
+    // dispatches to) against `spawn_auth_ok_server`'s fake WS backend, the same
+    // pattern `client.rs`'s own tests (BT-3364) established for `ReplClient`.
+    // Handlers gated behind a terminal y/N confirmation
+    // (`confirm_destructive_action` reads `std::io::stdin()` directly, with no
+    // injection seam) — `:remove-class`, `:rename-class`, `:rename-method`,
+    // `:flush-destructive[-arg]` — are out of scope here; see BT-3370's
+    // follow-up.
+    mod handle_repl_command_dispatch {
+        use super::*;
+        use crate::commands::test_support::spawn_auth_ok_server;
+        use std::sync::Mutex;
+        use tungstenite::Message;
+
+        fn connect_to(port: u16) -> ReplClient {
+            ReplClient::connect("127.0.0.1", port, "cookie").expect("connect")
+        }
+
+        #[test]
+        fn clear_command_sends_session_clear_eval() {
+            let port = spawn_auth_ok_server(|req, ws| {
+                if req.get("op").and_then(|v| v.as_str()) == Some("eval")
+                    && req.get("code").and_then(|v| v.as_str()) == Some("Session current clear")
+                {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"status": ["done"]}).to_string().into(),
+                    ));
+                }
+            });
+            let mut client = connect_to(port);
+            assert_eq!(
+                handle_repl_command(":clear", &mut client),
+                CommandResult::Handled
+            );
+        }
+
+        #[test]
+        fn bindings_command_handles_empty_list() {
+            let port = spawn_auth_ok_server(|req, ws| {
+                if req.get("op").and_then(|v| v.as_str()) == Some("eval") {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"status": ["done"], "value": []})
+                            .to_string()
+                            .into(),
+                    ));
+                }
+            });
+            let mut client = connect_to(port);
+            assert_eq!(
+                handle_repl_command(":bindings", &mut client),
+                CommandResult::Handled
+            );
+        }
+
+        #[test]
+        fn bindings_command_handles_populated_list() {
+            let port = spawn_auth_ok_server(|req, ws| {
+                if req.get("op").and_then(|v| v.as_str()) == Some("eval") {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"status": ["done"], "value": ["x", "y"]})
+                            .to_string()
+                            .into(),
+                    ));
+                }
+            });
+            let mut client = connect_to(port);
+            assert_eq!(
+                handle_repl_command(":bindings", &mut client),
+                CommandResult::Handled
+            );
+        }
+
+        #[test]
+        fn bindings_command_surfaces_server_error() {
+            let port = spawn_auth_ok_server(|req, ws| {
+                if req.get("op").and_then(|v| v.as_str()) == Some("eval") {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"status": ["done", "error"], "error": "boom"})
+                            .to_string()
+                            .into(),
+                    ));
+                }
+            });
+            let mut client = connect_to(port);
+            assert_eq!(
+                handle_repl_command(":bindings", &mut client),
+                CommandResult::Handled
+            );
+        }
+
+        #[test]
+        fn sync_command_displays_summary_and_classes_on_success() {
+            let port = spawn_auth_ok_server(|req, ws| {
+                if req.get("op").and_then(|v| v.as_str()) == Some("load-project") {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({
+                            "status": ["done"],
+                            "summary": "Loaded 2 classes",
+                            "classes": ["Foo", "Bar"],
+                        })
+                        .to_string()
+                        .into(),
+                    ));
+                }
+            });
+            let mut client = connect_to(port);
+            assert_eq!(
+                handle_repl_command(":sync", &mut client),
+                CommandResult::Handled
+            );
+        }
+
+        #[test]
+        fn interrupt_command_sends_interrupt_op() {
+            let port = spawn_auth_ok_server(|req, ws| {
+                if req.get("op").and_then(|v| v.as_str()) == Some("interrupt") {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"status": ["done"]}).to_string().into(),
+                    ));
+                }
+            });
+            let mut client = connect_to(port);
+            assert_eq!(
+                handle_repl_command(":interrupt", &mut client),
+                CommandResult::Handled
+            );
+        }
+
+        #[test]
+        fn unload_command_sends_unload_op_for_named_class() {
+            let port = spawn_auth_ok_server(|req, ws| {
+                if req.get("op").and_then(|v| v.as_str()) == Some("unload") {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"status": ["done"], "classes": ["Foo"]})
+                            .to_string()
+                            .into(),
+                    ));
+                }
+            });
+            let mut client = connect_to(port);
+            assert_eq!(
+                handle_repl_command(":unload Foo", &mut client),
+                CommandResult::Handled
+            );
+        }
+
+        #[test]
+        fn unload_command_with_no_class_name_does_not_reach_server() {
+            // `spawn_auth_ok_server`'s handler runs on a background thread
+            // (`std::thread::spawn`, never joined) — a `panic!` there is
+            // caught at that thread's boundary and never fails the test, so
+            // "no contact" must be observed via shared state on the main
+            // thread instead of asserted inside the handler.
+            let contacted = Arc::new(AtomicBool::new(false));
+            let contacted_writer = Arc::clone(&contacted);
+            let mut client = connect_to(spawn_auth_ok_server(move |_req, _ws| {
+                contacted_writer.store(true, Ordering::SeqCst);
+            }));
+            assert_eq!(
+                handle_repl_command(":unload", &mut client),
+                CommandResult::Handled
+            );
+            assert!(
+                !contacted.load(Ordering::SeqCst),
+                "unload with no class name must not contact the server"
+            );
+        }
+
+        #[test]
+        fn show_codegen_command_displays_generated_code() {
+            let port = spawn_auth_ok_server(|req, ws| {
+                if req.get("op").and_then(|v| v.as_str()) == Some("show-codegen") {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"status": ["done"], "core_erlang": "'foo'/0 = ..."})
+                            .to_string()
+                            .into(),
+                    ));
+                }
+            });
+            let mut client = connect_to(port);
+            assert_eq!(
+                handle_repl_command(":show-codegen 1 + 1", &mut client),
+                CommandResult::Handled
+            );
+        }
+
+        #[test]
+        fn help_topic_command_evaluates_beamtalk_help() {
+            let port = spawn_auth_ok_server(|req, ws| {
+                if req.get("op").and_then(|v| v.as_str()) == Some("eval")
+                    && req.get("code").and_then(|v| v.as_str()) == Some("Beamtalk help: Counter")
+                {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"status": ["done"], "value": "Counter docs"})
+                            .to_string()
+                            .into(),
+                    ));
+                }
+            });
+            let mut client = connect_to(port);
+            assert_eq!(
+                handle_repl_command(":help Counter", &mut client),
+                CommandResult::Handled
+            );
+        }
+
+        #[test]
+        fn remove_method_command_evaluates_remove_selector_send() {
+            // Content checks must happen on the main test thread: the handler
+            // below runs on a background thread that `spawn_auth_ok_server`
+            // never joins, so an `assert!` inside it would be silently
+            // swallowed on failure instead of failing the test.
+            let received_code = Arc::new(Mutex::new(None));
+            let received_code_writer = Arc::clone(&received_code);
+            let port = spawn_auth_ok_server(move |req, ws| {
+                if req.get("op").and_then(|v| v.as_str()) == Some("eval") {
+                    let code = req
+                        .get("code")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    *received_code_writer.lock().unwrap() = Some(code);
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"status": ["done"]}).to_string().into(),
+                    ));
+                }
+            });
+            let mut client = connect_to(port);
+            assert_eq!(
+                handle_repl_command(":remove-method Counter increment", &mut client),
+                CommandResult::Handled
+            );
+            let code = received_code.lock().unwrap().clone();
+            let code = code.expect("eval op should have been sent to the server");
+            assert!(
+                code.contains("Counter") && code.contains("increment"),
+                "unexpected eval code: {code}"
+            );
+        }
+
+        #[test]
+        fn flush_changes_dirty_recheck_commands_all_dispatch() {
+            // BT-2287/ADR 0082 Phase 3 aliases: each desugars to a fixed
+            // `Workspace ...` eval expression via `eval_and_display` — assert
+            // all four reach the server and are handled, one fake server per
+            // command since each expects a different `code`. The comparison
+            // happens on the main thread (via shared state), not inside the
+            // handler's background thread, which `spawn_auth_ok_server` never
+            // joins — an `assert_eq!` there would be silently swallowed on
+            // failure instead of failing the test.
+            for (line, expected_code) in [
+                (":flush", "Workspace flush"),
+                (":changes", "Workspace changes"),
+                (":dirty", "Workspace changes dirtyMethods"),
+                (":recheck image", "Workspace recheckImage"),
+            ] {
+                let received_code = Arc::new(Mutex::new(None));
+                let received_code_writer = Arc::clone(&received_code);
+                let port = spawn_auth_ok_server(move |req, ws| {
+                    if req.get("op").and_then(|v| v.as_str()) == Some("eval") {
+                        let code = req
+                            .get("code")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        *received_code_writer.lock().unwrap() = Some(code);
+                        let _ = ws.send(Message::Text(
+                            serde_json::json!({"status": ["done"]}).to_string().into(),
+                        ));
+                    }
+                });
+                let mut client = connect_to(port);
+                assert_eq!(
+                    handle_repl_command(line, &mut client),
+                    CommandResult::Handled,
+                    "line {line:?} should be handled"
+                );
+                assert_eq!(
+                    received_code.lock().unwrap().as_deref(),
+                    Some(expected_code),
+                    "line {line:?} sent unexpected eval code"
+                );
+            }
+        }
+
+        #[test]
+        fn exit_command_returns_exit_without_contacting_server() {
+            // See unload_command_with_no_class_name_does_not_reach_server: a
+            // `panic!` inside spawn_auth_ok_server's unjoined background
+            // thread never fails the test, so "no contact" is observed via
+            // shared state instead.
+            let contacted = Arc::new(AtomicBool::new(false));
+            let contacted_writer = Arc::clone(&contacted);
+            let mut client = connect_to(spawn_auth_ok_server(move |_req, _ws| {
+                contacted_writer.store(true, Ordering::SeqCst);
+            }));
+            assert_eq!(
+                handle_repl_command(":exit", &mut client),
+                CommandResult::Exit
+            );
+            assert!(
+                !contacted.load(Ordering::SeqCst),
+                ":exit must not contact the server"
+            );
+        }
+
+        #[test]
+        fn unrecognized_line_is_not_a_command() {
+            // See unload_command_with_no_class_name_does_not_reach_server: a
+            // `panic!` inside spawn_auth_ok_server's unjoined background
+            // thread never fails the test, so "no contact" is observed via
+            // shared state instead.
+            let contacted = Arc::new(AtomicBool::new(false));
+            let contacted_writer = Arc::clone(&contacted);
+            let mut client = connect_to(spawn_auth_ok_server(move |_req, _ws| {
+                contacted_writer.store(true, Ordering::SeqCst);
+            }));
+            assert_eq!(
+                handle_repl_command("1 + 1", &mut client),
+                CommandResult::NotACommand
+            );
+            assert!(
+                !contacted.load(Ordering::SeqCst),
+                "a non-command line must not be dispatched by handle_repl_command"
+            );
+        }
     }
 
     /// Uses `#[serial(env_var)]` because it modifies the `BEAMTALK_RUNTIME_DIR`

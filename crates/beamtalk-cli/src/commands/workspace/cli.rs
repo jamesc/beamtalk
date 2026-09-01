@@ -360,22 +360,81 @@ fn run_create_background(
     Ok(())
 }
 
-/// Tests covering the parts of this module reachable without adopting
-/// `beamtalk_home`'s `BEAMTALK_HOME` override (BT-3364): `run_create`'s and
-/// `run_list`/`run_status`'s success paths still need it, since they
-/// read/write `~/.beamtalk/workspaces/` in ways that can't be pointed at a
-/// hermetic tempdir until that adoption also serializes against every other
-/// non-`#[serial]` test touching the real directory (BT-3370).
+/// `run_create`'s and `run_list`/`run_status`'s success paths now run
+/// against a `BeamtalkHomeOverride`-pointed hermetic tempdir (BT-3370), now
+/// that `test_support` serializes every `~/.beamtalk`-touching test (real or
+/// overridden) against a shared `RwLock` so an override can never race a
+/// real-directory test in the same test binary.
 ///
 /// `run_create_background`'s "already running" short-circuit is reachable
 /// today because `workspace_id_for_project(_, Some(name))` (see
 /// `storage::workspace_id_for`) ignores `project_path` entirely when a name
 /// is given — it just validates and returns the name — so a uniquely-named
 /// on-disk fixture guarantees a workspace ID collision with nothing else.
+/// Its "start a new node" path is untested here: unlike the three cases
+/// above, it needs a live BEAM node (`get_or_start_workspace` shells out to a
+/// real `start_detached_node`), the same live-runtime dependency as
+/// `workspace/process.rs`'s live-node paths — tracked as a follow-up rather
+/// than solved by this file's `BEAMTALK_HOME` isolation alone.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::test_support::WorkspaceFixture;
+    use crate::commands::test_support::{BeamtalkHomeOverride, WorkspaceFixture};
+    use crate::commands::workspace::workspace_exists;
+
+    /// `run_create`'s foreground success path (BT-3370): creates a real
+    /// workspace under an overridden `BEAMTALK_HOME` hermetic tempdir and
+    /// confirms both the returned success and the on-disk result, exercising
+    /// `run_create`'s own wrapper body (project-root discovery, the
+    /// `create_workspace` call, and its println! summary) rather than just
+    /// `create_workspace` itself (already covered at the `workspace::mod`
+    /// level against the real directory).
+    #[test]
+    fn run_create_creates_workspace_under_overridden_home() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let _home = BeamtalkHomeOverride::new(tmp.path());
+
+        let name = format!("run-create-test-{}", std::process::id());
+        run_create(&name).expect("run_create should succeed");
+
+        assert!(
+            workspace_exists(&name).unwrap(),
+            "run_create should have created the workspace on disk"
+        );
+    }
+
+    /// `run_list`'s success path (BT-3370), both table and `--json` output:
+    /// with at least one real workspace present, exercises the non-empty
+    /// table-printing loop (current-project marker detection, path
+    /// truncation, port formatting) and the JSON-serialization branch —
+    /// previously only the underlying `list_workspaces()` was covered
+    /// (`workspace::mod`'s tests), not this wrapper's own body.
+    #[test]
+    fn run_list_succeeds_with_a_workspace_present() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let _home = BeamtalkHomeOverride::new(tmp.path());
+
+        let name = format!("run-list-test-{}", std::process::id());
+        run_create(&name).expect("seed workspace should be created");
+
+        run_list(false).expect("table output should succeed");
+        run_list(true).expect("json output should succeed");
+    }
+
+    /// `run_status`'s success path (BT-3370): with a real workspace present,
+    /// exercises this wrapper's own body (age calculation, conditional
+    /// node/port/pid lines) rather than just the underlying
+    /// `workspace_status()` (already covered in `workspace::mod`'s tests).
+    #[test]
+    fn run_status_succeeds_for_an_existing_workspace() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let _home = BeamtalkHomeOverride::new(tmp.path());
+
+        let name = format!("run-status-test-{}", std::process::id());
+        run_create(&name).expect("seed workspace should be created");
+
+        run_status(Some(&name)).expect("status should succeed for an existing workspace");
+    }
 
     #[test]
     fn run_create_background_already_running_short_circuits() {

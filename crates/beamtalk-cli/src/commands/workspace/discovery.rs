@@ -187,6 +187,14 @@ mod tests {
         // ~/.beamtalk is global config, not a project marker.
         // Discovery should NOT use home dir as project root just because
         // ~/.beamtalk exists. It should fall back to .git or start_dir.
+        //
+        // `discover_project_root` -> `is_global_config_dir` reads
+        // `BEAMTALK_HOME` (via `beamtalk_home::beamtalk_root_dir`) to decide
+        // whether a `.beamtalk` marker is global config or a real project
+        // marker — a concurrent `BeamtalkHomeOverride` would make it treat
+        // the real `~/.beamtalk` as a project marker instead of skipping it,
+        // exactly the false positive this test guards against (BT-3370).
+        let _guard = crate::commands::test_support::real_home_guard();
         let home = dirs::home_dir().expect("home dir");
         let global = home.join(".beamtalk");
 
