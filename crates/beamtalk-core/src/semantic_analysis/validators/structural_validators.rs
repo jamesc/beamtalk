@@ -451,6 +451,7 @@ const KNOWN_OTP_MODULES: &[&str] = &[
     "persistent_term",
     "proc_lib",
     "proplists",
+    "public_key",
     "queue",
     "rand",
     "re",
@@ -1023,6 +1024,9 @@ mod tests {
         assert!(is_known_erlang_module("maps"));
         assert!(is_known_erlang_module("erlang"));
         assert!(is_known_erlang_module("io"));
+        assert!(is_known_erlang_module("crypto"));
+        assert!(is_known_erlang_module("ssl"));
+        assert!(is_known_erlang_module("public_key"));
     }
 
     #[test]
@@ -1057,6 +1061,27 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("custom_mod"));
         assert_eq!(diags[0].category, Some(DiagnosticCategory::UnresolvedFfi));
+    }
+
+    /// BT-3388: `public_key` ships in every standard OTP install and is the
+    /// natural companion to `ssl`/`crypto` for certificate/CA-trust work —
+    /// it must not trigger `unresolved_ffi`.
+    #[test]
+    fn test_public_key_module_does_not_warn() {
+        // Build: Erlang public_key cacerts_get
+        let send = Expression::MessageSend {
+            receiver: Box::new(class_ref("Erlang")),
+            selector: MessageSelector::Unary("public_key".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: test_span(),
+        };
+        let module = empty_module_with_exprs(vec![send]);
+        let mut diags = Vec::new();
+
+        check_unresolved_ffi_modules(&module, &mut diags);
+
+        assert!(diags.is_empty());
     }
 
     #[test]
