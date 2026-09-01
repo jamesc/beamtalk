@@ -67,6 +67,13 @@ module's other tests specifically exist to cover (see this moduledoc's own
 opening paragraph). Scoping the mock to this one module's one function, with
 `meck:passthrough/1` for every other call, keeps that real-chain coverage
 for everything except the single point under test.
+
+BT-2962 spike (OTP 29 native records): on this branch, the
+`meck:new(beamtalk_repl_loader, ...)` calls below crash — `meck` rebuilds a
+mock module's attributes from `Mod:module_info(attributes)`, which
+list-wraps `-import_record`'s value even for a single occurrence, and
+`erl_lint:import_native_record/3` has no clause for that shape. See the
+BT-2962 Linear issue for the full writeup.
 """.
 
 -include_lib("eunit/include/eunit.hrl").

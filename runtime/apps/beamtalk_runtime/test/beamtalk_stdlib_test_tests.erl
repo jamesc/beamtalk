@@ -262,7 +262,8 @@ load_atom_error_eval(Mod, Kind) ->
     {module, Mod} = code:load_binary(Mod, [], Bin).
 
 %% BT-2962 spike: `erl_parse:abstract/2` has no clause for native records
-%% (OTP 29.0.3) — it can turn atoms/tuples/maps/binaries into literal AST,
+%% (confirmed still true on OTP 29.0.5) — it can turn atoms/tuples/maps/binaries
+%% into literal AST,
 %% but not `#beamtalk_error{}` values, since native records are a new
 %% runtime type it predates. Build the equivalent `{record, ...}` AST node
 %% by hand instead; synthesized Forms using it also need the

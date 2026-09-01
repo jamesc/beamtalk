@@ -43,6 +43,13 @@ These boot the full stack (compiler port + runtime + workspace_meta +
 changelog) against an isolated, in-project temp tree, mirroring
 `beamtalk_workspace_revert_tests.erl`'s scaffolding. Each test uses a UNIQUE
 workspace_id + temp project dir and cleans up in an `after`/teardown block.
+
+BT-2962 spike (OTP 29 native records): on this branch, the `meck:new(beamtalk_package, ...)`
+calls in the `dependencies/0` tests below crash — `meck` rebuilds a mock
+module's attributes from `Mod:module_info(attributes)`, which list-wraps
+`-import_record`'s value even for a single occurrence, and
+`erl_lint:import_native_record/3` has no clause for that shape. See the
+BT-2962 Linear issue for the full writeup.
 """.
 
 -include_lib("eunit/include/eunit.hrl").

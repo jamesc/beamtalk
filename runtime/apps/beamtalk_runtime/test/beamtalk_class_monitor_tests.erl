@@ -39,6 +39,18 @@ same narrow-scope convention as
 BT-3280) — a plain spawned dummy process can be watched and killed, but it
 cannot stand in for a real class gen_server that `restart_class/1` itself
 would rebuild from ETS metadata.
+
+BT-2962 spike (OTP 29 native records): on this branch, every `meck:new/2`
+call below crashes. `meck_code_gen:to_forms/2` rebuilds a mock module's
+attributes from `Mod:module_info(attributes)`, which always list-wraps a
+custom attribute's value (`[{beamtalk_error,[beamtalk_error]}]`) even for
+a single occurrence — but `erl_lint:import_native_record/3` pattern-matches
+the raw `{Mod, Rs}` tuple and has no clause for the list-wrapped form, so
+recompiling the synthesized mock module crashes the compiler with a
+`function_clause` in `erl_lint.erl`. `-import_record` is not round-trip-safe
+through `module_info(attributes)`, which breaks `meck` for any module that
+imports a native record — see the BT-2962 Linear issue for the full
+writeup and reproduction.
 """.
 
 -include_lib("eunit/include/eunit.hrl").

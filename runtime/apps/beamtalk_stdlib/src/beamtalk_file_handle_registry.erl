@@ -2,6 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 -module(beamtalk_file_handle_registry).
+-compile(nowarn_deprecated_catch).
 -behaviour(gen_server).
 
 %%% **DDD Context:** Object System Context
