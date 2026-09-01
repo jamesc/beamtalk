@@ -123,15 +123,20 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    /// Helper to create a unique test workspace ID and clean up after.
+    /// Helper to create a unique test workspace ID and clean up after. Holds
+    /// the shared (real-directory) side of `test_support`'s `BEAMTALK_HOME`
+    /// guard for its whole lifetime (BT-3370), so it can never run
+    /// concurrently with a `BeamtalkHomeOverride`.
     struct TestWorkspace {
         id: String,
+        _guard: std::sync::RwLockReadGuard<'static, ()>,
     }
 
     impl TestWorkspace {
         fn new(prefix: &str) -> Self {
+            let guard = crate::commands::test_support::real_home_guard();
             let id = format!("{prefix}_{}", std::process::id());
-            Self { id }
+            Self { id, _guard: guard }
         }
 
         fn dir(&self) -> PathBuf {

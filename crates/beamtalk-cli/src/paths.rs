@@ -131,6 +131,11 @@ mod tests {
     #[test]
     #[serial(env_var)]
     fn beamtalk_dir_returns_session_subdirectory() {
+        // Also guards against a concurrent `BeamtalkHomeOverride` (BT-3370):
+        // `beamtalk_dir()` reads `BEAMTALK_HOME` transitively via
+        // `beamtalk_workspace::beamtalk_root_dir()`, and this test's
+        // assertion below hardcodes the *real* home directory.
+        let _home_guard = crate::commands::test_support::real_home_guard();
         // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
         let _guard = unsafe { EnvVarGuard::clear("BEAMTALK_WORKSPACE") };
         let dir = beamtalk_dir().expect("Failed to get beamtalk_dir");
