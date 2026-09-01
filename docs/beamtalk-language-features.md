@@ -2715,6 +2715,7 @@ pool startChild
 
 // Terminate a specific child — idempotent (Ok(nil) even if already gone)
 (pool terminateChild: w1) unwrap    // => nil
+pool count                          // => 3
 
 // Stop the whole pool (unchanged — Nil, let-it-crash teardown)
 pool stop
