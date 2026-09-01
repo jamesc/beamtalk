@@ -25,8 +25,10 @@ start(_StartType, _StartArgs) ->
     %% nothing has called into `beamtalk_error` yet, the first construction
     %% anywhere else in the app crashes with `{badrecord,{beamtalk_error,
     %% beamtalk_error}}`. Force it loaded before anything else runs so
-    %% record construction is safe regardless of call order.
-    code:ensure_loaded(beamtalk_error),
+    %% record construction is safe regardless of call order — matched
+    %% against the expected result so a missing/corrupt beamtalk_error.beam
+    %% fails loudly here at boot, not as a confusing badrecord downstream.
+    {module, beamtalk_error} = code:ensure_loaded(beamtalk_error),
 
     %% BT-1424: Configure SASL before it starts (started as a beamtalk_workspace dep).
     %% Suppress the legacy SASL error logger — reports flow through the standard
