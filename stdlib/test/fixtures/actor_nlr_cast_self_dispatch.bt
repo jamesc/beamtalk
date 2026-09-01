@@ -58,4 +58,19 @@ Actor subclass: BT3374CastNlrSender
     reason notNil ifTrue: [^self configureVictim]
     self
 
+  // C0b regression coverage: `^self otherMethod` nested in an `ifTrue:`
+  // branch that ALSO has a sibling `self.field := ...` mutation, so
+  // `control_flow_has_mutations` routes the branch through
+  // `generate_conditional_branch_inline`'s `ThreadedIr`/`StateAcc` path
+  // instead of the plain AST-directed `Expression::Return` handler — the
+  // codegen arm this exercises (`conditionals.rs`'s C0b) is distinct from
+  // the one `childExited:reason:`/`reconfigureIfRequested:` above hit.
+  reconfigureWithMarker: reason =>
+    reason notNil
+      ifTrue: [
+        self.debugLog := self.debugLog add: "marker"
+        ^self configureVictim
+      ]
+    self
+
   victim => self.victim

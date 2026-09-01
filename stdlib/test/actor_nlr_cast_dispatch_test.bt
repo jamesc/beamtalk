@@ -33,3 +33,15 @@ TestCase subclass: ActorNlrCastDispatchTest
     self.sender bringUp
     self.sender reconfigureIfRequested: #go
     self assert: self.sender debugLog equals: #("configureVictim start", "configureVictim end", "configureVictim start", "configureVictim end")
+
+  // Regression coverage for the C0b codegen arm specifically (see
+  // fixtures/actor_nlr_cast_self_dispatch.bt's `reconfigureWithMarker:`):
+  // a sibling `self.field := ...` mutation in the same `ifTrue:` branch as
+  // `^self configureVictim` forces `ThreadedIr`/`StateAcc` threading, which
+  // is a different codegen path than the plain-branch shape the two tests
+  // above exercise. Both the sibling mutation ("marker") and the nested
+  // self-send's own mutations must persist.
+  testNestedNlrSelfSendWithSiblingMutationRunsAndPersistsState =>
+    self.sender bringUp
+    self.sender reconfigureWithMarker: #go
+    self assert: self.sender debugLog equals: #("configureVictim start", "configureVictim end", "marker", "configureVictim start", "configureVictim end")

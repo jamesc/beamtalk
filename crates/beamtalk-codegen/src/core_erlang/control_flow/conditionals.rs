@@ -54,7 +54,7 @@ use super::super::gen_server::BodyExprKind;
 use super::super::threaded_ir::{
     self, BindOp, FrameId, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
-use super::super::{CoreErlangGenerator, OpenScopeResult, Result};
+use super::super::{CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
 use super::StateAccFallbackReason;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -610,6 +610,37 @@ impl CoreErlangGenerator {
         Ok(val_var)
     }
 
+    /// Dispatches a self-send (`expr`) and `Bind`s its returned `NewState` as
+    /// this branch's own next real `State` version — shared by the C12b
+    /// (`DispatchingSelfSend`) and C0b (BT-3374's nested `^self otherMethod`)
+    /// arms below, both of which dispatch a self-send mid-branch and must
+    /// thread its `NewState` forward instead of discarding it (mirroring C11
+    /// `ControlFlowWithMutations`'s tuple-unpack `Bind`).
+    fn dispatch_self_send_as_bind(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<String> {
+        let source_version = self.state_version();
+        let (call_doc, dispatch_var) = self.generate_self_dispatch_call_doc(expr)?;
+        stmts.push(ThreadedStmt::Statement(call_doc, span));
+        let target_version = self.state_version();
+        stmts.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+            op: BindOp::Direct(ValueRef::Doc(docvec![
+                "call 'erlang':'element'(2, ",
+                leaf::var(dispatch_var.clone()),
+                ")",
+            ])),
+            shadow_write: false,
+            span,
+        });
+        Ok(dispatch_var)
+    }
+
     /// Generates an inline block body for a conditional branch with field mutation threading.
     ///
     /// **Precondition**: Caller must set `in_loop_body = true` and `state_version = 0`
@@ -716,25 +747,15 @@ impl CoreErlangGenerator {
                             BodyExprKind::DispatchingSelfSend
                         )
                     {
-                        let source_version = self.state_version();
-                        let (call_doc, dispatch_var) =
-                            self.generate_self_dispatch_call_doc(value)?;
-                        stmts.push(ThreadedStmt::Statement(call_doc, span));
-                        let target_version = self.state_version();
-                        stmts.push(ThreadedStmt::Bind {
-                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                            op: BindOp::Direct(ValueRef::Doc(docvec![
-                                "call 'erlang':'element'(2, ",
-                                leaf::var(dispatch_var.clone()),
-                                ")",
-                            ])),
-                            shadow_write: false,
-                            span,
-                        });
-                        let nlr_token = self.current_nlr_token().cloned().expect(
-                            "BT-3374: EarlyReturn classification implies an active NLR context",
-                        );
+                        let dispatch_var =
+                            self.dispatch_self_send_as_bind(value, frame, span, &mut stmts)?;
+                        let nlr_token = self.current_nlr_token().cloned().ok_or_else(|| {
+                            CodeGenError::Internal(
+                                "BT-3374: EarlyReturn classification implies an active NLR \
+                                 context, but none is set"
+                                    .to_string(),
+                            )
+                        })?;
                         let new_state = self.current_state_var();
                         let throw_var = self.fresh_temp_var("NlrThrow");
                         stmts.push(ThreadedStmt::Statement(
@@ -1184,21 +1205,7 @@ impl CoreErlangGenerator {
                 // opposed to a direct `self.field := value`) is silently
                 // dropped once the branch closes.
                 BodyExprKind::DispatchingSelfSend => {
-                    let source_version = self.state_version();
-                    let (call_doc, dispatch_var) = self.generate_self_dispatch_call_doc(expr)?;
-                    stmts.push(ThreadedStmt::Statement(call_doc, span));
-                    let target_version = self.state_version();
-                    stmts.push(ThreadedStmt::Bind {
-                        target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                        source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                        op: BindOp::Direct(ValueRef::Doc(docvec![
-                            "call 'erlang':'element'(2, ",
-                            leaf::var(dispatch_var.clone()),
-                            ")",
-                        ])),
-                        shadow_write: false,
-                        span,
-                    });
+                    let dispatch_var = self.dispatch_self_send_as_bind(expr, frame, span, &mut stmts)?;
                     if is_last {
                         let result_var = self.fresh_temp_var("SDResultVal");
                         stmts.push(ThreadedStmt::Statement(
