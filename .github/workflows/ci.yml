@@ -223,6 +223,35 @@ jobs:
       - name: Check corpus.json is up to date
         run: just check-corpus
 
+  # ─── Codegen dependency boundary guard (BT-3371) ───────────────────────
+  # BT-3362 split `codegen` out of `beamtalk-core` into `beamtalk-codegen`
+  # specifically so beamtalk-lsp/beamtalk-lint (analysis only, never
+  # generation) stop compiling it. Nothing else re-checks that on every PR —
+  # a future dependency edge back onto beamtalk-codegen would compile and
+  # pass every existing test, silently regressing the build-time win. Rust-only
+  # (just resolves the dependency graph, no compilation needed), so it stays fast.
+  check-codegen-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Check beamtalk-lsp/beamtalk-lint do not depend on beamtalk-codegen
+        run: just check-codegen-boundary
+
   # ─── Full test suite on Linux only (requires Erlang/OTP) ──────────────
   # Split into parallel jobs for faster CI (~5 min wall-clock vs ~16 min sequential).
   # Each job restores Rust + Erlang caches and does a fast incremental build (~40s).
