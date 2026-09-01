@@ -374,8 +374,15 @@ fn run_create_background(
 /// Its "start a new node" path is untested here: unlike the three cases
 /// above, it needs a live BEAM node (`get_or_start_workspace` shells out to a
 /// real `start_detached_node`), the same live-runtime dependency as
-/// `workspace/process.rs`'s live-node paths — tracked as a follow-up rather
-/// than solved by this file's `BEAMTALK_HOME` isolation alone.
+/// `workspace/process.rs`'s live-node paths.
+///
+/// BT-3373 decision: not duplicated by a dedicated integration test in this
+/// file. `get_or_start_workspace` already has its own real-BEAM `#[ignore]`d
+/// coverage (`workspace/mod.rs`'s `test_get_or_start_workspace_lifecycle_integration`
+/// and friends); everything this function adds on top of that call is three
+/// `println!`s with no BEAM-node-dependent branching of its own, so a second
+/// live-node test here would just re-pay the same real-node startup cost for
+/// no new coverage.
 #[cfg(test)]
 mod tests {
     use super::*;

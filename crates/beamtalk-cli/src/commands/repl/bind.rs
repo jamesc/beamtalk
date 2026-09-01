@@ -51,15 +51,24 @@ pub fn validate_network_binding(addr: Ipv4Addr, confirm_network: bool) -> Result
 
 /// Auto-detect the Tailscale IPv4 address via `tailscale ip -4`.
 fn detect_tailscale_ip() -> Result<Ipv4Addr> {
-    let output = Command::new("tailscale")
-        .args(["ip", "-4"])
-        .output()
-        .map_err(|e| {
-            miette!(
-                "Failed to run `tailscale ip -4`: {e}\n\
-                 Is Tailscale installed? See https://tailscale.com/download"
-            )
-        })?;
+    detect_tailscale_ip_with(|| Command::new("tailscale").args(["ip", "-4"]).output())
+}
+
+/// `detect_tailscale_ip`'s output-parsing logic, with the actual `tailscale`
+/// subprocess spawn injected as a closure (BT-3373) — a real `Command::output()`
+/// call has no injection seam of its own, so a fake `run` lets tests exercise
+/// every parse/validation branch (spawn failure, non-zero exit, empty/malformed
+/// stdout) without a real `tailscale` binary on the test machine.
+fn detect_tailscale_ip_with<F>(run: F) -> Result<Ipv4Addr>
+where
+    F: FnOnce() -> std::io::Result<std::process::Output>,
+{
+    let output = run().map_err(|e| {
+        miette!(
+            "Failed to run `tailscale ip -4`: {e}\n\
+             Is Tailscale installed? See https://tailscale.com/download"
+        )
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -91,6 +100,89 @@ fn detect_tailscale_ip() -> Result<Ipv4Addr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Builds a real `std::process::ExitStatus` for a given exit code without
+    /// spawning a subprocess (BT-3373) — `ExitStatus` has no public
+    /// cross-platform constructor, so tests go through each platform's
+    /// `from_raw` extension trait instead. Unix encodes the exit code in the
+    /// high byte of the raw wait-status word; Windows' raw value is the exit
+    /// code itself.
+    fn exit_status(code: i32) -> std::process::ExitStatus {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(code << 8)
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(code as u32)
+        }
+    }
+
+    fn fake_output(code: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        std::process::Output {
+            status: exit_status(code),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn test_detect_tailscale_ip_spawn_error() {
+        let result = detect_tailscale_ip_with(|| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "no such file",
+            ))
+        });
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to run `tailscale ip -4`"));
+        assert!(err.contains("Is Tailscale installed?"));
+    }
+
+    #[test]
+    fn test_detect_tailscale_ip_nonzero_exit() {
+        let result = detect_tailscale_ip_with(|| {
+            Ok(fake_output(
+                1,
+                "",
+                "failed to connect to local tailscaled\n",
+            ))
+        });
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Tailscale returned an error"));
+        assert!(err.contains("failed to connect to local tailscaled"));
+    }
+
+    #[test]
+    fn test_detect_tailscale_ip_empty_output() {
+        let result = detect_tailscale_ip_with(|| Ok(fake_output(0, "", "")));
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("No output from `tailscale ip -4`"));
+    }
+
+    #[test]
+    fn test_detect_tailscale_ip_malformed_ip() {
+        let result = detect_tailscale_ip_with(|| Ok(fake_output(0, "not-an-ip\n", "")));
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Unexpected output from `tailscale ip -4`"));
+    }
+
+    #[test]
+    fn test_detect_tailscale_ip_success_single_line() {
+        let result = detect_tailscale_ip_with(|| Ok(fake_output(0, "100.64.0.5\n", "")));
+        assert_eq!(result.unwrap(), Ipv4Addr::new(100, 64, 0, 5));
+    }
+
+    #[test]
+    fn test_detect_tailscale_ip_success_uses_first_line_only() {
+        // `tailscale ip -4` can be followed by a second (IPv6) line under
+        // `tailscale ip` with no filter; -4 alone shouldn't emit one, but the
+        // parser only ever reads the first line regardless.
+        let result = detect_tailscale_ip_with(|| Ok(fake_output(0, "100.64.0.5\nfd7a::1\n", "")));
+        assert_eq!(result.unwrap(), Ipv4Addr::new(100, 64, 0, 5));
+    }
 
     #[test]
     fn test_resolve_none_returns_localhost() {
