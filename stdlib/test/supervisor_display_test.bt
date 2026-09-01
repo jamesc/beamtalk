@@ -16,6 +16,12 @@
 
 TestCase subclass: SupervisorDisplayTest
 
+  // BT-3379: ClassMethodSupervisor / TestDynamicSupervisorCustom supervise/stop
+  // register a single node-wide, name-registered process (see
+  // beamtalk_supervisor:startLink/1). Run serially so a concurrently-running
+  // test class cannot `stop` the shared supervisor out from under this one.
+  class serial -> Boolean => true
+
   testSupervisorPrintStringIsKindHeaded =>
     sup := (ClassMethodSupervisor supervise) unwrap
     self assert: (sup printString startsWith: "Supervisor(ClassMethodSupervisor, ") equals: true
