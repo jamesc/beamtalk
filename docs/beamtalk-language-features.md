@@ -2712,6 +2712,7 @@ w3 := (pool startChild: #{#label => "y"}) unwrap   // => Actor(Worker, _)
 pool startChild
   ifOk:    [:w | w process: 21]
   ifError: [:e | Logger warn: e message]
+pool count                          // => 4
 
 // Terminate a specific child — idempotent (Ok(nil) even if already gone)
 (pool terminateChild: w1) unwrap    // => nil
