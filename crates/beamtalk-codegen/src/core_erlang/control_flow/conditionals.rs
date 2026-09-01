@@ -1205,7 +1205,8 @@ impl CoreErlangGenerator {
                 // opposed to a direct `self.field := value`) is silently
                 // dropped once the branch closes.
                 BodyExprKind::DispatchingSelfSend => {
-                    let dispatch_var = self.dispatch_self_send_as_bind(expr, frame, span, &mut stmts)?;
+                    let dispatch_var =
+                        self.dispatch_self_send_as_bind(expr, frame, span, &mut stmts)?;
                     if is_last {
                         let result_var = self.fresh_temp_var("SDResultVal");
                         stmts.push(ThreadedStmt::Statement(
