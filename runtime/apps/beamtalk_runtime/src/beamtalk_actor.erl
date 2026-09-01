@@ -231,6 +231,10 @@ handle_getValue([], State) ->
 %% temporaries from committed state before the reply is emitted.
 -export([notify_state_change/2, strip_local_temps/1]).
 
+%% Shared error constructor used by beamtalk_class_instantiation to avoid
+%% duplicating the same instantiation_error construction logic.
+-export([generic_spawn_error/3]).
+
 %% Named registration (ADR 0079, BT-1987)
 -export([
     is_beamtalk_actor/1,
