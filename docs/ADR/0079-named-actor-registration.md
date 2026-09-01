@@ -458,10 +458,91 @@ Teardown methods (`Actor stop`, `Actor kill`, `Supervisor stop`, `unregister`) d
 **Critical path:** BT-1986 → BT-1988 → BT-1990 → BT-1991.
 **Parallelisable:** BT-1987 alongside BT-1986; BT-1989 alongside BT-1988 (after BT-1987 lands).
 
+## Amendments
+
+### BT-3376 — `DynamicSupervisor startChild:name:` for dynamically-added children
+
+**Context.** This ADR's `SupervisionSpec withName:` (Decision → Supervisor
+integration) gives static, class-declared `Supervisor` children
+restart-survivable identity via named registration. `DynamicSupervisor`
+(`simple_one_for_one`, ADR 0059) has no equivalent: `startChild:` has no name
+parameter, so a dynamically-added child that crashes and is auto-restarted by
+OTP comes back as a fresh, unregistered pid with no way for a holder to find
+it again. BT-3376 (`beamtalk-watcher`'s `CheckRegistry`, which keeps a
+`name -> Monitor pid` dictionary to serve `monitor:`/`status` lookups) hit
+this directly: its workaround keeps each child `#temporary` and hand-drives
+restarts itself (`Actor>>onExit:` + calling `startChild:` again), forfeiting
+OTP's native `maxRestarts`/`restartWindow` crash-loop protection for that
+restart path. A related earlier attempt, BT-3366's `ChildSupervisor`
+(ADR 0118, reverted — its config-preserving-restart premise was disproved by
+BT-3365, which showed `simple_one_for_one` already replays each dynamic
+child's own start args on restart), proposed a new supervisor class with
+internally-generated per-child integer ids; its own revert notes flagged
+that it never added a listing/lookup method either, leaving this specific
+gap — identity survives restart, for dynamically-added children — still
+open.
+
+**Decision: extend `startChild:`, don't add a new lookup method or class.**
+Add `startChild: args name: aSymbol -> Result(C, Error)` to
+`DynamicSupervisor`, routing through the same `#spawnAs:` / `#spawnWith:as:`
+name-registration path this ADR already wired for `SupervisionSpec
+withName:` (Implementation, above: `beamtalk_actor.erl`'s `spawnAs/2,3`).
+No shared-template change is needed: BT-3365 already proved
+`simple_one_for_one` records and replays each dynamically-started child's
+own per-call args (which now include the name) on automatic OTP restart, so
+a crashed named child comes back registered under the same name every time,
+with no supervisor-side bookkeeping beyond what `start_dynamic_child/2,3`
+(`beamtalk_supervisor.erl`) already does — it just needs a sibling entry
+point that calls `beamtalk_actor:'spawnAs'/3` instead of
+`ChildModule:start_link/1` when a name is present. Lookup is the existing
+`Actor class>>named: aSymbol` (Decision → Lookup, above) — already generic
+across static and dynamic children, already restart-survivable, nothing new
+to build there. `DynamicSupervisor` gains no `which:`/`children` listing
+method; ADR 0092 already flags `simple_one_for_one`'s `which_children/1` as
+a performance cliff at scale (it copies the whole child list out of the
+supervisor process in one message), and a name-keyed point lookup
+(`whereis/1`-backed, like every other `Actor named:` call) avoids that
+entirely.
+
+**Why caller-supplied ids are acceptable here, reversing ADR 0118's
+stance.** ADR 0118 rejected caller-supplied ids for `ChildSupervisor`
+because its target use case — many runtime-added children over a
+long-running process — risked unbounded atom minting. This ADR's own
+Negatives section (above) already draws that line more precisely:
+compile-time Symbol literals are bounded by program size and safe; the real
+risk is *dynamically minted* atoms (e.g. `String asSymbol` in a
+per-request/per-tenant loop). BT-3376's motivating case names each dynamic
+child after a statically-configured check — a bounded, compile-time-known
+namespace, exactly the case this ADR already treats as safe.
+`startChild: args name: aSymbol` inherits this ADR's existing
+bounded-naming guidance rather than establishing a new one; its docs should
+repeat the same caution given to `spawnAs:`/`registerAs:`.
+
+**Affected components (addition to Implementation, above):**
+- `stdlib/src/DynamicSupervisor.bt`: `startChild: args name: aSymbol ->
+  Result(C, Error)`, using the same error shape as `spawnAs:`/`registerAs:`
+  (`name_registered`/`type_error`/`reserved_name`, per the Errors table
+  above).
+- `runtime/apps/beamtalk_runtime/src/beamtalk_supervisor.erl`: a named
+  sibling of `start_dynamic_child/2,3` that delegates to
+  `beamtalk_actor:'spawnAs'/3` (or `spawnWithAs`-equivalent with args)
+  instead of `ChildModule:start_link/1`, wired the same way
+  `spec_to_otp/2` already routes the unnamed dynamic-start MFAs.
+- Docs (`docs/beamtalk-language-features.md`): a note distinguishing
+  `startChild: args name:` + `Actor named:` (per-child identity lookup,
+  survives restart) from `DynamicSupervisor count` (aggregate count only)
+  and static `Supervisor which:` (fixed, class-declared children only).
+
+**Regression test.** Start a child under a name via
+`startChild: args name: #x`, kill the resulting pid directly (not via
+`terminateChild:`), and confirm `(ChildClass named: #x) unwrap pid`
+resolves to a different, live pid after OTP's automatic restart.
+
 ## References
 - Related issues:
   - [BT-1985](https://linear.app/beamtalk/issue/BT-1985) — Implementation epic for this ADR
   - [BT-1977](https://linear.app/beamtalk/issue/BT-1977/migrate-supervisor-lifecycle-methods-to-result-return-type) — Migrate Supervisor lifecycle methods to Result (follow-up, blocked by this epic)
+  - [BT-3376](https://linear.app/beamtalk/issue/BT-3376) — `DynamicSupervisor startChild:name:` amendment (identity survives restart for dynamically-added children)
 - Related ADRs:
   - ADR 0060 — Result Type & Hybrid Error Handling (conventions this ADR follows for Result-returning methods)
   - ADR 0065 — Complete OTP Primitives & Actor Lifecycle (deferred this ADR; this ADR supersedes its placement suggestion on Server)
@@ -469,5 +550,7 @@ Teardown methods (`Actor stop`, `Actor kill`, `Supervisor stop`, `unregister`) d
   - ADR 0059 — SupervisionSpec (fluent builder this extends)
   - ADR 0076 — Convert Erlang ok/error Tuples to Result at FFI Boundary
   - ADR 0078 — Actor Initialize Inheritance
+  - ADR 0092 — Supervision Tree Introspection (`which_children` performance-cliff precedent cited in the BT-3376 amendment)
+  - ADR 0118 — Child Supervisor (reverted along with BT-3366, file removed; the id-assignment stance the BT-3376 amendment reverses — see git history for PR #3649/#3650)
 - External: [Erlang `erlang:register/2`](https://www.erlang.org/doc/man/erlang#register-2), [Elixir `Process.register/2`](https://hexdocs.pm/elixir/Process.html#register/2), `global(3erl)`, `pg(3erl)`
 - Motivating example: [`beamtalk-exdura/src/exdura_supervisor.bt`](https://github.com/jamesc/beamtalk-exdura/blob/main/src/exdura_supervisor.bt)

@@ -2686,6 +2686,100 @@ bt3365_wait_for_restart_loop(SupPid, OldPid, Deadline) ->
             end
     end.
 
+%%====================================================================
+%% BT-3376 / ADR 0079 amendment: DynamicSupervisor>>startChild:name:
+%%====================================================================
+
+startChild_arity3_with_real_dynamic_spec_registers_name_test() ->
+    %% BT-3376: startChild: args name: aName on a real simple_one_for_one
+    %% supervisor must start the child registered under aName — reusing
+    %% the exact same dynamic-mode spec BT-3365's arity-2 tests use, since
+    %% start_dynamic_child/4 shares the same zero-static-arg MFA template.
+    Name = bt3376_dyn_name,
+    bt1990_cleanup_name(Name),
+    ClassObj = bt1990_make_counter_class_obj(),
+    SupPid = bt3365_start_dynamic_supervisor(ClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT3376DynSup', ?MODULE, SupPid},
+        Result = beamtalk_supervisor:startChild(Self, 42, Name),
+        ?assertMatch({ok, {beamtalk_object, 'Counter', test_counter, _}}, Result),
+        {ok, Child} = Result,
+        ChildPid = element(4, Child),
+        ?assertEqual(ChildPid, erlang:whereis(Name)),
+        Proxy = #beamtalk_object{
+            class = 'Counter', class_mod = test_counter, pid = {registered, Name}
+        },
+        ?assertEqual(42, beamtalk_message_dispatch:send(Proxy, getValue, []))
+    after
+        bt1990_cleanup_class_obj(ClassObj),
+        bt1990_cleanup_name(Name),
+        gen_server:stop(SupPid)
+    end.
+
+startChild_arity3_restart_reregisters_same_name_test() ->
+    %% The load-bearing BT-3376 regression test (mirrors BT-1990's
+    %% `supervisor_restart_re_registers_name_test/0` for the dynamic case):
+    %% a child started via `startChild: args name: aName` that later
+    %% crashes must come back under a DIFFERENT pid but the SAME registered
+    %% name — proving `DynamicSupervisor` children can now survive an
+    %% OTP-driven automatic restart with their identity intact, closing the
+    %% gap `Actor class>>named:` alone couldn't close without this.
+    Name = bt3376_dyn_restart_name,
+    bt1990_cleanup_name(Name),
+    ClassObj = bt1990_make_counter_class_obj(),
+    SupPid = bt3365_start_dynamic_supervisor(ClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT3376DynSup', ?MODULE, SupPid},
+        {ok, Child} = beamtalk_supervisor:startChild(Self, 7, Name),
+        Pid1 = element(4, Child),
+        ?assertEqual(Pid1, erlang:whereis(Name)),
+
+        %% Kill the child directly (not via terminateChild:) — OTP's own
+        %% #permanent restart must bring it back, re-registered under the
+        %% same name, with no supervisor-side bookkeeping on our part.
+        exit(Pid1, kill),
+        Pid2 = bt1990_wait_for_registration(Name, Pid1, 2000),
+        ?assertNotEqual(Pid1, Pid2),
+
+        %% simple_one_for_one also replays this call's own args (BT-3365),
+        %% so the restarted child comes back with the SAME 7, not blank.
+        Proxy = #beamtalk_object{
+            class = 'Counter', class_mod = test_counter, pid = {registered, Name}
+        },
+        ?assertEqual(7, beamtalk_message_dispatch:send(Proxy, getValue, []))
+    after
+        bt1990_cleanup_class_obj(ClassObj),
+        bt1990_cleanup_name(Name),
+        gen_server:stop(SupPid)
+    end.
+
+startChild_arity3_duplicate_name_surfaces_structured_error_test() ->
+    %% BT-3376: a name collision must surface the same structured
+    %% `#beamtalk_error{kind = name_registered}` `'spawnAs'/3` already
+    %% gives static named children (ADR 0079), re-attributed to
+    %% `startChild:name:` rather than `spawnAs`.
+    Name = bt3376_dyn_dup_name,
+    bt1990_cleanup_name(Name),
+    ClassObj = bt1990_make_counter_class_obj(),
+    SupPid = bt3365_start_dynamic_supervisor(ClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT3376DynSup', ?MODULE, SupPid},
+        {ok, _Child} = beamtalk_supervisor:startChild(Self, 1, Name),
+        Result = beamtalk_supervisor:startChild(Self, 2, Name),
+        ?assertMatch(
+            {error, #beamtalk_error{
+                kind = name_registered,
+                class = 'BT3376DynSup',
+                selector = 'startChild:name:'
+            }},
+            Result
+        )
+    after
+        bt1990_cleanup_class_obj(ClassObj),
+        bt1990_cleanup_name(Name),
+        gen_server:stop(SupPid)
+    end.
+
 supervisor_restart_re_registers_name_test() ->
     %% The load-bearing restart-survival integration test.
     %%
