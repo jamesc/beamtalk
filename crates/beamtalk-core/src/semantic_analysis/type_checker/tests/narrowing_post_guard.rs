@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Post-guard narrowing of nullable locals/fields after divergent `isNil ifTrue: [^err]` (BT-2049),
-//! extended to `isKindOf:` class-test guards (BT-2825).
+//! extended to `isKindOf:` class-test guards (BT-2825), singleton-equality
+//! (`==`/`=:=`/`/=`) and `respondsTo:` guards (BT-3369).
 
 use super::common::*;
 
@@ -558,5 +559,287 @@ typed Object subclass: Caller
     assert!(
         type_warnings.is_empty(),
         "`x` should narrow to Nil after `x isNil ifFalse: [^nil]`, got: {type_warnings:?}"
+    );
+}
+
+// ── BT-3369: Post-guard narrowing for singleton-equality guards ──
+
+/// BT-3369: the issue's exact repro shape — `pid == #undefined ifTrue:
+/// [^false]` (loose equality, `==`) should narrow `pid` to `Integer` for the
+/// rest of the method, closing the gap without requiring `@expect type`.
+#[test]
+fn bt3369_double_equal_narrows_after_if_true_return_guard() {
+    let source = r"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: pid :: Integer | #undefined =>
+    pid == #undefined ifTrue: [^false]
+    Receiver process: pid
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse(&module);
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "`pid` should narrow to Integer after `pid == #undefined ifTrue: [^false]`, got: {type_warnings:?}"
+    );
+}
+
+/// BT-3369 AC: `x =:= #undefined ifTrue: [^...]` (strict equality) also
+/// narrows post-guard — the post-guard gate was missing for *all*
+/// `singleton_eq` guards, independent of the `==` operator extension.
+#[test]
+fn bt3369_strict_equal_narrows_after_if_true_return_guard() {
+    let source = r"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: pid :: Integer | #undefined =>
+    pid =:= #undefined ifTrue: [^false]
+    Receiver process: pid
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse(&module);
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "`pid` should narrow to Integer after `pid =:= #undefined ifTrue: [^false]`, got: {type_warnings:?}"
+    );
+}
+
+/// BT-3369 AC: `x /= #undefined ifFalse: [^...]` (loose inequality, already
+/// accepted by the detector before this issue) also narrows post-guard —
+/// the mirror `ifFalse:` guard shape, not just `ifTrue:`.
+#[test]
+fn bt3369_loose_not_equal_narrows_after_if_false_return_guard() {
+    let source = r"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: pid :: Integer | #undefined =>
+    pid /= #undefined ifFalse: [^false]
+    Receiver process: pid
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse(&module);
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "`pid` should narrow to Integer after `pid /= #undefined ifFalse: [^false]`, got: {type_warnings:?}"
+    );
+}
+
+/// BT-3369 AC: narrowing only removes the specific literal member compared —
+/// a 3-member union `Integer | #south | #east` checked against `#south`
+/// narrows to `Integer | #east`, not just `Integer` (the other singleton
+/// member must survive).
+#[test]
+fn bt3369_multi_member_union_keeps_other_singleton_after_guard() {
+    let source = r"
+typed Object subclass: Receiver
+  class process: v :: Integer | #east -> Integer | #east => v
+
+typed Object subclass: Caller
+  run: d :: Integer | #south | #east =>
+    d == #south ifTrue: [^nil]
+    Receiver process: d
+    true
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse(&module);
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "`d` should narrow to `Integer | #east` (not just `Integer`) after `d == #south ifTrue: [^nil]`, got: {type_warnings:?}"
+    );
+}
+
+/// BT-3369 AC: chained guards narrow incrementally — checking `#south` then
+/// `#east` in sequence on a 3-member union narrows down to the single
+/// remaining member, `Integer`.
+#[test]
+fn bt3369_chained_guards_narrow_incrementally() {
+    let source = r"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: d :: Integer | #south | #east =>
+    d == #south ifTrue: [^nil]
+    d == #east ifTrue: [^nil]
+    Receiver process: d
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse(&module);
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "`d` should narrow to Integer after two chained singleton guards, got: {type_warnings:?}"
+    );
+}
+
+/// BT-3369 AC: no narrowing attempted for an equality check against a
+/// non-literal `Symbol`-typed value — `pid == atomName` (both operands
+/// variables, neither a `#foo`-style literal) must not be detected as a
+/// singleton-equality guard at all, since there's no specific literal to
+/// subtract from the union (narrowing on an arbitrary Symbol value would be
+/// unsound — the checker can't know all possible Symbol values). This is
+/// guaranteed structurally by `symbol_literal()` requiring a literal AST
+/// node on one side; this test locks that guarantee in for the guard path
+/// this issue extends. (The already-covered literal case — `s =:= #foo` on
+/// a bare `Symbol` receiver narrowing its false branch to the `Symbol \
+/// #foo` negation, never collapsing further — is exercised by
+/// `test_refine_singleton_eq_symbol_false_branch_is_negation` in
+/// `narrowing_control_flow_legacy.rs`; `apply_early_return_narrowing`
+/// reuses that exact same `refine_singleton_narrowing` function, so its
+/// soundness carries over to the post-guard path for free.)
+#[test]
+fn bt3369_equality_against_non_literal_symbol_is_not_detected_as_narrowing() {
+    let expr = msg_send(
+        var("pid"),
+        MessageSelector::Binary("==".into()),
+        vec![var("atomName")],
+    );
+    assert!(
+        TypeChecker::detect_narrowing(&expr).is_none(),
+        "`pid == atomName` (neither operand a literal) must not be detected as narrowing"
+    );
+}
+
+// ── BT-3369: Post-guard narrowing for `respondsTo:` guards ──
+
+/// BT-3369: `(x respondsTo: #foo) ifFalse: [^default]` should narrow `x` to
+/// `Dynamic` post-guard (no protocol registered for the selector), so a
+/// subsequent send of that selector does not raise a DNU warning — the same
+/// gap as singleton-equality, for `responded_selector` instead.
+#[test]
+fn bt3369_responds_to_if_false_guard_narrows_to_dynamic() {
+    let source = r"
+typed Object subclass: Caller
+  run: x :: Object =>
+    (x respondsTo: #customMethod) ifFalse: [^nil]
+    x customMethod
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse(&module);
+    let dnu_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu_warnings.is_empty(),
+        "`x` should narrow to Dynamic after `(x respondsTo: #customMethod) ifFalse: [^nil]`, \
+         got DNU warnings: {:?}",
+        dnu_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// BT-3369 (matches BT-1833 in-branch behaviour): when exactly one protocol
+/// requires the tested selector, `(x respondsTo: #foo) ifFalse: [^default]`
+/// narrows `x` to that concrete `Protocol` type post-guard, not just
+/// `Dynamic`.
+#[test]
+fn bt3369_responds_to_if_false_guard_narrows_to_protocol() {
+    let source = r#"
+Protocol define: Printable
+  asString -> String
+
+typed Object subclass: Caller
+  run: x :: Object -> String =>
+    (x respondsTo: #asString) ifFalse: [^""]
+    x asString
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse(&module);
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "`x` should narrow to Printable after `(x respondsTo: #asString) ifFalse: [^\"\"]`, \
+         got: {type_warnings:?}"
+    );
+}
+
+/// BT-3369 AC: `(x respondsTo: #foo) ifTrue: [^default]` correctly still
+/// does NOT narrow `x` post-guard — there is no sound complement type for
+/// "doesn't respond to X" (mirrors the already-locked-in in-branch
+/// behaviour from BT-1833/`bt2825_non_diverging_is_kind_of_if_false_guard_does_not_narrow`-style
+/// negative tests). `x customMethod` must still raise a DNU warning.
+#[test]
+fn bt3369_responds_to_if_true_guard_does_not_narrow() {
+    let source = r"
+typed Object subclass: Caller
+  run: x :: Object =>
+    (x respondsTo: #customMethod) ifTrue: [^nil]
+    x customMethod
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse(&module);
+    let dnu_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        !dnu_warnings.is_empty(),
+        "`x` must stay unnarrowed after `(x respondsTo: #customMethod) ifTrue: [^nil]` — no \
+         sound complement type exists for \"doesn't respond to X\"; got diagnostics: {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
     );
 }

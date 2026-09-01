@@ -739,10 +739,6 @@ sealed typed Object subclass: SystemNavigation
     (aClass respondsTo: #superclassChain) ifFalse: [^false]
     announcementClass := self findClass: #Announcement
     announcementClass isNil ifTrue: [^false]
-    // `aClass` is typed `Object` (it may be a class object, a metaclass object,
-    // or `nil`); the `respondsTo: #superclassChain` guard above makes the send
-    // safe at runtime, so suppress the static does-not-understand check.
-    @expect dnu
     aClass superclassChain includes: announcementClass
 
   /// Append announcement emission sites found in every source-bearing extension
@@ -791,13 +787,9 @@ sealed typed Object subclass: SystemNavigation
   /// `#Foo`) and a metaclass tag (`#'Foo class'` → `Foo class`, name
   /// `#'Foo class'`) uniformly. A `resolveExtensionClass:` result that is a raw
   /// atom (the defensive miss path) does not respond to `name` and answers
-  /// `false`. The `@expect dnu` suppresses the static does-not-understand check:
-  /// `extClass` is typed `Object` (the navigation queries report class objects,
-  /// metaclass objects, or a raw atom under one umbrella type), and the
-  /// `respondsTo: #name` guard makes the `name` send safe at runtime.
+  /// `false`.
   extensionTargets: extClass :: Object names: targetNames :: List(Symbol) -> Boolean =>
     (extClass respondsTo: #name) ifFalse: [^false]
-    @expect dnu
     targetNames includes: extClass name
 
   // ===== References To (ADR 0087) =====
