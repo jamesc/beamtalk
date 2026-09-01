@@ -2538,4 +2538,66 @@ mod tests {
             );
         }
     }
+
+    /// BT-3372: `beamtalk_repl_eval`'s statement scanner
+    /// (`scan_for_second_top_level_statement/2`) gained a hand-rolled Erlang
+    /// mirror of `lex_line_comment`/`lex_block_comment`'s span computation
+    /// (`skip_line_comment/1`/`skip_block_comment/1`), for the same
+    /// cross-crate-dependency reason as the string/character mirror above. A
+    /// shared corpus fixture
+    /// (`runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json`)
+    /// pins both implementations to the same cases. Every corpus source
+    /// starts with the comment at offset 0 and has no leading trivia of its
+    /// own, so the comment is always the first entry in whatever token's
+    /// leading trivia collects it (the next real token's, or EOF's if the
+    /// comment runs to end of input) — its text length is directly
+    /// comparable to the Erlang side's consumed-character count. The Erlang
+    /// side asserts the identical cases in
+    /// `beamtalk_repl_eval_tests:comment_span_matches_shared_corpus_test/0`.
+    #[test]
+    fn comment_span_matches_shared_corpus() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .join("runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let kind = case["kind"].as_str().expect("case.kind is a string");
+            let source = case["source"].as_str().expect("case.source is a string");
+            let expected_end = case["expected_end"]
+                .as_u64()
+                .expect("case.expected_end is a number");
+            let why = case["why"].as_str().unwrap_or("");
+            let tokens = lex_with_eof(source);
+            assert!(
+                !tokens.is_empty(),
+                "expected at least an EOF token for {source:?} ({why})"
+            );
+            let leading = tokens[0].leading_trivia();
+            assert!(
+                !leading.is_empty(),
+                "expected leading trivia for {source:?} ({why})"
+            );
+            let comment = &leading[0];
+            assert!(
+                matches!(
+                    (kind, comment),
+                    ("line_comment", Trivia::LineComment(_))
+                        | ("block_comment", Trivia::BlockComment(_))
+                ),
+                "expected a {kind} for {source:?}, got {comment:?} ({why})"
+            );
+            assert_eq!(
+                comment.as_str().len() as u64,
+                expected_end,
+                "span-end mismatch for {source:?} ({why})"
+            );
+        }
+    }
 }

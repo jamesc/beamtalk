@@ -902,6 +902,92 @@ assert_literal_span_case(#{
         lists:flatten(io_lib:format("span-end mismatch for ~p (~ts)", [Source, Why]))
     ).
 
+%% BT-3372: a `//` line comment containing an unbalanced bracket, followed
+%% by a genuine second top-level statement, must still be detected as two
+%% statements — the bracket inside the comment must not permanently bump
+%% `Depth` and mask the real statement boundary that follows. Exact repro
+%% from the issue: without comment-awareness, the `(` in `// (see below`
+%% bumps `Depth` to 1 and nothing ever closes it, so `extract_assignment/1`
+%% wrongly returns `{ok, alpha}` and `process_eval_result/4` clobbers
+%% `alpha`'s already-correct binding with `beta`'s value.
+extract_assignment_line_comment_unbalanced_bracket_test() ->
+    ?assertEqual(
+        none, beamtalk_repl_eval:extract_assignment("alpha := 1 // (see below\nbeta := 2")
+    ).
+
+%% BT-3372: a `"` inside a `//` comment must not be misread as the start of
+%% a real string literal — otherwise it could swallow real code that
+%% follows and mask a second statement through a different path.
+extract_assignment_line_comment_with_quote_test() ->
+    ?assertEqual(
+        none,
+        beamtalk_repl_eval:extract_assignment(
+            "alpha := 1 // says \"hi\" here\nbeta := 2"
+        )
+    ),
+    %% A single statement with a trailing `//` comment containing a quote is
+    %% unaffected — no false bail.
+    ?assertEqual(
+        {ok, alpha},
+        beamtalk_repl_eval:extract_assignment("alpha := 1 // says \"hi\" here")
+    ).
+
+%% BT-3372: same shape, but with a `/* ... */` block comment instead of a
+%% `//` line comment — an unbalanced brace inside the block comment must
+%% not be read as real code either.
+extract_assignment_block_comment_unbalanced_brace_test() ->
+    ?assertEqual(
+        none,
+        beamtalk_repl_eval:extract_assignment("alpha := 1 /* { unbalanced */\nbeta := 2")
+    ),
+    %% A single statement with a block comment on the same line is
+    %% unaffected — no false bail.
+    ?assertEqual(
+        {ok, alpha},
+        beamtalk_repl_eval:extract_assignment("alpha := 1 /* note */")
+    ).
+
+%% BT-3372 (CLAUDE.md Essential Rules: a "mirrors" claim across the
+%% Rust/Erlang boundary needs a shared conformance fixture, not just a
+%% comment): `skip_line_comment/1`/`skip_block_comment/1` are hand-rolled
+%% Erlang mirrors of the Rust lexer's `lex_line_comment/0`/
+%% `lex_block_comment/0` span computation. Both sides run the exact same
+%% cases from `test/fixtures/comment_span_corpus.json` — see
+%% `source_analysis::lexer::tests::comment_span_matches_shared_corpus` for
+%% the Rust side.
+comment_span_matches_shared_corpus_test() ->
+    Path = filename:join([
+        code:lib_dir(beamtalk_workspace),
+        "test",
+        "fixtures",
+        "comment_span_corpus.json"
+    ]),
+    {ok, Raw} = file:read_file(Path),
+    Cases = json:decode(Raw),
+    ?assert(length(Cases) > 0),
+    lists:foreach(fun assert_comment_span_case/1, Cases).
+
+assert_comment_span_case(#{
+    <<"kind">> := Kind,
+    <<"source">> := SourceBin,
+    <<"expected_end">> := ExpectedEnd,
+    <<"why">> := Why
+}) ->
+    Source = unicode:characters_to_list(SourceBin),
+    Remaining =
+        case Kind of
+            <<"line_comment">> ->
+                beamtalk_repl_eval:skip_line_comment(Source);
+            <<"block_comment">> ->
+                beamtalk_repl_eval:skip_block_comment(Source)
+        end,
+    Consumed = length(Source) - length(Remaining),
+    ?assertEqual(
+        ExpectedEnd,
+        Consumed,
+        lists:flatten(io_lib:format("span-end mismatch for ~p (~ts)", [Source, Why]))
+    ).
+
 %% ===================================================================
 %% compile_expression_via_port catch clauses (BT-627)
 %% ===================================================================

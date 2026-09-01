@@ -109,6 +109,8 @@ module loading to beamtalk_repl_loader (BT-863).
     extract_assignment/1,
     skip_string_literal/1,
     skip_character_literal/1,
+    skip_line_comment/1,
+    skip_block_comment/1,
     maybe_await_future/1,
     rebuild_bindings_from_steps/2,
     should_purge_module/2,
@@ -1683,7 +1685,12 @@ first, found by scanning left to right and tracking `[]`/`()`/`{}` nesting
 depth (BT-3368). A `"..."` string or `$x` character literal is skipped
 atomically via `skip_string_literal/1`/`skip_character_literal/1` — as a
 single lexeme, never character-by-character — so nothing inside either one
-(a `.`, a newline, a bracket) is ever individually inspected.
+(a `.`, a newline, a bracket) is ever individually inspected. A `//...`
+line comment or `/* ... */` block comment is skipped the same way via
+`skip_line_comment/1`/`skip_block_comment/1` (BT-3372) — mirroring
+`lex_line_comment`/`lex_block_comment` (`source_analysis/lexer.rs`) — so a
+bracket, quote, period, or newline inside a comment is never read as real
+code either.
 
 Two signals count as a statement boundary, and only at depth 0:
 
@@ -1716,6 +1723,10 @@ scan_for_second_top_level_statement([$" | _] = Chars, Depth) ->
     end;
 scan_for_second_top_level_statement([$$ | _] = Chars, Depth) ->
     scan_for_second_top_level_statement(skip_character_literal(Chars), Depth);
+scan_for_second_top_level_statement([$/, $/ | _] = Chars, Depth) ->
+    scan_for_second_top_level_statement(skip_line_comment(Chars), Depth);
+scan_for_second_top_level_statement([$/, $* | _] = Chars, Depth) ->
+    scan_for_second_top_level_statement(skip_block_comment(Chars), Depth);
 scan_for_second_top_level_statement([C | Rest], Depth) when
     C =:= $[; C =:= $(; C =:= ${
 ->
@@ -1811,6 +1822,67 @@ skip_character_literal([$$, _Payload | Rest]) ->
     Rest;
 skip_character_literal([$$]) ->
     [].
+
+-doc """
+Skips one `//...` line comment starting at the opening `//`, returning the
+characters from (and including) the terminating `\n`, or `[]` if the
+comment runs to end of input (BT-3372).
+
+Mirrors `lex_line_comment/0` (`source_analysis/lexer.rs`): the comment body
+is everything up to but not including the next `\n`, consumed atomically
+so a `.`, bracket, or `"` inside it is never read as real code. The `\n`
+itself is left in `Rest` so the caller's own newline-boundary check
+(`scan_for_second_top_level_statement/2`'s `$\n` clause) still applies to
+it exactly as if the comment weren't there. A `///` doc comment shares this
+same span rule (only its semantics differ, not its termination), so this
+also handles doc comments correctly without a separate clause.
+
+Conformance-tested against the real Rust lexer via the shared corpus
+`runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json` —
+see `beamtalk_repl_eval_tests:comment_span_matches_shared_corpus_test/0` and
+`source_analysis::lexer::tests::comment_span_matches_shared_corpus`.
+""".
+-spec skip_line_comment(string()) -> string().
+skip_line_comment([$/, $/ | Rest]) ->
+    skip_line_comment_body(Rest).
+
+-spec skip_line_comment_body(string()) -> string().
+skip_line_comment_body([]) ->
+    [];
+skip_line_comment_body([$\n | _] = Chars) ->
+    Chars;
+skip_line_comment_body([_ | Rest]) ->
+    skip_line_comment_body(Rest).
+
+-doc """
+Skips one `/* ... */` block comment starting at the opening `/*`, returning
+the characters immediately after its closing `*/`, or `[]` if the comment
+is unterminated (runs to end of input) (BT-3372).
+
+Mirrors `lex_block_comment/0` (`source_analysis/lexer.rs`): the whole span,
+delimiters included, is consumed atomically, so a `.`, bracket, or `"`
+inside it is never read as real code. An unterminated block comment is a
+lex-time error in the real compiler (BT-3372's caller never reaches a
+comment that would fail to compile in practice) but is still consumed
+harmlessly to end of input here, matching `extract_assignment/1`'s existing
+policy of never raising on malformed input.
+
+Conformance-tested against the real Rust lexer via the shared corpus
+`runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json` —
+see `beamtalk_repl_eval_tests:comment_span_matches_shared_corpus_test/0` and
+`source_analysis::lexer::tests::comment_span_matches_shared_corpus`.
+""".
+-spec skip_block_comment(string()) -> string().
+skip_block_comment([$/, $* | Rest]) ->
+    skip_block_comment_body(Rest).
+
+-spec skip_block_comment_body(string()) -> string().
+skip_block_comment_body([]) ->
+    [];
+skip_block_comment_body([$*, $/ | Rest]) ->
+    Rest;
+skip_block_comment_body([_ | Rest]) ->
+    skip_block_comment_body(Rest).
 
 -doc "Auto-await a Future if the result is a tagged future tuple (BT-840).".
 -spec maybe_await_future(term()) -> term().
