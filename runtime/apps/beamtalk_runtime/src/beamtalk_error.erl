@@ -42,10 +42,10 @@ See docs/internal/design-self-as-object.md Section 3.8 for error taxonomy.
 -record #beamtalk_error{
     kind :: atom(),
     class :: atom(),
-    selector :: atom() | undefined,
+    selector = undefined :: atom() | undefined,
     message :: binary(),
-    hint :: binary() | undefined,
-    details :: map()
+    hint = undefined :: binary() | undefined,
+    details = #{} :: map()
 }.
 -export_record([beamtalk_error]).
 
