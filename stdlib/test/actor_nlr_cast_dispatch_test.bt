@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3374: `^self otherMethod` (non-local return of a non-Nil self-call)
+// nested one block deep, in a method dispatched via cast (`!`) from a
+// foreign process (an `onExit:` callback), used to silently drop the
+// nested call's effects — see fixtures/actor_nlr_cast_self_dispatch.bt.
+
+TestCase subclass: ActorNlrCastDispatchTest
+  field: sender = nil
+
+  setUp => self withSender: BT3374CastNlrSender spawn
+
+  tearDown => self.sender isNil ifFalse: [self.sender stop]
+
+  // Acceptance criteria: cast-dispatched (`!`), non-Nil-returning method
+  // whose body does `^self otherNonNilMethod`, invoked via `!` from an
+  // `onExit:`/foreign-process context, must actually re-run
+  // `configureVictim` and its mutations must persist in `debugLog`.
+  testNestedNlrSelfSendInCastDispatchedMethodRunsAndPersistsState =>
+    self.sender bringUp
+    v := self.sender victim
+    v stop
+    // Poll with bounded wait instead of fixed sleep (avoids timing flakiness):
+    // the exit callback fires the cast asynchronously.
+    50 timesRepeat: [self.sender debugLog size < 4 ifTrue: [Timer sleep: 10]]
+    self assert: self.sender debugLog equals: #("configureVictim start", "configureVictim end", "configureVictim start", "configureVictim end")
+
+  // Non-regression: the identical nested-NLR-self-send shape, reached via
+  // an ordinary synchronous self-send instead (`handle_call` dispatch, not
+  // `handle_cast`) — must not be broken by the BT-3374 fix.
+  testNestedNlrSelfSendInSyncDispatchedMethodRunsAndPersistsState =>
+    self.sender bringUp
+    self.sender reconfigureIfRequested: #go
+    self assert: self.sender debugLog equals: #("configureVictim start", "configureVictim end", "configureVictim start", "configureVictim end")
