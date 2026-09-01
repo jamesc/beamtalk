@@ -5379,7 +5379,7 @@ impl CoreErlangGenerator {
             .methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
-            .map(|m| Self::meta_method_entry(m, sealed, type_params))
+            .map(|m| Self::meta_method_entry(m, type_params))
             .collect();
         // BT-1005: Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
         // but included in BuilderState.meta so init/1 can register their return types.
@@ -5389,11 +5389,7 @@ impl CoreErlangGenerator {
                     && !m.is_class_method
                     && m.method.kind == MethodKind::Primary
             }) {
-                entries.push(Self::meta_method_entry(
-                    &standalone.method,
-                    sealed,
-                    type_params,
-                ));
+                entries.push(Self::meta_method_entry(&standalone.method, type_params));
             }
         }
         if let Some(auto) = auto {
@@ -5430,7 +5426,7 @@ impl CoreErlangGenerator {
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
-            .map(|m| Self::meta_method_entry(m, sealed, type_params))
+            .map(|m| Self::meta_method_entry(m, type_params))
             .collect();
         // BT-1005: Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
         // but included in BuilderState.meta so init/1 can register their return types.
@@ -5440,11 +5436,7 @@ impl CoreErlangGenerator {
                     && m.is_class_method
                     && m.method.kind == MethodKind::Primary
             }) {
-                entries.push(Self::meta_method_entry(
-                    &standalone.method,
-                    sealed,
-                    type_params,
-                ));
+                entries.push(Self::meta_method_entry(&standalone.method, type_params));
             }
         }
         if let Some(auto) = auto {
@@ -5484,9 +5476,31 @@ impl CoreErlangGenerator {
     ///
     /// ADR 0068: When `class_type_params` is non-empty, type annotations that reference
     /// a class-level type parameter emit `MetaTypeRepr::TypeParam` instead of a flat atom.
+    ///
+    /// BT-3367: the serialized `is_sealed` bit is `m.is_sealed` alone — the same
+    /// per-method flag `ClassInfo::from_class_definition` (`semantic_analysis/
+    /// class_hierarchy/class_info.rs`) records for a fresh-AST compile, with no OR
+    /// against the class-level `sealed` flag. `is_sealed` here means two different
+    /// things to two different readers: `compute_direct_call_eligible`'s Gate 5
+    /// (`codegen/core_erlang/mod.rs`) treats it as "this method body never references
+    /// self/its own class for construction, so it's safe to call directly with a
+    /// literal `nil` `ClassSelf`" — true only for a method individually declared
+    /// `class sealed`, per that gate's own doc comment. A class being sealed only
+    /// means "cannot be subclassed" (`can_be_subclassed`/`check_sealed_superclass`);
+    /// it says nothing about whether an *individual* method's body is self-free.
+    /// OR'ing in `class_is_sealed` previously made this producer disagree with the
+    /// fresh-AST one — a class-side factory method of a sealed class (e.g. `class
+    /// ok: a details: b => Self checkName: a details: b`) that itself constructs a
+    /// new instance would round-trip through this BEAM-metadata path (the one the
+    /// REPL uses to see an already-loaded project class) as `is_sealed = true` even
+    /// though the method was never individually sealed, wrongly clearing Gate 5 for
+    /// it. The generated direct call then hard-codes `ClassSelf = 'nil'`
+    /// (`generate_direct_class_method_call`, `dispatch_codegen.rs`), and the method's
+    /// own `self`/class-name construction dereferences that `nil` as a tuple —
+    /// `erlang:element(2, 'nil')` — raising exactly the reported `badarg` ("invalid
+    /// argument"). See BT-3367.
     fn meta_method_entry(
         m: &MethodDefinition,
-        class_is_sealed: bool,
         class_type_params: &[TypeParamDecl],
     ) -> MethodInfoEntry {
         let return_type = m.return_type.as_ref().map_or(MetaTypeRepr::None, |rt| {
@@ -5506,7 +5520,7 @@ impl CoreErlangGenerator {
             m.selector.arity(),
             return_type,
             param_types,
-            m.is_sealed || class_is_sealed,
+            m.is_sealed,
             m.is_internal,
         )
     }

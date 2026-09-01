@@ -1926,6 +1926,35 @@ Counter >> getValue => value
 }
 
 #[test]
+fn test_bt3367_sealed_class_does_not_mark_unsealed_class_method_as_sealed() {
+    // BT-3367: a class-level `sealed` must not leak into an individual class
+    // method's own `is_sealed` bit in __beamtalk_meta/0 — only a method itself
+    // declared `class sealed` should report `is_sealed => true`. This is the
+    // producer side of the bug: the REPL recovers an already-loaded project
+    // class's method info from exactly this serialized meta map, and
+    // compute_direct_call_eligible's Gate 5 (mod.rs) relies on a false
+    // `is_sealed` here to route a self-constructing factory method (like
+    // `make` below) through the safe gen_server dispatch instead of a direct
+    // call with a hard-coded nil `ClassSelf`.
+    let src = "
+sealed Value subclass: SealedFactory
+  class make => SealedFactory new
+";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("sealed_factory"))
+        .expect("codegen should succeed")
+        .code;
+
+    assert!(
+        code.contains(
+            "'make' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SealedFactory', 'is_sealed' => 'false', 'visibility' => 'public'}~"
+        ),
+        "an unsealed class method of a sealed class must serialize is_sealed => false. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_bt1005_untyped_param_does_not_shadow_state_field_type() {
     // BT-1005: An untyped parameter with the same name as a state field must NOT
     // cause the method's return type to be inferred as the state field's type.
