@@ -3571,22 +3571,74 @@ impl CoreErlangGenerator {
                         },
                         *span,
                     );
-                    // BT-3051: `value` may be a self-send that goes through the
-                    // open-scope pattern (`emit_class_var_result_unwrap`/
-                    // `finalize_dispatch_with_preamble`), returning a dangling
-                    // `let ... in ` chain via `last_open_scope_result` rather
-                    // than a closed expression — and critically, the chain also
-                    // rebinds the class-var snapshot (e.g. `ClassVars1`) that
-                    // `state` below must reference. Wrapping the chain into its
-                    // own closed sub-expression (as at other open-scope call
-                    // sites) would scope that rebind away before `state` could
-                    // see it — the class-var version `state` needs is exactly
-                    // the one this chain just produced. So instead of closing
-                    // the chain, thread it as a preamble ahead of the `throw`
-                    // call and reference `last_open_scope_result`'s variable
-                    // directly at the tuple's Value position, keeping both it
-                    // and the rebound class-var snapshot in scope for `state`.
-                    let (val_preamble, open_scope) = self.expression_doc_with_open_scope(value)?;
+                    // BT-3374: `value` may itself be a plain (non-cast) actor
+                    // self-send that dispatches through `safe_dispatch`/`dispatch`
+                    // and returns a *new* actor state (e.g. `^self configureVictim`
+                    // nested inside an `ifTrue:` block). The generic open-scope
+                    // path below never threads that new state anywhere — actor
+                    // self-sends don't populate `last_open_scope_result` (only
+                    // class-method self-sends and class-var assignments do, per
+                    // that helper's own doc comment) — so `generate_message_send`
+                    // instead reaches `generate_self_dispatch`'s *closed* form,
+                    // which computes the call's `Result` but drops its `NewState`
+                    // on the floor. `state` below then falls back to the state
+                    // version from BEFORE this call, so the NLR throw's 4-tuple
+                    // silently discards every mutation the self-send just made —
+                    // the call still runs, but its effects vanish the moment this
+                    // `^` unwinds. Route this shape through
+                    // `generate_self_dispatch_open` instead — the same helper the
+                    // top-level `^self foo` (unnested) early-return path already
+                    // uses (`gen_server/methods.rs`'s `DispatchingSelfSend` arm) —
+                    // which bumps `current_state_var()` to the self-send's own new
+                    // state before `state` below is computed.
+                    // BT-3374: excludes class methods (`in_class_method()`) —
+                    // `generate_self_dispatch_open`/`generate_self_dispatch_call_doc`
+                    // unconditionally thread `current_state_var()` (Actor
+                    // instance state), never `current_class_var()` (ADR
+                    // 0110's ClassVars mechanism a class method actually
+                    // needs), so routing a class-method self-send through
+                    // this branch mints a `State*` version nothing downstream
+                    // consumes while the throw below still (correctly) reads
+                    // `current_class_var()` for its state — a class method
+                    // reaching this shape keeps the pre-existing `else`
+                    // behavior instead, exactly as before this fix.
+                    let (val_preamble, open_scope) = if self.is_dispatching_actor_self_send(value)
+                        && !self.in_class_method()
+                    {
+                        let (dispatch_doc, dispatch_var) =
+                            self.generate_self_dispatch_open(value)?;
+                        let result_doc =
+                            docvec!["call 'erlang':'element'(1, ", leaf::var(dispatch_var), ")"];
+                        (dispatch_doc, Some(result_doc))
+                    } else {
+                        // BT-3051: `value` may be a self-send that goes through the
+                        // open-scope pattern (`emit_class_var_result_unwrap`/
+                        // `finalize_dispatch_with_preamble`), returning a dangling
+                        // `let ... in ` chain via `last_open_scope_result` rather
+                        // than a closed expression — and critically, the chain also
+                        // rebinds the class-var snapshot (e.g. `ClassVars1`) that
+                        // `state` below must reference. Wrapping the chain into its
+                        // own closed sub-expression (as at other open-scope call
+                        // sites) would scope that rebind away before `state` could
+                        // see it — the class-var version `state` needs is exactly
+                        // the one this chain just produced. So instead of closing
+                        // the chain, thread it as a preamble ahead of the `throw`
+                        // call and reference `last_open_scope_result`'s variable
+                        // directly at the tuple's Value position, keeping both it
+                        // and the rebound class-var snapshot in scope for `state`.
+                        let (val_preamble, open_scope) =
+                            self.expression_doc_with_open_scope(value)?;
+                        let value_doc = match open_scope {
+                            Some(OpenScopeResult::Value(result_var)) => Some(leaf::var(result_var)),
+                            // BT-3053: e.g. `^(items do: [...])` inside a
+                            // direct-params loop — no single value was bound, so
+                            // substitute do:'s own `nil` return-value contract
+                            // rather than referencing a nonexistent variable.
+                            Some(OpenScopeResult::NoValue) => Some(Document::Str("'nil'")),
+                            None => None,
+                        };
+                        (val_preamble, value_doc)
+                    };
                     // BT-761/BT-854: All NLR throws carry state as a 4-tuple.
                     // Actor methods use the current gen_server state; value type
                     // methods use the latest Self{N} snapshot so field mutations
@@ -3602,16 +3654,7 @@ impl CoreErlangGenerator {
                         self.current_self_var()
                     };
                     let (preamble, value_doc) = match open_scope {
-                        Some(OpenScopeResult::Value(result_var)) => {
-                            (Some(val_preamble), leaf::var(result_var))
-                        }
-                        // BT-3053: e.g. `^(items do: [...])` inside a direct-params
-                        // loop — no single value was bound, so substitute do:'s own
-                        // `nil` return-value contract rather than referencing a
-                        // nonexistent variable.
-                        Some(OpenScopeResult::NoValue) => {
-                            (Some(val_preamble), Document::Str("'nil'"))
-                        }
+                        Some(value_doc) => (Some(val_preamble), value_doc),
                         None => (None, val_preamble),
                     };
                     let throw_doc = docvec![
