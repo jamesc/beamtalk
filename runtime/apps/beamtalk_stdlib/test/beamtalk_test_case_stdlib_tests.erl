@@ -539,10 +539,30 @@ bif_fallback_bif_path_test_() ->
 %%% Covers lines 652, 655, 657, 660, 669 of beamtalk_test_case.erl.
 %%% ============================================================================
 
+%% BT-2962 spike: `#beamtalk_error{}` is a native record on this branch, and
+%% `-import_record` skips the compile-time field-completeness check a local
+%% `-record` declaration enforces — omitting a field with no default (as
+%% these 4 tests originally did, setting only kind/class/message) crashes
+%% at construction with `{novalue, {{beamtalk_error,beamtalk_error}, Field}}`
+%% inside the test's own `Block` fun. `should_raise/2` catches that crash as
+%% the "raised" value, and since it isn't a `#beamtalk_error{}` at all,
+%% `extract_error_kind/1` falls through to its generic `error` clause —
+%% surfacing as "expected my_kind but got error" rather than the construction
+%% crash itself. Fixed by setting every field explicitly, matching the
+%% pattern the original BT-2962 spike applied to the ~10 production/test call
+%% sites it found relying on the classic-record implicit-`undefined` default.
+
 %% Line 657: #beamtalk_error{kind = Kind} direct record match
 should_raise_matches_beamtalk_error_record_test() ->
     Block = fun() ->
-        error(#beamtalk_error{kind = my_kind, class = 'TestCase', message = <<"m">>})
+        error(#beamtalk_error{
+            kind = my_kind,
+            class = 'TestCase',
+            selector = undefined,
+            message = <<"m">>,
+            hint = undefined,
+            details = #{}
+        })
     end,
     ?assertEqual(nil, beamtalk_test_case:should_raise(Block, my_kind)).
 
@@ -552,7 +572,14 @@ should_raise_matches_exception_map_test() ->
         error(#{
             class => 'Exception',
             '$beamtalk_class' => 'Exception',
-            error => #beamtalk_error{kind = my_kind, class = 'TestCase', message = <<"m">>}
+            error => #beamtalk_error{
+                kind = my_kind,
+                class = 'TestCase',
+                selector = undefined,
+                message = <<"m">>,
+                hint = undefined,
+                details = #{}
+            }
         })
     end,
     ?assertEqual(nil, beamtalk_test_case:should_raise(Block, my_kind)).
@@ -562,7 +589,12 @@ should_raise_matches_future_rejected_test() ->
     Block = fun() ->
         error(
             {future_rejected, #beamtalk_error{
-                kind = my_kind, class = 'TestCase', message = <<"m">>
+                kind = my_kind,
+                class = 'TestCase',
+                selector = undefined,
+                message = <<"m">>,
+                hint = undefined,
+                details = #{}
             }}
         )
     end,
@@ -574,7 +606,14 @@ should_raise_matches_error_map_wrapped_test() ->
         error(
             {error, #{
                 '$beamtalk_class' => 'RuntimeError',
-                error => #beamtalk_error{kind = my_kind, class = 'TestCase', message = <<"m">>}
+                error => #beamtalk_error{
+                    kind = my_kind,
+                    class = 'TestCase',
+                    selector = undefined,
+                    message = <<"m">>,
+                    hint = undefined,
+                    details = #{}
+                }
             }}
         )
     end,

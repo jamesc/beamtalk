@@ -55,6 +55,21 @@ writeup and reproduction.
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% BT-2962 spike: `meck:new(beamtalk_class_registry, ...)` crashes the
+%% compiler on this branch (see moduledoc above). Throwing turns that crash
+%% into a clean, deliberate "context setup failed" skip in the eunit report
+%% instead of an unreadable compiler stack dump — eunit has no primitive
+%% that both skips a test AND keeps the overall run's exit code zero, so
+%% this doesn't turn `just test` green, just legible.
+meck_broken_by_bt_2962() ->
+    throw(
+        {skip,
+            "BT-2962: meck:new/2 crashes under OTP 29 native records "
+            "(erl_lint:import_native_record/3 has no clause for the "
+            "list-wrapped attribute module_info(attributes) produces) — "
+            "see the BT-2962 Linear issue"}
+    ).
+
 %%====================================================================
 %% Setup/Teardown — start an isolated monitor under the module's fixed
 %% registered name, displacing (and later restoring) whatever a prior
@@ -209,6 +224,7 @@ gen_server_catchall_test_() ->
 watch_dedup_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_Ctx) ->
         {"watching the same live pid twice installs only one monitor ref", fun() ->
+            meck_broken_by_bt_2962(),
             meck:new(beamtalk_class_registry, [passthrough]),
             meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
                 {ok, spawn_dummy()}
@@ -256,6 +272,7 @@ deliberate_stop_shutdown_test_() ->
     end}.
 
 assert_no_restart_on_exit(ClassName, ExitReason) ->
+    meck_broken_by_bt_2962(),
     meck:new(beamtalk_class_registry, [passthrough]),
     meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
         {ok, spawn_dummy()}
@@ -280,6 +297,7 @@ restart_failure_test_() ->
         #{monitor := MonPid} = Ctx,
         [
             {"restart_class returning {error, _} is logged; the monitor survives", fun() ->
+                meck_broken_by_bt_2962(),
                 meck:new(beamtalk_class_registry, [passthrough]),
                 meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
                     {error, injected_failure}
@@ -302,6 +320,7 @@ restart_failure_test_() ->
                 end
             end},
             {"restart_class raising an exception is caught; the monitor survives", fun() ->
+                meck_broken_by_bt_2962(),
                 meck:new(beamtalk_class_registry, [passthrough]),
                 meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
                     error(injected_crash)
@@ -333,6 +352,7 @@ restart_failure_test_() ->
 restart_budget_exhausted_test_() ->
     {setup, fun() -> setup(#{max_restarts => 1, window_ms => 60000}) end, fun teardown/1, fun(_Ctx) ->
         {"a second crash inside the window is not retried once the budget is spent", fun() ->
+            meck_broken_by_bt_2962(),
             meck:new(beamtalk_class_registry, [passthrough]),
             meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
                 {ok, spawn_dummy()}

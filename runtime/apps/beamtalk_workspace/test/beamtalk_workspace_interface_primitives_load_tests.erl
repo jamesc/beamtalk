@@ -61,6 +61,21 @@ BT-2962 Linear issue for the full writeup.
 -behaviour(supervisor).
 -export([init/1]).
 
+%% BT-2962 spike: `meck:new(beamtalk_package, ...)` crashes the compiler on
+%% this branch (see moduledoc above). Throwing turns that crash into a
+%% clean, deliberate "context setup failed" skip in the eunit report
+%% instead of an unreadable compiler stack dump — eunit has no primitive
+%% that both skips a test AND keeps the overall run's exit code zero, so
+%% this doesn't turn `just test` green, just legible.
+meck_broken_by_bt_2962() ->
+    throw(
+        {skip,
+            "BT-2962: meck:new/2 crashes under OTP 29 native records "
+            "(erl_lint:import_native_record/3 has no clause for the "
+            "list-wrapped attribute module_info(attributes) produces) — "
+            "see the BT-2962 Linear issue"}
+    ).
+
 %%====================================================================
 %% Suite-level setup: the heavy, node-global apps (compiler port + runtime).
 %%====================================================================
@@ -294,6 +309,7 @@ dependencies_with_real_dependency_returns_populated_map(#{
     ok = file:write_file(
         filename:join(Tmp, "beamtalk.toml"), <<"[package]\nname = \"wideps_pkg\"\n">>
     ),
+    meck_broken_by_bt_2962(),
     meck:new(beamtalk_package, [passthrough]),
     meck:expect(beamtalk_package, dependencies, fun(<<"wideps_pkg">>) -> [<<"utils">>] end),
     meck:expect(beamtalk_package, named, fun(<<"utils">>) -> #{name => <<"utils">>} end),
@@ -313,6 +329,7 @@ dependencies_skips_a_dependency_that_fails_to_resolve(#{tmp := Tmp, workspace_id
     ok = file:write_file(
         filename:join(Tmp, "beamtalk.toml"), <<"[package]\nname = \"wideps_pkg2\"\n">>
     ),
+    meck_broken_by_bt_2962(),
     meck:new(beamtalk_package, [passthrough]),
     meck:expect(beamtalk_package, dependencies, fun(<<"wideps_pkg2">>) ->
         [<<"missing_dep">>]

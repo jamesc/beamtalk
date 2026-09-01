@@ -1884,8 +1884,11 @@ save_section_write_rejects_stale_source_test() ->
         Result = beamtalk_repl_ops_load:finish_section_write(
             Path, <<"BtSectionConflictClass">>, OriginalSource, NewSource
         ),
+        %% BT-2962 spike: `#beamtalk_error{}` is a native record on this
+        %% branch, not a plain tuple, so match it via record syntax rather
+        %% than the raw 7-tuple shape (which never matches a native record).
         ?assertMatch(
-            {error, {beamtalk_error, external_edit, 'WorkspaceInterface', _, _, _, _}}, Result
+            {error, #beamtalk_error{kind = external_edit, class = 'WorkspaceInterface'}}, Result
         ),
         %% Nothing was written: disk still holds the concurrent write, not
         %% this op's `NewSource` (which would have silently reverted it) and

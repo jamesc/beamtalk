@@ -78,6 +78,21 @@ BT-2962 Linear issue for the full writeup.
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% BT-2962 spike: `meck:new(beamtalk_repl_loader, ...)` crashes the
+%% compiler on this branch (see moduledoc above). Throwing turns that
+%% crash into a clean, deliberate "context setup failed" skip in the eunit
+%% report instead of an unreadable compiler stack dump — eunit has no
+%% primitive that both skips a test AND keeps the overall run's exit code
+%% zero, so this doesn't turn `just test` green, just legible.
+meck_broken_by_bt_2962() ->
+    throw(
+        {skip,
+            "BT-2962: meck:new/2 crashes under OTP 29 native records "
+            "(erl_lint:import_native_record/3 has no clause for the "
+            "list-wrapped attribute module_info(attributes) produces) — "
+            "see the BT-2962 Linear issue"}
+    ).
+
 %%====================================================================
 %% Fixture sources
 %%====================================================================
@@ -733,6 +748,7 @@ rewrite_sites_partial_install_failure_test_() ->
 
 setup_with_install_fault() ->
     Fixture = setup(),
+    meck_broken_by_bt_2962(),
     meck:new(beamtalk_repl_loader, [passthrough]),
     %% Fail only SubCounter's own group install — Counter's group (processed
     %% first; see group_sites_by_class/1's first-seen-class-order doc) still
@@ -812,6 +828,7 @@ concurrent_sub_counter_source() ->
 
 setup_with_concurrent_write() ->
     Fixture = setup(),
+    meck_broken_by_bt_2962(),
     meck:new(beamtalk_repl_loader, [passthrough]),
     meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
         Result = meck:passthrough([Compiled, LoadPath]),
@@ -880,6 +897,7 @@ rewrite_sites_stale_snapshot_removed_test_() ->
 
 setup_with_concurrent_removal() ->
     Fixture = setup(),
+    meck_broken_by_bt_2962(),
     meck:new(beamtalk_repl_loader, [passthrough]),
     meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
         Result = meck:passthrough([Compiled, LoadPath]),
