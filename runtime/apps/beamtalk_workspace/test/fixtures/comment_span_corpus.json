@@ -1,0 +1,38 @@
+[
+  {
+    "kind": "line_comment",
+    "source": "// (see below",
+    "expected_end": 13,
+    "why": "a line comment with no trailing newline runs to end of input"
+  },
+  {
+    "kind": "line_comment",
+    "source": "// (see below\nbeta := 2",
+    "expected_end": 13,
+    "why": "an unbalanced bracket inside a line comment must not be read as real code; the comment ends at (not including) the newline"
+  },
+  {
+    "kind": "line_comment",
+    "source": "// hello \"world\"",
+    "expected_end": 16,
+    "why": "a quote inside a line comment must not be read as a string delimiter"
+  },
+  {
+    "kind": "block_comment",
+    "source": "/* note */",
+    "expected_end": 10,
+    "why": "a simple block comment closes at its own */"
+  },
+  {
+    "kind": "block_comment",
+    "source": "/* a { b */ rest",
+    "expected_end": 11,
+    "why": "an unbalanced brace inside a block comment must not be read as real code; the comment ends at its own closing */, not at the end of the whole source"
+  },
+  {
+    "kind": "block_comment",
+    "source": "/* { */",
+    "expected_end": 7,
+    "why": "an opening brace immediately inside a block comment must not bump nesting depth"
+  }
+]

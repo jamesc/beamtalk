@@ -1035,12 +1035,28 @@ fn handle_rename_method(arg: &str, client: &mut ReplClient) {
 /// REPL command (`:remove-class`, `:flush-destructive`) never proceeds
 /// without an explicit affirmative (ADR 0113 "Surface": the REPL's
 /// confirmation gesture for a Tier-2/destructive operation).
+///
+/// Thin wrapper over `confirm_destructive_action_with` (BT-3373), which
+/// takes the confirmation source as an injected `BufRead` — the same
+/// closure/seam-injection pattern `repl::bind::detect_tailscale_ip_with`
+/// uses for its own untestable subprocess call — so the y/N-parsing logic
+/// itself is unit-tested without a real terminal.
 fn confirm_destructive_action(message: &str) -> bool {
-    use std::io::{BufRead, Write};
+    use std::io::Write;
     print!("{message} [y/N] ");
     let _ = std::io::stdout().flush();
+    confirm_destructive_action_with(&mut std::io::stdin().lock())
+}
+
+/// Read one line from `reader`, returning `true` only for an explicit
+/// `y`/`yes` (case-insensitive, surrounding whitespace ignored). Any other
+/// input — including a blank line, EOF (`Ok(0)`), or a read error —
+/// declines. See `confirm_destructive_action` for the caller-facing
+/// contract; this half carries no stdin/terminal dependency, so it's
+/// exercised directly in `mod tests` rather than only at the e2e level.
+fn confirm_destructive_action_with<R: std::io::BufRead>(reader: &mut R) -> bool {
     let mut input = String::new();
-    match std::io::stdin().lock().read_line(&mut input) {
+    match reader.read_line(&mut input) {
         Ok(0) | Err(_) => false,
         Ok(_) => matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes"),
     }
@@ -1664,16 +1680,69 @@ mod tests {
         assert!(result.contains(color::RESET));
     }
 
+    // --- confirm_destructive_action_with (BT-3373) ---
+
+    #[test]
+    fn confirm_destructive_action_accepts_y() {
+        let mut reader = std::io::Cursor::new(b"y\n".as_slice());
+        assert!(confirm_destructive_action_with(&mut reader));
+    }
+
+    #[test]
+    fn confirm_destructive_action_accepts_yes_case_insensitive() {
+        let mut reader = std::io::Cursor::new(b"YES\n".as_slice());
+        assert!(confirm_destructive_action_with(&mut reader));
+    }
+
+    #[test]
+    fn confirm_destructive_action_accepts_y_with_surrounding_whitespace() {
+        let mut reader = std::io::Cursor::new(b"  y  \n".as_slice());
+        assert!(confirm_destructive_action_with(&mut reader));
+    }
+
+    #[test]
+    fn confirm_destructive_action_declines_n() {
+        let mut reader = std::io::Cursor::new(b"n\n".as_slice());
+        assert!(!confirm_destructive_action_with(&mut reader));
+    }
+
+    #[test]
+    fn confirm_destructive_action_declines_blank_line() {
+        let mut reader = std::io::Cursor::new(b"\n".as_slice());
+        assert!(!confirm_destructive_action_with(&mut reader));
+    }
+
+    #[test]
+    fn confirm_destructive_action_declines_garbage() {
+        let mut reader = std::io::Cursor::new(b"maybe\n".as_slice());
+        assert!(!confirm_destructive_action_with(&mut reader));
+    }
+
+    #[test]
+    fn confirm_destructive_action_declines_eof() {
+        let mut reader = std::io::Cursor::new(b"".as_slice());
+        assert!(!confirm_destructive_action_with(&mut reader));
+    }
+
     // --- handle_repl_command dispatch (BT-3370) ---
     //
     // These drive `handle_repl_command` (and the non-stdin-gated handlers it
     // dispatches to) against `spawn_auth_ok_server`'s fake WS backend, the same
     // pattern `client.rs`'s own tests (BT-3364) established for `ReplClient`.
-    // Handlers gated behind a terminal y/N confirmation
-    // (`confirm_destructive_action` reads `std::io::stdin()` directly, with no
-    // injection seam) — `:remove-class`, `:rename-class`, `:rename-method`,
-    // `:flush-destructive[-arg]` — are out of scope here; see BT-3370's
-    // follow-up.
+    //
+    // Handlers gated behind a terminal y/N confirmation — `:remove-class`,
+    // `:rename-class`, `:rename-method`, `:flush-destructive[-arg]` — are
+    // still out of scope here (BT-3373 decision): `confirm_destructive_action`
+    // itself gained a `BufRead` injection seam
+    // (`confirm_destructive_action_with`, tested directly below) covering its
+    // own y/N-parsing branches, but each handler also calls
+    // `eval_and_display`/`client.eval` on its own path, so exercising a full
+    // handler end-to-end would need threading a fake reader through every
+    // `handle_*` call site (and the `CommandAction` dispatch that reaches
+    // them) for logic that's otherwise a thin wrapper over the already
+    // fully-tested `repl_meta_exprs` expr builders plus the confirm/decline
+    // branch. Not worth the seam for what's left uncovered; still e2e-only,
+    // same as BT-3370 left them.
     mod handle_repl_command_dispatch {
         use super::*;
         use crate::commands::test_support::spawn_auth_ok_server;

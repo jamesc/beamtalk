@@ -254,6 +254,20 @@ fn configure_startup_logging(
 /// inserted into the eval sequence after the workspace supervisor starts but before
 /// the REPL port is queried. This guarantees all project classes are registered
 /// before the OTP supervisor tree is brought up (BT-1319).
+///
+/// BT-3373 decision: this function's own process-spawn/PID-file/port-file
+/// logic is covered by real-BEAM `#[ignore]`d integration tests
+/// (`workspace/mod.rs`'s `test_node_start_queries_and_kill_integration`,
+/// `test_get_or_start_workspace_lifecycle_integration`,
+/// `test_start_detached_node_ignores_stale_port_file_integration`,
+/// `test_start_detached_node_cleans_up_tombstone_integration`, and others in
+/// that file's integration tier), not a fake process-spawn double — cheaper,
+/// and it's the tier this code's own callers already use. Deliberately
+/// uncovered: the PID-file-timeout and port-file-timeout error branches below
+/// (would need a real BEAM node deliberately made to hang or crash
+/// mid-startup, a materially bigger integration-test fixture than exists
+/// today) and the `#[cfg(windows)]` spawn path (untestable on this repo's
+/// Linux CI). Tracked as a follow-up rather than solved here.
 pub fn start_detached_node(
     workspace_id: &str,
     beam_paths: &BeamPaths,
