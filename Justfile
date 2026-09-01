@@ -667,6 +667,10 @@ check-codegen-boundary:
     #!/usr/bin/env bash
     set -uo pipefail
     fail=0
+    if ! cargo tree -p beamtalk-codegen >/dev/null 2>&1; then
+        echo "❌ package 'beamtalk-codegen' no longer resolves — update check-codegen-boundary's target package"
+        exit 1
+    fi
     for pkg in beamtalk-lsp beamtalk-lint; do
         if ! cargo tree -p "$pkg" >/dev/null 2>&1; then
             echo "❌ package '$pkg' no longer resolves — update check-codegen-boundary's package list"
