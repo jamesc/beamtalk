@@ -1940,8 +1940,8 @@ fn test_bt3367_sealed_class_does_not_mark_unsealed_class_method_as_sealed() {
 sealed Value subclass: SealedFactory
   class make => SealedFactory new
 ";
-    let tokens = crate::source_analysis::lex_with_eof(src);
-    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module_with_warnings(&module, CodegenOptions::new("sealed_factory"))
         .expect("codegen should succeed")
         .code;
