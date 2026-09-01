@@ -1,0 +1,55 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3365: Regression tests for DynamicSupervisor(C)>>startChild: on a
+// child class that needs per-call initialization arguments. Before the
+// fix, any startChild: call on a DynamicSupervisor crashed with badarg
+// from gen_server:start_link/2, because the simple_one_for_one child
+// template baked a static #{} arg that supervisor:start_child/2 then
+// appended the caller's args on top of.
+//
+// Fixtures: stdlib/test/fixtures/test_dynamic_supervisor_custom.bt,
+//           stdlib/test/fixtures/baked_args_counter.bt,
+//           stdlib/test/fixtures/dynamic_supervisor_baked_args.bt
+
+TestCase subclass: DynamicSupervisorStartChildArgsTest
+
+  testStartChildWithArgsStartsChildWithGivenArgs =>
+    pool := (TestDynamicSupervisorCustom supervise) unwrap
+    child := (pool startChild: #{#value => 42}) unwrap
+    self assert: child getValue equals: 42
+    [pool stop] on: Error do: [:e | nil]
+
+  testStartChildNoArgsStillWorks =>
+    // Regression guard: the no-arg startChild path must keep working now
+    // that #spawn routes through a zero-static-arg indirection (BT-3365).
+    pool := (TestDynamicSupervisorCustom supervise) unwrap
+    child := pool startChild unwrap
+    self assert: child getValue equals: 0
+    [pool stop] on: Error do: [:e | nil]
+
+  testStartChildWithArgsAllowsMultipleIndependentChildren =>
+    pool := (TestDynamicSupervisorCustom supervise) unwrap
+    a := (pool startChild: #{#value => 1}) unwrap
+    b := (pool startChild: #{#value => 2}) unwrap
+    self assert: a getValue equals: 1
+    self assert: b getValue equals: 2
+    [pool stop] on: Error do: [:e | nil]
+
+  // === Review follow-up: childClass with a supervisionSpec-baked withArgs: default ===
+  //
+  // A childClass can override `class supervisionSpec` to bake default args
+  // via `withArgs:` (startFn #spawnWith: instead of the plain #spawn the
+  // tests above exercise). startChild: hits the same zero-static-arg
+  // indirection through that path too.
+  testStartChildWithArgsOverridesBakedDefault =>
+    pool := (DynamicSupervisorBakedArgs supervise) unwrap
+    child := (pool startChild: #{#value => 99}) unwrap
+    self assert: child getValue equals: 99
+    [pool stop] on: Error do: [:e | nil]
+
+  testStartChildNoArgsUsesBakedDefault =>
+    pool := (DynamicSupervisorBakedArgs supervise) unwrap
+    child := pool startChild unwrap
+    self assert: child getValue equals: 7
+    [pool stop] on: Error do: [:e | nil]

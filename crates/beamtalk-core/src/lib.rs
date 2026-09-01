@@ -7,53 +7,70 @@
 //! - Lexical analysis (tokenization)
 //! - Parsing (AST construction)
 //! - Semantic analysis (type checking, name resolution)
-//! - Code generation (Core Erlang output)
+//!
+//! Code generation (Core Erlang output) lives in the standalone
+//! `beamtalk-codegen` crate (ADR 0117 step 5, BT-3362), which depends on
+//! this crate's Compilation context, never the reverse.
 //!
 //! The compiler is designed as a language service, prioritizing
 //! IDE responsiveness over batch compilation speed.
 
 #![doc = include_str!("../../../README.md")]
 
-pub(crate) mod announce_selectors;
+// BT-3361 (ADR 0117 Decision step 5): widened from `pub(crate)` — the
+// Language Service context (now the standalone `beamtalk-language-service`
+// crate) reaches `is_announce_selector` as the shared-leaf fact both it and
+// this crate's `semantic_analysis` must agree on (see this module's own doc
+// comment). It was already a public-shaped leaf beneath two DDD contexts;
+// only one of those contexts used to live inside this crate, so a `pub(crate)`
+// item it reached had to become genuinely `pub` once the consumer moved out.
+pub mod announce_selectors;
 pub mod ast;
 // BT-3340: widened from `pub(crate)` — `for_each_expr_seq` is used by the
 // standalone `beamtalk-lint` crate now that `lint` has moved out of this
 // crate (ADR 0117 Decision step 2).
 pub mod ast_walker;
-pub mod codegen;
 pub mod compilation;
-pub(crate) mod ffi_receiver;
+// BT-3361 (ADR 0117 Decision step 5): widened from `pub(crate)` — same
+// rationale as `announce_selectors` above; `erlang_module_of_receiver` is
+// reached from `beamtalk-language-service`'s `queries::ffi_sites_query`.
+pub mod ffi_receiver;
 pub mod ffi_type_specs;
 pub mod file_walker;
-pub mod language_service;
-pub(crate) mod method_source_walker;
+// BT-3361 (ADR 0117 Decision step 5): widened from `pub(crate)` — same
+// rationale as `announce_selectors` above; `selector_span` is reached from
+// `beamtalk-language-service`'s `queries` module.
+pub mod method_source_walker;
 pub mod near_miss_divider;
-// BT-3342 (ADR 0117 Decision step 3): `queries` merged into `language_service`
-// as a submodule — both were the Language Service DDD context split into two
-// Rust modules with an unenforced (and, until this issue, unnoticed) cycle
-// between them. Re-exported here under its old top-level name so every
-// existing `beamtalk_core::queries::...` / `crate::queries::...` call site
-// (inside this crate and in `beamtalk-lsp`/`beamtalk-mcp`/`beamtalk-cli`/
-// `beamtalk-compiler-port`/`beamtalk-lint`) keeps compiling unchanged.
-pub use language_service::queries;
 pub mod semantic_analysis;
 pub mod source_analysis;
 pub mod span;
-pub(crate) mod state_threading_selectors;
+// BT-3362 (ADR 0117 Decision step 5): widened from `pub(crate)` — the
+// standalone `beamtalk-codegen` crate's `core_erlang` reaches
+// `is_exception_selector`/`is_conditional_selector` to decide state-threading
+// codegen for exception handlers and conditionals.
+pub mod state_threading_selectors;
 pub mod synthetic_selectors;
 pub mod test_helpers;
 pub mod tool_expr;
 pub mod unparse;
 
 /// Re-export commonly used types.
+///
+/// BT-3361 (ADR 0117 Decision step 5): this used to also re-export
+/// `Completion`, `CompletionKind`, `HoverInfo`, `LanguageService`, `Location`,
+/// `Position`, `ProjectIndex`, and `SimpleLanguageService` from
+/// `language_service` — removed since that module moved into the standalone
+/// `beamtalk-language-service` crate, which this crate cannot depend on
+/// without creating a cycle (Language Service depends on Compilation, never
+/// the reverse). No production code imported these through `prelude` (only
+/// direct `beamtalk_core::language_service::...` / `crate::queries::...`
+/// paths existed), so callers that want them now import directly from
+/// `beamtalk_language_service::{...}`.
 pub mod prelude {
     pub use crate::ast::{
         ClassDefinition, DeclaredKeyword, Expression, Identifier, Literal, MethodDefinition,
         Module, StateDeclaration, TypeAnnotation,
-    };
-    pub use crate::language_service::{
-        Completion, CompletionKind, HoverInfo, LanguageService, Location, Position, ProjectIndex,
-        SimpleLanguageService,
     };
     pub use crate::source_analysis::Span;
 }

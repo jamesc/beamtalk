@@ -24,6 +24,14 @@ path = "src/main.rs"
 
 [dependencies]
 beamtalk-core = { workspace = true, features = ["serde"] }
+# why: ADR 0117 step 5 (BT-3361) — `diagnostic_provider` (the unified
+# diagnostic pipeline `beamtalk build`/`beamtalk lint` both drive) and
+# `STDLIB_PACKAGE_MARKER` moved out of `beamtalk-core` into their own crate.
+beamtalk-language-service.workspace = true
+# why: ADR 0117 step 5 (BT-3362) — `beamtalk build`/`beamtalk test` drive
+# Core Erlang generation directly (`beam_compiler`, `build_stdlib`, `test`,
+# `test_stdlib`), so this crate needs the now-standalone codegen crate.
+beamtalk-codegen.workspace = true
 # why: BT-3340 (ADR 0117 Decision step 2) — `lint`/`project`/`repl` moved
 # out of `beamtalk-core` into standalone crates.
 beamtalk-lint.workspace = true

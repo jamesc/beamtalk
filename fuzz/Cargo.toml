@@ -18,6 +18,12 @@ path = "../crates/beamtalk-core"
 # instead of duplicating them in the fuzz crate.
 features = ["test"]
 
+# why: ADR 0117 step 5 (BT-3362) — compile_pipeline exercises the full
+# pipeline (lex → parse → analyse → codegen); codegen now lives in its own
+# crate.
+[dependencies.beamtalk-codegen]
+path = "../crates/beamtalk-codegen"
+
 [[bin]]
 name = "parse_arbitrary"
 path = "fuzz_targets/parse_arbitrary.rs"

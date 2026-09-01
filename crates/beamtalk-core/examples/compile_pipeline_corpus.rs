@@ -31,7 +31,7 @@
 //! escript scripts/compile-pipeline-corpus-lint.escript <output_dir>
 //! ```
 
-use beamtalk_core::codegen::core_erlang::{CodegenOptions, generate_module};
+use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::semantic_analysis::analyse;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use std::collections::HashMap;

@@ -1,0 +1,4593 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! Expression code generation.
+//!
+//! **DDD Context:** Compilation — Code Generation
+//!
+//! This domain service handles code generation for Beamtalk expressions:
+//! - Literals (integers, floats, strings, symbols)
+//! - Identifiers and variable references
+//! - Map literals
+//! - Field access (`self.field`)
+//! - Field assignment (`self.field := value`)
+//! - Blocks (closures)
+//! - Await expressions
+//! - Cascades
+//!
+//! Note: Message sending is handled by [`super::dispatch_codegen`].
+
+use std::collections::HashSet;
+
+use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
+use beamtalk_core::ast::{
+    BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, CascadeMessage,
+    Expression, Identifier, Literal, MapPair, MapPatternKey, MatchArm, MessageSelector, Pattern,
+    StringSegment,
+};
+
+/// Classification of how a block body expression should be handled.
+/// Produced by [`CoreErlangGenerator::classify_block_expr`] and consumed
+/// by [`CoreErlangGenerator::generate_block_expr`].
+enum BlockExprKind {
+    /// `{a, b} := expr` or `#[a, b] := expr` — destructure assignment.
+    /// Carries `is_last` so the handler can append `'nil'` when the destructure
+    /// is the final expression in the block.
+    Destructure { is_last: bool },
+    /// Last expression that is a class method self-send (BT-1397).
+    LastClassMethodSelfSend,
+    /// Last expression (general case) — its value is the block's result.
+    LastExpr,
+    /// `self.field := value` — direct field assignment (non-last).
+    FieldAssignment,
+    /// `var := expr` — local variable assignment (non-last).
+    LocalAssignment,
+    /// `whileTrue:` / `whileFalse:` / `timesRepeat:` with threaded vars (non-last).
+    ControlFlowWithThreadedVars,
+    /// Class method self-send as non-last expression (BT-1397).
+    ClassMethodSelfSend,
+    /// Expression evaluated for side effects only — result discarded.
+    SideEffect,
+}
+
+impl CoreErlangGenerator {
+    /// Generates code for a literal value.
+    ///
+    /// Maps Beamtalk literals to Core Erlang:
+    /// - Integers: `42` → `42`
+    /// - Floats: `3.14` → `3.14`
+    /// - Strings: `"hello"` → binary syntax `#{#<104>(8,1,...), #<101>(8,1,...), ...}#`
+    /// - Symbols: `#foo` → atom `'foo'`
+    /// - Characters: `$a` → integer `97`
+    /// - Arrays: `[1, 2, 3]` → list `[1, 2, 3]`
+    #[allow(clippy::self_only_used_in_recursion)] // &self needed for method resolution
+    pub(super) fn generate_literal(&self, lit: &Literal) -> Result<Document<'static>> {
+        match lit {
+            Literal::Integer(n) => Ok(leaf::int_lit(*n)),
+            Literal::Float(f) => Ok(leaf::float_lit(*f)),
+            Literal::String(s) => Ok(leaf::binary_lit(s)),
+            Literal::Symbol(s) => Ok(leaf::atom(s.to_string())),
+            Literal::Character(c) => Ok(leaf::int_lit(i64::from(*c as u32))),
+            Literal::List(elements) => {
+                let mut parts: Vec<Document<'static>> = vec![Document::Str("[")];
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::Str(", "));
+                    }
+                    parts.push(self.generate_literal(elem)?);
+                }
+                parts.push(Document::Str("]"));
+                Ok(Document::Vec(parts))
+            }
+        }
+    }
+
+    /// Generates code for a string interpolation expression (ADR 0023 Phase 3).
+    ///
+    /// Compiles `StringInterpolation` to Core Erlang binary construction:
+    /// - Literal segments → byte sequences in the binary
+    /// - Expression segments → evaluate, dispatch `displayString`, insert as binary segment
+    ///
+    /// Example: `"Hello, {name}!"` compiles to:
+    /// ```text
+    /// let _interpExpr1 = Name in
+    ///   let _interpRaw2 = call 'beamtalk_message_dispatch':'send'(_interpExpr1, 'displayString', []) in
+    ///     let _interpStr3 = call 'beamtalk_primitive':'display_string'(_interpRaw2) in
+    ///       #{#<72>(8,1,...), ..., #<_interpStr3>('all',8,'binary',...), #<33>(8,1,...)}#
+    /// ```
+    pub(super) fn generate_string_interpolation(
+        &mut self,
+        segments: &[StringSegment],
+    ) -> Result<Document<'static>> {
+        // Collect let-bindings for expression segments and binary segments
+        let mut let_bindings: Vec<Document<'static>> = Vec::with_capacity(segments.len());
+        let mut binary_parts: Vec<Document<'static>> = Vec::with_capacity(segments.len());
+
+        for segment in segments {
+            match segment {
+                StringSegment::Literal(s) => {
+                    if !s.is_empty() {
+                        // ADR 0089: `leaf::binary_segments` emits the *unwrapped*
+                        // inner segments (no surrounding `#{...}#`) so they can be
+                        // spliced between interpolation segments — `leaf::binary_lit`
+                        // would add the wrapper and corrupt the construction.
+                        binary_parts.push(leaf::binary_segments(s));
+                    }
+                }
+                StringSegment::Interpolation(expr) => {
+                    let expr_doc = self.expression_doc(expr)?;
+                    let interp_var = self.fresh_temp_var("interpExpr");
+                    let raw_str_var = self.fresh_temp_var("interpRaw");
+                    let str_var = self.fresh_temp_var("interpStr");
+
+                    // Evaluate the expression
+                    let_bindings.push(docvec![
+                        "let ",
+                        leaf::var(interp_var.clone()),
+                        " = ",
+                        expr_doc,
+                        " in ",
+                    ]);
+
+                    // Dispatch displayString to convert to binary string (user-facing representation)
+                    let_bindings.push(docvec![
+                        "let ",
+                        leaf::var(raw_str_var.clone()),
+                        " = call 'beamtalk_message_dispatch':'send'(",
+                        leaf::var(interp_var.clone()),
+                        ", 'displayString', []) in ",
+                    ]);
+
+                    // Convert to binary string via display_string, which recursively awaits futures.
+                    // This handles both direct futures (actor displayString returns future) and
+                    // double-futures (Object.displayString delegates to self printString which is
+                    // itself async for actors, returning a nested future).
+                    let_bindings.push(docvec![
+                        "let ",
+                        leaf::var(str_var.clone()),
+                        " = call 'beamtalk_primitive':'display_string'(",
+                        leaf::var(raw_str_var.clone()),
+                        ") in "
+                    ]);
+
+                    // Add as binary segment: #<Var>('all',8,'binary',['unsigned'|['big']])
+                    binary_parts.push(docvec![
+                        "#<",
+                        leaf::var(str_var),
+                        ">('all',8,'binary',['unsigned'|['big']])",
+                    ]);
+                }
+            }
+        }
+
+        // Build the binary literal: #{seg1,seg2,...}#
+        let mut binary_doc_parts: Vec<Document<'static>> = vec![Document::Str("#{")];
+        for (i, part) in binary_parts.into_iter().enumerate() {
+            if i > 0 {
+                binary_doc_parts.push(Document::Str(","));
+            }
+            binary_doc_parts.push(part);
+        }
+        binary_doc_parts.push(Document::Str("}#"));
+        let binary_doc = Document::Vec(binary_doc_parts);
+
+        // Wrap with let-bindings
+        let mut doc = Document::Vec(Vec::new());
+        for binding in let_bindings {
+            doc = docvec![doc, binding];
+        }
+        doc = docvec![doc, binary_doc];
+
+        Ok(doc)
+    }
+
+    /// Generates code for an identifier reference.
+    ///
+    /// Handles three cases:
+    /// 1. Reserved keywords (`true`, `false`, `nil`, `self`) → Core Erlang atoms/variables
+    /// 2. Bound variables (in scope) → Core Erlang variable name
+    /// 3. Unbound identifiers → Field access via `maps:get/2` from context-appropriate variable:
+    ///    - **Actor context**: `State` or `StateAcc` (with threading)
+    ///    - **`ValueType` context**: `Self` parameter
+    ///    - **Repl context**: `State` from bindings
+    pub(super) fn generate_identifier(&mut self, id: &Identifier) -> Result<Document<'static>> {
+        // Handle special reserved identifiers as atoms
+        match id.name.as_str() {
+            "true" => Ok(Document::Str("'true'")),
+            "false" => Ok(Document::Str("'false'")),
+            "nil" => Ok(Document::Str("'nil'")),
+            "self" => {
+                // BT-411: Check if self is explicitly bound (e.g., in class methods)
+                if let Some(var_name) = self.lookup_var("self").cloned() {
+                    Ok(docvec![leaf::var(var_name)])
+                } else if self.context == super::CodeGenContext::ValueType {
+                    // BT-833: In value type context, self resolves to the latest Self{N}
+                    // snapshot after any preceding field assignments.
+                    Ok(leaf::var(self.current_self_var()))
+                } else if self.context == super::CodeGenContext::Repl {
+                    // BT-2503 (ADR 0095 §1): at the top level of a REPL eval there is
+                    // no enclosing-method receiver, so a bare `Self` would be an
+                    // unbound Core Erlang variable. Resolve `self` from the bindings
+                    // map instead, so the Inspector's value `evaluate:` can bind
+                    // `self` to the inspected value by passing `#{self => Value}`.
+                    // BT-2509: on a miss, raise `undefined_variable` directly rather
+                    // than routing through `resolve_name`, whose `bind:as:` tier would
+                    // let a user binding named `self` silently shadow the reserved
+                    // word. A top-level `self` with no `#{self => _}` binding is
+                    // genuinely undefined.
+                    let state_var = self.current_state_var();
+                    let resolved_var = self.fresh_var("Resolved");
+                    Ok(docvec![
+                        "case call 'maps':'find'('self', ",
+                        leaf::var(state_var),
+                        ") of ",
+                        "<{'ok', ",
+                        leaf::var(resolved_var.clone()),
+                        "}> when 'true' -> ",
+                        leaf::var(resolved_var),
+                        " <'error'> when 'true' -> ",
+                        "call 'beamtalk_workspace':'raise_undefined_variable'('self') ",
+                        "end",
+                    ])
+                } else {
+                    Ok(Document::Str("Self")) // self → Self parameter (BT-161)
+                }
+            }
+            "super" => {
+                // super alone is an error - must be used in message send (super method: args)
+                Err(CodeGenError::UnsupportedFeature {
+                    feature: "super used alone (must be in message send like 'super method: arg')"
+                        .to_string(),
+                    span: Some(id.span),
+                })
+            }
+            _ => {
+                // Check if it's a bound variable in current or outer scopes
+                if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
+                    Ok(docvec![leaf::var(var_name)])
+                } else {
+                    // BT-1326: In hybrid mode, check if this is a read-only field
+                    // accessed implicitly (bare name without self. prefix).
+                    if self.in_hybrid_loop {
+                        if let Some(param_var) =
+                            self.hybrid_readonly_field_params.get(id.name.as_str())
+                        {
+                            return Ok(leaf::var(param_var.clone()));
+                        }
+                    }
+                    // Field access from state/self
+                    // BT-213: Context determines which variable to use
+                    let state_var = match self.context {
+                        super::CodeGenContext::ValueType => {
+                            // BT-833: Value types use the latest Self{N} snapshot
+                            self.current_self_var()
+                        }
+                        super::CodeGenContext::Actor | super::CodeGenContext::Repl => {
+                            // BT-153: Use StateAcc when inside loop body
+                            // BT-1326: Hybrid loops use State* naming, not StateAcc*
+                            if self.in_hybrid_loop {
+                                self.current_state_var()
+                            } else if self.in_loop_body {
+                                super::util::versioned_var("StateAcc", self.state_version())
+                            } else {
+                                self.current_state_var()
+                            }
+                        }
+                    };
+                    // BT-2365 (ADR 0081 Phase 1): in REPL context a free
+                    // identifier is no longer guaranteed to be present in State —
+                    // workspace globals (singletons, bind:as:) are resolved lazily
+                    // rather than eagerly injected into the session map. So instead
+                    // of `maps:get/2` (which throws {badkey,_} on a miss) we look up
+                    // the locals map and, on a miss, fall through to the shared
+                    // runtime resolver, which checks bind:as: -> singletons ->
+                    // classes -> undefined_variable. Actor/ValueType field access is
+                    // unchanged (the field must exist in State/Self).
+                    //
+                    // This applies in loop/hybrid-loop bodies too: `state_var`
+                    // above already resolves to the context-appropriate map
+                    // (`StateAcc`/`StateAccN` for plain loops, `StateN` for hybrid
+                    // loops), and a free workspace global referenced inside a
+                    // `do:`/`collect:` block must resolve lazily rather than crash
+                    // with `badkey`. Captured locals (the loop accumulator and any
+                    // `__local__*` keys) are unpacked into bound vars at the loop
+                    // body entry, so they are handled by the `lookup_var` branch
+                    // above and never reach this fallthrough.
+                    //
+                    // Note: `resolve_name/2` does its own `maps:find(Name, Locals)`
+                    // as tier 1, then falls through to the live workspace tiers, so
+                    // passing `StateAcc`/`StateN` as the locals map is correct — a
+                    // miss there proceeds to bind:as: -> singletons -> classes.
+                    if self.context == super::CodeGenContext::Repl {
+                        let resolved_var = self.fresh_var("Resolved");
+                        Ok(docvec![
+                            "case call 'maps':'find'(",
+                            leaf::atom(id.name.to_string()),
+                            ", ",
+                            leaf::var(state_var.clone()),
+                            ") of ",
+                            "<{'ok', ",
+                            leaf::var(resolved_var.clone()),
+                            "}> when 'true' -> ",
+                            leaf::var(resolved_var),
+                            " <'error'> when 'true' -> call 'beamtalk_workspace':'resolve_name'(",
+                            leaf::var(state_var),
+                            ", ",
+                            leaf::atom(id.name.to_string()),
+                            ") ",
+                            "end",
+                        ])
+                    } else {
+                        Ok(docvec![
+                            "call 'maps':'get'(",
+                            leaf::atom(id.name.to_string()),
+                            ", ",
+                            leaf::var(state_var),
+                            ")",
+                        ])
+                    }
+                }
+            }
+        }
+    }
+
+    /// Generates code for a map literal: `~{key => value, ...}~`
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// ~{'name' => <<"Alice">>, 'age' => 30}~
+    /// ```
+    pub(super) fn generate_map_literal(&mut self, pairs: &[MapPair]) -> Result<Document<'static>> {
+        if pairs.is_empty() {
+            return Ok(Document::Str("~{}~"));
+        }
+
+        // BT-1937: Capture all keys and values as one ordered sequence so
+        // capture_subexpr_sequence can force-hoist every sub-expression in
+        // left-to-right order when ANY of them produces an open scope.
+        // Preserves the source-order semantics: key1, val1, key2, val2, ...
+        let mut all_exprs: Vec<&Expression> = Vec::with_capacity(pairs.len() * 2);
+        for pair in pairs {
+            all_exprs.push(&pair.key);
+            all_exprs.push(&pair.value);
+        }
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "MapLit")?;
+
+        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
+        let mut docs_iter = docs.drain(..);
+        for (i, _pair) in pairs.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            let key_doc = docs_iter.next().expect("key doc");
+            let val_doc = docs_iter.next().expect("value doc");
+            parts.push(key_doc);
+            parts.push(Document::Str(" => "));
+            parts.push(val_doc);
+        }
+        parts.push(Document::Str(" }~"));
+        let literal_doc = Document::Vec(parts);
+        Ok(self.finalize_dispatch_with_preamble(preamble, literal_doc, "MapLit"))
+    }
+
+    /// Generates code for a list literal: `#(1, 2, 3)` → `[1, 2, 3]`
+    ///
+    /// Cons syntax `#(head | tail)` → `[head | tail]`
+    pub(super) fn generate_list_literal(
+        &mut self,
+        elements: &[Expression],
+        tail: Option<&Expression>,
+    ) -> Result<Document<'static>> {
+        // BT-1937: Capture all elements + optional tail as one ordered
+        // sequence so evaluation order is preserved when sub-expressions have
+        // open scopes.
+        let mut all_exprs: Vec<&Expression> = Vec::with_capacity(elements.len() + 1);
+        for elem in elements {
+            all_exprs.push(elem);
+        }
+        if let Some(t) = tail {
+            all_exprs.push(t);
+        }
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "ListLit")?;
+
+        let mut parts: Vec<Document<'static>> = vec![Document::Str("[")];
+        let mut docs_iter = docs.drain(..);
+        for i in 0..elements.len() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(docs_iter.next().expect("element doc"));
+        }
+        if tail.is_some() {
+            if !elements.is_empty() {
+                parts.push(Document::Str(" | "));
+            }
+            parts.push(docs_iter.next().expect("tail doc"));
+        }
+        parts.push(Document::Str("]"));
+        let literal_doc = Document::Vec(parts);
+        Ok(self.finalize_dispatch_with_preamble(preamble, literal_doc, "ListLit"))
+    }
+
+    /// Generates code for an array literal: `#[1, 2, 3]`
+    ///
+    /// Compiles to a call to `beamtalk_array:from_list/1`:
+    /// ```erlang
+    /// call 'beamtalk_array':'from_list'([1, 2, 3])
+    /// ```
+    pub(super) fn generate_array_literal(
+        &mut self,
+        elements: &[Expression],
+    ) -> Result<Document<'static>> {
+        // BT-1937: Capture all elements as one ordered sequence so evaluation
+        // order is preserved when sub-expressions have open scopes.
+        let exprs: Vec<&Expression> = elements.iter().collect();
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "ArrLit")?;
+
+        let mut parts: Vec<Document<'static>> =
+            vec![Document::Str("call 'beamtalk_array':'from_list'([")];
+        let mut docs_iter = docs.drain(..);
+        for i in 0..elements.len() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(docs_iter.next().expect("element doc"));
+        }
+        parts.push(Document::Str("])"));
+        let literal_doc = Document::Vec(parts);
+        Ok(self.finalize_dispatch_with_preamble(preamble, literal_doc, "ArrLit"))
+    }
+
+    /// Generates code for field access (e.g., `self.value`).
+    ///
+    /// Maps to Erlang `maps:get/2` call:
+    /// ```erlang
+    /// call 'maps':'get'('value', State)  // Actor context
+    /// call 'maps':'get'('value', Self)   // ValueType context
+    /// ```
+    pub(super) fn generate_field_access(
+        &mut self,
+        receiver: &Expression,
+        field: &Identifier,
+    ) -> Result<Document<'static>> {
+        // BT-412: Class methods access class variables directly from ClassVars map
+        if self.in_class_method() {
+            if let Expression::Identifier(recv_id) = receiver {
+                if recv_id.name == "self" && self.class_var_names().contains(field.name.as_str()) {
+                    let cv = self.current_class_var();
+                    return Ok(docvec![
+                        "call 'maps':'get'(",
+                        leaf::atom(field.name.to_string()),
+                        ", ",
+                        leaf::var(cv),
+                        ")",
+                    ]);
+                }
+            }
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "cannot access instance field '{}' in a class method",
+                    field.name
+                ),
+                span: Some(field.span),
+            });
+        }
+        // Field access resolves against self's State/Self map. A non-self receiver
+        // is not valid (Beamtalk enforces encapsulation) and is rejected with a
+        // diagnostic in the fall-through below.
+        if let Expression::Identifier(recv_id) = receiver {
+            if recv_id.name == "self" {
+                // BT-1326: In hybrid mode, read-only fields are pre-extracted before the letrec.
+                // Use the direct parameter variable instead of generating maps:get every iteration.
+                if self.in_hybrid_loop {
+                    if let Some(param_var) =
+                        self.hybrid_readonly_field_params.get(field.name.as_str())
+                    {
+                        return Ok(leaf::var(param_var.clone()));
+                    }
+                }
+                // BT-213/BT-833: Use appropriate variable based on context
+                let state_var = match self.context {
+                    super::CodeGenContext::ValueType => self.current_self_var(),
+                    super::CodeGenContext::Actor => self.current_state_var(),
+                    super::CodeGenContext::Repl => "State".to_string(),
+                };
+                return Ok(docvec![
+                    "call 'maps':'get'(",
+                    leaf::atom(field.name.to_string()),
+                    ", ",
+                    leaf::var(state_var),
+                    ")",
+                ]);
+            }
+        }
+
+        let receiver_desc = match receiver {
+            Expression::Identifier(id) => id.name.to_string(),
+            _ => "receiver".to_string(),
+        };
+        Err(CodeGenError::UnsupportedFeature {
+            feature: format!(
+                "field access on a non-self receiver — use a getter method instead: \
+                `{receiver_desc} {field_name}` rather than `{receiver_desc}.{field_name}`",
+                field_name = field.name
+            ),
+            span: Some(receiver.span()),
+        })
+    }
+
+    /// Generates code for a field assignment (`self.field := value`).
+    ///
+    /// Uses threading to simulate mutation in Core Erlang. The generated pattern varies
+    /// by context:
+    ///
+    /// - **Actor context**: `State{n}` threading via `maps:put`
+    /// - **`ValueType` context** (BT-833): `Self{n}` threading — each assignment produces
+    ///   a new immutable snapshot; `self` in subsequent expressions resolves to `Self{n}`
+    ///
+    /// ```erlang
+    /// let _Val = <value> in
+    /// let State{n} = call 'maps':'put'('fieldName', _Val, State{n-1}) in
+    /// _Val
+    /// ```
+    ///
+    /// The assignment expression evaluates to the assigned value (Smalltalk semantics).
+    pub(super) fn generate_field_assignment(
+        &mut self,
+        field_name: &str,
+        value: &Expression,
+    ) -> Result<Document<'static>> {
+        // BT-412: Class methods assign to class variables via ClassVars map threading.
+        if self.in_class_method() {
+            return self.generate_class_var_field_assignment(field_name, value);
+        }
+        // BT-833: Value type field assignment — Self-threading (immutable update).
+        //
+        // Mirrors the Actor state-threading pattern but uses Self{N} instead of State{N}.
+        // Each `:=` produces a new Self snapshot via `maps:put`, so `self` in subsequent
+        // expressions resolves to the latest Self{N} via `current_self_var()`.
+        if matches!(self.context, super::CodeGenContext::ValueType) {
+            let val_var = self.fresh_temp_var("Val");
+            // Capture current Self BEFORE generating the value expression so that
+            // RHS field reads (e.g., `self.x := self.x + 1`) see the current snapshot.
+            let current_self = self.current_self_var();
+            let source_self_version = self.self_version();
+            let val_doc = self.expression_doc(value)?;
+            let new_self = self.next_self_var();
+            let target_self_version = self.self_version();
+            // BT-3139: previously uninstrumented — see
+            // check_simple_field_bind_invariant's doc comment.
+            self.check_simple_field_bind_invariant(
+                super::threaded_ir::VersionPrefix::SelfVt,
+                source_self_version,
+                target_self_version,
+                "value-type Self field-assignment version bind",
+                value.span(),
+            );
+            let doc = docvec![
+                "let ",
+                leaf::var(val_var.clone()),
+                " = ",
+                val_doc,
+                " in let ",
+                leaf::var(new_self),
+                " = call 'maps':'put'(",
+                leaf::atom(field_name.to_string()),
+                ", ",
+                leaf::var(val_var.clone()),
+                ", ",
+                leaf::var(current_self),
+                ") in ",
+                leaf::var(val_var),
+            ];
+            return Ok(doc);
+        }
+
+        let val_var = self.fresh_temp_var("Val");
+
+        // Capture current state BEFORE generating value expression,
+        // because the value expression may reference state (e.g., self.value + 1)
+        let current_state = self.current_state_var();
+        let source_state_version = self.state_version();
+
+        // Capture value expression (preserves side effects on state)
+        let val_doc = self.expression_doc(value)?;
+
+        // Now increment state version for the new state after assignment
+        let new_state = self.next_state_var();
+        let target_state_version = self.state_version();
+        // BT-3139: previously uninstrumented, like the Self branch above.
+        self.check_simple_field_bind_invariant(
+            super::threaded_ir::VersionPrefix::State,
+            source_state_version,
+            target_state_version,
+            "actor State field-assignment version bind",
+            value.span(),
+        );
+
+        let doc = docvec![
+            "let ",
+            leaf::var(val_var.clone()),
+            " = ",
+            val_doc,
+            " in let ",
+            leaf::var(new_state),
+            " = call 'maps':'put'(",
+            leaf::atom(field_name.to_string()),
+            ", ",
+            leaf::var(val_var.clone()),
+            ", ",
+            leaf::var(current_state),
+            ") in ",
+            leaf::var(val_var),
+        ];
+        Ok(doc)
+    }
+
+    /// BT-412: The class-var branch of [`Self::generate_field_assignment`]
+    /// (`self.field := value` inside a class method) — extracted to its own
+    /// function so the caller stays under clippy's `too_many_lines` budget
+    /// alongside its two sibling branches (BT-3139 added `ThreadedIr`
+    /// instrumentation to those two, growing the combined function past the
+    /// limit).
+    ///
+    /// The generated code leaves `let ClassVarsN = ...` open — the caller
+    /// (sequential expression handler) must provide the continuation.
+    ///
+    /// BT-3164: delegates the actual `Bind` construction (mint/
+    /// version-capture/shadow-write/isolated-verify) to the shared
+    /// [`Self::lower_class_var_field_assignment_bind`] — see its own doc
+    /// comment for the full ADR 0110 shadow-write rationale — and renders
+    /// the returned `Bind` immediately here (unlike
+    /// `gen_server::methods`'s `lower_class_method_last_class_var_bind`,
+    /// the one case BT-3164 promotes to a real top-level `ThreadedStmt::Bind`
+    /// instead of an immediately-rendered `Document`).
+    fn generate_class_var_field_assignment(
+        &mut self,
+        field_name: &str,
+        value: &Expression,
+    ) -> Result<Document<'static>> {
+        let (preamble_doc, bind, val_var) = self.lower_class_var_field_assignment_bind(
+            field_name,
+            value,
+            super::threaded_ir::FrameId::ROOT,
+        )?;
+        let bind_doc = {
+            let mut ctx = super::threaded_ir::RenderCtx::new(self);
+            super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
+        };
+        let doc = docvec![preamble_doc, bind_doc];
+        // Store result var name for callers that need to reference it
+        self.last_open_scope_result = Some(OpenScopeResult::Value(val_var));
+        Ok(doc)
+    }
+
+    /// BT-412/BT-3164: shared class-var assignment `Bind` construction —
+    /// the `self.classVar := value` shape's core sequence (mint `Val`,
+    /// capture `source_version`/`target_version` around
+    /// `expression_doc(value)`/`next_class_var()`, derive the ADR 0110
+    /// shadow-write gate, construct + isolated-verify the `Bind` via
+    /// [`super::threaded_ir::construct_and_verify_class_var_bind`]) —
+    /// extracted so [`Self::generate_class_var_field_assignment`] (every
+    /// non-last-position or nested class-var assignment, which still
+    /// renders its `Bind` immediately and keeps it inside an opaque
+    /// `Statement`) and `gen_server::methods`'s
+    /// `lower_class_method_last_class_var_bind` (BT-3164: the ONE case
+    /// promoted to a real top-level `Bind` node) don't each hand-roll the
+    /// same sequence (CLAUDE.md's no-duplicate-implementations rule).
+    ///
+    /// ADR 0110 (BT-3032/BT-3037): shadow write-through so a foreign NLR
+    /// (`^` belonging to another method's frame) relayed out of this class
+    /// method does not lose the mutation — `invoke_class_method/7` reads
+    /// the shadow back on the `{nlr_relay, ...}` path and erases it in
+    /// `after` on every path. Gated on `block_depth == 0`: a block literal
+    /// written in this method can execute in a *different* class's
+    /// `gen_server` process (ADR 0109), where an unconditional write would
+    /// corrupt that class's vars with this class's map. Top-frame-only
+    /// also matches existing semantics — block-interior class-var
+    /// mutations are already discarded on normal return (BT-1550).
+    ///
+    /// ADR 0110 amendment (BT-3039): keyed by `element(2, ClassSelf)` —
+    /// this call's dynamic runtime class identity — not a single shared
+    /// key. A mutating self-send inside a block invoked from a foreign
+    /// class's process (`block_depth` resets to 0 on entering the
+    /// self-sent method's own body) would otherwise write the *same*
+    /// global key that process's own class method is using, clobbering it
+    /// before that class's `invoke_class_method/7` reads it back.
+    /// `element(2, ClassSelf)` (not the static `self.class_name()`) also
+    /// keeps an inherited self-dispatch chain (`self otherClassMethod:`)
+    /// tagged with the calling subclass's identity, not the defining
+    /// ancestor's.
+    ///
+    /// BT-3140: this is NOT the only class-var write site —
+    /// `whileTrue:`/`timesRepeat:` loop bodies (and other state-threaded
+    /// constructs) never reach it; a class-var write there goes through
+    /// `generate_field_assignment_open` (`dispatch_codegen.rs`), which
+    /// threads via the generic State/StateAcc map and has no class-var
+    /// branch at all, so `block_depth == 0` never even gets consulted for
+    /// that shape. That gap is now a compile-time error
+    /// (`CodeGenError::ClassVarAssignmentInThreadedBody`) rather than a
+    /// silent runtime no-op — see ADR 0110's BT-3140 amendment.
+    ///
+    /// BT-3148 (ADR 0111 Phase D completion): this `Bind` is constructed
+    /// and isolated-verified through the SAME `threaded_ir::ThreadedStmt::Bind`
+    /// a `while_loops.rs`-style caller would — `threaded_ir::render`'s
+    /// `BindOp::Put` arm is the only place the ADR 0110 shadow write is
+    /// constructed (see [`super::threaded_ir::construct_and_verify_class_var_bind`]'s
+    /// doc comment); no second, hand-rolled `Document` reconstructs it.
+    ///
+    /// Returns `(preamble_doc, bind, val_var)`: `preamble_doc` is `"let
+    /// Val = <value> in "` — the caller supplies its own
+    /// continuation/glue after (rendering the `Bind` immediately and
+    /// appending, or pushing both as separate real `ThreadedStmt`s);
+    /// `bind` is the real, not-yet-rendered `ThreadedStmt::Bind`;
+    /// `val_var` is the minted temp variable name (both the `Bind`'s
+    /// `Put` value and the expression's own logical result).
+    ///
+    /// BT-3168: `frame` is the real [`threaded_ir::FrameId`] this write's
+    /// `Bind` is tagged with — `FrameId::ROOT` for the method's own
+    /// top-frame write (`generate_class_var_field_assignment`,
+    /// `lower_class_method_last_class_var_bind`), or the loop's real,
+    /// already-minted frame (`current_branch_frame()`) for a class-var write
+    /// directly inside a Letrec loop body that threads `ClassVars` through
+    /// the loop's own recursive tail call (`dispatch_codegen.rs`'s
+    /// `generate_field_assignment_open`) — per ADR 0111 Addendum 9, Question
+    /// 2's resolution. `shadow_write`/`shadow_write_eligible` stay driven by
+    /// `block_depth == 0` regardless of `frame`: a loop body never
+    /// increments `block_depth` (it is control flow, not a lexical closure
+    /// boundary), so this is `true` there exactly as it is at the method's
+    /// own top level.
+    pub(super) fn lower_class_var_field_assignment_bind(
+        &mut self,
+        field_name: &str,
+        value: &Expression,
+        frame: super::threaded_ir::FrameId,
+    ) -> Result<(Document<'static>, super::threaded_ir::ThreadedStmt, String)> {
+        if !self.class_var_names().contains(field_name) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "cannot assign to instance field '{field_name}' in a class method"
+                ),
+                span: Some(value.span()),
+            });
+        }
+        let val_var = self.fresh_temp_var("Val");
+        // BT-3148: the version numbers driving both the verify() call and
+        // the real Bind rendered below — captured before/after minting,
+        // exactly as `current_cv`/`new_cv`'s names used to be by hand.
+        let source_version = self.class_var_version();
+        let val_doc = self.expression_doc(value)?;
+        self.next_class_var();
+        let target_version = self.class_var_version();
+        let shadow_write = self.block_depth == 0;
+        let (bind, verify_errors) = super::threaded_ir::construct_and_verify_class_var_bind(
+            super::threaded_ir::BindOp::Put {
+                field: field_name.to_string(),
+                value: super::threaded_ir::ValueRef::Var(val_var.clone()),
+                class_tag: super::threaded_ir::ValueRef::Var("ClassSelf".to_string()),
+            },
+            shadow_write,
+            frame,
+            self.block_depth == 0, // independently re-derived per ADR 0111 §Verifier honesty — must not reuse `shadow_write`
+            source_version,
+            target_version,
+            value.span(),
+        );
+        self.report_threaded_ir_verify_errors(
+            &verify_errors,
+            "class-var mutation missing ADR 0110 shadow write",
+            value.span(),
+        );
+        let preamble_doc = docvec!["let ", leaf::var(val_var.clone()), " = ", val_doc, " in ",];
+        Ok((preamble_doc, bind, val_var))
+    }
+
+    /// BT-3139 (ADR 0111 coverage extension): construct + verify the
+    /// just-emitted `Self{N}`/`State{N}` `Bind`'s `ThreadedIr` shape via the
+    /// shared [`super::threaded_ir::verify_simple_bind`] helper — the two
+    /// `generate_field_assignment` sibling branches (value-type `Self` and
+    /// instance-actor `State`) that, unlike the class-var branch above
+    /// (BT-3135), constructed zero `ThreadedIr` fixture before this issue.
+    ///
+    /// `source_version`/`target_version` are the real `self_version()`/
+    /// `state_version()` counter reads taken immediately before and after
+    /// the caller's own `next_self_var()`/`next_state_var()` call — not
+    /// re-derived here, so this checks what the generator actually produced,
+    /// not a recomputation of it (ADR 0111 §Verifier honesty).
+    ///
+    /// `pub(super)` (BT-3180): also reused by `dispatch_codegen.rs`'s
+    /// `generate_field_assignment_open` plain-`State` branch, the sibling
+    /// "open" (non-last-position) mint site this function's own BT-3139
+    /// scope note left uncovered — same check, same reasoning, no reason to
+    /// hand-roll a second copy (CLAUDE.md's no-duplicate-implementations rule).
+    pub(super) fn check_simple_field_bind_invariant(
+        &mut self,
+        prefix: super::threaded_ir::VersionPrefix,
+        source_version: usize,
+        target_version: usize,
+        invariant_label: &str,
+        span: beamtalk_core::source_analysis::Span,
+    ) {
+        let errors =
+            super::threaded_ir::verify_simple_bind(prefix, source_version, target_version, span);
+        self.report_threaded_ir_verify_errors(&errors, invariant_label, span);
+    }
+
+    /// Extracts a block literal from an expression, unwrapping parentheses.
+    ///
+    /// Returns `Some(&Block)` for `Expression::Block` and for
+    /// `Expression::Parenthesized` wrappers around a block (recursively).
+    /// Returns `None` for all other expression kinds (identifiers, message sends, etc.).
+    ///
+    /// Used by Erlang interop sites to detect block arguments regardless of whether
+    /// the caller wrote `[:x | x + 1]` or `([:x | x + 1])`.
+    pub(super) fn extract_block_literal(expr: &Expression) -> Option<&Block> {
+        match expr {
+            Expression::Block(block) => Some(block),
+            Expression::Parenthesized { expression, .. } => Self::extract_block_literal(expression),
+            _ => None,
+        }
+    }
+
+    /// This is the Tier 2 promotion check: non-empty → stateful block, empty → pure block.
+    /// Centralised here so both `generate_block` and `generate_erlang_interop_wrapper`
+    /// use identical logic and cannot drift independently.
+    pub(super) fn captured_mutations_for_block(block: &Block) -> Vec<String> {
+        use crate::core_erlang::block_analysis::analyze_block;
+        Self::captured_mutations_from_analysis(&analyze_block(block))
+    }
+
+    /// Same check as [`Self::captured_mutations_for_block`], but from an already-computed
+    /// analysis — lets callers that need more than one fact off a single `analyze_block`
+    /// pass (e.g. [`Self::generate_block`], which also checks `field_writes`) avoid
+    /// re-walking the block's AST.
+    fn captured_mutations_from_analysis(
+        analysis: &crate::core_erlang::block_analysis::BlockMutationAnalysis,
+    ) -> Vec<String> {
+        analysis
+            .local_writes
+            .intersection(&analysis.captured_reads)
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    /// BT-1213: Returns captured mutation variable names if `expr` is a
+    /// `[block] value`/`value:`/etc. with a literal block that mutates outer locals.
+    pub(super) fn inline_block_captured_mutations(expr: &Expression) -> Option<Vec<String>> {
+        if let Expression::MessageSend {
+            receiver, selector, ..
+        } = expr
+        {
+            let is_value_selector = match selector {
+                beamtalk_core::ast::MessageSelector::Unary(name) => name == "value",
+                beamtalk_core::ast::MessageSelector::Keyword(parts) => {
+                    let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+                    matches!(
+                        sel.as_str(),
+                        "value:" | "value:value:" | "value:value:value:"
+                    )
+                }
+                beamtalk_core::ast::MessageSelector::Binary(_) => false,
+            };
+            if is_value_selector {
+                if let Expression::Block(block) = receiver.as_ref() {
+                    let mutations = Self::captured_mutations_for_block(block);
+                    if !mutations.is_empty() {
+                        return Some(mutations);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// BT-3151: Rejects a same-class self-send inside a block whose target
+    /// selector isn't provably free of class-variable mutation (see
+    /// `ClassMethodSelfSendInUnthreadedBlock`'s doc comment for the full
+    /// rationale) — such a block has no way to thread a classState mutation
+    /// back to the class method that owns it, silently losing it otherwise.
+    ///
+    /// Scoped to class-method context only (this is a classState concern,
+    /// not an actor-state one), and gated on the class actually declaring
+    /// class variables: with none, there is no classState a self-send could
+    /// possibly lose, so the conservative "not defined locally" fallback
+    /// below (which can't see inherited methods — e.g. `Actor`'s
+    /// `spawnWith:` called from a native Actor subclass with no
+    /// `classState:` of its own, like `Subprocess`) would otherwise reject
+    /// sends to safe inherited methods it has no way to prove safe. See
+    /// `class_var_names`.
+    ///
+    /// Deliberately NOT called from `generate_block` itself — that function
+    /// is the universal block-to-closure compiler, reached from contexts
+    /// that are safe (a block passed to a *different* class's class-side
+    /// method always runs in that class's own `gen_server` process, so a
+    /// same-class self-send inside it is genuine cross-process messaging,
+    /// not the lossy in-process direct-call optimization — see ADR 0110
+    /// BT-3039 / `shadow_cross_class_owner.bt`) or merely unproven (an
+    /// `ifTrue:`/`ifFalse:` block reached via generic dynamic dispatch is a
+    /// long-documented ADR 0110 "known limitation" (BT-1550), not something
+    /// this guard introduces). `generate_block` has no way to tell those apart
+    /// from its own call site. Instead, called individually from each
+    /// call site *confirmed* unsafe (same-process, in-process self-send,
+    /// mutation empirically lost). Most list-op call sites share this via
+    /// `check_bare_list_op_block_self_sends` (`control_flow/list_ops/mod.rs`)
+    /// — `do:`/`collect:`/`select:`/`reject:`/`detect:`/`detect:ifNone:`/
+    /// `anySatisfy:`/`allSatisfy:`/`count:`/`flatMap:`/`takeWhile:`/
+    /// `dropWhile:`/`partition:`/`groupBy:`/`sort:`, plus the
+    /// `eachWithIndex:`/`do:separatedBy:` desugar fallbacks
+    /// (`enumeration_ops.rs`) — every one a bare, no-mutation-threading
+    /// block that falls through to a plain/BIF dispatch. Called directly
+    /// (not through that shared helper) at three shapes it doesn't cover:
+    /// `generate_list_inject`'s BT-1327 pure-block fast path (bypasses
+    /// `generate_block` entirely — calls `generate_block_body` directly to
+    /// avoid wrapper overhead), a `whileTrue:`/`whileFalse:` condition
+    /// block, a bare `timesRepeat:`/`to:do:`/`to:by:do:` body that falls
+    /// through to the stdlib's own `Integer`/value-type loop implementation,
+    /// and a block argument crossing the Erlang interop boundary in a
+    /// direct `(Erlang mod) fn: arg` call (`generate_direct_erlang_call`'s
+    /// keyword branch, `dispatch_codegen.rs`) — same
+    /// `generate_erlang_interop_wrapper` → `generate_block` mechanism as
+    /// the list-op call sites above.
+    pub(super) fn check_no_unsafe_class_method_self_sends(
+        &self,
+        analysis: &crate::core_erlang::block_analysis::BlockMutationAnalysis,
+        span: beamtalk_core::source_analysis::Span,
+    ) -> Result<()> {
+        if !self.in_class_method() || self.class_var_names().is_empty() {
+            return Ok(());
+        }
+        let mut unsafe_selectors: Vec<&String> = analysis
+            .self_send_selectors
+            .iter()
+            .filter(|sel| {
+                self.class_var_mutating_selectors().contains(sel.as_str())
+                    || !self.class_method_selectors().contains(sel.as_str())
+            })
+            .collect();
+        if let Some(selector) = {
+            unsafe_selectors.sort_unstable();
+            unsafe_selectors.into_iter().next()
+        } {
+            return Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock {
+                selector: selector.clone(),
+                location: self.span_to_line(span).map_or_else(
+                    || format!("offset {}", span.start()),
+                    |line| format!("line {line}"),
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// Generates code for a block (closure).
+    ///
+    /// BT-852: Automatically selects Tier 1 (plain) or Tier 2 (stateful) codegen
+    /// based on `BlockMutationAnalysis`:
+    ///
+    /// - **Tier 2 (stateful):** blocks with captured variable mutations emit
+    ///   `fun(Params..., StateAcc) -> {Result, NewStateAcc}`
+    /// - **Plain fun:** pure blocks (no captured mutations) emit
+    ///   `fun(Params...) -> Result` — zero overhead for stateless blocks
+    ///
+    /// Captured mutations = variables written inside the block that were also
+    /// read from the outer scope (i.e. `local_writes ∩ captured_reads`).
+    /// Field writes (`self.x := ...`) and self-sends are handled separately:
+    /// - Field writes are threaded via `gen_server` State at the method level (BT-1140 for Tier 2).
+    /// - Self-sends are pre-scanned via `generate_tier2_self_send_open` (BT-851).
+    pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
+        use crate::core_erlang::block_analysis::analyze_block;
+        let analysis = analyze_block(block);
+
+        // BT-2792: `self.field :=` inside a block that reaches this generic
+        // fallback can't correctly thread state — see `validate_stored_closure`
+        // for why, and BT-2797 for the follow-up that will lift this once
+        // stored/opaque blocks get proper Tier 2 support. Checked *before* the
+        // captured-local-mutation promotion below: a block with both a field
+        // write and a captured-local mutation (e.g. `[:x | outerCount :=
+        // outerCount + x. self.total := self.total + outerCount]`) would
+        // otherwise be routed to Tier 2 for the local mutation alone, which
+        // fixes nothing — `generate_block_value_call` and friends still call
+        // the resulting 2-arity stateful fun with only its declared params
+        // (no `StateAcc` argument), producing a `badarity` crash at runtime
+        // instead of the erlc-time failure this check exists to catch.
+        // Location is a lazy thunk: format!/span_to_line only run on the
+        // (rare) error path, not on every block that reaches this line.
+        //
+        // Guarded on field_writes specifically (not a bare call to
+        // validate_stored_closure) so a block with *only* captured-local
+        // mutations — the legitimate Tier 2 case handled below — doesn't
+        // spuriously trip validate_stored_closure's separate local-mutation
+        // branch, which only applies to blocks that never reach Tier 2 at all.
+        if !analysis.field_writes.is_empty() {
+            Self::validate_stored_closure(&analysis, || {
+                self.span_to_line(block.span).map_or_else(
+                    || format!("offset {}", block.span.start()),
+                    |line| format!("line {line}"),
+                )
+            })?;
+        }
+
+        // BT-3151: deliberately NOT calling `check_no_unsafe_class_method_self_sends`
+        // here — `generate_block` is the universal block-to-closure compiler,
+        // reached both from genuinely unsafe bare-block call sites (a
+        // `select:`/`do:`/`inject:into:` argument, a `whileTrue:` condition —
+        // all same-process, in-process self-send contexts where the mutation
+        // is provably lost) AND from contexts that are safe or cannot be
+        // proven unsafe here: an `ifTrue:`/`ifFalse:` block reached via
+        // generic dynamic dispatch (a long-documented ADR 0110 "known
+        // limitation", not newly introduced by this guard), and a block
+        // passed to a message send whose receiver may be a *different*
+        // class's class-side method — which always executes in that class's
+        // own gen_server process (`docs/beamtalk-language-features.md` §
+        // Passing Blocks Through Class Methods), so a same-class self-send
+        // inside it is genuine cross-process messaging, not the in-process
+        // direct-call optimization, and correctly commits (confirmed by the
+        // pre-existing, passing `shadow_cross_class_owner.bt` fixture/
+        // `testCrossClassMutationDoesNotCorruptForeignProcessShadow`, ADR
+        // 0110 BT-3039). `generate_block` has no way to distinguish these
+        // from its own call site, so the check instead lives at each
+        // specific, individually-verified-unsafe call site: see
+        // `check_no_unsafe_class_method_self_sends`'s doc comment for the
+        // full list.
+
+        let captured_mutations = Self::captured_mutations_from_analysis(&analysis);
+
+        // BT-852: Blocks with captured local mutations use Tier 2 stateful calling convention.
+        if !captured_mutations.is_empty() {
+            return self.generate_block_stateful(block, &captured_mutations);
+        }
+
+        // Pure block: plain fun (no mutations to thread via Tier 2)
+        self.push_scope();
+        // BT-1475: Track block nesting so self-cast sends route through the mailbox
+        self.block_depth += 1;
+        // BT-1550: Save class_var_version so that self-calls inside the closure
+        // don't leak ClassVars{N} bindings into the enclosing scope.  The closure
+        // is a separate Core Erlang `fun`, so any let-bindings inside it are not
+        // visible to the outer method body.
+        let saved_class_var_version = self.class_var_version();
+
+        let mut param_parts: Vec<Document<'static>> = Vec::new();
+        for (i, param) in block.parameters.iter().enumerate() {
+            if i > 0 {
+                param_parts.push(Document::Str(", "));
+            }
+            let var_name = self.fresh_var(&param.name);
+            param_parts.push(leaf::var(var_name));
+        }
+        let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
+
+        // Generate block body as Document.
+        // BT-1475: Ensure block_depth and scope are restored even on error.
+        let body_result = self.generate_block_body(block);
+        self.block_depth -= 1;
+        self.set_class_var_version(saved_class_var_version);
+        self.pop_scope();
+        // BT-1937: The block is a closed `fun () -> ... end` expression. Any
+        // open let-chain produced inside the body is closed by the body
+        // handlers and scoped inside the fun, so the block as a whole MUST
+        // NOT propagate an open scope to its outer context. Clear the
+        // side-channel in case the body's last statement left it set.
+        self.last_open_scope_result = None;
+        Ok(docvec![header, body_result?])
+    }
+
+    /// BT-851: Generates a Tier 2 stateful block (ADR 0041 Phase 0).
+    ///
+    /// Emits a block with the stateful calling convention:
+    /// `fun(Param1, ..., ParamN, StateAcc) -> {Result, NewStateAcc}`
+    ///
+    /// Captured-mutated variables are unpacked from `StateAcc` at the start,
+    /// assignments thread through `StateAcc` via `maps:put`, and the final
+    /// expression is wrapped in a `{Result, StateAccN}` tuple.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// fun (X, StateAcc) ->
+    ///     let Count = call 'maps':'get'('__local__count', StateAcc) in
+    ///     let _Sum = call 'erlang':'+'(Count, X) in
+    ///     let StateAcc1 = call 'maps':'put'('__local__count', _Sum, StateAcc) in
+    ///     {_Sum, StateAcc1}
+    /// end
+    /// ```
+    ///
+    /// BT-3149 (ADR 0111 close-out): this arm's mutation sequence is built
+    /// as real [`ThreadedStmt`]s (the same C1/C2-style shapes
+    /// `conditionals.rs`'s ADR 0111 Addendum 5 pinned, via
+    /// `lower_field_assignment_bind`/`lower_local_var_assignment_bind`),
+    /// wrapped in one [`threaded_ir::ThreadedStmt::Threaded`] node (this
+    /// single-arm `with_branch_context`'s own [`threaded_ir::FrameId`]),
+    /// [`threaded_ir::verify`]d and [`threaded_ir::render`]ed via
+    /// `conditionals.rs`'s `verify_and_render_branch_arm` — the last real
+    /// production caller of the scalar-synthesis `check_branch_frame_linearity`
+    /// scaffolding is gone; `UnboundVersion` is a live check against this
+    /// arm's real IR for the first time (see that scaffolding's own doc
+    /// comment on why it could never fire from here before).
+    pub(super) fn generate_block_stateful(
+        &mut self,
+        block: &Block,
+        captured_vars: &[String],
+    ) -> Result<Document<'static>> {
+        self.push_scope();
+        // BT-1475: Track block nesting so self-cast sends route through the mailbox
+        self.block_depth += 1;
+
+        // Bind block parameters
+        let mut param_parts: Vec<Document<'static>> = Vec::new();
+        for (i, param) in block.parameters.iter().enumerate() {
+            if i > 0 {
+                param_parts.push(Document::Str(", "));
+            }
+            let var_name = self.fresh_var(&param.name);
+            param_parts.push(leaf::var(var_name));
+        }
+
+        // Add StateAcc parameter
+        if !block.parameters.is_empty() {
+            param_parts.push(Document::Str(", "));
+        }
+        param_parts.push(Document::Str("StateAcc"));
+
+        let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
+
+        // Set up loop body context for StateAcc-based threading
+        let result = self.with_branch_context(|this| {
+            let frame = this.current_branch_frame();
+            let mut stmts: Vec<ThreadedStmt> = Vec::new();
+
+            // Unpack captured-mutated vars from StateAcc.
+            // BT-909: Use maps:get/3 with the current outer value as fallback so the block
+            // remains callable even when StateAcc was not pre-seeded with the local state keys
+            // (e.g. when called through the runtime arity normalization wrapper).
+            for var_name in captured_vars {
+                let core_var = Self::to_core_erlang_var(var_name);
+                let key = Self::local_state_key(var_name);
+                // Look up the outer binding BEFORE rebinding so the fallback refers to the
+                // value at block-definition time (not the newly introduced inner binding).
+                // If no outer binding exists (e.g. REPL mode where vars come from state dict),
+                // fall back to maps:get/2 (original behavior) to avoid referencing unbound vars.
+                let outer_binding = this.lookup_var(var_name).cloned();
+                this.bind_var(var_name, &core_var);
+                let unpack_doc = if let Some(outer_var) = outer_binding {
+                    docvec![
+                        "let ",
+                        leaf::var(core_var),
+                        " = call 'maps':'get'(",
+                        leaf::atom(key),
+                        ", StateAcc, ",
+                        leaf::var(outer_var),
+                        ") in "
+                    ]
+                } else {
+                    docvec![
+                        "let ",
+                        leaf::var(core_var),
+                        " = call 'maps':'get'(",
+                        leaf::atom(key),
+                        ", StateAcc) in "
+                    ]
+                };
+                stmts.push(ThreadedStmt::Statement(unpack_doc, block.span));
+            }
+
+            // Generate body expressions with state threading
+            this.generate_block_stateful_body(block, frame, &mut stmts)?;
+            let branch_final = this.state_version();
+            Ok::<_, crate::core_erlang::CodeGenError>(this.verify_and_render_branch_arm(
+                stmts,
+                frame,
+                branch_final,
+                block.span,
+            ))
+        });
+        // BT-1475: Ensure block_depth and scope are restored even on error.
+        self.block_depth -= 1;
+        self.pop_scope();
+        // BT-1937: Stateful blocks are also closed `fun (...) -> {Result, NewStateAcc}`
+        // expressions and must not propagate an open scope from their body to
+        // the outer context.
+        self.last_open_scope_result = None;
+
+        let (body_doc, _branch_final) = result?;
+
+        Ok(docvec![header, body_doc])
+    }
+
+    /// BT-855: Generates an Erlang-compatible wrapper for a block at an Erlang call site.
+    ///
+    /// Erlang/Elixir code does not know about the Beamtalk state-threading protocol.
+    /// When a Beamtalk block is passed to an Erlang call site (e.g. `lists:map/2`),
+    /// this function generates a wrapper that strips the `StateAcc` protocol:
+    ///
+    /// ```erlang
+    /// %% For a stateful block: fun(X, StateAcc) -> {X + Count, StateAcc1}
+    /// let _BtBlock = fun(X, StateAcc) -> ... in
+    /// fun(X) ->
+    ///     let _WT = apply _BtBlock(X, CurrentState) in
+    ///     let _WRes = call 'erlang':'element'(1, _WT) in _WRes
+    /// ```
+    ///
+    /// The wrapper captures `CurrentState` from the enclosing scope so that reads of
+    /// captured variables succeed. Mutations made inside the block are dropped — the
+    /// updated `StateAcc` is not propagated back to the Beamtalk caller.
+    ///
+    /// For **pure blocks** (no captured mutations), returns the plain Tier 1 block
+    /// `fun(Params...) -> Body` unchanged and `is_stateful = false`.
+    ///
+    /// For **stateful blocks** (captured mutations), returns the wrapper expression
+    /// and `is_stateful = true`. Callers should emit a diagnostic warning because
+    /// mutations will be silently dropped.
+    pub(super) fn generate_erlang_interop_wrapper(
+        &mut self,
+        block: &Block,
+    ) -> Result<(Document<'static>, bool)> {
+        // Use the shared helper to ensure consistent Tier 2 promotion logic.
+        let captured_mutations = Self::captured_mutations_for_block(block);
+
+        if captured_mutations.is_empty() {
+            // Pure block — plain Tier 1 fun, no wrapping needed.
+            return Ok((self.generate_block(block)?, false));
+        }
+
+        // Stateful block (captured local mutations) — generate Tier 2 block,
+        // then wrap it to strip the protocol so Erlang can call it as a plain fun.
+        let bt_block_var = self.fresh_temp_var("BtBlock");
+
+        // Generate the Tier 2 block: fun(Params..., StateAcc) -> {Result, NewStateAcc}
+        let tier2_doc = self.generate_block_stateful(block, &captured_mutations)?;
+
+        // Seed StateAcc with captured locals before passing to the Tier 2 block.
+        // The Tier 2 block expects keys like "__local__count" in the StateAcc for
+        // captured mutations. For ValueType context, start with an empty map since
+        // there's no State var in the signature. For Actor/Repl, start from current_state.
+        let mut seed_state = if matches!(self.context, CodeGenContext::ValueType) {
+            self.fresh_temp_var("WStateAcc")
+        } else {
+            self.current_state_var().clone()
+        };
+        let mut seed_docs: Vec<Document<'static>> = Vec::new();
+
+        // If ValueType, initialize StateAcc to empty map.
+        if matches!(self.context, CodeGenContext::ValueType) {
+            seed_docs.push(docvec![
+                "let ",
+                leaf::var(seed_state.clone()),
+                " = ~{}~ in "
+            ]);
+        }
+
+        // Pack captured locals into StateAcc under "__local__*" keys.
+        for var_name in &captured_mutations {
+            let next_state = self.fresh_temp_var("WStateAcc");
+            let key = Self::local_state_key(var_name);
+
+            // BT-857: Generate code to fetch the captured variable.
+            // If the variable is bound in the local scope, use it directly.
+            // Otherwise, fetch it from the current State map (for REPL/Actor contexts).
+            let var_ref = if let Some(bound_var) = self.lookup_var(var_name).cloned() {
+                docvec![leaf::var(bound_var)]
+            } else {
+                // Variable not in scope — fetch from State map
+                // In REPL context, captured mutations are stored in State (the bindings map)
+                let state_var = self.current_state_var();
+                docvec![
+                    "call 'maps':'get'(",
+                    leaf::atom(var_name.clone()),
+                    ", ",
+                    leaf::var(state_var),
+                    ")"
+                ]
+            };
+
+            seed_docs.push(docvec![
+                "let ",
+                leaf::var(next_state.clone()),
+                " = call 'maps':'put'(",
+                leaf::atom(key),
+                ", ",
+                var_ref,
+                ", ",
+                leaf::var(seed_state),
+                ") in "
+            ]);
+            seed_state = next_state;
+        }
+
+        // Fresh parameter names for the wrapper fun (separate scope from the Tier 2 block).
+        let n_params = block.parameters.len();
+        let wrap_params: Vec<String> = (0..n_params).map(|_| self.fresh_temp_var("WArg")).collect();
+
+        // Build wrapper parameter list: "WArg1, WArg2, ..."
+        let mut param_parts: Vec<Document<'static>> = Vec::new();
+        for (i, p) in wrap_params.iter().enumerate() {
+            if i > 0 {
+                param_parts.push(Document::Str(", "));
+            }
+            param_parts.push(leaf::var(p.clone()));
+        }
+
+        // Build apply arguments: "WArg1, ..., WArgN, SeedStateAcc"
+        let mut apply_parts: Vec<Document<'static>> = Vec::new();
+        for (i, p) in wrap_params.iter().enumerate() {
+            if i > 0 {
+                apply_parts.push(Document::Str(", "));
+            }
+            apply_parts.push(leaf::var(p.clone()));
+        }
+        if !wrap_params.is_empty() {
+            apply_parts.push(Document::Str(", "));
+        }
+        apply_parts.push(leaf::var(seed_state));
+
+        // Emit:
+        // let _BtBlock = fun(Params..., StateAcc) -> ... in
+        // let WStateAcc0 = ~{}~ in  (if ValueType)
+        // let WStateAcc1 = call 'maps':'put'('__local__count', Count, WStateAcc0) in
+        // ... (for each captured local)
+        // fun(WArg1, ..., WArgN) ->
+        //     let _WT = apply _BtBlock(WArg1, ..., WArgN, WStateAccN) in
+        //     let _WRes = call 'erlang':'element'(1, _WT) in _WRes
+        //
+        // NOTE 1: `let {_WRes, _} = apply ...` is invalid Core Erlang inside a fun body
+        // (erlc rejects tuple patterns in let). Use element/2 extraction instead.
+        // NOTE 2: In Core Erlang, `fun (Params) -> Body` does NOT use `end` to
+        // terminate the fun — the Body expression ends the fun.
+
+        let wrap_tuple = self.fresh_temp_var("WT");
+        let wrap_result = self.fresh_temp_var("WRes");
+        let wrapper_doc = docvec![
+            "let ",
+            leaf::var(bt_block_var.clone()),
+            " = ",
+            tier2_doc,
+            " in ",
+            Document::Vec(seed_docs),
+            "fun (",
+            Document::Vec(param_parts),
+            ") -> let ",
+            leaf::var(wrap_tuple.clone()),
+            " = apply ",
+            leaf::var(bt_block_var),
+            " (",
+            Document::Vec(apply_parts),
+            ") in let ",
+            leaf::var(wrap_result.clone()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(wrap_tuple),
+            ") in ",
+            leaf::var(wrap_result),
+        ];
+
+        Ok((wrapper_doc, true))
+    }
+
+    /// BT-851: Generates the body of a Tier 2 stateful block with state threading.
+    ///
+    /// BT-3149 (ADR 0111 close-out, task 2 — the last real production
+    /// caller of `check_branch_frame_linearity`'s scalar-synthesis
+    /// scaffolding): field-/local-var-assignment mutations now lower
+    /// through `conditionals.rs`'s `lower_field_assignment_bind`/
+    /// `lower_local_var_assignment_bind` — real [`ThreadedStmt::Bind`]
+    /// nodes, not a hand-rolled `maps:put` `Document` fragment — appended
+    /// to `stmts` alongside every other (non-mutating) statement as an
+    /// opaque [`ThreadedStmt::Statement`]. The two shared helpers only
+    /// build the *mutation* itself; this function's own is-last/non-last
+    /// result wrapping (the `maps:get` re-read on `is_last`, the
+    /// `Refreshed` rebind on non-last local-var assignment) is unchanged —
+    /// neither shape appears in `conditionals.rs`'s own C1/C2 arm closer,
+    /// which uses the freshly-bound value var directly instead of
+    /// re-reading it back out of the state map — so it stays here,
+    /// modeled as its own `Statement`/[`ThreadedStmt::Return`], preserving
+    /// the exact pre-migration bytes.
+    #[allow(clippy::too_many_lines)]
+    fn generate_block_stateful_body(
+        &mut self,
+        block: &Block,
+        frame: threaded_ir::FrameId,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let filtered_body = super::util::collect_body_exprs(&block.body);
+
+        for (i, expr) in filtered_body.iter().enumerate() {
+            let is_last = i == filtered_body.len() - 1;
+            let span = expr.span();
+
+            if Self::is_field_assignment(expr) {
+                let _val_var = self.lower_field_assignment_bind(expr, frame, span, stmts)?;
+                if is_last {
+                    // Return the assigned value and updated state.
+                    // Extract the field name from the assignment target.
+                    let final_version = self.state_version();
+                    let state = self.current_state_var();
+                    if let Expression::Assignment { target, .. } = expr {
+                        if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                            stmts.push(ThreadedStmt::Return(
+                                ValueRef::Doc(docvec![
+                                    "call 'maps':'get'(",
+                                    leaf::atom(field.name.to_string()),
+                                    ", ",
+                                    leaf::var(state),
+                                    ")",
+                                ]),
+                                VersionedVar::new(VersionPrefix::State, final_version, frame),
+                                span,
+                            ));
+                        }
+                    }
+                }
+            } else if Self::is_local_var_assignment(expr) {
+                let _val_var = self.lower_local_var_assignment_bind(expr, frame, span, stmts)?;
+                if let Expression::Assignment { target, .. } = expr {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let key = Self::local_state_key(&id.name);
+                        if is_last {
+                            // Last expression is an assignment — result is the assigned value.
+                            // Read it from the updated state map (the _Val was put there).
+                            let final_version = self.state_version();
+                            let state = self.current_state_var();
+                            stmts.push(ThreadedStmt::Return(
+                                ValueRef::Doc(docvec![
+                                    "call 'maps':'get'(",
+                                    leaf::atom(key),
+                                    ", ",
+                                    leaf::var(state),
+                                    ")",
+                                ]),
+                                VersionedVar::new(VersionPrefix::State, final_version, frame),
+                                span,
+                            ));
+                        } else {
+                            // Non-last assignment: refresh scope binding so subsequent reads
+                            // of this variable see the updated value (not the initial unpack).
+                            let fresh = self.fresh_temp_var("Refreshed");
+                            self.bind_var(&id.name, &fresh);
+                            let state = self.current_state_var();
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec![
+                                    "let ",
+                                    leaf::var(fresh),
+                                    " = call 'maps':'get'(",
+                                    leaf::atom(key),
+                                    ", ",
+                                    leaf::var(state),
+                                    ") in "
+                                ],
+                                span,
+                            ));
+                        }
+                    }
+                }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    stmts.push(ThreadedStmt::Statement(d, span));
+                }
+                if is_last {
+                    let final_version = self.state_version();
+                    stmts.push(ThreadedStmt::Return(
+                        ValueRef::Literal("'nil'"),
+                        VersionedVar::new(VersionPrefix::State, final_version, frame),
+                        span,
+                    ));
+                }
+            } else {
+                // Non-assignment expression
+                // BT-1397: Detect open-scope results from class method self-sends.
+                let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                if is_last {
+                    // Wrap result in {Result, StateAcc} tuple
+                    let final_version = self.state_version();
+                    // BT-1397: If the expression left an open scope, close it with
+                    // the result variable then wrap in the Tier 2 tuple.
+                    match open_scope {
+                        Some(OpenScopeResult::Value(result_var)) => {
+                            stmts.push(ThreadedStmt::Statement(doc, span));
+                            stmts.push(ThreadedStmt::Return(
+                                ValueRef::Var(result_var),
+                                VersionedVar::new(VersionPrefix::State, final_version, frame),
+                                span,
+                            ));
+                        }
+                        // BT-3053: no single value — substitute do:'s own `nil` contract.
+                        Some(OpenScopeResult::NoValue) => {
+                            stmts.push(ThreadedStmt::Statement(doc, span));
+                            stmts.push(ThreadedStmt::Return(
+                                ValueRef::Literal("'nil'"),
+                                VersionedVar::new(VersionPrefix::State, final_version, frame),
+                                span,
+                            ));
+                        }
+                        None => {
+                            let result_var = self.fresh_temp_var("T2Res");
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec!["let ", leaf::var(result_var.clone()), " = ", doc, " in "],
+                                span,
+                            ));
+                            stmts.push(ThreadedStmt::Return(
+                                ValueRef::Var(result_var),
+                                VersionedVar::new(VersionPrefix::State, final_version, frame),
+                                span,
+                            ));
+                        }
+                    }
+                } else {
+                    match open_scope {
+                        Some(OpenScopeResult::Value(result_var)) => {
+                            // BT-1397: Open scope from class method self-send — emit chain
+                            // then discard the result.
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec![doc, "let _ = ", leaf::var(result_var), " in "],
+                                span,
+                            ));
+                        }
+                        // BT-3053: no single value to discard — its own rebindings
+                        // are already visible; nothing to bind here.
+                        Some(OpenScopeResult::NoValue) => {
+                            stmts.push(ThreadedStmt::Statement(doc, span));
+                        }
+                        None => {
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec![Document::Str("let _ = "), doc, Document::Str(" in ")],
+                                span,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Generates await expression.
+    ///
+    /// Delegates to `beamtalk_future:await/1` which blocks until the future
+    /// is resolved or rejected (with 30-second default timeout):
+    /// ```erlang
+    /// call 'beamtalk_future':'await'(Future)
+    /// ```
+    pub(super) fn generate_await(&mut self, future: &Expression) -> Result<Document<'static>> {
+        // Delegate to beamtalk_future:await/1, which uses 30s default timeout
+        let future_doc = self.expression_doc(future)?;
+        Ok(docvec!["call 'beamtalk_future':'await'(", future_doc, ")"])
+    }
+
+    /// Generates await with explicit timeout.
+    ///
+    /// Delegates to `beamtalk_future:await/2` with an explicit timeout value:
+    /// ```erlang
+    /// call 'beamtalk_future':'await'(Future, Timeout)
+    /// ```
+    pub(super) fn generate_await_with_timeout(
+        &mut self,
+        future: &Expression,
+        timeout: &Expression,
+    ) -> Result<Document<'static>> {
+        let future_doc = self.expression_doc(future)?;
+        let timeout_doc = self.expression_doc(timeout)?;
+        Ok(docvec![
+            "call 'beamtalk_future':'await'(",
+            future_doc,
+            ", ",
+            timeout_doc,
+            ")"
+        ])
+    }
+
+    /// Generates awaitForever expression.
+    ///
+    /// Delegates to `beamtalk_future:await_forever/1` which waits indefinitely:
+    /// ```erlang
+    /// call 'beamtalk_future':'await_forever'(Future)
+    /// ```
+    pub(super) fn generate_await_forever(
+        &mut self,
+        future: &Expression,
+    ) -> Result<Document<'static>> {
+        let future_doc = self.expression_doc(future)?;
+        Ok(docvec![
+            "call 'beamtalk_future':'await_forever'(",
+            future_doc,
+            ")"
+        ])
+    }
+
+    /// Generates code for cascade expressions.
+    ///
+    /// Cascades send multiple messages to the same receiver using semicolon separators.
+    /// The receiver is evaluated once and each message is sent to that receiver.
+    ///
+    /// # Example
+    ///
+    /// ```beamtalk
+    /// collection add: 1; add: 2; add: 3
+    /// ```
+    ///
+    /// Generates:
+    ///
+    /// ```erlang
+    /// let Receiver = <evaluate collection> in
+    ///   let _ = <send add: 1 to Receiver> in
+    ///   let _ = <send add: 2 to Receiver> in
+    ///   <send add: 3 to Receiver>
+    /// ```
+    ///
+    /// The cascade returns the result of the final message.
+    #[allow(clippy::too_many_lines)]
+    pub(super) fn generate_cascade(
+        &mut self,
+        receiver: &Expression,
+        messages: &[CascadeMessage],
+    ) -> Result<Document<'static>> {
+        // BT-2246 / BT-2270: ClassBuilder construction cascades with literal
+        // block methods get synthesised source setters — methodSource: from
+        // methods: (instance side) and classMethodSource: from classMethods:
+        // (class side) — so builder-defined classes are indexable by
+        // SystemNavigation on both sides.
+        let augmented = super::class_builder_source::inject_method_source(receiver, messages);
+        let messages: &[CascadeMessage] = augmented.as_deref().unwrap_or(messages);
+
+        if messages.is_empty() {
+            // Edge case: cascade with no messages just evaluates to the receiver
+            return self.generate_expression(receiver);
+        }
+
+        // The parser represents cascades such that `receiver` is the *first*
+        // message send expression, e.g. for:
+        //
+        //   counter increment; increment; getValue
+        //
+        // `receiver` is a MessageSend for `counter increment`, and `messages`
+        // holds the remaining cascade messages. We need to:
+        //   1. Evaluate the underlying receiver expression (`counter`) once,
+        //      bind it to a temp variable.
+        //   2. Send the first message (`increment`) and all subsequent
+        //      cascade messages to that same bound receiver.
+        //
+        // Normalize the cascade into (underlying_receiver, all_messages) so
+        // both the MessageSend and non-MessageSend cases share one code path.
+        let (underlying_receiver, all_messages): (
+            &Expression,
+            Vec<(&MessageSelector, &[Expression])>,
+        ) = if let Expression::MessageSend {
+            receiver: inner,
+            selector: first_selector,
+            arguments: first_arguments,
+            ..
+        } = receiver
+        {
+            let mut all: Vec<(&MessageSelector, &[Expression])> =
+                Vec::with_capacity(messages.len() + 1);
+            all.push((first_selector, first_arguments.as_slice()));
+            for msg in messages {
+                all.push((&msg.selector, msg.arguments.as_slice()));
+            }
+            (inner.as_ref(), all)
+        } else {
+            // Fallback: receiver is not a MessageSend — send all cascade
+            // messages directly to it.
+            let all: Vec<(&MessageSelector, &[Expression])> = messages
+                .iter()
+                .map(|msg| (&msg.selector, msg.arguments.as_slice()))
+                .collect();
+            (receiver, all)
+        };
+
+        // ADR 0084 / BT-2267: A `classBuilder … classMethods: #{…}; register`
+        // cascade gets its `classMethods:` block-literal values lowered as
+        // class-method funs (see `generate_class_methods_map_arg`).
+        let builder_ctx: Option<(String, Vec<String>)> =
+            super::class_builder_source::builder_class_method_context(receiver, messages);
+
+        let receiver_var = self.fresh_temp_var("Receiver");
+        let recv_doc = self.expression_doc(underlying_receiver)?;
+        let mut docs: Vec<Document<'static>> = vec![docvec![
+            "let ",
+            leaf::var(receiver_var.clone()),
+            " = ",
+            recv_doc,
+            " in "
+        ]];
+
+        let total_messages = all_messages.len();
+        for (index, (selector, arguments)) in all_messages.into_iter().enumerate() {
+            let is_last = index == total_messages - 1;
+
+            let selector_atom = selector.name().to_string();
+            if matches!(selector, MessageSelector::Binary(_)) {
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "binary selectors in cascades".to_string(),
+                    span: Some(underlying_receiver.span()),
+                });
+            }
+
+            // BT-884: Hoist field-assignment arg bindings BEFORE the `let _ =`
+            // wrapper so that StateN remains in scope for subsequent messages.
+            // BT-2267: the `classMethods:` argument of a recognised builder
+            // cascade gets its block values lowered as class-method funs.
+            // BT-2269: `addClassMethod: #sel body: [block]` is the incremental
+            // counterpart — its block (the second argument) is lowered the same
+            // way, keeping the selector argument as an ordinary value.
+            let arg_docs = match &builder_ctx {
+                Some((bclass, cvars)) if selector.name().as_str() == "classMethods:" => {
+                    match arguments {
+                        [Expression::MapLiteral { pairs, .. }] => {
+                            vec![self.generate_class_methods_map_arg(pairs, bclass, cvars)?]
+                        }
+                        _ => self.generate_cascade_args(arguments, &mut docs)?,
+                    }
+                }
+                Some((bclass, cvars)) if selector.name().as_str() == "addClassMethod:body:" => {
+                    match arguments {
+                        [
+                            sel_arg @ Expression::Literal(Literal::Symbol(_), _),
+                            Expression::Block(block),
+                        ] => {
+                            let sel_doc = self
+                                .generate_cascade_args(std::slice::from_ref(sel_arg), &mut docs)?;
+                            let mut combined = sel_doc;
+                            combined.push(
+                                self.generate_class_method_single_arg(
+                                    sel_arg, block, bclass, cvars,
+                                )?,
+                            );
+                            combined
+                        }
+                        _ => self.generate_cascade_args(arguments, &mut docs)?,
+                    }
+                }
+                _ => self.generate_cascade_args(arguments, &mut docs)?,
+            };
+
+            if !is_last {
+                // For all but the last message, discard the result
+                docs.push(Document::Str("let _ = "));
+            }
+
+            docs.push(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(receiver_var.clone()),
+                ", ",
+                leaf::atom(selector_atom),
+                ", [",
+            ]);
+            for (j, arg_doc) in arg_docs.into_iter().enumerate() {
+                if j > 0 {
+                    docs.push(Document::Str(", "));
+                }
+                docs.push(arg_doc);
+            }
+
+            docs.push(Document::Str("])"));
+
+            if !is_last {
+                docs.push(Document::Str(" in "));
+            }
+        }
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// Generates the body of a block with proper state threading.
+    ///
+    /// Handles field assignments specially to keep State{n} variables in scope
+    /// for subsequent expressions. See inline comments for threading details.
+    pub(super) fn generate_block_body(&mut self, block: &Block) -> Result<Document<'static>> {
+        if block.body.is_empty() {
+            return Ok(Document::Str("'nil'"));
+        }
+
+        // Filter out @expect directives — they are compile-time only and generate no code.
+        let body = super::util::collect_body_exprs(&block.body);
+
+        self.generate_block_body_slice(&body)
+    }
+
+    /// Generates a slice of block body expressions with proper state threading.
+    ///
+    /// Handles field assignments specially to keep State{n} variables in scope
+    /// for subsequent expressions. Called recursively for tuple destructuring.
+    ///
+    /// # State threading
+    ///
+    /// For a block like: `[self.value := self.value + 1. ^self.value]`
+    /// We need:
+    ///   `let _Val1 = ... in let State1 = ... in <return expression>`
+    /// NOT:
+    ///   `let _seq1 = (let _Val1 = ... in let State1 = ... in _Val1) in <return expression>`
+    ///
+    /// The difference is crucial: in the first form, `State1` is visible in `<return expression>`.
+    ///
+    /// For local variable assignments like: `[count := 0. count + 1]`
+    /// We need:
+    ///   `let Count = 0 in Count + 1`
+    pub(super) fn generate_block_body_slice(
+        &mut self,
+        body: &[&Expression],
+    ) -> Result<Document<'static>> {
+        if body.is_empty() {
+            return Ok(Document::Str("'nil'"));
+        }
+
+        let mut docs: Vec<Document<'static>> = Vec::with_capacity(body.len());
+
+        for (i, expr) in body.iter().enumerate() {
+            let is_last = i == body.len() - 1;
+            let kind = Self::classify_block_expr(self, expr, is_last);
+            let doc = self.generate_block_expr(expr, &kind)?;
+            docs.push(doc);
+        }
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// Classify a block body expression for dispatch.
+    ///
+    /// The order of checks matters: more specific patterns (e.g. destructuring,
+    /// field assignment) must come before general ones (e.g. pure expression).
+    fn classify_block_expr(&self, expr: &Expression, is_last: bool) -> BlockExprKind {
+        if matches!(expr, Expression::DestructureAssignment { .. }) {
+            return BlockExprKind::Destructure { is_last };
+        }
+
+        if is_last && self.is_class_method_self_send(expr) {
+            return BlockExprKind::LastClassMethodSelfSend;
+        }
+
+        if is_last {
+            return BlockExprKind::LastExpr;
+        }
+
+        if Self::is_field_assignment(expr) {
+            return BlockExprKind::FieldAssignment;
+        }
+
+        if Self::is_local_var_assignment(expr) {
+            return BlockExprKind::LocalAssignment;
+        }
+
+        if self.get_control_flow_threaded_vars(expr).is_some() {
+            return BlockExprKind::ControlFlowWithThreadedVars;
+        }
+
+        if self.is_class_method_self_send(expr) {
+            return BlockExprKind::ClassMethodSelfSend;
+        }
+
+        BlockExprKind::SideEffect
+    }
+
+    /// Generate code for a single block body expression, dispatching by kind.
+    fn generate_block_expr(
+        &mut self,
+        expr: &Expression,
+        kind: &BlockExprKind,
+    ) -> Result<Document<'static>> {
+        match *kind {
+            BlockExprKind::Destructure { is_last } => {
+                self.generate_block_destructure(expr, is_last)
+            }
+            BlockExprKind::LastClassMethodSelfSend => {
+                // BT-1397: Class method self-send as last expression in a block body.
+                // The generated code leaves an open scope ending with `in ` — close it
+                // with the unwrapped result variable (same pattern as
+                // lower_class_method_body, BT-3164; formerly generate_class_method_body).
+                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                match open_scope {
+                    Some(OpenScopeResult::Value(result_var)) => {
+                        Ok(docvec![expr_doc, leaf::var(result_var)])
+                    }
+                    // BT-3053: no single value — substitute do:'s own `nil` contract.
+                    Some(OpenScopeResult::NoValue) => Ok(docvec![expr_doc, "'nil'"]),
+                    None => Ok(expr_doc),
+                }
+            }
+            BlockExprKind::LastExpr => {
+                // Last expression: its value is the block's result. BT-1937: a
+                // message send whose receiver/args contain a class method
+                // self-send may produce an open let-chain that we must close
+                // here so the block body is a complete closed expression. The
+                // ClassVarsN bindings inside the chain stay scoped inside the
+                // block's `fun () -> ... end` and do not leak to the outer
+                // method body — that is handled in generate_block by
+                // saving/restoring class_var_version and clearing
+                // last_open_scope_result.
+                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                match open_scope {
+                    Some(OpenScopeResult::Value(result_var)) => {
+                        Ok(docvec![expr_doc, leaf::var(result_var)])
+                    }
+                    // BT-3053: no single value — substitute do:'s own `nil` contract.
+                    Some(OpenScopeResult::NoValue) => Ok(docvec![expr_doc, "'nil'"]),
+                    None => Ok(expr_doc),
+                }
+            }
+            BlockExprKind::FieldAssignment => {
+                // Field assignment not at end: generate WITHOUT closing the value.
+                // This leaves the let bindings open for subsequent expressions.
+                let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
+                Ok(doc)
+            }
+            BlockExprKind::LocalAssignment => self.generate_block_local_assignment(expr),
+            BlockExprKind::ControlFlowWithThreadedVars => {
+                self.generate_block_control_flow_threaded(expr)
+            }
+            BlockExprKind::ClassMethodSelfSend => {
+                // BT-1397: Class method self-send as non-last expression in a block body.
+                // The generated code leaves an open scope — emit it and discard the result.
+                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                match open_scope {
+                    Some(OpenScopeResult::Value(result_var)) => Ok(docvec![
+                        expr_doc,
+                        "let _Unit = ",
+                        leaf::var(result_var),
+                        " in "
+                    ]),
+                    // BT-3053: no single value to discard — its own rebindings
+                    // are already visible; nothing to bind here.
+                    Some(OpenScopeResult::NoValue) => Ok(expr_doc),
+                    None => Ok(docvec!["let _Unit = ", expr_doc, " in "]),
+                }
+            }
+            BlockExprKind::SideEffect => {
+                // Not an assignment or loop - generate and discard result.
+                // BT-1937: handle open scopes from message sends whose
+                // receiver/args contain class method self-sends, by closing
+                // the chain here and binding the result var.
+                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                match open_scope {
+                    Some(OpenScopeResult::Value(result_var)) => Ok(docvec![
+                        expr_doc,
+                        "let _Unit = ",
+                        leaf::var(result_var),
+                        " in "
+                    ]),
+                    // BT-3053: no single value to discard — its own rebindings
+                    // are already visible; nothing to bind here.
+                    Some(OpenScopeResult::NoValue) => Ok(expr_doc),
+                    None => Ok(docvec!["let _Unit = ", expr_doc, " in "]),
+                }
+            }
+        }
+    }
+
+    /// Handle destructure assignment expressions in block bodies.
+    ///
+    /// Dispatches to sub-helpers by pattern kind: array, tuple, map.
+    /// When `is_last` is true, appends `'nil'` as the block result value since
+    /// destructuring only creates bindings and does not produce a value itself.
+    fn generate_block_destructure(
+        &mut self,
+        expr: &Expression,
+        is_last: bool,
+    ) -> Result<Document<'static>> {
+        let Expression::DestructureAssignment { pattern, value, .. } = expr else {
+            unreachable!("caller guarantees DestructureAssignment");
+        };
+
+        match pattern {
+            Pattern::Array { elements, rest, .. } => {
+                let mut doc =
+                    self.generate_block_array_destructure(elements, rest.as_deref(), value)?;
+                if is_last {
+                    doc = docvec![doc, "'nil'"];
+                }
+                Ok(doc)
+            }
+            Pattern::Tuple { .. } | Pattern::Map { .. } => {
+                let mut docs = self.generate_destructure_bindings(pattern, value)?;
+                if is_last {
+                    docs.push(Document::Str("'nil'"));
+                }
+                Ok(Document::Vec(docs))
+            }
+            _ => Err(CodeGenError::UnsupportedFeature {
+                feature: "Unsupported destructuring pattern kind".to_string(),
+                span: Some(value.span()),
+            }),
+        }
+    }
+
+    /// Generate array destructure bindings in a block body.
+    ///
+    /// Example: `#[a, b] := expr` generates:
+    ///   `let _Arr1 = <expr> in let A = send(_Arr1, 'at:', [1]) in let B = send(...) in`
+    /// With rest: `#[a, ...rest] := expr` additionally generates:
+    ///   `let Rest = beamtalk_array:slice_from(_Arr1, 2) in`
+    fn generate_block_array_destructure(
+        &mut self,
+        elements: &[Pattern],
+        rest: Option<&Pattern>,
+        value: &Expression,
+    ) -> Result<Document<'static>> {
+        let arr_var = self.fresh_temp_var("Arr");
+        let val_doc = self.expression_doc(value)?;
+        let mut docs = vec![docvec![
+            "let ",
+            leaf::var(arr_var.clone()),
+            " = ",
+            val_doc,
+            " in "
+        ]];
+
+        for (idx, elem) in elements.iter().enumerate() {
+            let one_based = index_lit(idx + 1);
+            match elem {
+                Pattern::Variable(id) => {
+                    let core_var = Self::to_core_erlang_var(&id.name);
+                    self.bind_var(&id.name, &core_var);
+                    docs.push(docvec![
+                        "let ",
+                        leaf::var(core_var),
+                        " = call 'beamtalk_message_dispatch':'send'(",
+                        leaf::var(arr_var.clone()),
+                        ", 'at:', [",
+                        one_based,
+                        "]) in "
+                    ]);
+                }
+                Pattern::Literal(lit, _span) => {
+                    // Guard-check: extract element and assert it equals the
+                    // literal.  Raises `{badmatch, Array}` on mismatch.
+                    let elem_var = self.fresh_temp_var("Elem");
+                    let guard_ok_var = self.fresh_temp_var("GuardOk");
+                    let mismatch_var = self.fresh_temp_var("Mismatch");
+                    let lit_doc = self.generate_literal(lit)?;
+                    docs.push(docvec![
+                        "let ",
+                        leaf::var(elem_var.clone()),
+                        " = call 'beamtalk_message_dispatch':'send'(",
+                        leaf::var(arr_var.clone()),
+                        ", 'at:', [",
+                        one_based,
+                        "]) in "
+                    ]);
+                    docs.push(docvec![
+                        "let ",
+                        leaf::var(guard_ok_var),
+                        " = case ",
+                        leaf::var(elem_var),
+                        " of <",
+                        lit_doc,
+                        "> when 'true' -> 'ok' <",
+                        leaf::var(mismatch_var),
+                        "> when 'true' -> call 'erlang':'error'({'badmatch', ",
+                        leaf::var(arr_var.clone()),
+                        "}) end in "
+                    ]);
+                }
+                Pattern::Wildcard(_) => {} // no binding needed
+                _ => {
+                    return Err(CodeGenError::UnsupportedFeature {
+                        feature: "Nested patterns in array destructuring".to_string(),
+                        span: Some(elem.span()),
+                    });
+                }
+            }
+        }
+
+        // Rest pattern: `...rest` binds remaining elements as a sub-array
+        // Pattern::Wildcard — no binding needed, only Variable generates code.
+        if let Some(Pattern::Variable(id)) = rest {
+            let core_var = Self::to_core_erlang_var(&id.name);
+            self.bind_var(&id.name, &core_var);
+            let from_idx = index_lit(elements.len() + 1);
+            docs.push(docvec![
+                "let ",
+                leaf::var(core_var),
+                " = call 'beamtalk_array':'slice_from'(",
+                leaf::var(arr_var.clone()),
+                ", ",
+                from_idx,
+                ") in "
+            ]);
+        }
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// Handle local variable assignment in a block body (non-last position).
+    fn generate_block_local_assignment(&mut self, expr: &Expression) -> Result<Document<'static>> {
+        let Expression::Assignment { target, value, .. } = expr else {
+            return Ok(Document::Nil);
+        };
+        let Expression::Identifier(id) = target.as_ref() else {
+            return Ok(Document::Nil);
+        };
+
+        // BT-852: Stored blocks with mutations are now supported via Tier 2.
+        // generate_block() handles stateful emission; no validation needed here.
+
+        let var_name = &id.name;
+        // Determine the Core Erlang variable name:
+        // - If the variable is already bound (e.g. block parameter), reuse that Core var.
+        // - Otherwise, create a new Core Erlang variable name.
+        let core_var = self
+            .lookup_var(var_name)
+            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+        // Capture the value expression (preserves side effects)
+        // Important: capture BEFORE updating the mapping,
+        // so that any uses of the variable in the RHS see the previous binding.
+        // BT-1397: Detect open-scope results from class method self-sends
+        // in the value expression.
+        let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
+        // Now update the mapping so subsequent expressions see this binding.
+        self.bind_var(var_name, &core_var);
+        // BT-1397: If the RHS produced an open scope (class method self-send),
+        // emit the open scope then bind the variable to its result.
+        match open_scope {
+            Some(OpenScopeResult::Value(open_scope_result)) => Ok(docvec![
+                val_doc,
+                "let ",
+                leaf::var(core_var),
+                " = ",
+                leaf::var(open_scope_result),
+                " in "
+            ]),
+            // BT-3053: no single value — substitute do:'s own `nil` contract.
+            Some(OpenScopeResult::NoValue) => Ok(docvec![
+                val_doc,
+                "let ",
+                leaf::var(core_var),
+                " = 'nil' in "
+            ]),
+            None => Ok(docvec![
+                "let ",
+                leaf::var(core_var.clone()),
+                " = ",
+                val_doc,
+                " in "
+            ]),
+        }
+    }
+
+    /// Handle a non-last block-body statement that is a mutating control-flow
+    /// construct (`whileTrue:`/`whileFalse:`/`timesRepeat:`/loops, `ifTrue:`/
+    /// `ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`, `on:do:`/`ensure:`, …) — one
+    /// this block's own top-level [`BlockMutationAnalysis`] doesn't classify
+    /// as captured-mutating (see [`Self::get_control_flow_threaded_vars`]),
+    /// so the enclosing block still compiled as a plain (non-`StateAcc`) fun.
+    ///
+    /// BT-3162: every one of these constructs' `generate_*_with_mutations`
+    /// generator returns a `{Result, StateAcc}` 2-tuple (`StateAcc` a map
+    /// keyed by [`Self::local_state_key`]) — `expr` alone is never the bare
+    /// scalar value. `element(2, ...)` + `maps:get` unpacks it the same way
+    /// the actor method-body sequencer's own "real state Bind" arm does
+    /// (`gen_server/methods.rs`); binding `core_var` directly to the raw
+    /// tuple (the pre-fix behavior) silently produced a `{Val, Map}` pair
+    /// where a scalar was expected, corrupting any later read of `var`.
+    ///
+    /// For multiple vars, we'd need to unpack more than one key — not yet
+    /// supported.
+    fn generate_block_control_flow_threaded(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        let threaded_vars = self
+            .get_control_flow_threaded_vars(expr)
+            .expect("caller guarantees control flow with threaded vars");
+
+        if threaded_vars.len() == 1 {
+            let var = &threaded_vars[0];
+            // Get the Core Erlang variable name for this var
+            let core_var = self
+                .lookup_var(var)
+                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+            let expr_doc = self.expression_doc(expr)?;
+            let tuple_var = self.fresh_temp_var("CtrlFlowResult");
+            let state_var = self.fresh_temp_var("CtrlFlowState");
+            Ok(docvec![
+                "let ",
+                leaf::var(tuple_var.clone()),
+                " = ",
+                expr_doc,
+                " in let ",
+                leaf::var(state_var.clone()),
+                " = call 'erlang':'element'(2, ",
+                leaf::var(tuple_var),
+                ") in let ",
+                leaf::var(core_var),
+                " = call 'maps':'get'(",
+                leaf::atom(Self::local_state_key(var)),
+                ", ",
+                leaf::var(state_var),
+                ") in "
+            ])
+        } else {
+            // Multi-var case not supported yet
+            Err(CodeGenError::UnsupportedFeature {
+                feature: "Multiple threaded variables in control flow".to_string(),
+                span: Some(expr.span()),
+            })
+        }
+    }
+
+    /// Generates flat `let` bindings for a destructuring assignment.
+    ///
+    /// This is the general-purpose helper used by all body-generation loops
+    /// (`gen_server` methods, value-type methods, block bodies, etc.) to handle
+    /// `DestructureAssignment` in non-last positions.
+    ///
+    /// For tuples, uses `erlang:element/2` to extract each position.
+    /// For arrays, uses `beamtalk_message_dispatch:send` with `at:`.
+    ///
+    /// Returns a `Vec<Document>` of `let X = ... in` bindings.
+    /// Variables are bound in the current scope for subsequent expressions.
+    pub(super) fn generate_destructure_bindings(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expression,
+    ) -> Result<Vec<Document<'static>>> {
+        let (docs, _rhs_var, _bound) =
+            self.generate_destructure_extractions(pattern, value, "let ", " in ")?;
+        Ok(docs)
+    }
+
+    /// Like [`Self::generate_destructure_bindings`] but takes a pre-evaluated variable name
+    /// instead of an expression.  Used when the RHS has already been unpacked from a
+    /// `{Value, State}` tuple (e.g., `DestructureAssignmentControlFlow`).
+    pub(super) fn generate_destructure_bindings_from_var(
+        &mut self,
+        pattern: &Pattern,
+        rhs_var: &str,
+    ) -> Result<Vec<Document<'static>>> {
+        let (docs, _bound) =
+            self.generate_pattern_extractions_from_var(pattern, rhs_var, "let ", " in ")?;
+        Ok(docs)
+    }
+
+    /// Evaluates `value` into a fresh temporary variable, returning the binding document and var name.
+    ///
+    /// Shared first step for [`Self::generate_destructure_extractions`] (compiled-code) and
+    /// [`CoreErlangGenerator::generate_repl_destructure`] (REPL), which both need to evaluate
+    /// the RHS before extracting individual elements.
+    ///
+    /// Returns `(binding_doc, var_name)` where:
+    /// - `binding_doc` is the `<indent><var> = <value><terminator>` document
+    /// - `var_name` is the temp variable holding the evaluated RHS
+    pub(super) fn eval_rhs_to_temp_var(
+        &mut self,
+        value: &Expression,
+        prefix: &str,
+        indent: &'static str,
+        terminator: &'static str,
+    ) -> Result<(Document<'static>, String)> {
+        let var = self.fresh_temp_var(prefix);
+        let val_doc = self.expression_doc(value)?;
+        let binding_doc = docvec![indent, leaf::var(var.clone()), " = ", val_doc, terminator];
+        Ok((binding_doc, var))
+    }
+
+    /// Core extraction logic shared between compiled-code and REPL destructuring.
+    ///
+    /// Evaluates `value` into a fresh temp var via [`Self::eval_rhs_to_temp_var`], then
+    /// delegates to [`Self::generate_pattern_extractions_from_var`] for the element bindings.
+    ///
+    /// The `indent` and `terminator` parameters control formatting:
+    /// - Non-REPL: `indent = "let "`, `terminator = " in "` (inline expression style)
+    /// - REPL: `indent = "    let "`, `terminator = " in\n"` (module body style)
+    ///
+    /// Returns `(extraction_docs, rhs_var_name, bound_pairs)` where:
+    /// - `extraction_docs` is the flat let-binding chain (RHS eval + element extractions)
+    /// - `rhs_var_name` is the Core Erlang var holding the evaluated RHS
+    /// - `bound_pairs` is `Vec<(beamtalk_name, core_erlang_var)>` for each `Pattern::Variable` bound
+    #[allow(clippy::type_complexity)]
+    pub(super) fn generate_destructure_extractions(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expression,
+        indent: &'static str,
+        terminator: &'static str,
+    ) -> Result<(Vec<Document<'static>>, String, Vec<(String, String)>)> {
+        let rhs_prefix = match pattern {
+            Pattern::Array { .. } => "Arr",
+            Pattern::Tuple { .. } => "Tup",
+            Pattern::Map { .. } => "Map",
+            _ => {
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "Unsupported destructuring pattern kind".to_string(),
+                    span: Some(pattern.span()),
+                });
+            }
+        };
+        let (rhs_doc, rhs_var) =
+            self.eval_rhs_to_temp_var(value, rhs_prefix, indent, terminator)?;
+        let mut docs = vec![rhs_doc];
+        let (extraction_docs, bound_pairs) =
+            self.generate_pattern_extractions_from_var(pattern, &rhs_var, indent, terminator)?;
+        docs.extend(extraction_docs);
+        Ok((docs, rhs_var, bound_pairs))
+    }
+
+    /// Generates element-extraction let-bindings for a pattern given a pre-evaluated RHS var.
+    ///
+    /// Unlike [`Self::generate_destructure_extractions`], this function does **not** evaluate
+    /// the RHS expression — the caller is responsible for providing an already-evaluated
+    /// `rhs_var` (e.g., after unwrapping a mutation-threaded result in REPL mode).
+    ///
+    /// Returns `(extraction_docs, bound_pairs)` where:
+    /// - `extraction_docs` are the element-extraction let-bindings
+    /// - `bound_pairs` is `Vec<(beamtalk_name, core_erlang_var)>` for each `Pattern::Variable` bound
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CodeGenError`] if the pattern uses an unsupported shape or
+    /// element extraction otherwise fails.
+    #[allow(clippy::too_many_lines, clippy::type_complexity)]
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` calls this while
+    // destructuring a REPL binding pattern against an already-evaluated RHS.
+    pub fn generate_pattern_extractions_from_var(
+        &mut self,
+        pattern: &Pattern,
+        rhs_var: &str,
+        indent: &'static str,
+        terminator: &'static str,
+    ) -> Result<(Vec<Document<'static>>, Vec<(String, String)>)> {
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        let mut bound_pairs: Vec<(String, String)> = Vec::new();
+
+        match pattern {
+            Pattern::Array { elements, rest, .. } => {
+                for (idx, elem) in elements.iter().enumerate() {
+                    let one_based = index_lit(idx + 1);
+                    match elem {
+                        Pattern::Variable(id) => {
+                            let core_var = Self::to_core_erlang_var(&id.name);
+                            self.bind_var(&id.name, &core_var);
+                            docs.push(docvec![
+                                indent,
+                                leaf::var(core_var.clone()),
+                                " = call 'beamtalk_message_dispatch':'send'(",
+                                leaf::var(rhs_var.to_string()),
+                                ", 'at:', [",
+                                one_based,
+                                "])",
+                                terminator,
+                            ]);
+                            bound_pairs.push((id.name.to_string(), core_var));
+                        }
+                        Pattern::Literal(lit, _span) => {
+                            // Guard-check: extract the element and assert it equals the literal.
+                            // If it doesn't match, raise `{badmatch, Array}` mirroring tuple
+                            // literal destructuring.
+                            let elem_var = self.fresh_temp_var("Elem");
+                            let guard_ok_var = self.fresh_temp_var("GuardOk");
+                            let mismatch_var = self.fresh_temp_var("Mismatch");
+                            let lit_doc = self.generate_literal(lit)?;
+                            docs.push(docvec![
+                                indent,
+                                leaf::var(elem_var.clone()),
+                                " = call 'beamtalk_message_dispatch':'send'(",
+                                leaf::var(rhs_var.to_string()),
+                                ", 'at:', [",
+                                one_based,
+                                "])",
+                                terminator,
+                            ]);
+                            docs.push(docvec![
+                                indent,
+                                leaf::var(guard_ok_var),
+                                " = case ",
+                                leaf::var(elem_var),
+                                " of <",
+                                lit_doc,
+                                "> when 'true' -> 'ok' <",
+                                leaf::var(mismatch_var),
+                                "> when 'true' -> call 'erlang':'error'({'badmatch', ",
+                                leaf::var(rhs_var.to_string()),
+                                "}) end",
+                                terminator,
+                            ]);
+                        }
+                        Pattern::Wildcard(_) => {}
+                        _ => {
+                            return Err(CodeGenError::UnsupportedFeature {
+                                feature: "Nested patterns in array destructuring".to_string(),
+                                span: Some(elem.span()),
+                            });
+                        }
+                    }
+                }
+                // Rest pattern: `...rest` binds remaining elements as a sub-array
+                if let Some(rest_pat) = rest {
+                    if let Pattern::Variable(id) = rest_pat.as_ref() {
+                        let core_var = Self::to_core_erlang_var(&id.name);
+                        self.bind_var(&id.name, &core_var);
+                        let from_idx = index_lit(elements.len() + 1);
+                        docs.push(docvec![
+                            indent,
+                            leaf::var(core_var.clone()),
+                            " = call 'beamtalk_array':'slice_from'(",
+                            leaf::var(rhs_var.to_string()),
+                            ", ",
+                            from_idx,
+                            ")",
+                            terminator,
+                        ]);
+                        bound_pairs.push((id.name.to_string(), core_var));
+                    }
+                    // Pattern::Wildcard — no binding needed
+                }
+            }
+            Pattern::Tuple { elements, .. } => {
+                // Arity check: verify the tuple has the expected number of elements.
+                let expected_arity = index_lit(elements.len());
+                let size_ok_var = self.fresh_temp_var("SizeOk");
+                let bad_arity_var = self.fresh_temp_var("BadArity");
+                docs.push(docvec![
+                    indent,
+                    leaf::var(size_ok_var),
+                    " = case call 'erlang':'tuple_size'(",
+                    leaf::var(rhs_var.to_string()),
+                    ") of <",
+                    expected_arity,
+                    "> when 'true' -> 'ok' <",
+                    leaf::var(bad_arity_var),
+                    "> when 'true' -> call 'erlang':'error'({'badmatch', ",
+                    leaf::var(rhs_var.to_string()),
+                    "}) end",
+                    terminator,
+                ]);
+                for (idx, elem) in elements.iter().enumerate() {
+                    let one_based = index_lit(idx + 1);
+                    match elem {
+                        Pattern::Variable(id) => {
+                            let core_var = Self::to_core_erlang_var(&id.name);
+                            self.bind_var(&id.name, &core_var);
+                            docs.push(docvec![
+                                indent,
+                                leaf::var(core_var.clone()),
+                                " = call 'erlang':'element'(",
+                                one_based,
+                                ", ",
+                                leaf::var(rhs_var.to_string()),
+                                ")",
+                                terminator,
+                            ]);
+                            bound_pairs.push((id.name.to_string(), core_var));
+                        }
+                        Pattern::Literal(lit, _span) => {
+                            // Guard-check: extract the element and assert it equals the literal.
+                            // If it doesn't match, raise `{badmatch, Tuple}` to mirror the arity
+                            // check error format above.
+                            let elem_var = self.fresh_temp_var("Elem");
+                            let guard_ok_var = self.fresh_temp_var("GuardOk");
+                            let mismatch_var = self.fresh_temp_var("Mismatch");
+                            let lit_doc = self.generate_literal(lit)?;
+                            docs.push(docvec![
+                                indent,
+                                leaf::var(elem_var.clone()),
+                                " = call 'erlang':'element'(",
+                                one_based,
+                                ", ",
+                                leaf::var(rhs_var.to_string()),
+                                ")",
+                                terminator,
+                            ]);
+                            docs.push(docvec![
+                                indent,
+                                leaf::var(guard_ok_var),
+                                " = case ",
+                                leaf::var(elem_var),
+                                " of <",
+                                lit_doc,
+                                "> when 'true' -> 'ok' <",
+                                leaf::var(mismatch_var),
+                                "> when 'true' -> call 'erlang':'error'({'badmatch', ",
+                                leaf::var(rhs_var.to_string()),
+                                "}) end",
+                                terminator,
+                            ]);
+                        }
+                        Pattern::Wildcard(_) => {}
+                        _ => {
+                            return Err(CodeGenError::UnsupportedFeature {
+                                feature: "Nested patterns in tuple destructuring".to_string(),
+                                span: Some(elem.span()),
+                            });
+                        }
+                    }
+                }
+            }
+            Pattern::Map { pairs, .. } => {
+                for pair in pairs {
+                    match &pair.value {
+                        Pattern::Variable(id) => {
+                            let core_var = Self::to_core_erlang_var(&id.name);
+                            self.bind_var(&id.name, &core_var);
+                            let key_doc = Self::map_pattern_key_doc(&pair.key);
+                            docs.push(docvec![
+                                indent,
+                                leaf::var(core_var.clone()),
+                                " = call 'erlang':'map_get'(",
+                                key_doc,
+                                ", ",
+                                leaf::var(rhs_var.to_string()),
+                                ")",
+                                terminator,
+                            ]);
+                            bound_pairs.push((id.name.to_string(), core_var));
+                        }
+                        Pattern::Wildcard(_) => {}
+                        _ => {
+                            return Err(CodeGenError::UnsupportedFeature {
+                                feature: "Nested patterns in map destructuring".to_string(),
+                                span: Some(pair.value.span()),
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "Unsupported destructuring pattern kind".to_string(),
+                    span: Some(pattern.span()),
+                });
+            }
+        }
+
+        Ok((docs, bound_pairs))
+    }
+
+    /// Generates cascade arguments, hoisting field-assignment bindings to outer scope.
+    ///
+    /// BT-884: This is a helper to avoid duplicating the hoisting logic across the
+    /// `MessageSend` and fallback branches of `generate_cascade`.
+    pub(super) fn generate_cascade_args(
+        &mut self,
+        arguments: &[Expression],
+        docs: &mut Vec<Document<'static>>,
+    ) -> Result<Vec<Document<'static>>> {
+        let mut arg_docs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+        for arg in arguments {
+            if Self::is_field_assignment(arg) {
+                // Push hoisted binding directly to docs (preserves source order).
+                let (doc, val_var) = self.generate_field_assignment_open(arg)?;
+                docs.push(doc);
+                arg_docs.push(leaf::var(val_var));
+            } else {
+                arg_docs.push(self.expression_doc(arg)?);
+            }
+        }
+        Ok(arg_docs)
+    }
+
+    /// Generates code for a match expression.
+    ///
+    /// `value match: [pattern -> body ...]` compiles to Core Erlang:
+    /// `let _Match1 = <value> in case _Match1 of <Pattern1> when Guard1 -> Body1 ... end`
+    ///
+    /// When the match contains a `Pattern::Array` arm, each arm is compiled as a
+    /// chain of conditional case expressions instead of a single native case, because
+    /// Beamtalk arrays are opaque tagged maps that cannot be matched structurally in
+    /// Core Erlang patterns. See [`Self::generate_match_chain`].
+    pub(super) fn generate_match(
+        &mut self,
+        value: &Expression,
+        arms: &[MatchArm],
+    ) -> Result<Document<'static>> {
+        if arms.is_empty() {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: "match expression with no arms".to_string(),
+                span: Some(value.span()),
+            });
+        }
+
+        let match_var = self.fresh_temp_var("Match");
+        let value_doc = self.expression_doc(value)?;
+
+        // Guard against unsupported pattern forms reaching array-match codegen.
+        for arm in arms {
+            if let Pattern::Array {
+                list_syntax: true,
+                span,
+                ..
+            } = &arm.pattern
+            {
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "List-syntax pattern `#(...)` in match: arm is not yet supported"
+                        .to_string(),
+                    span: Some(*span),
+                });
+            }
+            // Rest patterns in match arms are not yet supported (BT-1251 only adds
+            // rest to destructuring assignments).
+            if let Pattern::Array {
+                rest: Some(_),
+                span,
+                ..
+            } = &arm.pattern
+            {
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "Rest pattern `...` in match: arm is not yet supported".to_string(),
+                    span: Some(*span),
+                });
+            }
+        }
+
+        let has_array_arm = arms
+            .iter()
+            .any(|arm| matches!(arm.pattern, Pattern::Array { .. }));
+        // BT-2855 / ADR 0107 Phase A: a `Pattern::Type` arm needs the same
+        // chain-of-nested-`case`s path as `Pattern::Array` — its runtime
+        // test (a guard-safe BIF, an atom-exclusion guard, or a
+        // `maps:get`-based class-tag check) isn't expressible as a single
+        // native Core Erlang pattern the "all-native" fast path below
+        // builds. This is also what makes a `match:` mixing a primitive
+        // `Type` arm and a `Constructor`/native arm compile correctly into
+        // one `case`: both arm kinds flow through `generate_match_chain`,
+        // which dispatches each arm (in source order) to its own strategy
+        // and recurses for the rest.
+        let has_type_arm = arms
+            .iter()
+            .any(|arm| matches!(arm.pattern, Pattern::Type { .. }));
+
+        // BT-2880: decide once, for the whole `match:`, whether any arm needs
+        // actor state threading (e.g. an arm body that is a state-mutating
+        // `[...] value` block). When it does, every arm below is compiled to a
+        // uniform `{Value, State}` shape via `generate_match_arm_body`, so the
+        // whole `match:` expression threads state exactly like `ifTrue:`/
+        // `ifFalse:` mutations — see `match_needs_mutation_threading`.
+        let base_state = if self.match_needs_mutation_threading(arms) {
+            Some(self.current_state_var())
+        } else {
+            None
+        };
+
+        let inner_doc = if has_array_arm || has_type_arm {
+            self.generate_match_chain(&match_var, arms, base_state.as_deref())?
+        } else {
+            // All arms use native Core Erlang patterns (literals, variables, tuples, maps).
+            let mut parts: Vec<Document<'static>> = Vec::new();
+            parts.push(docvec!["case ", leaf::var(match_var.clone()), " of "]);
+            for (i, arm) in arms.iter().enumerate() {
+                if i > 0 {
+                    parts.push(Document::Str(" "));
+                }
+                let pattern_doc = self.generate_pattern(&arm.pattern)?;
+                parts.push(Document::Str("<"));
+                parts.push(pattern_doc);
+                parts.push(Document::Str(">"));
+                self.push_scope();
+                Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
+                    self.bind_var(name, core_var);
+                });
+                if let Some(guard) = &arm.guard {
+                    parts.push(Document::Str(" when "));
+                    let guard_doc = self.generate_guard_expression(guard)?;
+                    parts.push(guard_doc);
+                } else {
+                    parts.push(Document::Str(" when 'true'"));
+                }
+                parts.push(Document::Str(" -> "));
+                let body_doc = self.generate_match_arm_body(&arm.body, base_state.as_deref())?;
+                parts.push(body_doc);
+                self.pop_scope();
+            }
+            parts.push(Document::Str(" end"));
+            Document::Vec(parts)
+        };
+
+        Ok(docvec![
+            "let ",
+            leaf::var(match_var.clone()),
+            " = ",
+            value_doc,
+            " in ",
+            inner_doc
+        ])
+    }
+
+    /// BT-2880: Compiles a `match:` arm body.
+    ///
+    /// When `base_state` is `None` (no arm in this `match:` needs actor state
+    /// threading — the common case), this is exactly `expression_doc`,
+    /// byte-for-byte unchanged from before BT-2880.
+    ///
+    /// When `base_state` is `Some` (`match_needs_mutation_threading` found at
+    /// least one arm that does), every arm must yield a `{Value, State}` tuple
+    /// so the whole `match:` expression has one consistent shape that the
+    /// caller (`generate_match`) can return as-is, letting the existing
+    /// `ifTrue:`/`ifFalse:`-style tuple-unwrap machinery
+    /// (`control_flow_has_mutations`'s `Expression::Match` branch) consume it:
+    /// - An arm body that is itself a state-mutating `[...] value` block
+    ///   (`is_tier2_value_call` with a block-literal receiver) is inlined via
+    ///   `generate_conditional_branch_inline` — the same mechanism `ifTrue:`/
+    ///   `ifFalse:` branches use — so `self.<field> :=` assignments inside it
+    ///   thread state correctly instead of leaking their raw internal tuple
+    ///   as the match's value (BT-2880).
+    /// - An arm body that is itself a nested control-flow-with-mutations
+    ///   construct — `ifTrue:`/`ifFalse:`/a nested `match:`/etc., e.g. `nil ->
+    ///   flag ifTrue: [self.x := 1]` with no `[...] value` wrapper — already
+    ///   compiles to `{Value, State}` rooted at the same `base_state` (both
+    ///   derive from the `self.current_state_var()` snapshot taken before
+    ///   this `match:` began, and every intermediate arm's own state-version
+    ///   bookkeeping is saved/restored via `with_branch_context`, so it never
+    ///   leaks into that snapshot). Passed through via `expression_doc`
+    ///   unchanged — no extra wrapping needed.
+    /// - Any other arm body — including the remaining `is_tier2_value_call`
+    ///   shapes this function doesn't special-case (`self.<field> value`, a
+    ///   named `tier2_local_vars`/`tier2_block_params` identifier receiver,
+    ///   or a `Cascade` of safe `value:` sends, e.g. `blk value: a; value:
+    ///   b`), for which `expression_doc` already unwraps/discards that
+    ///   call's own state via `close_tier2_value_subexpr_doc` (the BT-2814
+    ///   sub-expression-position limitation) — is wrapped unchanged as
+    ///   `{<value>, <base_state>}`.
+    fn generate_match_arm_body(
+        &mut self,
+        body: &Expression,
+        base_state: Option<&str>,
+    ) -> Result<Document<'static>> {
+        let Some(base_state) = base_state else {
+            return self.expression_doc(body);
+        };
+        let base_state_var = leaf::var(base_state.to_string());
+        if self.is_tier2_value_call(body) {
+            if let Expression::MessageSend { receiver, .. } = body {
+                if let Expression::Block(block) = receiver.as_ref() {
+                    // ADR 0111 Addendum 5 (BT-3146): tier2 conditional-branch
+                    // inlining inside a `match:` arm — reaches the SAME
+                    // `generate_conditional_branch_inline` single-arm helper
+                    // conditionals.rs's ifTrue:/ifFalse: use, which now
+                    // builds, `verify()`s, and `render()`s this arm's real
+                    // per-frame ThreadedIr internally; the scalar
+                    // `check_branch_frame_linearity` scaffolding check that
+                    // used to run here is gone.
+                    let (branch_doc, _branch_final) = self.with_branch_context(|this| {
+                        this.generate_conditional_branch_inline(block)
+                    })?;
+                    return Ok(docvec![
+                        "let StateAcc = ",
+                        base_state_var,
+                        " in ",
+                        branch_doc
+                    ]);
+                }
+                // Any other is_tier2_value_call receiver (self.<field> value,
+                // a named tier2_local_vars/tier2_block_params identifier, or
+                // a Cascade of safe value: sends) isn't a literal block, so
+                // there's no block to inline here — fall through to
+                // expression_doc below, which already unwraps/discards that
+                // call's own state via close_tier2_value_subexpr_doc
+                // (BT-2814).
+            }
+        }
+        if self.control_flow_has_mutations(body) {
+            return self.expression_doc(body);
+        }
+        let body_doc = self.expression_doc(body)?;
+        Ok(docvec!["{", body_doc, ", ", base_state_var, "}"])
+    }
+
+    /// Compiles match arms as a chain of nested case expressions.
+    ///
+    /// Used when any arm contains a `Pattern::Array` (opaque tagged map — cannot be
+    /// matched natively in Core Erlang). Each arm becomes its own case expression with
+    /// a wildcard fallthrough to the next arm.
+    ///
+    /// For `Pattern::Array` arms the generated structure is:
+    /// ```text
+    /// case is_map(_Match) of
+    ///   <'true'> when 'true' ->
+    ///     case maps:get('$beamtalk_class', _Match, 'undefined') of
+    ///       <'Array'> when 'true' ->
+    ///         case beamtalk_array:size(_Match) of
+    ///           <N> when 'true' ->
+    ///             let Elem1 = at(_Match, 1) in ... body
+    ///           <_NoMatch> when 'true' -> [rest]
+    ///         end
+    ///       <_NoMatch> when 'true' -> [rest]
+    ///     end
+    ///   <'false'> when 'true' -> [rest]
+    /// end
+    /// ```
+    ///
+    /// For all other arms:
+    /// `case _Match of <pattern> when guard -> body <_FT> when 'true' -> [rest] end`
+    fn generate_match_chain(
+        &mut self,
+        match_var: &str,
+        arms: &[MatchArm],
+        base_state: Option<&str>,
+    ) -> Result<Document<'static>> {
+        if arms.is_empty() {
+            return Ok(docvec![
+                "call 'erlang':'error'({'case_clause', ",
+                leaf::var(match_var.to_string()),
+                "})"
+            ]);
+        }
+
+        let arm = &arms[0];
+        let rest = &arms[1..];
+
+        if let Pattern::Array { elements, .. } = &arm.pattern {
+            // Generate current arm body FIRST so that state_version and temp-var counters
+            // are not advanced by later arms before we codegen the current one.
+            return self.generate_array_match_arm(match_var, arm, elements, rest, base_state);
+        }
+
+        // BT-2855 / ADR 0107 Phase A: `Pattern::Type` (`binding :: ClassName`)
+        // dispatches to a per-class runtime test (BIF test, atom-exclusion
+        // guard, or map-tag check) — see `generate_type_pattern`. Like
+        // `Pattern::Array` above, this can't reuse the plain native-arm path
+        // below because at least one class (`Dictionary`, or an exact tagged
+        // `Value`/sealed class) needs a `maps:get` test in case-scrutinee
+        // position, which is not expressible as a single Core Erlang guard.
+        if let Pattern::Type { binding, class, .. } = &arm.pattern {
+            return self.generate_type_pattern(match_var, arm, binding, class, rest, base_state);
+        }
+
+        // Native arm: case _Match of <pattern> when guard -> body <_FT> when 'true' -> rest end
+        // Compute current arm first — body codegen must not see state advanced by later arms.
+        let fallthrough_var = self.fresh_temp_var("NoMatch");
+        let pattern_doc = self.generate_pattern(&arm.pattern)?;
+
+        self.push_scope();
+        Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
+            self.bind_var(name, core_var);
+        });
+        let guard_part = if let Some(guard) = &arm.guard {
+            let gd = self.generate_guard_expression(guard)?;
+            docvec![" when ", gd]
+        } else {
+            Document::Str(" when 'true'")
+        };
+        let body_doc = self.generate_match_arm_body(&arm.body, base_state)?;
+        self.pop_scope();
+
+        // Rest is generated AFTER the current arm to prevent state leakage.
+        let rest_doc = self.generate_match_chain(match_var, rest, base_state)?;
+
+        Ok(docvec![
+            "case ",
+            leaf::var(match_var.to_string()),
+            " of ",
+            "<",
+            pattern_doc,
+            ">",
+            guard_part,
+            " -> ",
+            body_doc,
+            " <",
+            leaf::var(fallthrough_var),
+            "> when 'true' -> ",
+            rest_doc,
+            " end"
+        ])
+    }
+
+    /// Compiles a single `Pattern::Array` match arm.
+    ///
+    /// Emits a three-level conditional check (`is_map` → class → size), then element
+    /// extractions via `at:` dispatch. `rest_doc` is cloned for all failure branches.
+    ///
+    /// Takes `rest_arms` (not a pre-built `rest_doc`) so that the current arm's body
+    /// is fully generated before any later arm's codegen advances generator state.
+    fn generate_array_match_arm(
+        &mut self,
+        match_var: &str,
+        arm: &MatchArm,
+        elements: &[Pattern],
+        rest_arms: &[MatchArm],
+        base_state: Option<&str>,
+    ) -> Result<Document<'static>> {
+        let n = elements.len();
+
+        // Bind all pattern variables (including from nested arrays) into scope
+        // before generating guard/body so they can reference the bound names.
+        // This MUST happen before rest_arms codegen so state is not leaked.
+        self.push_scope();
+        Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
+            self.bind_var(name, core_var);
+        });
+        let guard_doc_opt = if let Some(guard) = &arm.guard {
+            Some(self.generate_guard_expression(guard)?)
+        } else {
+            None
+        };
+        let body_doc = self.generate_match_arm_body(&arm.body, base_state)?;
+        self.pop_scope();
+
+        // Generate rest AFTER the current arm body to prevent state leakage.
+        let rest_doc = self.generate_match_chain(match_var, rest_arms, base_state)?;
+
+        // Build body section: element extractions + optional guard check.
+        // Use `case 'true' of <'true'> when GUARD ->` (Core Erlang guard position) so that
+        // guard evaluation errors silently fail and fall through, matching Erlang guard semantics.
+        // A plain `case GUARD of <'true'>` would propagate evaluation errors as exceptions.
+        let success_doc = if let Some(guard_doc) = guard_doc_opt {
+            docvec![
+                "case 'true' of ",
+                "<'true'> when ",
+                guard_doc,
+                " -> ",
+                body_doc,
+                " <'true'> when 'true' -> ",
+                rest_doc.clone(),
+                " end"
+            ]
+        } else {
+            body_doc
+        };
+
+        // Recursively build element extraction + nested array checks
+        let mut bound_vars: HashSet<String> = HashSet::new();
+        let inner_body = self.build_array_arm_body(
+            match_var,
+            elements,
+            0,
+            success_doc,
+            &rest_doc,
+            &mut bound_vars,
+        )?;
+
+        let no_match_size = self.fresh_temp_var("NoMatch");
+        let no_match_class = self.fresh_temp_var("NoMatch");
+
+        Ok(docvec![
+            "case call 'erlang':'is_map'(",
+            leaf::var(match_var.to_string()),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'maps':'get'('$beamtalk_class', ",
+            leaf::var(match_var.to_string()),
+            ", 'undefined') of ",
+            "<'Array'> when 'true' -> ",
+            "case call 'beamtalk_array':'size'(",
+            leaf::var(match_var.to_string()),
+            ") of ",
+            "<",
+            index_lit(n),
+            "> when 'true' -> ",
+            inner_body,
+            " <",
+            leaf::var(no_match_size),
+            "> when 'true' -> ",
+            rest_doc.clone(),
+            " end ",
+            "<",
+            leaf::var(no_match_class),
+            "> when 'true' -> ",
+            rest_doc.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest_doc,
+            " end"
+        ])
+    }
+
+    /// Compiles a single `Pattern::Type` match arm (`binding :: ClassName ->
+    /// body`) — ADR 0107 Phase A / BT-2855.
+    ///
+    /// Dispatches to one of four runtime-test shapes based on `class`'s
+    /// name, generalizing two existing codegen strategies (no new runtime
+    /// mechanism is introduced):
+    ///
+    /// - **Guard-safe BIF primitives** (`String` → `is_binary`, `Integer` →
+    ///   `is_integer`, `Float` → `is_float`, `List` → `is_list`): a
+    ///   single-level `case call 'erlang':'is_X'(_Match) of <'true'> -> ...
+    ///   <'false'> -> rest end` ([`Self::wrap_bif_test`]), generalizing
+    ///   [`Self::generate_array_match_arm`]'s outer `is_map` check to an
+    ///   arbitrary guard-safe boolean-returning BIF.
+    /// - **`Symbol`**: `is_atom(X) andalso X =/= nil andalso X =/= true
+    ///   andalso X =/= false` ([`Self::wrap_symbol_test`]), expressed as
+    ///   four nested boolean-case tests rather than `andalso` (every
+    ///   sub-test is total/side-effect-free, so nesting is equivalent and
+    ///   avoids reproducing `andalso`'s try/catch desugaring) — this
+    ///   excludes `nil`/`true`/`false` explicitly so an earlier `s ::
+    ///   Symbol` arm can never shadow a later `nil ->`/`b :: Boolean` arm
+    ///   (all four are plain Erlang atoms with no distinguishing runtime
+    ///   tag).
+    /// - **`Boolean`**: an exact 3-clause literal match on the scrutinee
+    ///   (`'true'`/`'false'`/anything-else-falls-through,
+    ///   [`Self::wrap_boolean_test`]) — not a bare `is_atom` guard, for the
+    ///   same shadowing reason as `Symbol`.
+    /// - **`Dictionary`/exact tagged `Value`/sealed classes**: `maps:get/3`
+    ///   is not guard-safe, so [`Self::wrap_class_tag_test`] reuses the
+    ///   exact nested-`case` shape [`Self::generate_array_match_arm`]
+    ///   already uses for its class-tag check: an outer `is_map` case, and
+    ///   — only in the `'true'` branch — an inner case on
+    ///   `maps:get('$beamtalk_class', _Match, 'undefined')` matching
+    ///   `'undefined'` for `Dictionary` (a bare map has no
+    ///   `'$beamtalk_class'` key) or the class name atom for a tagged class
+    ///   (generalizing [`Self::generate_constructor_pattern`]'s map-key
+    ///   check, hardcoded to `Result` via [`sealed_constructor_fields`], to
+    ///   the pattern's `class` field), falling through to `rest` on any
+    ///   other class tag.
+    /// - **`Block`**: `is_function` — a Beamtalk block compiles to a plain
+    ///   Erlang `fun`, never a map, so it needs its own guard-safe BIF
+    ///   entry rather than falling into the tagged-class path.
+    /// - **`True`/`False`/`Nil`/`UndefinedObject`**: `True`/`False` are
+    ///   real (sealed, leaf) stdlib subclasses of `Boolean`, and
+    ///   `UndefinedObject` (canonical) / `Nil` (legacy alias, BT-2016) are
+    ///   the nil class — all four are resolvable, leaf class names a type
+    ///   pattern can legally name, but all four compile to a bare atom
+    ///   (`'true'`/`'false'`/`'nil'`), never a map, so
+    ///   [`Self::wrap_single_atom_test`] tests the one exact atom directly
+    ///   instead of the tagged-class `is_map` check.
+    /// - **Actor-hierarchy classes**: an actor reference is
+    ///   `{'beamtalk_object', ClassAtom, ModuleAtom, Pid}` — a 4-tuple, not
+    ///   a map — so [`Self::wrap_actor_class_tag_test`] tests
+    ///   `is_tuple`/`tuple_size`/`element(1)`/`element(2)` instead of the
+    ///   map-tag check, reusing the same `is_tuple`/`element(1) ==
+    ///   'beamtalk_object'` idiom `fieldAt:`'s actor-vs-map dispatch already
+    ///   uses (`intrinsics.rs`), extended to also compare `element(2)`
+    ///   (the class name) against the pattern's `class` field.
+    /// - **`Supervisor`/`DynamicSupervisor`-hierarchy classes** (BT-2870): a
+    ///   live supervisor reference is a third runtime shape, also a 4-tuple
+    ///   but tagged `'beamtalk_supervisor'` (or transiently
+    ///   `'beamtalk_supervisor_new'` — rewritten to `'beamtalk_supervisor'`
+    ///   by `beamtalk_class_dispatch:class_send_dispatch/3` before *any*
+    ///   caller, including `class initialize:` itself, ever observes it)
+    ///   rather than `'beamtalk_object'` — [`Self::wrap_supervisor_class_tag_test`]
+    ///   accepts either tag at `element(1)` before comparing `element(2)`
+    ///   against the pattern's `class` field.
+    fn generate_type_pattern(
+        &mut self,
+        match_var: &str,
+        arm: &MatchArm,
+        binding: &Identifier,
+        class: &Identifier,
+        rest_arms: &[MatchArm],
+        base_state: Option<&str>,
+    ) -> Result<Document<'static>> {
+        // Bind `binding` to the whole matched value and generate guard/body
+        // FIRST (before rest_arms) so state_version/temp-var counters are
+        // not advanced by later arms before this arm's own codegen — same
+        // ordering rationale as `generate_array_match_arm`.
+        self.push_scope();
+        let core_binding = Self::to_core_erlang_var(&binding.name);
+        self.bind_var(&binding.name, &core_binding);
+        let body_doc = self.generate_match_arm_body(&arm.body, base_state)?;
+        self.pop_scope();
+
+        // Rest is generated AFTER the current arm to prevent state leakage.
+        let rest_doc = self.generate_match_chain(match_var, rest_arms, base_state)?;
+
+        // Use `case 'true' of <'true'> when GUARD -> body <'true'> when
+        // 'true' -> rest end` (Core Erlang guard position) so guard
+        // evaluation errors silently fail and fall through, matching Erlang
+        // guard semantics — same shape `generate_array_match_arm` uses for
+        // its own optional guard.
+        let success_doc = if let Some(guard) = &arm.guard {
+            let guard_doc = self.generate_guard_expression(guard)?;
+            docvec![
+                "case 'true' of ",
+                "<'true'> when ",
+                guard_doc,
+                " -> ",
+                body_doc,
+                " <'true'> when 'true' -> ",
+                rest_doc.clone(),
+                " end"
+            ]
+        } else {
+            body_doc
+        };
+
+        // `binding` denotes the whole matched value — not a decomposed
+        // field, unlike `Pattern::Array`'s per-element extraction.
+        let bound_success = docvec![
+            "let ",
+            leaf::var(core_binding),
+            " = ",
+            leaf::var(match_var.to_string()),
+            " in ",
+            success_doc
+        ];
+
+        Ok(self.dispatch_type_pattern_strategy(match_var, &class.name, bound_success, &rest_doc))
+    }
+
+    /// Picks (and applies) one of `generate_type_pattern`'s per-class
+    /// runtime-test strategies — factored out purely to keep
+    /// `generate_type_pattern` itself under the line-count lint; see that
+    /// function's doc comment for the full strategy breakdown.
+    fn dispatch_type_pattern_strategy(
+        &mut self,
+        match_var: &str,
+        class_name: &str,
+        bound_success: Document<'static>,
+        rest_doc: &Document<'static>,
+    ) -> Document<'static> {
+        match class_name {
+            "String" => Self::wrap_bif_test(match_var, "is_binary", bound_success, rest_doc),
+            "Integer" => Self::wrap_bif_test(match_var, "is_integer", bound_success, rest_doc),
+            "Float" => Self::wrap_bif_test(match_var, "is_float", bound_success, rest_doc),
+            "List" => Self::wrap_bif_test(match_var, "is_list", bound_success, rest_doc),
+            "Block" => Self::wrap_bif_test(match_var, "is_function", bound_success, rest_doc),
+            "Pid" => Self::wrap_bif_test(match_var, "is_pid", bound_success, rest_doc),
+            "Reference" => Self::wrap_bif_test(match_var, "is_reference", bound_success, rest_doc),
+            "Port" => Self::wrap_bif_test(match_var, "is_port", bound_success, rest_doc),
+            "Tuple" => self.wrap_tuple_test(match_var, bound_success, rest_doc),
+            "Symbol" => Self::wrap_symbol_test(match_var, bound_success, rest_doc),
+            "Boolean" => self.wrap_boolean_test(match_var, bound_success, rest_doc),
+            "True" => self.wrap_single_atom_test(match_var, "true", bound_success, rest_doc),
+            "False" => self.wrap_single_atom_test(match_var, "false", bound_success, rest_doc),
+            "Nil" | "UndefinedObject" => {
+                self.wrap_single_atom_test(match_var, "nil", bound_success, rest_doc)
+            }
+            "Dictionary" => self.wrap_class_tag_test(
+                match_var,
+                Document::Str("'undefined'"),
+                bound_success,
+                rest_doc,
+            ),
+            other => {
+                // BT-2855: an actor reference is a 4-tuple
+                // (`{'beamtalk_object', ClassAtom, ModuleAtom, Pid}`), not a
+                // map — the tagged-class `is_map` check would never match a
+                // live actor instance, silently miscompiling the single
+                // most common kind of leaf class in real Beamtalk programs.
+                //
+                // BT-2882: `is_actor_subclass`/`is_supervisor_subclass`/
+                // `is_dynamic_supervisor_subclass` are verified to resolve
+                // correctly even when `other`'s Actor/Supervisor ancestor is
+                // declared in a different file (or several files away) —
+                // see their doc comments in `hierarchy_queries.rs` and the
+                // `..._resolves_through_cross_file_stub_chain` codegen tests
+                // in `tests/control_flow.rs`.
+                let is_actor = self
+                    .class_hierarchy
+                    .as_ref()
+                    .is_some_and(|h| h.is_actor_subclass(other));
+                // BT-2870: a Supervisor/DynamicSupervisor subclass reference
+                // is a *different* 4-tuple, tagged `'beamtalk_supervisor'`
+                // (or transiently `'beamtalk_supervisor_new'`) rather than
+                // `'beamtalk_object'` — same reasoning as the actor case
+                // above, just a different reserved tag.
+                let is_supervisor = self.class_hierarchy.as_ref().is_some_and(|h| {
+                    h.is_supervisor_subclass(other) || h.is_dynamic_supervisor_subclass(other)
+                });
+                if is_actor {
+                    self.wrap_actor_class_tag_test(match_var, other, bound_success, rest_doc)
+                } else if is_supervisor {
+                    self.wrap_supervisor_class_tag_test(match_var, other, bound_success, rest_doc)
+                } else {
+                    self.wrap_class_tag_test(
+                        match_var,
+                        leaf::atom(other.to_string()),
+                        bound_success,
+                        rest_doc,
+                    )
+                }
+            }
+        }
+    }
+
+    /// `case call 'erlang':'BIF'(_Match) of <'true'> -> success <'false'> ->
+    /// rest end` — the single-level generalization of
+    /// `generate_array_match_arm`'s outer `is_map` check to an arbitrary
+    /// guard-safe boolean-returning BIF (`is_binary`, `is_integer`,
+    /// `is_float`, `is_list`). No wildcard fallback clause is needed: these
+    /// BIFs only ever return `'true'`/`'false'`, exactly like the existing
+    /// `is_map` check's 2-clause case.
+    fn wrap_bif_test(
+        match_var: &str,
+        bif: &'static str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        docvec![
+            "case call 'erlang':'",
+            Document::Str(bif),
+            "'(",
+            leaf::var(match_var.to_string()),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            success,
+            " <'false'> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// `is_atom(X) andalso X =/= nil andalso X =/= true andalso X =/=
+    /// false` (ADR 0107 Phase A `Symbol` guard — see
+    /// [`Self::generate_type_pattern`]'s doc for why this excludes the
+    /// other atom-representation patterns). Expressed as four nested
+    /// 2-clause boolean-case tests rather than `andalso`: every sub-test
+    /// here is total and side-effect-free (an atom guard BIF or `=/=`), so
+    /// nesting evaluates identically without reproducing `andalso`'s
+    /// try/catch desugaring.
+    fn wrap_symbol_test(
+        match_var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let v = leaf::var(match_var.to_string());
+        let tests: [Document<'static>; 4] = [
+            docvec!["call 'erlang':'is_atom'(", v.clone(), ")"],
+            docvec!["call 'erlang':'=/='(", v.clone(), ", 'nil')"],
+            docvec!["call 'erlang':'=/='(", v.clone(), ", 'true')"],
+            docvec!["call 'erlang':'=/='(", v, ", 'false')"],
+        ];
+        tests.into_iter().rev().fold(success, |acc, test| {
+            docvec![
+                "case ",
+                test,
+                " of ",
+                "<'true'> when 'true' -> ",
+                acc,
+                " <'false'> when 'true' -> ",
+                rest.clone(),
+                " end"
+            ]
+        })
+    }
+
+    /// Exact literal match on `'true'`/`'false'` — not a bare `is_atom`
+    /// guard, so an earlier `b :: Boolean` arm can never shadow a later
+    /// `nil ->`/`s :: Symbol` arm (ADR 0107 Phase A; see
+    /// [`Self::generate_type_pattern`]'s doc). Needs a fresh wildcard
+    /// binder (unlike the pure-boolean tests above) because the scrutinee
+    /// ranges over more than `{'true', 'false'}`.
+    fn wrap_boolean_test(
+        &mut self,
+        match_var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let no_match = self.fresh_temp_var("NoMatch");
+        docvec![
+            "case ",
+            leaf::var(match_var.to_string()),
+            " of ",
+            "<'true'> when 'true' -> ",
+            success.clone(),
+            " <'false'> when 'true' -> ",
+            success,
+            " <",
+            leaf::var(no_match),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// `case is_map(_Match) of <'true'> -> case maps:get('$beamtalk_class',
+    /// _Match, 'undefined') of <expected_tag> -> success <_> -> rest end
+    /// <'false'> -> rest end` — the exact nested-`case` shape
+    /// `generate_array_match_arm` already uses for its class-tag check,
+    /// generalized to an arbitrary `expected_tag` atom: `'undefined'` for
+    /// `Dictionary` (a bare map with no `'$beamtalk_class'` key — see
+    /// [`Self::generate_type_pattern`]'s doc) or the class name atom for an
+    /// exact tagged `Value`/sealed class (generalizing
+    /// [`Self::generate_constructor_pattern`]'s map-key check to the
+    /// pattern's `class` field).
+    fn wrap_class_tag_test(
+        &mut self,
+        match_var: &str,
+        expected_tag: Document<'static>,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let no_match_class = self.fresh_temp_var("NoMatch");
+        docvec![
+            "case call 'erlang':'is_map'(",
+            leaf::var(match_var.to_string()),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'maps':'get'('$beamtalk_class', ",
+            leaf::var(match_var.to_string()),
+            ", 'undefined') of ",
+            "<",
+            expected_tag,
+            "> when 'true' -> ",
+            success,
+            " <",
+            leaf::var(no_match_class),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// Exact literal match on a single atom (`'true'`, `'false'`, or
+    /// `'nil'`) — used for the `True`/`False` `Boolean` subclasses and the
+    /// nil class (`UndefinedObject`, or its legacy alias `Nil`, BT-2016).
+    /// None of these is a map, so [`Self::wrap_class_tag_test`]'s `is_map`
+    /// check would never match; a bare `is_atom` guard would also be wrong
+    /// (see [`Self::generate_type_pattern`]'s doc on why `Symbol`/`Boolean`
+    /// need atom-exclusion rather than a bare `is_atom`) — this tests the
+    /// exact expected atom directly, falling through to `rest` on any
+    /// other value.
+    fn wrap_single_atom_test(
+        &mut self,
+        match_var: &str,
+        atom: &'static str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let no_match = self.fresh_temp_var("NoMatch");
+        docvec![
+            "case ",
+            leaf::var(match_var.to_string()),
+            " of ",
+            "<'",
+            Document::Str(atom),
+            "'> when 'true' -> ",
+            success,
+            " <",
+            leaf::var(no_match),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// Tests whether the scrutinee is an actor reference of exactly
+    /// `class_name` — an actor reference is `{'beamtalk_object', ClassAtom,
+    /// ModuleAtom, Pid}` (a 4-tuple, `beamtalk.hrl`'s `#beamtalk_object{}`
+    /// record), never a map, so [`Self::wrap_class_tag_test`]'s `is_map`
+    /// check would never match a live actor instance. Reuses the same
+    /// `is_tuple`/`tuple_size`/`element(1) == 'beamtalk_object'` idiom
+    /// `fieldAt:`'s actor-vs-map dispatch already uses (`intrinsics.rs`),
+    /// guarding `tuple_size` before calling `element/2` (which raises
+    /// `badarg` on an out-of-range index, unlike the guard-safe BIFs used
+    /// elsewhere) so an arbitrary Erlang tuple a caller happens to pass in
+    /// falls through to `rest` instead of crashing. `element(2)` (the class
+    /// name) is then compared against `class_name` to complete the exact
+    /// match.
+    fn wrap_actor_class_tag_test(
+        &mut self,
+        match_var: &str,
+        class_name: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        // `is_tuple`/`tuple_size == 4` are boolean-returning (2-clause,
+        // `'true'`/`'false'` only — same convention as the outer `is_map`
+        // check elsewhere); `element(1)`/`element(2)` return an arbitrary
+        // atom, so each needs its own wildcard fallback var.
+        let no_match_tag = self.fresh_temp_var("NoMatch");
+        let no_match_class = self.fresh_temp_var("NoMatch");
+        let v = leaf::var(match_var.to_string());
+        docvec![
+            "case call 'erlang':'is_tuple'(",
+            v.clone(),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+            v.clone(),
+            "), 4) of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'element'(1, ",
+            v.clone(),
+            ") of ",
+            "<'beamtalk_object'> when 'true' -> ",
+            "case call 'erlang':'element'(2, ",
+            v,
+            ") of ",
+            "<",
+            leaf::atom(class_name.to_string()),
+            "> when 'true' -> ",
+            success,
+            " <",
+            leaf::var(no_match_class),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<",
+            leaf::var(no_match_tag),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// Tests whether the scrutinee is a supervisor reference (a
+    /// `Supervisor`/`DynamicSupervisor` subclass instance) of exactly
+    /// `class_name` (BT-2870). A live supervisor reference is always
+    /// `{'beamtalk_supervisor', ClassAtom, ModuleAtom, Pid}` by the time any
+    /// caller observes it — `beamtalk_class_dispatch:class_send_dispatch/3`
+    /// rewrites the transient `{'beamtalk_supervisor_new', ClassAtom,
+    /// ModuleAtom, Pid}` fresh-start tag to `'beamtalk_supervisor'` before
+    /// `run_initialize` is even called, so `'beamtalk_supervisor_new'` is
+    /// never observable by user code, not even inside `class initialize:`
+    /// (see `beamtalk_supervisor.erl`'s `startLink/1` doc). The
+    /// `'beamtalk_supervisor_new'` arm below is defensive dead code kept for
+    /// symmetry with the tag pair, not a reachable runtime case. Neither
+    /// shape is a map, so [`Self::wrap_class_tag_test`]'s `is_map` check
+    /// would never match; this reuses the same
+    /// `is_tuple`/`tuple_size`/`element(1)`/`element(2)` idiom
+    /// [`Self::wrap_actor_class_tag_test`] uses, but accepts *either*
+    /// reserved tag at `element(1)` before comparing `element(2)` (the
+    /// class name) against `class_name`.
+    fn wrap_supervisor_class_tag_test(
+        &mut self,
+        match_var: &str,
+        class_name: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let no_match_tag = self.fresh_temp_var("NoMatch");
+        let no_match_class = self.fresh_temp_var("NoMatch");
+        let v = leaf::var(match_var.to_string());
+
+        // Built once in source; cloned into both accepted tag arms below so
+        // the element(2) class-name check isn't copy-pasted in Rust source.
+        let class_check = docvec![
+            "case call 'erlang':'element'(2, ",
+            v.clone(),
+            ") of ",
+            "<",
+            leaf::atom(class_name.to_string()),
+            "> when 'true' -> ",
+            success,
+            " <",
+            leaf::var(no_match_class),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ];
+
+        docvec![
+            "case call 'erlang':'is_tuple'(",
+            v.clone(),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+            v.clone(),
+            "), 4) of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'element'(1, ",
+            v,
+            ") of ",
+            "<'beamtalk_supervisor'> when 'true' -> ",
+            class_check.clone(),
+            " <'beamtalk_supervisor_new'> when 'true' -> ",
+            class_check,
+            " <",
+            leaf::var(no_match_tag),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// `Tuple` matches any Erlang tuple **except** the reserved 4-tuple
+    /// shapes this compiler uses internally for actor references
+    /// (`{'beamtalk_object', ...}`) and supervisor references
+    /// (`{'beamtalk_supervisor' | 'beamtalk_supervisor_new', ...}`) —
+    /// without this exclusion, a live actor/supervisor reference is *also*
+    /// a plain Erlang tuple structurally, so `x :: Tuple` would incorrectly
+    /// match it too. (BT-2870: `Supervisor`/`DynamicSupervisor` subclasses
+    /// are themselves valid type-pattern `class` names now, handled by
+    /// [`Self::wrap_supervisor_class_tag_test`] above — this exclusion
+    /// still applies to an *unrelated* `x :: Tuple` arm that could see one
+    /// of these values flow through.)
+    fn wrap_tuple_test(
+        &mut self,
+        match_var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let v = leaf::var(match_var.to_string());
+        let not_reserved = self.fresh_temp_var("NotReserved");
+        docvec![
+            "case call 'erlang':'is_tuple'(",
+            v.clone(),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+            v.clone(),
+            "), 4) of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'element'(1, ",
+            v,
+            ") of ",
+            "<'beamtalk_object'> when 'true' -> ",
+            rest.clone(),
+            " <'beamtalk_supervisor'> when 'true' -> ",
+            rest.clone(),
+            " <'beamtalk_supervisor_new'> when 'true' -> ",
+            rest.clone(),
+            " <",
+            leaf::var(not_reserved),
+            "> when 'true' -> ",
+            success.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            success,
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// Handles a `Pattern::Array` element inside an outer array match arm.
+    ///
+    /// Extracts the element, verifies it is an `Array` of the right size, then
+    /// recurses into its sub-elements before continuing with the outer arm.
+    #[allow(clippy::too_many_arguments)]
+    fn build_nested_array_element(
+        &mut self,
+        outer_array_var: &str,
+        outer_elements: &[Pattern],
+        start: usize,
+        one_based: usize,
+        inner_elems: &[Pattern],
+        continuation: Document<'static>,
+        failure_doc: &Document<'static>,
+        already_bound: &mut HashSet<String>,
+    ) -> Result<Document<'static>> {
+        let nested_var = self.fresh_temp_var("ArrElem");
+        let n_inner = inner_elems.len();
+
+        let after_nested = self.build_array_arm_body(
+            outer_array_var,
+            outer_elements,
+            start + 1,
+            continuation,
+            failure_doc,
+            already_bound,
+        )?;
+        let inner_body = self.build_array_arm_body(
+            &nested_var,
+            inner_elems,
+            0,
+            after_nested,
+            failure_doc,
+            already_bound,
+        )?;
+
+        let no_match_size_n = self.fresh_temp_var("NoMatch");
+        let no_match_class_n = self.fresh_temp_var("NoMatch");
+
+        Ok(docvec![
+            "let ",
+            leaf::var(nested_var.clone()),
+            " = call 'beamtalk_message_dispatch':'send'(",
+            leaf::var(outer_array_var.to_string()),
+            ", 'at:', [",
+            index_lit(one_based),
+            "]) in ",
+            "case call 'erlang':'is_map'(",
+            leaf::var(nested_var.clone()),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'maps':'get'('$beamtalk_class', ",
+            leaf::var(nested_var.clone()),
+            ", 'undefined') of ",
+            "<'Array'> when 'true' -> ",
+            "case call 'beamtalk_array':'size'(",
+            leaf::var(nested_var.clone()),
+            ") of ",
+            "<",
+            index_lit(n_inner),
+            "> when 'true' -> ",
+            inner_body,
+            " <",
+            leaf::var(no_match_size_n),
+            "> when 'true' -> ",
+            failure_doc.clone(),
+            " end ",
+            "<",
+            leaf::var(no_match_class_n),
+            "> when 'true' -> ",
+            failure_doc.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            failure_doc.clone(),
+            " end"
+        ])
+    }
+
+    /// Emits the equality-check extraction for a duplicate `Pattern::Variable` in an
+    /// array match arm: `let VarDup = at:[N] in case erlang:=:=(Var, VarDup) of ...`
+    fn build_array_variable_element(
+        &mut self,
+        array_var: &str,
+        core_var: String,
+        one_based: usize,
+        next: Document<'static>,
+        failure_doc: &Document<'static>,
+    ) -> Document<'static> {
+        let dup_var = self.fresh_temp_var(&format!("{core_var}Dup"));
+        let mismatch_var = self.fresh_temp_var("Mismatch");
+        docvec![
+            "let ",
+            leaf::var(dup_var.clone()),
+            " = call 'beamtalk_message_dispatch':'send'(",
+            leaf::var(array_var.to_string()),
+            ", 'at:', [",
+            index_lit(one_based),
+            "]) in ",
+            "case call 'erlang':'=:='(",
+            leaf::var(core_var),
+            ", ",
+            leaf::var(dup_var),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            next,
+            " <",
+            leaf::var(mismatch_var),
+            "> when 'true' -> ",
+            failure_doc.clone(),
+            " end"
+        ]
+    }
+
+    /// Recursively builds element-extraction `let`-bindings for an array pattern arm.
+    ///
+    /// Handles nested `Pattern::Array` elements by wrapping the continuation in a
+    /// sub-array check. Variables are pre-registered in scope by
+    /// [`Self::generate_array_match_arm`] via [`Self::collect_pattern_variables`].
+    ///
+    /// `continuation` is what to execute after all elements are extracted.
+    /// `failure_doc` is what to execute if any nested array check fails.
+    /// `already_bound` tracks variable names already extracted in this arm; a second
+    /// occurrence emits an `erlang:=:=` equality check rather than a new binding.
+    fn build_array_arm_body(
+        &mut self,
+        array_var: &str,
+        elements: &[Pattern],
+        start: usize,
+        continuation: Document<'static>,
+        failure_doc: &Document<'static>,
+        already_bound: &mut HashSet<String>,
+    ) -> Result<Document<'static>> {
+        if start >= elements.len() {
+            return Ok(continuation);
+        }
+
+        let one_based = start + 1;
+        match &elements[start] {
+            Pattern::Variable(id) => {
+                let core_var = Self::to_core_erlang_var(&id.name);
+                if already_bound.contains(id.name.as_str()) {
+                    // Duplicate: build rest first, then wrap with equality check.
+                    let next = self.build_array_arm_body(
+                        array_var,
+                        elements,
+                        start + 1,
+                        continuation,
+                        failure_doc,
+                        already_bound,
+                    )?;
+                    Ok(self.build_array_variable_element(
+                        array_var,
+                        core_var,
+                        one_based,
+                        next,
+                        failure_doc,
+                    ))
+                } else {
+                    // First occurrence: register BEFORE recursing so later positions
+                    // with the same name are recognised as duplicates.
+                    already_bound.insert(id.name.to_string());
+                    let next = self.build_array_arm_body(
+                        array_var,
+                        elements,
+                        start + 1,
+                        continuation,
+                        failure_doc,
+                        already_bound,
+                    )?;
+                    Ok(docvec![
+                        "let ",
+                        leaf::var(core_var),
+                        " = call 'beamtalk_message_dispatch':'send'(",
+                        leaf::var(array_var.to_string()),
+                        ", 'at:', [",
+                        index_lit(one_based),
+                        "]) in ",
+                        next
+                    ])
+                }
+            }
+            Pattern::Wildcard(_) => self.build_array_arm_body(
+                array_var,
+                elements,
+                start + 1,
+                continuation,
+                failure_doc,
+                already_bound,
+            ),
+            Pattern::Array {
+                elements: inner_elems,
+                ..
+            } => {
+                let inner_elems_clone: Vec<Pattern> = inner_elems.clone();
+                self.build_nested_array_element(
+                    array_var,
+                    elements,
+                    start,
+                    one_based,
+                    &inner_elems_clone,
+                    continuation,
+                    failure_doc,
+                    already_bound,
+                )
+            }
+            elem => Err(CodeGenError::UnsupportedFeature {
+                feature: "Unsupported pattern in Array match arm element".to_string(),
+                span: Some(elem.span()),
+            }),
+        }
+    }
+
+    /// Generates a Core Erlang document for a map pattern key.
+    ///
+    /// Symbol keys emit an atom: `'key'`.
+    /// String keys emit a Core Erlang binary literal via the Document pipeline.
+    fn map_pattern_key_doc(key: &MapPatternKey) -> Document<'static> {
+        match key {
+            MapPatternKey::Symbol(s) => leaf::atom(s.as_str()),
+            MapPatternKey::StringLit(s) => leaf::binary_lit(s.as_str()),
+        }
+    }
+
+    /// Generates a Core Erlang pattern from a Pattern AST node.
+    pub(super) fn generate_pattern(&mut self, pattern: &Pattern) -> Result<Document<'static>> {
+        match pattern {
+            Pattern::Wildcard(_) => Ok(Document::Str("_")),
+            // Reuses the existing atom-literal codegen path verbatim
+            // (ADR 0107 Phase A) — `nil` has one canonical runtime
+            // representation, no new mechanism needed.
+            Pattern::Nil(_) => Ok(Document::Str("'nil'")),
+            // `Pattern::Type` only has codegen as a top-level match arm
+            // pattern (`generate_type_pattern`, dispatched from
+            // `generate_match_chain`) — its per-class runtime test needs to
+            // wrap the *whole* arm (body, guard, rest-arm fallthrough), which
+            // isn't expressible as a plain native sub-pattern nested inside a
+            // `Tuple`/`List`/`Map`/`Constructor`. Mirrors `Pattern::Array`'s
+            // identical restriction just below.
+            Pattern::Type { span, .. } => Err(CodeGenError::UnsupportedFeature {
+                feature: "Type pattern (`binding :: ClassName`) nested inside a composite \
+                          pattern (tuple/list/map/constructor) is not supported — only \
+                          top-level match arm patterns are supported (ADR 0107 Phase A)"
+                    .to_string(),
+                span: Some(*span),
+            }),
+            Pattern::Variable(id) => {
+                let var_name = Self::to_core_erlang_var(&id.name);
+                Ok(leaf::var(var_name))
+            }
+            Pattern::Literal(lit, _) => self.generate_literal(lit),
+            Pattern::Tuple { elements, .. } => {
+                let mut parts = vec![Document::Str("{")];
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::Str(", "));
+                    }
+                    parts.push(self.generate_pattern(elem)?);
+                }
+                parts.push(Document::Str("}"));
+                Ok(Document::Vec(parts))
+            }
+            Pattern::Array { .. } => {
+                // Beamtalk arrays are opaque tagged maps — they cannot appear as a
+                // native Core Erlang sub-pattern (inside tuples, lists, binary segments, etc.).
+                // Top-level array patterns in `match:` arms are handled by
+                // `generate_array_match_arm` and never reach this path.
+                Err(CodeGenError::UnsupportedFeature {
+                    feature: "Array pattern nested inside a composite native pattern (tuple/list) is not supported".to_string(),
+                    span: Some(pattern.span()),
+                })
+            }
+            Pattern::List { elements, tail, .. } => {
+                if elements.is_empty() && tail.is_none() {
+                    return Ok(Document::Str("[]"));
+                }
+                let mut parts = vec![Document::Str("[")];
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::Str(", "));
+                    }
+                    parts.push(self.generate_pattern(elem)?);
+                }
+                if let Some(tail_pat) = tail {
+                    parts.push(Document::Str(" | "));
+                    parts.push(self.generate_pattern(tail_pat)?);
+                }
+                parts.push(Document::Str("]"));
+                Ok(Document::Vec(parts))
+            }
+            Pattern::Binary { segments, .. } => {
+                let mut parts = vec![Document::Str("#{")];
+                for (i, seg) in segments.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::Str(","));
+                    }
+                    parts.push(self.generate_binary_segment(seg)?);
+                }
+                parts.push(Document::Str("}#"));
+                Ok(Document::Vec(parts))
+            }
+            Pattern::Map { pairs, .. } => {
+                // Beamtalk Dictionaries are plain Erlang maps — emit a Core Erlang map pattern.
+                // `#{#k => v}` compiles to `~{ 'k' := V }~`   (symbol key → atom)
+                // `#{"k" => v}` compiles to `~{ <binary literal for "k"> := V }~` (string key → binary)
+                // `:=` is the Core Erlang match-binding form.
+                if pairs.is_empty() {
+                    return Ok(Document::Str("~{}~"));
+                }
+                let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
+                for (i, pair) in pairs.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::Str(", "));
+                    }
+                    let key_doc = Self::map_pattern_key_doc(&pair.key);
+                    parts.push(key_doc);
+                    parts.push(Document::Str(" := "));
+                    parts.push(self.generate_pattern(&pair.value)?);
+                }
+                parts.push(Document::Str(" }~"));
+                Ok(Document::Vec(parts))
+            }
+            Pattern::Constructor {
+                class,
+                keywords,
+                span,
+            } => self.generate_constructor_pattern(class, keywords, *span),
+        }
+    }
+
+    /// Generates a Core Erlang map pattern for a sealed-type constructor pattern.
+    ///
+    /// Maps `Result ok: v` to:
+    /// ```text
+    /// ~{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := V}~
+    /// ```
+    ///
+    /// The field mapping is looked up from [`sealed_constructor_fields`].
+    fn generate_constructor_pattern(
+        &mut self,
+        class: &beamtalk_core::ast::Identifier,
+        keywords: &[(beamtalk_core::ast::Identifier, Pattern)],
+        span: beamtalk_core::source_analysis::Span,
+    ) -> Result<Document<'static>> {
+        // Build the full selector from keyword parts (e.g. "ok:" or "attempt:identifier:")
+        let selector: String = keywords.iter().map(|(kw, _)| kw.name.as_str()).collect();
+
+        let fields = sealed_constructor_fields(&class.name, &selector).ok_or_else(|| {
+            CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "Constructor pattern `{} {}` — '{}' is not a known sealed type or \
+                     '{}' is not a recognised constructor. \
+                     Only stdlib sealed types (e.g. Result) support constructor patterns in this release.",
+                    class.name, selector, class.name, selector
+                ),
+                span: Some(span),
+            }
+        })?;
+
+        // Validate arity
+        if keywords.len() != fields.binding_fields.len() {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "Constructor pattern `{} {}` has {} argument(s) but constructor expects {}",
+                    class.name,
+                    selector,
+                    keywords.len(),
+                    fields.binding_fields.len()
+                ),
+                span: Some(span),
+            });
+        }
+
+        // ~{'$beamtalk_class' := 'ClassName', 'discriminator' := Value, ..., 'field' := Binding}~
+        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{")];
+
+        // Class tag
+        parts.push(Document::Str("'$beamtalk_class' := "));
+        parts.push(leaf::atom(class.name.to_string()));
+
+        // Discriminator fields (fixed values distinguishing variants)
+        for (field_name, field_value) in &fields.discriminators {
+            parts.push(Document::Str(", "));
+            parts.push(leaf::atom(*field_name));
+            parts.push(Document::Str(" := "));
+            // field_value is a compile-time-constant Core Erlang term (e.g. `'true'`).
+            parts.push(Document::Str(field_value));
+        }
+
+        // Binding fields — one per keyword argument. Wildcards still emit the
+        // field key (requiring the key to exist in the map) but bind to `_`.
+        for ((_, binding_pattern), field_name) in keywords.iter().zip(fields.binding_fields.iter())
+        {
+            parts.push(Document::Str(", "));
+            parts.push(leaf::atom(*field_name));
+            parts.push(Document::Str(" := "));
+            parts.push(self.generate_pattern(binding_pattern)?);
+        }
+
+        parts.push(Document::Str("}~"));
+        Ok(Document::Vec(parts))
+    }
+
+    /// Generates a Core Erlang binary segment: `#<Value>(Size,Unit,Type,Flags)`.
+    ///
+    /// Core Erlang binary segment format:
+    /// ```text
+    /// #<VarName>(Size, Unit, Type, ['flag1'|['flag2']])
+    /// ```
+    ///
+    /// Defaults: type=integer, signedness=unsigned, endianness=big,
+    /// size=8 for integer/float, 'all' for binary, 'undefined' for utf8.
+    /// Unit=1 for integer/float, 8 for binary, 'undefined' for utf8.
+    pub(super) fn generate_binary_segment(
+        &mut self,
+        seg: &BinarySegment,
+    ) -> Result<Document<'static>> {
+        // Value: the variable or wildcard
+        let value_doc = self.generate_pattern(&seg.value)?;
+
+        // Resolve type (default: integer)
+        let seg_type = seg.segment_type.unwrap_or(BinarySegmentType::Integer);
+
+        // Size: explicit, or default based on type
+        let size_doc = if let Some(size_expr) = &seg.size {
+            self.expression_doc(size_expr)?
+        } else {
+            match seg_type {
+                BinarySegmentType::Binary => Document::Str("'all'"),
+                BinarySegmentType::Utf8 => Document::Str("'undefined'"),
+                BinarySegmentType::Integer => Document::Str("8"),
+                BinarySegmentType::Float => Document::Str("64"),
+            }
+        };
+
+        // Unit: 8 for binary, 'undefined' for utf8, 1 for integer/float
+        let unit_doc = match seg_type {
+            BinarySegmentType::Binary => Document::Str("8"),
+            BinarySegmentType::Utf8 => Document::Str("'undefined'"),
+            BinarySegmentType::Integer | BinarySegmentType::Float => Document::Str("1"),
+        };
+
+        // Type atom
+        let type_doc = match seg_type {
+            BinarySegmentType::Integer => Document::Str("'integer'"),
+            BinarySegmentType::Float => Document::Str("'float'"),
+            BinarySegmentType::Binary => Document::Str("'binary'"),
+            BinarySegmentType::Utf8 => Document::Str("'utf8'"),
+        };
+
+        // Flags: cons-cell list ['signedness'|['endianness']]
+        // Defaults: unsigned, big
+        let sign_str = match seg.signedness.unwrap_or(BinarySignedness::Unsigned) {
+            BinarySignedness::Signed => "'signed'",
+            BinarySignedness::Unsigned => "'unsigned'",
+        };
+        let end_str = match seg.endianness.unwrap_or(BinaryEndianness::Big) {
+            BinaryEndianness::Big => "'big'",
+            BinaryEndianness::Little => "'little'",
+            BinaryEndianness::Native => "'native'",
+        };
+        let flags_doc = docvec![
+            "[",
+            Document::Str(sign_str),
+            "|[",
+            Document::Str(end_str),
+            "]]"
+        ];
+
+        Ok(docvec![
+            "#<", value_doc, ">(", size_doc, ",", unit_doc, ",", type_doc, ",", flags_doc, ")"
+        ])
+    }
+
+    /// Generates a Core Erlang guard expression.
+    ///
+    /// Core Erlang guards only allow a restricted set of BIFs:
+    /// comparisons, arithmetic, and type checks.
+    fn generate_guard_expression(&mut self, expr: &Expression) -> Result<Document<'static>> {
+        match expr {
+            Expression::Literal(lit, _) => self.generate_literal(lit),
+            Expression::Identifier(id) => match id.name.as_str() {
+                "true" => Ok(Document::Str("'true'")),
+                "false" => Ok(Document::Str("'false'")),
+                "nil" => Ok(Document::Str("'nil'")),
+                _ => {
+                    if let Some(var_name) = self.lookup_var(&id.name) {
+                        Ok(leaf::var(var_name.clone()))
+                    } else {
+                        let var_name = Self::to_core_erlang_var(&id.name);
+                        Ok(leaf::var(var_name))
+                    }
+                }
+            },
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Binary(op),
+                arguments,
+                ..
+            } => {
+                let left = self.generate_guard_expression(receiver)?;
+                let right = self.generate_guard_expression(&arguments[0])?;
+                let erlang_op = match op.as_str() {
+                    ">" => ">",
+                    "<" => "<",
+                    ">=" => ">=",
+                    "<=" => "=<",
+                    "=:=" => "=:=",
+                    "/=" => "/=",
+                    "=/=" => "=/=",
+                    "+" => "+",
+                    "-" => "-",
+                    "*" => "*",
+                    "/" => "/",
+                    _ => {
+                        return Err(CodeGenError::UnsupportedFeature {
+                            feature: format!("operator '{op}' in guard expression"),
+                            span: Some(expr.span()),
+                        });
+                    }
+                };
+                Ok(docvec![
+                    "call 'erlang':",
+                    leaf::atom(erlang_op),
+                    "(",
+                    left,
+                    ", ",
+                    right,
+                    ")",
+                ])
+            }
+            _ => Err(CodeGenError::UnsupportedFeature {
+                feature: "complex guard expression (only comparisons and arithmetic allowed)"
+                    .to_string(),
+                span: Some(expr.span()),
+            }),
+        }
+    }
+
+    /// Collects all variable names from a pattern and calls the callback
+    /// with the Beamtalk name and the corresponding Core Erlang variable name.
+    fn collect_pattern_variables(pattern: &Pattern, mut bind: impl FnMut(&str, &str)) {
+        Self::collect_pattern_variables_inner(pattern, &mut bind);
+    }
+
+    fn collect_pattern_variables_inner(pattern: &Pattern, bind: &mut impl FnMut(&str, &str)) {
+        match pattern {
+            Pattern::Variable(id) => {
+                let core_var = Self::to_core_erlang_var(&id.name);
+                bind(&id.name, &core_var);
+            }
+            Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+                for elem in elements {
+                    Self::collect_pattern_variables_inner(elem, bind);
+                }
+                if let Pattern::List { tail: Some(t), .. } = pattern {
+                    Self::collect_pattern_variables_inner(t, bind);
+                }
+            }
+            Pattern::Array { elements, rest, .. } => {
+                for elem in elements {
+                    Self::collect_pattern_variables_inner(elem, bind);
+                }
+                if let Some(rest_pat) = rest {
+                    Self::collect_pattern_variables_inner(rest_pat, bind);
+                }
+            }
+            Pattern::Binary { segments, .. } => {
+                for seg in segments {
+                    Self::collect_pattern_variables_inner(&seg.value, bind);
+                }
+            }
+            Pattern::Map { pairs, .. } => {
+                for pair in pairs {
+                    Self::collect_pattern_variables_inner(&pair.value, bind);
+                }
+            }
+            Pattern::Constructor { keywords, .. } => {
+                for (_, binding) in keywords {
+                    Self::collect_pattern_variables_inner(binding, bind);
+                }
+            }
+            // `Pattern::Type`'s `binding` is bound directly by
+            // `generate_type_pattern` (BT-2855) when it's the arm's
+            // top-level pattern — this helper is only reached for *nested*
+            // sub-patterns (inside `Tuple`/`List`/`Map`/`Constructor`), and
+            // `generate_pattern` already rejects a nested `Pattern::Type`
+            // before this would matter (same restriction as
+            // `Pattern::Array`).
+            Pattern::Wildcard(_)
+            | Pattern::Literal(_, _)
+            | Pattern::Nil(_)
+            | Pattern::Type { .. } => {}
+        }
+    }
+}
+
+/// Renders a `usize` index, arity, or size as a Core Erlang integer leaf.
+///
+/// Wraps [`leaf::int_lit`] for the many positional-index call sites in
+/// destructuring and pattern-match codegen, where the value comes from an
+/// AST `Vec` length or position and is therefore always non-negative and far
+/// below `i64::MAX`. Saturates rather than panicking on the unreachable
+/// overflow case so codegen never aborts.
+fn index_lit(n: usize) -> Document<'static> {
+    leaf::int_lit(i64::try_from(n).unwrap_or(i64::MAX))
+}
+
+/// Field layout for a sealed-type constructor pattern (Phase 1: stdlib types only).
+///
+/// `discriminators` — fixed field values that distinguish variants of the same sealed type
+///   (e.g. `isOk => true` for `Result ok:`).
+/// `binding_fields` — ordered list of map keys that receive the constructor arguments.
+struct ConstructorPatternFields {
+    discriminators: Vec<(&'static str, &'static str)>,
+    binding_fields: Vec<&'static str>,
+}
+
+/// Returns the Core Erlang field layout for a known sealed-type constructor.
+///
+/// Returns `None` for unknown classes or unknown selectors (caller emits a compile error).
+///
+/// # Phase 1 scope
+/// Only stdlib sealed types are supported. User-defined sealed types require the
+/// Phase 2 `[pattern: ...]` annotation (tracked separately).
+fn sealed_constructor_fields(class: &str, selector: &str) -> Option<ConstructorPatternFields> {
+    match (class, selector) {
+        ("Result", "ok:") => Some(ConstructorPatternFields {
+            discriminators: vec![("isOk", "'true'")],
+            binding_fields: vec!["okValue"],
+        }),
+        ("Result", "error:") => Some(ConstructorPatternFields {
+            discriminators: vec![("isOk", "'false'")],
+            binding_fields: vec!["errReason"],
+        }),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::core_erlang::CoreErlangGenerator;
+    use beamtalk_core::ast::{
+        Block, BlockParameter, Expression, ExpressionStatement, Identifier, Literal, MapPair,
+        MatchArm, MessageSelector, Pattern,
+    };
+    use beamtalk_core::source_analysis::Span;
+
+    fn s() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn bare(expr: Expression) -> ExpressionStatement {
+        ExpressionStatement::bare(expr)
+    }
+
+    #[test]
+    fn test_generate_empty_map_literal() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let doc = generator.generate_map_literal(&[]).unwrap();
+        assert_eq!(doc.to_pretty_string(), "~{}~");
+    }
+
+    #[test]
+    fn test_generate_map_literal_with_symbol_key() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let pairs = vec![MapPair::new(
+            Expression::Literal(Literal::Symbol("x".into()), s()),
+            Expression::Literal(Literal::Integer(1), s()),
+            s(),
+        )];
+        let doc = generator.generate_map_literal(&pairs).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'x'"),
+            "map key should be atom. Got: {output}"
+        );
+        assert!(
+            output.contains("=> 1"),
+            "map value should be integer. Got: {output}"
+        );
+        assert!(
+            output.contains("=>"),
+            "map should use => syntax. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_empty_list_literal() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let doc = generator.generate_list_literal(&[], None).unwrap();
+        assert_eq!(doc.to_pretty_string(), "[]");
+    }
+
+    #[test]
+    fn test_generate_list_literal_with_elements() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let elements = vec![
+            Expression::Literal(Literal::Integer(1), s()),
+            Expression::Literal(Literal::Integer(2), s()),
+        ];
+        let doc = generator.generate_list_literal(&elements, None).unwrap();
+        assert_eq!(doc.to_pretty_string(), "[1, 2]");
+    }
+
+    #[test]
+    fn test_generate_array_literal_calls_from_list() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let elements = vec![Expression::Literal(Literal::Integer(42), s())];
+        let doc = generator.generate_array_literal(&elements).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("beamtalk_array':'from_list'"),
+            "array should call from_list. Got: {output}"
+        );
+        assert!(
+            output.contains("42"),
+            "array should contain element. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_identifier_reserved_words() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let t = generator
+            .generate_identifier(&Identifier::new("true", s()))
+            .unwrap();
+        assert_eq!(t.to_pretty_string(), "'true'");
+        let f = generator
+            .generate_identifier(&Identifier::new("false", s()))
+            .unwrap();
+        assert_eq!(f.to_pretty_string(), "'false'");
+        let n = generator
+            .generate_identifier(&Identifier::new("nil", s()))
+            .unwrap();
+        assert_eq!(n.to_pretty_string(), "'nil'");
+    }
+
+    #[test]
+    fn test_generate_block_no_params() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let block = Block::new(
+            vec![],
+            vec![bare(Expression::Literal(Literal::Integer(99), s()))],
+            s(),
+        );
+        let doc = generator.generate_block(&block).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("fun ()"),
+            "block header should be 'fun ()'. Got: {output}"
+        );
+        assert!(
+            output.contains("99"),
+            "block body should contain literal. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_block_with_param() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let block = Block::new(
+            vec![BlockParameter::new("x", s())],
+            vec![bare(Expression::Literal(Literal::Integer(0), s()))],
+            s(),
+        );
+        let doc = generator.generate_block(&block).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("fun ("),
+            "block should start with 'fun ('. Got: {output}"
+        );
+        assert!(
+            output.contains("->"),
+            "block should have arrow. Got: {output}"
+        );
+    }
+
+    // ── BT-2855 / ADR 0107 Phase A: `Pattern::Type` codegen ─────────────────
+
+    /// Builds a top-level `binding :: class -> body` match arm.
+    fn type_arm(binding: &str, class: &str, body: Expression) -> MatchArm {
+        MatchArm::new(
+            Pattern::Type {
+                binding: Identifier::new(binding, s()),
+                class: Identifier::new(class, s()),
+                span: s(),
+            },
+            body,
+            s(),
+        )
+    }
+
+    /// Builds a wildcard `_ -> body` fallthrough arm.
+    fn wildcard_arm(body: Expression) -> MatchArm {
+        MatchArm::new(Pattern::Wildcard(s()), body, s())
+    }
+
+    fn ident_expr(name: &str) -> Expression {
+        Expression::Identifier(Identifier::new(name, s()))
+    }
+
+    fn int_expr(n: i64) -> Expression {
+        Expression::Literal(Literal::Integer(n), s())
+    }
+
+    #[test]
+    fn test_type_pattern_string_uses_is_binary() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("s", "String", ident_expr("s")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_binary'"),
+            "String pattern should test is_binary. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_integer_uses_is_integer() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("n", "Integer", ident_expr("n")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_integer'"),
+            "Integer pattern should test is_integer. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_float_uses_is_float() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("f", "Float", ident_expr("f")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_float'"),
+            "Float pattern should test is_float. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_list_uses_is_list() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("l", "List", ident_expr("l")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_list'"),
+            "List pattern should test is_list. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_dictionary_uses_nested_map_tag_check() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("d", "Dictionary", ident_expr("d")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_map'"),
+            "Dictionary pattern should test is_map first. Got: {output}"
+        );
+        assert!(
+            output.contains("'maps':'get'('$beamtalk_class'"),
+            "Dictionary pattern should check '$beamtalk_class' via maps:get. Got: {output}"
+        );
+        assert!(
+            output.contains("'undefined'"),
+            "Dictionary pattern matches the *absence* of '$beamtalk_class' ('undefined'). Got: {output}"
+        );
+        // Must NOT use maps:get/3 inside a guard position (not guard-safe) —
+        // it must appear only as a case scrutinee.
+        assert!(
+            !output.contains("when call 'maps':'get'"),
+            "maps:get must not appear in guard position. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_symbol_excludes_nil_true_false() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("sym", "Symbol", ident_expr("sym")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_atom'"),
+            "Symbol pattern should test is_atom. Got: {output}"
+        );
+        assert!(
+            output.contains("'erlang':'=/='") && output.contains("'nil'"),
+            "Symbol pattern should exclude 'nil'. Got: {output}"
+        );
+        assert!(
+            output.contains("'true'") && output.contains("'false'"),
+            "Symbol pattern should exclude 'true'/'false'. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_boolean_is_exact_literal_match_not_is_atom() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("b", "Boolean", ident_expr("b")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            !output.contains("is_atom"),
+            "Boolean pattern must not use a bare is_atom guard. Got: {output}"
+        );
+        assert!(
+            output.contains("<'true'>") && output.contains("<'false'>"),
+            "Boolean pattern should match literal 'true'/'false'. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_tagged_class_uses_beamtalk_class_map_check() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("shape", "Circle", ident_expr("shape")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_map'"),
+            "Tagged-class pattern should test is_map first. Got: {output}"
+        );
+        assert!(
+            output.contains("'maps':'get'('$beamtalk_class'"),
+            "Tagged-class pattern should check '$beamtalk_class'. Got: {output}"
+        );
+        assert!(
+            output.contains("'Circle'"),
+            "Tagged-class pattern should match the class name atom. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_binds_value_to_binding_name() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("path", "String", ident_expr("path")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("Path = "),
+            "binding should be bound via a `let` to the matched value. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_guard_scopes_over_binding() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        // path :: String when: [path > 0] -> path
+        let guard = Expression::MessageSend {
+            receiver: Box::new(ident_expr("path")),
+            selector: MessageSelector::Binary(">".into()),
+            arguments: vec![int_expr(0)],
+            is_cast: false,
+            span: s(),
+        };
+        let arms = vec![
+            MatchArm::with_guard(
+                Pattern::Type {
+                    binding: Identifier::new("path", s()),
+                    class: Identifier::new("String", s()),
+                    span: s(),
+                },
+                guard,
+                ident_expr("path"),
+                s(),
+            ),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_binary'"),
+            "Guarded Type arm should still emit the class test. Got: {output}"
+        );
+        assert!(
+            output.contains("'erlang':'>'"),
+            "Guarded Type arm should emit the guard, referencing the bound name. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_match_mixes_primitive_type_arm_and_native_arm_in_one_case() {
+        // A `match:` with a primitive `Type` arm followed by a plain
+        // `Literal`/wildcard arm must compile into a single interleaved
+        // chain (BT-2855 acceptance: dispatch/interleaving layer, not just
+        // each strategy in isolation).
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("s", "String", ident_expr("s")),
+            MatchArm::new(
+                Pattern::Literal(Literal::Integer(42), s()),
+                int_expr(1),
+                s(),
+            ),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_binary'"),
+            "Should still contain the String arm's test. Got: {output}"
+        );
+        assert!(
+            output.contains("<42>"),
+            "Should still contain the native literal arm. Got: {output}"
+        );
+    }
+}

@@ -41,10 +41,14 @@ pub(crate) fn unique_ws_id(label: &str) -> String {
 
 /// RAII guard owning a real (but uniquely-named) workspace directory under
 /// `~/.beamtalk/workspaces/`, matching the pattern already used by
-/// `storage.rs`'s and `node_state.rs`'s own tests — there is no
-/// `BEAMTALK_HOME`-style test override yet (BT-3349's own description
-/// tracks adding one). Removes the directory and lockfile on drop, including
-/// on panic, so a failing assertion never leaves real state behind.
+/// `storage.rs`'s and `node_state.rs`'s own tests. `beamtalk_home`'s
+/// `BEAMTALK_HOME` override (BT-3364) now exists, but this fixture doesn't
+/// use it: adopting it here needs a serialization strategy shared with every
+/// other non-`#[serial]` test that touches the real `~/.beamtalk` directory,
+/// or a test that sets it races this fixture's real-directory reads/writes
+/// (BT-3370 tracks that adoption). Removes the directory and lockfile on
+/// drop, including on panic, so a failing assertion never leaves real state
+/// behind.
 pub(crate) struct WorkspaceFixture {
     pub(crate) id: String,
 }

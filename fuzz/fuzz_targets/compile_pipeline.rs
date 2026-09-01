@@ -36,7 +36,7 @@
 
 #![no_main]
 
-use beamtalk_core::codegen::core_erlang::{CodegenOptions, generate_module};
+use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::semantic_analysis::analyse;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use beamtalk_core::test_helpers::test_support::core_erlang_structural_issues;

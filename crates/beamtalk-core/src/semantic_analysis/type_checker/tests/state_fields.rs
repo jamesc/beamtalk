@@ -744,7 +744,7 @@ fn test_expect_type_suppresses_typed_state_warning() {
 
     // ...but apply_expect_directives should suppress it
     let mut diagnostics = checker.diagnostics().to_vec();
-    crate::queries::diagnostic_provider::apply_expect_directives(&module, &mut diagnostics);
+    crate::compilation::diagnostics_policy::apply_expect_directives(&module, &mut diagnostics);
     let remaining: Vec<_> = diagnostics
         .iter()
         .filter(|d| {

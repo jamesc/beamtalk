@@ -360,11 +360,12 @@ fn run_create_background(
     Ok(())
 }
 
-/// Tests covering the parts of this module reachable without a
-/// `BEAMTALK_HOME`-style test override (BT-3349's own description tracks
-/// adding one): `run_create`'s and `run_list`/`run_status`'s success paths
-/// still need it, since they read/write `~/.beamtalk/workspaces/` in ways
-/// that can't be pointed at a hermetic tempdir yet.
+/// Tests covering the parts of this module reachable without adopting
+/// `beamtalk_home`'s `BEAMTALK_HOME` override (BT-3364): `run_create`'s and
+/// `run_list`/`run_status`'s success paths still need it, since they
+/// read/write `~/.beamtalk/workspaces/` in ways that can't be pointed at a
+/// hermetic tempdir until that adoption also serializes against every other
+/// non-`#[serial]` test touching the real directory (BT-3370).
 ///
 /// `run_create_background`'s "already running" short-circuit is reachable
 /// today because `workspace_id_for_project(_, Some(name))` (see

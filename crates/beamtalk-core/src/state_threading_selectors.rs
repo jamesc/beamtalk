@@ -6,6 +6,11 @@
 //! Used by both `semantic_analysis` (for `DispatchKind::ControlFlow` classification)
 //! and `codegen` (for block-mutation analysis and state-threading code generation).
 //!
+//! BT-3362 (ADR 0117 Decision step 5): the module and its four predicates
+//! widened from `pub(crate)` to `pub` — `codegen`'s consumer moved out into
+//! the standalone `beamtalk-codegen` crate, so a `pub(crate)` item it reached
+//! had to become genuinely `pub` once that consumer left the crate.
+//!
 //! Predicates in this module classify selectors for block-mutation analysis.
 //! Where a selector is also part of [`WellKnownSelector`](crate::ast::WellKnownSelector)
 //! — conditionals, `on:do:` — the predicate matches on the enum via
@@ -23,7 +28,7 @@ use crate::ast::WellKnownSelector;
 /// These selectors receive block arguments that are analysed for field mutations
 /// as part of state-threading control flow.
 #[must_use]
-pub(crate) fn is_state_threading_keyword_selector(sel: &str) -> bool {
+pub fn is_state_threading_keyword_selector(sel: &str) -> bool {
     if matches!(
         WellKnownSelector::from_name(sel),
         Some(
@@ -69,7 +74,7 @@ pub(crate) fn is_state_threading_keyword_selector(sel: &str) -> bool {
 
 /// Returns `true` if `sel` is a state-threading unary selector.
 #[must_use]
-pub(crate) fn is_state_threading_unary_selector(sel: &str) -> bool {
+pub fn is_state_threading_unary_selector(sel: &str) -> bool {
     matches!(sel, "whileTrue" | "whileFalse" | "timesRepeat")
 }
 
@@ -78,7 +83,7 @@ pub(crate) fn is_state_threading_unary_selector(sel: &str) -> bool {
 /// For these selectors the *receiver* (try body) is a block that must also be
 /// analysed for field mutations, in addition to the argument blocks.
 #[must_use]
-pub(crate) fn is_exception_selector(sel: &str) -> bool {
+pub fn is_exception_selector(sel: &str) -> bool {
     // `on:do:` is a well-known selector; `ensure:` is not (it's not
     // intrinsified by the type-checker, only by codegen's state-threading).
     matches!(
@@ -92,7 +97,7 @@ pub(crate) fn is_exception_selector(sel: &str) -> bool {
 /// For these selectors every block argument must be analysed independently,
 /// because mutations may appear in the first branch but not the second.
 #[must_use]
-pub(crate) fn is_conditional_selector(sel: &str) -> bool {
+pub fn is_conditional_selector(sel: &str) -> bool {
     matches!(
         WellKnownSelector::from_name(sel),
         Some(

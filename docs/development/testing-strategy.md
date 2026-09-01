@@ -1324,7 +1324,7 @@ smaller sub-expressions) instead of chopping the string arbitrarily.
 
 **Location:** `crate::test_helpers::test_support::arb_program` (`crates/beamtalk-core/src/test_helpers.rs`)
 
-**Properties:** `crates/beamtalk-core/src/codegen/core_erlang_validity_tests.rs`, in a second `proptest!` block below the `FRAGMENTS`-based one (that block is kept as-is — it intentionally also covers ill-formed/truncated input this generator never produces):
+**Properties:** `crates/beamtalk-codegen/src/core_erlang_validity_tests.rs`, in a second `proptest!` block below the `FRAGMENTS`-based one (that block is kept as-is — it intentionally also covers ill-formed/truncated input this generator never produces):
 
 | Property | What it verifies |
 |---|---|

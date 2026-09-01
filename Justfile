@@ -45,10 +45,10 @@ doctor:
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-surface-drift check-boundary test-grammar
+ci: build lint test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-surface-drift test-grammar
 
 [windows]
-ci: build clippy fmt-check-rust test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift check-boundary
+ci: build clippy fmt-check-rust test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
 
 # Run local CI checks, skipping the slow workspace/MCP/REPL-protocol/parity
 # suites when the diff (vs origin/main, plus uncommitted changes) doesn't touch
@@ -76,7 +76,6 @@ ci-changed:
     just check-corpus
     just check-generated-builtins
     just check-surface-drift
-    just check-boundary
 
     merge_base="$(git merge-base HEAD origin/main 2>/dev/null || true)"
     if [[ -n "$merge_base" ]]; then
@@ -659,14 +658,6 @@ check-generated-builtins: build
 check-surface-drift:
     @echo "🔎 Checking surface parity drift..."
     @cargo run -p beamtalk-surface-drift --quiet
-
-# Check the Compilation -> Language Service dependency direction inside
-# beamtalk-core (BT-3339, ADR 0117 Decision step 1). Fails if a production
-# `use`/fully-qualified edge from ast/source_analysis/unparse/codegen/
-# semantic_analysis/compilation reaches into queries/language_service/lint.
-check-boundary:
-    @echo "🔎 Checking Compilation -> Language Service dependency direction..."
-    @cargo run -p beamtalk-boundary-check --quiet
 
 # Evaluate search quality from structured MCP server logs (ADR 0062)
 # Usage: just search-eval /path/to/mcp-server.log

@@ -1,0 +1,50 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-language-service"
+description = "Beamtalk Language Service: IDE query API (completions, hover, diagnostics, navigation) over beamtalk-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["compiler", "beam", "smalltalk", "lsp"]
+categories = ["compilers", "development-tools"]
+
+[dependencies]
+# why: ADR 0117 step 5 (BT-3361) — the Language Service bounded context
+# consumes the Compilation context's AST, semantic analysis, source
+# analysis, unparse, and compilation-diagnostics-policy types. Never the
+# reverse (see docs/development/architecture-principles.md §1).
+beamtalk-core.workspace = true
+ecow.workspace = true
+camino.workspace = true
+# why: `runtime_delegate`'s nav-query request/response types derive
+# `Deserialize` behind this optional feature, mirroring beamtalk-core's own
+# `serde` feature — `beamtalk-lsp`/`beamtalk-mcp` enable it to decode
+# runtime-attached nav-query payloads.
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true
+tempfile = "3.14"
+# why: BT-3100 / BT-3344 pattern — property tests (`property_tests.rs`) share
+# `beamtalk_core::test_helpers::test_support::proptest_config_default`
+# rather than duplicating it (the "No duplicate implementations" rule); the
+# `test` feature gates that module in beamtalk-core.
+beamtalk-core = { workspace = true, features = ["test"] }
+
+[features]
+default = []
+## Enable serde Deserialize derives on nav-query request/response types
+## (`runtime_delegate`). Used by beamtalk-lsp/beamtalk-mcp. `ecow/serde` is
+## needed too — `EcoString`-typed fields on those structs otherwise have no
+## `Deserialize` impl (mirrors beamtalk-core's own `serde = ["ecow/serde"]`).
+serde = ["dep:serde", "ecow/serde"]
+
+[lints]
+workspace = true

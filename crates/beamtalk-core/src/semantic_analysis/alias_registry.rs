@@ -718,7 +718,15 @@ impl AliasRegistry {
     /// [`resolve_type_annotation`](crate::semantic_analysis::type_checker::resolve_type_annotation)'s
     /// own tests) that need an alias table without constructing a full
     /// `Module` AST.
-    #[cfg(test)]
+    ///
+    /// BT-3361: gate widened from `#[cfg(test)]` to `#[cfg(any(test, feature
+    /// = "test"))]` (the same mechanism `test_helpers::test_support` uses) —
+    /// `#[cfg(test)]` alone is per-compilation-unit and doesn't cross the
+    /// crate boundary, so it was invisible to `beamtalk-language-service`'s
+    /// own `#[cfg(test)]` tests (`queries::completion_provider`) once that
+    /// module moved into its own crate and started linking this crate's
+    /// compiled (non-test) rlib.
+    #[cfg(any(test, feature = "test"))]
     pub fn register_test_alias(&mut self, info: AliasInfo) {
         self.aliases.insert(info.name.clone(), info);
     }

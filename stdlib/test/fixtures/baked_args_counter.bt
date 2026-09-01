@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3365: Actor whose `class supervisionSpec` bakes default init args via
+// `withArgs:` — fixture for the DynamicSupervisor(C)>>startChild: review
+// follow-up. Exercises the SupervisionSpec startFn #spawnWith: (baked
+// default args) path through a simple_one_for_one template, as opposed to
+// the plain #spawn (no default args) path Counter exercises elsewhere.
+
+Actor subclass: BakedArgsCounter
+  state: value = 0
+
+  class supervisionSpec -> SupervisionSpec =>
+    ((SupervisionSpec new withActorClass: self) withRestart: self supervisionPolicy) withArgs: #{
+      #value => 7
+    }
+
+  getValue => self.value

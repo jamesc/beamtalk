@@ -124,7 +124,7 @@ pub(super) fn run_with_expect(module: &Module, hierarchy: &ClassHierarchy) -> Ve
     let mut checker = TypeChecker::new();
     checker.check_module(module, hierarchy);
     let mut diags = checker.take_diagnostics();
-    crate::queries::diagnostic_provider::apply_expect_directives(module, &mut diags);
+    crate::compilation::diagnostics_policy::apply_expect_directives(module, &mut diags);
     diags
 }
 

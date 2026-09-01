@@ -522,7 +522,7 @@ fn compile_sources_to_core(
             &module_name,
             &core_file,
             options,
-            &beamtalk_core::codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
             compile_ctx,
             cached,
         )?;

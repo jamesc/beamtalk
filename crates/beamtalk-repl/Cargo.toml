@@ -17,8 +17,10 @@ categories = ["compilers", "development-tools"]
 [dependencies]
 # why: BT-3340 (ADR 0117 Decision step 2) — REPL codegen delegates
 # expression compilation and state threading to `CoreErlangGenerator`
-# (`codegen::core_erlang`).
+# (`core_erlang`, now in the standalone `beamtalk-codegen` crate, ADR 0117
+# step 5 / BT-3362).
 beamtalk-core.workspace = true
+beamtalk-codegen.workspace = true
 # why: shared leaf for the Core Erlang Document/leaf/docvec! pretty-printing
 # API (BT-3343, ADR 0117 step 4) — REPL module assembly builds `Document`
 # values directly rather than only through `CoreErlangGenerator`.
