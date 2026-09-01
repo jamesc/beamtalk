@@ -131,3 +131,129 @@ fn connect_and_run(host: &str, port: u16, cookie: &str) -> Result<()> {
 
     super::repl::repl_loop(&mut client, host, port, cookie)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::{BeamtalkHomeOverride, WorkspaceFixture, real_home_guard};
+
+    /// Bind then immediately drop a `TcpListener` to obtain a port nothing
+    /// is listening on, so a connect attempt fails fast (connection
+    /// refused) instead of timing out — mirrors the pattern used by
+    /// `repl/process.rs` and `protocol.rs`'s own tests.
+    fn unbound_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        drop(listener);
+        port
+    }
+
+    // --- run(): --port without --cookie ---
+
+    #[test]
+    fn run_with_port_requires_cookie() {
+        let err = run(None, Some(9999), None, false).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("When using --port, a --cookie is required"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn run_with_port_and_unreachable_cookie_fails_to_connect() {
+        // A cookie is provided, so we reach connect_and_run — but nothing is
+        // listening on the port, so the connect itself fails.
+        let port = unbound_port();
+        let err = run(None, Some(port), Some("cookie"), false).unwrap_err();
+        assert!(err.to_string().contains("Failed to connect"), "got: {err}");
+    }
+
+    // --- attach_by_workspace_id: workspace does not exist ---
+
+    #[test]
+    fn attach_by_workspace_id_missing_named_workspace() {
+        let tmp = std::env::temp_dir().join(format!(
+            "bt3375-attach-missing-named-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&tmp).expect("create tempdir");
+        let _override = BeamtalkHomeOverride::new(&tmp);
+
+        let err = attach_by_workspace_id(Some("nope")).unwrap_err();
+        assert!(
+            err.to_string().contains("Workspace 'nope' does not exist"),
+            "got: {err}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn attach_by_workspace_id_missing_cwd_workspace() {
+        let tmp =
+            std::env::temp_dir().join(format!("bt3375-attach-missing-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).expect("create tempdir");
+        let _override = BeamtalkHomeOverride::new(&tmp);
+
+        let err = attach_by_workspace_id(None).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("No workspace found for current directory"),
+            "got: {err}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // --- workspace_not_running: error message shape ---
+
+    #[test]
+    fn workspace_not_running_uses_provided_label() {
+        let err = workspace_not_running("ws-id-123", Some("myname"));
+        let msg = err.to_string();
+        assert!(msg.contains("Workspace 'myname' is not running"), "{msg}");
+        assert!(!msg.contains("ws-id-123"), "{msg}");
+    }
+
+    #[test]
+    fn workspace_not_running_falls_back_to_workspace_id_label() {
+        let err = workspace_not_running("ws-id-123", None);
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Workspace 'ws-id-123' is not running"),
+            "{msg}"
+        );
+    }
+
+    // --- attach_by_workspace_id: workspace exists but not running ---
+
+    #[test]
+    fn attach_by_workspace_id_reports_not_running() {
+        let port = unbound_port();
+        let fixture = WorkspaceFixture::new("attach-not-running", port, 999_999);
+
+        let err = attach_by_workspace_id(Some(&fixture.id)).unwrap_err();
+        assert!(err.to_string().contains("is not running"), "got: {err}");
+    }
+
+    // --- connect_and_run: connection failure surfaces a hint ---
+
+    #[test]
+    fn connect_and_run_fails_with_hint_when_unreachable() {
+        let port = unbound_port();
+        let err = connect_and_run("127.0.0.1", port, "cookie").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Failed to connect to"), "{msg}");
+        assert!(msg.contains("is a workspace running"), "{msg}");
+    }
+
+    // Ensure `real_home_guard` stays referenced: `WorkspaceFixture` already
+    // holds it internally, but importing it here documents the invariant
+    // for readers scanning this module's test imports (BT-3370's guard
+    // pattern).
+    #[test]
+    fn real_home_guard_is_available_for_direct_use() {
+        let _guard = real_home_guard();
+    }
+}

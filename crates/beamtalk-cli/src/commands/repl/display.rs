@@ -245,7 +245,9 @@ pub(crate) fn display_info(info: &serde_json::Value) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::color::ColorGuard;
     use super::*;
+    use serial_test::serial;
 
     fn strip_ansi(s: &str) -> String {
         // Remove ESC[...m sequences for comparison
@@ -353,5 +355,21 @@ mod tests {
         // `core_pp` is not installed in the test environment, so this always
         // exercises the "print unmodified Core Erlang" fallback path.
         display_codegen("module test.\n  'foo'/0 = fun () -> ok\nend");
+    }
+
+    // --- output_mode ---
+
+    #[test]
+    #[serial(color)]
+    fn output_mode_is_ansi_when_color_enabled() {
+        let _guard = ColorGuard::enabled();
+        assert_eq!(output_mode(), OutputMode::Ansi);
+    }
+
+    #[test]
+    #[serial(color)]
+    fn output_mode_is_plain_when_color_disabled() {
+        let _guard = ColorGuard::disabled();
+        assert_eq!(output_mode(), OutputMode::Plain);
     }
 }

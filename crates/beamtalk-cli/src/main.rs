@@ -480,27 +480,29 @@ fn main() {
 /// running binary, falling back to `/usr/local`.
 fn compute_sysroot() -> PathBuf {
     match std::env::current_exe() {
-        Ok(exe) => {
-            if let Some(sysroot) = exe.parent().and_then(|bin| bin.parent()) {
-                return sysroot.to_path_buf();
-            }
-            eprintln!(
-                "warning: unable to determine sysroot from '{}'; falling back to /usr/local",
-                exe.display()
-            );
-        }
+        Ok(exe) => sysroot_from_exe_path(&exe),
         Err(err) => {
             eprintln!("warning: failed to read executable path: {err}; falling back to /usr/local");
+            PathBuf::from("/usr/local")
         }
     }
+}
+
+/// Derives the sysroot from a (real or hypothetical) binary path, split out
+/// from [`compute_sysroot`] so the "no grandparent directory" fallback branch
+/// is reachable without depending on `std::env::current_exe()`'s actual value.
+fn sysroot_from_exe_path(exe: &std::path::Path) -> PathBuf {
+    if let Some(sysroot) = exe.parent().and_then(|bin| bin.parent()) {
+        return sysroot.to_path_buf();
+    }
+    eprintln!(
+        "warning: unable to determine sysroot from '{}'; falling back to /usr/local",
+        exe.display()
+    );
     PathBuf::from("/usr/local")
 }
 
 /// CLI entry point: parse arguments and dispatch to the appropriate subcommand.
-#[expect(
-    clippy::too_many_lines,
-    reason = "top-level dispatch — each arm is a one-liner"
-)]
 fn run() -> Result<()> {
     let cli = Cli::parse();
 
@@ -547,6 +549,20 @@ fn run() -> Result<()> {
         )
     }))?;
 
+    dispatch_command(command)
+}
+
+/// Dispatches a parsed [`Command`] to its subcommand implementation.
+///
+/// Split out from [`run`] (BT-3375) so the argument-validation branches that
+/// don't touch the filesystem or spawn subprocesses (e.g. `--entry`/`-o`
+/// without `--escript`, `fmt --check`) are unit-testable without going
+/// through `Cli::parse()`/tracing/miette setup.
+#[expect(
+    clippy::too_many_lines,
+    reason = "top-level dispatch — each arm is a one-liner"
+)]
+fn dispatch_command(command: Command) -> Result<()> {
     match command {
         Command::Build {
             path,
@@ -721,5 +737,122 @@ fn run() -> Result<()> {
             class_filter,
         } => commands::type_coverage::run(&path, detail, format, at_least, class_filter.as_deref()),
         Command::WarmOtpCache => commands::warm_otp_cache::run(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- sysroot_from_exe_path ---
+
+    #[test]
+    fn sysroot_from_exe_path_returns_grandparent_of_binary() {
+        let exe = PathBuf::from("/opt/beamtalk/bin/beamtalk");
+        assert_eq!(sysroot_from_exe_path(&exe), PathBuf::from("/opt/beamtalk"));
+    }
+
+    #[test]
+    fn sysroot_from_exe_path_falls_back_without_grandparent() {
+        // A bare filename has no parent directories to walk up from, so the
+        // fallback path is used (and a warning printed to stderr).
+        let exe = PathBuf::from("beamtalk");
+        assert_eq!(sysroot_from_exe_path(&exe), PathBuf::from("/usr/local"));
+    }
+
+    #[test]
+    fn sysroot_from_exe_path_falls_back_with_single_component() {
+        // "/beamtalk" has a parent ("/") but that parent has no parent itself.
+        let exe = PathBuf::from("/beamtalk");
+        assert_eq!(sysroot_from_exe_path(&exe), PathBuf::from("/usr/local"));
+    }
+
+    // --- dispatch_command: safe validation branches (no filesystem/subprocess) ---
+
+    #[test]
+    fn dispatch_build_rejects_entry_without_escript() {
+        let err = dispatch_command(Command::Build {
+            path: ".".to_string(),
+            allow_primitives: false,
+            stdlib_mode: false,
+            no_warnings: false,
+            force: false,
+            escript: false,
+            entry: Some("Greeter main:".to_string()),
+            output: None,
+        })
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("only apply to `--escript`"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn dispatch_build_rejects_output_without_escript() {
+        let err = dispatch_command(Command::Build {
+            path: ".".to_string(),
+            allow_primitives: false,
+            stdlib_mode: false,
+            no_warnings: false,
+            force: false,
+            escript: false,
+            entry: None,
+            output: Some("out".to_string()),
+        })
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("only apply to `--escript`"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn dispatch_fmt_check_true_rejects_with_hint() {
+        let err = dispatch_command(Command::Fmt {
+            paths: vec![".".to_string()],
+            check: true,
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("beamtalk fmt-check"), "got: {err}");
+    }
+
+    #[test]
+    fn dispatch_check_prints_placeholder_and_succeeds() {
+        // `beamtalk check` is a stub that always succeeds — exercises the
+        // dispatch arm without touching the filesystem.
+        let result = dispatch_command(Command::Check {
+            path: ".".to_string(),
+        });
+        assert!(result.is_ok());
+    }
+
+    // --- Cli argument parsing ---
+
+    #[test]
+    fn cli_requires_a_subcommand_or_print_sysroot() {
+        // No subcommand and no --print-sysroot: parses fine (both are
+        // optional at the clap level); `run()`'s own bail for a missing
+        // subcommand is exercised by dispatch requiring a `Command`, not by
+        // clap itself.
+        let cli = Cli::try_parse_from(["beamtalk"]).expect("parses with no subcommand");
+        assert!(cli.command.is_none());
+        assert!(!cli.print_sysroot);
+    }
+
+    #[test]
+    fn cli_parses_print_sysroot_flag() {
+        let cli = Cli::try_parse_from(["beamtalk", "--print-sysroot"]).expect("parses");
+        assert!(cli.print_sysroot);
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn cli_fmt_check_flag_is_hidden_but_parses() {
+        let cli = Cli::try_parse_from(["beamtalk", "fmt", "--check"]).expect("parses");
+        match cli.command {
+            Some(Command::Fmt { check, .. }) => assert!(check),
+            other => panic!("expected Fmt command, got {other:?}"),
+        }
     }
 }

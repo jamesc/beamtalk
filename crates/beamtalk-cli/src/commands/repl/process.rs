@@ -164,14 +164,28 @@ pub(crate) fn start_beam_node(
 
 /// Connect to REPL backend with retries.
 pub(crate) fn connect_with_retries(host: &str, port: u16, cookie: &str) -> Result<ReplClient> {
-    for attempt in 1..=MAX_CONNECT_RETRIES {
+    connect_with_retries_and_delay(host, port, cookie, MAX_CONNECT_RETRIES, RETRY_DELAY_MS)
+}
+
+/// [`connect_with_retries`]'s retry loop, parameterized on attempt count/delay
+/// so tests can exhaust retries against a dead/unreachable port without
+/// paying `MAX_CONNECT_RETRIES * RETRY_DELAY_MS` of real wall-clock time
+/// (mirrors `client.rs`'s `reconnect_with_retries`, BT-3375).
+fn connect_with_retries_and_delay(
+    host: &str,
+    port: u16,
+    cookie: &str,
+    max_retries: u32,
+    retry_delay_ms: u64,
+) -> Result<ReplClient> {
+    for attempt in 1..=max_retries {
         match ReplClient::connect(host, port, cookie) {
             Ok(client) => return Ok(client),
             Err(e) => {
-                if attempt == MAX_CONNECT_RETRIES {
+                if attempt == max_retries {
                     return Err(e);
                 }
-                std::thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
+                std::thread::sleep(Duration::from_millis(retry_delay_ms));
             }
         }
     }
@@ -491,5 +505,23 @@ mod tests {
         // SAFETY: Test is serialized with #[serial(env_var)].
         unsafe { std::env::remove_var("BEAMTALK_NODE_NAME") };
         assert_eq!(result, Some("clinode".to_string()));
+    }
+
+    // --- connect_with_retries_and_delay ---
+
+    #[test]
+    fn connect_with_retries_exhausts_and_returns_last_error() {
+        // Bind then immediately drop a listener to get a port nothing is
+        // listening on, so every connect attempt fails fast (connection
+        // refused) rather than timing out. Small retry count/delay so the
+        // exhausted-retries branch is exercised without paying
+        // MAX_CONNECT_RETRIES * RETRY_DELAY_MS of real wall-clock time
+        // (mirrors client.rs's reconnect_with_retries_exhausts_* tests).
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        drop(listener);
+
+        let result = connect_with_retries_and_delay("127.0.0.1", port, "cookie", 2, 5);
+        assert!(result.is_err(), "expected connection failure to propagate");
     }
 }
