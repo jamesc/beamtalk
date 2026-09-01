@@ -105,3 +105,18 @@ TestCase subclass: ActorConditionalMutationsTest
     self assert: (self.c decrementViaLocalVar: false) equals: -1
     self assert: (self.c decrementViaLocalVar: false) equals: -2
     self assert: (self.c decrementViaLocalVar: true) equals: -2
+
+  testSelfSendAsConditionalReceiverThreadsMutation =>
+    // BT-3382: `(self recordOnce: flag) ifTrue:ifFalse:` — the self-send is
+    // the RECEIVER of the conditional, not a statement inside either block
+    // body, so the block-mutation scan that decides whether to inline this
+    // conditional never even sees a mutation (neither block itself mutates
+    // anything). Correct branch selection alone does not prove the
+    // self-send's own state mutation was observed afterward — assert the
+    // count too, for both branches.
+    result := self.c recordThenBranch: true
+    self assert: result equals: #recorded
+    self assert: self.c getCount equals: 1
+    result2 := self.c recordThenBranch: false
+    self assert: result2 equals: #gaveUp
+    self assert: self.c getCount equals: 2

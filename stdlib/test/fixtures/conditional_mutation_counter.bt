@@ -57,6 +57,18 @@ Actor subclass: ConditionalMutationCounter
       ]
     self.count
 
+  // BT-3382: self-send as the RECEIVER of ifTrue:ifFalse: (not inside either
+  // block body) must still thread the callee's own state mutation. Branch
+  // selection alone proves the self-send ran (its Boolean return value
+  // picks the branch) but does not, by itself, prove its mutation was
+  // observed afterward.
+  recordThenBranch: flag =>
+    (self recordOnce: flag) ifTrue: [#recorded] ifFalse: [#gaveUp]
+
+  internal recordOnce: flag =>
+    self.count := self.count + 1
+    flag
+
   getCount => self.count
 
   reset => self.count := 0
