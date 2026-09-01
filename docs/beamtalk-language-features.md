@@ -2704,6 +2704,10 @@ w1 := pool startChild unwrap        // => Actor(Worker, _)
 w2 := pool startChild unwrap        // => Actor(Worker, _)
 pool count                          // => 2
 
+// Start a child with custom init args — args is passed to the child's init/1
+// the same way ActorClass spawnWith: args would
+w3 := (pool startChild: #{#label => "y"}) unwrap   // => Actor(Worker, _)
+
 // Recoverable variant — useful when a failing init should not abort the caller
 pool startChild
   ifOk:    [:w | w process: 21]
@@ -2711,12 +2715,13 @@ pool startChild
 
 // Terminate a specific child — idempotent (Ok(nil) even if already gone)
 (pool terminateChild: w1) unwrap    // => nil
-pool count                          // => 1
 
 // Stop the whole pool (unchanged — Nil, let-it-crash teardown)
 pool stop
 WorkerPool current                  // => nil
 ```
+
+**Automatic restart replays per-child args.** OTP tracks the exact args each dynamically-started child was started with. A child started via `startChild: args` that later crashes under a `#permanent` or `#transient` restart policy comes back with those same args, not blank defaults. A child started via the no-arg `startChild` restarts the same way. Restart re-runs `init/1` from scratch — it does not resume the child's prior runtime state.
 
 ### Nested Supervisors
 
