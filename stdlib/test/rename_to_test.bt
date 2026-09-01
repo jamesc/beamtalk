@@ -38,7 +38,7 @@ TestCase subclass: RenameToTest
     self.renamedClass := target renameTo: #Bt3278RenameFixtureRenamed
 
     self assert: self.renamedClass name equals: #Bt3278RenameFixtureRenamed
-    self assert: (SystemNavigation default findClass: #Bt3278RenameFixtureRenamed) notNil
+    self assert: (SystemNavigation default findClass: #Bt3278RenameFixtureRenamed) equals: self.renamedClass
     self assert: (SystemNavigation default findClass: #Bt3278RenameFixtureTarget) isNil
 
   // Collision refusal (ADR 0114 § Decision): renaming to an already-loaded
