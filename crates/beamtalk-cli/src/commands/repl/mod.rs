@@ -1677,6 +1677,7 @@ mod tests {
     mod handle_repl_command_dispatch {
         use super::*;
         use crate::commands::test_support::spawn_auth_ok_server;
+        use std::sync::Mutex;
         use tungstenite::Message;
 
         fn connect_to(port: u16) -> ReplClient {
@@ -1813,14 +1814,23 @@ mod tests {
 
         #[test]
         fn unload_command_with_no_class_name_does_not_reach_server() {
-            // No fake server at all: reaching the network here would mean the
-            // usage-error branch (empty class name) failed to short-circuit.
-            let mut client = connect_to(spawn_auth_ok_server(|_req, _ws| {
-                panic!("unload with no class name must not contact the server");
+            // `spawn_auth_ok_server`'s handler runs on a background thread
+            // (`std::thread::spawn`, never joined) — a `panic!` there is
+            // caught at that thread's boundary and never fails the test, so
+            // "no contact" must be observed via shared state on the main
+            // thread instead of asserted inside the handler.
+            let contacted = Arc::new(AtomicBool::new(false));
+            let contacted_writer = Arc::clone(&contacted);
+            let mut client = connect_to(spawn_auth_ok_server(move |_req, _ws| {
+                contacted_writer.store(true, Ordering::SeqCst);
             }));
             assert_eq!(
                 handle_repl_command(":unload", &mut client),
                 CommandResult::Handled
+            );
+            assert!(
+                !contacted.load(Ordering::SeqCst),
+                "unload with no class name must not contact the server"
             );
         }
 
@@ -1864,13 +1874,20 @@ mod tests {
 
         #[test]
         fn remove_method_command_evaluates_remove_selector_send() {
-            let port = spawn_auth_ok_server(|req, ws| {
+            // Content checks must happen on the main test thread: the handler
+            // below runs on a background thread that `spawn_auth_ok_server`
+            // never joins, so an `assert!` inside it would be silently
+            // swallowed on failure instead of failing the test.
+            let received_code = Arc::new(Mutex::new(None));
+            let received_code_writer = Arc::clone(&received_code);
+            let port = spawn_auth_ok_server(move |req, ws| {
                 if req.get("op").and_then(|v| v.as_str()) == Some("eval") {
-                    let code = req.get("code").and_then(|v| v.as_str()).unwrap_or_default();
-                    assert!(
-                        code.contains("Counter") && code.contains("increment"),
-                        "unexpected eval code: {code}"
-                    );
+                    let code = req
+                        .get("code")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    *received_code_writer.lock().unwrap() = Some(code);
                     let _ = ws.send(Message::Text(
                         serde_json::json!({"status": ["done"]}).to_string().into(),
                     ));
@@ -1881,6 +1898,12 @@ mod tests {
                 handle_repl_command(":remove-method Counter increment", &mut client),
                 CommandResult::Handled
             );
+            let code = received_code.lock().unwrap().clone();
+            let code = code.expect("eval op should have been sent to the server");
+            assert!(
+                code.contains("Counter") && code.contains("increment"),
+                "unexpected eval code: {code}"
+            );
         }
 
         #[test]
@@ -1888,20 +1911,27 @@ mod tests {
             // BT-2287/ADR 0082 Phase 3 aliases: each desugars to a fixed
             // `Workspace ...` eval expression via `eval_and_display` — assert
             // all four reach the server and are handled, one fake server per
-            // command since each expects a different `code`.
+            // command since each expects a different `code`. The comparison
+            // happens on the main thread (via shared state), not inside the
+            // handler's background thread, which `spawn_auth_ok_server` never
+            // joins — an `assert_eq!` there would be silently swallowed on
+            // failure instead of failing the test.
             for (line, expected_code) in [
                 (":flush", "Workspace flush"),
                 (":changes", "Workspace changes"),
                 (":dirty", "Workspace changes dirtyMethods"),
                 (":recheck image", "Workspace recheckImage"),
             ] {
-                let expected_code = expected_code.to_string();
+                let received_code = Arc::new(Mutex::new(None));
+                let received_code_writer = Arc::clone(&received_code);
                 let port = spawn_auth_ok_server(move |req, ws| {
                     if req.get("op").and_then(|v| v.as_str()) == Some("eval") {
-                        assert_eq!(
-                            req.get("code").and_then(|v| v.as_str()),
-                            Some(expected_code.as_str())
-                        );
+                        let code = req
+                            .get("code")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        *received_code_writer.lock().unwrap() = Some(code);
                         let _ = ws.send(Message::Text(
                             serde_json::json!({"status": ["done"]}).to_string().into(),
                         ));
@@ -1913,28 +1943,53 @@ mod tests {
                     CommandResult::Handled,
                     "line {line:?} should be handled"
                 );
+                assert_eq!(
+                    received_code.lock().unwrap().as_deref(),
+                    Some(expected_code),
+                    "line {line:?} sent unexpected eval code"
+                );
             }
         }
 
         #[test]
         fn exit_command_returns_exit_without_contacting_server() {
-            let mut client = connect_to(spawn_auth_ok_server(|_req, _ws| {
-                panic!(":exit must not contact the server");
+            // See unload_command_with_no_class_name_does_not_reach_server: a
+            // `panic!` inside spawn_auth_ok_server's unjoined background
+            // thread never fails the test, so "no contact" is observed via
+            // shared state instead.
+            let contacted = Arc::new(AtomicBool::new(false));
+            let contacted_writer = Arc::clone(&contacted);
+            let mut client = connect_to(spawn_auth_ok_server(move |_req, _ws| {
+                contacted_writer.store(true, Ordering::SeqCst);
             }));
             assert_eq!(
                 handle_repl_command(":exit", &mut client),
                 CommandResult::Exit
             );
+            assert!(
+                !contacted.load(Ordering::SeqCst),
+                ":exit must not contact the server"
+            );
         }
 
         #[test]
         fn unrecognized_line_is_not_a_command() {
-            let mut client = connect_to(spawn_auth_ok_server(|_req, _ws| {
-                panic!("a non-command line must not be dispatched by handle_repl_command");
+            // See unload_command_with_no_class_name_does_not_reach_server: a
+            // `panic!` inside spawn_auth_ok_server's unjoined background
+            // thread never fails the test, so "no contact" is observed via
+            // shared state instead.
+            let contacted = Arc::new(AtomicBool::new(false));
+            let contacted_writer = Arc::clone(&contacted);
+            let mut client = connect_to(spawn_auth_ok_server(move |_req, _ws| {
+                contacted_writer.store(true, Ordering::SeqCst);
             }));
             assert_eq!(
                 handle_repl_command("1 + 1", &mut client),
                 CommandResult::NotACommand
+            );
+            assert!(
+                !contacted.load(Ordering::SeqCst),
+                "a non-command line must not be dispatched by handle_repl_command"
             );
         }
     }
