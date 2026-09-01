@@ -58,7 +58,9 @@ functions that call OTP APIs from the caller's process context.
     run_initialize/1,
     start_child_via_class_method/4,
     start_dynamic_child/2,
-    start_dynamic_child/3
+    start_dynamic_child/3,
+    start_dynamic_child/4,
+    startChild/3
 ]).
 
 -include("beamtalk.hrl").
@@ -520,6 +522,87 @@ startChild(Self, Args) ->
     end).
 
 -doc """
+Start a new child with args, registered under a name, under a DynamicSupervisor.
+
+Called from `startChild: args name: aName` on DynamicSupervisor instances
+(ADR 0079 amendment, BT-3376). Combines args-replay (BT-3365) with named
+registration: `Name` is appended as a third extra argument that
+`supervisor:start_child/2` threads onto the shared `simple_one_for_one`
+template, landing on `start_dynamic_child/4`, which spawns the child via
+`beamtalk_actor:'spawnAs'/3` instead of a bare `ChildModule:start_link/1` —
+the same primitive `SupervisionSpec withName:` already uses for static
+children (ADR 0079). Because `simple_one_for_one` replays each dynamic
+child's own start args (now including `Name`) on automatic OTP restart, a
+crashed named child re-registers under the same name every time, with no
+supervisor-side bookkeeping.
+
+## Return shape (ADR 0080 Phase 1 — BT-1997)
+
+Returns `{ok, {beamtalk_supervisor, ChildClass, ChildModule, ChildPid}}`
+for supervisor subclasses, or `{ok, {beamtalk_object, ...}}` for workers.
+On a duplicate name returns `{error, #beamtalk_error{kind = name_registered}}`;
+on a reserved name `{error, #beamtalk_error{kind = reserved_name}}`; on any
+other `supervisor:start_child/2` failure (e.g. a child `init/1` crash)
+`{error, #beamtalk_error{kind = child_start_failed}}`. On a stale
+supervisor handle returns `{error, #beamtalk_error{kind = stale_handle}}`.
+""".
+-spec startChild(term(), term(), term()) -> {ok, tuple()} | {error, #beamtalk_error{}}.
+startChild(Self, Args, Name) ->
+    SupPid = element(4, Self),
+    SupMod = element(3, Self),
+    SupClass = element(2, Self),
+    ChildClassObj = SupMod:'childClass'(),
+    ChildClassPid = element(4, ChildClassObj),
+    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildModule = element(3, ChildClassObj),
+    with_live_supervisor(SupClass, 'startChild:name:', fun() ->
+        case supervisor:start_child(SupPid, [Args, Name]) of
+            {ok, ChildPid} ->
+                ?LOG_INFO("DynamicSupervisor named child started", #{
+                    supervisor => SupClass,
+                    child => ChildClass,
+                    module => ChildModule,
+                    child_pid => ChildPid,
+                    name => Name,
+                    domain => [beamtalk, runtime]
+                }),
+                announce_child_added(SupClass, ChildClass, ChildPid),
+                {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
+            {error, #beamtalk_error{} = Err} ->
+                %% `'spawnAs'/3` already returns a structured error for
+                %% name_registered/type_error/reserved_name — re-attribute
+                %% it to this call site rather than wrapping it again.
+                ?LOG_ERROR("DynamicSupervisor named child start failed", #{
+                    supervisor => SupClass,
+                    child => ChildClass,
+                    name => Name,
+                    reason => Err#beamtalk_error.kind,
+                    domain => [beamtalk, runtime]
+                }),
+                announce_child_crashed(SupClass, ChildClass, Err),
+                {error, Err#beamtalk_error{class = SupClass, selector = 'startChild:name:'}};
+            {error, Reason} ->
+                ?LOG_ERROR("DynamicSupervisor named child start failed", #{
+                    supervisor => SupClass,
+                    child => ChildClass,
+                    name => Name,
+                    reason => Reason,
+                    domain => [beamtalk, runtime]
+                }),
+                announce_child_crashed(SupClass, ChildClass, Reason),
+                Error = beamtalk_error:new(
+                    child_start_failed,
+                    SupClass,
+                    'startChild:name:',
+                    iolist_to_binary(
+                        io_lib:format("supervisor start_child failed: ~p", [Reason])
+                    )
+                ),
+                {error, Error}
+        end
+    end).
+
+-doc """
 Return the count of active children.
 
 Called from `count` on Supervisor and DynamicSupervisor instances.
@@ -956,6 +1039,28 @@ start_dynamic_child(ChildModule, _DefaultArgs, Args) ->
     ChildModule:start_link(Args).
 
 -doc """
+Start a DynamicSupervisor child with caller-supplied init args, registered
+under a name (BT-3376, ADR 0079 amendment).
+
+The arity-4 entry point `startChild: args name: aName` lands on:
+`supervisor:start_child/2` appends `[Args, Name]` to the template's
+`[ChildModule, DefaultArgs]` static args. Delegates to
+`beamtalk_actor:'spawnAs'/3` instead of `ChildModule:start_link/1` so the
+child starts under `{local, Name}` registration — the same primitive
+`SupervisionSpec withName:` uses for static children (ADR 0079).
+
+Also the entry point automatic OTP restart lands on for a child started
+this way: `simple_one_for_one` bookkeeping (`supervisor:dyn_store/3`)
+records this exact call's `[ChildModule, DefaultArgs, Args, Name]` and
+replays it verbatim on restart, so a crashed named child restarts with the
+SAME `Args` and re-registers under the SAME `Name` — not a blank, unnamed
+default. See `start_dynamic_child/2,3`'s docs for the unnamed counterparts.
+""".
+-spec start_dynamic_child(module(), map(), term(), atom()) -> {ok, pid()} | {error, term()}.
+start_dynamic_child(ChildModule, _DefaultArgs, Args, Name) ->
+    beamtalk_actor:'spawnAs'(Name, ChildModule, Args).
+
+-doc """
 Convert a Beamtalk child spec dict to an OTP-compatible child spec map.
 
 The Beamtalk dict from `SupervisionSpec childSpec` has keys:
@@ -1141,12 +1246,15 @@ announce_child_crashed(SupClass, ChildClass, Reason) ->
 
 -doc """
 Normalise an OTP `supervisor:start_child/2` failure reason to a stable Symbol
-for the `SupervisionChildCrashed` event payload (BT-2445): a leading atom is
-kept (e.g. `already_present`), anything else collapses to `child_start_failed`.
-Keeps the typed `reason :: Symbol` field flat (the full reason is in the returned
+for the `SupervisionChildCrashed` event payload (BT-2445): a `#beamtalk_error{}`
+(e.g. from `startChild:name:`'s `'spawnAs'/3` path, BT-3376) yields its `kind`
+(e.g. `name_registered`), a leading atom is kept (e.g. `already_present`),
+anything else collapses to `child_start_failed`. Keeps the typed
+`reason :: Symbol` field flat (the full reason is in the returned
 `#beamtalk_error{}` for diagnostics).
 """.
 -spec normalize_crash_reason(term()) -> atom().
+normalize_crash_reason(#beamtalk_error{kind = Kind}) -> Kind;
 normalize_crash_reason(Reason) when is_atom(Reason) -> Reason;
 normalize_crash_reason({Reason, _}) when is_atom(Reason) -> Reason;
 normalize_crash_reason(_Reason) -> child_start_failed.

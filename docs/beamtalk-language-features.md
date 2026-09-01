@@ -2725,6 +2725,26 @@ WorkerPool current                  // => nil
 
 **Automatic restart replays per-child args.** OTP tracks the exact args each dynamically-started child was started with. A child started via `startChild: args` that later crashes under a `#permanent` or `#transient` restart policy comes back with those same args, not blank defaults. A child started via the no-arg `startChild` restarts the same way. Restart re-runs `init/1` from scratch — it does not resume the child's prior runtime state.
 
+**Named dynamic children — identity that survives restart.** `startChild:` alone gives you a pid, and a `simple_one_for_one`-restarted child comes back as a *different*, unlabelled pid — there is no `which:`/`children` method on `DynamicSupervisor` to rediscover it (see below). `startChild: args name: aSymbol` closes that gap by combining args-replay with [named actor registration](ADR/0079-named-actor-registration.md): the child starts under `{local, aSymbol}` registration, and because OTP replays each dynamic child's own start args (including the name) on automatic restart, a crashed named child re-registers under the same name every time.
+
+```beamtalk
+DynamicSupervisor(Monitor) subclass: CheckRegistry
+  class childClass => Monitor
+
+pool := (CheckRegistry supervise) unwrap
+m := (pool startChild: #{#check => "db"} name: #dbCheck) unwrap
+// => Actor(Monitor, _)
+
+// ... time passes; #dbCheck's process crashes and OTP restarts it ...
+
+current := (Monitor named: #dbCheck) unwrap   // re-resolves to the NEW pid
+current isAlive                                // => true
+```
+
+`aSymbol` should come from a bounded, statically-known namespace (e.g. a fixed set of configured checks/workers) — the same atom-exhaustion guidance that applies to `Actor>>spawnAs:` applies here, since names are Erlang atoms.
+
+**Why no `which: id` / `children` method on `DynamicSupervisor`.** Static `Supervisor>>which:` and `>>children` (below) work because OTP's plain `one_for_one` gives every statically-declared child a stable childspec id. `DynamicSupervisor`'s `simple_one_for_one` children are anonymous — matched only by pid — and `supervisor:which_children/1` is a documented performance cliff at scale (it copies the whole child list out of the supervisor process in one message). `startChild:name:` + `Actor named:` gives "find this dynamic child again by a stable identity, surviving restart" without either limitation: a `whereis/1`-backed point lookup, not a full-list scan. This differs from `DynamicSupervisor>>count`, which only reports an aggregate number with no per-child identity at all.
+
 ### Nested Supervisors
 
 Supervisors can be nested — include another supervisor class in `children`:
@@ -2753,6 +2773,7 @@ Supervisor lifecycle methods that can fail at a startup / registry boundary retu
 | `Supervisor>>which: aClass` | `-> Result(Object, Error)` | `#stale_handle` |
 | `DynamicSupervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
 | `DynamicSupervisor>>startChild` / `startChild: args` | `-> Result(C, Error)` | `#child_start_failed`, `#stale_handle` |
+| `DynamicSupervisor>>startChild: args name: aSymbol` | `-> Result(C, Error)` | `#child_start_failed`, `#name_registered`, `#reserved_name`, `#stale_handle` |
 | `DynamicSupervisor>>terminateChild: child` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
 
 `stop`, `current`, `children`, and `count` are **unchanged** — they are teardown / lookup / inspection operations over an already-valid handle and follow let-it-crash semantics (teardown) or nil-on-miss (lookup), matching the rules established in [ADR 0079](ADR/0079-named-actor-registration.md) for the parallel `Actor` surface.

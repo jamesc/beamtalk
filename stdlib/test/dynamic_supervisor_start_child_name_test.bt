@@ -1,0 +1,58 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3376 / ADR 0079 amendment: DynamicSupervisor(C)>>startChild:name:
+//
+// Combines args-replay (BT-3365) with named actor registration (ADR 0079)
+// so a dynamically-added child's identity survives an OTP-driven restart:
+// the child starts under `{local, aName}` registration, and because
+// simple_one_for_one replays each dynamic child's own start args (now
+// including the name) on automatic restart, a crashed named child
+// re-registers under the same name every time.
+//
+// These tests cover the Beamtalk-level API surface — named start, lookup
+// via `named:`, and the duplicate-name error shape. Runtime-level
+// restart-survival coverage (kill the child, wait for OTP to re-register
+// it under the same name) lives in beamtalk_supervisor_tests.erl, since
+// polling for an OTP-driven restart is more reliably tested at the EUnit
+// level than over the compiled stdlib boundary.
+//
+// Fixture: stdlib/test/fixtures/test_dynamic_supervisor_custom.bt
+
+TestCase subclass: DynamicSupervisorStartChildNameTest
+
+  // Named registration touches global state (registered process names) and
+  // shares the `TestDynamicSupervisorCustom` fixture with
+  // DynamicSupervisorStartChildArgsTest — run serially so a concurrent
+  // class can't race this class's supervise/stop calls against its own
+  // (same mitigation as SupervisorWhichTest, BT-2729).
+  class serial -> Boolean => true
+
+  testStartChildWithNameStartsAndRegistersChild =>
+    pool := (TestDynamicSupervisorCustom supervise) unwrap
+    child := (pool startChild: #{
+      #value => 42
+    } name: #dsStartChildNameTestA) unwrap
+    self assert: child getValue equals: 42
+    // A name-based proxy and a direct pid reference are distinct identity
+    // shapes even when they resolve to the same process (ADR 0079's
+    // Equality rule) — compare observable state, not `==`.
+    self assert: (Counter named: #dsStartChildNameTestA) unwrap getValue equals: 42
+    [pool stop] on: Error do: [:e | nil]
+
+  testStartChildWithNameLookupWorksWithoutHoldingTheReturnedChild =>
+    // The whole point: a caller that never held onto the returned child
+    // can still find it later purely by name.
+    pool := (TestDynamicSupervisorCustom supervise) unwrap
+    (pool startChild: #{#value => 7} name: #dsStartChildNameTestB) unwrap
+    found := (Counter named: #dsStartChildNameTestB) unwrap
+    self assert: found getValue equals: 7
+    [pool stop] on: Error do: [:e | nil]
+
+  testStartChildWithDuplicateNameReturnsNameRegisteredError =>
+    pool := (TestDynamicSupervisorCustom supervise) unwrap
+    (pool startChild: #{#value => 1} name: #dsStartChildNameTestC) unwrap
+    result := pool startChild: #{#value => 2} name: #dsStartChildNameTestC
+    self assert: result isError equals: true
+    self assert: result error kind equals: #name_registered
+    [pool stop] on: Error do: [:e | nil]
