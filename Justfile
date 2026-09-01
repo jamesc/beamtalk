@@ -45,7 +45,7 @@ doctor:
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-surface-drift test-grammar
+ci: build lint test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-codegen-boundary check-surface-drift test-grammar
 
 [windows]
 ci: build clippy fmt-check-rust test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
@@ -75,6 +75,7 @@ ci-changed:
     just test
     just check-corpus
     just check-generated-builtins
+    just check-codegen-boundary
     just check-surface-drift
 
     merge_base="$(git merge-base HEAD origin/main 2>/dev/null || true)"
@@ -651,6 +652,47 @@ check-generated-builtins: build
         exit 1
     fi
     echo "✅ generated stdlib builtin-class artifacts are up to date"
+
+# Guard the BT-3362 crate split's build-time win: beamtalk-lsp and beamtalk-lint
+# analyze code but never generate it, so neither should depend on beamtalk-codegen
+# (~90k lines) directly or transitively. `cargo tree -p <pkg> -i beamtalk-codegen`
+# exits non-zero with "did not match any packages" when no such edge exists, and
+# exits 0 and prints the dependency path when one does — so success here means a
+# regression. beamtalk-mcp is deliberately NOT checked: it depends on beamtalk-cli
+# for manifest/build-layout reuse (BT-2823), and beamtalk-cli genuinely drives
+# codegen, so beamtalk-mcp compiling beamtalk-codegen transitively is expected,
+# pre-existing coupling, not a regression (docs/development/architecture-principles.md §1).
+[unix]
+check-codegen-boundary:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    fail=0
+    if ! cargo tree -p beamtalk-codegen >/dev/null 2>&1; then
+        echo "❌ package 'beamtalk-codegen' no longer resolves — update check-codegen-boundary's target package"
+        exit 1
+    fi
+    for pkg in beamtalk-lsp beamtalk-lint; do
+        if ! cargo tree -p "$pkg" >/dev/null 2>&1; then
+            echo "❌ package '$pkg' no longer resolves — update check-codegen-boundary's package list"
+            fail=1
+            continue
+        fi
+        output="$(cargo tree -p "$pkg" -i beamtalk-codegen 2>&1)"
+        status=$?
+        if [[ $status -eq 0 ]]; then
+            echo "❌ $pkg depends on beamtalk-codegen — this regresses the BT-3362 crate split:"
+            echo "$output"
+            fail=1
+        elif [[ "$output" != *"did not match any packages"* ]]; then
+            echo "❌ unexpected error checking whether $pkg depends on beamtalk-codegen:"
+            echo "$output"
+            fail=1
+        fi
+    done
+    if [[ $fail -ne 0 ]]; then
+        exit 1
+    fi
+    echo "✅ beamtalk-lsp/beamtalk-lint do not depend on beamtalk-codegen"
 
 # Check that REPL ops × CLI × MCP × LSP coverage matches docs/development/surface-parity.md (BT-2082).
 # Fails if a new REPL op landed without a parity-doc row, or a binding listed
