@@ -302,7 +302,7 @@ impl CoreErlangGenerator {
                 // preserved deliberately.
                 ") of 'true' when 'true' -> apply ",
                 leaf::var(recv_var.clone()),
-                " () 'false' when 'true' -> call 'beamtalk_primitive':'send'(",
+                " () 'false' when 'true' -> call 'beamtalk_message_dispatch':'send'(",
                 leaf::var(recv_var),
                 ", 'value', []) end end end",
             ];
@@ -865,7 +865,7 @@ impl CoreErlangGenerator {
     /// let _ValArg0 = <arg0> in
     /// case call 'erlang':'is_function'(_ValRecv) of
     ///   'true' when 'true' -> apply _ValRecv (_ValArg0)
-    ///   'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv, 'value:', [_ValArg0])
+    ///   'false' when 'true' -> call 'beamtalk_message_dispatch':'send'(_ValRecv, 'value:', [_ValArg0])
     /// end
     /// ```
     ///
@@ -1007,7 +1007,7 @@ impl CoreErlangGenerator {
             leaf::var(recv_var.clone()),
             " (",
             apply_args,
-            ") 'false' when 'true' -> call 'beamtalk_primitive':'send'(",
+            ") 'false' when 'true' -> call 'beamtalk_message_dispatch':'send'(",
             leaf::var(recv_var),
             ", ",
             leaf::atom(selector_name.to_string()),
@@ -1139,8 +1139,10 @@ impl CoreErlangGenerator {
     /// - Tier 2 (`is_function(Fun, N + 1)`): returns the block's own
     ///   `{Result, NewState}` tuple directly (Tier 2 funs already return this
     ///   shape — see `generate_block_stateful`).
-    /// - Non-function receiver: falls back to `beamtalk_primitive:send/3`
-    ///   (DNU-style dispatch, mirroring `generate_value_keyword_guard`'s
+    /// - Non-function receiver: falls back to `beamtalk_message_dispatch:send/3`
+    ///   (BT-3377: not `beamtalk_primitive:send/3` — the receiver may be a
+    ///   live actor, whose reply envelope only `beamtalk_actor:sync_send/3`
+    ///   knows how to unwrap; mirrors `generate_value_keyword_guard`'s
     ///   fallback), wrapped as `{SendResult, State}`.
     ///
     /// Callers must unpack this tuple. `is_tier2_value_call` (extended for
@@ -1218,7 +1220,7 @@ impl CoreErlangGenerator {
             leaf::var(fun_var.clone()),
             " (",
             tier2_apply_args,
-            ") 'false' when 'true' -> {call 'beamtalk_primitive':'send'(",
+            ") 'false' when 'true' -> {call 'beamtalk_message_dispatch':'send'(",
             leaf::var(fun_var),
             ", ",
             leaf::atom(selector_name.to_string()),
@@ -1448,7 +1450,7 @@ impl CoreErlangGenerator {
     /// let _ValArgs = <args> in
     /// case call 'erlang':'is_function'(_ValRecv) of
     ///   'true' when 'true' -> call 'erlang':'apply'(_ValRecv, _ValArgs)
-    ///   'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv, 'valueWithArguments:', [_ValArgs])
+    ///   'false' when 'true' -> call 'beamtalk_message_dispatch':'send'(_ValRecv, 'valueWithArguments:', [_ValArgs])
     /// end
     /// ```
     fn generate_block_value_with_arguments_call(
@@ -1471,7 +1473,7 @@ impl CoreErlangGenerator {
             leaf::var(recv_var.clone()),
             ", ",
             leaf::var(args_var.clone()),
-            ") 'false' when 'true' -> call 'beamtalk_primitive':'send'(",
+            ") 'false' when 'true' -> call 'beamtalk_message_dispatch':'send'(",
             leaf::var(recv_var),
             ", ",
             leaf::atom("valueWithArguments:"),
@@ -1512,7 +1514,9 @@ impl CoreErlangGenerator {
     ///   method's live state as the trailing element of `Args` and returns
     ///   the block's own `{Result, NewState}` tuple directly (Tier 2 funs
     ///   already return this shape).
-    /// - Non-function receiver: falls back to `beamtalk_primitive:send/3`,
+    /// - Non-function receiver: falls back to `beamtalk_message_dispatch:send/3`
+    ///   (BT-3377 — see `generate_block_value_call_runtime_discriminated`'s
+    ///   doc comment for why `beamtalk_primitive:send/3` is wrong here),
     ///   wrapped as `{SendResult, State}`.
     pub(in crate::core_erlang) fn generate_block_value_with_arguments_call_runtime_discriminated(
         &mut self,
@@ -1570,7 +1574,7 @@ impl CoreErlangGenerator {
             leaf::var(args_var.clone()),
             ", [",
             leaf::var(current_state.clone()),
-            "])) 'false' when 'true' -> {call 'beamtalk_primitive':'send'(",
+            "])) 'false' when 'true' -> {call 'beamtalk_message_dispatch':'send'(",
             leaf::var(fun_var),
             ", ",
             leaf::atom("valueWithArguments:"),

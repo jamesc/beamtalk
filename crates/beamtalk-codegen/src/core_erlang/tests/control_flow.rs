@@ -2342,10 +2342,13 @@ fn test_bt2803_field_stored_block_invoked_via_value_with_arguments_threads_state
     );
     assert!(
         code.contains(&format!(
-            "{{call 'beamtalk_primitive':'send'({fun_var}, 'valueWithArguments:', [{args_var}]), State}}"
+            "{{call 'beamtalk_message_dispatch':'send'({fun_var}, 'valueWithArguments:', [{args_var}]), State}}"
         )),
-        "the non-function fallback must DNU-dispatch valueWithArguments: with \
-         State unchanged. Got: {code}"
+        "the non-function fallback must dispatch valueWithArguments: through \
+         beamtalk_message_dispatch:send (BT-3377), not beamtalk_primitive:send \
+         — the field may hold a live actor whose gen_server reply only \
+         beamtalk_actor:sync_send knows how to unwrap. State must stay \
+         unchanged. Got: {code}"
     );
 }
 

@@ -652,6 +652,10 @@ fn test_value_keyword_erlang_ffi_receiver_routes_to_erlang_interop() {
 fn test_value_keyword_unknown_receiver_emits_is_function_guard() {
     // BT-1260: `someVar value: arg` where receiver is unknown emits a runtime
     // is_function guard: if it's a function, apply it; otherwise dispatch via send.
+    // BT-3377: the "otherwise" branch must go through beamtalk_message_dispatch:send
+    // (which knows how to unwrap an actor's gen_server reply envelope), not the
+    // lower-level beamtalk_primitive:send — otherwise an actor with its own
+    // `value:` method gets its reply returned as a raw `{ok, Result}` tuple.
     let mut generator = CoreErlangGenerator::new("test");
 
     let receiver = Expression::Identifier(Identifier::new("someVar", Span::new(0, 7)));
@@ -672,8 +676,14 @@ fn test_value_keyword_unknown_receiver_emits_is_function_guard() {
         "Should emit apply for the function path. Got: {output}"
     );
     assert!(
-        output.contains("beamtalk_primitive':'send'"),
-        "Should emit beamtalk_primitive:send fallback. Got: {output}"
+        output.contains("beamtalk_message_dispatch':'send'"),
+        "Should emit beamtalk_message_dispatch:send fallback (BT-3377) so a \
+         non-function receiver's reply is unwrapped correctly. Got: {output}"
+    );
+    assert!(
+        !output.contains("beamtalk_primitive':'send'"),
+        "Must not fall back to beamtalk_primitive:send (BT-3377): it does not \
+         unwrap an actor's {{ok, Result}} gen_server reply. Got: {output}"
     );
     assert!(
         output.contains("'value:'"),
