@@ -377,6 +377,8 @@ find stdlib/test -maxdepth 1 -name '*.bt' | wc -l
 
 **Test fixtures:** Place fixture classes in `stdlib/test/fixtures/`. All `.bt` files in this directory are automatically compiled and made available to all test files — no explicit loading needed. Just use the class name directly in your tests.
 
+**Hazard — shared `Supervisor`/`DynamicSupervisor` fixtures:** `supervise` on a `Supervisor`/`DynamicSupervisor` subclass registers the running process under `{local, ClassName}` — one node-wide, name-registered singleton, not a per-test instance (`beamtalk_supervisor:startLink/1`). Since BUnit runs non-serial test classes concurrently, any two test classes that call `supervise`/`stop` on the *same* fixture class race: one test's teardown can `stop` the shared supervisor (and its children) out from under another test still using it, producing spurious "actor process has terminated" failures (BT-2729, BT-3379). If a test class touches a shared `Supervisor`/`DynamicSupervisor` fixture, declare `class serial -> Boolean => true` on it (see `SupervisorWhichTest` or `DynamicSupervisorDefaultsTest`) so it never runs concurrently with another class sharing that fixture.
+
 **Test file format:**
 ```beamtalk
 // stdlib/test/counter_test.bt
