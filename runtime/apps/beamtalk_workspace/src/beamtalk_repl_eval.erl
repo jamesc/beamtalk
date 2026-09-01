@@ -1710,7 +1710,10 @@ has_second_top_level_statement(Expression) ->
 scan_for_second_top_level_statement([], _Depth) ->
     false;
 scan_for_second_top_level_statement([$" | _] = Chars, Depth) ->
-    scan_for_second_top_level_statement(skip_string_literal(Chars), Depth);
+    case skip_string_literal(Chars) of
+        {ok, Rest} -> scan_for_second_top_level_statement(Rest, Depth);
+        unsupported -> true
+    end;
 scan_for_second_top_level_statement([$$ | _] = Chars, Depth) ->
     scan_for_second_top_level_statement(skip_character_literal(Chars), Depth);
 scan_for_second_top_level_statement([C | Rest], Depth) when
@@ -1735,37 +1738,59 @@ scan_for_second_top_level_statement([_ | Rest], Depth) ->
     scan_for_second_top_level_statement(Rest, Depth).
 
 -doc """
-Skips one string literal starting at the opening `"`, returning the
-characters immediately after its closing `"` (BT-3368 review follow-up).
+Skips one string literal starting at the opening `"`, returning
+`{ok, Rest}` with the characters immediately after its closing `"`, or
+`unsupported` if the string contains string interpolation (BT-3368 review
+follow-up).
 
-Mirrors `lex_string/0` (`source_analysis/lexer.rs`) exactly: `""` (doubled
-delimiter) is a literal `"` inside the string, and `\` escapes whatever
-character follows it — including another `\` or a `"` — so that pair is
-always consumed together and never independently reopens/closes the
-string. An unterminated string (malformed input that would already have
-failed compilation before reaching here) returns `[]`.
+Mirrors `lex_string/0` (`source_analysis/lexer.rs`) for the common,
+non-interpolated case: `""` (doubled delimiter) is a literal `"` inside the
+string, and `\` escapes whatever character follows it — including another
+`\` or a `"` — so that pair is always consumed together and never
+independently reopens/closes the string. An unterminated string (malformed
+input that would already have failed compilation before reaching here)
+returns `{ok, []}`.
+
+An unescaped `{` starts a string interpolation (`lex_interpolation_body`),
+whose body is an arbitrary expression that may itself contain a *nested*
+string literal (`skip_nested_string`) — i.e. a single BT string token can
+legitimately contain more than two `"` characters, with the interpolated
+expression's own `.`/`{`/`}`/`"` syntax interleaved. Faithfully mirroring
+that (brace depth, nested strings, comments, doubled `{{}}`, all inside one
+string) is real lexer logic this heuristic scanner isn't worth duplicating
+for what is only a display/future-rebinding optimization — so it bails out
+via `unsupported` instead of risking a wrong guess at the string's real
+extent (which could mis-pair quotes across the interpolation and produce
+an incorrect statement-boundary read either way). The caller
+(`scan_for_second_top_level_statement/2`) treats `unsupported` the same as
+a confirmed second statement — safe, since `extract_assignment/1`'s only
+use of a `none` result is to skip an optimization, never to corrupt a
+binding.
 
 Conformance-tested against the real Rust lexer via the shared corpus
 `runtime/apps/beamtalk_workspace/test/fixtures/
-string_and_character_literal_span_corpus.json` — see
+string_and_character_literal_span_corpus.json` for the non-interpolated
+case — see
 `beamtalk_repl_eval_tests:string_and_character_literal_span_matches_shared_corpus_test/0`
 and `source_analysis::lexer::tests::string_and_character_literal_span_matches_shared_corpus`.
 """.
--spec skip_string_literal(string()) -> string().
+-spec skip_string_literal(string()) -> {ok, string()} | unsupported.
 skip_string_literal([$" | Rest]) ->
     skip_string_literal_body(Rest).
 
--spec skip_string_literal_body(string()) -> string().
+-spec skip_string_literal_body(string()) -> {ok, string()} | unsupported.
 skip_string_literal_body([]) ->
-    [];
+    {ok, []};
+skip_string_literal_body([${ | _Rest]) ->
+    unsupported;
 skip_string_literal_body([$", $" | Rest]) ->
     skip_string_literal_body(Rest);
 skip_string_literal_body([$" | Rest]) ->
-    Rest;
+    {ok, Rest};
 skip_string_literal_body([$\\, _Escaped | Rest]) ->
     skip_string_literal_body(Rest);
 skip_string_literal_body([$\\]) ->
-    [];
+    {ok, []};
 skip_string_literal_body([_ | Rest]) ->
     skip_string_literal_body(Rest).
 

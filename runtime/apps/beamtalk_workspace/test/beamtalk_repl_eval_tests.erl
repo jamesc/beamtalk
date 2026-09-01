@@ -831,6 +831,35 @@ extract_assignment_character_literal_payload_is_not_a_bracket_test() ->
     %% Escaped-payload form (`$\c`) consumes all three characters together.
     ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $\\( class")).
 
+%% BT-3368 regression guard (review follow-up): a string containing
+%% interpolation (`"...{expr}..."`) may itself contain a *nested* string
+%% literal inside the interpolated expression (`lex_interpolation_body`/
+%% `skip_nested_string`, `source_analysis/lexer.rs`) — a single BT string
+%% token can legitimately have more than two `"` characters, with the
+%% interpolated expression's own `.`/`{`/`}`/`"` syntax interleaved.
+%% `skip_string_literal/1` doesn't attempt to mirror that (see its own doc
+%% comment) — it bails conservatively (`unsupported`) the moment it sees an
+%% unescaped `{`, which `has_second_top_level_statement/1` treats as "found
+%% a second statement" so `extract_assignment/1` safely returns `none`
+%% (skips the future-rebinding optimization) rather than mis-pairing quotes
+%% across the interpolation and misreading genuine interpolated code as a
+%% top-level statement boundary.
+extract_assignment_interpolated_string_is_not_mis_parsed_test() ->
+    %% The exact shape from review: a nested string inside the interpolated
+    %% expression, containing what would look like a `.` statement
+    %% separator if the scanner mis-closed the outer string early.
+    ?assertEqual(
+        none, beamtalk_repl_eval:extract_assignment("x := \"pre {a == \"z. bogus\"} mid\"")
+    ),
+    %% Plain interpolation, no nested string — still conservatively bails
+    %% (never mis-parsed), since the scanner doesn't try to reason about
+    %% what's inside the interpolation at all.
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("x := \"Hello {name}\"")),
+    %% A plain string with no interpolation at all is unaffected.
+    ?assertEqual(
+        {ok, x}, beamtalk_repl_eval:extract_assignment("x := \"no interpolation here\"")
+    ).
+
 %% BT-3368 review follow-up (CLAUDE.md Essential Rules: a "mirrors" claim
 %% across the Rust/Erlang boundary needs a shared conformance fixture, not
 %% just a comment): `skip_string_literal/1`/`skip_character_literal/1` are
@@ -860,8 +889,11 @@ assert_literal_span_case(#{
     Source = unicode:characters_to_list(SourceBin),
     Remaining =
         case Kind of
-            <<"string">> -> beamtalk_repl_eval:skip_string_literal(Source);
-            <<"character">> -> beamtalk_repl_eval:skip_character_literal(Source)
+            <<"string">> ->
+                {ok, R} = beamtalk_repl_eval:skip_string_literal(Source),
+                R;
+            <<"character">> ->
+                beamtalk_repl_eval:skip_character_literal(Source)
         end,
     Consumed = length(Source) - length(Remaining),
     ?assertEqual(
