@@ -810,8 +810,8 @@ No existing behavior changes. This is purely additive:
 ## Implementation Tracking
 
 **Epic:** BT-1839
-**Issues:** BT-1840, BT-1841, BT-1842, BT-1843, BT-1844, BT-1845, BT-1846, BT-1847, BT-1848, BT-1849, BT-1850, BT-1851, BT-1852, BT-1853
-**Status:** Phase 1 Complete — Phase 2 Deferred (see [gate evaluation](0075-gate-evaluation.md))
+**Issues:** BT-1840, BT-1841, BT-1842, BT-1843, BT-1844, BT-1845, BT-1846, BT-1847, BT-1848, BT-1849, BT-1850, BT-1851, BT-1852, BT-1853, BT-3394
+**Status:** Phase 1 Complete. Phase 2's full resolution-chain plumbing (all five layers: project-local, package-bundled, distribution, auto-extracted, dynamic) is Done — BT-1847 shipped layer 1, BT-3394 wired layers 2–3. Layer 3 has no curated content yet: BT-1848 was canceled, so distribution stubs discovery/merge is exercised only by tests until curated OTP stubs are (re)scoped. Phase 3 (CLI `generate` command) and Phase 4 (advanced LSP/REPL integration) remain Planned.
 
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
@@ -821,9 +821,10 @@ No existing behavior changes. This is purely additive:
 | 1 | BT-1843 | Type checker: FFI call inference + keyword mismatch warning | M | Done |
 | 1 | BT-1844 | Build + LSP: Cache integration + typed completions | M | Done |
 | Gate | BT-1845 | Gate: Evaluate auto-extract quality — decide Phase 2 | S | Done |
-| 2 | BT-1846 | Parser: `declare native:` top-level form | M | Deferred |
-| 2 | BT-1847 | Build: Stub resolution chain | S | Deferred |
-| 2 | BT-1848 | Curate initial OTP stubs (10 modules) | M | Deferred |
+| 2 | BT-1846 | Parser: `declare native:` top-level form | M | Done |
+| 2 | BT-1847 | Build: Stub resolution chain (layer 1, project-local) | S | Done |
+| 2 | BT-3394 | Build: Package-bundled + distribution stub tiers (layers 2–3) | M | Done |
+| 2 | BT-1848 | Curate initial OTP stubs (10 modules) | M | Canceled |
 | 3 | BT-1849 | CLI: Create `beamtalk generate` subcommand group | M | Planned |
 | 3 | BT-1850 | CLI: Implement `beamtalk generate stubs` | M | Planned |
 | 4 | BT-1851 | Runtime: `beamtalk_native_docs` EEP-48 reader | S | Planned |

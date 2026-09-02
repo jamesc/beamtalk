@@ -883,21 +883,40 @@ fn execute_build_passes(
         env.pkg_manifest().is_some(),
         options.stdlib_mode,
     );
-    // ADR 0075 Phase 2 (BT-1847): project-local stubs/ override auto-extract
-    // at the function/arity level. Computed against the pre-merge
-    // auto-extract registry so the drift check has real ground truth.
-    let (native_type_registry, stub_diagnostics) = match load_project_stub_registry(
+    // ADR 0075 full resolution chain (BT-1847, BT-3394): each stub tier
+    // overrides auto-extract at the function/arity level, applied
+    // lowest-precedence first so project-local always wins —
+    // extracted -> distribution -> package-bundled -> project-local. Every
+    // tier is checked for drift against the pre-merge auto-extract registry
+    // so the drift check has real ground truth.
+    let dependency_stubs = load_dependency_stub_registries(
+        &dep_ctx.resolved_deps,
+        distribution_stubs_dir().as_deref(),
+        auto_extract_registry.as_ref(),
+        OutputFormat::Text,
+    );
+    let project_stubs = load_project_stub_registry(
         &env.project_root,
         auto_extract_registry.as_ref(),
         OutputFormat::Text,
-    ) {
-        Some((stub_registry, diags)) => {
+    );
+
+    let (native_type_registry, stub_diagnostics) =
+        if dependency_stubs.is_none() && project_stubs.is_none() {
+            (auto_extract_registry, Vec::new())
+        } else {
             let mut merged = auto_extract_registry.unwrap_or_default();
-            merged.apply_overrides(stub_registry);
-            (Some(merged), diags)
-        }
-        None => (auto_extract_registry, Vec::new()),
-    };
+            let mut diagnostics = Vec::new();
+            if let Some((dep_registry, dep_diags)) = dependency_stubs {
+                merged.apply_overrides(dep_registry);
+                diagnostics.extend(dep_diags);
+            }
+            if let Some((stub_registry, diags)) = project_stubs {
+                merged.apply_overrides(stub_registry);
+                diagnostics.extend(diags);
+            }
+            (Some(merged), diagnostics)
+        };
     let native_type_registry = native_type_registry.map(std::sync::Arc::new);
 
     let file_module_pairs = compute_file_module_pairs(env)?;
@@ -1167,6 +1186,28 @@ pub(crate) fn extract_type_specs(
 /// `lint --format=json` the same way every other lint diagnostic does,
 /// instead of always printing miette text regardless of the caller's
 /// requested format.
+/// Locate the compiler distribution's own curated FFI type stubs (ADR 0075
+/// layer 3), installed alongside the stdlib sources under
+/// `{sysroot}/share/beamtalk/stubs/` — the same sysroot convention used by
+/// `beamtalk --print-sysroot` and the LSP's `sysroot_stdlib_source_dir`
+/// (`{exe}/../..`). `BEAMTALK_STUBS_DIR` overrides the sysroot-derived path
+/// for development, mirroring `BEAMTALK_RUNTIME_DIR`.
+///
+/// Returns `None` if no such directory exists on disk — expected until
+/// curated distribution stub content is added (BT-1848); the discovery/merge
+/// plumbing is still correct with nothing to find.
+pub(crate) fn distribution_stubs_dir() -> Option<Utf8PathBuf> {
+    if let Ok(dir) = std::env::var("BEAMTALK_STUBS_DIR") {
+        let candidate = Utf8PathBuf::from(dir);
+        return candidate.is_dir().then_some(candidate);
+    }
+
+    let exe = std::env::current_exe().ok()?;
+    let sysroot = exe.parent()?.parent()?;
+    let candidate = Utf8PathBuf::from_path_buf(sysroot.join("share/beamtalk/stubs")).ok()?;
+    candidate.is_dir().then_some(candidate)
+}
+
 pub(crate) fn load_project_stub_registry(
     project_root: &Utf8Path,
     auto_extract: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
@@ -1175,11 +1216,84 @@ pub(crate) fn load_project_stub_registry(
     beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
     Vec<beamtalk_core::source_analysis::Diagnostic>,
 )> {
-    let stubs_dir = project_root.join("stubs");
+    load_stub_registry_from_dir(&project_root.join("stubs"), auto_extract, format)
+}
+
+/// Load and merge the package-bundled (ADR 0075 layer 2) and distribution
+/// (layer 3) stub tiers, ranked in that precedence order: distribution
+/// applied first, then each dependency's own bundled stubs on top —
+/// matching the resolution chain's "project > package > distribution >
+/// auto-extracted" order (project-local stubs are merged separately, last,
+/// by [`load_project_stub_registry`]'s caller).
+///
+/// A dependency's `stubs_dir` (set by dependency resolution from its own
+/// `beamtalk.toml` `[stubs] path`, ADR 0075 layer 2) covers only that
+/// package's own native code — never its own dependencies' stubs, since
+/// those are auto-extracted instead.
+///
+/// `distribution_stubs_dir` is the compiler distribution's own `stubs/`
+/// directory (layer 3), when one is discoverable — `None` until curated
+/// distribution stub content exists (BT-1848).
+///
+/// Returns `None` only when none of these layers contributed anything.
+pub(crate) fn load_dependency_stub_registries(
+    resolved_deps: &[super::deps::path::ResolvedDependency],
+    distribution_stubs_dir: Option<&Utf8Path>,
+    auto_extract: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+    format: OutputFormat,
+) -> Option<(
+    beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+    Vec<beamtalk_core::source_analysis::Diagnostic>,
+)> {
+    let mut registry = beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new();
+    let mut diagnostics = Vec::new();
+    let mut found_any = false;
+
+    if let Some(dist_dir) = distribution_stubs_dir {
+        if let Some((dist_registry, dist_diagnostics)) =
+            load_stub_registry_from_dir(dist_dir, auto_extract, format)
+        {
+            registry.apply_overrides(dist_registry);
+            diagnostics.extend(dist_diagnostics);
+            found_any = true;
+        }
+    }
+
+    for dep in resolved_deps {
+        let Some(stubs_dir) = dep.stubs_dir.as_deref() else {
+            continue;
+        };
+        if let Some((dep_registry, dep_diagnostics)) =
+            load_stub_registry_from_dir(stubs_dir, auto_extract, format)
+        {
+            registry.apply_overrides(dep_registry);
+            diagnostics.extend(dep_diagnostics);
+            found_any = true;
+        }
+    }
+
+    found_any.then_some((registry, diagnostics))
+}
+
+/// Parse and merge every `declare native:` stub file directly inside `stubs_dir`
+/// into a single [`NativeTypeRegistry`], checking each against `auto_extract`
+/// for version drift. Shared by every stub-resolution-chain layer
+/// (project-local, package-bundled, distribution) — each layer is just a
+/// different directory.
+///
+/// Returns `None` if `stubs_dir` does not exist or contains no `.bt` files.
+fn load_stub_registry_from_dir(
+    stubs_dir: &Utf8Path,
+    auto_extract: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+    format: OutputFormat,
+) -> Option<(
+    beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+    Vec<beamtalk_core::source_analysis::Diagnostic>,
+)> {
     if !stubs_dir.exists() {
         return None;
     }
-    let stub_files = match collect_source_files_from_dir(&stubs_dir) {
+    let stub_files = match collect_source_files_from_dir(stubs_dir) {
         Ok(files) => files,
         Err(e) => {
             warn!(dir = %stubs_dir, error = %e, "Cannot read stubs/ directory; skipping stub resolution");
@@ -3068,6 +3182,157 @@ mod tests {
                 .unwrap();
 
         assert!(diags.is_empty());
+    }
+
+    // ── distribution_stubs_dir tests (ADR 0075 layer 3) ──────────────────
+
+    #[test]
+    #[serial_test::serial(beamtalk_stubs_env)]
+    fn distribution_stubs_dir_uses_env_override_when_dir_exists() {
+        let temp = TempDir::new().unwrap();
+        let stubs_dir = temp.path().join("stubs");
+        fs::create_dir_all(&stubs_dir).unwrap();
+        // SAFETY: serialised via #[serial]; the var is removed before returning.
+        unsafe {
+            std::env::set_var("BEAMTALK_STUBS_DIR", &stubs_dir);
+        }
+        let result = distribution_stubs_dir();
+        // SAFETY: serialised via #[serial]; restores the unset state.
+        unsafe {
+            std::env::remove_var("BEAMTALK_STUBS_DIR");
+        }
+        assert_eq!(result, Some(Utf8PathBuf::from_path_buf(stubs_dir).unwrap()));
+    }
+
+    #[test]
+    #[serial_test::serial(beamtalk_stubs_env)]
+    fn distribution_stubs_dir_env_override_none_when_dir_missing() {
+        let temp = TempDir::new().unwrap();
+        let missing_dir = temp.path().join("does_not_exist");
+        // SAFETY: serialised via #[serial]; the var is removed before returning.
+        unsafe {
+            std::env::set_var("BEAMTALK_STUBS_DIR", &missing_dir);
+        }
+        let result = distribution_stubs_dir();
+        // SAFETY: serialised via #[serial]; restores the unset state.
+        unsafe {
+            std::env::remove_var("BEAMTALK_STUBS_DIR");
+        }
+        assert!(
+            result.is_none(),
+            "a non-existent BEAMTALK_STUBS_DIR override should yield None"
+        );
+    }
+
+    // ── ADR 0075 full resolution chain (BT-3394) ─────────────────────────
+
+    /// A function declared at all four layers must resolve according to the
+    /// ADR 0075 precedence order — project-local stub, then package-bundled
+    /// stub, then distribution stub, then auto-extracted — mirroring the
+    /// exact merge sequence `execute_build_passes`/`run_lint` perform.
+    #[test]
+    fn stub_resolution_order_project_over_package_over_distribution_over_auto_extract() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+
+        // Layer 4 (lowest precedence): auto-extracted.
+        let mut auto_extract =
+            beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new();
+        auto_extract.register_module(
+            "sample_mod",
+            vec![
+                beamtalk_core::semantic_analysis::type_checker::FunctionSignature {
+                    name: "thing".to_string(),
+                    arity: 1,
+                    params: vec![],
+                    return_type:
+                        beamtalk_core::semantic_analysis::type_checker::InferredType::known(
+                            "ExtractMarker",
+                        ),
+                    provenance:
+                        beamtalk_core::semantic_analysis::type_checker::TypeProvenance::Extracted,
+                    line: None,
+                },
+            ],
+        );
+
+        // Layer 3: distribution stubs.
+        let dist_dir = Utf8PathBuf::from_path_buf(temp.path().join("dist_stubs")).unwrap();
+        fs::create_dir_all(&dist_dir).unwrap();
+        write_test_file(
+            &dist_dir.join("sample_mod.bt"),
+            "declare native: sample_mod\n  thing: x -> DistMarker\n",
+        );
+
+        // Layer 2: a dependency's own package-bundled stubs.
+        let dep_root = Utf8PathBuf::from_path_buf(temp.path().join("dep_pkg")).unwrap();
+        let dep_stubs_dir = dep_root.join("stubs");
+        fs::create_dir_all(&dep_stubs_dir).unwrap();
+        write_test_file(
+            &dep_stubs_dir.join("sample_mod.bt"),
+            "declare native: sample_mod\n  thing: x -> PackageMarker\n",
+        );
+        let resolved_deps = vec![crate::commands::deps::path::ResolvedDependency {
+            name: "dep_pkg".to_string(),
+            root: dep_root.clone(),
+            ebin_path: dep_root.join("ebin"),
+            class_module_index: HashMap::new(),
+            class_infos: Vec::new(),
+            protocol_infos: Vec::new(),
+            alias_infos: Vec::new(),
+            is_direct: true,
+            via_chain: Vec::new(),
+            stubs_dir: Some(dep_stubs_dir),
+        }];
+
+        // Layer 1 (highest precedence): project-local stubs.
+        let project_stubs_dir = project_path.join("stubs");
+        fs::create_dir_all(&project_stubs_dir).unwrap();
+        write_test_file(
+            &project_stubs_dir.join("sample_mod.bt"),
+            "declare native: sample_mod\n  thing: x -> ProjectMarker\n",
+        );
+
+        let marker = |registry: &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry| -> String {
+            registry
+                .lookup("sample_mod", "thing", 1)
+                .unwrap()
+                .return_type
+                .display_for_diagnostic()
+                .unwrap()
+                .to_string()
+        };
+
+        // Distribution alone overrides auto-extract.
+        let (dist_layer, _) = load_dependency_stub_registries(
+            &[],
+            Some(dist_dir.as_path()),
+            Some(&auto_extract),
+            OutputFormat::Text,
+        )
+        .unwrap();
+        let mut merged = auto_extract.clone();
+        merged.apply_overrides(dist_layer);
+        assert_eq!(marker(&merged), "DistMarker");
+
+        // Package-bundled beats distribution when both are present.
+        let (dep_layer, _) = load_dependency_stub_registries(
+            &resolved_deps,
+            Some(dist_dir.as_path()),
+            Some(&auto_extract),
+            OutputFormat::Text,
+        )
+        .unwrap();
+        let mut merged = auto_extract.clone();
+        merged.apply_overrides(dep_layer);
+        assert_eq!(marker(&merged), "PackageMarker");
+
+        // Project-local beats everything, including package-bundled.
+        let (project_layer, _) =
+            load_project_stub_registry(&project_path, Some(&auto_extract), OutputFormat::Text)
+                .unwrap();
+        merged.apply_overrides(project_layer);
+        assert_eq!(marker(&merged), "ProjectMarker");
     }
 
     #[test]
@@ -5051,6 +5316,7 @@ mod tests {
             alias_infos: Vec::new(),
             is_direct: true,
             via_chain: Vec::new(),
+            stubs_dir: None,
         }];
 
         let result = check_native_module_collisions(&project_path, "root_pkg", &deps);
@@ -5114,6 +5380,7 @@ mod tests {
                 alias_infos: Vec::new(),
                 is_direct: true,
                 via_chain: Vec::new(),
+                stubs_dir: None,
             },
             super::super::deps::path::ResolvedDependency {
                 name: "dep_b".to_string(),
@@ -5125,6 +5392,7 @@ mod tests {
                 alias_infos: Vec::new(),
                 is_direct: true,
                 via_chain: Vec::new(),
+                stubs_dir: None,
             },
         ];
 
@@ -5185,6 +5453,7 @@ mod tests {
             alias_infos: Vec::new(),
             is_direct: true,
             via_chain: Vec::new(),
+            stubs_dir: None,
         }];
 
         let result = check_native_module_collisions(&project_path, "root_pkg", &deps);
@@ -5637,6 +5906,7 @@ mod tests {
             alias_infos: Vec::new(),
             is_direct: true,
             via_chain: Vec::new(),
+            stubs_dir: None,
         }
     }
 

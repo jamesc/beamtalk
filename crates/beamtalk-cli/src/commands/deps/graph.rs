@@ -1025,6 +1025,42 @@ pkg_b = {{ path = "{b_str}" }}"#
         assert_eq!(names, vec!["pkg_d", "pkg_c", "pkg_b"]);
     }
 
+    /// ADR 0075 layer 2: the full graph resolver records each dependency's
+    /// own `[stubs] path` as `stubs_dir` — this is the primary production
+    /// path (`compile_dependency_at`), distinct from the legacy
+    /// `resolve_path_dependencies` covered in `path.rs`'s own tests.
+    #[test]
+    fn test_resolve_dependency_graph_records_dep_stubs_dir() {
+        let temp = TempDir::new().unwrap();
+
+        let dep_dir = temp.path().join("dep_pkg");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "dep_pkg", "0.1.0", "[stubs]\npath = \"stubs/\"\n");
+
+        let root = temp.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        let dep_str = dep_dir.to_str().unwrap().replace('\\', "/");
+        write_manifest(
+            &root,
+            "my_app",
+            "0.1.0",
+            &format!(
+                r#"[dependencies]
+dep_pkg = {{ path = "{dep_str}" }}"#
+            ),
+        );
+
+        let root_path = Utf8PathBuf::from_path_buf(root).unwrap();
+        let options = beamtalk_core::CompilerOptions::default();
+
+        let resolved = resolve_dependency_graph(&root_path, &options).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(
+            resolved[0].stubs_dir,
+            Some(Utf8PathBuf::from_path_buf(dep_dir.join("stubs")).unwrap())
+        );
+    }
+
     /// Create a local git repo with a beamtalk.toml, a tag, and a branch.
     /// Returns (`TempDir`, url, `commit_sha`).
     fn create_git_dep_repo(pkg_name: &str, version: &str, deps: &str) -> (TempDir, String, String) {
