@@ -36,9 +36,11 @@ pub fn with_star_selector(field_name: &str) -> String {
 
 /// Returns `true` if `selector_name` has the shape a `with_star_selector`
 /// call could have produced — the single-keyword-part `with<Field>:`
-/// naming convention: the literal prefix `"with"` followed by an
-/// upper-cased first letter (e.g. `"withX:"`, `"withFirstName:"`, but not
-/// `"withdraw:"` or `"with:"`, the empty-field-name degenerate case).
+/// naming convention: the literal prefix `"with"`, an upper-cased first
+/// letter, and a trailing `:` (e.g. `"withX:"`, `"withFirstName:"`, but not
+/// `"withdraw:"`, `"with:"` — the empty-field-name degenerate case — or the
+/// unary `"withCounter"` with no colon at all, since a bare unary selector
+/// can never be the single keyword part this convention describes).
 ///
 /// This is the recognition counterpart to [`with_star_selector`]'s
 /// generation, kept in the same module as the single naming authority for
@@ -55,10 +57,10 @@ pub fn with_star_selector(field_name: &str) -> String {
 /// count) rather than the bare string this function takes.
 #[must_use]
 pub fn is_with_star_selector(selector_name: &str) -> bool {
-    selector_name
-        .strip_prefix("with")
-        .and_then(|rest| rest.chars().next())
-        .is_some_and(char::is_uppercase)
+    let Some(rest) = selector_name.strip_prefix("with") else {
+        return false;
+    };
+    rest.ends_with(':') && rest.chars().next().is_some_and(char::is_uppercase)
 }
 
 /// Computes the keyword-constructor selector for a value class's slots.
@@ -125,6 +127,10 @@ mod tests {
         // No "with" prefix at all.
         assert!(!is_with_star_selector("at:put:"));
         assert!(!is_with_star_selector(""));
+        // No trailing colon — a bare unary selector can never be the single
+        // keyword part this convention describes, even with the right
+        // "with" + uppercase shape.
+        assert!(!is_with_star_selector("withCounter"));
     }
 
     /// BT-3090: `with_star_selector` has a hand-rolled Erlang mirror,

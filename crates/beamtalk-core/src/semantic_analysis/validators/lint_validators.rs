@@ -621,7 +621,11 @@ fn is_with_star_selector(selector: &MessageSelector) -> bool {
     crate::synthetic_selectors::is_with_star_selector(&selector.name())
 }
 
-/// Returns `true` if `expr` is `self with<Field>: value` (any field name).
+/// Returns `true` if `expr` is a `with<Field>:` send whose receiver is
+/// itself self-producing — either literal `self` (`self withA: x`) or
+/// another self-producing expression, recursively, so an arbitrarily deep
+/// `with*:` chain (`((self withA: x) withB: y) withC: z`) is recognized
+/// throughout, not just its outermost send. See [`is_self_producing`].
 fn is_self_with_field_send(expr: &Expression) -> bool {
     let Expression::MessageSend {
         receiver,
@@ -632,7 +636,25 @@ fn is_self_with_field_send(expr: &Expression) -> bool {
     else {
         return false;
     };
-    arguments.len() == 1 && is_bare_self(receiver) && is_with_star_selector(selector)
+    arguments.len() == 1 && is_with_star_selector(selector) && is_self_producing(receiver)
+}
+
+/// Returns `true` if `expr` reliably evaluates to the fully updated `self`
+/// — a bare `self`, a `self.field := value` assignment, a `with<Field>:`
+/// send (recursively, so a chain of them also qualifies), or a `with*:`
+/// cascade whose *last* message is a `with<Field>:` send. This is the
+/// shared "self-producing" predicate: a `with<Field>:` send's receiver must
+/// satisfy it (chaining), and so must the trailing statement
+/// `check_setup_body_returns_self` requires — both need to know what the
+/// expression actually *evaluates to*, so a cascade is checked by its last
+/// message only (ADR 0067), unlike the presence-only
+/// [`is_self_with_field_cascade`] used for detecting *that* a mutation
+/// happened anywhere in the body.
+fn is_self_producing(expr: &Expression) -> bool {
+    is_bare_self(expr)
+        || is_self_field_assignment(expr)
+        || is_self_with_field_send(expr)
+        || cascade_value_is_self_producing(expr)
 }
 
 /// Returns the cascade's common receiver — the receiver of the message
@@ -648,13 +670,23 @@ fn cascade_common_receiver(receiver: &Expression) -> Option<&Expression> {
     }
 }
 
-/// Returns `true` if `expr` is a cascade whose common receiver is `self` and
-/// whose messages include at least one `with<Field>:` send — e.g.
-/// `self withCounter: 1; withDb: 2`. A cascade's own value is the value of
-/// its *last* message (ADR 0067), so such a cascade only reliably threads
-/// the field mutation forward when it is itself `setUp`'s trailing
-/// statement — same trap as a lone `self.field := value` or
-/// `self with<Field>: value`.
+/// Returns `true` if `expr` is a cascade whose common receiver is
+/// self-producing (literal `self`, or itself a `with<Field>:` send/chain —
+/// recursively, via [`is_self_producing`]) and *at least one* of its
+/// messages is a `with<Field>:` send — e.g. `self withCounter: 1; withDb:
+/// 2`, or a cascade with an unrelated message mixed in. Presence-only: this
+/// answers "did a field mutation happen anywhere in this cascade", which is
+/// what [`contains_self_reconstructing_send`] needs to decide whether
+/// `setUp` has anything to drop at all. It does NOT tell you whether the
+/// cascade's own *value* is self — for that (whether this expression, in
+/// trailing position, actually carries the mutation forward), use
+/// [`cascade_value_is_self_producing`], which requires the *last* message to
+/// be the `with<Field>:` send (ADR 0067: a cascade evaluates to its last
+/// message's result) — the distinction a 3+-message cascade like `self
+/// withCounter: 1; withDb: 2; log: "ready"` depends on: this function
+/// answers "true" (a mutation happened), but the cascade's value is `log:`'s
+/// result, not self, so `cascade_value_is_self_producing` must answer
+/// "false" for the same expression.
 fn is_self_with_field_cascade(expr: &Expression) -> bool {
     let Expression::Cascade {
         receiver, messages, ..
@@ -662,18 +694,40 @@ fn is_self_with_field_cascade(expr: &Expression) -> bool {
     else {
         return false;
     };
-    cascade_common_receiver(receiver).is_some_and(is_bare_self)
+    cascade_common_receiver(receiver).is_some_and(is_self_producing)
         && messages
             .iter()
             .any(|msg| msg.arguments.len() == 1 && is_with_star_selector(&msg.selector))
 }
 
+/// Returns `true` if `expr` is a cascade whose common receiver is
+/// self-producing AND whose *last* message is a `with<Field>:` send — the
+/// only shape of cascade that actually evaluates to the fully updated self
+/// (ADR 0067: a cascade's value is its last message's result). Used by
+/// [`is_self_producing`] wherever the code needs to know what an expression
+/// evaluates to (a chained receiver, or `setUp`'s trailing statement) —
+/// never for mere presence detection, where [`is_self_with_field_cascade`]
+/// applies instead.
+fn cascade_value_is_self_producing(expr: &Expression) -> bool {
+    let Expression::Cascade {
+        receiver, messages, ..
+    } = expr.unwrap_parens()
+    else {
+        return false;
+    };
+    cascade_common_receiver(receiver).is_some_and(is_self_producing)
+        && messages
+            .last()
+            .is_some_and(|msg| msg.arguments.len() == 1 && is_with_star_selector(&msg.selector))
+}
+
 /// Returns `true` if `expr` contains a self-reconstructing send anywhere in
 /// its subtree (including itself) — a `self.field := value` assignment, a
-/// `self with<Field>: value` send, or a cascade on `self` containing a
-/// `with<Field>:` message. Each of these shapes returns the fully updated
-/// `self`; when the containing `setUp` doesn't return that value as its very
-/// last statement, the mutation is silently dropped (BT-3391, BT-3395).
+/// `with<Field>:` send/chain, or a `with*:` cascade (see
+/// [`is_self_producing`], minus the bare-`self` case, which mutates
+/// nothing). Each of these shapes returns the fully updated `self`; when the
+/// containing `setUp` doesn't return that value as its very last statement,
+/// the mutation is silently dropped (BT-3391, BT-3395).
 fn contains_self_reconstructing_send(expr: &Expression) -> bool {
     let mut found = false;
     walk_expression(expr, &mut |e| {
@@ -704,11 +758,7 @@ fn check_setup_body_returns_self(
         return;
     }
     let last_expr = last_stmt.expression.unwrap_parens();
-    if is_bare_self(last_expr)
-        || is_self_field_assignment(last_expr)
-        || is_self_with_field_send(last_expr)
-        || is_self_with_field_cascade(last_expr)
-    {
+    if is_self_producing(last_expr) {
         return;
     }
     diagnostics.push(setup_drops_field_assignments_diagnostic(last_expr.span()));
@@ -1776,6 +1826,85 @@ mod tests {
             "Expected 1 warning: trailing `self with: 2` isn't a with<Field>: \
              send, so it doesn't carry the earlier self.dashboard := forward, \
              got: {diagnostics:?}"
+        );
+    }
+
+    /// A chained `with*:` send — `(self withA: x) withB: y` — where the
+    /// outer send's receiver is itself a `with<Field>:` send rather than
+    /// literal `self`. The CI regression (BT-3395 fix-forward): the chain's
+    /// overall value is still the fully updated self (each `with*:` send
+    /// returns self with its own field set), so this must NOT warn as
+    /// `setUp`'s trailing statement.
+    #[test]
+    fn setup_with_field_chain_two_deep_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ChainedTest\n  field: a = nil\n  field: b = nil\n\
+                   \n  setUp =>\n    (self withA: 1) withB: 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for a 2-deep with*: chain as the trailing statement, got: {diagnostics:?}"
+        );
+    }
+
+    /// The same chain, 3 levels deep — `((self withA: x) withB: y) withC:
+    /// z` — confirming the recursive receiver check isn't hardcoded to a
+    /// single level of nesting.
+    #[test]
+    fn setup_with_field_chain_three_deep_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ChainedTest\n  field: a = nil\n  field: b = nil\n  field: c = nil\n\
+                   \n  setUp =>\n    ((self withA: 1) withB: 2) withC: 3";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for a 3-deep with*: chain as the trailing statement, got: {diagnostics:?}"
+        );
+    }
+
+    /// A 2-deep `with*:` chain followed by an unrelated trailing statement
+    /// still warns — the chain's self-preserving value is discarded once
+    /// something follows it, same trap as the single-send and cascade
+    /// forms.
+    #[test]
+    fn setup_with_field_chain_then_unrelated_statement_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ChainedTest\n  field: a = nil\n  field: b = nil\n\
+                   \n  setUp =>\n    (self withA: 1) withB: 2.\n    Transcript show: \"ready\"";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for a with*: chain followed by an unrelated statement, got: {diagnostics:?}"
+        );
+    }
+
+    /// A 3+-message cascade whose `with<Field>:` sends are NOT last —
+    /// `self withCounter: 1; withDb: 2; log: "ready"`. The cascade's actual
+    /// value is `log:`'s result, not self (ADR 0067: a cascade evaluates to
+    /// its *last* message), so both `counter` and `db` are genuinely
+    /// dropped. Must warn — a naive `.any()` check over the cascade's
+    /// messages would wrongly see the `with<Field>:` sends and call this
+    /// self-preserving.
+    #[test]
+    fn setup_with_field_cascade_with_trailing_non_with_message_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: CounterDbTest\n  field: counter = nil\n  field: db = nil\n\
+                   \n  setUp =>\n    self withCounter: 1; withDb: 2; log: \"ready\"";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning: the cascade's last message is `log:`, not a \
+             with<Field>: send, so counter/db are genuinely dropped, got: {diagnostics:?}"
         );
     }
 
