@@ -6087,9 +6087,9 @@ setUp =>
   self   // <- carries both field mutations forward
 ```
 
-`beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field via `self.field := value` and its last statement isn't a bare `self` or another field assignment.
+`beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field — via `self.field := value` or a `with<Field>:` send — and its last statement isn't a bare `self`, another field assignment, a `with<Field>:` send, or a `with*:` cascade.
 
-Chained `with*:` setters (`self withCounter: (Counter spawn)`) remain a valid alternative — each `with*:` call itself ends in a field assignment internally, so the chain's own last call already returns the fully updated self. This only holds when the `with*:` chain is itself the trailing statement of `setUp`: like a bare `self.field := value`, its self-preserving return value only threads through when nothing follows it — the same trap applies (silently, since `beamtalk lint`'s BT-3391 check only recognizes the literal `self.field := value` form, not a `with*:` send).
+Chained `with*:` setters (`self withCounter: (Counter spawn)`) remain a valid alternative to `self.field := value` — each `with*:` call itself returns the fully updated self, so the chain's own last call already carries every field set through. This only holds when the `with*:` chain is itself the trailing statement of `setUp`: like a bare `self.field := value`, its self-preserving return value only threads through when nothing follows it — the same trap applies, and `beamtalk lint` (BT-3391/BT-3395) warns for both forms.
 
 #### Suite-Level Setup — setUpOnce / tearDownOnce
 

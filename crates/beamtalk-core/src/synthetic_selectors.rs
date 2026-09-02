@@ -34,6 +34,33 @@ pub fn with_star_selector(field_name: &str) -> String {
     }
 }
 
+/// Returns `true` if `selector_name` has the shape a `with_star_selector`
+/// call could have produced — the single-keyword-part `with<Field>:`
+/// naming convention: the literal prefix `"with"` followed by an
+/// upper-cased first letter (e.g. `"withX:"`, `"withFirstName:"`, but not
+/// `"withdraw:"` or `"with:"`, the empty-field-name degenerate case).
+///
+/// This is the recognition counterpart to [`with_star_selector`]'s
+/// generation, kept in the same module as the single naming authority for
+/// this convention (see the module doc comment) so callers on both sides of
+/// the `beamtalk-core` / `beamtalk-lint` boundary — which can only depend on
+/// `beamtalk-core`, never the reverse — share one implementation instead of
+/// each re-deriving the shape check.
+///
+/// Callers that only have a full multi-part keyword selector string (e.g.
+/// `"at:put:"`) should first confirm it is a *single* keyword part — this
+/// function only judges the naming shape, not part count, since that
+/// requires the caller's own selector representation (an AST
+/// `MessageSelector`'s parts list, or a `MethodDefinition`'s parameter
+/// count) rather than the bare string this function takes.
+#[must_use]
+pub fn is_with_star_selector(selector_name: &str) -> bool {
+    selector_name
+        .strip_prefix("with")
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(char::is_uppercase)
+}
+
 /// Computes the keyword-constructor selector for a value class's slots.
 ///
 /// Each slot name becomes one keyword part, e.g. `["x", "y"]` → `"x:y:"`.
@@ -76,6 +103,28 @@ mod tests {
     #[test]
     fn keyword_constructor_empty() {
         assert_eq!(keyword_constructor_selector(std::iter::empty()), "");
+    }
+
+    #[test]
+    fn is_with_star_selector_recognizes_generated_shapes() {
+        assert!(is_with_star_selector("withX:"));
+        assert!(is_with_star_selector("withFirstName:"));
+        assert!(is_with_star_selector(&with_star_selector("db")));
+        assert!(is_with_star_selector(&with_star_selector("x")));
+    }
+
+    #[test]
+    fn is_with_star_selector_rejects_non_setter_shapes() {
+        // Lowercase after "with" — an unrelated `withdraw:` method, not a
+        // copy-setter for a field named "draw".
+        assert!(!is_with_star_selector("withdraw:"));
+        // The empty-field-name degenerate case: `with_star_selector("")`
+        // produces "with:", which has nothing uppercase after the prefix.
+        assert!(!is_with_star_selector("with:"));
+        assert!(!is_with_star_selector(&with_star_selector("")));
+        // No "with" prefix at all.
+        assert!(!is_with_star_selector("at:put:"));
+        assert!(!is_with_star_selector(""));
     }
 
     /// BT-3090: `with_star_selector` has a hand-rolled Erlang mirror,
