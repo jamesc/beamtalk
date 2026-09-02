@@ -120,3 +120,12 @@ TestCase subclass: ActorConditionalMutationsTest
     result2 := self.c recordThenBranch: false
     self assert: result2 equals: #gaveUp
     self assert: self.c getCount equals: 2
+
+  testNonDispatchingSelfSendAsConditionalReceiverDoesNotCrash =>
+    // BT-3382 regression: `(self respondsTo: sel) ifTrue:ifFalse:` — the
+    // receiver is a self-send, but `respondsTo:` is intercepted before
+    // self-dispatch (BT-1420) and is never a real dispatch-table entry.
+    // An over-broad receiver check previously routed this through the
+    // self-dispatch codegen shortcut, crashing with does_not_understand.
+    self assert: (self.c respondsToAsReceiver: #getCount) equals: #yes
+    self assert: (self.c respondsToAsReceiver: #bogusSelector) equals: #no

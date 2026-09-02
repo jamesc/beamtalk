@@ -4977,7 +4977,7 @@ impl CoreErlangGenerator {
             // check — the two are independently-computed decisions that
             // must agree (see this file's own commentary on that class of
             // bug, e.g. BT-2356's "two decision points disagree" note).
-            if self.is_actor_self_send(receiver.unwrap_parens()) {
+            if self.is_dispatching_actor_self_send(receiver.unwrap_parens()) {
                 return true;
             }
             for arg in arguments {

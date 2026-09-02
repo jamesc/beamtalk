@@ -69,6 +69,15 @@ Actor subclass: ConditionalMutationCounter
     self.count := self.count + 1
     flag
 
+  // BT-3382 regression: `respondsTo:` is a self-send but is intercepted
+  // BEFORE self-dispatch (BT-1420) — using it as a conditional receiver must
+  // not be routed through the self-dispatch-shortcut codegen, which builds
+  // a `safe_dispatch` call for the selector atom and would crash with
+  // does_not_understand since `respondsTo:` is never a real dispatch-table
+  // entry.
+  respondsToAsReceiver: sel =>
+    (self respondsTo: sel) ifTrue: [#yes] ifFalse: [#no]
+
   getCount => self.count
 
   reset => self.count := 0

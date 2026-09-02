@@ -159,7 +159,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
     ) -> Result<(Document<'static>, Document<'static>)> {
         let unwrapped = receiver.unwrap_parens();
-        if self.is_actor_self_send(unwrapped) {
+        if self.is_dispatching_actor_self_send(unwrapped) {
             if let Expression::MessageSend {
                 selector,
                 arguments,

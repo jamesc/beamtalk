@@ -1992,7 +1992,7 @@ impl CoreErlangGenerator {
                         let needs_threading = self.needs_mutation_threading(&analysis)
                             || self.body_has_list_op_cross_scope_mutations(block)
                             || (self.in_loop_body && !analysis.local_writes.is_empty())
-                            || self.is_actor_self_send(receiver.unwrap_parens());
+                            || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
                         if needs_threading {
                             // Validate arity before generating mutation-threaded code.
                             // This ensures a block with >1 params still raises
@@ -2653,7 +2653,7 @@ impl CoreErlangGenerator {
                     let needs_threading = self.needs_mutation_threading(&analysis)
                         || self.body_has_list_op_cross_scope_mutations(block)
                         || (self.in_loop_body && !analysis.local_writes.is_empty())
-                        || self.is_actor_self_send(receiver.unwrap_parens());
+                        || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
                     if needs_threading {
                         // BT-1392: Set repl_loop_mutated so the REPL unpacks {Result, State}
                         if self.is_repl_mode() {
@@ -2673,7 +2673,7 @@ impl CoreErlangGenerator {
                     let needs_threading = self.needs_mutation_threading(&analysis)
                         || self.body_has_list_op_cross_scope_mutations(block)
                         || (self.in_loop_body && !analysis.local_writes.is_empty())
-                        || self.is_actor_self_send(receiver.unwrap_parens());
+                        || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
                     if needs_threading {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
@@ -2700,7 +2700,7 @@ impl CoreErlangGenerator {
                         || (self.in_loop_body
                             && (!true_analysis.local_writes.is_empty()
                                 || !false_analysis.local_writes.is_empty()))
-                        || self.is_actor_self_send(receiver.unwrap_parens());
+                        || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
                     if needs_threading {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
