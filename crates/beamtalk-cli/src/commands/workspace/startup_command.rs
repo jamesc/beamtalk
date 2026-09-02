@@ -221,7 +221,55 @@ pub(super) fn build_detached_node_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::WorkspaceFixture;
     use std::ffi::OsStr;
+
+    // --- write_cookie_args_file ---
+
+    #[test]
+    fn write_cookie_args_file_writes_setcookie_line() {
+        let fixture = WorkspaceFixture::new("startup-cmd-cookie-args", 0, 1);
+        let path = write_cookie_args_file(&fixture.id, "my-secret-cookie").unwrap();
+
+        assert_eq!(path.file_name().unwrap(), OsStr::new("vm.args"));
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "-setcookie my-secret-cookie\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_cookie_args_file_is_owner_only_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = WorkspaceFixture::new("startup-cmd-cookie-perms", 0, 1);
+        let path = write_cookie_args_file(&fixture.id, "cookie").unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "cookie args file must be owner-only");
+    }
+
+    #[test]
+    fn write_cookie_args_file_errors_for_unknown_workspace() {
+        // No such workspace directory exists to write `vm.args` into, so the
+        // underlying `write_secure_file` open() must fail rather than
+        // silently creating the missing parent directory.
+        let _guard = crate::commands::test_support::real_home_guard();
+        let result = write_cookie_args_file("__bt3401_nonexistent_ws__", "cookie");
+        assert!(result.is_err());
+    }
+
+    // --- path_to_erlang_arg ---
+
+    #[test]
+    fn path_to_erlang_arg_passes_through_on_unix() {
+        // On non-Windows, this is a plain lossy-to-string conversion — no
+        // separator rewriting.
+        #[cfg(not(windows))]
+        {
+            let path = Path::new("/some/nested/path");
+            assert_eq!(path_to_erlang_arg(path), "/some/nested/path");
+        }
+    }
 
     /// Helper: build a test command and return its env vars and args.
     fn build_test_command() -> Command {
@@ -320,5 +368,126 @@ mod tests {
             args.contains(&OsStr::new("ok.")),
             "must include the eval command"
         );
+    }
+
+    // --- node_flag / node_arg selection ---
+
+    fn build_with_node_name(node_name: &str) -> Command {
+        let tmp = std::env::temp_dir();
+        let cookie_file = tmp.join("test_cookie_args");
+        let beam_dir = tmp.join("test_beam");
+        let paths = beamtalk_cli::repl_startup::BeamPaths {
+            runtime_ebin: beam_dir.clone(),
+            workspace_ebin: beam_dir.clone(),
+            compiler_ebin: beam_dir.clone(),
+            cowboy_ebin: beam_dir.clone(),
+            cowlib_ebin: beam_dir.clone(),
+            ranch_ebin: beam_dir.clone(),
+            telemetry_ebin: beam_dir.clone(),
+            telemetry_poller_ebin: beam_dir.clone(),
+            stdlib_ebin: beam_dir.clone(),
+            stdlib_erlang_ebin: beam_dir,
+        };
+        build_detached_node_command(node_name, &cookie_file, &paths, &[], "ok.", &tmp)
+    }
+
+    #[test]
+    fn node_without_at_sign_uses_short_names() {
+        let cmd = build_with_node_name("plain_node");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert!(args.contains(&OsStr::new("-sname")));
+        assert!(!args.contains(&OsStr::new("-name")));
+        assert!(args.contains(&OsStr::new("plain_node")));
+    }
+
+    #[test]
+    fn node_at_short_hostname_uses_short_names() {
+        // BT-1418: a short (non-dotted) host after `@` must still get
+        // `-sname`, not `-name` ("Hostname localhost is illegal" otherwise).
+        let cmd = build_with_node_name("ws@localhost");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert!(args.contains(&OsStr::new("-sname")));
+        assert!(!args.contains(&OsStr::new("-name")));
+        assert!(args.contains(&OsStr::new("ws@localhost")));
+    }
+
+    #[test]
+    fn node_at_fully_qualified_hostname_uses_long_names() {
+        let cmd = build_with_node_name("ws@host.example.com");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert!(args.contains(&OsStr::new("-name")));
+        assert!(!args.contains(&OsStr::new("-sname")));
+        assert!(args.contains(&OsStr::new("ws@host.example.com")));
+    }
+
+    // --- extra_code_paths ---
+
+    #[test]
+    fn extra_code_paths_are_each_appended_as_a_pa_flag() {
+        let tmp = std::env::temp_dir();
+        let cookie_file = tmp.join("test_cookie_args");
+        let beam_dir = tmp.join("test_beam");
+        let paths = beamtalk_cli::repl_startup::BeamPaths {
+            runtime_ebin: beam_dir.clone(),
+            workspace_ebin: beam_dir.clone(),
+            compiler_ebin: beam_dir.clone(),
+            cowboy_ebin: beam_dir.clone(),
+            cowlib_ebin: beam_dir.clone(),
+            ranch_ebin: beam_dir.clone(),
+            telemetry_ebin: beam_dir.clone(),
+            telemetry_poller_ebin: beam_dir.clone(),
+            stdlib_ebin: beam_dir.clone(),
+            stdlib_erlang_ebin: beam_dir,
+        };
+        let extra = vec![tmp.join("extra1"), tmp.join("extra2")];
+        let cmd = build_detached_node_command(
+            "node@localhost",
+            &cookie_file,
+            &paths,
+            &extra,
+            "ok.",
+            &tmp,
+        );
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy()).collect();
+
+        let extra1 = path_to_erlang_arg(&tmp.join("extra1"));
+        let extra2 = path_to_erlang_arg(&tmp.join("extra2"));
+        let pa_positions: Vec<usize> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.as_ref() == "-pa")
+            .map(|(i, _)| i)
+            .collect();
+        assert!(
+            pa_positions
+                .iter()
+                .any(|&i| args.get(i + 1).map(AsRef::as_ref) == Some(extra1.as_str())),
+            "extra1 must follow a -pa flag: {args:?}"
+        );
+        assert!(
+            pa_positions
+                .iter()
+                .any(|&i| args.get(i + 1).map(AsRef::as_ref) == Some(extra2.as_str())),
+            "extra2 must follow a -pa flag: {args:?}"
+        );
+    }
+
+    // --- BEAMTALK_COMPILER_PORT_BIN allowlisting ---
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn user_provided_compiler_port_bin_is_passed_through_verbatim() {
+        // SAFETY: serialized via #[serial(env_var)]; removed before returning.
+        unsafe { std::env::set_var("BEAMTALK_COMPILER_PORT_BIN", "/opt/custom/compiler-port") };
+        let cmd = build_test_command();
+        // SAFETY: see above.
+        unsafe { std::env::remove_var("BEAMTALK_COMPILER_PORT_BIN") };
+
+        let value = cmd
+            .get_envs()
+            .find(|(k, _)| k == &OsStr::new("BEAMTALK_COMPILER_PORT_BIN"))
+            .and_then(|(_, v)| v)
+            .map(|v| v.to_string_lossy().into_owned());
+        assert_eq!(value.as_deref(), Some("/opt/custom/compiler-port"));
     }
 }

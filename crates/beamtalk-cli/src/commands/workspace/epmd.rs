@@ -190,6 +190,49 @@ mod tests {
     }
 
     #[test]
+    fn is_epmd_name_conflict_false_when_startup_log_has_no_conflict_markers() {
+        use crate::commands::test_support::WorkspaceFixture;
+
+        let fixture = WorkspaceFixture::new("epmd-no-conflict", 0, 1);
+        let dir = workspace_dir(&fixture.id).unwrap();
+        std::fs::write(dir.join("startup.log"), "Erlang/OTP 26 booted\n").unwrap();
+
+        assert!(!is_epmd_name_conflict(&fixture.id));
+    }
+
+    #[test]
+    fn is_epmd_name_conflict_true_for_already_registered_marker() {
+        use crate::commands::test_support::WorkspaceFixture;
+
+        // OTP 25+ net_kernel error atom.
+        let fixture = WorkspaceFixture::new("epmd-already-registered", 0, 1);
+        let dir = workspace_dir(&fixture.id).unwrap();
+        std::fs::write(
+            dir.join("startup.log"),
+            "** Reason for termination ==\n** {already_registered, ...}\n",
+        )
+        .unwrap();
+
+        assert!(is_epmd_name_conflict(&fixture.id));
+    }
+
+    #[test]
+    fn is_epmd_name_conflict_true_for_protocol_register_marker() {
+        use crate::commands::test_support::WorkspaceFixture;
+
+        // Older net_kernel registration-failure prefix.
+        let fixture = WorkspaceFixture::new("epmd-protocol-register", 0, 1);
+        let dir = workspace_dir(&fixture.id).unwrap();
+        std::fs::write(
+            dir.join("startup.log"),
+            "epmd: Protocol: register: not a socket\n",
+        )
+        .unwrap();
+
+        assert!(is_epmd_name_conflict(&fixture.id));
+    }
+
+    #[test]
     fn primary_non_loopback_ipv4_is_never_loopback_or_unspecified() {
         // May be None on a loopback-only host (e.g. minimal CI); when present it
         // must be a genuine non-loopback, specified address — the property the

@@ -172,6 +172,8 @@ pub(super) use beamtalk_cli::pid_liveness::is_process_alive;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::real_home_guard;
+    use std::net::TcpListener;
     use std::path::Path;
 
     /// Write a two-line port file (`PORT\nNONCE\n`) into `workspaces_root/ws_id/port`.
@@ -183,6 +185,156 @@ mod tests {
             None => format!("{port}\n"),
         };
         std::fs::write(ws_dir.join("port"), content).unwrap();
+    }
+
+    fn base_node_info(port: u16) -> NodeInfo {
+        NodeInfo {
+            node_name: "n@localhost".to_string(),
+            port,
+            pid: 1,
+            start_time: None,
+            nonce: None,
+            bind_addr: None,
+        }
+    }
+
+    /// Bind an ephemeral port, then drop the listener — the OS will not
+    /// reissue it immediately, so a connect attempt reliably fails without
+    /// needing a real BEAM node to have crashed.
+    fn unused_port() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        drop(listener);
+        port
+    }
+
+    // --- is_node_running: early-return / TCP-probe branches (no fixture needed) ---
+
+    #[test]
+    fn is_node_running_false_for_unparseable_connect_host() {
+        // `connect_host()` returns `bind_addr` verbatim for anything other than
+        // "0.0.0.0"/None, so a non-IP value makes the SocketAddr parse fail —
+        // the very first bail branch, before any TCP connect is attempted.
+        let mut info = base_node_info(12345);
+        info.bind_addr = Some("not-an-ip-address".to_string());
+        assert!(!is_node_running(&info, None));
+    }
+
+    #[test]
+    fn is_node_running_false_when_port_not_listening() {
+        let info = base_node_info(unused_port());
+        assert!(!is_node_running(&info, None));
+    }
+
+    #[test]
+    fn is_node_running_true_when_listening_and_no_nonce() {
+        // No nonce means the function trusts the TCP probe alone (the final
+        // `else { true }` branch) without ever touching a port file.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+
+        assert!(is_node_running(&base_node_info(port), None));
+        drop(listener);
+    }
+
+    // --- is_node_running: workspace_id fast path (Some(id) -> read_port_file) ---
+
+    #[test]
+    fn is_node_running_fast_path_nonce_matches() {
+        let _guard = real_home_guard();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        let ws_id = format!("bt3401-node-state-match-{}", std::process::id());
+        let base = super::super::storage::workspaces_base_dir().unwrap();
+        write_port_file(&base, &ws_id, port, Some("nonce-abc"));
+
+        let mut info = base_node_info(port);
+        info.nonce = Some("nonce-abc".to_string());
+        assert!(is_node_running(&info, Some(&ws_id)));
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(base.join(&ws_id));
+    }
+
+    #[test]
+    fn is_node_running_fast_path_nonce_mismatch() {
+        let _guard = real_home_guard();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        let ws_id = format!("bt3401-node-state-mismatch-{}", std::process::id());
+        let base = super::super::storage::workspaces_base_dir().unwrap();
+        write_port_file(&base, &ws_id, port, Some("nonce-on-disk"));
+
+        let mut info = base_node_info(port);
+        info.nonce = Some("nonce-expected".to_string());
+        assert!(
+            !is_node_running(&info, Some(&ws_id)),
+            "mismatched nonce must be treated as a stale/different node"
+        );
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(base.join(&ws_id));
+    }
+
+    #[test]
+    fn is_node_running_fast_path_stale_port_in_file_returns_false() {
+        // The port file on disk belongs to a different (newer) startup than
+        // the port recorded in `info` — comparing nonces would be meaningless,
+        // so this must short-circuit to false without even reading the nonce.
+        let _guard = real_home_guard();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        let ws_id = format!("bt3401-node-state-stale-port-{}", std::process::id());
+        let base = super::super::storage::workspaces_base_dir().unwrap();
+        write_port_file(&base, &ws_id, port.wrapping_add(1), Some("whatever"));
+
+        let mut info = base_node_info(port);
+        info.nonce = Some("whatever".to_string());
+        assert!(!is_node_running(&info, Some(&ws_id)));
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(base.join(&ws_id));
+    }
+
+    #[test]
+    fn is_node_running_fast_path_no_port_file_trusts_probe() {
+        // A running-but-nonce-carrying `info` with no port file at all for this
+        // workspace ID (e.g. the file has not been written yet) must fall back
+        // to trusting the TCP probe rather than treating "no file" as stale.
+        let _guard = real_home_guard();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        let ws_id = format!("bt3401-node-state-no-port-file-{}", std::process::id());
+        let base = super::super::storage::workspaces_base_dir().unwrap();
+        std::fs::create_dir_all(base.join(&ws_id)).unwrap();
+
+        let mut info = base_node_info(port);
+        info.nonce = Some("whatever".to_string());
+        assert!(is_node_running(&info, Some(&ws_id)));
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(base.join(&ws_id));
+    }
+
+    // --- is_node_running: workspace_id None -> workspaces_base_dir() scan fallback ---
+
+    #[test]
+    fn is_node_running_none_fallback_scans_workspaces_base_dir() {
+        let _guard = real_home_guard();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        let ws_id = format!("bt3401-node-state-fallback-{}", std::process::id());
+        let base = super::super::storage::workspaces_base_dir().unwrap();
+        write_port_file(&base, &ws_id, port, Some("fallback-nonce"));
+
+        let mut info = base_node_info(port);
+        info.nonce = Some("fallback-nonce".to_string());
+        // workspace_id is None: exercises the O(N) `workspaces_base_dir` scan
+        // fallback rather than the fast per-workspace `read_port_file` path.
+        assert!(is_node_running(&info, None));
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(base.join(&ws_id));
     }
 
     #[test]

@@ -372,4 +372,83 @@ mod tests {
         let _guard = ColorGuard::disabled();
         assert_eq!(output_mode(), OutputMode::Plain);
     }
+
+    // --- display_info ---
+    //
+    // `display_info` is currently unused (`#[allow(dead_code)]`, kept for the
+    // planned `:info` REPL command) but its branches are otherwise ordinary
+    // pure JSON-to-stdout formatting, so — like `print_help`/`display_codegen`
+    // above — these are smoke tests exercising every branch rather than
+    // checking exact formatted output.
+
+    #[test]
+    fn display_info_not_found_short_circuits() {
+        // found=false must print the "not found" message and return before
+        // touching `kind` or any other field.
+        display_info(&serde_json::json!({"found": false, "symbol": "Bogus"}));
+    }
+
+    #[test]
+    fn display_info_defaults_missing_found_and_symbol() {
+        // Neither `found` nor `symbol` present: `unwrap_or` defaults apply
+        // (found -> false, symbol -> "?"), still hitting the not-found branch.
+        display_info(&serde_json::json!({}));
+    }
+
+    #[test]
+    fn display_info_found_prints_header_and_skips_known_fields() {
+        display_info(&serde_json::json!({
+            "found": true,
+            "symbol": "Counter",
+            "kind": "class",
+        }));
+    }
+
+    #[test]
+    fn display_info_found_defaults_missing_kind() {
+        display_info(&serde_json::json!({"found": true, "symbol": "Counter"}));
+    }
+
+    #[test]
+    fn display_info_string_field_skips_when_empty() {
+        display_info(&serde_json::json!({
+            "found": true,
+            "symbol": "Counter",
+            "kind": "class",
+            "doc": "",
+            "superclass": "Actor",
+        }));
+    }
+
+    #[test]
+    fn display_info_array_field_of_strings_and_skips_when_empty() {
+        display_info(&serde_json::json!({
+            "found": true,
+            "symbol": "Counter",
+            "kind": "class",
+            "methods": ["increment", "reset"],
+            "class_methods": [],
+        }));
+    }
+
+    #[test]
+    fn display_info_array_field_with_non_string_items_uses_display() {
+        display_info(&serde_json::json!({
+            "found": true,
+            "symbol": "Counter",
+            "kind": "class",
+            "line_numbers": [1, 2, 3],
+        }));
+    }
+
+    #[test]
+    fn display_info_other_value_kinds_fall_back_to_format_value() {
+        display_info(&serde_json::json!({
+            "found": true,
+            "symbol": "Counter",
+            "kind": "class",
+            "arity": 2,
+            "sealed": false,
+        }));
+    }
 }
