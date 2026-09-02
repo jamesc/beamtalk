@@ -6746,3 +6746,27 @@ fn bt3382_self_dispatch_receiver_of_conditional_threads_state_and_compiles_throu
     );
     assert_compiles_through_erlc("bt3382_self_dispatch_receiver_of_conditional", &code);
 }
+
+#[test]
+fn bt3392_self_dispatch_nested_in_binary_op_operand_threads_state_and_compiles_through_erlc() {
+    // BT-3392: `1 + (self bumpCount)` inside an `ifTrue:` block body — the
+    // self-send is a binary-op operand nested inside the block's own (only)
+    // statement, neither the block's top-level statement (C11/C12b, already
+    // correct) nor the conditional's receiver (BT-3382, already fixed).
+    // Confirms the self-send's mutation is threaded via a real `Bind` AND
+    // the generated code is real, erlc-valid Core Erlang.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly: flag =>\n    flag ifTrue: [\n      1 + (self bumpCount)\n    ] ifFalse: [\n      0\n    ].\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3392_self_dispatch_nested_in_binary_op_operand")
+            .with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        code.contains("erlang':'element'(2, "),
+        "the self-dispatch's new state must be extracted, not discarded. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3392_self_dispatch_nested_in_binary_op_operand", &code);
+}

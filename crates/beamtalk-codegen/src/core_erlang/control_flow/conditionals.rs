@@ -59,7 +59,7 @@ use super::StateAccFallbackReason;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Block, Expression};
+use beamtalk_core::ast::{Block, Expression, MessageSelector};
 use beamtalk_core::source_analysis::Span;
 
 impl CoreErlangGenerator {
@@ -187,6 +187,65 @@ impl CoreErlangGenerator {
             Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
             None => (Document::Nil, cond_chain),
         })
+    }
+
+    /// BT-3392: recursively dispatches every actor self-send nested as an
+    /// operand of a binary-operator chain within `expr` — e.g. both `self
+    /// a`s in `(self a) + ((self a) * 2)` — via a real `ThreadedStmt::Bind`
+    /// (`dispatch_self_send_as_bind`, the same mechanism C11/C12b above use),
+    /// in left-to-right evaluation order, *before* the C12 catch-all in
+    /// `generate_conditional_branch_inline` compiles this statement.
+    /// Registers each dispatch's result variable in
+    /// `hoisted_self_send_results` (keyed by the self-send's own receiver
+    /// span) so `try_handle_self_dispatch` substitutes a reference to it —
+    /// instead of dispatching (and re-running the method) a second time —
+    /// the moment `expression_doc` reaches that same node.
+    ///
+    /// Deliberately narrow: only unwraps parens and recurses through
+    /// `MessageSelector::Binary` sends (`+`, `-`, `*`, `/`, `<`, `==`, …) —
+    /// this is the literal shape BT-3392 confirmed still broken (`1 + (self
+    /// recordOnce: flag)` inside an `ifTrue:` block). It does NOT recurse
+    /// into keyword-message receivers/arguments, block bodies, or
+    /// field-assignment RHS trees — `lower_field_assignment_bind` (a
+    /// completely separate call path, C1 above, never reached from here)
+    /// is exactly the call site whose pre-captured `source_version` a fully
+    /// general "thread every self-dispatch sub-expression" version of this
+    /// mechanism broke during BT-3382's own prototyping (see
+    /// `hoisted_self_send_results`'s doc comment in `mod.rs`) — staying out
+    /// of that tree entirely, rather than trying to special-case it, is
+    /// what keeps this addition safe.
+    fn hoist_self_sends_for_binary_op(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let expr = expr.unwrap_parens();
+        if self.is_dispatching_actor_self_send(expr) {
+            if let Expression::MessageSend { receiver, .. } = expr {
+                let receiver_span = receiver.span();
+                let dispatch_var = self.dispatch_self_send_as_bind(expr, frame, span, stmts)?;
+                self.hoisted_self_send_results
+                    .insert(receiver_span, dispatch_var);
+            }
+            return Ok(());
+        }
+        if let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } = expr
+        {
+            if matches!(selector, MessageSelector::Binary(_)) {
+                self.hoist_self_sends_for_binary_op(receiver, frame, span, stmts)?;
+                if let Some(arg) = arguments.first() {
+                    self.hoist_self_sends_for_binary_op(arg, frame, span, stmts)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Generates inline code for `flag ifTrue: [block]` in actor context
@@ -1263,7 +1322,17 @@ impl CoreErlangGenerator {
                 }
                 // C12 — catch-all pure statements (EarlyReturn, SuperSend,
                 // ErrorSend, Tier2SelfSend, Pure).
+                //
+                // BT-3392: before compiling, hoist (as real `Bind`s pushed
+                // into `stmts`) any self-send nested as a binary-op operand
+                // of this statement, so `try_handle_self_dispatch` reuses
+                // the already-threaded result instead of discarding its
+                // mutation — see `hoist_self_sends_for_binary_op`'s doc
+                // comment. When nothing needed hoisting (the overwhelmingly
+                // common case), this is a no-op and `expression_doc` below
+                // behaves exactly as before.
                 _ => {
+                    self.hoist_self_sends_for_binary_op(expr, frame, span, &mut stmts)?;
                     if is_last {
                         let result_var = self.fresh_temp_var("BranchResult");
                         let expr_doc = self.expression_doc(expr)?;
