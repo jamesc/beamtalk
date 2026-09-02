@@ -396,21 +396,17 @@ fn enter_block(
 
 /// Returns `true` if `msg_ctx` identifies a block literal at a (selector,
 /// argument position) that codegen recognizes for Value-type / class-method
-/// captured-local state-threading (ADR 0041 "known inline call sites"),
-/// meaning a reassignment to an outer local inside the block is threaded
-/// back out and visible after the call returns — contradicting this lint's
-/// general "capture by value, mutation lost" assumption.
+/// captured-local state-threading, meaning a reassignment to an outer local
+/// inside the block is threaded back out and visible after the call
+/// returns — contradicting this lint's general "capture by value, mutation
+/// lost" assumption.
 ///
-/// Mirrors (does not import — `beamtalk-lint` sits below `beamtalk-codegen`
-/// in the dependency graph, see `docs/development/architecture-principles.md`
-/// §1) the selector/position table in:
-/// - `crates/beamtalk-codegen/src/core_erlang/control_flow/mod.rs::block_arg_for_selector`
-///   (the loop/list-op family: `do:`, `collect:`, `select:`, `reject:`,
-///   `anySatisfy:`, `allSatisfy:`, `detect:`, `count:`, `takeWhile:`,
-///   `dropWhile:`, `partition:`, `groupBy:`, `timesRepeat:`, `to:do:`,
-///   `to:by:do:`, `inject:into:`)
-/// - BT-1392/BT-2359 (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` conditional
-///   threading in `value_type_codegen.rs`)
+/// Delegates to `beamtalk_core::ast::is_state_threaded_block_arg` — the
+/// single source of truth for this table, shared with
+/// `beamtalk-codegen`'s `block_arg_for_selector`, so the two can never
+/// silently drift (CLAUDE.md's "No duplicate implementations" rule; see
+/// that function's doc comment for the full selector list and the
+/// conformance story for each half of it).
 ///
 /// BT-3385 confirmed empirically (`BUnit` runtime tests, see
 /// `stdlib/test/bt_3385_dead_assignment_test.bt`) that mutating ANY captured
@@ -432,15 +428,7 @@ fn is_state_threaded_block_arg(msg_ctx: Option<&BlockMessageContext>) -> bool {
     let Some(ctx) = msg_ctx else {
         return false;
     };
-    match ctx.selector.as_str() {
-        "whileTrue:" | "whileFalse:" | "do:" | "collect:" | "select:" | "reject:"
-        | "anySatisfy:" | "allSatisfy:" | "detect:" | "count:" | "takeWhile:" | "dropWhile:"
-        | "partition:" | "groupBy:" | "timesRepeat:" | "ifTrue:" | "ifFalse:" => ctx.arg_index == 0,
-        "to:do:" | "inject:into:" => ctx.arg_index == 1,
-        "to:by:do:" => ctx.arg_index == 2,
-        "ifTrue:ifFalse:" => ctx.arg_index == 0 || ctx.arg_index == 1,
-        _ => false,
-    }
+    beamtalk_core::ast::is_state_threaded_block_arg(&ctx.selector, ctx.arg_index)
 }
 
 /// Emit a dead-assignment warning diagnostic.

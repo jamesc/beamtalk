@@ -1765,36 +1765,35 @@ impl CoreErlangGenerator {
     /// [`Self::expr_has_nested_counted_loop_threading`]'s assignment-RHS
     /// unwrap) do it before calling, matching each site's pre-existing
     /// behavior exactly.
+    ///
+    /// Position eligibility is delegated to
+    /// `beamtalk_core::ast::is_state_threaded_block_arg` — the single
+    /// source of truth for this table, shared with `beamtalk-lint`'s
+    /// `DeadAssignment` check (BT-3385) so the two can never silently
+    /// drift (CLAUDE.md's "No duplicate implementations" rule). That
+    /// shared table also covers `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
+    /// (threaded via dedicated codegen elsewhere, not this loop/fold
+    /// table) — explicitly excluded below so a conditional's block is
+    /// never misclassified as a nested loop/fold body by this function's
+    /// callers (e.g. [`Self::nested_loop_or_fold_body`], which calls this
+    /// with whatever keyword selector it finds, unfiltered).
     fn block_arg_for_selector<'a>(
         sel: &str,
         arguments: &'a [Expression],
     ) -> Option<&'a beamtalk_core::ast::Block> {
-        match sel {
-            "whileTrue:" | "whileFalse:" => match arguments.first() {
-                Some(Expression::Block(block)) => Some(block),
-                _ => None,
-            },
-            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:"
-            | "detect:" | "count:" | "takeWhile:" | "dropWhile:" | "partition:" | "groupBy:" => {
-                match arguments.first() {
-                    Some(Expression::Block(block)) => Some(block),
+        if matches!(sel, "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:") {
+            return None;
+        }
+        arguments.iter().enumerate().find_map(|(idx, arg)| {
+            if beamtalk_core::ast::is_state_threaded_block_arg(sel, idx) {
+                match arg {
+                    Expression::Block(block) => Some(block),
                     _ => None,
                 }
+            } else {
+                None
             }
-            "timesRepeat:" => match arguments.last() {
-                Some(Expression::Block(block)) => Some(block),
-                _ => None,
-            },
-            "to:do:" | "inject:into:" if arguments.len() == 2 => match &arguments[1] {
-                Expression::Block(block) => Some(block),
-                _ => None,
-            },
-            "to:by:do:" if arguments.len() == 3 => match &arguments[2] {
-                Expression::Block(block) => Some(block),
-                _ => None,
-            },
-            _ => None,
-        }
+        })
     }
 
     /// Extracts the body block of `expr`, and which family it belongs to,
