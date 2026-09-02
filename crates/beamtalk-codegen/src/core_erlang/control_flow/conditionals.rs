@@ -246,8 +246,7 @@ impl CoreErlangGenerator {
             if *safe_to_hoist {
                 if let Expression::MessageSend { receiver, .. } = expr {
                     let receiver_span = receiver.span();
-                    let dispatch_var =
-                        self.dispatch_self_send_as_bind(expr, frame, span, stmts)?;
+                    let dispatch_var = self.dispatch_self_send_as_bind(expr, frame, span, stmts)?;
                     self.hoisted_self_send_results
                         .insert(receiver_span, dispatch_var);
                 }
@@ -274,7 +273,6 @@ impl CoreErlangGenerator {
         }
         Ok(())
     }
-
 }
 
 /// BT-3392: true for an operand that provably cannot raise or have a side
