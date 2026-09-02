@@ -1293,6 +1293,7 @@ impl Parser {
         let mut method_definitions = Vec::new();
         let mut protocols = Vec::new();
         let mut type_aliases = Vec::new();
+        let mut native_declarations = Vec::new();
         let mut expressions = Vec::new();
 
         // Parse statements until EOF.
@@ -1310,6 +1311,11 @@ impl Parser {
             else if self.is_at_protocol_definition() {
                 let protocol = self.parse_protocol_definition();
                 protocols.push(protocol);
+            }
+            // Check if this looks like a native (Erlang FFI) type declaration (ADR 0075)
+            else if self.is_at_native_declaration() {
+                let native_declaration = self.parse_native_declaration();
+                native_declarations.push(native_declaration);
             }
             // Check if this looks like a class definition
             else if self.is_at_class_definition() {
@@ -1330,6 +1336,7 @@ impl Parser {
                     && method_definitions.is_empty()
                     && protocols.is_empty()
                     && type_aliases.is_empty()
+                    && native_declarations.is_empty()
                     && expressions.is_empty();
                 let has_blank_line = !is_first_module_item
                     && self.current_token().has_blank_line_before_first_comment();
@@ -1380,6 +1387,7 @@ impl Parser {
             && method_definitions.is_empty()
             && protocols.is_empty()
             && type_aliases.is_empty()
+            && native_declarations.is_empty()
             && expressions.is_empty()
         {
             (eof_comments, Vec::new())
@@ -1400,9 +1408,7 @@ impl Parser {
             method_definitions,
             protocols,
             type_aliases,
-            // Always empty until BT-1846 wires `declare native:` parsing into
-            // this dispatch loop.
-            native_declarations: Vec::new(),
+            native_declarations,
             expressions,
             span,
             file_leading_comments,
@@ -1469,6 +1475,20 @@ impl Parser {
     pub(super) fn is_at_protocol_definition(&self) -> bool {
         matches!(self.peek_at(0), Some(TokenKind::Identifier(name)) if name == "Protocol")
             && matches!(self.peek_at(1), Some(TokenKind::Keyword(k)) if k == "define:")
+    }
+
+    /// Checks if the current position looks like a native (Erlang FFI) type
+    /// declaration (ADR 0075, Phase 2).
+    ///
+    /// Native declarations follow the pattern:
+    /// - `declare native: <module>`
+    ///
+    /// We look ahead for `Identifier("declare")` followed by `Keyword("native:")`.
+    /// `declare` is a contextual keyword — anywhere else it parses as an
+    /// ordinary identifier.
+    pub(super) fn is_at_native_declaration(&self) -> bool {
+        matches!(self.peek_at(0), Some(TokenKind::Identifier(name)) if name == "declare")
+            && matches!(self.peek_at(1), Some(TokenKind::Keyword(k)) if k == "native:")
     }
 
     /// Checks if the current position looks like a type alias definition (ADR 0108, Phase 1).

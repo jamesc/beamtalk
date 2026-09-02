@@ -11,9 +11,9 @@
 use crate::ast::{
     ClassDefinition, ClassModifiers, CommentAttachment, DeclaredKeyword, ExpectCategory,
     Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector, MethodDefinition,
-    MethodKind, MethodModifiers, ParameterDefinition, ProtocolDefinition, ProtocolMethodSignature,
-    StandaloneMethodDefinition, StateDeclaration, TypeAliasDefinition, TypeAnnotation,
-    TypeParamDecl,
+    MethodKind, MethodModifiers, NativeDeclaration, ParameterDefinition, ProtocolDefinition,
+    ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration, TypeAliasDefinition,
+    TypeAnnotation, TypeParamDecl,
 };
 use crate::source_analysis::{Span, TokenKind};
 use ecow::EcoString;
@@ -516,6 +516,7 @@ impl Parser {
             && !self.is_at_class_definition()
             && !self.is_at_protocol_definition()
             && !self.is_at_type_alias_definition()
+            && !self.is_at_native_declaration()
             && !self.is_at_standalone_method_definition()
         {
             let pending = self.parse_pending_declaration_expect();
@@ -1646,6 +1647,7 @@ impl Parser {
             || self.is_at_class_definition()
             || self.is_at_protocol_definition()
             || self.is_at_type_alias_boundary()
+            || self.is_at_native_declaration_boundary()
             || self.is_at_method_definition()
             || self.is_at_standalone_method_definition()
             || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
@@ -1676,6 +1678,22 @@ impl Parser {
                 .indentation_after_newline()
                 .is_none_or(|col| col <= self.current_method_header_indent.unwrap_or(2)))
             && self.is_at_type_alias_definition()
+    }
+
+    /// `is_at_native_declaration()`, gated by the same indentation guard as
+    /// [`Self::is_at_type_alias_boundary`].
+    ///
+    /// Without this guard, an in-body statement like `declare native: 5`
+    /// (`declare` used as an ordinary variable, sent the keyword message
+    /// `native:`) token-matches the native-declaration pattern and would
+    /// falsely truncate the method body.
+    fn is_at_native_declaration_boundary(&self) -> bool {
+        (!self.in_class_body
+            || self
+                .current_token()
+                .indentation_after_newline()
+                .is_none_or(|col| col <= self.current_method_header_indent.unwrap_or(2)))
+            && self.is_at_native_declaration()
     }
 
     /// Parses a method body (expressions until the next method or end of class).
@@ -2101,6 +2119,101 @@ impl Parser {
         }
     }
 
+    /// Parses a native (Erlang FFI) type declaration (ADR 0075, Phase 2).
+    ///
+    /// Syntax: `declare native: <module>` followed by an indented body of
+    /// method signatures — the same shape as a protocol body, reusing
+    /// [`Self::parse_protocol_method_signature_with_doc`] for each entry.
+    /// No `=>` bodies, no class-side signatures, and no header type
+    /// parameters (BT-1846): type parameters in a native declaration's
+    /// signatures — `T`, `A`, `B`, `Acc` — are method-scoped, introduced
+    /// per-signature rather than declared once at the header like a
+    /// protocol's `Collection(E)`.
+    ///
+    /// Whether `declare native:` is valid at this file's location (only
+    /// `stubs/`, never `src/`) is not a parser concern — the parser has no
+    /// notion of source paths. That check is enforced by the build
+    /// pipeline, which knows each module's file path (BT-1846/BT-1847).
+    pub(super) fn parse_native_declaration(&mut self) -> NativeDeclaration {
+        let start = self.current_token().span();
+        let doc_comment = self.collect_doc_comment();
+        let mut comments = self.collect_comment_attachment();
+
+        // Consume `declare`
+        self.advance();
+
+        // Expect `native:` keyword
+        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "native:") {
+            self.error("Expected 'native:' after 'declare'");
+            return NativeDeclaration {
+                module: Identifier::new("Error", start),
+                method_signatures: Vec::new(),
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: start,
+            };
+        }
+        self.advance(); // consume `native:`
+
+        // Parse the Erlang module name
+        let module = self.parse_identifier("Expected Erlang module name after 'declare native:'");
+
+        // Collect a trailing end-of-line comment on the declaration header
+        // line (e.g. `declare native: lists // comment`), mirroring
+        // `parse_protocol_definition`'s identical handling (BT-2906).
+        comments.trailing = self.collect_trailing_comment();
+
+        // Parse the declaration body (method signatures without `=>`)
+        let method_signatures = self.parse_native_declaration_body();
+
+        // Determine end span
+        let end = method_signatures
+            .last()
+            .map_or(module.span, |sig: &ProtocolMethodSignature| sig.span);
+        let span = start.merge(end);
+
+        NativeDeclaration {
+            module,
+            method_signatures,
+            comments,
+            doc_comment,
+            span,
+        }
+    }
+
+    /// Parses the body of a native declaration (method signatures without
+    /// `=>`). Identical stopping conditions to [`Self::parse_protocol_body`]
+    /// but without the `class`-prefix distinction — native declarations have
+    /// no class-side signatures.
+    fn parse_native_declaration_body(&mut self) -> Vec<ProtocolMethodSignature> {
+        let mut signatures = Vec::new();
+
+        // Skip any periods/statement terminators
+        while self.match_token(&TokenKind::Period) {}
+
+        while !self.is_at_end()
+            && !self.is_at_protocol_definition()
+            && !self.is_at_class_definition()
+            && !self.is_at_type_alias_definition()
+            && !self.is_at_native_declaration()
+            && !self.is_at_standalone_method_definition()
+        {
+            let doc_comment = self.collect_doc_comment();
+            let comments = self.collect_comment_attachment();
+
+            match self.parse_protocol_method_signature_with_doc(doc_comment, comments) {
+                Some(sig) => signatures.push(sig),
+                // Not a valid signature start — end of declaration body
+                None => break,
+            }
+
+            // Skip any periods/statement terminators
+            while self.match_token(&TokenKind::Period) {}
+        }
+
+        signatures
+    }
+
     /// Parses the body of a protocol definition (method signatures without `=>`).
     ///
     /// Protocol method signatures have the same selector and parameter syntax as
@@ -2128,6 +2241,7 @@ impl Parser {
             && !self.is_at_protocol_definition()
             && !self.is_at_class_definition()
             && !self.is_at_type_alias_definition()
+            && !self.is_at_native_declaration()
             && !self.is_at_standalone_method_definition()
         {
             // BT-1618/BT-2930: Collect the doc comment and any non-doc leading
