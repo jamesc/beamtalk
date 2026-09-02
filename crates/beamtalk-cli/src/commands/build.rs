@@ -876,12 +876,24 @@ fn execute_build_passes(
     // native compilation so freshly compiled native modules are included.
     // Results are cached in _build/type_cache/ — incremental builds read zero
     // .beam files when the cache is fresh.
-    let native_type_registry = extract_type_specs(
+    let auto_extract_registry = extract_type_specs(
         &env.layout,
         env.pkg_manifest().is_some(),
         options.stdlib_mode,
-    )
-    .map(std::sync::Arc::new);
+    );
+    // ADR 0075 Phase 2 (BT-1847): project-local stubs/ override auto-extract
+    // at the function/arity level. Computed against the pre-merge
+    // auto-extract registry so the drift check has real ground truth.
+    let (native_type_registry, stub_diagnostics) =
+        match load_project_stub_registry(&env.project_root, auto_extract_registry.as_ref()) {
+            Some((stub_registry, diags)) => {
+                let mut merged = auto_extract_registry.unwrap_or_default();
+                merged.apply_overrides(stub_registry);
+                (Some(merged), diags)
+            }
+            None => (auto_extract_registry, Vec::new()),
+        };
+    let native_type_registry = native_type_registry.map(std::sync::Arc::new);
 
     let file_module_pairs = compute_file_module_pairs(env)?;
 
@@ -950,7 +962,8 @@ fn execute_build_passes(
         diagnostics_overrides,
     };
     // BT-2014: Collect diagnostics from all compiled files for the summary.
-    let mut all_build_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
+    // BT-1847: seed with stubs/ diagnostics (skipped signatures, version drift).
+    let mut all_build_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = stub_diagnostics;
 
     for (file, module_name, core_file) in &file_module_pairs {
         module_names.push(module_name.clone());
@@ -1120,6 +1133,119 @@ pub(crate) fn extract_type_specs(
     // call the same single source of truth without reading a possibly-stale
     // on-disk cache. This is a thin delegation, not a duplicate.
     beamtalk_cli::native_type_specs::extract_project_type_specs(layout)
+}
+
+/// ADR 0075 Phase 2 (BT-1847): scan `project_root/stubs/` for `declare
+/// native:` stub files and build the project-local stub-tier registry, plus
+/// its diagnostics (skipped-signature warnings and version-drift warnings
+/// against `auto_extract`).
+///
+/// `stubs/` is auto-discovered — no `beamtalk.toml` config needed, matching
+/// ADR 0075's project-local-stubs design. Returns `None` when there is no
+/// `stubs/` directory or it contains no `.bt` files (the common case — most
+/// projects have no stubs at all), so callers can tell "nothing to merge"
+/// apart from "stubs/ exists but is empty of declarations".
+///
+/// Pass `auto_extract` as the *pre-merge* auto-extracted registry — the
+/// drift check (`NativeTypeRegistry::detect_stub_drift`) needs it as ground
+/// truth for what a `.beam` module actually exports, which only holds before
+/// stub overrides are applied on top of it.
+///
+/// Shared by `beamtalk build` and `beamtalk lint`, mirroring
+/// [`extract_type_specs`]'s "single source of truth" role, so both surfaces
+/// agree on stub-derived types by construction.
+pub(crate) fn load_project_stub_registry(
+    project_root: &Utf8Path,
+    auto_extract: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+) -> Option<(
+    beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+    Vec<beamtalk_core::source_analysis::Diagnostic>,
+)> {
+    let stubs_dir = project_root.join("stubs");
+    if !stubs_dir.exists() {
+        return None;
+    }
+    let stub_files = collect_source_files_from_dir(&stubs_dir).ok()?;
+    if stub_files.is_empty() {
+        return None;
+    }
+
+    let mut registry = beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new();
+    let mut all_diagnostics = Vec::new();
+
+    for file in &stub_files {
+        let source = match fs::read_to_string(file) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(file = %file, error = %e, "Cannot read stub file; skipping");
+                continue;
+            }
+        };
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+        let (module, mut file_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+        // BT-1847: this file's own declarations, checked for drift against
+        // `auto_extract` *before* merging into the accumulating `registry` —
+        // scoping the check to one file's functions lets each warning render
+        // against that file's own source (below), rather than losing track
+        // of which stub file a merged function came from.
+        let mut file_registry =
+            beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new();
+        file_diagnostics.extend(
+            beamtalk_core::semantic_analysis::type_checker::load_native_declarations(
+                &module.native_declarations,
+                &mut file_registry,
+            ),
+        );
+        if let Some(auto_extract) = auto_extract {
+            for (module_name, sig) in auto_extract.detect_stub_drift(&file_registry) {
+                let span = match sig.provenance {
+                    beamtalk_core::semantic_analysis::type_checker::TypeProvenance::Declared(s) => {
+                        s
+                    }
+                    _ => beamtalk_core::source_analysis::Span::default(),
+                };
+                file_diagnostics.push(
+                    beamtalk_core::source_analysis::Diagnostic::warning(
+                        format!(
+                            "Stub declares `{module_name}:{}/{}`, which was not found in the \
+                             compiled `{module_name}.beam` exports — the stub may be out of date",
+                            sig.name, sig.arity
+                        ),
+                        span,
+                    )
+                    .with_hint(
+                        "Regenerate this stub with `beamtalk generate stubs`, or remove the \
+                         stale declaration.",
+                    ),
+                );
+            }
+        }
+        // Per-function upsert (not `merge`'s whole-module keep-on-collision):
+        // two stub files declaring the same Erlang module must combine, with
+        // the later file's function/arity winning on overlap.
+        registry.apply_overrides(file_registry);
+
+        // Render immediately against this file's own source, mirroring
+        // `compile_source_with_bindings`'s rendering for src/ files —
+        // without it, a drift or skipped-signature warning would only ever
+        // show up as an anonymous count in the build summary.
+        for diagnostic in &file_diagnostics {
+            if diagnostic.severity == beamtalk_core::source_analysis::Severity::Lint {
+                continue;
+            }
+            let compile_diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
+                diagnostic,
+                file.as_str(),
+                &source,
+            );
+            eprintln!("{:?}", miette::Report::new(compile_diag));
+        }
+
+        all_diagnostics.extend(file_diagnostics);
+    }
+
+    Some((registry, all_diagnostics))
 }
 
 /// Collected build outputs needed for OTP application packaging.
@@ -2763,6 +2889,131 @@ mod tests {
 
     fn default_options() -> beamtalk_core::CompilerOptions {
         beamtalk_core::CompilerOptions::default()
+    }
+
+    // ── load_project_stub_registry tests (ADR 0075 Phase 2, BT-1847) ────────
+
+    #[test]
+    fn load_project_stub_registry_none_when_no_stubs_dir() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+
+        assert!(load_project_stub_registry(&project_path, None).is_none());
+    }
+
+    #[test]
+    fn load_project_stub_registry_none_when_stubs_dir_has_no_bt_files() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let stubs_path = project_path.join("stubs");
+        fs::create_dir_all(&stubs_path).unwrap();
+        write_test_file(&stubs_path.join("README.md"), "not a stub");
+
+        assert!(load_project_stub_registry(&project_path, None).is_none());
+    }
+
+    #[test]
+    fn load_project_stub_registry_populates_registry_from_stub_file() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let stubs_path = project_path.join("stubs");
+        fs::create_dir_all(&stubs_path).unwrap();
+        write_test_file(
+            &stubs_path.join("lists.bt"),
+            "declare native: lists\n  reverse: list :: List -> List\n",
+        );
+
+        let (registry, diags) = load_project_stub_registry(&project_path, None).unwrap();
+
+        assert!(diags.is_empty());
+        let sig = registry.lookup("lists", "reverse", 1).unwrap();
+        assert_eq!(
+            sig.params[0].type_,
+            beamtalk_core::semantic_analysis::type_checker::InferredType::known("List")
+        );
+    }
+
+    #[test]
+    fn load_project_stub_registry_combines_multiple_files_for_same_module() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let stubs_path = project_path.join("stubs");
+        fs::create_dir_all(&stubs_path).unwrap();
+        write_test_file(
+            &stubs_path.join("lists_a.bt"),
+            "declare native: lists\n  reverse: list -> List\n",
+        );
+        write_test_file(
+            &stubs_path.join("lists_b.bt"),
+            "declare native: lists\n  sort: list -> List\n",
+        );
+
+        let (registry, _diags) = load_project_stub_registry(&project_path, None).unwrap();
+
+        assert_eq!(registry.module_functions("lists").unwrap().len(), 2);
+        assert!(registry.lookup("lists", "reverse", 1).is_some());
+        assert!(registry.lookup("lists", "sort", 1).is_some());
+    }
+
+    #[test]
+    fn load_project_stub_registry_flags_version_drift_against_auto_extract() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let stubs_path = project_path.join("stubs");
+        fs::create_dir_all(&stubs_path).unwrap();
+        write_test_file(
+            &stubs_path.join("lists.bt"),
+            "declare native: lists\n  reverse: list -> List\n  bogus: x -> Integer\n",
+        );
+
+        let mut auto_extract =
+            beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new();
+        auto_extract.register_module(
+            "lists",
+            vec![
+                beamtalk_core::semantic_analysis::type_checker::FunctionSignature {
+                    name: "reverse".to_string(),
+                    arity: 1,
+                    params: vec![],
+                    return_type:
+                        beamtalk_core::semantic_analysis::type_checker::InferredType::known("List"),
+                    provenance:
+                        beamtalk_core::semantic_analysis::type_checker::TypeProvenance::Extracted,
+                    line: None,
+                },
+            ],
+        );
+
+        let (registry, diags) =
+            load_project_stub_registry(&project_path, Some(&auto_extract)).unwrap();
+
+        // `bogus/1` isn't a real `lists` export — one drift warning.
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("bogus"));
+        assert!(diags[0].message.contains("out of date"));
+        // Both stub functions are still registered — drift is a warning,
+        // not a rejection.
+        assert!(registry.lookup("lists", "reverse", 1).is_some());
+        assert!(registry.lookup("lists", "bogus", 1).is_some());
+    }
+
+    #[test]
+    fn load_project_stub_registry_no_drift_for_module_unknown_to_auto_extract() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let stubs_path = project_path.join("stubs");
+        fs::create_dir_all(&stubs_path).unwrap();
+        write_test_file(
+            &stubs_path.join("beamtalk_http.bt"),
+            "declare native: beamtalk_http\n  get: url -> Dynamic\n",
+        );
+        let auto_extract =
+            beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new();
+
+        let (_registry, diags) =
+            load_project_stub_registry(&project_path, Some(&auto_extract)).unwrap();
+
+        assert!(diags.is_empty());
     }
 
     #[test]

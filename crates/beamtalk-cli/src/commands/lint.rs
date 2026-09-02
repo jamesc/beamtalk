@@ -245,9 +245,25 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // build`/`test` agree on the FFI type registry by construction: a fresh
     // cache still short-circuits to zero `.beam` reads, and a cold/stale one
     // extracts once and writes the same cache a subsequent build would.
+    // BT-1847: project-local stubs/ override auto-extract at the
+    // function/arity level — same merge `beamtalk build` performs, via the
+    // same shared `load_project_stub_registry`, so `beamtalk lint` and
+    // `beamtalk build` agree on stub-derived FFI types too, not just
+    // auto-extracted ones. `load_project_stub_registry` prints its own
+    // diagnostics (skipped signatures, version drift) directly; they are
+    // not folded into `all_diags` below, which is scoped to `.bt` diagnostics.
     let native_type_registry = package_root.as_deref().and_then(|root| {
         let layout = crate::commands::build_layout::BuildLayout::new(root);
-        super::build::extract_type_specs(&layout, true, false).map(std::sync::Arc::new)
+        let auto_extract = super::build::extract_type_specs(&layout, true, false);
+        match super::build::load_project_stub_registry(root, auto_extract.as_ref()) {
+            Some((stub_registry, _stub_diags)) => {
+                let mut merged = auto_extract.unwrap_or_default();
+                merged.apply_overrides(stub_registry);
+                Some(merged)
+            }
+            None => auto_extract,
+        }
+        .map(std::sync::Arc::new)
     });
 
     // Pass 2: Analyse each file with cross-file class context.
