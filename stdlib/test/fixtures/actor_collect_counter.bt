@@ -50,3 +50,10 @@ Actor subclass: ActorCollectCounter
   checkNegative: item =>
     self.count := self.count + 1
     item < 0
+
+  // BT-3383: collect: assigned to a local var, then used afterward (not the
+  // method's last expression) — assign-RHS position, not last-expression
+  // position. Returns the result's class to let the test assert species.
+  doubleAllAssignThenClass: items =>
+    result := items collect: [:item | self processItem: item]
+    result class
