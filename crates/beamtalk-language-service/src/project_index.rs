@@ -520,6 +520,29 @@ impl ProjectIndex {
         self.stdlib_files.contains(file)
     }
 
+    /// Returns `true` if `file` lives under a known workspace root's
+    /// `stubs/` directory (ADR 0075, BT-1846/BT-1847).
+    ///
+    /// `beamtalk build`/`beamtalk lint` never reach `analyse_full` for a
+    /// stub file at all (they exclude `stubs/` from their own file walks and
+    /// parse stub declarations directly via `load_project_stub_registry`),
+    /// so unlike [`Self::is_stdlib_file`] there is no explicit "loaded as a
+    /// stub" tracked set to check membership against — a stub file is simply
+    /// whatever the editor opens under `stubs/`, never preloaded (see
+    /// `beamtalk-lsp`'s `collect_preload_files`, which only walks
+    /// `src/`/`test/`). Derives the answer instead from [`Self::root_packages`]
+    /// (populated by `beamtalk-lsp` from each workspace root's
+    /// `beamtalk.toml`), mirroring [`Self::package_for_alias_stamping`]'s
+    /// root-containment check. Returns `false` before any root is
+    /// registered — the same race already tolerated for alias package
+    /// stamping (see `set_root_packages`'s doc).
+    #[must_use]
+    pub fn is_stub_file(&self, file: &Utf8Path) -> bool {
+        self.root_packages
+            .iter()
+            .any(|(root, _)| file.starts_with(root.join("stubs")))
+    }
+
     /// Sets the real package name for each known workspace root (BT-2960).
     ///
     /// Replaces the entire root->package map — call once at startup with
@@ -1382,6 +1405,36 @@ mod tests {
             index.alias_package_for_file(&unrooted_file),
             EcoString::from(CURRENT_PROJECT_PACKAGE_MARKER)
         );
+    }
+
+    /// BT-1846/BT-1847 (review follow-up on PR #3679): opening a legitimate
+    /// `stubs/lists.bt` directly in an editor must not diagnose its
+    /// `declare native:` blocks as errors — `is_stub_file` derives that from
+    /// the same root-containment check `alias_package_for_file` uses, not a
+    /// tracked-membership set (stub files are never preloaded, see
+    /// `is_stub_file`'s doc).
+    #[test]
+    fn is_stub_file_true_for_file_under_a_root_stubs_dir() {
+        let mut index = ProjectIndex::new();
+        let root = Utf8PathBuf::from("/workspace/a");
+        index.set_root_packages(vec![(root.clone(), EcoString::from("pkg_a"))]);
+
+        let stub_file = root.join("stubs").join("lists.bt");
+        let src_file = root.join("src").join("Foo.bt");
+
+        assert!(index.is_stub_file(&stub_file));
+        assert!(!index.is_stub_file(&src_file));
+    }
+
+    /// A file under no registered root (REPL/script, or before `beamtalk-lsp`
+    /// has registered the workspace's roots yet) must not be misclassified
+    /// as a stub file just because it happens to have "stubs" in its path
+    /// outside any known root's `stubs/` directory.
+    #[test]
+    fn is_stub_file_false_for_unrooted_file() {
+        let index = ProjectIndex::new();
+        let unrooted_file = Utf8PathBuf::from("/elsewhere/stubs/lists.bt");
+        assert!(!index.is_stub_file(&unrooted_file));
     }
 
     #[test]

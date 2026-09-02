@@ -881,6 +881,12 @@ pub(crate) fn compile_source_with_bindings(
             // returning) — the single shared pipeline both the CLI and the LSP
             // call, so severity can never drift between the two surfaces.
             diagnostics_overrides: ctx.diagnostics_overrides.clone(),
+            // BT-1846/BT-1847: this compile pipeline never reaches a `stubs/`
+            // file — `find_source_files`/`collect_lint_files` exclude
+            // `stubs/` from the walk that feeds it, and `declare native:`
+            // stub declarations are parsed separately by
+            // `load_project_stub_registry`, never through here.
+            is_stub_file: false,
         };
     // BT-3123: capture the `AnalysisResult` this pipeline's `analyse_full`
     // call already produced, so it can be handed to codegen below instead of

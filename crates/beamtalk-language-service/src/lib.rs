@@ -1777,6 +1777,12 @@ impl LanguageService for SimpleLanguageService {
                 // "unknown protocol" — parity with the CLI's `build`/`lint`
                 // wiring (BT-2910), mirrors `cross_file_classes` above.
                 let pre_loaded_protocols = self.project_index.cross_file_protocol_infos_for(file);
+                // BT-1846/BT-1847: a `stubs/lists.bt` opened directly in an
+                // editor must not be diagnosed as if it were an ordinary
+                // src/ file — `declare native:` is only legal there. See
+                // `ProjectIndex::is_stub_file`'s doc for why this can't be a
+                // tracked-membership check like `is_stdlib_file`.
+                let is_stub_file = self.project_index.is_stub_file(file);
                 let ctx = crate::queries::diagnostic_provider::ProjectDiagnosticContext {
                     options,
                     cross_file_classes,
@@ -1789,6 +1795,7 @@ impl LanguageService for SimpleLanguageService {
                     // LSP never disagrees with the CLI about a diagnostic's
                     // severity.
                     diagnostics_overrides: self.diagnostics_overrides.clone(),
+                    is_stub_file,
                     ..Default::default()
                 };
                 crate::queries::diagnostic_provider::compute_project_diagnostics(

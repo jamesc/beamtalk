@@ -285,6 +285,7 @@ pub enum MutationKind {
 /// context that leaves a field unset degrades safely (quietly loses
 /// precision) rather than silently misbehaving.
 #[derive(Debug, Default)]
+#[allow(clippy::struct_excessive_bools)] // Independent orthogonal flags, not a state machine.
 pub struct AnalysisContext<'a> {
     /// Pre-defined variables treated as already bound (REPL context).
     pub known_vars: &'a [&'a str],
@@ -333,6 +334,11 @@ pub struct AnalysisContext<'a> {
     /// Whether the current package has dependencies whose extensions are
     /// not visible here (BT-2794, ADR 0100 Rule 2).
     pub has_package_dependencies: bool,
+    /// Whether the module being analysed comes from a `stubs/` directory
+    /// (ADR 0075, BT-1846/BT-1847). `declare native:` is only legal there —
+    /// defaulting to `false` means any caller that doesn't know about stub
+    /// files (the common case today) correctly rejects it.
+    pub is_stub_file: bool,
 }
 
 impl<'a> AnalysisContext<'a> {
@@ -429,6 +435,14 @@ impl<'a> AnalysisContext<'a> {
         self.cross_file_extensions = Some(cross_file_extensions);
         self
     }
+
+    /// Whether the module being analysed comes from a `stubs/` directory
+    /// (ADR 0075, BT-1846/BT-1847) — see the `is_stub_file` field's own doc.
+    #[must_use]
+    pub fn with_is_stub_file(mut self, is_stub_file: bool) -> Self {
+        self.is_stub_file = is_stub_file;
+        self
+    }
 }
 
 /// Perform semantic analysis on a module.
@@ -502,6 +516,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         knowledge_scope,
         cross_file_extensions,
         has_package_dependencies,
+        is_stub_file,
     } = ctx;
 
     let mut result = AnalysisResult::new();
@@ -933,6 +948,8 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     validators::check_unresolved_ffi_modules(module, &mut result.diagnostics);
     // Warn on Erlang FFI calls with wrong arity for known functions.
     validators::check_ffi_arity(module, &mut result.diagnostics);
+    // BT-1846/BT-1847: `declare native:` is only valid in stubs/.
+    validators::check_native_declaration_location(module, is_stub_file, &mut result.diagnostics);
 
     // Phase 6: Module-level validation (BT-349, BT-1666)
     let module_diags = module_validator::validate_single_definition(module);

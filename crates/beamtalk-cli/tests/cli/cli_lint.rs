@@ -12,6 +12,55 @@ use crate::cli_common;
 use predicates::prelude::*;
 use predicates::str::contains;
 
+/// ADR 0075 / BT-1846 / BT-1847 end-to-end regression: `beamtalk lint` must
+/// not sweep `stubs/*.bt` into ordinary lint input — `collect_lint_files`
+/// has no src/-only scoping (unlike `beamtalk build`'s `find_source_files`),
+/// so without an explicit exclusion, a legitimate `declare native:` stub
+/// file was reported as a hard error ("only valid in stubs/ directory").
+#[test]
+fn lint_succeeds_with_project_local_stubs_directory() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("stubs")).expect("mkdir stubs");
+    std::fs::write(
+        project.path().join("stubs/lists.bt"),
+        "declare native: lists\n  reverse: list :: List -> List\n",
+    )
+    .expect("write stubs/lists.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success();
+}
+
+/// Review follow-up on PR #3679: `load_project_stub_registry`'s own stub
+/// diagnostics (skipped signatures, version drift) used to always render as
+/// miette text on stderr regardless of `--format`, so a machine consumer of
+/// `lint --format=json`'s stdout stream never saw them. `lists` is a real
+/// OTP module auto-extract actually inspects, so declaring a function it
+/// doesn't really export triggers a genuine version-drift warning — this
+/// asserts that warning now appears as a JSON line on stdout, the same way
+/// every other lint diagnostic does under `--format=json`.
+#[test]
+fn lint_json_format_streams_stub_diagnostics_as_json_lines() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("stubs")).expect("mkdir stubs");
+    std::fs::write(
+        project.path().join("stubs/lists.bt"),
+        "declare native: lists\n  definitelyNotARealExport: x :: Integer -> Dynamic\n",
+    )
+    .expect("write stubs/lists.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["lint", "--format=json"])
+        .assert()
+        .stdout(contains("definitelyNotARealExport"))
+        .stdout(contains("out of date"))
+        .stderr(contains("definitelyNotARealExport").not());
+}
+
 #[test]
 fn lint_clean_project_text_format_exits_zero() {
     let project = cli_common::fixture_project();

@@ -24,8 +24,13 @@
 //! 4. Auto-extracted (.beam `abstract_code`)
 //! 5. Dynamic (no type info)
 //!
-//! This registry handles layers 4 and 5. Stub layers (1–3) will be
-//! added in Phase 2 (BT-1847).
+//! This registry handles all five layers: [`NativeTypeRegistry::apply_overrides`]
+//! implements the function/arity-level stub-over-auto-extract merge shared by
+//! layers 1–3 (BT-1847); layer 1 (project-local `stubs/`) is populated by
+//! `beamtalk build` via [`super::native_types::load_native_declarations`].
+//! Layers 2–3 (package-bundled and compiler-distribution stubs) are not yet
+//! wired into the build — see BT-1848 and the follow-up filed alongside
+//! BT-1847 for package-bundled stub discovery.
 
 #[cfg(test)]
 use super::types::DynamicReason;
@@ -164,6 +169,43 @@ impl NativeTypeRegistry {
         }
     }
 
+    /// Adds or replaces `functions` in `module_name`'s signature list,
+    /// matched by `(name, arity)` — every other function already registered
+    /// for that module is left untouched (ADR 0075 Phase 2, BT-1847).
+    ///
+    /// Unlike [`Self::register_module`] (whole-module replace) and
+    /// [`Self::merge`] (whole-module keep-on-collision), this is the
+    /// function/arity-level upsert stub declarations need: a `stubs/lists.bt`
+    /// overriding `reverse/1` must not discard `lists`'s other
+    /// auto-extracted functions.
+    pub fn upsert_functions(&mut self, module_name: &str, functions: Vec<FunctionSignature>) {
+        let self_modules = Arc::make_mut(&mut self.modules);
+        let entry = self_modules.entry(module_name.to_string()).or_default();
+        for func in functions {
+            if let Some(existing) = entry
+                .iter_mut()
+                .find(|f| f.name == func.name && f.arity == func.arity)
+            {
+                *existing = func;
+            } else {
+                entry.push(func);
+            }
+        }
+    }
+
+    /// Applies every function in `overrides` as a function/arity-level
+    /// override onto `self` via [`Self::upsert_functions`] (ADR 0075 Phase 2,
+    /// BT-1847) — the stub-over-auto-extract merge direction: `overrides`
+    /// (higher-precedence stubs) wins per function/arity, everything else
+    /// `self` already has (auto-extracted) is preserved.
+    pub fn apply_overrides(&mut self, overrides: NativeTypeRegistry) {
+        let override_modules =
+            Arc::try_unwrap(overrides.modules).unwrap_or_else(|shared| (*shared).clone());
+        for (module, functions) in override_modules {
+            self.upsert_functions(&module, functions);
+        }
+    }
+
     /// Looks up the type signature for a specific function.
     #[must_use]
     pub fn lookup(&self, module: &str, function: &str, arity: u8) -> Option<&FunctionSignature> {
@@ -199,6 +241,45 @@ impl NativeTypeRegistry {
     /// Returns an iterator over all module names in the registry.
     pub fn module_names(&self) -> impl Iterator<Item = &str> {
         self.modules.keys().map(String::as_str)
+    }
+
+    /// Version drift detection (ADR 0075 Phase 2, BT-1847): compares `stubs`
+    /// against `self` — the auto-extracted registry, treated as ground truth
+    /// for what a `.beam` module actually exports — and returns every stub
+    /// function/arity that doesn't exist there, paired with its owning
+    /// module name.
+    ///
+    /// Call with the *pre-merge* auto-extracted registry (before
+    /// [`Self::apply_overrides`] applies the same stubs) — merging first
+    /// would make every stub function trivially "exist".
+    ///
+    /// A stub module `self` has no entry for at all (not on the code path,
+    /// a typo'd module name, or a package's own native module not yet
+    /// compiled) has nothing to compare against and is silently skipped —
+    /// only a *known* module's *missing* function/arity is drift.
+    #[must_use]
+    pub fn detect_stub_drift<'a>(
+        &self,
+        stubs: &'a NativeTypeRegistry,
+    ) -> Vec<(&'a str, &'a FunctionSignature)> {
+        let mut drift = Vec::new();
+        for module in stubs.module_names() {
+            let Some(actual_functions) = self.module_functions(module) else {
+                continue;
+            };
+            let Some(stub_functions) = stubs.module_functions(module) else {
+                continue;
+            };
+            for stub_fn in stub_functions {
+                let exists = actual_functions
+                    .iter()
+                    .any(|f| f.name == stub_fn.name && f.arity == stub_fn.arity);
+                if !exists {
+                    drift.push((module, stub_fn));
+                }
+            }
+        }
+        drift
     }
 }
 
@@ -486,5 +567,206 @@ mod tests {
 
         let sig = reg.lookup("lists", "reverse", 1).unwrap();
         assert_eq!(sig.provenance, TypeProvenance::Extracted);
+    }
+
+    // ── upsert_functions / apply_overrides (BT-1847) ────────────────────────
+
+    fn declared_sig(name: &str, arity: u8, return_type: InferredType) -> FunctionSignature {
+        FunctionSignature {
+            name: name.to_string(),
+            arity,
+            params: vec![],
+            return_type,
+            provenance: TypeProvenance::Declared(crate::span::Span::new(0, 0)),
+            line: None,
+        }
+    }
+
+    #[test]
+    fn upsert_functions_overrides_matching_arity_only() {
+        let mut reg = NativeTypeRegistry::new();
+        reg.register_module(
+            "lists",
+            vec![
+                extracted_sig(
+                    "reverse",
+                    1,
+                    vec![param("list", "List")],
+                    InferredType::known("List"),
+                ),
+                extracted_sig(
+                    "member",
+                    2,
+                    vec![],
+                    InferredType::Dynamic(DynamicReason::DynamicSpec),
+                ),
+            ],
+        );
+
+        reg.upsert_functions(
+            "lists",
+            vec![declared_sig("member", 2, InferredType::known("Boolean"))],
+        );
+
+        assert_eq!(reg.module_functions("lists").unwrap().len(), 2);
+        // Overridden function has the stub's tightened type + Declared provenance.
+        let member = reg.lookup("lists", "member", 2).unwrap();
+        assert_eq!(member.return_type, InferredType::known("Boolean"));
+        assert!(matches!(member.provenance, TypeProvenance::Declared(_)));
+        // Untouched function survives unchanged.
+        let reverse = reg.lookup("lists", "reverse", 1).unwrap();
+        assert_eq!(reverse.return_type, InferredType::known("List"));
+        assert_eq!(reverse.provenance, TypeProvenance::Extracted);
+    }
+
+    #[test]
+    fn upsert_functions_adds_new_function_to_existing_module() {
+        let mut reg = NativeTypeRegistry::new();
+        reg.register_module(
+            "lists",
+            vec![extracted_sig(
+                "reverse",
+                1,
+                vec![param("list", "List")],
+                InferredType::known("List"),
+            )],
+        );
+
+        reg.upsert_functions(
+            "lists",
+            vec![declared_sig("seq", 2, InferredType::known("List"))],
+        );
+
+        assert_eq!(reg.module_functions("lists").unwrap().len(), 2);
+        assert!(reg.lookup("lists", "seq", 2).is_some());
+    }
+
+    #[test]
+    fn upsert_functions_creates_module_when_absent() {
+        let mut reg = NativeTypeRegistry::new();
+
+        reg.upsert_functions(
+            "brand_new",
+            vec![declared_sig("go", 0, InferredType::known("Integer"))],
+        );
+
+        assert!(reg.has_module("brand_new"));
+        assert!(reg.lookup("brand_new", "go", 0).is_some());
+    }
+
+    #[test]
+    fn apply_overrides_leaves_other_modules_untouched() {
+        let mut auto_extract = NativeTypeRegistry::new();
+        auto_extract.register_module(
+            "lists",
+            vec![extracted_sig(
+                "reverse",
+                1,
+                vec![param("list", "List")],
+                InferredType::known("List"),
+            )],
+        );
+        auto_extract.register_module(
+            "maps",
+            vec![extracted_sig(
+                "keys",
+                1,
+                vec![],
+                InferredType::known("List"),
+            )],
+        );
+
+        let mut stubs = NativeTypeRegistry::new();
+        stubs.register_module(
+            "lists",
+            vec![declared_sig("reverse", 1, InferredType::known("List"))],
+        );
+
+        auto_extract.apply_overrides(stubs);
+
+        assert_eq!(auto_extract.module_count(), 2);
+        assert!(matches!(
+            auto_extract
+                .lookup("lists", "reverse", 1)
+                .unwrap()
+                .provenance,
+            TypeProvenance::Declared(_)
+        ));
+        assert_eq!(
+            auto_extract.lookup("maps", "keys", 1).unwrap().provenance,
+            TypeProvenance::Extracted
+        );
+    }
+
+    // ── detect_stub_drift (BT-1847) ──────────────────────────────────────────
+
+    #[test]
+    fn detect_stub_drift_flags_function_missing_from_known_module() {
+        let mut auto_extract = NativeTypeRegistry::new();
+        auto_extract.register_module(
+            "lists",
+            vec![extracted_sig(
+                "reverse",
+                1,
+                vec![param("list", "List")],
+                InferredType::known("List"),
+            )],
+        );
+
+        let mut stubs = NativeTypeRegistry::new();
+        stubs.register_module(
+            "lists",
+            vec![
+                declared_sig("reverse", 1, InferredType::known("List")),
+                // Not a real `lists` export — a stale/typo'd stub entry.
+                declared_sig("bogus", 2, InferredType::known("Dynamic")),
+            ],
+        );
+
+        let drift = auto_extract.detect_stub_drift(&stubs);
+
+        assert_eq!(drift.len(), 1);
+        assert_eq!(drift[0].0, "lists");
+        assert_eq!(drift[0].1.name, "bogus");
+        assert_eq!(drift[0].1.arity, 2);
+    }
+
+    #[test]
+    fn detect_stub_drift_skips_module_unknown_to_auto_extract() {
+        // `beamtalk_http` is the package's own not-yet-compiled native
+        // module — nothing to compare against, so no false-positive drift.
+        let auto_extract = NativeTypeRegistry::new();
+
+        let mut stubs = NativeTypeRegistry::new();
+        stubs.register_module(
+            "beamtalk_http",
+            vec![declared_sig("get", 1, InferredType::known("Dynamic"))],
+        );
+
+        let drift = auto_extract.detect_stub_drift(&stubs);
+
+        assert!(drift.is_empty());
+    }
+
+    #[test]
+    fn detect_stub_drift_empty_when_every_stub_function_exists() {
+        let mut auto_extract = NativeTypeRegistry::new();
+        auto_extract.register_module(
+            "lists",
+            vec![extracted_sig(
+                "reverse",
+                1,
+                vec![param("list", "List")],
+                InferredType::known("List"),
+            )],
+        );
+
+        let mut stubs = NativeTypeRegistry::new();
+        stubs.register_module(
+            "lists",
+            vec![declared_sig("reverse", 1, InferredType::known("List"))],
+        );
+
+        assert!(auto_extract.detect_stub_drift(&stubs).is_empty());
     }
 }

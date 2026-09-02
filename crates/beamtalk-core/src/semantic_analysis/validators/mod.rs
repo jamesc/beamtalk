@@ -58,8 +58,8 @@ pub(crate) use sendability_validators::{
     check_block_capture_sendability, check_undeclared_handle_class,
 };
 pub(crate) use structural_validators::{
-    check_ffi_arity, check_unresolved_classes, check_unresolved_ffi_modules,
-    check_unresolved_type_aliases, check_workspace_shadows,
+    check_ffi_arity, check_native_declaration_location, check_unresolved_classes,
+    check_unresolved_ffi_modules, check_unresolved_type_aliases, check_workspace_shadows,
 };
 // BT-3361: widened from `pub(crate)` to `pub` — `queries::ffi_sites_query`
 // (Language Service) reaches these from the standalone
