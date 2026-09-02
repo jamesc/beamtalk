@@ -19,6 +19,7 @@
 
 use std::collections::HashSet;
 
+use super::control_flow::HoistSink;
 use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
 use beamtalk_cerl_doc::Document;
@@ -455,6 +456,14 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         field: &Identifier,
     ) -> Result<Document<'static>> {
+        // BT-3396: this exact read was snapshotted ahead of a hoisted
+        // self-send that follows it in evaluation order — substitute the
+        // snapshot so the read keeps its source-order value. See
+        // `hoisted_field_reads`'s doc comment (mod.rs). Consumed once: the
+        // key is the field identifier's own span, unique per occurrence.
+        if let Some(snap_var) = self.hoisted_field_reads.remove(&field.span) {
+            return Ok(leaf::var(snap_var));
+        }
         // BT-412: Class methods access class variables directly from ClassVars map
         if self.in_class_method() {
             if let Expression::Identifier(recv_id) = receiver {
@@ -1480,6 +1489,13 @@ impl CoreErlangGenerator {
                 }
             } else {
                 // Non-assignment expression
+                // BT-3396: thread every order-safe nested self-send (`1 +
+                // (self bump)`) as real `Bind`s ahead of the compile — the
+                // Tier 2 counterpart of `conditionals.rs`'s C12 catch-all.
+                self.hoist_nested_self_sends(
+                    expr,
+                    &mut HoistSink::Threaded { stmts, frame, span },
+                )?;
                 // BT-1397: Detect open-scope results from class method self-sends.
                 let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
                 if is_last {
