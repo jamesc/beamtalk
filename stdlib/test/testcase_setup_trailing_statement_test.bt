@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3391: Tests that `setUp` correctly threads self.field := assignments to
+// the test method when it ends with an explicit trailing `self`, even after
+// an unrelated statement following the last field assignment.
+//
+// The `self.field := x` idiom (rather than `self withX:`) is what nearly
+// every test file actually uses for setUp (see stdlib/src/TestCase.bt's
+// updated class doc comment). Adding any statement after the last field
+// assignment silently drops that field UNLESS setUp ends in a bare `self`
+// (or another `self.field := x` assignment) — see BT-3391's
+// `check_testcase_setup_drops_field_assignments` compile-time lint, which
+// warns when a `setUp` doesn't follow this rule.
+
+TestCase subclass: SetupTrailingStatementTest
+  field: first = 0
+  field: second = 0
+
+  setUp =>
+    self.first := 1
+    self.second := 2
+    _extra := 99  // unrelated trailing statement, deliberately unused
+    self  // required: carries the field mutations forward as self
+
+  testBothFieldsSurviveTrailingStatement =>
+    self assert: self.first equals: 1
+    self assert: self.second equals: 2

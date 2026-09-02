@@ -2178,6 +2178,8 @@
       "tags": [
         "CounterTest",
         "TestCase",
+        "assign",
+        "assignment",
         "beamtalk-language-features",
         "extends",
         "field",
@@ -2185,13 +2187,16 @@
         "inheritance",
         "instance variable",
         "member",
+        "mutate",
+        "mutation",
         "object",
         "property",
+        "set",
         "setUp",
         "subclassing",
         "testIncrement"
       ],
-      "source": "TestCase subclass: CounterTest\n  field: counter = nil\n\n  setUp => self withCounter: (Counter spawn)\n\n  testIncrement =>\n    self.counter increment.\n    self assert: (self.counter getValue) equals: 1",
+      "source": "TestCase subclass: CounterTest\n  field: counter = nil\n\n  setUp => self.counter := Counter spawn\n\n  testIncrement =>\n    self.counter increment.\n    self assert: (self.counter getValue) equals: 1",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2201,6 +2206,8 @@
       "tags": [
         "IntegrationTest",
         "TestCase",
+        "assign",
+        "assignment",
         "beamtalk-language-features",
         "extends",
         "field",
@@ -2208,17 +2215,20 @@
         "inheritance",
         "instance variable",
         "member",
+        "mutate",
+        "mutation",
         "object",
         "property",
+        "set",
         "setUp",
         "subclassing",
         "testLookup"
       ],
-      "source": "TestCase subclass: IntegrationTest\n  field: db = nil\n  field: cache = nil\n\n  setUp =>\n    (self withDb: (DB connect)) withCache: (Cache spawn)\n\n  testLookup =>\n    self.cache at: \"key\" put: \"value\".\n    self assert: (self.cache at: \"key\") equals: \"value\"",
+      "source": "TestCase subclass: IntegrationTest\n  field: db = nil\n  field: cache = nil\n\n  setUp =>\n    self.db := DB connect\n    self.cache := Cache spawn\n\n  testLookup =>\n    self.cache at: \"key\" put: \"value\".\n    self assert: (self.cache at: \"key\") equals: \"value\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-255",
+      "id": "docs-beamtalk-language-features-block-257",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2249,7 +2259,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-256",
+      "id": "docs-beamtalk-language-features-block-258",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -31783,6 +31793,34 @@
       ],
       "source": "// BUnit tests for TestRunner and TestResult (BT-762)\n\nTestCase subclass: TestRunnerTest\n\n  setUp => self.result := TestRunner run: SampleTestCase\n\n  testResultTotal => self assert: self.result total equals: 2\n\n  testResultPassed => self assert: self.result passed equals: 2\n\n  testResultFailed => self assert: self.result failed equals: 0\n\n  testResultHasPassed => self assert: self.result hasPassed\n\n  testResultSummary => self assert: self.result summary class equals: String\n\n  testResultDuration => self assert: (self.result duration >= 0.0)\n\n  testResultPrintString =>\n    self assert: self.result printString class equals: String\n\n  testResultFailuresEmpty => self assert: self.result failures equals: #()",
       "explanation": "BUnit tests for TestRunner and TestResult (BT-762)"
+    },
+    {
+      "id": "stdlib-test-testcase-setup-trailing-statement-test",
+      "title": "SetupTrailingStatementTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "SetupTrailingStatementTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "setUp",
+        "subclassing",
+        "testBothFieldsSurviveTrailingStatement",
+        "testcase_setup_trailing_statement_test"
+      ],
+      "source": "// BT-3391: Tests that `setUp` correctly threads self.field := assignments to\n// the test method when it ends with an explicit trailing `self`, even after\n// an unrelated statement following the last field assignment.\n//\n// The `self.field := x` idiom (rather than `self withX:`) is what nearly\n// every test file actually uses for setUp (see stdlib/src/TestCase.bt's\n// updated class doc comment). Adding any statement after the last field\n// assignment silently drops that field UNLESS setUp ends in a bare `self`\n// (or another `self.field := x` assignment) — see BT-3391's\n// `check_testcase_setup_drops_field_assignments` compile-time lint, which\n// warns when a `setUp` doesn't follow this rule.\n\nTestCase subclass: SetupTrailingStatementTest\n  field: first = 0\n  field: second = 0\n\n  setUp =>\n    self.first := 1\n    self.second := 2\n    _extra := 99  // unrelated trailing statement, deliberately unused\n    self  // required: carries the field mutations forward as self\n\n  testBothFieldsSurviveTrailingStatement =>\n    self assert: self.first equals: 1\n    self assert: self.second equals: 2",
+      "explanation": "BT-3391: Tests that `setUp` correctly threads self.field := assignments to the test method when it ends with an explicit trailing `self`, even after an unrelated statement following the last field assignment.  The `self.field := x` idiom (rather than `self withX:`) is what nearly every test file actually uses for setUp (see stdlib/src/TestCase.bt's updated class doc comment). Adding any statement after the last field assignment silently drops that field UNLESS setUp ends in a bare `self` (or another `self.field := x` assignment) — see BT-3391's `check_testcase_setup_drops_field_assignments` compile-time lint, which warns when a `setUp` doesn't follow this rule."
     },
     {
       "id": "stdlib-test-tier2-block-round-trip-test",

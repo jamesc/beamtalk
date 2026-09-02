@@ -515,6 +515,143 @@ fn redundant_super_initialize_diagnostic(span: Span) -> Diagnostic {
     .with_category(DiagnosticCategory::Lint)
 }
 
+// ── BT-3391: setUp drops self.field := assignments unless it ends in self ────
+
+/// BT-3391: Warn when a `TestCase` subclass's `setUp` method mutates a field
+/// via `self.field := value` but its last statement isn't itself
+/// self-producing.
+///
+/// `TestCase` is a `Value subclass:` (BT-1533 exempts `self.field :=` there
+/// from the general value-immutability error, pending the `with*:` migration
+/// tracked by BT-1534). Value-type method bodies return the value of their
+/// *last* expression, with one special case: a `self.field := value`
+/// assignment in last position evaluates to the updated `self` rather than
+/// the assigned value (BT-833/BT-900) — precisely so this idiom works. That
+/// special case only fires when the field assignment IS the last statement.
+/// Any other trailing statement (an unrelated local assignment, a `super
+/// setUp` call, a log line, …) makes the method return *that* statement's own
+/// value instead, silently discarding every field mutation made earlier in
+/// the body — the test runner then threads the wrong `self` into every test
+/// method, with no compile or runtime error.
+///
+/// Fires only for `setUp`: it is the one `TestCase` lifecycle method whose
+/// return value the runner threads as the receiver of each test method (see
+/// `stdlib/src/TestCase.bt`'s class doc comment). `tearDown` returns `Nil`
+/// and `setUpOnce`'s return is stored as a suite fixture, not threaded as
+/// `self`, so neither is affected by this trap.
+///
+/// Does NOT fire when:
+/// - `setUp` contains no `self.field := ...` assignment at all (e.g. the
+///   documented `self withCounter: (Counter spawn)` idiom, which needs no
+///   trailing `self` — the `with*:` chain already returns the updated self).
+/// - The last statement is a bare `self`, or is itself a
+///   `self.field := value` assignment — both reliably yield the fully
+///   updated self already.
+pub(crate) fn check_testcase_setup_drops_field_assignments(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        let class_name = class.name.name.as_str();
+        if !hierarchy.is_testcase_subclass(class_name) {
+            continue;
+        }
+        for method in &class.methods {
+            if is_unary_setup(&method.selector) {
+                check_setup_body_returns_self(&method.body, diagnostics);
+            }
+        }
+    }
+    // Also check standalone (Tonel-style) method definitions.
+    for standalone in &module.method_definitions {
+        if standalone.is_class_method {
+            continue;
+        }
+        let class_name = standalone.class_name.name.as_str();
+        if !hierarchy.is_testcase_subclass(class_name) {
+            continue;
+        }
+        if is_unary_setup(&standalone.method.selector) {
+            check_setup_body_returns_self(&standalone.method.body, diagnostics);
+        }
+    }
+}
+
+/// Returns `true` if the selector is the unary `setUp` message.
+fn is_unary_setup(selector: &MessageSelector) -> bool {
+    matches!(selector, MessageSelector::Unary(name) if name.as_str() == "setUp")
+}
+
+/// Returns `true` if `expr` is `self.field := value` (any field name).
+fn is_self_field_assignment(expr: &Expression) -> bool {
+    let Expression::Assignment { target, .. } = expr.unwrap_parens() else {
+        return false;
+    };
+    let Expression::FieldAccess { receiver, .. } = target.as_ref() else {
+        return false;
+    };
+    matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+}
+
+/// Returns `true` if `expr` is the bare identifier `self`.
+fn is_bare_self(expr: &Expression) -> bool {
+    matches!(expr.unwrap_parens(), Expression::Identifier(id) if id.name == "self")
+}
+
+/// Returns `true` if `expr` contains a `self.field := value` assignment
+/// anywhere in its subtree (including itself).
+fn contains_self_field_assignment(expr: &Expression) -> bool {
+    let mut found = false;
+    walk_expression(expr, &mut |e| {
+        if is_self_field_assignment(e) {
+            found = true;
+        }
+    });
+    found
+}
+
+/// Checks one `setUp` method body: warns when it mutates a field via
+/// `self.field := value` but the last statement won't carry those mutations
+/// forward as the returned `self`.
+fn check_setup_body_returns_self(
+    body: &[crate::ast::ExpressionStatement],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(last_stmt) = body.last() else {
+        return;
+    };
+    let has_field_mutation = body
+        .iter()
+        .any(|stmt| contains_self_field_assignment(&stmt.expression));
+    if !has_field_mutation {
+        return;
+    }
+    let last_expr = last_stmt.expression.unwrap_parens();
+    if is_bare_self(last_expr) || is_self_field_assignment(last_expr) {
+        return;
+    }
+    diagnostics.push(setup_drops_field_assignments_diagnostic(last_expr.span()));
+}
+
+/// Builds the BT-3391 diagnostic for a `setUp` whose trailing statement
+/// drops earlier `self.field :=` mutations.
+fn setup_drops_field_assignments_diagnostic(span: Span) -> Diagnostic {
+    Diagnostic::warning(
+        "`setUp` assigns `self.field := ...` earlier in the method, but its \
+         last statement doesn't return the updated self — every field \
+         mutation is silently dropped for the test method"
+            .to_string(),
+        span,
+    )
+    .with_hint(
+        "End `setUp` with a bare `self` (or with a `self.field := value` \
+         assignment) so the updated fields carry forward, or use `self \
+         with<Field>: value` chains instead of `self.field := value`",
+    )
+    .with_category(DiagnosticCategory::Lint)
+}
+
 // ── BT-2140: Redundant local-variable type annotation ────────────────────────
 
 /// BT-2140: Lint when a local-variable assignment carries a `:: T` annotation
@@ -1322,6 +1459,176 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected no warnings for class-side keyword initialize, got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-3391: setUp drops field assignments tests ──────────────────────────
+
+    /// A single `self.field := value` statement, with nothing after it — the
+    /// documented-as-working idiom (BT-833/BT-900 special-cases the last
+    /// position). No warning.
+    #[test]
+    fn setup_single_field_assignment_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    self.dashboard := 1";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for setUp ending in self.field :=, got: {diagnostics:?}"
+        );
+    }
+
+    /// The exact BT-3391 repro: a field assignment followed by an unrelated
+    /// trailing statement — warns.
+    #[test]
+    fn setup_field_assignment_then_unrelated_statement_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    self.dashboard := 1.\n    extra := 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("silently dropped"),
+            "Expected 'silently dropped' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// A trailing `super setUp` call after a field assignment also warns —
+    /// explicitly called out as a breaking case in BT-3391.
+    #[test]
+    fn setup_field_assignment_then_super_setup_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    self.dashboard := 1.\n    super setUp";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for trailing super setUp, got: {diagnostics:?}"
+        );
+    }
+
+    /// Ending with an explicit trailing `self` after the extra statement —
+    /// the documented fix. No warning.
+    #[test]
+    fn setup_field_assignment_then_extra_then_self_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    self.dashboard := 1.\n    extra := 2.\n    self";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings when setUp ends in explicit self, got: {diagnostics:?}"
+        );
+    }
+
+    /// Two field assignments in a row, ending in the second — still safe
+    /// (each field-assignment-in-last-position threads the full self).
+    #[test]
+    fn setup_two_field_assignments_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: a = nil\n  field: b = nil\n  setUp =>\n    self.a := 1.\n    self.b := 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for two field assignments ending in the last, got: {diagnostics:?}"
+        );
+    }
+
+    /// The documented `self withCounter: ...` idiom — no `self.field :=`
+    /// anywhere, so there's nothing to drop. No warning.
+    #[test]
+    fn setup_with_selector_idiom_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: CounterTest\n  field: counter = nil\n  setUp =>\n    self withCounter: 1";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for with*: idiom (no self.field :=), got: {diagnostics:?}"
+        );
+    }
+
+    /// A non-TestCase Value subclass with the identical shape does NOT warn
+    /// — this lint is scoped to `TestCase`'s documented setUp/threading
+    /// contract, not a general value-type rule.
+    #[test]
+    fn non_testcase_setup_no_warn() {
+        let src =
+            "Value subclass: Point\n  field: x = 0\n  setUp =>\n    self.x := 1.\n    extra := 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for non-TestCase class, got: {diagnostics:?}"
+        );
+    }
+
+    /// A method named `setUp` with a keyword selector part (e.g.
+    /// `setUp:` — not the case in practice, but guards the unary-only match)
+    /// does not trigger the check on unrelated methods.
+    #[test]
+    fn other_method_named_differently_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  helper =>\n    self.dashboard := 1.\n    extra := 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for a non-setUp method, got: {diagnostics:?}"
+        );
+    }
+
+    /// Standalone (Tonel-style) `setUp` method definitions are also checked.
+    #[test]
+    fn setup_in_standalone_method_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n\
+                   \nThingTest >> setUp =>\n    self.dashboard := 1.\n    extra := 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        assert_eq!(module.method_definitions.len(), 1);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning in standalone setUp method, got: {diagnostics:?}"
+        );
+    }
+
+    /// The diagnostic has the `Lint` category and a hint pointing at the fix.
+    #[test]
+    fn setup_drops_field_diagnostic_has_hint_and_category() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    self.dashboard := 1.\n    extra := 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].category, Some(DiagnosticCategory::Lint));
+        assert!(
+            diagnostics[0]
+                .hint
+                .as_ref()
+                .is_some_and(|h| h.contains("self")),
+            "Expected hint mentioning self, got: {:?}",
+            diagnostics[0].hint
         );
     }
 

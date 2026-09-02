@@ -17,11 +17,41 @@
 /// ```beamtalk
 /// TestCase subclass: CounterTest
 ///   field: counter = nil
-///   setUp => self withCounter: (Counter spawn)
+///   setUp => self.counter := Counter spawn
 ///   testIncrement =>
 ///     self.counter increment.
 ///     self assert: (self.counter getValue) equals: 1
 /// ```
+///
+/// `setUp` must end with a value that carries the updated fields forward as
+/// `self` — either a bare `self.field := value` (as above) or an explicit
+/// trailing `self`. Any OTHER statement after the last field assignment
+/// (an unrelated local, a `super setUp` call, a log line, …) makes `setUp`
+/// return THAT statement's own value instead, silently dropping every field
+/// set earlier in the method:
+///
+/// ```beamtalk
+/// TestCase subclass: BadExampleTest
+///   field: counter = nil
+///   setUp =>
+///     self.counter := Counter spawn
+///     Transcript show: "set up".   // <- adding this line breaks it!
+///   // self.counter now reads nil in every test — see BT-3391
+/// ```
+///
+/// Fix it by ending with an explicit `self`:
+///
+/// ```beamtalk
+/// TestCase subclass: FixedExampleTest
+///   field: counter = nil
+///   setUp =>
+///     self.counter := Counter spawn
+///     Transcript show: "set up".
+///     self   // <- carries the field mutation(s) forward
+/// ```
+///
+/// `beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field via
+/// `self.field := value` and its last statement doesn't fit this shape.
 Value subclass: TestCase
 
   // Stays inline FFI rather than `native:` (ADR 0101 / BT-2731): only one method
@@ -68,10 +98,22 @@ Value subclass: TestCase
   ///
   /// Returns self (or an updated copy with fields set). The test runner
   /// uses the return value as the receiver for the test method, so
-  /// subclasses should return the configured instance:
+  /// subclasses should return the configured instance. `self.field := value`
+  /// as the LAST statement returns the updated self, so this works:
   ///
   /// ```beamtalk
-  /// setUp => self withCounter: (Counter spawn)
+  /// setUp => self.counter := Counter spawn
+  /// ```
+  ///
+  /// Any statement after that last field assignment must be followed by an
+  /// explicit trailing `self` (or another `self.field := value`), or the
+  /// fields set above it are silently lost for the test method:
+  ///
+  /// ```beamtalk
+  /// setUp =>
+  ///   self.counter := Counter spawn
+  ///   self.log := AlertLog spawn
+  ///   self   // <- required once anything follows the last field assignment
   /// ```
   setUp -> Self => self
 
