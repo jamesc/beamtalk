@@ -269,32 +269,37 @@ impl CoreErlangGenerator {
                 return Ok(());
             }
         }
-        if !self.is_effect_free_operand(expr) {
+        if !is_effect_free_operand(expr) {
             *safe_to_hoist = false;
         }
         Ok(())
     }
 
-    /// BT-3392: true for an operand that provably cannot raise or have a
-    /// side effect, so its relative evaluation order against a hoisted
-    /// self-send doesn't matter — a literal, a plain local/parameter
-    /// identifier, a class reference, `super`, or a direct field read
-    /// (recursing into its own receiver, which is normally `self`/`super`).
-    /// Anything else — in particular any message send, including a
-    /// non-self-send one that could itself raise (`anArray at: idx`,
-    /// `respondsTo:`, …) — is conservatively NOT effect-free. See
-    /// `hoist_self_sends_for_binary_op`'s doc comment for why this matters.
-    fn is_effect_free_operand(&self, expr: &Expression) -> bool {
-        match expr.unwrap_parens() {
-            Expression::Literal(_, _)
-            | Expression::Identifier(_)
-            | Expression::ClassReference { .. }
-            | Expression::Super(_) => true,
-            Expression::FieldAccess { receiver, .. } => self.is_effect_free_operand(receiver),
-            _ => false,
-        }
-    }
+}
 
+/// BT-3392: true for an operand that provably cannot raise or have a side
+/// effect, so its relative evaluation order against a hoisted self-send
+/// doesn't matter — a literal, a plain local/parameter identifier, a class
+/// reference, `super`, or a direct field read (recursing into its own
+/// receiver, which is normally `self`/`super`). Anything else — in
+/// particular any message send, including a non-self-send one that could
+/// itself raise (`anArray at: idx`, `respondsTo:`, …) — is conservatively
+/// NOT effect-free. See `hoist_self_sends_for_binary_op`'s doc comment
+/// (`CoreErlangGenerator::hoist_self_sends_for_binary_op`) for why this
+/// matters. A free function, not a method: it recurses on the AST only,
+/// touching no generator state.
+fn is_effect_free_operand(expr: &Expression) -> bool {
+    match expr.unwrap_parens() {
+        Expression::Literal(_, _)
+        | Expression::Identifier(_)
+        | Expression::ClassReference { .. }
+        | Expression::Super(_) => true,
+        Expression::FieldAccess { receiver, .. } => is_effect_free_operand(receiver),
+        _ => false,
+    }
+}
+
+impl CoreErlangGenerator {
     /// Generates inline code for `flag ifTrue: [block]` in actor context
     /// when the block contains field mutations.
     ///
