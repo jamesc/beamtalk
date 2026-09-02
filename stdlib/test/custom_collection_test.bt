@@ -41,8 +41,7 @@ TestCase subclass: CustomCollectionTest
     self deny: col isEmpty
     self assert: col isNotEmpty
 
-  testInheritedDetect =>
-    self assert: (self.col detect: [:x | x > 1]) equals: 2
+  testInheritedDetect => self assert: (self.col detect: [:x | x > 1]) equals: 2
 
   testInheritedDetectIfNone =>
     self assert: (self.col detect: [:x | x > 10] ifNone: [0]) equals: 0
