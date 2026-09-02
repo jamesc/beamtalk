@@ -498,9 +498,13 @@ fn expect_category_unchecked(expect_cat: ExpectCategory, unchecked: &[Diagnostic
         return false;
     }
     match expect_cat {
-        ExpectCategory::All => false,
         ExpectCategory::DeadAssignment => unchecked.contains(&DiagnosticCategory::DeadAssignment),
-        ExpectCategory::Dnu
+        // Every other category (including `all`, deliberately — see this
+        // function's doc) is produced by `analyse_full`'s semantic analysis,
+        // which every caller of this function always runs, so none of them
+        // can ever be "unchecked".
+        ExpectCategory::All
+        | ExpectCategory::Dnu
         | ExpectCategory::Type
         | ExpectCategory::Unused
         | ExpectCategory::Deprecation
@@ -828,7 +832,7 @@ fn collect_directives_from_expr(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::Span;
+    use crate::source_analysis::{Span, lex_with_eof, parse};
 
     fn dnu_diagnostic(severity: Severity) -> Diagnostic {
         let mut d = Diagnostic::warning("test dnu", Span::new(0, 1));
@@ -1062,6 +1066,110 @@ dnu = "error"
         assert_eq!(
             table[&DiagnosticCategory::Dnu],
             DiagnosticSeverityOverride::Error
+        );
+    }
+
+    // ── BT-3384: @expect staleness scoped to lint-vs-non-lint categories ───
+
+    /// Plain `apply_expect_directives` (used by `beamtalk lint`, which always
+    /// runs `beamtalk_lint::run_lint_passes` first) validates every category
+    /// — with no matching diagnostic, `@expect dead_assignment` is genuinely
+    /// stale. Mirrors `beamtalk-language-service`'s pre-existing
+    /// `expect_dead_assignment_stale_when_no_diagnostic` (same source), kept
+    /// here as the baseline the next test's fixed behavior contrasts with.
+    #[test]
+    fn apply_expect_directives_dead_assignment_stale_when_no_diagnostic() {
+        let source = "@expect dead_assignment\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        apply_expect_directives(&module, &mut diagnostics);
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect")),
+            "plain apply_expect_directives should flag dead_assignment stale \
+             when no diagnostic exists, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-3384: `beamtalk build`/`beamtalk test`/the LSP/the REPL never run
+    /// `beamtalk_lint::run_lint_passes`, so a `dead_assignment` diagnostic can
+    /// never appear in their diagnostics list. The exact same source the
+    /// previous test correctly flags stale under plain
+    /// `apply_expect_directives` must be silently left alone — neither stale
+    /// nor satisfied — by `apply_expect_directives_excluding_lint_only`.
+    #[test]
+    fn apply_expect_directives_excluding_lint_only_does_not_flag_dead_assignment_stale() {
+        let source = "@expect dead_assignment\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        apply_expect_directives_excluding_lint_only(&module, &mut diagnostics);
+
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect")),
+            "apply_expect_directives_excluding_lint_only must not flag a \
+             lint-only category as stale, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-3384's fix is scoped to categories that are genuinely lint-only: a
+    /// category `beamtalk build` DOES check via `analyse_full` (`dnu`, here)
+    /// must still be validated for staleness by the excluding variant, same
+    /// as plain `apply_expect_directives` — only `dead_assignment` (today's
+    /// sole [`LINT_PASS_ONLY_CATEGORIES`] entry) is exempted.
+    #[test]
+    fn apply_expect_directives_excluding_lint_only_still_flags_other_categories_stale() {
+        let source = "@expect dnu\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        apply_expect_directives_excluding_lint_only(&module, &mut diagnostics);
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect")),
+            "apply_expect_directives_excluding_lint_only should still flag a \
+             non-lint-only category as stale, got: {diagnostics:?}"
+        );
+    }
+
+    /// Defensive: if a `DeadAssignment` diagnostic genuinely *is* present on
+    /// the `@expect`'s target expression, the excluding variant must still
+    /// suppress it exactly like plain `apply_expect_directives` would — the
+    /// exclusion only changes the "no matching diagnostic found" staleness
+    /// verdict, never a real match.
+    #[test]
+    fn apply_expect_directives_excluding_lint_only_still_suppresses_a_present_dead_assignment_diagnostic()
+     {
+        let source = "@expect dead_assignment\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        let target_span = module.expressions.last().unwrap().expression.span();
+        diagnostics.push(
+            Diagnostic::lint("test dead assignment", target_span)
+                .with_category(DiagnosticCategory::DeadAssignment),
+        );
+        apply_expect_directives_excluding_lint_only(&module, &mut diagnostics);
+
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.category == Some(DiagnosticCategory::DeadAssignment)),
+            "a real DeadAssignment diagnostic on the target expression must \
+             still be suppressed, got: {diagnostics:?}"
+        );
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect")),
+            "got: {diagnostics:?}"
         );
     }
 }
