@@ -118,6 +118,77 @@ impl CoreErlangGenerator {
         (seed_doc, seeded_state)
     }
 
+    /// BT-1942/BT-3382: compiles a conditional/`ifNotNil:` receiver, returning
+    /// `(preamble, value_doc)` — `preamble` is any open let-chain that must be
+    /// emitted BEFORE the `case`'s condition binding (so a mutated binding
+    /// like `ClassVarsN` or an actor self-send's new `State`/`StateAcc` stays
+    /// in scope inside the `case`), and `value_doc` is the receiver's own
+    /// boolean/nil value to test. Shared by all four `generate_if_*_with_mutations`
+    /// generators below (previously each hand-duplicated this exact match —
+    /// CLAUDE.md's no-duplicate-implementations rule).
+    ///
+    /// Two receiver shapes thread state through this position:
+    /// - BT-1942: a class-method self-send (or sub-expression containing one)
+    ///   emits its class-var mutation as an open let-chain, surfaced generically
+    ///   via `expression_doc_with_open_scope`.
+    /// - BT-3382: an ACTOR-INSTANCE self-send used directly as the receiver
+    ///   (optionally parenthesized) — e.g. `(self recordOnce: which)
+    ///   ifTrue:ifFalse:` — needs the same treatment, special-cased here
+    ///   directly via `generate_self_dispatch_open_for` rather than through
+    ///   `expression_doc_with_open_scope`'s generic side-channel:
+    ///   `generate_self_dispatch` (the codegen for an ordinary actor
+    ///   self-send *sub-expression*, e.g. a self-send nested inside some
+    ///   other operator or nested one level deeper inside a block body)
+    ///   deliberately still discards its callee's state — publishing it
+    ///   through the shared `last_open_scope_result` side-channel
+    ///   unconditionally would silently break any OTHER call site that reads
+    ///   `state_version()`/`current_state_var()` before compiling a value
+    ///   expression and assumes computing that expression cannot itself
+    ///   advance the counter (confirmed by a real regression against
+    ///   `self.log := self.log ++ #(self getValue)` while prototyping the
+    ///   general fix — a field assignment's own `Bind` source was captured
+    ///   before its RHS ran). This ONE receiver position is safe to
+    ///   special-case because the surrounding code
+    ///   (`self.current_state_var()` read immediately after, and every
+    ///   branch keyed off `StateAcc`) is already written to expect a
+    ///   correctly-threaded state exactly here. See BT-3382 Linear follow-up
+    ///   issues for widening this to other self-send-as-sub-expression shapes
+    ///   (nested inside a block body, `and:`/`or:` receivers, arguments).
+    fn compile_conditional_receiver(
+        &mut self,
+        receiver: &Expression,
+    ) -> Result<(Document<'static>, Document<'static>)> {
+        let unwrapped = receiver.unwrap_parens();
+        if self.is_dispatching_actor_self_send(unwrapped) {
+            if let Expression::MessageSend {
+                selector,
+                arguments,
+                ..
+            } = unwrapped
+            {
+                let (open_doc, dispatch_var) =
+                    self.generate_self_dispatch_open_for(selector, arguments)?;
+                let result_var = self.fresh_temp_var("CondSelfResult");
+                let preamble = docvec![
+                    open_doc,
+                    "let ",
+                    leaf::var(result_var.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(dispatch_var),
+                    ") in ",
+                ];
+                return Ok((preamble, leaf::var(result_var)));
+            }
+        }
+        let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
+        Ok(match cond_open_scope {
+            Some(OpenScopeResult::Value(result_var)) => (cond_chain, leaf::var(result_var)),
+            // BT-3053: no single value — substitute do:'s own `nil` contract.
+            Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
+            None => (Document::Nil, cond_chain),
+        })
+    }
+
     /// Generates inline code for `flag ifTrue: [block]` in actor context
     /// when the block contains field mutations.
     ///
@@ -129,18 +200,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
     ) -> Result<Document<'static>> {
-        // BT-1942: The receiver may be a class method self-send (or sub-expression
-        // containing one) whose class var mutations are emitted as an open
-        // let-chain. Split the open chain into a preamble (the let-chain) and
-        // the value doc (the result variable). The preamble is emitted BEFORE
-        // the case binding so ClassVarsN stays in scope inside the case.
-        let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        let (cond_preamble, cond_val_doc) = match cond_open_scope {
-            Some(OpenScopeResult::Value(result_var)) => (cond_chain, leaf::var(result_var)),
-            // BT-3053: no single value — substitute do:'s own `nil` contract.
-            Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
-            None => (Document::Nil, cond_chain),
-        };
+        let (cond_preamble, cond_val_doc) = self.compile_conditional_receiver(receiver)?;
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
         // BT-2355: seed threaded outer-locals so the non-taken (false) branch and
@@ -191,14 +251,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
     ) -> Result<Document<'static>> {
-        // BT-1942: Split open let-chain from class method self-send sub-expressions.
-        let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        let (cond_preamble, cond_val_doc) = match cond_open_scope {
-            Some(OpenScopeResult::Value(result_var)) => (cond_chain, leaf::var(result_var)),
-            // BT-3053: no single value — substitute do:'s own `nil` contract.
-            Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
-            None => (Document::Nil, cond_chain),
-        };
+        let (cond_preamble, cond_val_doc) = self.compile_conditional_receiver(receiver)?;
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
         // BT-2355: seed threaded outer-locals so the non-taken (true) branch and
@@ -244,14 +297,7 @@ impl CoreErlangGenerator {
         true_block: &Block,
         false_block: &Block,
     ) -> Result<Document<'static>> {
-        // BT-1942: Split open let-chain from class method self-send sub-expressions.
-        let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        let (cond_preamble, cond_val_doc) = match cond_open_scope {
-            Some(OpenScopeResult::Value(result_var)) => (cond_chain, leaf::var(result_var)),
-            // BT-3053: no single value — substitute do:'s own `nil` contract.
-            Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
-            None => (Document::Nil, cond_chain),
-        };
+        let (cond_preamble, cond_val_doc) = self.compile_conditional_receiver(receiver)?;
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
         // BT-2355: seed threaded outer-locals so a branch that does not itself
@@ -318,14 +364,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
     ) -> Result<Document<'static>> {
-        // BT-1942: Split open let-chain from class method self-send sub-expressions.
-        let (recv_chain, recv_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        let (recv_preamble, recv_val_doc) = match recv_open_scope {
-            Some(OpenScopeResult::Value(result_var)) => (recv_chain, leaf::var(result_var)),
-            // BT-3053: no single value — substitute do:'s own `nil` contract.
-            Some(OpenScopeResult::NoValue) => (recv_chain, Document::Str("'nil'")),
-            None => (Document::Nil, recv_chain),
-        };
+        let (recv_preamble, recv_val_doc) = self.compile_conditional_receiver(receiver)?;
         let obj_var = self.fresh_temp_var("Obj");
         let outer_state = self.current_state_var();
         // BT-2355: seed threaded outer-locals so the non-taken (nil) branch and the

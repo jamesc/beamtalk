@@ -4969,6 +4969,17 @@ impl CoreErlangGenerator {
         // BT-915: For Boolean conditionals, any block argument may contain mutations.
         // BT-1226: ifNotNil: also needs per-block mutation detection.
         if beamtalk_core::state_threading_selectors::is_conditional_selector(sel_str.as_str()) {
+            // BT-3382: the conditional's own RECEIVER may be an actor
+            // self-send (`(self recordOnce: x) ifTrue:ifFalse:`) whose own
+            // state mutation must be threaded, even when neither block
+            // argument mutates anything itself. Must stay in sync with
+            // `intrinsics.rs`'s `try_generate_boolean_protocol`'s matching
+            // check — the two are independently-computed decisions that
+            // must agree (see this file's own commentary on that class of
+            // bug, e.g. BT-2356's "two decision points disagree" note).
+            if self.is_dispatching_actor_self_send(receiver.unwrap_parens()) {
+                return true;
+            }
             for arg in arguments {
                 if let Expression::Block(block) = arg {
                     let analysis = self

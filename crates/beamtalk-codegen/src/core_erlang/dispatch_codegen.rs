@@ -1989,7 +1989,33 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<(Document<'static>, String)> {
-        let (call_doc, dispatch_var) = self.generate_self_dispatch_call_doc(expr)?;
+        if let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = expr
+        {
+            return self.generate_self_dispatch_open_for(selector, arguments);
+        }
+        Err(CodeGenError::Internal(
+            "generate_self_dispatch_open called on non-MessageSend expression".to_string(),
+        ))
+    }
+
+    /// BT-3382: selector/arguments-based counterpart of
+    /// [`Self::generate_self_dispatch_open`], for callers that only have the
+    /// decomposed selector/arguments of a self-send, not the owning
+    /// `Expression::MessageSend` node itself — e.g.
+    /// `control_flow/conditionals.rs`'s `compile_conditional_receiver`, which
+    /// destructures a conditional's (unwrapped-of-parens) receiver expression
+    /// itself. `generate_self_dispatch_open` is now a thin wrapper over this.
+    pub(super) fn generate_self_dispatch_open_for(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<(Document<'static>, String)> {
+        let (call_doc, dispatch_var) =
+            self.generate_self_dispatch_call_doc_for(selector, arguments)?;
         let new_state = self.current_state_var();
         let doc = docvec![
             call_doc,
@@ -2019,7 +2045,6 @@ impl CoreErlangGenerator {
     /// respect (same mint order, same returned bytes) — it now simply
     /// delegates here and appends the extraction `let` it used to build
     /// inline.
-    #[allow(clippy::too_many_lines)] // Document-based sealed/normal dispatch branches
     pub(super) fn generate_self_dispatch_call_doc(
         &mut self,
         expr: &Expression,
@@ -2029,6 +2054,30 @@ impl CoreErlangGenerator {
             arguments,
             ..
         } = expr
+        {
+            return self.generate_self_dispatch_call_doc_for(selector, arguments);
+        }
+        Err(CodeGenError::Internal(
+            "generate_self_dispatch_call_doc called on non-MessageSend expression".to_string(),
+        ))
+    }
+
+    /// BT-3382: selector/arguments-based core of
+    /// [`Self::generate_self_dispatch_call_doc`] — see that function's doc
+    /// comment (ADR 0111 Addendum 5 / BT-3165) for the shape this builds and
+    /// why the state-version bump (`next_state_var()`) mints exactly where it
+    /// does. Factored out so [`Self::generate_self_dispatch_open_for`] (used
+    /// by `compile_conditional_receiver`, which only has the decomposed
+    /// selector/arguments of an unwrapped-of-parens receiver expression, not
+    /// an owning `MessageSend` node) can reuse the exact same dispatch-call/
+    /// state-threading shape instead of re-deriving a parallel
+    /// implementation (CLAUDE.md's no-duplicate-implementations rule).
+    #[allow(clippy::too_many_lines)] // Document-based sealed/normal dispatch branches
+    pub(super) fn generate_self_dispatch_call_doc_for(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<(Document<'static>, String)> {
         {
             let selector_atom = selector.name().to_string();
             // BT-2822: `selector_atom` is moved into `call_doc` below (some
@@ -2139,12 +2188,12 @@ impl CoreErlangGenerator {
                 "end in ",
             ];
 
-            return Ok((doc, dispatch_var));
+            Ok((doc, dispatch_var))
         }
-        Err(CodeGenError::Internal(
-            "generate_self_dispatch_call_doc called on non-MessageSend expression".to_string(),
-        ))
     }
+
+    /// BT-403: Sealed-class self-dispatch (value-discarding — see
+    /// `generate_self_dispatch`'s call site).
     ///
     /// Two levels of optimization:
     /// 1. **Known sealed method**: Direct function call to `__sealed_{selector}`,

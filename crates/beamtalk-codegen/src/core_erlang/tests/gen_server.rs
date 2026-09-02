@@ -6721,3 +6721,28 @@ fn test_abstract_actor_with_class_method_exports_class_method() {
         "abstract actor's class method must appear in the generated code. Got:\n{code}"
     );
 }
+
+#[test]
+fn bt3382_self_dispatch_receiver_of_conditional_threads_state_and_compiles_through_erlc() {
+    // BT-3382: `(self recordOnce: which) ifTrue:ifFalse:` — the self-send is
+    // the RECEIVER of the conditional, not a block-body statement, so the
+    // `_with_mutations` branch generators' block-mutation scan never even
+    // sees it (neither block body itself contains a mutation). Confirms the
+    // receiver's own mutation is threaded into the branches' base state AND
+    // the generated code is real, erlc-valid Core Erlang (not just
+    // parseable).
+    let src = "Actor subclass: MutProbe\n  state: timestamps = 0\n\n  triggerDirectly: which =>\n    (self recordOnce: which)\n      ifTrue: [1]\n      ifFalse: [2].\n    self.timestamps\n\n  internal recordOnce: which =>\n    self.timestamps := self.timestamps + 1.\n    true\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3382_self_dispatch_receiver_of_conditional")
+            .with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        code.contains("erlang':'element'(2, "),
+        "the self-dispatch's new state must be extracted, not discarded. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3382_self_dispatch_receiver_of_conditional", &code);
+}

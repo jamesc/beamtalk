@@ -1992,9 +1992,11 @@ impl CoreErlangGenerator {
                     if let Expression::Block(block) = &arguments[0] {
                         let analysis = block_analysis::analyze_block(block);
                         // BT-2356: inline when a nested list op mutates an outer local (see IfTrue).
+                        // BT-3382: also inline for a self-send receiver (see IfTrue above).
                         let needs_threading = self.needs_mutation_threading(&analysis)
                             || self.body_has_list_op_cross_scope_mutations(block)
-                            || (self.in_loop_body && !analysis.local_writes.is_empty());
+                            || (self.in_loop_body && !analysis.local_writes.is_empty())
+                            || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
                         if needs_threading {
                             // Validate arity before generating mutation-threaded code.
                             // This ensures a block with >1 params still raises
@@ -2646,9 +2648,16 @@ impl CoreErlangGenerator {
                     // mutates an outer local — otherwise the conditional falls through to a
                     // runtime `send` whose `nil`-on-false result breaks the `{Value, State}`
                     // contract the method-body sequencer expects (badarg on element/2).
+                    // BT-3382: also inline when the RECEIVER itself is an actor self-send
+                    // (`(self recordOnce: x) ifTrue:...`) — its own state mutation must be
+                    // threaded through before evaluating either branch, even when neither
+                    // block contains a mutation of its own. See
+                    // `compile_conditional_receiver`'s doc comment for how the receiver
+                    // position threads it.
                     let needs_threading = self.needs_mutation_threading(&analysis)
                         || self.body_has_list_op_cross_scope_mutations(block)
-                        || (self.in_loop_body && !analysis.local_writes.is_empty());
+                        || (self.in_loop_body && !analysis.local_writes.is_empty())
+                        || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
                     if needs_threading {
                         // BT-1392: Set repl_loop_mutated so the REPL unpacks {Result, State}
                         if self.is_repl_mode() {
@@ -2664,9 +2673,11 @@ impl CoreErlangGenerator {
                 if let Expression::Block(block) = &arguments[0] {
                     let analysis = block_analysis::analyze_block(block);
                     // BT-2356: inline when a nested list op mutates an outer local (see IfTrue).
+                    // BT-3382: also inline for a self-send receiver (see IfTrue above).
                     let needs_threading = self.needs_mutation_threading(&analysis)
                         || self.body_has_list_op_cross_scope_mutations(block)
-                        || (self.in_loop_body && !analysis.local_writes.is_empty());
+                        || (self.in_loop_body && !analysis.local_writes.is_empty())
+                        || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
                     if needs_threading {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
@@ -2685,13 +2696,15 @@ impl CoreErlangGenerator {
                     let false_analysis = block_analysis::analyze_block(false_block);
                     // BT-2356: inline when either branch has a nested list op mutating an
                     // outer local (see IfTrue).
+                    // BT-3382: also inline for a self-send receiver (see IfTrue above).
                     let needs_threading = self.needs_mutation_threading(&true_analysis)
                         || self.needs_mutation_threading(&false_analysis)
                         || self.body_has_list_op_cross_scope_mutations(true_block)
                         || self.body_has_list_op_cross_scope_mutations(false_block)
                         || (self.in_loop_body
                             && (!true_analysis.local_writes.is_empty()
-                                || !false_analysis.local_writes.is_empty()));
+                                || !false_analysis.local_writes.is_empty()))
+                        || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
                     if needs_threading {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
