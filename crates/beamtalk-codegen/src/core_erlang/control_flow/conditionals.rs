@@ -59,7 +59,7 @@ use super::StateAccFallbackReason;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Block, Expression};
+use beamtalk_core::ast::{Block, Expression, MessageSelector};
 use beamtalk_core::source_analysis::Span;
 
 impl CoreErlangGenerator {
@@ -189,6 +189,115 @@ impl CoreErlangGenerator {
         })
     }
 
+    /// BT-3392: recursively dispatches every actor self-send nested as an
+    /// operand of a binary-operator chain within `expr` — e.g. both `self
+    /// a`s in `(self a) + ((self a) * 2)` — via a real `ThreadedStmt::Bind`
+    /// (`dispatch_self_send_as_bind`, the same mechanism C11/C12b above use),
+    /// in left-to-right evaluation order, *before* the C12 catch-all in
+    /// `generate_conditional_branch_inline` compiles this statement.
+    /// Registers each dispatch's result variable in
+    /// `hoisted_self_send_results` (keyed by the self-send's own receiver
+    /// span) so `try_handle_self_dispatch` substitutes a reference to it —
+    /// instead of dispatching (and re-running the method) a second time —
+    /// the moment `expression_doc` reaches that same node.
+    ///
+    /// Deliberately narrow: only unwraps parens and recurses through
+    /// `MessageSelector::Binary` sends (`+`, `-`, `*`, `/`, `<`, `==`, …) —
+    /// this is the literal shape BT-3392 confirmed still broken (`1 + (self
+    /// recordOnce: flag)` inside an `ifTrue:` block). It does NOT recurse
+    /// into keyword-message receivers/arguments, block bodies, or
+    /// field-assignment RHS trees — `lower_field_assignment_bind` (a
+    /// completely separate call path, C1 above, never reached from here)
+    /// is exactly the call site whose pre-captured `source_version` a fully
+    /// general "thread every self-dispatch sub-expression" version of this
+    /// mechanism broke during BT-3382's own prototyping (see
+    /// `hoisted_self_send_results`'s doc comment in `mod.rs`) — staying out
+    /// of that tree entirely, rather than trying to special-case it, is
+    /// what keeps this addition safe.
+    ///
+    /// A hoisted self-send's `Bind` always lands in `stmts` ahead of the
+    /// full `expression_doc(expr)` compile at the call site — so it always
+    /// *executes* first, regardless of where in the source tree it sits.
+    /// That's fine among self-sends themselves (this function visits them
+    /// left-to-right, same as their natural evaluation order, and a raise
+    /// from an earlier one still short-circuits the later `Bind`s via
+    /// ordinary Core Erlang `let`-chain semantics) — but it's wrong the
+    /// moment a NON-hoisted operand precedes a self-send in evaluation
+    /// order and that operand could itself raise or have an effect: e.g.
+    /// `(self.items at: idx) + (self bumpCount)` must not run `bumpCount`'s
+    /// mutation before `at:` has had a chance to fail. `safe_to_hoist`
+    /// tracks this left-to-right: it flips to `false` the first time this
+    /// traversal visits an operand that is neither a self-send nor
+    /// provably `is_effect_free_operand` (a literal, plain identifier,
+    /// class reference, or field read), and every self-send visited after
+    /// that point is left un-hoisted — its mutation stays dropped, same as
+    /// every other shape this issue leaves out of scope, rather than being
+    /// reordered ahead of an operand it must not run before.
+    fn hoist_self_sends_for_binary_op(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+        safe_to_hoist: &mut bool,
+    ) -> Result<()> {
+        let expr = expr.unwrap_parens();
+        if self.is_dispatching_actor_self_send(expr) {
+            if *safe_to_hoist {
+                if let Expression::MessageSend { receiver, .. } = expr {
+                    let receiver_span = receiver.span();
+                    let dispatch_var = self.dispatch_self_send_as_bind(expr, frame, span, stmts)?;
+                    self.hoisted_self_send_results
+                        .insert(receiver_span, dispatch_var);
+                }
+            }
+            return Ok(());
+        }
+        if let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } = expr
+        {
+            if matches!(selector, MessageSelector::Binary(_)) {
+                self.hoist_self_sends_for_binary_op(receiver, frame, span, stmts, safe_to_hoist)?;
+                if let Some(arg) = arguments.first() {
+                    self.hoist_self_sends_for_binary_op(arg, frame, span, stmts, safe_to_hoist)?;
+                }
+                return Ok(());
+            }
+        }
+        if !is_effect_free_operand(expr) {
+            *safe_to_hoist = false;
+        }
+        Ok(())
+    }
+}
+
+/// BT-3392: true for an operand that provably cannot raise or have a side
+/// effect, so its relative evaluation order against a hoisted self-send
+/// doesn't matter — a literal, a plain local/parameter identifier, a class
+/// reference, `super`, or a direct field read (recursing into its own
+/// receiver, which is normally `self`/`super`). Anything else — in
+/// particular any message send, including a non-self-send one that could
+/// itself raise (`anArray at: idx`, `respondsTo:`, …) — is conservatively
+/// NOT effect-free. See `hoist_self_sends_for_binary_op`'s doc comment
+/// (`CoreErlangGenerator::hoist_self_sends_for_binary_op`) for why this
+/// matters. A free function, not a method: it recurses on the AST only,
+/// touching no generator state.
+fn is_effect_free_operand(expr: &Expression) -> bool {
+    match expr.unwrap_parens() {
+        Expression::Literal(_, _)
+        | Expression::Identifier(_)
+        | Expression::ClassReference { .. }
+        | Expression::Super(_) => true,
+        Expression::FieldAccess { receiver, .. } => is_effect_free_operand(receiver),
+        _ => false,
+    }
+}
+
+impl CoreErlangGenerator {
     /// Generates inline code for `flag ifTrue: [block]` in actor context
     /// when the block contains field mutations.
     ///
@@ -1263,7 +1372,24 @@ impl CoreErlangGenerator {
                 }
                 // C12 — catch-all pure statements (EarlyReturn, SuperSend,
                 // ErrorSend, Tier2SelfSend, Pure).
+                //
+                // BT-3392: before compiling, hoist (as real `Bind`s pushed
+                // into `stmts`) any self-send nested as a binary-op operand
+                // of this statement, so `try_handle_self_dispatch` reuses
+                // the already-threaded result instead of discarding its
+                // mutation — see `hoist_self_sends_for_binary_op`'s doc
+                // comment. When nothing needed hoisting (the overwhelmingly
+                // common case), this is a no-op and `expression_doc` below
+                // behaves exactly as before.
                 _ => {
+                    let mut safe_to_hoist = true;
+                    self.hoist_self_sends_for_binary_op(
+                        expr,
+                        frame,
+                        span,
+                        &mut stmts,
+                        &mut safe_to_hoist,
+                    )?;
                     if is_last {
                         let result_var = self.fresh_temp_var("BranchResult");
                         let expr_doc = self.expression_doc(expr)?;

@@ -121,6 +121,36 @@ TestCase subclass: ActorConditionalMutationsTest
     self assert: result2 equals: #gaveUp
     self assert: self.c getCount equals: 2
 
+  testSelfSendNestedInBinaryOpOperandThreadsMutation =>
+    // BT-3392: `1 + (self bumpCount: true)` inside an `ifTrue:` block —
+    // the self-send is a binary-op operand, not the block's own top-level
+    // statement and not the conditional's receiver. Without the fix, this
+    // silently drops `bumpCount:`'s mutation even though the arithmetic
+    // (and thus the self-send) demonstrably ran.
+    self assert: (self.c recordViaBinaryOpOperand: true) equals: 1
+
+  testSelfSendAsBinaryOpArgumentDoesNotRunBeforeEarlierRaisingOperand =>
+    // BT-3392 follow-up: `(self.items at: idx) + (self bumpCount: true)` —
+    // the self-send is a binary-op ARGUMENT, and `at:` (a non-self-send
+    // operand that can itself raise) evaluates before it in source order.
+    // Hoisting the self-send unconditionally ahead of `at:` (the original
+    // BT-3392 mechanism) would run bumpCount:'s mutation before `at:` gets
+    // a chance to fail — an out-of-bounds index must raise WITHOUT ever
+    // bumping the count.
+    self should: [
+      self.c orderSensitiveBinaryOp: 99 flag: true
+    ] raise: #index_out_of_bounds
+    self assert: self.c getCount equals: 0
+
+  testSelfSendInsideOnDoProtectedBlockAlreadyThreadsMutation =>
+    // BT-3392: verifies the shape confirmed against the actual
+    // beamtalk-watcher source (`CheckRegistry.bt`'s `spawnMonitorFor:`
+    // pattern) — a self-send as the sole statement of an on:do:-protected
+    // block, itself the sole statement of an ifTrue: block. This was
+    // already correct before BT-3392 (the pre-existing on:do:/C11 handling
+    // covers it); this test pins that down as a regression guard.
+    self assert: (self.c recordViaOnDoProtectedBlock: true) equals: 1
+
   testNonDispatchingSelfSendAsConditionalReceiverDoesNotCrash =>
     // BT-3382 regression: `(self respondsTo: sel) ifTrue:ifFalse:` — the
     // receiver is a self-send, but `respondsTo:` is intercepted before
