@@ -214,13 +214,33 @@ impl CoreErlangGenerator {
     /// `hoisted_self_send_results`'s doc comment in `mod.rs`) — staying out
     /// of that tree entirely, rather than trying to special-case it, is
     /// what keeps this addition safe.
+    ///
+    /// `safe_so_far` guards evaluation order: a hoisted self-send's `Bind`
+    /// is pushed into `stmts` — and so runs — *before* `expression_doc`
+    /// later compiles the rest of the statement, including any earlier
+    /// (in source/evaluation order) sibling operand this walk chose not to
+    /// touch (e.g. a keyword-send receiver like `anArray at: idx`). Hoisting
+    /// past such an operand would run the self-send's mutation before that
+    /// operand's own evaluation — including any exception it might raise —
+    /// silently reordering a would-be-aborted mutation into an unconditional
+    /// one. So the walk only hoists a self-send while everything visited so
+    /// far in left-to-right order was itself either a hoisted self-send or a
+    /// provably pure leaf (`is_provably_pure_operand`); the first node that
+    /// isn't either one latches `*safe_so_far = false` for the rest of the
+    /// walk, leaving every self-send from that point on exactly as
+    /// unthreaded as it was before this fix (a pre-existing limitation
+    /// tracked by BT-3396, not a regression).
     fn hoist_self_sends_for_binary_op(
         &mut self,
         expr: &Expression,
         frame: FrameId,
         span: Span,
         stmts: &mut Vec<ThreadedStmt>,
+        safe_so_far: &mut bool,
     ) -> Result<()> {
+        if !*safe_so_far {
+            return Ok(());
+        }
         let expr = expr.unwrap_parens();
         if self.is_dispatching_actor_self_send(expr) {
             if let Expression::MessageSend { receiver, .. } = expr {
@@ -239,13 +259,29 @@ impl CoreErlangGenerator {
         } = expr
         {
             if matches!(selector, MessageSelector::Binary(_)) {
-                self.hoist_self_sends_for_binary_op(receiver, frame, span, stmts)?;
-                if let Some(arg) = arguments.first() {
-                    self.hoist_self_sends_for_binary_op(arg, frame, span, stmts)?;
+                self.hoist_self_sends_for_binary_op(receiver, frame, span, stmts, safe_so_far)?;
+                if *safe_so_far {
+                    if let Some(arg) = arguments.first() {
+                        self.hoist_self_sends_for_binary_op(arg, frame, span, stmts, safe_so_far)?;
+                    }
                 }
+                return Ok(());
             }
         }
+        if !Self::is_provably_pure_operand(expr) {
+            *safe_so_far = false;
+        }
         Ok(())
+    }
+
+    /// BT-3392: whether `expr` is provably free of side effects and cannot
+    /// raise — a `Literal` or a plain (non-`self`-send) `Identifier` read.
+    /// Deliberately conservative: anything else (message sends, field
+    /// access, blocks, …) is treated as potentially effectful, which only
+    /// makes `hoist_self_sends_for_binary_op` hoist less, never more, than
+    /// is safe. See that function's doc comment for why this matters.
+    fn is_provably_pure_operand(expr: &Expression) -> bool {
+        matches!(expr, Expression::Literal(..) | Expression::Identifier(_))
     }
 
     /// Generates inline code for `flag ifTrue: [block]` in actor context
@@ -1332,7 +1368,14 @@ impl CoreErlangGenerator {
                 // common case), this is a no-op and `expression_doc` below
                 // behaves exactly as before.
                 _ => {
-                    self.hoist_self_sends_for_binary_op(expr, frame, span, &mut stmts)?;
+                    let mut safe_to_hoist = true;
+                    self.hoist_self_sends_for_binary_op(
+                        expr,
+                        frame,
+                        span,
+                        &mut stmts,
+                        &mut safe_to_hoist,
+                    )?;
                     if is_last {
                         let result_var = self.fresh_temp_var("BranchResult");
                         let expr_doc = self.expression_doc(expr)?;

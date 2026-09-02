@@ -6770,3 +6770,24 @@ fn bt3392_self_dispatch_nested_in_binary_op_operand_threads_state_and_compiles_t
     );
     assert_compiles_through_erlc("bt3392_self_dispatch_nested_in_binary_op_operand", &code);
 }
+
+#[test]
+fn bt3392_binary_op_hoist_does_not_reorder_past_a_non_self_send_operand() {
+    // BT-3392 code review finding: `(self.items at: idx) + (self
+    // bumpCount)` — the left operand is a message send but NOT a self-send,
+    // so `hoist_self_sends_for_binary_op` must not treat it as safe to
+    // hoist past. Confirms the self-dispatch for `bumpCount` is compiled
+    // in its ordinary (non-hoisted) position — i.e. as part of
+    // `expression_doc`'s normal left-to-right compilation of the whole
+    // statement — rather than pulled out ahead of `at:`'s evaluation. The
+    // generated code must still be real, erlc-valid Core Erlang.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = 0\n\n  triggerDirectly: flag =>\n    flag ifTrue: [\n      (self.items at: 1) + (self bumpCount)\n    ] ifFalse: [\n      0\n    ].\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3392_binary_op_hoist_order_safety").with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert_compiles_through_erlc("bt3392_binary_op_hoist_order_safety", &code);
+}

@@ -6,6 +6,7 @@
 
 Actor subclass: ConditionalMutationCounter
   state: count = 0
+  state: items = #()
 
   // Increment count only when flag is true
   conditionalIncrement: flag =>
@@ -91,6 +92,17 @@ Actor subclass: ConditionalMutationCounter
   internal bumpCount: _unused =>
     self.count := self.count + 1
     1
+
+  // BT-3392 evaluation-order regression: the LEFT operand
+  // (`self.items at: 99`, out of bounds) is NOT a self-send, so
+  // `hoist_self_sends_for_binary_op` must not hoist it, and it must also
+  // stop the RIGHT operand's self-send (`bumpCount:`) from being hoisted
+  // past it — the raise must happen before any mutation, exactly as if
+  // hoisting didn't exist. Left uncaught here on purpose: the calling test
+  // wraps the call in `on: Error do:` and asserts the mutation never ran.
+  recordViaBinaryOpWithRaisingLeftOperand: flag =>
+    flag ifTrue: [(self.items at: 99) + (self bumpCount: true)] ifFalse: [0]
+    self.count
 
   // BT-3392: verifies (rather than fixes) a shape confirmed by inspecting
   // github.com/jamesc/beamtalk-watcher's actual `CheckRegistry.bt` — a
