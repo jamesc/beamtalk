@@ -785,6 +785,14 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // BT-3391: Warn when a TestCase subclass's `setUp` mutates a field via
+    // `self.field := value` but its last statement doesn't return the
+    // updated self — the mutation is silently dropped for the test method.
+    validators::check_testcase_setup_drops_field_assignments(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     // ADR 0103: `handleScope:` is only meaningful on Object-kind classes.
     validators::check_handle_scope_on_object(
         module,

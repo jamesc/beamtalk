@@ -41,6 +41,7 @@ pub use lint_validators::check_effect_free_statements;
 pub(crate) use lint_validators::{
     check_empty_method_bodies, check_literal_boolean_condition, check_redundant_assignment,
     check_redundant_local_type_annotation, check_redundant_super_initialize,
+    check_testcase_setup_drops_field_assignments,
 };
 pub(crate) use match_validators::{
     check_match_exhaustiveness, check_type_pattern_classes, is_concrete_leaf_class,

@@ -5995,14 +5995,14 @@ Each `AtomicCounter` owns its own named ETS table. When `delete` is called, the 
 TestCase subclass: CounterTest
   field: counter = nil
 
-  setUp => self withCounter: (Counter spawn)
+  setUp => self.counter := Counter spawn
 
   testIncrement =>
     self.counter increment.
     self assert: (self.counter getValue) equals: 1
 ```
 
-For multiple fields, `with*:` calls chain via cascades:
+For multiple fields, chain the assignments — the LAST statement is what the runner threads through as `self`:
 
 ```beamtalk
 TestCase subclass: IntegrationTest
@@ -6010,7 +6010,8 @@ TestCase subclass: IntegrationTest
   field: cache = nil
 
   setUp =>
-    (self withDb: (DB connect)) withCache: (Cache spawn)
+    self.db := DB connect
+    self.cache := Cache spawn
 
   testLookup =>
     self.cache at: "key" put: "value".
@@ -6019,8 +6020,31 @@ TestCase subclass: IntegrationTest
 
 **Key points:**
 - Declare test instance variables with `field:` (not `state:`) since TestCase is a Value subclass
-- `setUp` returns a new self via `with*:` methods instead of using `self.x :=` assignment
+- `self.field := value` in the LAST statement of `setUp` returns the updated self — this is a special case for value-type field assignment (BT-833/BT-900), not the general rule that a bare assignment evaluates to the assigned value
 - Each test method receives the setUp'd value as `self` — mutations to actor references work normally, but `self` itself is immutable
+
+**Any statement after the last `self.field := value` silently drops that field** (BT-3391) — `setUp`'s return value is always its last expression's value, and only a trailing field assignment (or bare `self`) evaluates to the updated self. Adding one more line after your last assignment — a `super setUp` call, a log line, an unrelated local — makes `setUp` return THAT statement's value instead, and every field set above it reads back as its default in every test method, with no compile or runtime error:
+
+```beamtalk
+setUp =>
+  self.db := DB connect
+  self.cache := Cache spawn
+  Transcript show: "set up".   // <- adding this line breaks self.db and self.cache!
+```
+
+Fix it by ending with an explicit trailing `self`:
+
+```beamtalk
+setUp =>
+  self.db := DB connect
+  self.cache := Cache spawn
+  Transcript show: "set up".
+  self   // <- carries both field mutations forward
+```
+
+`beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field via `self.field := value` and its last statement isn't a bare `self` or another field assignment.
+
+Chained `with*:` setters (`self withCounter: (Counter spawn)`) remain a valid alternative — each `with*:` call itself ends in a field assignment internally, so the chain's own last call already returns the fully updated self without needing a trailing `self`.
 
 #### Suite-Level Setup — setUpOnce / tearDownOnce
 
