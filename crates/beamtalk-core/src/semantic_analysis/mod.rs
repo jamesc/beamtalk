@@ -435,6 +435,14 @@ impl<'a> AnalysisContext<'a> {
         self.cross_file_extensions = Some(cross_file_extensions);
         self
     }
+
+    /// Whether the module being analysed comes from a `stubs/` directory
+    /// (ADR 0075, BT-1846/BT-1847) — see the `is_stub_file` field's own doc.
+    #[must_use]
+    pub fn with_is_stub_file(mut self, is_stub_file: bool) -> Self {
+        self.is_stub_file = is_stub_file;
+        self
+    }
 }
 
 /// Perform semantic analysis on a module.

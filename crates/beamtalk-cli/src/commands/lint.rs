@@ -255,7 +255,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     let native_type_registry = package_root.as_deref().and_then(|root| {
         let layout = crate::commands::build_layout::BuildLayout::new(root);
         let auto_extract = super::build::extract_type_specs(&layout, true, false);
-        match super::build::load_project_stub_registry(root, auto_extract.as_ref()) {
+        match super::build::load_project_stub_registry(root, auto_extract.as_ref(), format) {
             Some((stub_registry, _stub_diags)) => {
                 let mut merged = auto_extract.unwrap_or_default();
                 merged.apply_overrides(stub_registry);

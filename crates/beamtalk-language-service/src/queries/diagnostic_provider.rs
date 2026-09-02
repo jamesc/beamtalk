@@ -81,6 +81,14 @@ pub struct ProjectDiagnosticContext<'a> {
     /// can never disagree about the resulting severity — see
     /// `beamtalk_core::compilation::diagnostics_policy::apply_diagnostics_table`.
     pub diagnostics_overrides: beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
+    /// Whether the file being analysed lives under a project's `stubs/`
+    /// directory (ADR 0075, BT-1846/BT-1847) — `declare native:` is only
+    /// legal there. Callers derive this from the file path they're about to
+    /// analyse (e.g. `SimpleLanguageService::diagnostics`); defaulting to
+    /// `false` matches `AnalysisContext::is_stub_file`'s own default, so a
+    /// caller that never sets this still correctly rejects `declare native:`
+    /// outside `stubs/`.
+    pub is_stub_file: bool,
 }
 
 /// Unified post-analysis diagnostic pipeline (BT-2009).
@@ -144,7 +152,8 @@ pub fn compute_project_diagnostics_with_analysis(
         .with_pre_loaded_protocols(ctx.pre_loaded_protocols.clone())
         .with_pre_loaded_aliases(ctx.pre_loaded_aliases.clone())
         .with_native_type_registry(ctx.native_type_registry.clone())
-        .with_cross_file_extensions(&ctx.cross_file_extensions);
+        .with_cross_file_extensions(&ctx.cross_file_extensions)
+        .with_is_stub_file(ctx.is_stub_file);
     let mut analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
     // BT-3123: diagnostics are consumed below (and by every downstream pass
     // in this pipeline); take them out of `analysis_result` so the rest of

@@ -16,6 +16,7 @@ use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, error, info, instrument, warn};
 
+use super::OutputFormat;
 use super::app_file;
 use super::manifest;
 use super::manifest::NativeDependencyMap;
@@ -857,6 +858,7 @@ fn compile_to_beam(
 
 /// Phase 5-8: Build the class index (Pass 1), merge dependency indexes,
 /// compile changed source files (Pass 2), and compile Core Erlang to BEAM.
+#[allow(clippy::too_many_lines)] // orchestration function — one call per build phase
 fn execute_build_passes(
     env: &BuildEnvironment,
     options: &beamtalk_core::CompilerOptions,
@@ -884,15 +886,18 @@ fn execute_build_passes(
     // ADR 0075 Phase 2 (BT-1847): project-local stubs/ override auto-extract
     // at the function/arity level. Computed against the pre-merge
     // auto-extract registry so the drift check has real ground truth.
-    let (native_type_registry, stub_diagnostics) =
-        match load_project_stub_registry(&env.project_root, auto_extract_registry.as_ref()) {
-            Some((stub_registry, diags)) => {
-                let mut merged = auto_extract_registry.unwrap_or_default();
-                merged.apply_overrides(stub_registry);
-                (Some(merged), diags)
-            }
-            None => (auto_extract_registry, Vec::new()),
-        };
+    let (native_type_registry, stub_diagnostics) = match load_project_stub_registry(
+        &env.project_root,
+        auto_extract_registry.as_ref(),
+        OutputFormat::Text,
+    ) {
+        Some((stub_registry, diags)) => {
+            let mut merged = auto_extract_registry.unwrap_or_default();
+            merged.apply_overrides(stub_registry);
+            (Some(merged), diags)
+        }
+        None => (auto_extract_registry, Vec::new()),
+    };
     let native_type_registry = native_type_registry.map(std::sync::Arc::new);
 
     let file_module_pairs = compute_file_module_pairs(env)?;
@@ -1154,9 +1159,18 @@ pub(crate) fn extract_type_specs(
 /// Shared by `beamtalk build` and `beamtalk lint`, mirroring
 /// [`extract_type_specs`]'s "single source of truth" role, so both surfaces
 /// agree on stub-derived types by construction.
+///
+/// `format` controls how each stub diagnostic (skipped signature, version
+/// drift) is rendered as it's discovered — `beamtalk build` always passes
+/// [`OutputFormat::Text`] (it has no JSON mode); `beamtalk lint` passes its
+/// own `--format`, so a stub diagnostic streams as a JSON line under
+/// `lint --format=json` the same way every other lint diagnostic does,
+/// instead of always printing miette text regardless of the caller's
+/// requested format.
 pub(crate) fn load_project_stub_registry(
     project_root: &Utf8Path,
     auto_extract: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+    format: OutputFormat,
 ) -> Option<(
     beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
     Vec<beamtalk_core::source_analysis::Diagnostic>,
@@ -1235,17 +1249,46 @@ pub(crate) fn load_project_stub_registry(
         // Render immediately against this file's own source, mirroring
         // `compile_source_with_bindings`'s rendering for src/ files —
         // without it, a drift or skipped-signature warning would only ever
-        // show up as an anonymous count in the build summary.
+        // show up as an anonymous count in the build summary. Respects
+        // `format` so `lint --format=json` gets these as JSON lines too
+        // (see this function's doc).
         for diagnostic in &file_diagnostics {
             if diagnostic.severity == beamtalk_core::source_analysis::Severity::Lint {
                 continue;
             }
-            let compile_diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
-                diagnostic,
-                file.as_str(),
-                &source,
-            );
-            eprintln!("{:?}", miette::Report::new(compile_diag));
+            match format {
+                OutputFormat::Text => {
+                    let compile_diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
+                        diagnostic,
+                        file.as_str(),
+                        &source,
+                    );
+                    eprintln!("{:?}", miette::Report::new(compile_diag));
+                }
+                OutputFormat::Json => {
+                    let notes: Vec<serde_json::Value> = diagnostic
+                        .notes
+                        .iter()
+                        .map(|n| {
+                            serde_json::json!({
+                                "message": n.message.as_str(),
+                                "span_start": n.span.map(beamtalk_core::source_analysis::Span::start),
+                                "span_end": n.span.map(beamtalk_core::source_analysis::Span::end),
+                            })
+                        })
+                        .collect();
+                    let json = serde_json::json!({
+                        "file": file.as_str(),
+                        "severity": format!("{:?}", diagnostic.severity).to_lowercase(),
+                        "message": diagnostic.message.as_str(),
+                        "span_start": diagnostic.span.start(),
+                        "span_end": diagnostic.span.end(),
+                        "hint": diagnostic.hint.as_deref(),
+                        "notes": notes,
+                    });
+                    println!("{json}");
+                }
+            }
         }
 
         all_diagnostics.extend(file_diagnostics);
@@ -2924,7 +2967,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let project_path = create_test_project(&temp);
 
-        assert!(load_project_stub_registry(&project_path, None).is_none());
+        assert!(load_project_stub_registry(&project_path, None, OutputFormat::Text).is_none());
     }
 
     #[test]
@@ -2935,7 +2978,7 @@ mod tests {
         fs::create_dir_all(&stubs_path).unwrap();
         write_test_file(&stubs_path.join("README.md"), "not a stub");
 
-        assert!(load_project_stub_registry(&project_path, None).is_none());
+        assert!(load_project_stub_registry(&project_path, None, OutputFormat::Text).is_none());
     }
 
     #[test]
@@ -2949,7 +2992,8 @@ mod tests {
             "declare native: lists\n  reverse: list :: List -> List\n",
         );
 
-        let (registry, diags) = load_project_stub_registry(&project_path, None).unwrap();
+        let (registry, diags) =
+            load_project_stub_registry(&project_path, None, OutputFormat::Text).unwrap();
 
         assert!(diags.is_empty());
         let sig = registry.lookup("lists", "reverse", 1).unwrap();
@@ -2974,7 +3018,8 @@ mod tests {
             "declare native: lists\n  sort: list -> List\n",
         );
 
-        let (registry, _diags) = load_project_stub_registry(&project_path, None).unwrap();
+        let (registry, _diags) =
+            load_project_stub_registry(&project_path, None, OutputFormat::Text).unwrap();
 
         assert_eq!(registry.module_functions("lists").unwrap().len(), 2);
         assert!(registry.lookup("lists", "reverse", 1).is_some());
@@ -3011,7 +3056,8 @@ mod tests {
         );
 
         let (registry, diags) =
-            load_project_stub_registry(&project_path, Some(&auto_extract)).unwrap();
+            load_project_stub_registry(&project_path, Some(&auto_extract), OutputFormat::Text)
+                .unwrap();
 
         // `bogus/1` isn't a real `lists` export — one drift warning.
         assert_eq!(diags.len(), 1);
@@ -3037,7 +3083,8 @@ mod tests {
             beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new();
 
         let (_registry, diags) =
-            load_project_stub_registry(&project_path, Some(&auto_extract)).unwrap();
+            load_project_stub_registry(&project_path, Some(&auto_extract), OutputFormat::Text)
+                .unwrap();
 
         assert!(diags.is_empty());
     }
