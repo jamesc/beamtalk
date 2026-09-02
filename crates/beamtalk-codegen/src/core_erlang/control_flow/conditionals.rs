@@ -525,7 +525,7 @@ impl CoreErlangGenerator {
             )
             .with_hint(
                 "extract this self-send into its own statement before the expression, or \
-                 reorder the binary-op chain so the self-send is evaluated first",
+                 reorder the expression so the self-send is evaluated first",
             )
             .with_category(DiagnosticCategory::Type),
         );
