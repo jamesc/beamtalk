@@ -5,18 +5,22 @@
 // do: and size) correctly inherits the abstract Collection protocol
 
 TestCase subclass: CustomCollectionTest
+  field: col = nil
+  field: empty = nil
+
+  setUp =>
+    self.col := NumberList new: #{#items => #(1, 2, 3)}
+    self.empty := NumberList new: #{#items => #()}
 
   testInheritedInjectInto =>
-    col := NumberList new: #{#items => #(1, 2, 3)}
-    self assert: (col inject: 0 into: [:sum :x | sum + x]) equals: 6
+    self assert: (self.col inject: 0 into: [:sum :x | sum + x]) equals: 6
     // Non-commutative: verifies block arg order is (accumulator, element)
-    self assert: (col inject: #() into: [:acc :x |
+    self assert: (self.col inject: #() into: [:acc :x |
       acc addFirst: x
     ]) equals: #(3, 2, 1)
 
   testInheritedCollect =>
-    col := NumberList new: #{#items => #(1, 2, 3)}
-    self assert: (col collect: [:x | x * 2]) equals: #(2, 4, 6)
+    self assert: (self.col collect: [:x | x * 2]) equals: #(2, 4, 6)
 
   testInheritedSelect =>
     col := NumberList new: #{#items => #(1, 2, 3, 4)}
@@ -27,56 +31,48 @@ TestCase subclass: CustomCollectionTest
     self assert: (col reject: [:x | x > 2]) equals: #(1, 2)
 
   testInheritedIncludes =>
-    col := NumberList new: #{#items => #(1, 2, 3)}
-    self assert: (col includes: 2)
-    self deny: (col includes: 9)
+    self assert: (self.col includes: 2)
+    self deny: (self.col includes: 9)
 
   testInheritedIsEmpty =>
-    empty := NumberList new: #{#items => #()}
-    self assert: empty isEmpty
-    self deny: empty isNotEmpty
+    self assert: self.empty isEmpty
+    self deny: self.empty isNotEmpty
     col := NumberList new: #{#items => #(1)}
     self deny: col isEmpty
     self assert: col isNotEmpty
 
   testInheritedDetect =>
-    col := NumberList new: #{#items => #(1, 2, 3)}
-    self assert: (col detect: [:x | x > 1]) equals: 2
+    self assert: (self.col detect: [:x | x > 1]) equals: 2
 
   testInheritedDetectIfNone =>
-    col := NumberList new: #{#items => #(1, 2, 3)}
-    self assert: (col detect: [:x | x > 10] ifNone: [0]) equals: 0
+    self assert: (self.col detect: [:x | x > 10] ifNone: [0]) equals: 0
 
   // BT-3028: the inherited `detect:` raises on a no-match, and the error names
   // the *receiver's* class rather than the abstract `Collection` the method is
   // defined on — so a user-defined subclass reports itself.
   testInheritedDetectNoMatchNamesReceiverClass =>
-    col := NumberList new: #{#items => #(1, 2, 3)}
     errorClass := [
-      col detect: [:x | x > 10]
+      self.col detect: [:x | x > 10]
     ] on: RuntimeError do: [:e | e errorClass asString]
     self assert: errorClass equals: "NumberList"
 
   testInheritedAnySatisfy =>
-    col := NumberList new: #{#items => #(1, 2, 3)}
-    self assert: (col anySatisfy: [:x | x > 2])
-    self deny: (col anySatisfy: [:x | x > 5])
+    self assert: (self.col anySatisfy: [:x | x > 2])
+    self deny: (self.col anySatisfy: [:x | x > 5])
 
   testInheritedAllSatisfy =>
-    col := NumberList new: #{#items => #(1, 2, 3)}
-    self assert: (col allSatisfy: [:x | x > 0])
-    self deny: (col allSatisfy: [:x | x > 1])
+    self assert: (self.col allSatisfy: [:x | x > 0])
+    self deny: (self.col allSatisfy: [:x | x > 1])
 
   testEmptyCollectionEdgeCases =>
-    empty := NumberList new: #{#items => #()}
-    self assert: (empty inject: 0 into: [:acc :x | acc + x]) equals: 0
-    self assert: (empty collect: [:x | x * 2]) equals: #()
-    self assert: (empty select: [:x | x > 0]) equals: #()
-    self assert: (empty reject: [:x | x > 0]) equals: #()
-    self deny: (empty includes: 1)
+    self assert: (self.empty inject: 0 into: [:acc :x | acc + x]) equals: 0
+    self assert: (self.empty collect: [:x | x * 2]) equals: #()
+    self assert: (self.empty select: [:x | x > 0]) equals: #()
+    self assert: (self.empty reject: [:x | x > 0]) equals: #()
+    self deny: (self.empty includes: 1)
     // BT-3028: `detect:` answers `E`, so a no-match raises rather than
     // answering nil — an empty receiver is just the degenerate no-match case.
-    self should: [empty detect: [:x | x > 0]] raise: #not_found
-    self assert: (empty detect: [:x | x > 0] ifNone: [42]) equals: 42
-    self deny: (empty anySatisfy: [:x | x > 0])
-    self assert: (empty allSatisfy: [:x | x > 0])
+    self should: [self.empty detect: [:x | x > 0]] raise: #not_found
+    self assert: (self.empty detect: [:x | x > 0] ifNone: [42]) equals: 42
+    self deny: (self.empty anySatisfy: [:x | x > 0])
+    self assert: (self.empty allSatisfy: [:x | x > 0])
