@@ -6816,3 +6816,126 @@ fn bt3392_binary_op_hoist_does_not_reorder_past_a_non_self_send_operand() {
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert_compiles_through_erlc("bt3392_binary_op_hoist_order_safety", &code);
 }
+
+#[test]
+fn bt3396_self_dispatch_nested_in_conditional_receiver_and_threads_state_and_compiles_through_erlc()
+{
+    // BT-3396 shape 1: `((self recordOnce: which) and: [true]) ifTrue:ifFalse:`
+    // — the conditional's receiver is an `and:` send whose OWN receiver is
+    // the self-send. Neither block mutates, and the receiver is not itself
+    // a self-send (BT-3382's check), so only the widened
+    // `contains_hoistable_self_send` probe makes this conditional inline;
+    // `compile_conditional_receiver` then hoists the nested dispatch ahead
+    // of the `and:` send. The generated code must be real, erlc-valid Core
+    // Erlang.
+    let src = "Actor subclass: MutProbe\n  state: timestamps = 0\n\n  triggerDirectly: which =>\n    ((self recordOnce: which) and: [true])\n      ifTrue: [1]\n      ifFalse: [2].\n    self.timestamps\n\n  internal recordOnce: which =>\n    self.timestamps := self.timestamps + 1.\n    which\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3396_self_dispatch_nested_in_conditional_receiver_and")
+            .with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        code.contains("erlang':'element'(2, "),
+        "the nested self-dispatch's new state must be extracted, not discarded. Got:\n{code}"
+    );
+    assert_eq!(
+        code.matches("'safe_dispatch'('recordOnce:'").count(),
+        1,
+        "the hoisted self-send must be dispatched exactly once (hoist, then substitute). Got:\n{code}"
+    );
+    assert_compiles_through_erlc(
+        "bt3396_self_dispatch_nested_in_conditional_receiver_and",
+        &code,
+    );
+}
+
+#[test]
+fn bt3396_self_dispatch_as_keyword_argument_in_method_body_threads_state_and_compiles_through_erlc()
+{
+    // BT-3396 shape 2: `#(10, 20, 30) at: (self bumpCount)` as a top-level
+    // method-body statement (`BodyExprKind::Pure`, not inside any
+    // conditional) — the self-send is an argument to an arbitrary non-self
+    // keyword send. The method-body `Pure` arm must hoist it as a real
+    // ROOT-frame `Bind` ahead of the statement.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    #(10, 20, 30) at: (self bumpCount).\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3396_self_dispatch_as_keyword_argument").with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        code.contains("erlang':'element'(2, "),
+        "the self-dispatch's new state must be extracted, not discarded. Got:\n{code}"
+    );
+    assert_eq!(
+        code.matches("'safe_dispatch'('bumpCount'").count(),
+        1,
+        "the hoisted self-send must be dispatched exactly once. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3396_self_dispatch_as_keyword_argument", &code);
+}
+
+#[test]
+fn bt3396_self_dispatch_in_field_assignment_rhs_snapshots_prior_field_read_and_compiles_through_erlc()
+ {
+    // BT-3396 shape 3 + evaluation order: `self.count := self.count + (self
+    // bumpCount)` — the self-send is a sub-expression of a field
+    // assignment's RHS (the `lower_field_assignment_bind`/`FieldAssignment`
+    // `source_version` hazard BT-3382's reverted prototype hit), AND the
+    // `self.count` read precedes it in evaluation order. The read must be
+    // snapshotted into a temp BEFORE the hoisted dispatch runs, so it
+    // keeps its source-order (pre-bump) value.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    self.count := self.count + (self bumpCount).\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3396_self_dispatch_in_field_assignment_rhs")
+            .with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let snapshot_at = code.find("FieldSnap").unwrap_or_else(|| {
+        panic!("the preceding self.count read must be snapshotted. Got:\n{code}")
+    });
+    let dispatch_at = code
+        .find("'safe_dispatch'('bumpCount'")
+        .unwrap_or_else(|| panic!("the nested self-send must be dispatched. Got:\n{code}"));
+    assert!(
+        snapshot_at < dispatch_at,
+        "the field-read snapshot must be bound BEFORE the hoisted dispatch runs. Got:\n{code}"
+    );
+    assert_eq!(
+        code.matches("'safe_dispatch'('bumpCount'").count(),
+        1,
+        "the hoisted self-send must be dispatched exactly once. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3396_self_dispatch_in_field_assignment_rhs", &code);
+}
+
+#[test]
+fn bt3396_self_dispatch_after_order_unsafe_operand_is_still_not_hoisted() {
+    // BT-3396 keeps BT-3392's order-safety gate: a self-send that follows a
+    // non-self, non-effect-free operand (`printString` may raise) in
+    // evaluation order must NOT be hoisted ahead of it — `(x printString)
+    // ++ (self bumpCount) printString` leaves `bumpCount` in its natural
+    // (non-hoisted, BT-3399-tracked) position. No `FieldSnap`/hoisted
+    // `Bind` for it, and the code still compiles.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly: x =>\n    (x printString) ++ (self bumpCount) printString.\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3396_order_unsafe_operand_not_hoisted").with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        !code.contains("erlang':'element'(2, _SD"),
+        "a self-send after an order-unsafe operand must not be hoisted. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3396_order_unsafe_operand_not_hoisted", &code);
+}

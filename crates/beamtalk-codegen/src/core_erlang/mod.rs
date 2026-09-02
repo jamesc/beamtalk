@@ -1793,20 +1793,35 @@ pub struct CoreErlangGenerator {
     /// side effects and, since state was already threaded by the earlier
     /// real `Bind`, verify-fail as an unbound version).
     ///
-    /// Populated by `hoist_self_sends_for_binary_op`
-    /// (`control_flow/conditionals.rs`) immediately before compiling a
-    /// conditional block-body statement — scoped to self-sends nested as an
-    /// operand of a binary-operator chain (e.g. `1 + (self recordOnce:
-    /// x)`), the shape `generate_self_dispatch`'s own doc comment identifies
-    /// as unsafe to thread unconditionally (BT-3382's reverted general fix
-    /// broke `inheriting_counter.bt` by advancing the state-version counter
-    /// as a side effect of compiling a value expression a caller elsewhere
-    /// had already snapshotted the version for). Gating this to explicitly
-    /// pre-hoisted spans, each consumed exactly once via `HashMap::remove`,
-    /// keeps every other self-dispatch call site's behavior — including the
-    /// version-counter side effect — completely unchanged.
+    /// Populated by `hoist_nested_self_sends`
+    /// (`control_flow/conditionals.rs`) immediately before a statement (or
+    /// a conditional's receiver, or an assignment's RHS) is compiled —
+    /// BT-3392 for self-sends nested as a binary-op operand (`1 + (self
+    /// recordOnce: x)`), BT-3396 widened to any order-safe position: a
+    /// message-send argument or receiver (`Array with: (self a)`, `(self
+    /// a) and: [..]`), a literal element, an assignment RHS sub-expression
+    /// (`self.log := self.log ++ #(self a)`). The alternative —
+    /// `generate_self_dispatch` threading state unconditionally — is the
+    /// shape its own doc comment identifies as unsafe (BT-3382's reverted
+    /// general fix broke `inheriting_counter.bt` by advancing the
+    /// state-version counter as a side effect of compiling a value
+    /// expression a caller elsewhere had already snapshotted the version
+    /// for). Gating this to explicitly pre-hoisted spans, each consumed
+    /// exactly once via `HashMap::remove`, keeps every other self-dispatch
+    /// call site's behavior — including the version-counter side effect —
+    /// completely unchanged.
     hoisted_self_send_results:
         std::collections::HashMap<beamtalk_core::source_analysis::Span, String>,
+    /// BT-3396: `self.field` reads already snapshotted into a temp by
+    /// `hoist_nested_self_sends` because a self-send that comes *after*
+    /// them in evaluation order was hoisted ahead of the whole expression —
+    /// keyed by the read's field-identifier `Span`, valued by the temp
+    /// holding the read's source-order (pre-dispatch) value. Consulted and
+    /// consumed by `generate_field_access`, so `self.count + (self
+    /// bumpCount)` reads the count from *before* the bump, as written,
+    /// rather than from the state var the hoisted dispatch's `Bind` just
+    /// advanced.
+    hoisted_field_reads: std::collections::HashMap<beamtalk_core::source_analysis::Span, String>,
     /// BT-845/BT-860: Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     source_path: Option<String>,
@@ -1967,6 +1982,7 @@ impl CoreErlangGenerator {
             current_class_field_types: std::collections::HashMap::new(),
             last_open_scope_result: None,
             hoisted_self_send_results: std::collections::HashMap::new(),
+            hoisted_field_reads: std::collections::HashMap::new(),
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
             tier2_local_vars: std::collections::HashSet::new(),

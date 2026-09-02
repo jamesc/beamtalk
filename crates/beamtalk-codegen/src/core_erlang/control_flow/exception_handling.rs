@@ -53,6 +53,7 @@ use super::super::intrinsics::{
 };
 use super::super::threaded_ir::{BindOp, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result, block_analysis};
+use super::HoistSink;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{join, leaf};
@@ -1097,6 +1098,16 @@ impl CoreErlangGenerator {
                 // `generate_self_dispatch_call_doc` so the bump becomes a
                 // real Bind (Direct rebind, `element(2, _SD)`) instead of
                 // living inside an opaque Statement's text.
+                // BT-3396: `self log: (self nextId)` — thread the
+                // arguments' own self-sends ahead of this dispatch.
+                self.hoist_self_send_arguments(
+                    expr,
+                    &mut HoistSink::Threaded {
+                        stmts: &mut stmts,
+                        frame,
+                        span,
+                    },
+                )?;
                 let source_version = self.state_version();
                 let (call_doc, dispatch_var) = self.generate_self_dispatch_call_doc(expr)?;
                 stmts.push(ThreadedStmt::Statement(call_doc, span));
@@ -1149,6 +1160,17 @@ impl CoreErlangGenerator {
                     // wrapping that directly as `let rv = <open-chain> in`
                     // leaves a dangling `in` — a `core_parse_error`, the
                     // exact failure mode this closes.
+                    // BT-3396: thread every order-safe nested self-send
+                    // (`1 + (self bump)`) as real `Bind`s ahead of the
+                    // compile — the E-side counterpart of C12.
+                    self.hoist_nested_self_sends(
+                        expr,
+                        &mut HoistSink::Threaded {
+                            stmts: &mut stmts,
+                            frame,
+                            span,
+                        },
+                    )?;
                     let rv = self.fresh_temp_var("ExResult");
                     let expr_doc = self.closed_expression_doc(expr)?;
                     stmts.push(ThreadedStmt::Statement(
@@ -1212,6 +1234,15 @@ impl CoreErlangGenerator {
                         // why this must be `closed_expression_doc`, not
                         // plain `expression_doc` — same open-scope hazard,
                         // same fix (BT-2350).
+                        // BT-3396: see the E6 sub-branch above.
+                        self.hoist_nested_self_sends(
+                            expr,
+                            &mut HoistSink::Threaded {
+                                stmts: &mut stmts,
+                                frame,
+                                span,
+                            },
+                        )?;
                         let rv = self.fresh_temp_var("ExResult");
                         let expr_doc = self.closed_expression_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(
@@ -1232,6 +1263,15 @@ impl CoreErlangGenerator {
                 // discard `let`, mirroring `push_discarded_stmt`'s
                 // established idiom (BT-2350), rather than
                 // `closed_expression_doc`'s scope-closing wrap.
+                // BT-3396: see the E6 sub-branch above.
+                self.hoist_nested_self_sends(
+                    expr,
+                    &mut HoistSink::Threaded {
+                        stmts: &mut stmts,
+                        frame,
+                        span,
+                    },
+                )?;
                 let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
                 match open_scope {
                     Some(OpenScopeResult::Value(result_var)) => {
