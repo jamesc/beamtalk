@@ -1900,6 +1900,7 @@ Module {
     method_definitions: [],
     protocols: [],
     type_aliases: [],
+    native_declarations: [],
     expressions: [],
     span: Span {
         start: 681,

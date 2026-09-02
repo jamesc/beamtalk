@@ -37,6 +37,7 @@
 //!     method_definitions: Vec::new(),
 //!     protocols: Vec::new(),
 //!     type_aliases: Vec::new(),
+//!     native_declarations: Vec::new(),
 //!     expressions: vec![
 //!         ExpressionStatement::bare(Expression::Assignment {
 //!             target: Box::new(Expression::Identifier(Identifier {
@@ -129,6 +130,8 @@ pub struct Module {
     pub protocols: Vec<ProtocolDefinition>,
     /// Type alias definitions (ADR 0108, Phase 1: `type Name = ...`).
     pub type_aliases: Vec<TypeAliasDefinition>,
+    /// Native (Erlang FFI) type declarations (ADR 0075, Phase 2: `declare native: ...`).
+    pub native_declarations: Vec<NativeDeclaration>,
     /// Top-level expressions (scripts, REPL input).
     pub expressions: Vec<ExpressionStatement>,
     /// Source location spanning the entire module.
@@ -152,6 +155,7 @@ impl Module {
             method_definitions: Vec::new(),
             protocols: Vec::new(),
             type_aliases: Vec::new(),
+            native_declarations: Vec::new(),
             expressions,
             span,
             file_leading_comments: Vec::new(),
@@ -167,6 +171,7 @@ impl Module {
             method_definitions: Vec::new(),
             protocols: Vec::new(),
             type_aliases: Vec::new(),
+            native_declarations: Vec::new(),
             expressions: Vec::new(),
             span,
             file_leading_comments: Vec::new(),
@@ -186,6 +191,7 @@ impl Module {
             method_definitions: Vec::new(),
             protocols: Vec::new(),
             type_aliases: Vec::new(),
+            native_declarations: Vec::new(),
             expressions,
             span,
             file_leading_comments,

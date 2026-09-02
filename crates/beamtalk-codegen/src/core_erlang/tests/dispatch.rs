@@ -362,6 +362,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
     let module = Module {
         classes: vec![class],
         type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
         expressions: vec![],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -3252,6 +3253,7 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
     let module = Module {
         classes: vec![class],
         type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
         expressions: vec![],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -3335,6 +3337,7 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
         method_definitions: Vec::new(),
         protocols: Vec::new(),
         type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -3413,6 +3416,7 @@ fn test_spawn_with_args_validates_map_argument() {
         method_definitions: Vec::new(),
         protocols: Vec::new(),
         type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
