@@ -303,6 +303,149 @@ fn print_if_matches(line: &str, min_level: Option<LogLevel>, format: Option<LogF
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::{BeamtalkHomeOverride, WorkspaceFixture, real_home_guard};
+
+    // --- run(): argument-validation bail branches (before touching a workspace) ---
+
+    #[test]
+    fn run_rejects_unknown_level_before_resolving_workspace() {
+        // An invalid --level bails out of `run()` before `resolve_log_path`
+        // ever runs, so no BEAMTALK_HOME/workspace fixture is needed here.
+        let err = run(None, false, Some("critical"), None, false).unwrap_err();
+        assert!(err.to_string().contains("Unknown log level"), "{err}");
+    }
+
+    #[test]
+    fn run_rejects_unknown_format_before_resolving_workspace() {
+        let err = run(None, false, None, Some("xml"), false).unwrap_err();
+        assert!(err.to_string().contains("Unknown log format"), "{err}");
+    }
+
+    // --- resolve_log_path: workspace does not exist ---
+
+    #[test]
+    fn resolve_log_path_missing_named_workspace() {
+        let tmp =
+            std::env::temp_dir().join(format!("bt3381-logs-missing-named-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).expect("create tempdir");
+        let _override = BeamtalkHomeOverride::new(&tmp);
+
+        let err = resolve_log_path(Some("nope")).unwrap_err();
+        assert!(
+            err.to_string().contains("Workspace 'nope' does not exist"),
+            "got: {err}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_log_path_missing_cwd_workspace() {
+        let tmp =
+            std::env::temp_dir().join(format!("bt3381-logs-missing-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).expect("create tempdir");
+        let _override = BeamtalkHomeOverride::new(&tmp);
+
+        let err = resolve_log_path(None).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("No workspace found for current directory"),
+            "got: {err}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // --- run(): workspace exists but has no log file yet ---
+
+    #[test]
+    fn run_reports_missing_log_file_for_existing_workspace() {
+        let port = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("local_addr").port();
+            drop(listener);
+            port
+        };
+        let fixture = WorkspaceFixture::new("logs-no-file", port, 999_999);
+
+        let err = run(Some(&fixture.id), false, None, None, false).unwrap_err();
+        assert!(err.to_string().contains("No log file found at"), "{err}");
+    }
+
+    // --- run(): --path-only short-circuits before checking log existence ---
+
+    #[test]
+    fn run_path_only_succeeds_even_without_a_log_file() {
+        let port = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("local_addr").port();
+            drop(listener);
+            port
+        };
+        let fixture = WorkspaceFixture::new("logs-path-only", port, 999_999);
+
+        // No log file was written for this fixture; --path-only must still
+        // succeed (it only prints the path, never checks existence).
+        run(Some(&fixture.id), false, None, None, true).expect("path-only should succeed");
+    }
+
+    // --- show_last_lines ---
+
+    #[test]
+    fn show_last_lines_errors_when_file_missing() {
+        let missing = std::env::temp_dir().join(format!(
+            "bt3381-logs-show-missing-{}.log",
+            std::process::id()
+        ));
+        let err = show_last_lines(&missing, 50, None, None).unwrap_err();
+        assert!(!err.to_string().is_empty());
+    }
+
+    #[test]
+    fn show_last_lines_truncates_to_last_n_and_filters_by_level() {
+        let path = std::env::temp_dir().join(format!(
+            "bt3381-logs-show-truncate-{}.log",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            "[debug] one\n[info] two\n[warning] three\n[error] four\n",
+        )
+        .expect("write temp log");
+
+        // No filter, small n: exercises the saturating_sub truncation path.
+        show_last_lines(&path, 2, None, None).expect("show_last_lines");
+        // With a level filter: exercises matches_level integration.
+        show_last_lines(&path, 50, Some(LogLevel::Warning), None).expect("show_last_lines");
+        // n larger than the number of lines: no truncation needed.
+        show_last_lines(&path, 1000, None, None).expect("show_last_lines");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // --- file_inode / path_inode (Unix) ---
+
+    #[cfg(unix)]
+    #[test]
+    fn file_inode_and_path_inode_agree_for_the_same_file() {
+        let path =
+            std::env::temp_dir().join(format!("bt3381-logs-inode-{}.log", std::process::id()));
+        std::fs::write(&path, "hello\n").expect("write temp file");
+
+        let file = File::open(&path).expect("open temp file");
+        assert_eq!(file_inode(&file), path_inode(&path));
+        assert_ne!(file_inode(&file), 0);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // Documents the invariant that `real_home_guard`/`WorkspaceFixture` tests
+    // in this module never run concurrently with a `BeamtalkHomeOverride`
+    // test (BT-3370's guard pattern), mirroring `attach.rs`'s own test module.
+    #[test]
+    fn real_home_guard_is_available_for_direct_use() {
+        let _guard = real_home_guard();
+    }
 
     // --- LogFormat::from_str_arg ---
 

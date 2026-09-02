@@ -44,32 +44,18 @@ pub fn build_escript(
     options: &beamtalk_core::CompilerOptions,
     force: bool,
 ) -> Result<()> {
-    // Compile the project first (produces the project `bt@*.beam`).
+    // Validate arguments before running the (expensive) build, same
+    // validate-then-build ordering `run.rs`'s `run()` uses around
+    // `validate_class_and_selector`/`prepare_eval_environment` — fail fast on
+    // a bad `--entry`/`-o` instead of paying for a full compile first.
+    let pkg = manifest::find_manifest(project_root)?;
+    let (class_name, selector, is_keyword, output_name) =
+        resolve_entry_and_output(entry, output, pkg.as_ref().map(|p| p.name.as_str()))?;
+
+    // Compile the project (produces the project `bt@*.beam`).
     // Status output goes to stderr, matching `beamtalk run` (BT-2702, BT-2889).
     eprintln!("Building...");
     super::build::build(project_root.as_str(), options, force)?;
-
-    let pkg = manifest::find_manifest(project_root)?;
-
-    let entry = entry.ok_or_else(|| {
-        miette!(
-            "`--escript` requires `--entry \"ClassName selector\"`.\n\
-             Example: beamtalk build --escript --entry \"Greeter main:\" -o greeter"
-        )
-    })?;
-    let (class_name, selector, is_keyword) = parse_entry(entry)?;
-
-    // Output name: explicit, else the package name (lowercased).
-    let output_name = match output {
-        Some(o) => o.to_string(),
-        None => pkg.as_ref().map(|p| p.name.to_lowercase()).ok_or_else(|| {
-            miette!(
-                "No `-o <name>` given and no package manifest to derive one from.\n\
-                     Pass an explicit output name: beamtalk build --escript --entry \
-                     \"{class_name} {selector}\" -o <name>"
-            )
-        })?,
-    };
 
     // The escript boot module is named after the output basename, sanitised to a
     // valid Erlang atom; the bootstrap's `main/1` is its entry point.
@@ -159,6 +145,41 @@ pub fn build_escript(
     );
     info!(output = %output_path, "escript created");
     Ok(())
+}
+
+/// Validate `--entry` and derive the escript output name, before any build
+/// work happens. Returns `(class_name, selector, is_keyword, output_name)`.
+///
+/// `output` wins when given explicitly; otherwise the name is derived from
+/// `pkg_name` (the manifest package name, lowercased). Pulled out of
+/// [`build_escript`] as a pure seam so its argument-validation bail branches
+/// are unit-testable without a real build (BT-3381).
+fn resolve_entry_and_output(
+    entry: Option<&str>,
+    output: Option<&str>,
+    pkg_name: Option<&str>,
+) -> Result<(String, String, bool, String)> {
+    let entry = entry.ok_or_else(|| {
+        miette!(
+            "`--escript` requires `--entry \"ClassName selector\"`.\n\
+             Example: beamtalk build --escript --entry \"Greeter main:\" -o greeter"
+        )
+    })?;
+    let (class_name, selector, is_keyword) = parse_entry(entry)?;
+
+    // Output name: explicit, else the package name (lowercased).
+    let output_name = match output {
+        Some(o) => o.to_string(),
+        None => pkg_name.map(str::to_lowercase).ok_or_else(|| {
+            miette!(
+                "No `-o <name>` given and no package manifest to derive one from.\n\
+                     Pass an explicit output name: beamtalk build --escript --entry \
+                     \"{class_name} {selector}\" -o <name>"
+            )
+        })?,
+    };
+
+    Ok((class_name, selector, is_keyword, output_name))
 }
 
 /// Parse and validate `"ClassName selector"`. Returns `(class, selector, is_keyword)`.
@@ -410,6 +431,55 @@ readf(F) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -- resolve_entry_and_output ---------------------------------------
+
+    #[test]
+    fn test_resolve_entry_and_output_missing_entry_bails() {
+        let err = resolve_entry_and_output(None, Some("greeter"), Some("pkg")).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("`--escript` requires `--entry \"ClassName selector\"`"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_entry_and_output_invalid_entry_propagates_parse_entry_error() {
+        // `parse_entry`'s own error (missing selector) must surface unchanged.
+        let err = resolve_entry_and_output(Some("Greeter"), Some("greeter"), None).unwrap_err();
+        assert!(err.to_string().contains("is missing a selector"), "{err}");
+    }
+
+    #[test]
+    fn test_resolve_entry_and_output_explicit_output_wins_over_package_name() {
+        let (class, sel, kw, output) =
+            resolve_entry_and_output(Some("Greeter main:"), Some("myapp"), Some("pkgname"))
+                .unwrap();
+        assert_eq!(class, "Greeter");
+        assert_eq!(sel, "main:");
+        assert!(kw);
+        assert_eq!(output, "myapp");
+    }
+
+    #[test]
+    fn test_resolve_entry_and_output_derives_from_lowercased_package_name() {
+        let (_, _, _, output) =
+            resolve_entry_and_output(Some("Main run"), None, Some("MyPackage")).unwrap();
+        assert_eq!(output, "mypackage");
+    }
+
+    #[test]
+    fn test_resolve_entry_and_output_no_output_no_package_bails() {
+        let err = resolve_entry_and_output(Some("Main run"), None, None).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("No `-o <name>` given and no package manifest"),
+            "got: {err}"
+        );
+        // The bail message should still reference the parsed entry.
+        assert!(err.to_string().contains("Main run"), "got: {err}");
+    }
 
     #[test]
     fn test_parse_entry_keyword() {
