@@ -33,16 +33,7 @@ use beamtalk_core::ast::{
     Block, CascadeMessage, Expression, Identifier, KeywordPart, Literal, MapPair, MessageSelector,
     MethodDefinition, ParameterDefinition,
 };
-use beamtalk_core::source_analysis::Span;
-
-/// Mirrors the lexer's `is_binary_selector_char` so a symbol-literal selector
-/// can be reclassified as binary/unary/keyword.
-fn is_binary_selector_char(c: char) -> bool {
-    matches!(
-        c,
-        '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
-    )
-}
+use beamtalk_core::source_analysis::{Span, is_binary_selector_char};
 
 /// Returns `true` if `expr` names the `ClassBuilder` class — either as a
 /// `ClassReference` (the usual parse for a capitalised name) or a bare

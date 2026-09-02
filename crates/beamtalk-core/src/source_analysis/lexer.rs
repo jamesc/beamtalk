@@ -1078,15 +1078,15 @@ impl<'src> Lexer<'src> {
         ))
     }
 
-    /// Returns true if the character is a binary selector (operator) character.
+    /// Delegates to the module-level [`super::is_binary_selector_char`].
     ///
-    /// Shared between `lex_binary_selector()` and symbol operator lexing
-    /// in `lex_symbol_or_hash()` to keep the character sets in sync.
+    /// Kept as an associated function so the `Self::is_binary_selector_char`
+    /// and `self.advance_while(Self::is_binary_selector_char)` call sites
+    /// inside `lex_binary_selector` and `lex_symbol_or_hash` do not need
+    /// touching — a single point of truth for the character table lives in
+    /// the parent module where `is_valid_selector` can also reach it.
     fn is_binary_selector_char(c: char) -> bool {
-        matches!(
-            c,
-            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
-        )
+        super::is_binary_selector_char(c)
     }
 
     /// Lexes a binary selector (one or more operator characters).
