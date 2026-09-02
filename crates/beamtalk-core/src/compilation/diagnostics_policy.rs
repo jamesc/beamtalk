@@ -617,7 +617,22 @@ fn apply_expect_directives_impl(
             }
         }
         for method in class.methods.iter().chain(class.class_methods.iter()) {
-            // BT-1856: Collect declaration-level @expect from method declarations
+            // BT-1856: Collect declaration-level @expect from method declarations.
+            //
+            // `contains_block` here is deliberately whole-method, matching a
+            // declaration-level `@expect`'s own suppression scope (it covers
+            // a matching diagnostic ANYWHERE in the method, not just an
+            // adjacent statement — unlike a statement-level `@expect`, which
+            // has no "whole body" to fall back to). This means an unrelated
+            // block literal elsewhere in the same method (e.g. a `do:` loop)
+            // can make a stale, block-free `@expect dead_assignment` (e.g.
+            // one covering only a match-arm assignment) go unflagged by
+            // `build`/`test`/LSP/REPL — `beamtalk lint` still catches it
+            // regardless, and no real diagnostic is ever wrongly suppressed
+            // either way. Accepted as a low-impact miss on the "you can
+            // remove this now-unnecessary pragma" warning rather than
+            // narrowing a method-level directive's target below what it
+            // actually covers.
             if let Some((cat, ref reason, expect_span)) = method.expect {
                 directives.push((
                     cat,
@@ -631,6 +646,8 @@ fn apply_expect_directives_impl(
         }
     }
     for standalone in &module.method_definitions {
+        // Same whole-method `contains_block` scoping as above, and the same
+        // tradeoff — see that loop's comment.
         if let Some((cat, ref reason, expect_span)) = standalone.method.expect {
             directives.push((
                 cat,
