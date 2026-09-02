@@ -1400,6 +1400,9 @@ impl Parser {
             method_definitions,
             protocols,
             type_aliases,
+            // Always empty until BT-1846 wires `declare native:` parsing into
+            // this dispatch loop.
+            native_declarations: Vec::new(),
             expressions,
             span,
             file_leading_comments,

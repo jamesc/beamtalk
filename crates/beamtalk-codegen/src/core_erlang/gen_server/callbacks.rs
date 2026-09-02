@@ -1769,6 +1769,7 @@ mod tests {
             method_definitions: Vec::new(),
             protocols: Vec::new(),
             type_aliases: Vec::new(),
+            native_declarations: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: Vec::new(),
