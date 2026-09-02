@@ -129,6 +129,17 @@ TestCase subclass: ActorConditionalMutationsTest
     // (and thus the self-send) demonstrably ran.
     self assert: (self.c recordViaBinaryOpOperand: true) equals: 1
 
+  testSelfSendAsBinaryOpArgumentDoesNotRunBeforeEarlierRaisingOperand =>
+    // BT-3392 follow-up: `(self.items at: idx) + (self bumpCount: true)` —
+    // the self-send is a binary-op ARGUMENT, and `at:` (a non-self-send
+    // operand that can itself raise) evaluates before it in source order.
+    // Hoisting the self-send unconditionally ahead of `at:` (the original
+    // BT-3392 mechanism) would run bumpCount:'s mutation before `at:` gets
+    // a chance to fail — an out-of-bounds index must raise WITHOUT ever
+    // bumping the count.
+    self should: [self.c orderSensitiveBinaryOp: 99 flag: true] raise: #index_out_of_bounds
+    self assert: self.c getCount equals: 0
+
   testSelfSendInsideOnDoProtectedBlockAlreadyThreadsMutation =>
     // BT-3392: verifies the shape confirmed against the actual
     // beamtalk-watcher source (`CheckRegistry.bt`'s `spawnMonitorFor:`

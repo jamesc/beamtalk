@@ -214,20 +214,43 @@ impl CoreErlangGenerator {
     /// `hoisted_self_send_results`'s doc comment in `mod.rs`) — staying out
     /// of that tree entirely, rather than trying to special-case it, is
     /// what keeps this addition safe.
+    ///
+    /// A hoisted self-send's `Bind` always lands in `stmts` ahead of the
+    /// full `expression_doc(expr)` compile at the call site — so it always
+    /// *executes* first, regardless of where in the source tree it sits.
+    /// That's fine among self-sends themselves (this function visits them
+    /// left-to-right, same as their natural evaluation order, and a raise
+    /// from an earlier one still short-circuits the later `Bind`s via
+    /// ordinary Core Erlang `let`-chain semantics) — but it's wrong the
+    /// moment a NON-hoisted operand precedes a self-send in evaluation
+    /// order and that operand could itself raise or have an effect: e.g.
+    /// `(self.items at: idx) + (self bumpCount)` must not run `bumpCount`'s
+    /// mutation before `at:` has had a chance to fail. `safe_to_hoist`
+    /// tracks this left-to-right: it flips to `false` the first time this
+    /// traversal visits an operand that is neither a self-send nor
+    /// provably `is_effect_free_operand` (a literal, plain identifier,
+    /// class reference, or field read), and every self-send visited after
+    /// that point is left un-hoisted — its mutation stays dropped, same as
+    /// every other shape this issue leaves out of scope, rather than being
+    /// reordered ahead of an operand it must not run before.
     fn hoist_self_sends_for_binary_op(
         &mut self,
         expr: &Expression,
         frame: FrameId,
         span: Span,
         stmts: &mut Vec<ThreadedStmt>,
+        safe_to_hoist: &mut bool,
     ) -> Result<()> {
         let expr = expr.unwrap_parens();
         if self.is_dispatching_actor_self_send(expr) {
-            if let Expression::MessageSend { receiver, .. } = expr {
-                let receiver_span = receiver.span();
-                let dispatch_var = self.dispatch_self_send_as_bind(expr, frame, span, stmts)?;
-                self.hoisted_self_send_results
-                    .insert(receiver_span, dispatch_var);
+            if *safe_to_hoist {
+                if let Expression::MessageSend { receiver, .. } = expr {
+                    let receiver_span = receiver.span();
+                    let dispatch_var =
+                        self.dispatch_self_send_as_bind(expr, frame, span, stmts)?;
+                    self.hoisted_self_send_results
+                        .insert(receiver_span, dispatch_var);
+                }
             }
             return Ok(());
         }
@@ -239,13 +262,37 @@ impl CoreErlangGenerator {
         } = expr
         {
             if matches!(selector, MessageSelector::Binary(_)) {
-                self.hoist_self_sends_for_binary_op(receiver, frame, span, stmts)?;
+                self.hoist_self_sends_for_binary_op(receiver, frame, span, stmts, safe_to_hoist)?;
                 if let Some(arg) = arguments.first() {
-                    self.hoist_self_sends_for_binary_op(arg, frame, span, stmts)?;
+                    self.hoist_self_sends_for_binary_op(arg, frame, span, stmts, safe_to_hoist)?;
                 }
+                return Ok(());
             }
         }
+        if !self.is_effect_free_operand(expr) {
+            *safe_to_hoist = false;
+        }
         Ok(())
+    }
+
+    /// BT-3392: true for an operand that provably cannot raise or have a
+    /// side effect, so its relative evaluation order against a hoisted
+    /// self-send doesn't matter — a literal, a plain local/parameter
+    /// identifier, a class reference, `super`, or a direct field read
+    /// (recursing into its own receiver, which is normally `self`/`super`).
+    /// Anything else — in particular any message send, including a
+    /// non-self-send one that could itself raise (`anArray at: idx`,
+    /// `respondsTo:`, …) — is conservatively NOT effect-free. See
+    /// `hoist_self_sends_for_binary_op`'s doc comment for why this matters.
+    fn is_effect_free_operand(&self, expr: &Expression) -> bool {
+        match expr.unwrap_parens() {
+            Expression::Literal(_, _)
+            | Expression::Identifier(_)
+            | Expression::ClassReference { .. }
+            | Expression::Super(_) => true,
+            Expression::FieldAccess { receiver, .. } => self.is_effect_free_operand(receiver),
+            _ => false,
+        }
     }
 
     /// Generates inline code for `flag ifTrue: [block]` in actor context
@@ -1332,7 +1379,14 @@ impl CoreErlangGenerator {
                 // common case), this is a no-op and `expression_doc` below
                 // behaves exactly as before.
                 _ => {
-                    self.hoist_self_sends_for_binary_op(expr, frame, span, &mut stmts)?;
+                    let mut safe_to_hoist = true;
+                    self.hoist_self_sends_for_binary_op(
+                        expr,
+                        frame,
+                        span,
+                        &mut stmts,
+                        &mut safe_to_hoist,
+                    )?;
                     if is_last {
                         let result_var = self.fresh_temp_var("BranchResult");
                         let expr_doc = self.expression_doc(expr)?;

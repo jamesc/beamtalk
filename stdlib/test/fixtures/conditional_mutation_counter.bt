@@ -6,6 +6,7 @@
 
 Actor subclass: ConditionalMutationCounter
   state: count = 0
+  state: items :: List(Integer) = #(10, 20, 30)
 
   // Increment count only when flag is true
   conditionalIncrement: flag =>
@@ -91,6 +92,17 @@ Actor subclass: ConditionalMutationCounter
   internal bumpCount: _unused =>
     self.count := self.count + 1
     1
+
+  // BT-3392 follow-up: a self-send as a binary-op ARGUMENT must not be
+  // hoisted ahead of an earlier, non-self-send operand in the SAME chain
+  // that can itself raise — (self.items at: idx) + (self bumpCount: true)
+  // must raise from an out-of-bounds `at:` WITHOUT ever running
+  // bumpCount:'s mutation first. Hoisting unconditionally (the original
+  // BT-3392 mechanism, before this fix) would run the mutation before
+  // `at:` gets a chance to fail, reversing source evaluation order.
+  orderSensitiveBinaryOp: idx flag: flag =>
+    flag ifTrue: [(self.items at: idx) + (self bumpCount: true)] ifFalse: [0]
+    self.count
 
   // BT-3392: verifies (rather than fixes) a shape confirmed by inspecting
   // github.com/jamesc/beamtalk-watcher's actual `CheckRegistry.bt` — a
