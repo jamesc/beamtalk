@@ -59,7 +59,7 @@ use super::StateAccFallbackReason;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Block, Expression, MessageSelector};
+use beamtalk_core::ast::{Block, Expression, MessageSelector, StringSegment};
 use beamtalk_core::source_analysis::Span;
 
 impl CoreErlangGenerator {
@@ -118,183 +118,402 @@ impl CoreErlangGenerator {
         (seed_doc, seeded_state)
     }
 
-    /// BT-1942/BT-3382: compiles a conditional/`ifNotNil:` receiver, returning
-    /// `(preamble, value_doc)` — `preamble` is any open let-chain that must be
-    /// emitted BEFORE the `case`'s condition binding (so a mutated binding
-    /// like `ClassVarsN` or an actor self-send's new `State`/`StateAcc` stays
-    /// in scope inside the `case`), and `value_doc` is the receiver's own
-    /// boolean/nil value to test. Shared by all four `generate_if_*_with_mutations`
-    /// generators below (previously each hand-duplicated this exact match —
-    /// CLAUDE.md's no-duplicate-implementations rule).
+    /// BT-1942/BT-3382/BT-3396: compiles a conditional/`ifNotNil:` receiver,
+    /// returning `(preamble, value_doc)` — `preamble` is any open let-chain
+    /// that must be emitted BEFORE the `case`'s condition binding (so a
+    /// mutated binding like `ClassVarsN` or an actor self-send's new
+    /// `State`/`StateAcc` stays in scope inside the `case`), and `value_doc`
+    /// is the receiver's own boolean/nil value to test. Shared by all four
+    /// `generate_if_*_with_mutations` generators below (previously each
+    /// hand-duplicated this exact match — CLAUDE.md's
+    /// no-duplicate-implementations rule).
     ///
     /// Two receiver shapes thread state through this position:
     /// - BT-1942: a class-method self-send (or sub-expression containing one)
-    ///   emits its class-var mutation as an open let-chain, surfaced generically
-    ///   via `expression_doc_with_open_scope`.
-    /// - BT-3382: an ACTOR-INSTANCE self-send used directly as the receiver
-    ///   (optionally parenthesized) — e.g. `(self recordOnce: which)
-    ///   ifTrue:ifFalse:` — needs the same treatment, special-cased here
-    ///   directly via `generate_self_dispatch_open_for` rather than through
-    ///   `expression_doc_with_open_scope`'s generic side-channel:
-    ///   `generate_self_dispatch` (the codegen for an ordinary actor
-    ///   self-send *sub-expression*, e.g. a self-send nested inside some
-    ///   other operator or nested one level deeper inside a block body)
-    ///   deliberately still discards its callee's state — publishing it
-    ///   through the shared `last_open_scope_result` side-channel
-    ///   unconditionally would silently break any OTHER call site that reads
-    ///   `state_version()`/`current_state_var()` before compiling a value
-    ///   expression and assumes computing that expression cannot itself
-    ///   advance the counter (confirmed by a real regression against
-    ///   `self.log := self.log ++ #(self getValue)` while prototyping the
-    ///   general fix — a field assignment's own `Bind` source was captured
-    ///   before its RHS ran). This ONE receiver position is safe to
-    ///   special-case because the surrounding code
-    ///   (`self.current_state_var()` read immediately after, and every
-    ///   branch keyed off `StateAcc`) is already written to expect a
-    ///   correctly-threaded state exactly here. See BT-3382 Linear follow-up
-    ///   issues for widening this to other self-send-as-sub-expression shapes
-    ///   (nested inside a block body, `and:`/`or:` receivers, arguments).
+    ///   emits its class-var mutation as an open let-chain, surfaced
+    ///   generically via `expression_doc_with_open_scope`.
+    /// - BT-3382/BT-3396: an ACTOR-INSTANCE self-send anywhere in the
+    ///   receiver's hoistable sub-tree — the receiver itself (`(self
+    ///   recordOnce: which) ifTrue:ifFalse:`, BT-3382) or nested inside it,
+    ///   e.g. as the receiver of an `and:`/`or:` (`((self recordOnce: which)
+    ///   and: [x]) ifTrue:`, BT-3396) — is dispatched ahead of the receiver
+    ///   expression by [`Self::hoist_nested_self_sends`] with a
+    ///   [`HoistSink::OpenDocs`] sink (each dispatch is
+    ///   `generate_self_dispatch_open`'s open let-chain, which also advances
+    ///   the state version), so the receiver expression itself compiles to a
+    ///   plain reference to the already-threaded result. Nothing in a
+    ///   conditional evaluates before its receiver, so this position is
+    ///   always order-safe to hoist into. The inlining decision that gets us
+    ///   here (`try_generate_boolean_protocol`, and `classify_body_expr`'s
+    ///   `control_flow_has_mutations`) uses the same walker's planning pass
+    ///   ([`Self::contains_hoistable_self_send`]) so the two can never disagree.
     fn compile_conditional_receiver(
         &mut self,
         receiver: &Expression,
     ) -> Result<(Document<'static>, Document<'static>)> {
-        let unwrapped = receiver.unwrap_parens();
-        if self.is_dispatching_actor_self_send(unwrapped) {
-            if let Expression::MessageSend {
-                selector,
-                arguments,
-                ..
-            } = unwrapped
-            {
-                let (open_doc, dispatch_var) =
-                    self.generate_self_dispatch_open_for(selector, arguments)?;
-                let result_var = self.fresh_temp_var("CondSelfResult");
-                let preamble = docvec![
-                    open_doc,
-                    "let ",
-                    leaf::var(result_var.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(dispatch_var),
-                    ") in ",
-                ];
-                return Ok((preamble, leaf::var(result_var)));
-            }
-        }
+        let mut hoisted: Vec<Document<'static>> = Vec::new();
+        self.hoist_nested_self_sends(receiver, &mut HoistSink::OpenDocs(&mut hoisted))?;
         let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        Ok(match cond_open_scope {
+        let (chain_preamble, value_doc) = match cond_open_scope {
             Some(OpenScopeResult::Value(result_var)) => (cond_chain, leaf::var(result_var)),
             // BT-3053: no single value — substitute do:'s own `nil` contract.
             Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
             None => (Document::Nil, cond_chain),
-        })
+        };
+        let preamble = if hoisted.is_empty() {
+            chain_preamble
+        } else {
+            docvec![Document::Vec(hoisted), chain_preamble]
+        };
+        Ok((preamble, value_doc))
     }
 
-    /// BT-3392: recursively dispatches every actor self-send nested as an
-    /// operand of a binary-operator chain within `expr` — e.g. both `self
-    /// a`s in `(self a) + ((self a) * 2)` — via a real `ThreadedStmt::Bind`
-    /// (`dispatch_self_send_as_bind`, the same mechanism C11/C12b above use),
-    /// in left-to-right evaluation order, *before* the C12 catch-all in
-    /// `generate_conditional_branch_inline` compiles this statement.
-    /// Registers each dispatch's result variable in
+    /// BT-3392/BT-3396: dispatches every actor self-send nested inside
+    /// `expr` that can be hoisted ahead of the whole expression without
+    /// changing observable evaluation order — *before* the caller compiles
+    /// `expr` — and registers each dispatch's result variable in
     /// `hoisted_self_send_results` (keyed by the self-send's own receiver
-    /// span) so `try_handle_self_dispatch` substitutes a reference to it —
-    /// instead of dispatching (and re-running the method) a second time —
-    /// the moment `expression_doc` reaches that same node.
+    /// `self` token span) so `try_handle_self_dispatch` substitutes a
+    /// reference to the already-threaded result, instead of dispatching
+    /// (and re-running the method, and discarding its `NewState`) a second
+    /// time, the moment the caller's `expression_doc` reaches that node.
+    /// `sink` decides how each dispatch is emitted — a real `ThreadedStmt`
+    /// `Bind` pair or an open let-chain `Document` — see [`HoistSink`].
     ///
-    /// Deliberately narrow: only unwraps parens and recurses through
-    /// `MessageSelector::Binary` sends (`+`, `-`, `*`, `/`, `<`, `==`, …) —
-    /// this is the literal shape BT-3392 confirmed still broken (`1 + (self
-    /// recordOnce: flag)` inside an `ifTrue:` block). It does NOT recurse
-    /// into keyword-message receivers/arguments, block bodies, or
-    /// field-assignment RHS trees — `lower_field_assignment_bind` (a
-    /// completely separate call path, C1 above, never reached from here)
-    /// is exactly the call site whose pre-captured `source_version` a fully
-    /// general "thread every self-dispatch sub-expression" version of this
-    /// mechanism broke during BT-3382's own prototyping (see
-    /// `hoisted_self_send_results`'s doc comment in `mod.rs`) — staying out
-    /// of that tree entirely, rather than trying to special-case it, is
-    /// what keeps this addition safe.
+    /// Two passes: [`Self::plan_self_send_hoists`] (pure, `&self`) walks
+    /// the AST and decides *what* to hoist and in what order;
+    /// [`Self::emit_hoist_plan`] then emits it. The same plan pass backs
+    /// [`Self::contains_hoistable_self_send`], the inlining-decision
+    /// predicate, so a decision and its emission can never disagree.
     ///
-    /// A hoisted self-send's `Bind` always lands in `stmts` ahead of the
-    /// full `expression_doc(expr)` compile at the call site — so it always
-    /// *executes* first, regardless of where in the source tree it sits.
-    /// That's fine among self-sends themselves (this function visits them
-    /// left-to-right, same as their natural evaluation order, and a raise
-    /// from an earlier one still short-circuits the later `Bind`s via
-    /// ordinary Core Erlang `let`-chain semantics) — but it's wrong the
-    /// moment a NON-hoisted operand precedes a self-send in evaluation
-    /// order and that operand could itself raise or have an effect: e.g.
-    /// `(self.items at: idx) + (self bumpCount)` must not run `bumpCount`'s
-    /// mutation before `at:` has had a chance to fail. `safe_to_hoist`
-    /// tracks this left-to-right: it flips to `false` the first time this
-    /// traversal visits an operand that is neither a self-send nor
-    /// provably `is_effect_free_operand` (a literal, plain identifier,
-    /// class reference, or field read), and every self-send visited after
-    /// that point is left un-hoisted — its mutation stays dropped, same as
-    /// every other shape this issue leaves out of scope, rather than being
-    /// reordered ahead of an operand it must not run before.
-    fn hoist_self_sends_for_binary_op(
+    /// Why hoist rather than thread inside `generate_self_dispatch`: a
+    /// sub-expression self-dispatch that advanced the state version as a
+    /// side effect of being *compiled* broke every caller that snapshots
+    /// `state_version()` before compiling a value expression
+    /// (`lower_field_assignment_bind`'s `source_version`, confirmed by
+    /// BT-3382's reverted prototype against `self.log := self.log ++ #(self
+    /// getValue)`). A hoist is a real statement the caller emits *before*
+    /// taking any such snapshot; the compile that follows is then pure.
+    ///
+    /// # What is walked (BT-3396 widened BT-3392's binary-op-only scope)
+    ///
+    /// Parens, any message send's receiver and then its non-block arguments
+    /// in evaluation order (so `Array with: (self a)`, `(self a)
+    /// printString`, `(self a) and: [..]`, and a self-send's own arguments
+    /// `self log: (self next)` are all reached), list/array/map literal
+    /// elements, string-interpolation segments, and a `^` return's value.
+    /// Never walked: block literals (closures — whatever they contain runs
+    /// later, or never), assignments, cascades, `match:`, and the receiver of an
+    /// `ifTrue:`-family conditional (`is_conditional_selector`) — that
+    /// receiver is hoisted by `compile_conditional_receiver` when the
+    /// conditional is inlined, and the inlining decision itself is made
+    /// with this same plan pass, so it is inlined whenever there is
+    /// something to hoist.
+    ///
+    /// # Order safety
+    ///
+    /// A hoisted self-send always *executes* before everything else in
+    /// `expr`. That is only correct if nothing that precedes it in
+    /// evaluation order could observe the difference. Tracked
+    /// left-to-right in [`HoistWalk::safe_to_hoist`]: literals,
+    /// identifiers, class references and `super` are order-independent; a
+    /// binary operator stays transparent (BT-3392's original scope, `1 +
+    /// (self a)`); any other non-self message send (`at:`, `printString`,
+    /// …) may raise or have effects, so it flips the flag once its own
+    /// operands have been walked, and every self-send after that point in
+    /// evaluation order is left un-hoisted — its mutation stays dropped,
+    /// exactly as before BT-3392 (tracked as BT-3399) — rather than being
+    /// reordered ahead of an operand it must not run before (`(self.items
+    /// at: idx) + (self bumpCount)` must raise from `at:` without ever
+    /// bumping). A direct `self.field` read is effect-free but *does*
+    /// observe state: it is recorded in [`HoistWalk::pending_field_reads`]
+    /// and, if a self-send is hoisted after it, snapshotted into a temp
+    /// (`hoisted_field_reads`, consumed by `generate_field_access`) ahead
+    /// of that dispatch — otherwise `self.count + (self bumpCount)` would
+    /// read the *post*-bump count once the dispatch's `Bind` had advanced
+    /// the state var. A read with no later hoist needs no snapshot.
+    ///
+    /// A self-send whose receiver span is already registered (an enclosing
+    /// statement hoisted it first) is skipped, so nested walks never
+    /// dispatch the same source occurrence twice. No-op in class methods
+    /// (`in_class_method()`): a class-method self-send threads `ClassVars`
+    /// (ADR 0110), never `State`, and never reaches
+    /// `try_handle_self_dispatch` — same exclusion as C0b (BT-3374).
+    pub(in crate::core_erlang) fn hoist_nested_self_sends(
         &mut self,
         expr: &Expression,
-        frame: FrameId,
-        span: Span,
-        stmts: &mut Vec<ThreadedStmt>,
-        safe_to_hoist: &mut bool,
+        sink: &mut HoistSink<'_>,
     ) -> Result<()> {
+        let plan = self.plan_self_send_hoists(std::slice::from_ref(expr));
+        self.emit_hoist_plan(plan, sink)
+    }
+
+    /// BT-3396: [`Self::hoist_nested_self_sends`] restricted to the
+    /// *arguments* of `expr` (a self-send the caller is about to dispatch
+    /// itself via `dispatch_self_send_as_bind`/`generate_self_dispatch_open`,
+    /// e.g. C12b/`DispatchingSelfSend`): `self log: (self nextId)` must
+    /// thread `nextId`'s mutation too. The caller's own dispatch then
+    /// compiles the arguments and consumes the registrations.
+    pub(in crate::core_erlang) fn hoist_self_send_arguments(
+        &mut self,
+        expr: &Expression,
+        sink: &mut HoistSink<'_>,
+    ) -> Result<()> {
+        if let Expression::MessageSend { arguments, .. } = expr.unwrap_parens() {
+            let plan = self.plan_self_send_hoists(arguments);
+            self.emit_hoist_plan(plan, sink)?;
+        }
+        Ok(())
+    }
+
+    /// BT-3396: `true` if [`Self::hoist_nested_self_sends`] would hoist at
+    /// least one self-send out of `expr` — the decision predicate for
+    /// "does this conditional need inlining because of its receiver?"
+    /// (`try_generate_boolean_protocol`, `control_flow_has_mutations`).
+    /// The same plan pass the emitting walk runs, so it cannot drift from
+    /// what that walk actually does.
+    pub(in crate::core_erlang) fn contains_hoistable_self_send(&self, expr: &Expression) -> bool {
+        self.plan_self_send_hoists(std::slice::from_ref(expr))
+            .iter()
+            .any(|action| matches!(action, HoistAction::Dispatch(_)))
+    }
+
+    /// The pure planning pass of [`Self::hoist_nested_self_sends`]: walks
+    /// `exprs` in evaluation order and returns, in emission order, every
+    /// self-send to dispatch and every `self.field` read to snapshot ahead
+    /// of one. See that function's doc comment for the traversal and
+    /// order-safety rules. Reads generator state (`in_class_method`, the
+    /// Actor-context self-send test, the already-hoisted registry) but
+    /// never writes it.
+    fn plan_self_send_hoists<'e>(&self, exprs: &'e [Expression]) -> Vec<HoistAction<'e>> {
+        if self.in_class_method() {
+            return Vec::new();
+        }
+        let mut walk = HoistWalk {
+            safe_to_hoist: true,
+            pending_field_reads: Vec::new(),
+            actions: Vec::new(),
+        };
+        for expr in exprs {
+            self.hoist_plan_walk(expr, &mut walk);
+        }
+        walk.actions
+    }
+
+    /// The recursive body of [`Self::plan_self_send_hoists`].
+    fn hoist_plan_walk<'e>(&self, expr: &'e Expression, walk: &mut HoistWalk<'e>) {
         let expr = expr.unwrap_parens();
         if self.is_dispatching_actor_self_send(expr) {
-            if *safe_to_hoist {
-                if let Expression::MessageSend { receiver, .. } = expr {
-                    let receiver_span = receiver.span();
-                    let dispatch_var = self.dispatch_self_send_as_bind(expr, frame, span, stmts)?;
+            let Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } = expr
+            else {
+                return;
+            };
+            // The self-send's own arguments evaluate before its dispatch.
+            for arg in arguments {
+                self.hoist_plan_walk(arg, walk);
+            }
+            if !walk.safe_to_hoist
+                || self
+                    .hoisted_self_send_results
+                    .contains_key(&receiver.span())
+            {
+                return;
+            }
+            let reads = std::mem::take(&mut walk.pending_field_reads);
+            walk.actions
+                .extend(reads.into_iter().map(HoistAction::Snapshot));
+            walk.actions.push(HoistAction::Dispatch(expr));
+            return;
+        }
+        match expr {
+            // Order-independent against any self-send: no effect, cannot
+            // raise, and a self-send cannot change what they denote.
+            Expression::Literal(..)
+            | Expression::Identifier(_)
+            | Expression::ClassReference { .. }
+            | Expression::Super(_) => {}
+            Expression::FieldAccess { receiver, .. } => {
+                if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self") {
+                    walk.pending_field_reads.push(expr);
+                } else {
+                    walk.safe_to_hoist = false;
+                }
+            }
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                ..
+            } => {
+                if beamtalk_core::state_threading_selectors::is_conditional_selector(
+                    selector.name().as_str(),
+                ) {
+                    // Hoisted by `compile_conditional_receiver` instead
+                    // (see the doc comment above); opaque here.
+                    walk.safe_to_hoist = false;
+                    return;
+                }
+                self.hoist_plan_walk(receiver, walk);
+                for arg in arguments {
+                    // A block argument is a closure — never walked.
+                    if !matches!(arg, Expression::Block(_)) {
+                        self.hoist_plan_walk(arg, walk);
+                    }
+                }
+                // The send itself runs after all of its operands.
+                if !matches!(selector, MessageSelector::Binary(_)) {
+                    walk.safe_to_hoist = false;
+                }
+            }
+            Expression::ListLiteral { elements, tail, .. } => {
+                for element in elements {
+                    self.hoist_plan_walk(element, walk);
+                }
+                if let Some(tail) = tail {
+                    self.hoist_plan_walk(tail, walk);
+                }
+            }
+            Expression::ArrayLiteral { elements, .. } => {
+                for element in elements {
+                    self.hoist_plan_walk(element, walk);
+                }
+            }
+            Expression::MapLiteral { pairs, .. } => {
+                for pair in pairs {
+                    self.hoist_plan_walk(&pair.key, walk);
+                    self.hoist_plan_walk(&pair.value, walk);
+                }
+            }
+            Expression::StringInterpolation { segments, .. } => {
+                for segment in segments {
+                    if let StringSegment::Interpolation(inner) = segment {
+                        self.hoist_plan_walk(inner, walk);
+                        // `generate_string_interpolation` dispatches
+                        // `displayString` on this segment's value immediately
+                        // after evaluating it, before the next segment runs —
+                        // a message send of its own that may raise, so no
+                        // self-send in a LATER segment may be hoisted ahead
+                        // of it (`"{x}-{self bump}"` leaves `bump` in place).
+                        walk.safe_to_hoist = false;
+                    }
+                }
+            }
+            // `^ value` as the walked statement itself (`ifTrue: [^self.items
+            // at: (self bump)]`): the value evaluates, then the NLR throws —
+            // and `mod.rs`'s `Expression::Return` handler reads the state it
+            // throws with only AFTER compiling the value, so a dispatch
+            // hoisted ahead of the statement is what that throw carries.
+            Expression::Return { value, .. } => {
+                self.hoist_plan_walk(value, walk);
+                walk.safe_to_hoist = false;
+            }
+            // Blocks, assignments, cascades, `match:`, … — not walked, and
+            // nothing after them is hoisted.
+            _ => walk.safe_to_hoist = false,
+        }
+    }
+
+    /// The emission pass of [`Self::hoist_nested_self_sends`]: emits each
+    /// planned action into `sink`, in order, and registers its result
+    /// variable (`hoisted_self_send_results` for a dispatch,
+    /// `hoisted_field_reads` for a snapshot) for the compile that follows
+    /// to substitute.
+    fn emit_hoist_plan(
+        &mut self,
+        plan: Vec<HoistAction<'_>>,
+        sink: &mut HoistSink<'_>,
+    ) -> Result<()> {
+        for action in plan {
+            match action {
+                HoistAction::Dispatch(send) => {
+                    let Expression::MessageSend { receiver, .. } = send else {
+                        continue;
+                    };
+                    let dispatch_var = match sink {
+                        HoistSink::Threaded { stmts, frame, span } => {
+                            self.dispatch_self_send_as_bind(send, *frame, *span, stmts)?
+                        }
+                        HoistSink::OpenDocs(docs) => {
+                            let (doc, dispatch_var) = self.generate_self_dispatch_open(send)?;
+                            docs.push(doc);
+                            dispatch_var
+                        }
+                    };
                     self.hoisted_self_send_results
-                        .insert(receiver_span, dispatch_var);
+                        .insert(receiver.span(), dispatch_var);
+                }
+                HoistAction::Snapshot(read) => {
+                    let Expression::FieldAccess {
+                        receiver, field, ..
+                    } = read
+                    else {
+                        continue;
+                    };
+                    let read_doc = self.generate_field_access(receiver, field)?;
+                    let snap_var = self.fresh_temp_var("FieldSnap");
+                    let doc = docvec!["let ", leaf::var(snap_var.clone()), " = ", read_doc, " in "];
+                    match sink {
+                        HoistSink::Threaded { stmts, span, .. } => {
+                            stmts.push(ThreadedStmt::Statement(doc, *span));
+                        }
+                        HoistSink::OpenDocs(docs) => docs.push(doc),
+                    }
+                    self.hoisted_field_reads.insert(field.span, snap_var);
                 }
             }
-            return Ok(());
-        }
-        if let Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            ..
-        } = expr
-        {
-            if matches!(selector, MessageSelector::Binary(_)) {
-                self.hoist_self_sends_for_binary_op(receiver, frame, span, stmts, safe_to_hoist)?;
-                if let Some(arg) = arguments.first() {
-                    self.hoist_self_sends_for_binary_op(arg, frame, span, stmts, safe_to_hoist)?;
-                }
-                return Ok(());
-            }
-        }
-        if !is_effect_free_operand(expr) {
-            *safe_to_hoist = false;
         }
         Ok(())
     }
 }
 
-/// BT-3392: true for an operand that provably cannot raise or have a side
-/// effect, so its relative evaluation order against a hoisted self-send
-/// doesn't matter — a literal, a plain local/parameter identifier, a class
-/// reference, `super`, or a direct field read (recursing into its own
-/// receiver, which is normally `self`/`super`). Anything else — in
-/// particular any message send, including a non-self-send one that could
-/// itself raise (`anArray at: idx`, `respondsTo:`, …) — is conservatively
-/// NOT effect-free. See `hoist_self_sends_for_binary_op`'s doc comment
-/// (`CoreErlangGenerator::hoist_self_sends_for_binary_op`) for why this
-/// matters. A free function, not a method: it recurses on the AST only,
-/// touching no generator state.
-fn is_effect_free_operand(expr: &Expression) -> bool {
-    match expr.unwrap_parens() {
-        Expression::Literal(_, _)
-        | Expression::Identifier(_)
-        | Expression::ClassReference { .. }
-        | Expression::Super(_) => true,
-        Expression::FieldAccess { receiver, .. } => is_effect_free_operand(receiver),
-        _ => false,
-    }
+/// BT-3396: where [`CoreErlangGenerator::hoist_nested_self_sends`] emits
+/// each hoisted self-send's dispatch (and any `self.field` snapshot that
+/// must precede it).
+pub(in crate::core_erlang) enum HoistSink<'a> {
+    /// A `ThreadedIr` statement sequence with a real frame — a conditional
+    /// branch arm, an `on:do:`/`ensure:` body, a Tier 2 stateful block
+    /// body, or the flat method body at `FrameId::ROOT`: each dispatch
+    /// lands as `dispatch_self_send_as_bind`'s `Statement` + real `State`
+    /// `Bind` pair, each snapshot as an opaque `Statement`.
+    Threaded {
+        stmts: &'a mut Vec<ThreadedStmt>,
+        frame: FrameId,
+        span: Span,
+    },
+    /// An open let-chain `Document` sequence (a conditional's receiver
+    /// preamble, `compile_conditional_receiver`): each dispatch is
+    /// `generate_self_dispatch_open`'s call + `let StateN = element(2,
+    /// _SD) in` chain, each snapshot a plain `let … in`.
+    OpenDocs(&'a mut Vec<Document<'static>>),
+}
+
+/// One planned emission of [`CoreErlangGenerator::plan_self_send_hoists`].
+enum HoistAction<'e> {
+    /// Snapshot this `self.field` read (a `FieldAccess` node) into a temp
+    /// before the dispatch that follows it.
+    Snapshot(&'e Expression),
+    /// Dispatch this actor self-send (a `MessageSend` node) and register
+    /// its result.
+    Dispatch(&'e Expression),
+}
+
+/// Per-walk traversal state for
+/// [`CoreErlangGenerator::plan_self_send_hoists`].
+struct HoistWalk<'e> {
+    /// Flips to `false`, permanently for this walk, the first time the
+    /// traversal passes an operand a later self-send must not be reordered
+    /// ahead of — see the walker's doc comment § Order safety.
+    safe_to_hoist: bool,
+    /// `self.field` reads visited since the last hoist, in source order;
+    /// moved into `actions` as snapshots the moment a self-send is hoisted
+    /// after them, dropped unsnapshotted at the end of the walk otherwise.
+    pending_field_reads: Vec<&'e Expression>,
+    /// The plan so far, in emission order.
+    actions: Vec<HoistAction<'e>>,
 }
 
 impl CoreErlangGenerator {
@@ -661,6 +880,13 @@ impl CoreErlangGenerator {
             return Ok(val_var);
         }
 
+        // BT-3396: `self.log := self.log ++ #(self getValue)` — dispatch
+        // every order-safe self-send nested in the RHS as real `Bind`s
+        // *before* `source_version` is read below, so this assignment's own
+        // `Bind` chains from the post-dispatch state and the RHS compile
+        // that follows is pure (the exact call site BT-3382's reverted
+        // version-bump-on-compile prototype desynced).
+        self.hoist_nested_self_sends(value, &mut HoistSink::Threaded { stmts, frame, span })?;
         let val_var = self.fresh_temp_var("Val");
         let source_version = self.state_version();
         let value_str = self.generate_field_assignment_value_doc(value)?;
@@ -782,6 +1008,11 @@ impl CoreErlangGenerator {
             return Ok(val_var);
         }
 
+        // BT-3396: as in `lower_field_assignment_bind` — thread every
+        // order-safe self-send nested in the RHS (or the RHS itself, `v :=
+        // self bump`) as real `Bind`s before the RHS compiles and before
+        // either `source_version` below is read.
+        self.hoist_nested_self_sends(value, &mut HoistSink::Threaded { stmts, frame, span })?;
         let (value_code, open_scope) = self.expression_doc_with_open_scope(value)?;
 
         if let Some(open_scope_result) = open_scope {
@@ -1456,6 +1687,16 @@ impl CoreErlangGenerator {
                 // opposed to a direct `self.field := value`) is silently
                 // dropped once the branch closes.
                 BodyExprKind::DispatchingSelfSend => {
+                    // BT-3396: `self log: (self nextId)` — thread the
+                    // arguments' own self-sends ahead of this dispatch.
+                    self.hoist_self_send_arguments(
+                        expr,
+                        &mut HoistSink::Threaded {
+                            stmts: &mut stmts,
+                            frame,
+                            span,
+                        },
+                    )?;
                     let dispatch_var =
                         self.dispatch_self_send_as_bind(expr, frame, span, &mut stmts)?;
                     if is_last {
@@ -1476,22 +1717,23 @@ impl CoreErlangGenerator {
                 // C12 — catch-all pure statements (EarlyReturn, SuperSend,
                 // ErrorSend, Tier2SelfSend, Pure).
                 //
-                // BT-3392: before compiling, hoist (as real `Bind`s pushed
-                // into `stmts`) any self-send nested as a binary-op operand
-                // of this statement, so `try_handle_self_dispatch` reuses
-                // the already-threaded result instead of discarding its
-                // mutation — see `hoist_self_sends_for_binary_op`'s doc
-                // comment. When nothing needed hoisting (the overwhelmingly
-                // common case), this is a no-op and `expression_doc` below
-                // behaves exactly as before.
+                // BT-3392/BT-3396: before compiling, hoist (as real `Bind`s
+                // pushed into `stmts`) every order-safe self-send nested
+                // anywhere inside this statement, so
+                // `try_handle_self_dispatch` reuses the already-threaded
+                // result instead of discarding its mutation — see
+                // `hoist_nested_self_sends`'s doc comment. When nothing
+                // needed hoisting (the overwhelmingly common case), this is
+                // a no-op and `expression_doc` below behaves exactly as
+                // before.
                 _ => {
-                    let mut safe_to_hoist = true;
-                    self.hoist_self_sends_for_binary_op(
+                    self.hoist_nested_self_sends(
                         expr,
-                        frame,
-                        span,
-                        &mut stmts,
-                        &mut safe_to_hoist,
+                        &mut HoistSink::Threaded {
+                            stmts: &mut stmts,
+                            frame,
+                            span,
+                        },
                     )?;
                     if is_last {
                         let result_var = self.fresh_temp_var("BranchResult");

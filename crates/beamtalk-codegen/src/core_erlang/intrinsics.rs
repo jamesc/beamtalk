@@ -1996,7 +1996,7 @@ impl CoreErlangGenerator {
                         let needs_threading = self.needs_mutation_threading(&analysis)
                             || self.body_has_list_op_cross_scope_mutations(block)
                             || (self.in_loop_body && !analysis.local_writes.is_empty())
-                            || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
+                            || self.contains_hoistable_self_send(receiver);
                         if needs_threading {
                             // Validate arity before generating mutation-threaded code.
                             // This ensures a block with >1 params still raises
@@ -2697,13 +2697,15 @@ impl CoreErlangGenerator {
                     // BT-3382: also inline when the RECEIVER itself is an actor self-send
                     // (`(self recordOnce: x) ifTrue:...`) — its own state mutation must be
                     // threaded through before evaluating either branch, even when neither
-                    // block contains a mutation of its own. See
-                    // `compile_conditional_receiver`'s doc comment for how the receiver
-                    // position threads it.
+                    // block contains a mutation of its own. BT-3396: widened to any
+                    // hoistable self-send in the receiver's sub-tree (`((self recordOnce:
+                    // x) and: [y]) ifTrue:`) via the same walker
+                    // `compile_conditional_receiver` emits with. See that function's doc
+                    // comment for how the receiver position threads it.
                     let needs_threading = self.needs_mutation_threading(&analysis)
                         || self.body_has_list_op_cross_scope_mutations(block)
                         || (self.in_loop_body && !analysis.local_writes.is_empty())
-                        || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
+                        || self.contains_hoistable_self_send(receiver);
                     if needs_threading {
                         // BT-1392: Set repl_loop_mutated so the REPL unpacks {Result, State}
                         if self.is_repl_mode() {
@@ -2723,7 +2725,7 @@ impl CoreErlangGenerator {
                     let needs_threading = self.needs_mutation_threading(&analysis)
                         || self.body_has_list_op_cross_scope_mutations(block)
                         || (self.in_loop_body && !analysis.local_writes.is_empty())
-                        || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
+                        || self.contains_hoistable_self_send(receiver);
                     if needs_threading {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
@@ -2750,7 +2752,7 @@ impl CoreErlangGenerator {
                         || (self.in_loop_body
                             && (!true_analysis.local_writes.is_empty()
                                 || !false_analysis.local_writes.is_empty()))
-                        || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
+                        || self.contains_hoistable_self_send(receiver);
                     if needs_threading {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
