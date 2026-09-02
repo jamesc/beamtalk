@@ -2657,6 +2657,17 @@ struct LintResult {
 /// (`beamtalk_core::near_miss_divider::check_near_miss_dividers`) instead of relying on
 /// the AST's `Comment::span`, which is actually the *following
 /// declaration's* span, not the comment's own.
+///
+/// `is_stub_file` (BT-3398) mirrors the LSP's `ProjectIndex::is_stub_file`
+/// fix (review follow-up on #3679): this crate builds its own
+/// `AnalysisContext` directly rather than going through
+/// `beamtalk-language-service`'s shared `diagnostic_provider.rs`, so it was
+/// never touched by that fix and always analysed every file — including a
+/// legitimate `stubs/lists.bt`'s `declare native:` blocks — as if it lived
+/// outside `stubs/`. Callers derive this from the file path being analysed
+/// (`beamtalk_project::package::is_under_stubs_dir`, called once per
+/// top-level `path` argument below rather than by this per-file helper).
+#[allow(clippy::too_many_arguments)] // BT-3398 added is_stub_file; each param is load-bearing context, same as `beamtalk lint`'s `collect_diagnostics`.
 fn run_module_analysis(
     module: &beamtalk_core::ast::Module,
     source: &str,
@@ -2667,6 +2678,7 @@ fn run_module_analysis(
         std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     >,
     current_package: Option<&str>,
+    is_stub_file: bool,
 ) -> (
     Vec<beamtalk_core::source_analysis::Diagnostic>,
     beamtalk_core::semantic_analysis::ClassHierarchy,
@@ -2684,7 +2696,8 @@ fn run_module_analysis(
     let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
         .with_options(&options)
         .with_pre_loaded_classes(cross_file_classes)
-        .with_native_type_registry(native_type_registry);
+        .with_native_type_registry(native_type_registry)
+        .with_is_stub_file(is_stub_file);
     let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
     diags.extend(
         analysis_result
@@ -2767,6 +2780,15 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     // so E0401/E0402/E0403 visibility checks fire the same way in MCP.
     let current_package = resolve_current_package(path);
 
+    // BT-3398: Resolve the package root once so each file's `is_stub_file`
+    // check below (`beamtalk_project::package::is_under_stubs_dir`) doesn't
+    // re-walk ancestors per file — mirrors `current_package`/
+    // `native_type_registry`'s own one-time-per-call resolution above.
+    // `None` outside a manifest-backed package, matching
+    // `AnalysisContext::is_stub_file`'s own conservative default (no file is
+    // ever treated as a stub without a known project root).
+    let project_root = beamtalk_project::package::find_package_root(std::path::Path::new(path));
+
     // Pass 1: Parse all files and extract class metadata.
     let mut all_class_infos = Vec::new();
     let mut parsed_files = Vec::new();
@@ -2834,6 +2856,9 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             .cloned()
             .collect();
 
+        let is_stub_file = project_root.as_deref().is_some_and(|root| {
+            beamtalk_project::package::is_under_stubs_dir(root, std::path::Path::new(file_str))
+        });
         let (file_diags, class_hierarchy) = run_module_analysis(
             module,
             source,
@@ -2842,6 +2867,7 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             has_package_dependencies,
             native_type_registry.clone(),
             current_package.as_deref(),
+            is_stub_file,
         );
 
         all_diags.extend(file_diags);
@@ -3058,6 +3084,13 @@ fn run_lint_structured(path: &str) -> LintResult {
     // so E0401/E0402/E0403 visibility checks fire the same way in MCP.
     let current_package = resolve_current_package(path);
 
+    // BT-3398: Resolve the package root once, mirroring
+    // `compute_diagnostic_summary`'s own one-time resolution above, so each
+    // target file's `is_stub_file` can be derived via
+    // `beamtalk_project::package::is_under_stubs_dir` without re-walking
+    // ancestors per file.
+    let project_root = beamtalk_project::package::find_package_root(std::path::Path::new(path));
+
     // Pass 1: Parse files and extract class metadata.
     let mut all_class_infos = Vec::new();
     let mut parsed_targets: Vec<(
@@ -3145,6 +3178,9 @@ fn run_lint_structured(path: &str) -> LintResult {
         // BT-1587 / BT-2052: run_module_analysis runs lint passes, semantic
         // analysis with cross-file class context (mirroring CLI `beamtalk lint`),
         // and applies @expect directives (BT-1476).
+        let is_stub_file = project_root
+            .as_deref()
+            .is_some_and(|root| beamtalk_project::package::is_under_stubs_dir(root, &file));
         let (lint_diags, _) = run_module_analysis(
             &module,
             &source,
@@ -3153,6 +3189,7 @@ fn run_lint_structured(path: &str) -> LintResult {
             has_package_dependencies,
             native_type_registry.clone(),
             current_package.as_deref(),
+            is_stub_file,
         );
 
         let file_name = file.to_string_lossy().into_owned();
@@ -3412,8 +3449,16 @@ mod tests {
             .into_iter()
             .filter(|d| d.severity == Severity::Lint)
             .collect();
-        let (diags, _) =
-            run_module_analysis(&module, source, &[], initial_diags, false, None, None);
+        let (diags, _) = run_module_analysis(
+            &module,
+            source,
+            &[],
+            initial_diags,
+            false,
+            None,
+            None,
+            false,
+        );
         let near_misses: Vec<_> = diags
             .iter()
             .filter(|d| d.message.contains("section divider"))
@@ -3427,6 +3472,89 @@ mod tests {
             near_misses[0].span.line_number(source),
             2,
             "span should point at the comment's own line (2), not `bar`'s line (3): {diags:?}"
+        );
+    }
+
+    /// BT-3398 regression, analogous to
+    /// `beamtalk_language_service::project_index::tests::is_stub_file_true_for_file_under_a_root_stubs_dir`:
+    /// `run_module_analysis`'s `is_stub_file` argument must actually reach
+    /// `AnalysisContext::is_stub_file` — verified here by calling it directly
+    /// with `is_stub_file: false` (the value every call site used
+    /// unconditionally before this fix) on a module containing a `declare
+    /// native:` block and confirming `check_native_declaration_location`
+    /// still runs (would reject it if this test's own module lived in
+    /// `src/`), then with `is_stub_file: true` (what a real `stubs/` call
+    /// site now derives) and confirming it no longer would.
+    ///
+    /// `check_native_declaration_location`'s diagnostic has no
+    /// `DiagnosticCategory` (a separate, pre-existing gap shared by `beamtalk
+    /// lint`'s own `collect_diagnostics` — filed as BT-3399), so
+    /// `run_module_analysis`'s `category.is_some()` filter drops it from the
+    /// *returned* diagnostics regardless of `is_stub_file`. This test
+    /// therefore asserts on `analyse_full`'s pre-filter diagnostics — built
+    /// with the identical `AnalysisContext` construction `run_module_analysis`
+    /// uses — rather than `run_module_analysis`'s own return value, so it
+    /// actually exercises the `is_stub_file` wiring instead of vacuously
+    /// passing either way.
+    #[test]
+    fn run_module_analysis_is_stub_file_suppresses_native_declaration_location_error() {
+        let source = "declare native: lists\n";
+        let tokens = lex_with_eof(source);
+        let (module, _parse_diags) = parse(tokens);
+
+        let has_location_error = |is_stub_file: bool| {
+            let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
+                .with_is_stub_file(is_stub_file);
+            let result = beamtalk_core::semantic_analysis::analyse_full(&module, analysis_ctx);
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("only valid in stubs/ directory"))
+        };
+
+        assert!(
+            has_location_error(false),
+            "declare native: outside stubs/ should still be rejected"
+        );
+        assert!(
+            !has_location_error(true),
+            "declare native: inside stubs/ should not be rejected"
+        );
+    }
+
+    /// BT-3398 end-to-end (MCP-level) regression, per the issue's acceptance
+    /// criteria: opening a legitimate `stubs/lists.bt` via the MCP `lint`
+    /// tool must not report a false "only valid in stubs/ directory" error.
+    /// The previous test asserts the `is_stub_file` wiring actually
+    /// discriminates stub vs. non-stub at the `AnalysisContext` level (the
+    /// only level that can observe it, per that test's doc on the
+    /// category-filter gap); this one pins the MCP-surface behaviour the
+    /// issue is actually about.
+    #[test]
+    fn run_lint_structured_stub_file_declare_native_no_location_error() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"stub-test\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let stubs_dir = dir.join("stubs");
+        std::fs::create_dir_all(&stubs_dir).unwrap();
+        let stub_file = stubs_dir.join("lists.bt");
+        std::fs::write(&stub_file, "declare native: lists\n").unwrap();
+
+        let stub_result = run_lint_structured(stub_file.to_str().unwrap());
+        let stub_location_errors: Vec<_> = stub_result
+            .errors
+            .iter()
+            .filter(|d| d.message.contains("only valid in stubs/ directory"))
+            .collect();
+        assert!(
+            stub_location_errors.is_empty(),
+            "a legitimate stubs/lists.bt should not report a native-declaration \
+             location error via MCP lint, got: {stub_result:?}"
         );
     }
 
