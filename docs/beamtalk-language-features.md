@@ -6044,7 +6044,7 @@ setUp =>
 
 `beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field via `self.field := value` and its last statement isn't a bare `self` or another field assignment.
 
-Chained `with*:` setters (`self withCounter: (Counter spawn)`) remain a valid alternative — each `with*:` call itself ends in a field assignment internally, so the chain's own last call already returns the fully updated self without needing a trailing `self`.
+Chained `with*:` setters (`self withCounter: (Counter spawn)`) remain a valid alternative — each `with*:` call itself ends in a field assignment internally, so the chain's own last call already returns the fully updated self. This only holds when the `with*:` chain is itself the trailing statement of `setUp`: like a bare `self.field := value`, its self-preserving return value only threads through when nothing follows it — the same trap applies (silently, since `beamtalk lint`'s BT-3391 check only recognizes the literal `self.field := value` form, not a `with*:` send).
 
 #### Suite-Level Setup — setUpOnce / tearDownOnce
 
