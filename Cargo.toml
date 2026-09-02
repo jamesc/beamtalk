@@ -55,6 +55,7 @@ beamtalk-lint = { path = "crates/beamtalk-lint" }
 beamtalk-project = { path = "crates/beamtalk-project" }
 beamtalk-repl = { path = "crates/beamtalk-repl" }
 beamtalk-repl-protocol = { path = "crates/beamtalk-repl-protocol" }
+beamtalk-sysroot = { path = "crates/beamtalk-sysroot" }
 beamtalk-workspace = { path = "crates/beamtalk-workspace" }
 
 # CLI

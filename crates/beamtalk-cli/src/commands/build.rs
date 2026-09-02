@@ -1159,6 +1159,39 @@ pub(crate) fn extract_type_specs(
     beamtalk_cli::native_type_specs::extract_project_type_specs(layout)
 }
 
+/// Locate the compiler distribution's own curated FFI type stubs (ADR 0075
+/// layer 3), installed alongside the stdlib sources under
+/// `{sysroot}/share/beamtalk/stubs/` — the same sysroot convention used by
+/// `beamtalk --print-sysroot` and the LSP's `sysroot_stdlib_source_dir`,
+/// both backed by the shared [`beamtalk_sysroot`] leaf crate.
+/// `BEAMTALK_STUBS_DIR` overrides the sysroot-derived path for development.
+///
+/// Unlike `BEAMTALK_RUNTIME_DIR` (which hard-errors when set to an invalid
+/// path), an unset/missing/non-directory override here just logs a warning
+/// and falls through to `None` — this stub tier is optional and best-effort,
+/// so a build should never fail over a distribution-stub misconfiguration.
+///
+/// Returns `None` if no such directory exists on disk — expected until
+/// curated distribution stub content is added (BT-1848); the discovery/merge
+/// plumbing is still correct with nothing to find.
+pub(crate) fn distribution_stubs_dir() -> Option<Utf8PathBuf> {
+    if let Ok(dir) = std::env::var("BEAMTALK_STUBS_DIR") {
+        let candidate = Utf8PathBuf::from(dir);
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        warn!(
+            dir = %candidate,
+            "BEAMTALK_STUBS_DIR is set but is not a directory; ignoring distribution stubs"
+        );
+        return None;
+    }
+
+    let sysroot = beamtalk_sysroot::current_sysroot()?;
+    let candidate = Utf8PathBuf::from_path_buf(sysroot.join("share/beamtalk/stubs")).ok()?;
+    candidate.is_dir().then_some(candidate)
+}
+
 /// ADR 0075 Phase 2 (BT-1847): scan `project_root/stubs/` for `declare
 /// native:` stub files and build the project-local stub-tier registry, plus
 /// its diagnostics (skipped-signature warnings and version-drift warnings
@@ -1186,28 +1219,6 @@ pub(crate) fn extract_type_specs(
 /// `lint --format=json` the same way every other lint diagnostic does,
 /// instead of always printing miette text regardless of the caller's
 /// requested format.
-/// Locate the compiler distribution's own curated FFI type stubs (ADR 0075
-/// layer 3), installed alongside the stdlib sources under
-/// `{sysroot}/share/beamtalk/stubs/` — the same sysroot convention used by
-/// `beamtalk --print-sysroot` and the LSP's `sysroot_stdlib_source_dir`
-/// (`{exe}/../..`). `BEAMTALK_STUBS_DIR` overrides the sysroot-derived path
-/// for development, mirroring `BEAMTALK_RUNTIME_DIR`.
-///
-/// Returns `None` if no such directory exists on disk — expected until
-/// curated distribution stub content is added (BT-1848); the discovery/merge
-/// plumbing is still correct with nothing to find.
-pub(crate) fn distribution_stubs_dir() -> Option<Utf8PathBuf> {
-    if let Ok(dir) = std::env::var("BEAMTALK_STUBS_DIR") {
-        let candidate = Utf8PathBuf::from(dir);
-        return candidate.is_dir().then_some(candidate);
-    }
-
-    let exe = std::env::current_exe().ok()?;
-    let sysroot = exe.parent()?.parent()?;
-    let candidate = Utf8PathBuf::from_path_buf(sysroot.join("share/beamtalk/stubs")).ok()?;
-    candidate.is_dir().then_some(candidate)
-}
-
 pub(crate) fn load_project_stub_registry(
     project_root: &Utf8Path,
     auto_extract: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
@@ -1229,11 +1240,18 @@ pub(crate) fn load_project_stub_registry(
 /// A dependency's `stubs_dir` (set by dependency resolution from its own
 /// `beamtalk.toml` `[stubs] path`, ADR 0075 layer 2) covers only that
 /// package's own native code — never its own dependencies' stubs, since
-/// those are auto-extracted instead.
+/// those are auto-extracted instead. Because each package is expected to
+/// stub only its own native modules, two sibling dependencies declaring the
+/// same `(module, function, arity)` is unexpected — `warn_on_package_stub_collisions`
+/// flags it (naming both packages) rather than letting the later dependency
+/// in iteration order silently win, mirroring how `check_native_module_collisions`
+/// surfaces a native-module-implementation collision across dependencies.
 ///
 /// `distribution_stubs_dir` is the compiler distribution's own `stubs/`
 /// directory (layer 3), when one is discoverable — `None` until curated
-/// distribution stub content exists (BT-1848).
+/// distribution stub content exists (BT-1848). Distribution-vs-package
+/// overlap is not flagged: package stubs are *meant* to override
+/// distribution stubs, per the resolution order.
 ///
 /// Returns `None` only when none of these layers contributed anything.
 pub(crate) fn load_dependency_stub_registries(
@@ -1259,6 +1277,11 @@ pub(crate) fn load_dependency_stub_registries(
         }
     }
 
+    // Tracks which dependency first declared each (module, function, arity)
+    // package-bundled stub, so a sibling dependency re-declaring the same
+    // signature is flagged rather than silently overriding it.
+    let mut package_stub_owners: HashMap<(String, String, u8), String> = HashMap::new();
+
     for dep in resolved_deps {
         let Some(stubs_dir) = dep.stubs_dir.as_deref() else {
             continue;
@@ -1266,6 +1289,11 @@ pub(crate) fn load_dependency_stub_registries(
         if let Some((dep_registry, dep_diagnostics)) =
             load_stub_registry_from_dir(stubs_dir, auto_extract, format)
         {
+            diagnostics.extend(warn_on_package_stub_collisions(
+                &dep_registry,
+                &dep.name,
+                &mut package_stub_owners,
+            ));
             registry.apply_overrides(dep_registry);
             diagnostics.extend(dep_diagnostics);
             found_any = true;
@@ -1273,6 +1301,60 @@ pub(crate) fn load_dependency_stub_registries(
     }
 
     found_any.then_some((registry, diagnostics))
+}
+
+/// Records every `(module, function, arity)` in `dep_registry` as owned by
+/// `dep_name` in `owners`, returning a warning diagnostic for each one
+/// already owned by a *different* package — a same-module stub collision
+/// between two sibling dependencies' own package-bundled stubs (see
+/// [`load_dependency_stub_registries`]).
+fn warn_on_package_stub_collisions(
+    dep_registry: &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+    dep_name: &str,
+    owners: &mut HashMap<(String, String, u8), String>,
+) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
+    let mut collisions = Vec::new();
+
+    for module in dep_registry.module_names() {
+        let Some(functions) = dep_registry.module_functions(module) else {
+            continue;
+        };
+        for func in functions {
+            let key = (module.to_string(), func.name.clone(), func.arity);
+            match owners.insert(key, dep_name.to_string()) {
+                Some(existing_owner) if existing_owner != dep_name => {
+                    let span = match func.provenance {
+                        beamtalk_core::semantic_analysis::type_checker::TypeProvenance::Declared(
+                            s,
+                        ) => s,
+                        _ => beamtalk_core::source_analysis::Span::default(),
+                    };
+                    let message = format!(
+                        "Package-bundled stub collision: both '{existing_owner}' and \
+                         '{dep_name}' declare `{module}:{}/{}` — the later dependency's \
+                         stub silently wins. Package stubs should cover only that \
+                         package's own native code (ADR 0075); rename or remove the \
+                         duplicate declaration.",
+                        func.name, func.arity
+                    );
+                    warn!(
+                        module,
+                        function = %func.name,
+                        arity = func.arity,
+                        first_owner = %existing_owner,
+                        second_owner = %dep_name,
+                        "Package-bundled stub collision between sibling dependencies"
+                    );
+                    collisions.push(beamtalk_core::source_analysis::Diagnostic::warning(
+                        message, span,
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    collisions
 }
 
 /// Parse and merge every `declare native:` stub file directly inside `stubs_dir`
@@ -3333,6 +3415,134 @@ mod tests {
                 .unwrap();
         merged.apply_overrides(project_layer);
         assert_eq!(marker(&merged), "ProjectMarker");
+    }
+
+    /// Two sibling dependencies each declaring their own package-bundled
+    /// stub (ADR 0075 layer 2) for the same `(module, function, arity)` is
+    /// unexpected — package stubs are meant to cover only that package's own
+    /// native code — so it must be flagged, naming both packages, rather
+    /// than resolving silently.
+    #[test]
+    fn load_dependency_stub_registries_flags_collision_between_sibling_package_stubs() {
+        let temp = TempDir::new().unwrap();
+
+        let alpha_dep_root = Utf8PathBuf::from_path_buf(temp.path().join("dep_a")).unwrap();
+        let alpha_dep_stubs = alpha_dep_root.join("stubs");
+        fs::create_dir_all(&alpha_dep_stubs).unwrap();
+        write_test_file(
+            &alpha_dep_stubs.join("shared_mod.bt"),
+            "declare native: shared_mod\n  thing: x -> Integer\n",
+        );
+
+        let beta_dep_root = Utf8PathBuf::from_path_buf(temp.path().join("dep_b")).unwrap();
+        let beta_dep_stubs = beta_dep_root.join("stubs");
+        fs::create_dir_all(&beta_dep_stubs).unwrap();
+        write_test_file(
+            &beta_dep_stubs.join("shared_mod.bt"),
+            "declare native: shared_mod\n  thing: x -> String\n",
+        );
+
+        let resolved_deps = vec![
+            crate::commands::deps::path::ResolvedDependency {
+                name: "dep_a".to_string(),
+                root: alpha_dep_root.clone(),
+                ebin_path: alpha_dep_root.join("ebin"),
+                class_module_index: HashMap::new(),
+                class_infos: Vec::new(),
+                protocol_infos: Vec::new(),
+                alias_infos: Vec::new(),
+                is_direct: true,
+                via_chain: Vec::new(),
+                stubs_dir: Some(alpha_dep_stubs),
+            },
+            crate::commands::deps::path::ResolvedDependency {
+                name: "dep_b".to_string(),
+                root: beta_dep_root.clone(),
+                ebin_path: beta_dep_root.join("ebin"),
+                class_module_index: HashMap::new(),
+                class_infos: Vec::new(),
+                protocol_infos: Vec::new(),
+                alias_infos: Vec::new(),
+                is_direct: true,
+                via_chain: Vec::new(),
+                stubs_dir: Some(beta_dep_stubs),
+            },
+        ];
+
+        let (_registry, diags) =
+            load_dependency_stub_registries(&resolved_deps, None, None, OutputFormat::Text)
+                .unwrap();
+
+        assert_eq!(
+            diags.len(),
+            1,
+            "exactly one collision diagnostic expected, got: {diags:?}"
+        );
+        assert!(diags[0].message.contains("dep_a"), "{}", diags[0].message);
+        assert!(diags[0].message.contains("dep_b"), "{}", diags[0].message);
+        assert!(
+            diags[0].message.contains("shared_mod:thing/1"),
+            "{}",
+            diags[0].message
+        );
+    }
+
+    /// Two sibling dependencies declaring *different* functions (even in the
+    /// same native module) is not a collision — no diagnostic.
+    #[test]
+    fn load_dependency_stub_registries_no_collision_for_disjoint_functions() {
+        let temp = TempDir::new().unwrap();
+
+        let alpha_dep_root = Utf8PathBuf::from_path_buf(temp.path().join("dep_a")).unwrap();
+        let alpha_dep_stubs = alpha_dep_root.join("stubs");
+        fs::create_dir_all(&alpha_dep_stubs).unwrap();
+        write_test_file(
+            &alpha_dep_stubs.join("shared_mod.bt"),
+            "declare native: shared_mod\n  a_thing: x -> Integer\n",
+        );
+
+        let beta_dep_root = Utf8PathBuf::from_path_buf(temp.path().join("dep_b")).unwrap();
+        let beta_dep_stubs = beta_dep_root.join("stubs");
+        fs::create_dir_all(&beta_dep_stubs).unwrap();
+        write_test_file(
+            &beta_dep_stubs.join("shared_mod.bt"),
+            "declare native: shared_mod\n  b_thing: x -> String\n",
+        );
+
+        let resolved_deps = vec![
+            crate::commands::deps::path::ResolvedDependency {
+                name: "dep_a".to_string(),
+                root: alpha_dep_root.clone(),
+                ebin_path: alpha_dep_root.join("ebin"),
+                class_module_index: HashMap::new(),
+                class_infos: Vec::new(),
+                protocol_infos: Vec::new(),
+                alias_infos: Vec::new(),
+                is_direct: true,
+                via_chain: Vec::new(),
+                stubs_dir: Some(alpha_dep_stubs),
+            },
+            crate::commands::deps::path::ResolvedDependency {
+                name: "dep_b".to_string(),
+                root: beta_dep_root.clone(),
+                ebin_path: beta_dep_root.join("ebin"),
+                class_module_index: HashMap::new(),
+                class_infos: Vec::new(),
+                protocol_infos: Vec::new(),
+                alias_infos: Vec::new(),
+                is_direct: true,
+                via_chain: Vec::new(),
+                stubs_dir: Some(beta_dep_stubs),
+            },
+        ];
+
+        let (registry, diags) =
+            load_dependency_stub_registries(&resolved_deps, None, None, OutputFormat::Text)
+                .unwrap();
+
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert!(registry.lookup("shared_mod", "a_thing", 1).is_some());
+        assert!(registry.lookup("shared_mod", "b_thing", 1).is_some());
     }
 
     #[test]
