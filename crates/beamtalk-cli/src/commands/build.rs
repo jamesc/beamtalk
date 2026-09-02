@@ -1293,6 +1293,7 @@ pub(crate) fn load_dependency_stub_registries(
                 &dep_registry,
                 &dep.name,
                 &mut package_stub_owners,
+                format,
             ));
             registry.apply_overrides(dep_registry);
             diagnostics.extend(dep_diagnostics);
@@ -1308,10 +1309,21 @@ pub(crate) fn load_dependency_stub_registries(
 /// already owned by a *different* package — a same-module stub collision
 /// between two sibling dependencies' own package-bundled stubs (see
 /// [`load_dependency_stub_registries`]).
+///
+/// Each collision is rendered immediately (respecting `format`), mirroring
+/// [`load_stub_registry_from_dir`]'s own drift/skipped-signature
+/// diagnostics — without it, a collision would only ever show up as an
+/// anonymous count in the build summary (`beamtalk build`) or be silently
+/// dropped (`beamtalk lint`, which discards the diagnostics its caller
+/// doesn't fold into `all_diags`). There is no single stub file's source to
+/// render a code snippet against here (the two declarations live in two
+/// different packages' stub files), so this prints a plain message rather
+/// than a source-annotated miette report.
 fn warn_on_package_stub_collisions(
     dep_registry: &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
     dep_name: &str,
     owners: &mut HashMap<(String, String, u8), String>,
+    format: OutputFormat,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     let mut collisions = Vec::new();
 
@@ -1345,6 +1357,19 @@ fn warn_on_package_stub_collisions(
                         second_owner = %dep_name,
                         "Package-bundled stub collision between sibling dependencies"
                     );
+                    match format {
+                        OutputFormat::Text => eprintln!("warning: {message}"),
+                        OutputFormat::Json => {
+                            println!(
+                                "{}",
+                                serde_json::json!({
+                                    "file": dep_name,
+                                    "severity": "warning",
+                                    "message": message,
+                                })
+                            );
+                        }
+                    }
                     collisions.push(beamtalk_core::source_analysis::Diagnostic::warning(
                         message, span,
                     ));
