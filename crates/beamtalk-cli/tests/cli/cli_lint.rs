@@ -12,6 +12,28 @@ use crate::cli_common;
 use predicates::prelude::*;
 use predicates::str::contains;
 
+/// ADR 0075 / BT-1846 / BT-1847 end-to-end regression: `beamtalk lint` must
+/// not sweep `stubs/*.bt` into ordinary lint input — `collect_lint_files`
+/// has no src/-only scoping (unlike `beamtalk build`'s `find_source_files`),
+/// so without an explicit exclusion, a legitimate `declare native:` stub
+/// file was reported as a hard error ("only valid in stubs/ directory").
+#[test]
+fn lint_succeeds_with_project_local_stubs_directory() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("stubs")).expect("mkdir stubs");
+    std::fs::write(
+        project.path().join("stubs/lists.bt"),
+        "declare native: lists\n  reverse: list :: List -> List\n",
+    )
+    .expect("write stubs/lists.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success();
+}
+
 #[test]
 fn lint_clean_project_text_format_exits_zero() {
     let project = cli_common::fixture_project();

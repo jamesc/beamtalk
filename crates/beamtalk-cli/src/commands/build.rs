@@ -1165,7 +1165,13 @@ pub(crate) fn load_project_stub_registry(
     if !stubs_dir.exists() {
         return None;
     }
-    let stub_files = collect_source_files_from_dir(&stubs_dir).ok()?;
+    let stub_files = match collect_source_files_from_dir(&stubs_dir) {
+        Ok(files) => files,
+        Err(e) => {
+            warn!(dir = %stubs_dir, error = %e, "Cannot read stubs/ directory; skipping stub resolution");
+            return None;
+        }
+    };
     if stub_files.is_empty() {
         return None;
     }
@@ -1687,15 +1693,35 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
         miette::bail!("Path '{}' does not exist", path);
     }
 
-    // Look for src directory or .bt files in current directory
-    let src_dir = path.join("src");
+    collect_project_source_files(path)
+}
+
+/// Finds a project's `.bt` source files: `src/` if it exists, else
+/// `project_root` itself — excluding `project_root/stubs/`, which
+/// `load_project_stub_registry` (ADR 0075, BT-1847) scans separately and
+/// never compiles as ordinary source (a `declare native:` block there is a
+/// hard error everywhere else).
+///
+/// Without the exclusion, a project with no `src/` directory would fall back
+/// to searching the whole project root, sweeping `stubs/*.bt` into the
+/// normal compile/lint pipeline. Shared by `find_source_files` (this file),
+/// `type_coverage.rs`, and `deps/path.rs`'s path-dependency compilation — all
+/// three previously duplicated the same `src/`-or-fallback logic without
+/// this exclusion.
+pub(crate) fn collect_project_source_files(project_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+    let src_dir = project_root.join("src");
     let search_dir = if src_dir.exists() {
         src_dir
     } else {
-        path.to_path_buf()
+        project_root.to_path_buf()
     };
 
-    FileWalker::source_files().walk(&search_dir)
+    let files = collect_source_files_from_dir(&search_dir)?;
+    let stubs_dir = project_root.join("stubs");
+    Ok(files
+        .into_iter()
+        .filter(|f| !f.starts_with(&stubs_dir))
+        .collect())
 }
 
 /// Collect all `.bt` source files from a directory tree.
@@ -3053,6 +3079,52 @@ mod tests {
 
         let files = find_source_files(&project_path).unwrap();
         assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn test_find_source_files_excludes_stubs_dir_with_src() {
+        // ADR 0075 / BT-1847 regression: stubs/ is a sibling of src/, so
+        // when src/ exists it's already excluded by the src/-only scoping —
+        // this pins that behavior so a future refactor can't reintroduce it.
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        let stubs_path = project_path.join("stubs");
+        std::fs::create_dir_all(&stubs_path).unwrap();
+
+        write_test_file(&src_path.join("main.bt"), "test := [1].");
+        write_test_file(
+            &stubs_path.join("lists.bt"),
+            "declare native: lists\n  reverse: list -> List\n",
+        );
+
+        let files = find_source_files(&project_path).unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files.iter().any(|f| f.file_name() == Some("main.bt")));
+        assert!(!files.iter().any(|f| f.starts_with(&stubs_path)));
+    }
+
+    #[test]
+    fn test_find_source_files_excludes_stubs_dir_without_src() {
+        // ADR 0075 / BT-1847 regression: without a src/ directory,
+        // find_source_files used to fall back to scanning the whole
+        // project root — sweeping stubs/*.bt into the normal compile
+        // pipeline, where `declare native:` is a hard error (BT-1846).
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let stubs_path = project_path.join("stubs");
+        std::fs::create_dir_all(&stubs_path).unwrap();
+
+        write_test_file(&project_path.join("main.bt"), "test := [1].");
+        write_test_file(
+            &stubs_path.join("lists.bt"),
+            "declare native: lists\n  reverse: list -> List\n",
+        );
+
+        let files = find_source_files(&project_path).unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files.iter().any(|f| f.file_name() == Some("main.bt")));
+        assert!(!files.iter().any(|f| f.starts_with(&stubs_path)));
     }
 
     #[test]

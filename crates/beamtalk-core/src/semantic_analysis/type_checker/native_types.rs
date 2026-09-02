@@ -124,12 +124,9 @@ pub fn load_native_declarations(
         let mut functions = Vec::with_capacity(decl.method_signatures.len());
         for sig in &decl.method_signatures {
             match native_declaration_signature_to_function(sig, &subst) {
-                Some(func) => functions.push(func),
-                None => diagnostics.push(Diagnostic::warning(
-                    format!(
-                        "Skipping `declare native: {module_name}` signature — \
-                         binary selectors don't name an Erlang function"
-                    ),
+                Ok(func) => functions.push(func),
+                Err(reason) => diagnostics.push(Diagnostic::warning(
+                    format!("Skipping `declare native: {module_name}` signature — {reason}"),
                     sig.span,
                 )),
             }
@@ -141,9 +138,11 @@ pub fn load_native_declarations(
 }
 
 /// Converts one native-declaration method signature into a
-/// [`FunctionSignature`], or `None` if the selector shape has no
-/// corresponding Erlang function name ([`crate::ast::MessageSelector::Binary`]
-/// only — Erlang function names are never operators).
+/// [`FunctionSignature`], or `Err(reason)` if the signature can't become
+/// one: either the selector shape has no corresponding Erlang function name
+/// ([`crate::ast::MessageSelector::Binary`] — Erlang function names are
+/// never operators), or its arity doesn't fit `u8` (already beyond BEAM's
+/// own arity limit).
 ///
 /// An unannotated parameter or return type resolves to
 /// [`DynamicReason::UnannotatedParam`]/[`DynamicReason::UnannotatedReturn`]
@@ -155,9 +154,11 @@ pub fn load_native_declarations(
 fn native_declaration_signature_to_function(
     sig: &ProtocolMethodSignature,
     subst: &type_resolver::SubstitutionMap,
-) -> Option<FunctionSignature> {
-    let name = erlang_function_name(&sig.selector)?;
-    let arity = u8::try_from(erlang_arity(&sig.selector, sig.parameters.len())).unwrap_or(u8::MAX);
+) -> Result<FunctionSignature, &'static str> {
+    let name = erlang_function_name(&sig.selector)
+        .ok_or("binary selectors don't name an Erlang function")?;
+    let arity = u8::try_from(erlang_arity(&sig.selector, sig.parameters.len()))
+        .map_err(|_| "arity exceeds 255, already beyond BEAM's own arity limit")?;
 
     let params = sig
         .parameters
@@ -176,7 +177,7 @@ fn native_declaration_signature_to_function(
         |ann| type_resolver::resolve_type_annotation(ann, subst, None, None),
     );
 
-    Some(FunctionSignature {
+    Ok(FunctionSignature {
         name,
         arity,
         params,
@@ -1197,5 +1198,47 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("binary selectors"));
         assert!(!reg.has_module("lists") || reg.module_functions("lists").unwrap().is_empty());
+    }
+
+    #[test]
+    fn native_declaration_signature_with_arity_over_u8_max_is_skipped_not_clamped() {
+        // Regression: an out-of-range arity must be reported and skipped —
+        // silently clamping to u8::MAX would register the signature under
+        // the wrong (bogus) arity instead of rejecting it, the same way the
+        // binary-selector case above is rejected rather than guessed at.
+        use crate::ast::{CommentAttachment, Identifier, KeywordPart, MessageSelector};
+        use crate::source_analysis::Span;
+
+        let span = Span::new(0, 0);
+        let keywords: Vec<KeywordPart> = (0..300)
+            .map(|i| KeywordPart {
+                keyword: format!("k{i}:").into(),
+                span,
+            })
+            .collect();
+        let parameters = (0..300)
+            .map(|i| {
+                crate::ast::ParameterDefinition::new(Identifier {
+                    name: format!("p{i}").into(),
+                    span,
+                })
+            })
+            .collect();
+        let sig = ProtocolMethodSignature {
+            selector: MessageSelector::Keyword(keywords),
+            parameters,
+            return_type: None,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span,
+        };
+
+        let result =
+            native_declaration_signature_to_function(&sig, &type_resolver::SubstitutionMap::new());
+
+        assert!(
+            matches!(result, Err(reason) if reason.contains("arity")),
+            "expected an arity-related error, got {result:?}"
+        );
     }
 }

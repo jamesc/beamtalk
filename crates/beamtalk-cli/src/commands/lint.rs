@@ -434,7 +434,16 @@ fn collect_lint_files(
                 Err(e) => warn!("failed to scan native directory: {e}"),
             }
         }
+        // `stubs/` is excluded (ADR 0075, BT-1847): it's type-only and
+        // never compiled, but this walk has no src/-only scoping to
+        // exclude it implicitly the way `find_source_files` does, so a
+        // `declare native:` stub file would otherwise be swept in and
+        // rejected here as a hard error.
+        let stubs_dir = project_root.join("stubs");
         collect_source_files_from_dir(source_path)?
+            .into_iter()
+            .filter(|f| !f.starts_with(&stubs_dir))
+            .collect()
     } else {
         miette::bail!("Path '{}' does not exist", path);
     };
