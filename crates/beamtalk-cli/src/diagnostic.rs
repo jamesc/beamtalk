@@ -12,7 +12,7 @@
 // Suppress unused_assignments for struct fields used by derive macros
 #![allow(unused_assignments)]
 
-use beamtalk_core::source_analysis::{Diagnostic as CoreDiagnostic, Severity};
+use beamtalk_core::source_analysis::{Diagnostic as CoreDiagnostic, Severity, Span};
 use miette::{Diagnostic, SourceSpan};
 
 /// A compilation diagnostic with rich formatting.
@@ -98,6 +98,39 @@ impl CompileDiagnostic {
             help: diagnostic.hint.as_ref().map(ToString::to_string),
         }
     }
+}
+
+/// Render a beamtalk-core diagnostic as the single JSON shape every
+/// `--format=json` diagnostic stream uses (`beamtalk lint`'s per-diagnostic
+/// lines, and `load_project_stub_registry`'s stub diagnostics).
+///
+/// Extracted so the JSON schema (`file`/`severity`/`message`/`span_start`/
+/// `span_end`/`hint`/`notes`) is defined once — per CLAUDE.md's "No
+/// duplicate implementations" rule, copy-pasting this shape a second time
+/// would let the two call sites silently drift apart on a future schema
+/// change (a new field, a renamed key).
+#[must_use]
+pub fn diagnostic_to_json(file: &str, diagnostic: &CoreDiagnostic) -> serde_json::Value {
+    let notes: Vec<serde_json::Value> = diagnostic
+        .notes
+        .iter()
+        .map(|n| {
+            serde_json::json!({
+                "message": n.message.as_str(),
+                "span_start": n.span.map(Span::start),
+                "span_end": n.span.map(Span::end),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "file": file,
+        "severity": format!("{:?}", diagnostic.severity).to_lowercase(),
+        "message": diagnostic.message.as_str(),
+        "span_start": diagnostic.span.start(),
+        "span_end": diagnostic.span.end(),
+        "hint": diagnostic.hint.as_deref(),
+        "notes": notes,
+    })
 }
 
 #[cfg(test)]

@@ -11,6 +11,60 @@ use crate::cli_common;
 use predicates::prelude::*;
 use predicates::str::contains;
 
+/// ADR 0075 / BT-1846 / BT-1847 end-to-end regression: a project with a
+/// `stubs/` directory must build successfully — `stubs/*.bt` is scanned
+/// separately by `load_project_stub_registry` and must never reach the
+/// ordinary compile pipeline, where `declare native:` is a hard error
+/// ("only valid in stubs/ directory"). A prior version of this feature
+/// only exercised `load_project_stub_registry` in isolation and missed
+/// that `find_source_files` swept `stubs/` into `env.source_files` too.
+#[test]
+fn build_succeeds_with_project_local_stubs_directory() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("stubs")).expect("mkdir stubs");
+    std::fs::write(
+        project.path().join("stubs/lists.bt"),
+        "declare native: lists\n  reverse: list :: List -> List\n",
+    )
+    .expect("write stubs/lists.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success();
+}
+
+/// Companion to the above: the stub isn't just tolerated, it's actually
+/// consumed — a stubbed function's argument-type mismatch is caught by the
+/// type checker (BT-1847's function/arity-level registry override), proving
+/// `stubs/` is both excluded from ordinary compilation and loaded into the
+/// FFI type registry in the same build.
+#[test]
+fn build_enforces_stub_declared_argument_types() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("stubs")).expect("mkdir stubs");
+    std::fs::write(
+        project.path().join("stubs/lists.bt"),
+        "declare native: lists\n  reverse: list :: List -> List\n",
+    )
+    .expect("write stubs/lists.bt");
+    std::fs::write(
+        project.path().join("src/StubUser.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         result := Erlang lists reverse: 42.\n",
+    )
+    .expect("write src/StubUser.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .stderr(contains("expects List").and(contains("got Integer")));
+}
+
 #[test]
 fn build_clean_project_produces_beam_artefacts() {
     let project = cli_common::fixture_project();

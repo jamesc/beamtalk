@@ -350,15 +350,10 @@ fn compile_dependency_with_context(
 
     info!(dep = %dep_name, ebin = %ebin_path, "Compiling path dependency");
 
-    // Find source files in the dependency
+    // Find source files in the dependency. `stubs/` is excluded (ADR 0075,
+    // BT-1847) — it's type-only and never compiled.
     let src_dir = dep_root.join("src");
-    let search_dir = if src_dir.exists() {
-        src_dir.clone()
-    } else {
-        dep_root.to_path_buf()
-    };
-
-    let source_files = crate::commands::build::collect_source_files_from_dir(&search_dir)?;
+    let source_files = crate::commands::build::collect_project_source_files(dep_root)?;
 
     if source_files.is_empty() {
         debug!(dep = %dep_name, "No source files found in dependency, skipping compilation");
@@ -614,14 +609,10 @@ pub(crate) fn build_dep_class_index(
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
 )> {
+    // `stubs/` is excluded (ADR 0075, BT-1847) — it's type-only and never
+    // compiled.
     let src_dir = dep_root.join("src");
-    let search_dir = if src_dir.exists() {
-        src_dir.clone()
-    } else {
-        dep_root.to_path_buf()
-    };
-
-    let source_files = crate::commands::build::collect_source_files_from_dir(&search_dir)?;
+    let source_files = crate::commands::build::collect_project_source_files(dep_root)?;
     if source_files.is_empty() {
         return Ok((HashMap::new(), Vec::new(), Vec::new(), Vec::new()));
     }

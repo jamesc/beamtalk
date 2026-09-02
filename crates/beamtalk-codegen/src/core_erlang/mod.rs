@@ -1781,6 +1781,32 @@ pub struct CoreErlangGenerator {
     /// (`generate_field_assignment_open`, `generate_self_field_at_put_open`,
     /// `generate_local_var_assignment_in_loop`) return the result variable explicitly.
     last_open_scope_result: Option<OpenScopeResult>,
+    /// BT-3392: actor self-sends already dispatched-and-threaded (via a real
+    /// `ThreadedStmt::Bind`, per `dispatch_self_send_as_bind`) by a bounded
+    /// caller ahead of compiling the surrounding expression — keyed by the
+    /// self-send's receiver `self` token's own `Span` (unique per source
+    /// occurrence), valued by the Core Erlang variable already holding its
+    /// `{Result, NewState}` dispatch tuple. Consulted by
+    /// `try_handle_self_dispatch`, which substitutes
+    /// `element(1, <that var>)` — a plain, self-contained value reference —
+    /// instead of dispatching again (which would both re-run the method's
+    /// side effects and, since state was already threaded by the earlier
+    /// real `Bind`, verify-fail as an unbound version).
+    ///
+    /// Populated by `hoist_self_sends_for_binary_op`
+    /// (`control_flow/conditionals.rs`) immediately before compiling a
+    /// conditional block-body statement — scoped to self-sends nested as an
+    /// operand of a binary-operator chain (e.g. `1 + (self recordOnce:
+    /// x)`), the shape `generate_self_dispatch`'s own doc comment identifies
+    /// as unsafe to thread unconditionally (BT-3382's reverted general fix
+    /// broke `inheriting_counter.bt` by advancing the state-version counter
+    /// as a side effect of compiling a value expression a caller elsewhere
+    /// had already snapshotted the version for). Gating this to explicitly
+    /// pre-hoisted spans, each consumed exactly once via `HashMap::remove`,
+    /// keeps every other self-dispatch call site's behavior — including the
+    /// version-counter side effect — completely unchanged.
+    hoisted_self_send_results:
+        std::collections::HashMap<beamtalk_core::source_analysis::Span, String>,
     /// BT-845/BT-860: Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     source_path: Option<String>,
@@ -1940,6 +1966,7 @@ impl CoreErlangGenerator {
             current_method_param_types: std::collections::HashMap::new(),
             current_class_field_types: std::collections::HashMap::new(),
             last_open_scope_result: None,
+            hoisted_self_send_results: std::collections::HashMap::new(),
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
             tier2_local_vars: std::collections::HashSet::new(),

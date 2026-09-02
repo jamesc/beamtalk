@@ -30,11 +30,12 @@
 
 use super::native_type_registry::{FunctionSignature, NativeTypeRegistry, ParamType};
 use super::type_resolver;
-#[cfg(test)]
-use super::types::DynamicReason;
-use super::types::{InferredType, TypeProvenance};
+use super::types::{DynamicReason, InferredType, TypeProvenance};
+use crate::ast::{NativeDeclaration, ProtocolMethodSignature};
 use crate::semantic_analysis::class_hierarchy::DeclaredType;
 use crate::semantic_analysis::string_utils::split_top_level_maps;
+use crate::semantic_analysis::validators::{erlang_arity, erlang_function_name};
+use crate::source_analysis::Diagnostic;
 use ecow::EcoString;
 use std::collections::HashMap;
 
@@ -95,6 +96,95 @@ pub fn map_type_name(type_name: &str) -> InferredType {
         None,
         super::TypeStringContext::Extracted,
     )
+}
+
+/// Converts one file's `declare native:` stub declarations (ADR 0075 Phase
+/// 2, BT-1847) into [`NativeTypeRegistry`] entries and merges them into
+/// `registry` via [`NativeTypeRegistry::upsert_functions`].
+///
+/// Call once per parsed stub file, threading the same `registry` across
+/// every file in a project's `stubs/` directory — `upsert_functions`
+/// accumulates at the function/arity level, so multiple `declare native:`
+/// blocks for the same Erlang module (in the same file or across files)
+/// combine rather than one wholesale-replacing another; a later block's
+/// function/arity wins over an earlier one for the same module.
+///
+/// Returns one warning [`Diagnostic`] per skipped signature — only a
+/// binary-selector signature is skipped, since Erlang function names are
+/// never operators and [`erlang_function_name`] has no mapping for them.
+pub fn load_native_declarations(
+    declarations: &[NativeDeclaration],
+    registry: &mut NativeTypeRegistry,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let subst = type_resolver::SubstitutionMap::new();
+
+    for decl in declarations {
+        let module_name = decl.module.name.as_str();
+        let mut functions = Vec::with_capacity(decl.method_signatures.len());
+        for sig in &decl.method_signatures {
+            match native_declaration_signature_to_function(sig, &subst) {
+                Ok(func) => functions.push(func),
+                Err(reason) => diagnostics.push(Diagnostic::warning(
+                    format!("Skipping `declare native: {module_name}` signature — {reason}"),
+                    sig.span,
+                )),
+            }
+        }
+        registry.upsert_functions(module_name, functions);
+    }
+
+    diagnostics
+}
+
+/// Converts one native-declaration method signature into a
+/// [`FunctionSignature`], or `Err(reason)` if the signature can't become
+/// one: either the selector shape has no corresponding Erlang function name
+/// ([`crate::ast::MessageSelector::Binary`] — Erlang function names are
+/// never operators), or its arity doesn't fit `u8` (already beyond BEAM's
+/// own arity limit).
+///
+/// An unannotated parameter or return type resolves to
+/// [`DynamicReason::UnannotatedParam`]/[`DynamicReason::UnannotatedReturn`]
+/// — the same "no information written" reason a plain Beamtalk method
+/// without `::`/`->` gets, not [`DynamicReason::UntypedFfi`] (reserved for
+/// an FFI call with no spec *anywhere* in the registry) or
+/// [`DynamicReason::DynamicSpec`] (reserved for an *explicit* `term()`/
+/// `any()` Erlang spec).
+fn native_declaration_signature_to_function(
+    sig: &ProtocolMethodSignature,
+    subst: &type_resolver::SubstitutionMap,
+) -> Result<FunctionSignature, &'static str> {
+    let name = erlang_function_name(&sig.selector)
+        .ok_or("binary selectors don't name an Erlang function")?;
+    let arity = u8::try_from(erlang_arity(&sig.selector, sig.parameters.len()))
+        .map_err(|_| "arity exceeds 255, already beyond BEAM's own arity limit")?;
+
+    let params = sig
+        .parameters
+        .iter()
+        .map(|p| ParamType {
+            keyword: Some(EcoString::from(p.name.name.as_str())),
+            type_: p.type_annotation.as_ref().map_or_else(
+                || InferredType::Dynamic(DynamicReason::UnannotatedParam),
+                |ann| type_resolver::resolve_type_annotation(ann, subst, None, None),
+            ),
+        })
+        .collect();
+
+    let return_type = sig.return_type.as_ref().map_or_else(
+        || InferredType::Dynamic(DynamicReason::UnannotatedReturn),
+        |ann| type_resolver::resolve_type_annotation(ann, subst, None, None),
+    );
+
+    Ok(FunctionSignature {
+        name,
+        arity,
+        params,
+        return_type,
+        provenance: TypeProvenance::Declared(sig.span),
+        line: None,
+    })
 }
 
 /// Parses a `beamtalk-specs-module:` line and registers the specs in the registry.
@@ -954,6 +1044,201 @@ mod tests {
             "FFI `Nil` member must canonicalize to `UndefinedObject` so \
              isNil/ifNil: narrowing (which keys on UndefinedObject) \
              recognises it"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // load_native_declarations tests (ADR 0075 Phase 2, BT-1847)
+    // -----------------------------------------------------------------------
+
+    fn parse_native_decls(source: &str) -> Vec<NativeDeclaration> {
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, diagnostics) = crate::source_analysis::parse(tokens);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity != crate::source_analysis::Severity::Lint)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "unexpected parse diagnostics: {errors:?}"
+        );
+        module.native_declarations
+    }
+
+    #[test]
+    fn load_native_declarations_registers_typed_signature() {
+        let decls = parse_native_decls("declare native: lists\n  reverse: list :: List -> List\n");
+        let mut reg = NativeTypeRegistry::new();
+
+        let diags = load_native_declarations(&decls, &mut reg);
+
+        assert!(diags.is_empty());
+        let sig = reg.lookup("lists", "reverse", 1).unwrap();
+        assert_eq!(sig.params.len(), 1);
+        assert_eq!(sig.params[0].keyword.as_deref(), Some("list"));
+        assert_eq!(sig.params[0].type_, InferredType::known("List"));
+        assert_eq!(sig.return_type, InferredType::known("List"));
+        assert!(matches!(sig.provenance, TypeProvenance::Declared(_)));
+    }
+
+    #[test]
+    fn load_native_declarations_generic_type_param_is_not_resolved_at_load_time() {
+        // ADR 0075: type parameters in native declarations (T, A, B, Acc) are
+        // method-scoped, Hindley-Milner-style foralls — substituted per call
+        // site during inference, not at spec-registration time. So `T` here
+        // resolves to a bare `Known("T")` placeholder, not `Dynamic` or an
+        // error.
+        let decls =
+            parse_native_decls("declare native: lists\n  reverse: list :: List(T) -> List(T)\n");
+        let mut reg = NativeTypeRegistry::new();
+
+        load_native_declarations(&decls, &mut reg);
+
+        let sig = reg.lookup("lists", "reverse", 1).unwrap();
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = &sig.params[0].type_
+        else {
+            panic!("expected Known(List(T)), got {:?}", sig.params[0].type_);
+        };
+        assert_eq!(class_name.as_str(), "List");
+        assert_eq!(type_args.len(), 1);
+        assert!(matches!(
+            &type_args[0],
+            InferredType::Known { class_name, .. } if class_name.as_str() == "T"
+        ));
+    }
+
+    #[test]
+    fn load_native_declarations_multi_keyword_signature() {
+        let decls = parse_native_decls(
+            "declare native: lists\n  seq: from :: Integer to: to :: Integer -> List(Integer)\n",
+        );
+        let mut reg = NativeTypeRegistry::new();
+
+        load_native_declarations(&decls, &mut reg);
+
+        let sig = reg.lookup("lists", "seq", 2).unwrap();
+        assert_eq!(sig.params.len(), 2);
+        assert_eq!(sig.params[0].keyword.as_deref(), Some("from"));
+        assert_eq!(sig.params[0].type_, InferredType::known("Integer"));
+        assert_eq!(sig.params[1].keyword.as_deref(), Some("to"));
+    }
+
+    #[test]
+    fn load_native_declarations_unary_signature() {
+        let decls = parse_native_decls("declare native: erlang\n  node -> Symbol\n");
+        let mut reg = NativeTypeRegistry::new();
+
+        load_native_declarations(&decls, &mut reg);
+
+        let sig = reg.lookup("erlang", "node", 0).unwrap();
+        assert!(sig.params.is_empty());
+        assert_eq!(sig.return_type, InferredType::known("Symbol"));
+    }
+
+    #[test]
+    fn load_native_declarations_untyped_param_and_return_are_unannotated_dynamic() {
+        let decls = parse_native_decls("declare native: erlang\n  apply: fun with: args\n");
+        let mut reg = NativeTypeRegistry::new();
+
+        load_native_declarations(&decls, &mut reg);
+
+        let sig = reg.lookup("erlang", "apply", 2).unwrap();
+        assert!(matches!(
+            sig.params[0].type_,
+            InferredType::Dynamic(DynamicReason::UnannotatedParam)
+        ));
+        assert!(matches!(
+            sig.return_type,
+            InferredType::Dynamic(DynamicReason::UnannotatedReturn)
+        ));
+    }
+
+    #[test]
+    fn load_native_declarations_accumulates_across_calls_for_same_module() {
+        let first = parse_native_decls("declare native: lists\n  reverse: list -> List\n");
+        let second = parse_native_decls("declare native: lists\n  sort: list -> List\n");
+        let mut reg = NativeTypeRegistry::new();
+
+        load_native_declarations(&first, &mut reg);
+        load_native_declarations(&second, &mut reg);
+
+        assert_eq!(reg.module_functions("lists").unwrap().len(), 2);
+        assert!(reg.lookup("lists", "reverse", 1).is_some());
+        assert!(reg.lookup("lists", "sort", 1).is_some());
+    }
+
+    #[test]
+    fn load_native_declarations_later_call_overrides_same_function_arity() {
+        let first = parse_native_decls("declare native: lists\n  reverse: list -> Dynamic\n");
+        let second = parse_native_decls("declare native: lists\n  reverse: list :: List -> List\n");
+        let mut reg = NativeTypeRegistry::new();
+
+        load_native_declarations(&first, &mut reg);
+        load_native_declarations(&second, &mut reg);
+
+        assert_eq!(reg.module_functions("lists").unwrap().len(), 1);
+        let sig = reg.lookup("lists", "reverse", 1).unwrap();
+        assert_eq!(sig.params[0].type_, InferredType::known("List"));
+    }
+
+    #[test]
+    fn load_native_declarations_binary_selector_is_skipped_with_warning() {
+        // `declare native:` bodies reuse the general protocol signature
+        // parser, which accepts binary selectors — but Erlang function names
+        // are never operators, so these can't become a FunctionSignature.
+        let decls = parse_native_decls("declare native: lists\n  < other -> Boolean\n");
+        let mut reg = NativeTypeRegistry::new();
+
+        let diags = load_native_declarations(&decls, &mut reg);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("binary selectors"));
+        assert!(!reg.has_module("lists") || reg.module_functions("lists").unwrap().is_empty());
+    }
+
+    #[test]
+    fn native_declaration_signature_with_arity_over_u8_max_is_skipped_not_clamped() {
+        // Regression: an out-of-range arity must be reported and skipped —
+        // silently clamping to u8::MAX would register the signature under
+        // the wrong (bogus) arity instead of rejecting it, the same way the
+        // binary-selector case above is rejected rather than guessed at.
+        use crate::ast::{CommentAttachment, Identifier, KeywordPart, MessageSelector};
+        use crate::source_analysis::Span;
+
+        let span = Span::new(0, 0);
+        let keywords: Vec<KeywordPart> = (0..300)
+            .map(|i| KeywordPart {
+                keyword: format!("k{i}:").into(),
+                span,
+            })
+            .collect();
+        let parameters = (0..300)
+            .map(|i| {
+                crate::ast::ParameterDefinition::new(Identifier {
+                    name: format!("p{i}").into(),
+                    span,
+                })
+            })
+            .collect();
+        let sig = ProtocolMethodSignature {
+            selector: MessageSelector::Keyword(keywords),
+            parameters,
+            return_type: None,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span,
+        };
+
+        let result =
+            native_declaration_signature_to_function(&sig, &type_resolver::SubstitutionMap::new());
+
+        assert!(
+            matches!(result, Err(reason) if reason.contains("arity")),
+            "expected an arity-related error, got {result:?}"
         );
     }
 }
