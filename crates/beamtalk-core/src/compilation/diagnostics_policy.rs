@@ -462,6 +462,60 @@ pub fn compute_diagnostics_with_known_vars(
     all_diagnostics
 }
 
+/// Diagnostic categories produced *only* by `beamtalk lint`'s dedicated lint
+/// passes (`beamtalk_lint::run_lint_passes`), never by `analyse_full`'s
+/// semantic analysis (BT-3384).
+///
+/// `beamtalk build`/`beamtalk test`, the LSP, and the REPL never call
+/// `run_lint_passes` — so a diagnostic in one of these categories can never
+/// appear in the diagnostics list they hand to `apply_expect_directives`, and
+/// an `@expect` for one of them would always look "stale" from their point of
+/// view even when `beamtalk lint` genuinely still needs it: there is no state
+/// of the source that could satisfy both tools' staleness checks
+/// simultaneously otherwise. [`apply_expect_directives_excluding_lint_only`]
+/// is the staleness entry point for every pipeline that does not run lint
+/// passes; only `beamtalk lint` itself (and any other caller that actually
+/// calls `run_lint_passes` first, e.g. the MCP server's own lint-equivalent
+/// path) should keep calling plain [`apply_expect_directives`], which
+/// validates every category.
+const LINT_PASS_ONLY_CATEGORIES: &[DiagnosticCategory] = &[DiagnosticCategory::DeadAssignment];
+
+/// Returns `true` if `expect_cat`'s staleness cannot be evaluated because
+/// every [`DiagnosticCategory`] it could match is in `unchecked` — i.e. this
+/// invocation never ran the check that could confirm or refute it (BT-3384).
+///
+/// `all` is deliberately exempted: narrowing it here would silently defang
+/// staleness checking for *every* `@expect all` in a build, not just the
+/// ones that happen to depend on a lint-only category — BT-3384's fix stays
+/// scoped to the specific categories that are genuinely lint-only.
+///
+/// This match is intentionally exhaustive (no `_` arm): adding a new
+/// [`ExpectCategory`] variant is a compile error here until this function
+/// says whether it's lint-only, so that fact can never silently drift from
+/// [`LINT_PASS_ONLY_CATEGORIES`].
+fn expect_category_unchecked(expect_cat: ExpectCategory, unchecked: &[DiagnosticCategory]) -> bool {
+    if unchecked.is_empty() {
+        return false;
+    }
+    match expect_cat {
+        ExpectCategory::All => false,
+        ExpectCategory::DeadAssignment => unchecked.contains(&DiagnosticCategory::DeadAssignment),
+        ExpectCategory::Dnu
+        | ExpectCategory::Type
+        | ExpectCategory::Unused
+        | ExpectCategory::Deprecation
+        | ExpectCategory::ActorNew
+        | ExpectCategory::Visibility
+        | ExpectCategory::UnresolvedClass
+        | ExpectCategory::UnresolvedFfi
+        | ExpectCategory::ArityMismatch
+        | ExpectCategory::ShadowedClass
+        | ExpectCategory::TypeAnnotation
+        | ExpectCategory::Inheritance
+        | ExpectCategory::Sendability => false,
+    }
+}
+
 /// Applies `@expect` directives to suppress matching diagnostics.
 ///
 /// For each `@expect category` directive in the module, any diagnostic
@@ -471,7 +525,37 @@ pub fn compute_diagnostics_with_known_vars(
 ///
 /// This is called by both the language service (LSP/diagnostic provider) and
 /// the CLI compiler after all diagnostics have been collected.
+///
+/// Validates staleness for every category. Only appropriate for a pipeline
+/// that has actually run `beamtalk_lint::run_lint_passes` (`beamtalk lint`,
+/// and the MCP server's lint-equivalent path) — every other caller should use
+/// [`apply_expect_directives_excluding_lint_only`] instead (BT-3384).
 pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    apply_expect_directives_impl(module, diagnostics, &[]);
+}
+
+/// Like [`apply_expect_directives`], but an `@expect` directive whose
+/// category is produced only by `beamtalk lint`'s dedicated lint passes (see
+/// [`LINT_PASS_ONLY_CATEGORIES`]) is neither validated as stale nor treated
+/// as satisfied — silently left alone — because this invocation never ran
+/// the check that could confirm or refute it (BT-3384).
+///
+/// Use this from any pipeline that does not call
+/// `beamtalk_lint::run_lint_passes` before checking staleness: `beamtalk
+/// build`/`beamtalk test` and the LSP (`compute_project_diagnostics_with_analysis`),
+/// and the REPL (`run_diagnostic_pipeline`).
+pub fn apply_expect_directives_excluding_lint_only(
+    module: &Module,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    apply_expect_directives_impl(module, diagnostics, LINT_PASS_ONLY_CATEGORIES);
+}
+
+fn apply_expect_directives_impl(
+    module: &Module,
+    diagnostics: &mut Vec<Diagnostic>,
+    unchecked_categories: &[DiagnosticCategory],
+) {
     // (cat, reason, directive_span, target_span)
     let mut directives: Vec<(ExpectCategory, Option<EcoString>, Span, Span)> = Vec::new();
 
@@ -515,7 +599,7 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
                 matched = true;
             }
         }
-        if !matched {
+        if !matched && !expect_category_unchecked(*cat, unchecked_categories) {
             stale_directives.push((*cat, reason.clone(), *directive_span));
         }
     }
