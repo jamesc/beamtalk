@@ -60,7 +60,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression, MessageSelector};
-use beamtalk_core::source_analysis::Span;
+use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 impl CoreErlangGenerator {
     /// BT-2355: Seeds the `__local__` keys for the outer locals a conditional's
@@ -230,9 +230,27 @@ impl CoreErlangGenerator {
     /// traversal visits an operand that is neither a self-send nor
     /// provably `is_effect_free_operand` (a literal, plain identifier,
     /// class reference, or field read), and every self-send visited after
-    /// that point is left un-hoisted — its mutation stays dropped, same as
-    /// every other shape this issue leaves out of scope, rather than being
-    /// reordered ahead of an operand it must not run before.
+    /// that point is left un-hoisted.
+    ///
+    /// BT-3399: a self-send left un-hoisted this way still falls through to
+    /// the C12 catch-all's plain `expression_doc(expr)` compile, which
+    /// routes it through the ordinary, still-discarding
+    /// `generate_self_dispatch` path — so its mutation (if any) is silently
+    /// dropped, exactly as every binary-op-operand self-send's mutation was
+    /// before BT-3392, just narrowed to this order-unsafe subset. Fully
+    /// preserving the mutation here would require compiling the chain's
+    /// non-hoisted operands (not just its self-sends) into real `Bind`s at
+    /// their natural position too — real interleaving of hoisted `Bind`s
+    /// with placeholders for the non-hoisted subtrees, which the C12
+    /// catch-all's generic, AST-directed `expression_doc` call does not
+    /// support without duplicating binary-op codegen or teaching general
+    /// expression codegen about state-threading placeholders (the latter
+    /// is exactly what CLAUDE.md's "general expression codegen stays
+    /// AST-directed" rule rules out doing informally). Judged out of scope
+    /// for this fix: instead, `warn_order_unsafe_self_send_dropped` emits a
+    /// compile-time warning at the self-send's own span so this silent
+    /// drop is at least visible, rather than invisible, to the author of
+    /// the code that triggers it. See BT-3399.
     fn hoist_self_sends_for_binary_op(
         &mut self,
         expr: &Expression,
@@ -250,6 +268,8 @@ impl CoreErlangGenerator {
                     self.hoisted_self_send_results
                         .insert(receiver_span, dispatch_var);
                 }
+            } else {
+                self.warn_order_unsafe_self_send_dropped(expr);
             }
             return Ok(());
         }
@@ -272,6 +292,39 @@ impl CoreErlangGenerator {
             *safe_to_hoist = false;
         }
         Ok(())
+    }
+
+    /// BT-3399: emits a warning for a self-send nested in a binary-op
+    /// operand that `hoist_self_sends_for_binary_op` left un-hoisted
+    /// because a preceding, non-effect-free operand in the same chain made
+    /// hoisting order-unsafe. That self-send still compiles — through the
+    /// C12 catch-all's ordinary `expression_doc`/`generate_self_dispatch`
+    /// path — but its actor-state mutation, if any, is silently dropped;
+    /// this warning is the only signal the author gets that it happened.
+    /// `self_send` must be the (already paren-unwrapped) `MessageSend`
+    /// node itself, matching the shape `is_dispatching_actor_self_send`
+    /// just confirmed for it.
+    fn warn_order_unsafe_self_send_dropped(&mut self, self_send: &Expression) {
+        let Expression::MessageSend { selector, span, .. } = self_send else {
+            return;
+        };
+        self.add_codegen_warning(
+            Diagnostic::warning(
+                format!(
+                    "self-send `{}` nested in a binary-op operand follows an earlier \
+                     operand in the same expression that may raise or have a side effect, \
+                     so it cannot be safely hoisted ahead of it — its actor-state mutation \
+                     (if any) is silently dropped",
+                    selector.name()
+                ),
+                *span,
+            )
+            .with_hint(
+                "extract this self-send into its own statement before the expression, or \
+                 reorder the binary-op chain so the self-send is evaluated first",
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
     }
 }
 
@@ -1380,7 +1433,12 @@ impl CoreErlangGenerator {
                 // mutation — see `hoist_self_sends_for_binary_op`'s doc
                 // comment. When nothing needed hoisting (the overwhelmingly
                 // common case), this is a no-op and `expression_doc` below
-                // behaves exactly as before.
+                // behaves exactly as before. BT-3399: a self-send left
+                // un-hoisted because an earlier operand made hoisting
+                // order-unsafe still silently drops its mutation through
+                // `expression_doc` below — `hoist_self_sends_for_binary_op`
+                // emits a compile-time warning for that case so it's at
+                // least visible.
                 _ => {
                     let mut safe_to_hoist = true;
                     self.hoist_self_sends_for_binary_op(
