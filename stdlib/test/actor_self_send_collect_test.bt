@@ -14,6 +14,7 @@ TestCase subclass: ActorSelfSendCollectTest
   testCollectWithSelfSend =>
     result := self.c doubleAll: #(1, 2, 3)
     self assert: result equals: #(2, 4, 6)
+    self assert: result class equals: List
     self assert: self.c getCount equals: 3
 
   testCollectWithFieldMutation =>
@@ -40,6 +41,10 @@ TestCase subclass: ActorSelfSendCollectTest
     result := self.c rejectNegative: #(-1, 2, -3, 4)
     self assert: result equals: #(2, 4)
     self assert: self.c getCount equals: 4
+
+  testCollectWithSelfSendAssignThenClass =>
+    resultClass := self.c doubleAllAssignThenClass: #(1, 2, 3)
+    self assert: resultClass equals: List
 
   testCollectWithSelfSendEmptyList =>
     result := self.c doubleAll: #()
