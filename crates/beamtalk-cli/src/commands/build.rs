@@ -1266,26 +1266,7 @@ pub(crate) fn load_project_stub_registry(
                     eprintln!("{:?}", miette::Report::new(compile_diag));
                 }
                 OutputFormat::Json => {
-                    let notes: Vec<serde_json::Value> = diagnostic
-                        .notes
-                        .iter()
-                        .map(|n| {
-                            serde_json::json!({
-                                "message": n.message.as_str(),
-                                "span_start": n.span.map(beamtalk_core::source_analysis::Span::start),
-                                "span_end": n.span.map(beamtalk_core::source_analysis::Span::end),
-                            })
-                        })
-                        .collect();
-                    let json = serde_json::json!({
-                        "file": file.as_str(),
-                        "severity": format!("{:?}", diagnostic.severity).to_lowercase(),
-                        "message": diagnostic.message.as_str(),
-                        "span_start": diagnostic.span.start(),
-                        "span_end": diagnostic.span.end(),
-                        "hint": diagnostic.hint.as_deref(),
-                        "notes": notes,
-                    });
+                    let json = crate::diagnostic::diagnostic_to_json(file.as_str(), diagnostic);
                     println!("{json}");
                 }
             }

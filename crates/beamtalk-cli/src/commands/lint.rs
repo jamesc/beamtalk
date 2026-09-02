@@ -21,7 +21,7 @@ use crate::commands::build::collect_source_files_from_dir;
 use crate::commands::erlang_lint;
 use crate::diagnostic::CompileDiagnostic;
 use beamtalk_core::file_walker::FileWalker;
-use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
+use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_project::package;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result};
@@ -334,26 +334,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
                 OutputFormat::Json => {
                     // BT-2031: Stream each diagnostic as line-delimited JSON
                     // instead of buffering all diagnostics in memory.
-                    let notes: Vec<serde_json::Value> = diag
-                        .notes
-                        .iter()
-                        .map(|n| {
-                            serde_json::json!({
-                                "message": n.message.as_str(),
-                                "span_start": n.span.map(Span::start),
-                                "span_end": n.span.map(Span::end),
-                            })
-                        })
-                        .collect();
-                    let json = serde_json::json!({
-                        "file": file.as_str(),
-                        "severity": format!("{:?}", diag.severity).to_lowercase(),
-                        "message": diag.message.as_str(),
-                        "span_start": diag.span.start(),
-                        "span_end": diag.span.end(),
-                        "hint": diag.hint.as_deref(),
-                        "notes": notes,
-                    });
+                    let json = crate::diagnostic::diagnostic_to_json(file.as_str(), diag);
                     println!("{json}");
                 }
             }
