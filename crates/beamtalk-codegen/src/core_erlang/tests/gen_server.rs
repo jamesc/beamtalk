@@ -6939,3 +6939,43 @@ fn bt3396_self_dispatch_after_order_unsafe_operand_is_still_not_hoisted() {
     );
     assert_compiles_through_erlc("bt3396_order_unsafe_operand_not_hoisted", &code);
 }
+
+#[test]
+fn bt3396_self_dispatch_in_later_interpolation_segment_is_not_hoisted_past_earlier_segment() {
+    // BT-3396 review finding: `generate_string_interpolation` dispatches
+    // `displayString` on each segment's value right after evaluating it,
+    // before the next segment runs — a message send that may raise. So in
+    // `"{x}-{self bumpCount}"` the self-send must NOT be hoisted ahead of
+    // `x`'s `displayString` dispatch: it stays in its natural (non-hoisted)
+    // position, exactly like a self-send after any other order-unsafe
+    // operand. A self-send in the FIRST segment (`"n={self bumpCount}"`)
+    // has nothing before it and is still hoisted.
+    let later = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly: x =>\n    \"{x}-{self bumpCount}\".\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(later);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3396_later_interpolation_segment_not_hoisted")
+            .with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        !code.contains("erlang':'element'(2, _SD"),
+        "a self-send in a later interpolation segment must not be hoisted past an earlier segment's displayString dispatch. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3396_later_interpolation_segment_not_hoisted", &code);
+
+    let first = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    \"n={self bumpCount}\".\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(first);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3396_first_interpolation_segment_hoisted").with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        code.contains("erlang':'element'(2, _SD"),
+        "a self-send in the first interpolation segment has nothing before it and must still be hoisted. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3396_first_interpolation_segment_hoisted", &code);
+}

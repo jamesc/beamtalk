@@ -392,11 +392,15 @@ impl CoreErlangGenerator {
                 for segment in segments {
                     if let StringSegment::Interpolation(inner) = segment {
                         self.hoist_plan_walk(inner, walk);
+                        // `generate_string_interpolation` dispatches
+                        // `displayString` on this segment's value immediately
+                        // after evaluating it, before the next segment runs —
+                        // a message send of its own that may raise, so no
+                        // self-send in a LATER segment may be hoisted ahead
+                        // of it (`"{x}-{self bump}"` leaves `bump` in place).
+                        walk.safe_to_hoist = false;
                     }
                 }
-                // Formatting each interpolated value (`printString`-style)
-                // is a message send of its own and may raise.
-                walk.safe_to_hoist = false;
             }
             // `^ value` as the walked statement itself (`ifTrue: [^self.items
             // at: (self bump)]`): the value evaluates, then the NLR throws —
