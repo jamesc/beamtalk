@@ -181,6 +181,102 @@ fn expect_type_on_ffi_arg_mismatch_is_not_stale_across_lint_and_build_bt_2851() 
         .stderr(contains("stale @expect").not());
 }
 
+/// BT-3384: `beamtalk lint` requires `@expect dead_assignment` to suppress a
+/// real `DeadAssignment` diagnostic — without the pragma, lint fails.
+///
+/// `blk := [x := 2]` stores the block in a variable instead of invoking it
+/// directly at a recognized loop/conditional/list-op call site, so the
+/// dead-block-assignment lint pass (`beamtalk-lint`'s
+/// `DeadBlockAssignmentPass`) flags the reassignment of the captured outer
+/// local `x` — the same "escaped block" shape as the pass's own
+/// `assignment_in_stored_block_warns` unit test, wrapped in a class method so
+/// it goes through the full CLI pipeline instead of the pass in isolation.
+#[test]
+fn dead_assignment_lint_fires_without_expect_bt_3384() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/DeadAssignmentNoExpect.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: DeadAssignmentNoExpect\n\
+         \n\
+         \x20\x20demo =>\n\
+         \x20\x20\x20\x20x := 1\n\
+         \x20\x20\x20\x20blk := [x := 2]\n\
+         \x20\x20\x20\x20blk value\n\
+         \x20\x20\x20\x20x\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(contains("lint diagnostic"));
+}
+
+/// BT-3384 (acceptance criterion): a lint-only `@expect` category —
+/// `dead_assignment`, produced only by `beamtalk lint`'s dedicated
+/// `beamtalk-lint` passes — must not be reported "stale @expect" by
+/// `beamtalk build`/`beamtalk test`, since neither ever runs the check that
+/// could confirm or refute it. Before the fix, `beamtalk lint` required the
+/// pragma (0 diagnostics only with it present) while `beamtalk
+/// build`/`beamtalk test` reported that same pragma as stale on the exact
+/// same file — no state of the source satisfied both simultaneously.
+///
+/// Same fixture as [`dead_assignment_lint_fires_without_expect_bt_3384`],
+/// with `@expect dead_assignment` added above the method — mirrors
+/// [`expect_type_on_ffi_arg_mismatch_is_not_stale_across_lint_and_build_bt_2851`]'s
+/// lint-then-build shape, extended to also cover `beamtalk test`.
+#[test]
+fn expect_dead_assignment_not_stale_across_lint_build_and_test_bt_3384() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/DeadAssignmentExpect.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: DeadAssignmentExpect\n\
+         \n\
+         \x20\x20@expect dead_assignment\n\
+         \x20\x20demo =>\n\
+         \x20\x20\x20\x20x := 1\n\
+         \x20\x20\x20\x20blk := [x := 2]\n\
+         \x20\x20\x20\x20blk value\n\
+         \x20\x20\x20\x20x\n",
+    )
+    .unwrap();
+
+    // beamtalk lint: the pragma suppresses the real DeadAssignment
+    // diagnostic and is not itself stale.
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success()
+        .stderr(contains("stale @expect").not());
+
+    // beamtalk build: never runs the lint passes that would produce a
+    // DeadAssignment diagnostic in the first place, so the same pragma must
+    // not be flagged stale from build's point of view either (BT-3384).
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success()
+        .stderr(contains("stale @expect").not());
+
+    // beamtalk test: same diagnostic pipeline as build — must agree too.
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("test")
+        .assert()
+        .success()
+        .stderr(contains("stale @expect").not());
+}
+
 #[test]
 fn lint_missing_path_exits_nonzero() {
     let project = cli_common::fixture_project();

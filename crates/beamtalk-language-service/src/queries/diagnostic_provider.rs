@@ -214,7 +214,11 @@ pub fn compute_project_diagnostics_with_analysis(
     }
 
     // BT-782: Apply @expect directives to suppress matching diagnostics.
-    apply_expect_directives(module, &mut diagnostics);
+    // BT-3384: this pipeline never runs `beamtalk_lint::run_lint_passes`
+    // (that's `beamtalk lint`-only), so a lint-only `@expect` category (e.g.
+    // `dead_assignment`) must not be validated for staleness here — see
+    // `apply_expect_directives_excluding_lint_only`'s doc.
+    apply_expect_directives_excluding_lint_only(module, &mut diagnostics);
 
     // ADR 0100 Rule 3 (BT-2793 / BT-2800): apply the package's `[diagnostics]`
     // table last, after `@expect` suppression and ahead of any
@@ -288,7 +292,8 @@ pub fn compute_project_diagnostics_with_analysis(
 // library) cannot depend on this crate, which itself depends on
 // `beamtalk-core`, without one.
 pub use beamtalk_core::compilation::diagnostics_policy::{
-    apply_expect_directives, compute_diagnostics, compute_diagnostics_with_known_vars,
+    apply_expect_directives, apply_expect_directives_excluding_lint_only, compute_diagnostics,
+    compute_diagnostics_with_known_vars,
 };
 
 /// Computes diagnostics with native type registry for FFI type warnings (ADR 0075).
@@ -336,7 +341,9 @@ fn run_diagnostic_pipeline(
 ) -> Vec<Diagnostic> {
     let mut all_diagnostics = parse_diagnostics;
     all_diagnostics.extend(analysis_diagnostics);
-    apply_expect_directives(module, &mut all_diagnostics);
+    // BT-3384: the REPL never runs `beamtalk_lint::run_lint_passes` either —
+    // see `apply_expect_directives_excluding_lint_only`'s doc.
+    apply_expect_directives_excluding_lint_only(module, &mut all_diagnostics);
     beamtalk_core::compilation::diagnostics_policy::apply_diagnostics_table(
         all_diagnostics,
         diagnostics_overrides,

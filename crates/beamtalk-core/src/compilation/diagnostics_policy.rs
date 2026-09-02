@@ -462,6 +462,97 @@ pub fn compute_diagnostics_with_known_vars(
     all_diagnostics
 }
 
+/// Diagnostic categories that `beamtalk lint`'s dedicated lint passes
+/// (`beamtalk_lint::run_lint_passes`) can produce for a shape `analyse_full`'s
+/// semantic analysis itself never checks (BT-3384).
+///
+/// `DiagnosticCategory::DeadAssignment` is **not** exclusively lint-pass-only:
+/// `analyse_full`'s own `warn_assignment_in_match_arms`
+/// (`semantic_analysis/validators/match_validators.rs`) also produces it, for
+/// an assignment as the direct body of a `match:` arm — every caller of this
+/// module already runs that check, lint pass or not. The only shape genuinely
+/// unreachable without `run_lint_passes` is `beamtalk-lint`'s
+/// `DeadBlockAssignmentPass` (BT-3385): a captured outer local reassigned
+/// inside a block literal that isn't passed to a selector the compiler's
+/// state-threading recognizes — and that shape, by construction, always
+/// contains a block literal. [`expect_category_unchecked`] uses this list
+/// together with each directive's own `contains_block` flag (not the
+/// category alone) so a plain match-arm `@expect dead_assignment` — which has
+/// no block literal anywhere near it — stays subject to normal staleness
+/// checking even under [`apply_expect_directives_excluding_lint_only`].
+///
+/// `beamtalk build`/`beamtalk test`, the LSP, and the REPL never call
+/// `run_lint_passes`, so a `DeadBlockAssignmentPass` diagnostic can never
+/// appear in the diagnostics list they hand to `apply_expect_directives`, and
+/// an `@expect` suppressing one would always look "stale" from their point of
+/// view even when `beamtalk lint` genuinely still needs it — there is no
+/// state of the source that could satisfy both tools' staleness checks
+/// simultaneously otherwise. [`apply_expect_directives_excluding_lint_only`]
+/// is the staleness entry point for every pipeline that does not run lint
+/// passes; only `beamtalk lint` itself (and any other caller that actually
+/// calls `run_lint_passes` first, e.g. the MCP server's own lint-equivalent
+/// path) should keep calling plain [`apply_expect_directives`], which
+/// validates every category unconditionally.
+const LINT_PASS_ONLY_CATEGORIES: &[DiagnosticCategory] = &[DiagnosticCategory::DeadAssignment];
+
+/// Returns `true` if this specific directive's staleness cannot be evaluated
+/// because the check that could confirm or refute it was never run in this
+/// invocation (BT-3384).
+///
+/// `unchecked` names the categories this invocation didn't run lint passes
+/// for (see [`LINT_PASS_ONLY_CATEGORIES`]); `contains_block` says whether
+/// *this directive's own target expression* contains a block literal — the
+/// only shape `beamtalk-lint`'s `DeadBlockAssignmentPass` can apply to. A
+/// `dead_assignment` directive is only "unchecked" when both hold: the
+/// category is lint-pass-only for this invocation, AND the target could
+/// plausibly be the lint-only shape. A target with no block literal (e.g. a
+/// bare match-arm assignment) can only ever be `analyse_full`'s own
+/// match-arm check, which every caller already runs — so it's never
+/// "unchecked", and an unmatched one is correctly reported stale.
+///
+/// `all` is deliberately exempted regardless of `contains_block`: narrowing
+/// it here would silently defang staleness checking for *every* `@expect
+/// all` in a build, not just the ones that happen to depend on a lint-only
+/// category — BT-3384's fix stays scoped to the specific categories that are
+/// genuinely lint-only.
+///
+/// This match is intentionally exhaustive (no `_` arm): adding a new
+/// [`ExpectCategory`] variant is a compile error here until this function
+/// says whether it's lint-only, so that fact can never silently drift from
+/// [`LINT_PASS_ONLY_CATEGORIES`].
+fn expect_category_unchecked(
+    expect_cat: ExpectCategory,
+    unchecked: &[DiagnosticCategory],
+    contains_block: bool,
+) -> bool {
+    if unchecked.is_empty() {
+        return false;
+    }
+    match expect_cat {
+        ExpectCategory::DeadAssignment => {
+            contains_block && unchecked.contains(&DiagnosticCategory::DeadAssignment)
+        }
+        // Every other category (including `all`, deliberately — see this
+        // function's doc) is produced by `analyse_full`'s semantic analysis,
+        // which every caller of this function always runs, so none of them
+        // can ever be "unchecked".
+        ExpectCategory::All
+        | ExpectCategory::Dnu
+        | ExpectCategory::Type
+        | ExpectCategory::Unused
+        | ExpectCategory::Deprecation
+        | ExpectCategory::ActorNew
+        | ExpectCategory::Visibility
+        | ExpectCategory::UnresolvedClass
+        | ExpectCategory::UnresolvedFfi
+        | ExpectCategory::ArityMismatch
+        | ExpectCategory::ShadowedClass
+        | ExpectCategory::TypeAnnotation
+        | ExpectCategory::Inheritance
+        | ExpectCategory::Sendability => false,
+    }
+}
+
 /// Applies `@expect` directives to suppress matching diagnostics.
 ///
 /// For each `@expect category` directive in the module, any diagnostic
@@ -471,9 +562,39 @@ pub fn compute_diagnostics_with_known_vars(
 ///
 /// This is called by both the language service (LSP/diagnostic provider) and
 /// the CLI compiler after all diagnostics have been collected.
+///
+/// Validates staleness for every category. Only appropriate for a pipeline
+/// that has actually run `beamtalk_lint::run_lint_passes` (`beamtalk lint`,
+/// and the MCP server's lint-equivalent path) — every other caller should use
+/// [`apply_expect_directives_excluding_lint_only`] instead (BT-3384).
 pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    // (cat, reason, directive_span, target_span)
-    let mut directives: Vec<(ExpectCategory, Option<EcoString>, Span, Span)> = Vec::new();
+    apply_expect_directives_impl(module, diagnostics, &[]);
+}
+
+/// Like [`apply_expect_directives`], but an `@expect` directive whose
+/// category is produced only by `beamtalk lint`'s dedicated lint passes (see
+/// [`LINT_PASS_ONLY_CATEGORIES`]) is neither validated as stale nor treated
+/// as satisfied — silently left alone — because this invocation never ran
+/// the check that could confirm or refute it (BT-3384).
+///
+/// Use this from any pipeline that does not call
+/// `beamtalk_lint::run_lint_passes` before checking staleness: `beamtalk
+/// build`/`beamtalk test` and the LSP (`compute_project_diagnostics_with_analysis`),
+/// and the REPL (`run_diagnostic_pipeline`).
+pub fn apply_expect_directives_excluding_lint_only(
+    module: &Module,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    apply_expect_directives_impl(module, diagnostics, LINT_PASS_ONLY_CATEGORIES);
+}
+
+fn apply_expect_directives_impl(
+    module: &Module,
+    diagnostics: &mut Vec<Diagnostic>,
+    unchecked_categories: &[DiagnosticCategory],
+) {
+    // (cat, reason, directive_span, target_span, target_contains_block)
+    let mut directives: Vec<(ExpectCategory, Option<EcoString>, Span, Span, bool)> = Vec::new();
 
     collect_directives_from_exprs(&module.expressions, &mut directives);
     for class in &module.classes {
@@ -482,20 +603,59 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
         // target_span = the declaration span (for matching diagnostics).
         for state_decl in class.state.iter().chain(class.class_variables.iter()) {
             if let Some((cat, ref reason, expect_span)) = state_decl.expect {
-                directives.push((cat, reason.clone(), expect_span, state_decl.span));
+                let contains_block = state_decl
+                    .default_value
+                    .as_ref()
+                    .is_some_and(expression_contains_block);
+                directives.push((
+                    cat,
+                    reason.clone(),
+                    expect_span,
+                    state_decl.span,
+                    contains_block,
+                ));
             }
         }
         for method in class.methods.iter().chain(class.class_methods.iter()) {
-            // BT-1856: Collect declaration-level @expect from method declarations
+            // BT-1856: Collect declaration-level @expect from method declarations.
+            //
+            // `contains_block` here is deliberately whole-method, matching a
+            // declaration-level `@expect`'s own suppression scope (it covers
+            // a matching diagnostic ANYWHERE in the method, not just an
+            // adjacent statement — unlike a statement-level `@expect`, which
+            // has no "whole body" to fall back to). This means an unrelated
+            // block literal elsewhere in the same method (e.g. a `do:` loop)
+            // can make a stale, block-free `@expect dead_assignment` (e.g.
+            // one covering only a match-arm assignment) go unflagged by
+            // `build`/`test`/LSP/REPL — `beamtalk lint` still catches it
+            // regardless, and no real diagnostic is ever wrongly suppressed
+            // either way. Accepted as a low-impact miss on the "you can
+            // remove this now-unnecessary pragma" warning rather than
+            // narrowing a method-level directive's target below what it
+            // actually covers.
             if let Some((cat, ref reason, expect_span)) = method.expect {
-                directives.push((cat, reason.clone(), expect_span, method.span));
+                directives.push((
+                    cat,
+                    reason.clone(),
+                    expect_span,
+                    method.span,
+                    exprs_contain_block(&method.body),
+                ));
             }
             collect_directives_from_exprs(&method.body, &mut directives);
         }
     }
     for standalone in &module.method_definitions {
+        // Same whole-method `contains_block` scoping as above, and the same
+        // tradeoff — see that loop's comment.
         if let Some((cat, ref reason, expect_span)) = standalone.method.expect {
-            directives.push((cat, reason.clone(), expect_span, standalone.method.span));
+            directives.push((
+                cat,
+                reason.clone(),
+                expect_span,
+                standalone.method.span,
+                exprs_contain_block(&standalone.method.body),
+            ));
         }
         collect_directives_from_exprs(&standalone.method.body, &mut directives);
     }
@@ -507,7 +667,7 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
     let mut suppressed_indices: Vec<usize> = Vec::new();
     let mut stale_directives: Vec<(ExpectCategory, Option<EcoString>, Span)> = Vec::new();
 
-    for (cat, reason, directive_span, target_span) in &directives {
+    for (cat, reason, directive_span, target_span, contains_block) in &directives {
         let mut matched = false;
         for (i, diag) in diagnostics.iter().enumerate() {
             if target_span.contains(diag.span) && category_matches(*cat, diag.category) {
@@ -515,7 +675,7 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
                 matched = true;
             }
         }
-        if !matched {
+        if !matched && !expect_category_unchecked(*cat, unchecked_categories, *contains_block) {
             stale_directives.push((*cat, reason.clone(), *directive_span));
         }
     }
@@ -621,7 +781,7 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
 /// to find `@expect` directives inside block bodies (BT-2010).
 fn collect_directives_from_exprs(
     exprs: &[ExpressionStatement],
-    directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span)>,
+    directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span, bool)>,
 ) {
     for (i, stmt) in exprs.iter().enumerate() {
         if let Expression::ExpectDirective {
@@ -631,18 +791,47 @@ fn collect_directives_from_exprs(
         } = &stmt.expression
         {
             if let Some(next) = exprs.get(i + 1) {
-                directives.push((*category, reason.clone(), *span, next.expression.span()));
+                directives.push((
+                    *category,
+                    reason.clone(),
+                    *span,
+                    next.expression.span(),
+                    expression_contains_block(&next.expression),
+                ));
             } else {
                 // Trailing @expect with no following expression — treat as stale.
                 // Use the directive's own span as the target span so it will
                 // never match any real diagnostic and will always be reported stale.
-                directives.push((*category, reason.clone(), *span, *span));
+                directives.push((*category, reason.clone(), *span, *span, false));
             }
         }
         // BT-2010: Recurse into expression subtrees to find block bodies
         // containing @expect directives.
         collect_directives_from_expr(&stmt.expression, directives);
     }
+}
+
+/// Returns `true` if `exprs` contains a block literal anywhere in its tree
+/// (BT-3384) — see [`expression_contains_block`].
+fn exprs_contain_block(exprs: &[ExpressionStatement]) -> bool {
+    exprs
+        .iter()
+        .any(|stmt| expression_contains_block(&stmt.expression))
+}
+
+/// Returns `true` if `expr`'s tree contains an [`Expression::Block`] literal
+/// anywhere — the only shape `beamtalk-lint`'s `DeadBlockAssignmentPass`
+/// (BT-3385) can apply to, used by [`expect_category_unchecked`] (BT-3384) to
+/// tell a plausibly-lint-only `@expect dead_assignment` target apart from one
+/// `analyse_full`'s own match-arm check already covers.
+fn expression_contains_block(expr: &Expression) -> bool {
+    let mut found = false;
+    crate::ast_walker::walk_expression(expr, &mut |e| {
+        if matches!(e, Expression::Block(_)) {
+            found = true;
+        }
+    });
+    found
 }
 
 /// Recursively walks an expression tree to find nested `Block` bodies and
@@ -653,7 +842,7 @@ fn collect_directives_from_exprs(
 /// sub-expressions with block bodies.
 fn collect_directives_from_expr(
     expr: &Expression,
-    directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span)>,
+    directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span, bool)>,
 ) {
     match expr {
         Expression::Block(block) => {
@@ -744,7 +933,7 @@ fn collect_directives_from_expr(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::Span;
+    use crate::source_analysis::{Span, lex_with_eof, parse};
 
     fn dnu_diagnostic(severity: Severity) -> Diagnostic {
         let mut d = Diagnostic::warning("test dnu", Span::new(0, 1));
@@ -978,6 +1167,142 @@ dnu = "error"
         assert_eq!(
             table[&DiagnosticCategory::Dnu],
             DiagnosticSeverityOverride::Error
+        );
+    }
+
+    // ── BT-3384: @expect staleness scoped to lint-vs-non-lint categories ───
+
+    /// Plain `apply_expect_directives` (used by `beamtalk lint`, which always
+    /// runs `beamtalk_lint::run_lint_passes` first) validates every category
+    /// — with no matching diagnostic, `@expect dead_assignment` is genuinely
+    /// stale. Mirrors `beamtalk-language-service`'s pre-existing
+    /// `expect_dead_assignment_stale_when_no_diagnostic` (same source), kept
+    /// here as the baseline the next test's fixed behavior contrasts with.
+    #[test]
+    fn apply_expect_directives_dead_assignment_stale_when_no_diagnostic() {
+        let source = "@expect dead_assignment\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        apply_expect_directives(&module, &mut diagnostics);
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect")),
+            "plain apply_expect_directives should flag dead_assignment stale \
+             when no diagnostic exists, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-3384: `beamtalk build`/`beamtalk test`/the LSP/the REPL never run
+    /// `beamtalk_lint::run_lint_passes`, so a `DeadBlockAssignmentPass`
+    /// diagnostic can never appear in their diagnostics list. An `@expect
+    /// dead_assignment` whose target contains a block literal — the only
+    /// shape that pass can apply to — must be silently left alone (neither
+    /// stale nor satisfied) by `apply_expect_directives_excluding_lint_only`,
+    /// unlike plain `apply_expect_directives` (previous test), which
+    /// correctly flags the identical source stale since it assumes the lint
+    /// pass ran.
+    #[test]
+    fn apply_expect_directives_excluding_lint_only_does_not_flag_dead_assignment_stale() {
+        let source = "@expect dead_assignment\n[42] value";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        apply_expect_directives_excluding_lint_only(&module, &mut diagnostics);
+
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect")),
+            "apply_expect_directives_excluding_lint_only must not flag a \
+             block-literal target as stale, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-3384 review follow-up: `DiagnosticCategory::DeadAssignment` is not
+    /// exclusively lint-pass-only — `analyse_full`'s own
+    /// `warn_assignment_in_match_arms` also produces it, for an assignment
+    /// inside a `match:` arm, and every caller already runs that check. A
+    /// `@expect dead_assignment` whose target contains no block literal at
+    /// all (so it can't possibly be the lint-only stored-block shape) must
+    /// still be flagged stale by `apply_expect_directives_excluding_lint_only`
+    /// when nothing matches it — exactly like plain `apply_expect_directives`
+    /// — because there's no reason it could only be satisfiable by a check
+    /// this invocation doesn't run.
+    #[test]
+    fn apply_expect_directives_excluding_lint_only_still_flags_dead_assignment_stale_without_a_block()
+     {
+        let source = "@expect dead_assignment\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        apply_expect_directives_excluding_lint_only(&module, &mut diagnostics);
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect")),
+            "a dead_assignment @expect on a target with no block literal \
+             (e.g. the match-arm shape analyse_full already checks) should \
+             still be flagged stale, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-3384's fix is scoped to categories that are genuinely lint-only: a
+    /// category `beamtalk build` DOES check via `analyse_full` (`dnu`, here)
+    /// must still be validated for staleness by the excluding variant, same
+    /// as plain `apply_expect_directives` — only `dead_assignment` (today's
+    /// sole [`LINT_PASS_ONLY_CATEGORIES`] entry) is exempted.
+    #[test]
+    fn apply_expect_directives_excluding_lint_only_still_flags_other_categories_stale() {
+        let source = "@expect dnu\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        apply_expect_directives_excluding_lint_only(&module, &mut diagnostics);
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect")),
+            "apply_expect_directives_excluding_lint_only should still flag a \
+             non-lint-only category as stale, got: {diagnostics:?}"
+        );
+    }
+
+    /// Defensive: if a `DeadAssignment` diagnostic genuinely *is* present on
+    /// the `@expect`'s target expression, the excluding variant must still
+    /// suppress it exactly like plain `apply_expect_directives` would — the
+    /// exclusion only changes the "no matching diagnostic found" staleness
+    /// verdict, never a real match.
+    #[test]
+    fn apply_expect_directives_excluding_lint_only_still_suppresses_a_present_dead_assignment_diagnostic()
+     {
+        let source = "@expect dead_assignment\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        let target_span = module.expressions.last().unwrap().expression.span();
+        diagnostics.push(
+            Diagnostic::lint("test dead assignment", target_span)
+                .with_category(DiagnosticCategory::DeadAssignment),
+        );
+        apply_expect_directives_excluding_lint_only(&module, &mut diagnostics);
+
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.category == Some(DiagnosticCategory::DeadAssignment)),
+            "a real DeadAssignment diagnostic on the target expression must \
+             still be suppressed, got: {diagnostics:?}"
+        );
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect")),
+            "got: {diagnostics:?}"
         );
     }
 }
