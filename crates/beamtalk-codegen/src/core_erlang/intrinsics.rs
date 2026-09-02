@@ -2637,6 +2637,52 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
 
+        // BT-3402: `and:`/`or:` short-circuit boolean protocol. Both are
+        // ordinary self-hosted `Boolean` methods (`Boolean.bt`: `and: aBlock
+        // => self ifTrue: aBlock ifFalse: [false]`, `or: aBlock => self
+        // ifTrue: [true] ifFalse: aBlock`) — not `WellKnownSelector`s (see
+        // `state_threading_selectors`'s doc comment), so generic dispatch
+        // reaches them with no special-casing at all today, and the block
+        // literal argument compiles as an ordinary Tier 1 closure. A
+        // self-send (or `self.slot :=` field mutation) nested inside that
+        // closure then discards its own `NewState` exactly like `ifTrue:`
+        // blocks did before BT-915 — see this function's `IfTrue`/`IfFalse`
+        // arms below, which this mirrors. Recognizing the literal `and:`/
+        // `or:` call shape here, before generic dispatch (and Boolean.bt's
+        // self-hosted definition) is ever reached, lets the block compile
+        // through the same `generate_conditional_branch_inline` machinery
+        // `ifTrue:`/`ifFalse:` use, so nested self-sends and field
+        // mutations thread state correctly. Only intercepts when threading
+        // is actually needed; otherwise falls through to ordinary generic
+        // dispatch so the ordinary (non-mutating) codegen shape is
+        // unchanged.
+        if let MessageSelector::Keyword(parts) = selector {
+            if parts.len() == 1 && arguments.len() == 1 {
+                let kw = parts[0].keyword.as_str();
+                if kw == "and:" || kw == "or:" {
+                    if let Expression::Block(block) = &arguments[0] {
+                        let analysis = block_analysis::analyze_block(block);
+                        // Same threading gate as IfTrue/IfFalse below.
+                        let needs_threading = self.needs_mutation_threading(&analysis)
+                            || self.body_has_list_op_cross_scope_mutations(block)
+                            || (self.in_loop_body && !analysis.local_writes.is_empty())
+                            || self.is_dispatching_actor_self_send(receiver.unwrap_parens());
+                        if needs_threading {
+                            if self.is_repl_mode() {
+                                self.set_repl_loop_mutated(true);
+                            }
+                            let doc = if kw == "and:" {
+                                self.generate_and_with_mutations(receiver, block)?
+                            } else {
+                                self.generate_or_with_mutations(receiver, block)?
+                            };
+                            return Ok(Some(doc));
+                        }
+                    }
+                }
+            }
+        }
+
         match selector.well_known() {
             Some(WellKnownSelector::IfTrue) => {
                 debug_assert_eq!(arguments.len(), 1);

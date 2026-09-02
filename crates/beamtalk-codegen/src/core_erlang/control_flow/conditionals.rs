@@ -396,6 +396,109 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// BT-3402: generates inline code for `flag and: [block]` in actor
+    /// context when the block contains field mutations (or the receiver is
+    /// itself a hoistable actor self-send — see `compile_conditional_receiver`).
+    ///
+    /// Structurally identical to [`Self::generate_if_true_with_mutations`] —
+    /// `and:` short-circuits to the *literal* `false` on the non-taken path
+    /// rather than `ifTrue:`'s `nil`, matching `Boolean.bt`'s own
+    /// self-hosted definition (`and: aBlock => self ifTrue: aBlock ifFalse:
+    /// [false]`), so the inlined fast path stays behaviorally identical to
+    /// the generic-dispatch path it replaces.
+    ///
+    /// Returns `{Result, NewState}`:
+    /// - True branch: `{block_result, mutated_state}`
+    /// - False branch: `{'false', unchanged_state}`
+    pub(in crate::core_erlang) fn generate_and_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+    ) -> Result<Document<'static>> {
+        let (cond_preamble, cond_val_doc) = self.compile_conditional_receiver(receiver)?;
+        let cond_var = self.fresh_temp_var("Cond");
+        let outer_state = self.current_state_var();
+        // BT-2355: seed threaded outer-locals so the non-taken (false) branch and
+        // the post-conditional extraction always see the `__local__` keys.
+        let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
+
+        let (branch_doc, _branch_final) =
+            self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+        // BT-3161: explicit wildcard so this boolean `case` is statically
+        // exhaustive — see `case_clause_fallback`'s doc comment.
+        let no_match_fallback = self.case_clause_fallback("CondNoMatch");
+
+        Ok(docvec![
+            cond_preamble,
+            seed_doc,
+            "let ",
+            leaf::var(cond_var.clone()),
+            " = ",
+            cond_val_doc,
+            " in case ",
+            leaf::var(cond_var),
+            " of <'true'> when 'true' -> let StateAcc = ",
+            leaf::var(base_state.clone()),
+            " in ",
+            branch_doc,
+            " <'false'> when 'true' -> {'false', ",
+            leaf::var(base_state),
+            "}",
+            no_match_fallback,
+            " end",
+        ])
+    }
+
+    /// BT-3402: generates inline code for `flag or: [block]` in actor
+    /// context when the block contains field mutations (or the receiver is
+    /// itself a hoistable actor self-send).
+    ///
+    /// The mirror image of [`Self::generate_and_with_mutations`] — see its
+    /// doc comment. `or:`'s non-taken (true) path short-circuits to the
+    /// literal `true`, matching `Boolean.bt`'s `or: aBlock => self ifTrue:
+    /// [true] ifFalse: aBlock`.
+    ///
+    /// Returns `{Result, NewState}`:
+    /// - True branch: `{'true', unchanged_state}`
+    /// - False branch: `{block_result, mutated_state}`
+    pub(in crate::core_erlang) fn generate_or_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+    ) -> Result<Document<'static>> {
+        let (cond_preamble, cond_val_doc) = self.compile_conditional_receiver(receiver)?;
+        let cond_var = self.fresh_temp_var("Cond");
+        let outer_state = self.current_state_var();
+        // BT-2355: seed threaded outer-locals so the non-taken (true) branch and
+        // the post-conditional extraction always see the `__local__` keys.
+        let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
+
+        let (branch_doc, _branch_final) =
+            self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+        // BT-3161: explicit wildcard so this boolean `case` is statically
+        // exhaustive — see `case_clause_fallback`'s doc comment.
+        let no_match_fallback = self.case_clause_fallback("CondNoMatch");
+
+        Ok(docvec![
+            cond_preamble,
+            seed_doc,
+            "let ",
+            leaf::var(cond_var.clone()),
+            " = ",
+            cond_val_doc,
+            " in case ",
+            leaf::var(cond_var),
+            " of <'true'> when 'true' -> {'true', ",
+            leaf::var(base_state.clone()),
+            "} <'false'> when 'true' -> let StateAcc = ",
+            leaf::var(base_state),
+            " in ",
+            branch_doc,
+            no_match_fallback,
+            " end",
+        ])
+    }
+
     /// Generates inline code for `flag ifTrue: [t_block] ifFalse: [f_block]` in actor context
     /// when at least one block contains field mutations.
     ///
