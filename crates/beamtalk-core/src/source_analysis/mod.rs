@@ -100,6 +100,20 @@ pub fn is_valid_class_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Returns `true` if `c` is a binary-selector (operator) character.
+///
+/// The canonical character set — `+ - * / < > = ~ % & ? , \` — shared between
+/// the lexer (which uses this to lex binary selectors and operator symbols),
+/// `is_valid_selector` (which uses it to classify a selector's shape), and any
+/// code-generation pass that needs to reclassify a symbol-literal selector.
+/// All call sites must use this function rather than reimplementing the table.
+pub fn is_binary_selector_char(c: char) -> bool {
+    matches!(
+        c,
+        '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
+    )
+}
+
 /// Returns `true` if `sel` is a valid Beamtalk selector.
 ///
 /// Three shapes are accepted:
@@ -115,13 +129,6 @@ pub fn is_valid_class_name(name: &str) -> bool {
 /// selectors (LSP, MCP) must use [`validate_selector_input`] (which delegates
 /// here) so both the boolean rule and its error messages stay in one place.
 pub fn is_valid_selector(sel: &str) -> bool {
-    fn is_binary_selector_char(c: char) -> bool {
-        matches!(
-            c,
-            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
-        )
-    }
-
     let mut chars = sel.chars();
     match chars.next() {
         None => false,
