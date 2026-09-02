@@ -247,7 +247,7 @@ impl CoreErlangGenerator {
             leaf::var(body_var.clone()),
             ", ",
             leaf::var(list_var.clone()),
-            ") <'false'> when 'true' -> call 'beamtalk_primitive':'send'(",
+            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
             leaf::var(list_var),
             ", ",
             leaf::atom(selector.to_string()),
