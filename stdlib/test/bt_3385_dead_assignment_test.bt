@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3385: `beamtalk lint`'s `DeadAssignment` check flagged reassigning an
+// outer local inside a `to:do:` block on a `Value` class method as having
+// "no effect" — but the reassignment demonstrably persists at runtime. This
+// test proves the runtime side of that root cause: the reassignment DOES
+// escape the block for both the class-side (the reported repro) and
+// instance-side (the issue's own open question) shapes. The corresponding
+// static-analysis regression (the lint no longer flagging this shape) lives
+// in `crates/beamtalk-lint/src/dead_block_assignment.rs`'s
+// `bt3385_issue_repro_class_method_no_longer_warns` /
+// `bt3385_issue_repro_instance_method_no_longer_warns` tests.
+//
+// This complements — rather than duplicates — the pre-existing
+// `do_accumulator_test.bt` (BT-1053), `counted_loop_mutation_test.bt`
+// (BT-2308), and `mutation_corpus_class_method.bt` (BT-2360) corpora, which
+// already prove the general `do:`/`to:do:` mutation-threading mechanism at
+// length: this file exists to pin the issue's own exact reported shape
+// (Dictionary accumulation, `sealed typed Value subclass`) as a named
+// regression.
+
+TestCase subclass: Bt3385DeadAssignmentTest
+
+  testClassSideToDoAccumulatesDictionary =>
+    result := Bt3385DeadAssignmentFoo buildDictClass
+    self assert: result size equals: 3
+    self assert: (result at: "a") equals: 97
+    self assert: (result at: "c") equals: 99
+
+  testInstanceSideToDoAccumulatesDictionary =>
+    result := Bt3385DeadAssignmentFoo new buildDictInstance
+    self assert: result size equals: 3
+    self assert: (result at: "a") equals: 97
+    self assert: (result at: "c") equals: 99

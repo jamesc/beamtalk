@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3385: Test fixture reproducing the issue's exact `DeadAssignment` false
+// positive — a `sealed typed Value subclass` accumulating into a Dictionary
+// via a `to:do:` loop, on both the class side (the reported repro) and the
+// instance side (the issue's own open "haven't confirmed" question).
+
+sealed typed Value subclass: Bt3385DeadAssignmentFoo
+
+  class buildDictClass -> Dictionary(String, Integer) =>
+    dict := #{}
+    97 to: 99 do: [:code |
+      dict := dict at: (String fromCodePoint: code) put: code
+    ]
+    dict
+
+  buildDictInstance -> Dictionary(String, Integer) =>
+    dict := #{}
+    97 to: 99 do: [:code |
+      dict := dict at: (String fromCodePoint: code) put: code
+    ]
+    dict

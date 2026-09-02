@@ -1,37 +1,48 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Lint: warn when a local variable is reassigned inside a block on a value type
-//! but the new value cannot escape the block scope.
+//! Lint: warn when a local variable is reassigned inside a block whose call
+//! site the compiler does NOT recognize for captured-local state-threading,
+//! on a value type.
 //!
 //! **DDD Context:** Compilation
 //!
-//! In value types (Object/Value subclasses), blocks capture variables by value.
-//! Reassigning a captured variable inside a block has no effect on the outer
-//! scope — the mutation is silently lost. This is technically correct but a
-//! massive usability trap, especially for developers coming from imperative
-//! languages.
+//! **BT-3385 correction:** an earlier version of this lint fired for *any*
+//! block literal passed directly to a message send, on the theory that
+//! value types capture variables by value and any reassignment inside such
+//! a block is silently lost. That is no longer true (and empirically was
+//! not true at the time either — see BT-3385's root-cause notes) for a
+//! block literal passed directly to a loop, conditional, or list-op
+//! selector the compiler's codegen recognizes: ADR 0041's state-threading
+//! ("known inline call sites", plus BT-1392/BT-2359's `ifTrue:`/`ifFalse:`
+//! threading) packs captured-and-mutated outer locals into a `StateAcc` and
+//! rebinds them in the caller's scope after the call returns — the
+//! reassignment DOES escape the block. `is_state_threaded_block_arg` below
+//! is the exemption list for exactly these shapes; see its doc comment for
+//! the codegen cross-reference and how BT-3385 verified it (`BUnit` runtime
+//! tests, `stdlib/test/bt_3385_dead_assignment_test.bt`).
 //!
 //! ```text
-//! // Bad — x stays 1 after the block
-//! x := 1
-//! true ifTrue: [x := 2]
-//! x  // => 1  (expected 2!)
-//!
-//! // Bad — count stays 0
+//! // Fine — do: is a recognized selector, the mutation is threaded through
 //! count := 0
 //! #(1, 2, 3) do: [:item | count := count + 1]
-//! count  // => 0  (expected 3!)
+//! count  // => 3
 //!
-//! // OK — inject:into: accumulator IS the return value
-//! count := #(1, 2, 3) inject: 0 into: [:acc :item | acc + 1]
+//! // Still worth a warning — blk escapes and is invoked indirectly; BT-3385
+//! // found this currently raises a runtime error ("captures mutable state
+//! // and must be invoked directly") rather than silently dropping the
+//! // mutation, but it is still a trap worth flagging before it crashes
+//! blk := [count := count + 1]
+//! blk value
 //! ```
 //!
-//! This lint warns about dead assignments in blocks on value types. It does NOT
-//! warn for:
+//! This lint warns about local reassignments inside a block literal that is
+//! either stored/returned or passed to a selector the compiler does not
+//! recognize for state-threading, on a value type. It does NOT warn for:
 //! - Actor subclasses (where state mutations in blocks DO propagate)
-//! - `inject:into:` accumulator parameter assignments (the accumulator is
-//!   returned as the block's result)
+//! - A block literal passed directly to a selector `is_state_threaded_block_arg`
+//!   recognizes (loops, conditionals, `do:`/`collect:`/`inject:into:`-style
+//!   iteration — the mutation IS threaded back to the caller)
 //! - Variables defined locally within the block (not captured from outer scope)
 
 use std::collections::HashSet;
@@ -363,26 +374,73 @@ fn enter_block(
     msg_ctx: Option<&BlockMessageContext>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let safe_params = accumulator_params(block, msg_ctx);
     scope.push();
     for param in &block.parameters {
         scope.define(param.name.as_str());
     }
-    walk_expr_seq(&block.body, scope, Some(&safe_params), diagnostics);
+    if is_state_threaded_block_arg(msg_ctx) {
+        // BT-3385: this block literal sits at a (selector, argument position)
+        // that the compiler's Value-type / class-method state-threading
+        // codegen (ADR 0041; see `is_state_threaded_block_arg`'s doc comment
+        // for the exact codegen cross-reference) recognizes and threads
+        // captured-and-mutated outer locals through. A reassignment here
+        // DOES escape the block — it is not dead — so skip the check
+        // entirely for this block's body (`None` disables it, same as
+        // method/script-level code outside any block).
+        walk_expr_seq(&block.body, scope, None, diagnostics);
+    } else {
+        walk_expr_seq(&block.body, scope, Some(&HashSet::new()), diagnostics);
+    }
     scope.pop();
 }
 
-/// Returns the set of block parameter names that are "accumulators" and safe to
-/// reassign (their new value escapes the block as the return value).
-fn accumulator_params(block: &Block, msg_ctx: Option<&BlockMessageContext>) -> HashSet<String> {
-    let mut safe = HashSet::new();
-    if let Some(ctx) = msg_ctx {
-        // inject:into: — the first block parameter is the accumulator
-        if ctx.selector == "inject:into:" && ctx.arg_index == 1 && !block.parameters.is_empty() {
-            safe.insert(block.parameters[0].name.to_string());
-        }
+/// Returns `true` if `msg_ctx` identifies a block literal at a (selector,
+/// argument position) that codegen recognizes for Value-type / class-method
+/// captured-local state-threading (ADR 0041 "known inline call sites"),
+/// meaning a reassignment to an outer local inside the block is threaded
+/// back out and visible after the call returns — contradicting this lint's
+/// general "capture by value, mutation lost" assumption.
+///
+/// Mirrors (does not import — `beamtalk-lint` sits below `beamtalk-codegen`
+/// in the dependency graph, see `docs/development/architecture-principles.md`
+/// §1) the selector/position table in:
+/// - `crates/beamtalk-codegen/src/core_erlang/control_flow/mod.rs::block_arg_for_selector`
+///   (the loop/list-op family: `do:`, `collect:`, `select:`, `reject:`,
+///   `anySatisfy:`, `allSatisfy:`, `detect:`, `count:`, `takeWhile:`,
+///   `dropWhile:`, `partition:`, `groupBy:`, `timesRepeat:`, `to:do:`,
+///   `to:by:do:`, `inject:into:`)
+/// - BT-1392/BT-2359 (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` conditional
+///   threading in `value_type_codegen.rs`)
+///
+/// BT-3385 confirmed empirically (`BUnit` runtime tests, see
+/// `stdlib/test/bt_3385_dead_assignment_test.bt`) that mutating ANY captured
+/// outer local inside these shapes persists after the call returns — not
+/// just an `inject:into:` accumulator parameter, which is why this replaces
+/// (rather than extends) the old accumulator-only exemption.
+///
+/// Deliberately NOT included, so the lint keeps firing there: a block
+/// stored in a variable or passed to a user-defined (non-intrinsic) method
+/// and invoked indirectly via `value`/`value:` — BT-3385 confirmed the
+/// compiler does not silently drop such a mutation, but currently refuses
+/// the indirect invocation outright at runtime (a separate, more confusing
+/// failure mode outside this lint's scope) rather than threading it through;
+/// `on:do:`/`ensure:` (exception handling) and `detect:ifNone:`'s `ifNone:`
+/// arm — BT-3385 did not verify these shapes and leaves them to the
+/// conservative (may still false-positive) existing behavior rather than
+/// guess.
+fn is_state_threaded_block_arg(msg_ctx: Option<&BlockMessageContext>) -> bool {
+    let Some(ctx) = msg_ctx else {
+        return false;
+    };
+    match ctx.selector.as_str() {
+        "whileTrue:" | "whileFalse:" | "do:" | "collect:" | "select:" | "reject:"
+        | "anySatisfy:" | "allSatisfy:" | "detect:" | "count:" | "takeWhile:" | "dropWhile:"
+        | "partition:" | "groupBy:" | "timesRepeat:" | "ifTrue:" | "ifFalse:" => ctx.arg_index == 0,
+        "to:do:" | "inject:into:" => ctx.arg_index == 1,
+        "to:by:do:" => ctx.arg_index == 2,
+        "ifTrue:ifFalse:" => ctx.arg_index == 0 || ctx.arg_index == 1,
+        _ => false,
     }
-    safe
 }
 
 /// Emit a dead-assignment warning diagnostic.
@@ -394,15 +452,23 @@ fn emit_dead_assignment_warning(
     diagnostics.push(
         Diagnostic::lint(
             format!(
-                "assignment to `{name}` inside a block has no effect — \
-                 value types capture variables by value"
+                "assignment to `{name}` inside a block relies on the block being \
+                 invoked directly at this call site — storing it, returning it, or \
+                 passing it to a method that calls it indirectly will not see this \
+                 update (BT-3385: an escaped block that captures and mutates `{name}` \
+                 currently raises a runtime error rather than silently dropping the \
+                 mutation, so this is worth fixing before it crashes, not just before \
+                 it surprises)"
             ),
             span,
         )
         .with_hint(
-            "Use `inject:into:` to accumulate values, or \
-             `ifTrue:ifFalse:` to return alternative values. \
-             See: block-scoped variable semantics."
+            "If this block is passed directly to a loop, conditional, or \
+             iteration method (do:, collect:, inject:into:, ifTrue:, ...), \
+             the reassignment IS safe and this warning does not apply there. \
+             Otherwise, invoke the block inline instead of storing or passing \
+             it for indirect invocation, or use `inject:into:` to accumulate \
+             a value as the block's own return value."
                 .to_string(),
         )
         .with_category(DiagnosticCategory::DeadAssignment),
@@ -523,12 +589,16 @@ mod tests {
         diags
     }
 
-    // ── Basic detection ───────────────────────────────────────────────────────
+    // ── Basic detection (escaped block — stored, not a recognized call site) ───
 
-    /// Assignment inside ifTrue: block on a top-level script (value-type context).
+    /// Assignment inside a block stored in a variable, on a top-level script
+    /// (value-type context) — the block escapes its origin call site, so the
+    /// compiler cannot thread the mutation back out (BT-3385: invoking such a
+    /// block indirectly currently raises a runtime error rather than
+    /// silently dropping the mutation, but the lint still flags it early).
     #[test]
-    fn assignment_in_iftrue_block_warns() {
-        let diags = lint("x := 1.\ntrue ifTrue: [x := 2]");
+    fn assignment_in_stored_block_warns() {
+        let diags = lint("x := 1.\nblk := [x := 2]");
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert_eq!(diags[0].severity, Severity::Lint);
         assert!(
@@ -536,25 +606,22 @@ mod tests {
             "Expected variable name in message, got: {}",
             diags[0].message
         );
-        assert!(
-            diags[0].message.contains("no effect"),
-            "Expected 'no effect' in message, got: {}",
-            diags[0].message
-        );
     }
 
-    /// Accumulation in a do: block — classic broken pattern.
+    /// Accumulation in a block passed to an unrecognized (user-defined-shaped)
+    /// selector — not one of `is_state_threaded_block_arg`'s known loop/
+    /// conditional/list-op shapes, so still flagged.
     #[test]
-    fn accumulation_in_do_block_warns() {
-        let diags = lint("count := 0.\n#(1, 2, 3) do: [:item | count := count + 1]");
+    fn accumulation_in_unrecognized_selector_block_warns() {
+        let diags = lint("count := 0.\nfoo customLoop: [:item | count := count + 1]");
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert!(diags[0].message.contains("`count`"));
     }
 
-    /// Multiple dead assignments in the same block.
+    /// Multiple dead assignments in the same stored block.
     #[test]
     fn multiple_dead_assignments_warn() {
-        let diags = lint("x := 0.\ny := 0.\ntrue ifTrue: [x := 1. y := 2]");
+        let diags = lint("x := 0.\ny := 0.\nblk := [x := 1. y := 2]");
         assert_eq!(diags.len(), 2, "Expected 2 lints, got: {diags:?}");
     }
 
@@ -563,7 +630,7 @@ mod tests {
     /// Assignment to a variable defined WITHIN the block — no warning.
     #[test]
     fn local_block_variable_no_warn() {
-        let diags = lint("true ifTrue: [x := 1. x := 2]");
+        let diags = lint("blk := [x := 1. x := 2]");
         assert!(diags.is_empty(), "Expected no lints, got: {diags:?}");
     }
 
@@ -585,7 +652,7 @@ Actor subclass: Counter
   state: count = 0
   increment =>
     x := 0
-    true ifTrue: [x := 1]";
+    blk := [x := 1]";
         let diags = lint(src);
         assert!(
             diags.is_empty(),
@@ -609,7 +676,7 @@ BaseActor subclass: Counter
   state: count = 0
   increment =>
     x := 0
-    true ifTrue: [x := 1]";
+    blk := [x := 1]";
         let diags = lint(src);
         assert!(
             diags.is_empty(),
@@ -617,14 +684,16 @@ BaseActor subclass: Counter
         );
     }
 
-    /// Object subclass — block mutations DON'T propagate, should warn.
+    /// Object subclass — an escaped (stored) block's mutation is still
+    /// flagged, since the class kind doesn't change whether an escaped
+    /// block's mutation is threaded back (only its selector/position does).
     #[test]
     fn object_class_warns() {
         let src = "\
 Object subclass: Foo
   bar =>
     x := 0
-    true ifTrue: [x := 1]";
+    blk := [x := 1]";
         let diags = lint(src);
         assert_eq!(
             diags.len(),
@@ -633,7 +702,7 @@ Object subclass: Foo
         );
     }
 
-    /// Value subclass — block mutations DON'T propagate, should warn.
+    /// Value subclass — an escaped (stored) block's mutation is still flagged.
     #[test]
     fn value_class_warns() {
         let src = "\
@@ -642,7 +711,7 @@ Value subclass: Point
   state: y = 0
   broken =>
     z := 0
-    true ifTrue: [z := 1]";
+    blk := [z := 1]";
         let diags = lint(src);
         assert_eq!(
             diags.len(),
@@ -657,17 +726,17 @@ Value subclass: Point
         let src = "\
 Object subclass: Foo
   bar =>
-    true ifTrue: [x := 1]";
+    blk := [x := 1]";
         let diags = lint(src);
         assert!(diags.is_empty(), "Expected no lints, got: {diags:?}");
     }
 
     // ── Nested blocks ─────────────────────────────────────────────────────────
 
-    /// Dead assignment in a nested block.
+    /// Dead assignment in a nested stored block.
     #[test]
     fn nested_block_dead_assignment_warns() {
-        let diags = lint("x := 0.\ntrue ifTrue: [true ifTrue: [x := 1]]");
+        let diags = lint("x := 0.\nouter := [inner := [x := 1]]");
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert!(diags[0].message.contains("`x`"));
     }
@@ -677,7 +746,7 @@ Object subclass: Foo
     /// Lint diagnostic includes a hint suggesting alternatives.
     #[test]
     fn lint_includes_hint() {
-        let diags = lint("x := 1.\ntrue ifTrue: [x := 2]");
+        let diags = lint("x := 1.\nblk := [x := 2]");
         assert!(
             diags[0].hint.is_some(),
             "Expected a hint on lint diagnostic"
@@ -703,7 +772,7 @@ BaseActor subclass: Counter
   state: count = 0
 Counter >> increment =>
   x := 0
-  true ifTrue: [x := 1]";
+  blk := [x := 1]";
         let diags = lint(src);
         assert!(
             diags.is_empty(),
@@ -719,50 +788,27 @@ Object subclass: Foo
   value => 1
 Foo >> bar =>
   x := 0
-  true ifTrue: [x := 1]";
+  blk := [x := 1]";
         let diags = lint(src);
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
     }
 
-    /// collect: block that mutates an outer variable — should warn.
-    #[test]
-    fn collect_block_dead_assignment_warns() {
-        let diags =
-            lint("total := 0.\n#(1, 2, 3) collect: [:item | total := total + item. item * 2]");
-        assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
-        assert!(diags[0].message.contains("`total`"));
-    }
-
-    /// inject:into: — mutating a NON-accumulator captured variable should warn.
-    #[test]
-    fn inject_into_non_accumulator_mutation_warns() {
-        let diags = lint(
-            "count := 0.\n#(1, 2, 3) inject: 0 into: [:acc :item | count := count + 1. acc + item]",
-        );
-        assert_eq!(
-            diags.len(),
-            1,
-            "Expected 1 lint for non-accumulator mutation in inject:into:, got: {diags:?}"
-        );
-        assert!(diags[0].message.contains("`count`"));
-    }
-
-    /// Method parameter captured in block — should warn.
+    /// Method parameter captured in a stored block — should warn.
     #[test]
     fn method_param_captured_in_block_warns() {
         let src = "\
 Object subclass: Foo
   withX: x =>
-    true ifTrue: [x := 99]";
+    blk := [x := 99]";
         let diags = lint(src);
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert!(diags[0].message.contains("`x`"));
     }
 
-    /// Dead assignment inside a non-block message argument within a block.
+    /// Dead assignment inside a non-block message argument within a stored block.
     #[test]
     fn assignment_in_msg_arg_inside_block_warns() {
-        let diags = lint("x := 0.\ntrue ifTrue: [foo bar: (x := 1)]");
+        let diags = lint("x := 0.\nblk := [foo bar: (x := 1)]");
         assert_eq!(
             diags.len(),
             1,
@@ -793,10 +839,11 @@ Object subclass: Foo
         );
     }
 
-    /// Destructure assignment rebinding an outer variable inside a block — should warn.
+    /// Destructure assignment rebinding an outer variable inside a stored
+    /// block — should warn.
     #[test]
     fn destructure_rebinds_outer_var_warns() {
-        let diags = lint("x := 0.\ny := 0.\ntrue ifTrue: [{x, y} := {1, 2}]");
+        let diags = lint("x := 0.\ny := 0.\nblk := [{x, y} := {1, 2}]");
         assert_eq!(
             diags.len(),
             2,
@@ -807,11 +854,104 @@ Object subclass: Foo
     /// Destructure assignment with only local variables — no warning.
     #[test]
     fn destructure_local_vars_no_warn() {
-        let diags = lint("true ifTrue: [{x, y} := {1, 2}]");
+        let diags = lint("blk := [{x, y} := {1, 2}]");
         assert!(
             diags.is_empty(),
             "Expected no lints for destructure of local vars, got: {diags:?}"
         );
+    }
+
+    // ── BT-3385: state-threaded call sites no longer warn ──────────────────────
+    //
+    // The compiler's Value-type / class-method state-threading (ADR 0041;
+    // BT-1392/BT-2359 for conditionals) threads a captured-and-mutated outer
+    // local back out for a block literal passed directly to any of these
+    // selectors — confirmed at runtime by the existing `mutation_corpus_value.bt`
+    // / `mutation_corpus_class_method.bt` / `counted_loop_mutation_test.bt` BUnit
+    // corpora (BT-1053/BT-2308/BT-2360) and, for this issue's own reported
+    // shape, by `stdlib/test/bt_3385_dead_assignment_test.bt`.
+
+    /// The issue's exact reproduction: a `sealed typed Value subclass` class
+    /// method accumulating into a `Dictionary` via a `to:do:` loop. No longer
+    /// flagged as `DeadAssignment` — the reassignment does escape the block.
+    #[test]
+    fn bt3385_issue_repro_class_method_no_longer_warns() {
+        let src = "\
+sealed typed Value subclass: Foo
+  class buildDict -> Dictionary(String, Integer) =>
+    dict := #{}
+    97 to: 122 do: [:code | dict := dict at: (String fromCodePoint: code) put: code]
+    dict";
+        let diags = lint(src);
+        assert!(
+            diags.is_empty(),
+            "Expected no lints for BT-3385's do:-loop repro on a Value class method, got: {diags:?}"
+        );
+    }
+
+    /// The issue's own open question ("haven't confirmed... instance methods")
+    /// — same shape, instance-side. Also no longer flagged.
+    #[test]
+    fn bt3385_issue_repro_instance_method_no_longer_warns() {
+        let src = "\
+sealed typed Value subclass: Foo
+  buildDict -> Dictionary(String, Integer) =>
+    dict := #{}
+    97 to: 122 do: [:code | dict := dict at: (String fromCodePoint: code) put: code]
+    dict";
+        let diags = lint(src);
+        assert!(
+            diags.is_empty(),
+            "Expected no lints for BT-3385's do:-loop repro on a Value instance method, got: {diags:?}"
+        );
+    }
+
+    /// `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` thread captured-local mutations
+    /// too (BT-1392/BT-2359) — no longer flagged.
+    #[test]
+    fn iftrue_iffalse_no_longer_warn() {
+        for src in [
+            "x := 1.\ntrue ifTrue: [x := 2]",
+            "x := 1.\nfalse ifFalse: [x := 2]",
+            "x := 1.\ntrue ifTrue: [x := 2] ifFalse: [x := 3]",
+        ] {
+            let diags = lint(src);
+            assert!(
+                diags.is_empty(),
+                "Expected no lints for {src:?}, got: {diags:?}"
+            );
+        }
+    }
+
+    /// The whole family of loop / list-op selectors that codegen's
+    /// `block_arg_for_selector` (`crates/beamtalk-codegen/src/core_erlang/
+    /// control_flow/mod.rs`) recognizes for captured-local threading — none
+    /// of these should warn on a mutation of an outer local at the
+    /// recognized block-argument position, whatever the accumulator's name.
+    #[test]
+    fn loop_and_list_op_family_no_longer_warns() {
+        let cases = [
+            "x := 0.\n[x < 3] whileTrue: [x := x + 1]",
+            "x := 0.\n[x >= 3] whileFalse: [x := x + 1]",
+            "x := 0.\n#(1, 2, 3) do: [:item | x := x + item]",
+            "x := 0.\n#(1, 2, 3) collect: [:item | x := x + item. item]",
+            "x := 0.\n#(1, 2, 3) select: [:item | x := x + item. true]",
+            "x := 0.\n#(1, 2, 3) reject: [:item | x := x + item. false]",
+            "x := 0.\n#(1, 2, 3) detect: [:item | x := x + item. true]",
+            "x := 0.\n3 timesRepeat: [x := x + 1]",
+            "x := 0.\n1 to: 3 do: [:i | x := x + i]",
+            "x := 0.\n1 to: 3 by: 1 do: [:i | x := x + i]",
+            // inject:into: — a NON-accumulator captured var, not just the
+            // accumulator parameter (BT-3385 found this threads too).
+            "count := 0.\n#(1, 2, 3) inject: 0 into: [:acc :item | count := count + 1. acc + item]",
+        ];
+        for src in cases {
+            let diags = lint(src);
+            assert!(
+                diags.is_empty(),
+                "Expected no lints for {src:?}, got: {diags:?}"
+            );
+        }
     }
 
     // ── BT-1476: @expect dead_assignment suppression ─────────────────────────
@@ -819,7 +959,7 @@ Object subclass: Foo
     /// `@expect dead_assignment` suppresses the dead block assignment lint.
     #[test]
     fn expect_dead_assignment_suppresses_lint() {
-        let src = "x := 1.\n@expect dead_assignment\ntrue ifTrue: [x := 2]";
+        let src = "x := 1.\n@expect dead_assignment\nblk := [x := 2]";
         let tokens = lex_with_eof(src);
         let (module, _) = parse(tokens);
         let mut diags = Vec::new();
@@ -841,7 +981,7 @@ Object subclass: Foo
     /// Lint has `DeadAssignment` category for `@expect` matching.
     #[test]
     fn lint_has_dead_assignment_category() {
-        let diags = lint("x := 1.\ntrue ifTrue: [x := 2]");
+        let diags = lint("x := 1.\nblk := [x := 2]");
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].category,
