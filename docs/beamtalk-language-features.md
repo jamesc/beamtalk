@@ -526,6 +526,46 @@ Transcript show: "Hello"; cr; show: "World"
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
 3. Keyword messages: `dict at: #name`
 
+### Splitting a Message Send Across Lines
+
+A newline acts as a statement separator (see "Core Syntax" above), so whether
+a message send can be split across lines — receiver on one line, message on
+the next — depends on whether the following line could validly begin a *new*
+statement on its own:
+
+```beamtalk
+// Keyword messages split fine: a bare keyword part (`copyFrom:`) can never
+// start a statement on its own, so it unambiguously continues the receiver
+// above, no matter how it's indented.
+result := "abc"
+  copyFrom: 1
+  to: 2
+
+// A unary selector chained after something else on the same line also
+// splits fine, because only the *continuation* keyword moves to its own line:
+result := "abc" asList
+  collect: [:ch | ch uppercase]
+```
+
+```beamtalk
+// A unary selector alone on its own line, immediately after its intended
+// receiver, does NOT continue it — it parses as a new statement instead:
+result := "abc"
+  asList        // parsed as its own statement, not `"abc" asList`
+```
+
+This is intentional, not a bug: a bare identifier like `asList` is itself a
+valid statement (e.g. a variable reference), so the parser cannot safely
+rejoin it with the line above without risking silently swallowing a genuinely
+separate statement that happens to start with a unary-looking name. Keyword
+parts don't have this ambiguity — `bar:` alone can never be a complete
+statement — which is why only keyword-message continuation is safe to infer
+automatically.
+
+**Keep a unary selector on the same line as its receiver.** If the identifier
+that follows fails to resolve, the diagnostic hints at this — join the two
+lines instead of chasing a phantom spelling mistake.
+
 ### Binary Operators
 
 Binary operators follow standard math precedence (highest to lowest):
