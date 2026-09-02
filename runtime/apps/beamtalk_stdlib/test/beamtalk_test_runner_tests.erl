@@ -564,16 +564,19 @@ to_json_test_without_class_key_test() ->
 -define(SYNTH_MODULE, bt_test_runner_synth_mod).
 
 live_setup() ->
-    case whereis(pg) of
-        undefined -> pg:start_link();
-        _ -> ok
-    end,
-    beamtalk_extensions:init(),
-    case whereis(beamtalk_bootstrap) of
-        undefined -> {ok, _} = beamtalk_bootstrap:start_link();
-        _ -> ok
-    end,
-    beamtalk_stdlib:init(),
+    %% BT-3400: boot through the shared beamtalk_test_boot helper rather than
+    %% an ad hoc pg/bootstrap/init sequence. This test file's own copy of
+    %% that sequence never called application:ensure_all_started(beamtalk_runtime),
+    %% so beamtalk_runtime_app:start/2 (and beamtalk_protocol_registry:init/0,
+    %% which creates the ETS table Printable/JsonRepresentable's on_load
+    %% register into) could be skipped entirely whenever this fixture's
+    %% setup happened to run before any fixture in the same EUnit VM that did
+    %% call it — the root cause of the bif_fallback_bif_path_test_ flake
+    %% (BT-3400). boot_real_stdlib/1 always calls
+    %% application:ensure_all_started(beamtalk_runtime) first, so the
+    %% protocol/class-registry ETS tables exist before any stdlib module's
+    %% on_load can race them, regardless of EUnit run order.
+    beamtalk_test_boot:boot_real_stdlib('TestCase'),
     load_synth_module(),
     register_synth_class(),
     %% Two extra concurrent classes so run_all(2) exceeds MaxJobs and exercises

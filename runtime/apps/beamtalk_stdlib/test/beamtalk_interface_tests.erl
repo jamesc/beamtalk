@@ -282,16 +282,10 @@ fake_self() ->
     {beamtalk_object, 'BeamtalkInterface class', 'bt@stdlib@beamtalk_interface', self()}.
 
 live_setup() ->
-    case whereis(pg) of
-        undefined -> pg:start_link();
-        _ -> ok
-    end,
-    beamtalk_extensions:init(),
-    case whereis(beamtalk_bootstrap) of
-        undefined -> {ok, _} = beamtalk_bootstrap:start_link();
-        _ -> ok
-    end,
-    beamtalk_stdlib:init(),
+    %% BT-3400: boot through the shared beamtalk_test_boot helper rather than
+    %% an ad hoc pg/bootstrap/init sequence — see beamtalk_test_runner_tests's
+    %% live_setup/0 for why the old sequence here was the flake's root cause.
+    beamtalk_test_boot:boot_real_stdlib('Object'),
     ok.
 
 live_teardown(_) ->
