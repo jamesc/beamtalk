@@ -1703,7 +1703,13 @@ impl CoreErlangGenerator {
             super::class_builder_source::builder_class_method_context(receiver, messages);
 
         let receiver_var = self.fresh_temp_var("Receiver");
-        let recv_doc = self.expression_doc(underlying_receiver)?;
+        // BT-3412 review: use `closed_expression_doc`, not plain `expression_doc`
+        // — `underlying_receiver` can itself open a scope (e.g. a nested cascade
+        // whose own last message hoists a `ClassVarsN` rebind, now that this
+        // function can produce one). `expression_doc` doesn't consume
+        // `last_open_scope_result`, so a dangling `let ... in` would otherwise
+        // land unclosed inside `recv_doc`.
+        let recv_doc = self.closed_expression_doc(underlying_receiver)?;
         let mut docs: Vec<Document<'static>> = vec![docvec![
             "let ",
             leaf::var(receiver_var.clone()),
