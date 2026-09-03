@@ -19,6 +19,7 @@ use crate::beam_compiler::{
 };
 use beamtalk_codegen::core_erlang::escape_atom_chars;
 use beamtalk_core::file_walker::FileWalker;
+use beamtalk_project::package;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
@@ -528,25 +529,13 @@ fn canonical_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
 /// If `path` is a file, starts at its parent directory. If `path` is a directory,
 /// starts there. Returns the directory path if found, `None` if no manifest exists
 /// anywhere in the ancestor chain.
+///
+/// Delegates to [`beamtalk_project::package::find_package_root`] — the same
+/// canonical implementation used by `beamtalk lint` (BT-2060) — which
+/// canonicalizes `path` before the walk (BT-2027) and guards against
+/// empty-path false hits (BT-1228).
 fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
-    let start_dir = if path.is_file() { path.parent()? } else { path };
-
-    let mut current = start_dir.to_owned();
-    loop {
-        // Guard against empty paths — this happens when walking up from a
-        // single-component relative path (e.g. parent of "test" is "").
-        // Without this guard, `"".join("beamtalk.toml")` resolves to
-        // `"beamtalk.toml"` relative to the CWD and returns `Some("")`,
-        // which later causes `build("", ...)` to fail with
-        // "Path '' does not exist". (BT-1228)
-        if current.as_str().is_empty() {
-            return None;
-        }
-        if current.join("beamtalk.toml").exists() {
-            return Some(current);
-        }
-        current = current.parent()?.to_owned();
-    }
+    package::find_package_root(path.as_std_path()).and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -2197,7 +2186,9 @@ mod tests {
 
     fn temp_utf8_dir() -> (tempfile::TempDir, Utf8PathBuf) {
         let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let canonical =
+            std::fs::canonicalize(temp.path()).unwrap_or_else(|_| temp.path().to_path_buf());
+        let dir = Utf8PathBuf::from_path_buf(canonical).unwrap();
         (temp, dir)
     }
 
