@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3367 fixture: a sealed Value class with a class-side factory method that
+// is not itself declared `class sealed` — the shape that triggered the
+// REPL-only dispatch bug (a class-level `sealed` flag leaking into every
+// class method's own is_sealed bit when the class is recovered from
+// already-loaded BEAM metadata, wrongly enabling the BT-1639 direct-call
+// optimization for a method that constructs `self`).
+sealed Value subclass: Bt3367SealedResult
+  field: checkName = ""
+  field: details = ""
+
+  class ok: aName details: aDetails =>
+    Bt3367SealedResult checkName: aName details: aDetails

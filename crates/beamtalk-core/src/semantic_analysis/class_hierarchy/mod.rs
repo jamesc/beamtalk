@@ -30,19 +30,24 @@ pub use declared_type::DeclaredType;
 /// Per-class selector index: maps class name → (selector → method vec position).
 type SelectorIndexMap = HashMap<EcoString, HashMap<EcoString, usize>>;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 thread_local! {
     /// BT-3123 test-only instrumentation: counts calls to
     /// [`ClassHierarchy::build_with_options`] (which [`ClassHierarchy::build`]
     /// delegates to) — the from-scratch hierarchy construction pass. Used by a
     /// codegen test to verify that a driver threading an `AnalysisResult` into
     /// codegen via `CodegenOptions::with_analysis` doesn't trigger a second
-    /// build. `#[cfg(test)]` only — compiled out of release builds entirely.
+    /// build. `#[cfg(any(test, feature = "test"))]` — compiled out of plain
+    /// release/production builds. BT-3362 (ADR 0117 Decision step 5): widened
+    /// from `#[cfg(test)]` — the codegen test that reads this now lives in
+    /// the standalone `beamtalk-codegen` crate, whose own tests need the
+    /// `feature = "test"` half to see it (`#[cfg(test)]` alone only applies
+    /// to this crate's own `--cfg test` build).
     ///
     /// Thread-local, not a shared global counter — see
     /// `type_checker::CHECK_MODULE_CALL_COUNT`'s doc for why a global counter's
     /// absolute value would be meaningless under `cargo test`'s concurrency.
-    pub(crate) static BUILD_CALL_COUNT: std::cell::Cell<usize> =
+    pub static BUILD_CALL_COUNT: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
 }
 /// Static class hierarchy built during semantic analysis.
@@ -150,7 +155,7 @@ impl ClassHierarchy {
         stdlib_mode: bool,
     ) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
         // BT-3123 test-only instrumentation — see `BUILD_CALL_COUNT`'s doc.
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test"))]
         BUILD_CALL_COUNT.with(|c| c.set(c.get() + 1));
 
         let mut hierarchy = Self::with_builtins();

@@ -50,8 +50,15 @@ impl ReplClient {
     /// Returns `true` if the previous session was resumed, `false` if a fresh
     /// session was established.
     pub(crate) fn reconnect(&mut self) -> Result<bool> {
+        self.reconnect_with_retries(super::MAX_CONNECT_RETRIES, super::RETRY_DELAY_MS)
+    }
+
+    /// [`reconnect`](Self::reconnect)'s retry loop, parameterized on attempt
+    /// count/delay so tests can exhaust retries against a dead server without
+    /// paying `MAX_CONNECT_RETRIES * RETRY_DELAY_MS` of real wall-clock time.
+    fn reconnect_with_retries(&mut self, max_retries: u32, retry_delay_ms: u64) -> Result<bool> {
         let requested_session = self.session_id.clone();
-        for attempt in 1..=super::MAX_CONNECT_RETRIES {
+        for attempt in 1..=max_retries {
             match ProtocolClient::connect_with_resume(
                 &self.host,
                 self.port,
@@ -67,10 +74,10 @@ impl ReplClient {
                     return Ok(resumed);
                 }
                 Err(e) => {
-                    if attempt == super::MAX_CONNECT_RETRIES {
+                    if attempt == max_retries {
                         return Err(e);
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(super::RETRY_DELAY_MS));
+                    std::thread::sleep(std::time::Duration::from_millis(retry_delay_ms));
                 }
             }
         }
@@ -401,88 +408,9 @@ impl ReplClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::{spawn_auth_error_server, spawn_auth_ok_server};
     use std::net::TcpListener;
-    use tungstenite::{Message, WebSocket};
-
-    /// Spawn a minimal fake workspace backend on an OS-assigned port.
-    ///
-    /// Accepts connections in a loop (one background thread per connection,
-    /// since [`ReplClient::interrupt`] opens a *second* connection alongside
-    /// the main one). Each connection completes the real auth handshake
-    /// (`auth-required` -> read `auth` -> `auth_ok` -> `session-started`)
-    /// before handing subsequent parsed request frames to `handler`, which
-    /// may reply on the same socket. Returns the bound port.
-    ///
-    /// This is a third hand-rolled instance of the same ADR 0020 handshake
-    /// double already written for `beamtalk-lsp/src/runtime.rs`'s
-    /// `FakeWorkspace`/`spawn_workspace` and `beamtalk-mcp/src/server.rs`'s
-    /// `FakeRepl`/`spawn_fake_repl` — BT-3331 tracks consolidating those two.
-    /// Deliberately not reused as-is here: both of those are `tokio`-async
-    /// (`tokio::net::TcpListener` / `tokio_tungstenite`), while `ReplClient`
-    /// and the rest of `beamtalk-cli`'s REPL transport are synchronous
-    /// (`std::net::TcpStream` + blocking `tungstenite`) with no `tokio`
-    /// dependency to justify pulling in for tests only. BT-3331 has been
-    /// updated to note this sync variant so its extraction accounts for the
-    /// async/sync split rather than assuming a single shared shape.
-    fn spawn_auth_ok_server(
-        handler: impl Fn(serde_json::Value, &mut WebSocket<std::net::TcpStream>) + Send + Sync + 'static,
-    ) -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
-        let port = listener.local_addr().expect("local_addr").port();
-        let handler = std::sync::Arc::new(handler);
-        std::thread::spawn(move || {
-            for stream in listener.incoming().flatten() {
-                let handler = std::sync::Arc::clone(&handler);
-                std::thread::spawn(move || {
-                    let Ok(mut ws) = tungstenite::accept(stream) else {
-                        return;
-                    };
-                    let send = |ws: &mut WebSocket<std::net::TcpStream>, v: serde_json::Value| {
-                        let _ = ws.send(Message::Text(v.to_string().into()));
-                    };
-                    send(&mut ws, serde_json::json!({"op": "auth-required"}));
-                    if ws.read().is_err() {
-                        return;
-                    }
-                    send(&mut ws, serde_json::json!({"type": "auth_ok"}));
-                    send(
-                        &mut ws,
-                        serde_json::json!({"op": "session-started", "session": "sess-test"}),
-                    );
-                    while let Ok(Message::Text(text)) = ws.read() {
-                        if let Ok(req) = serde_json::from_str(&text) {
-                            handler(req, &mut ws);
-                        }
-                    }
-                });
-            }
-        });
-        port
-    }
-
-    /// Spawn a fake backend that rejects auth with the given message.
-    fn spawn_auth_error_server(message: &'static str) -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
-        let port = listener.local_addr().expect("local_addr").port();
-        std::thread::spawn(move || {
-            if let Ok((stream, _)) = listener.accept() {
-                if let Ok(mut ws) = tungstenite::accept(stream) {
-                    let _ = ws.send(Message::Text(
-                        serde_json::json!({"op": "auth-required"})
-                            .to_string()
-                            .into(),
-                    ));
-                    let _ = ws.read();
-                    let _ = ws.send(Message::Text(
-                        serde_json::json!({"type": "auth_error", "message": message})
-                            .to_string()
-                            .into(),
-                    ));
-                }
-            }
-        });
-        port
-    }
+    use tungstenite::Message;
 
     #[test]
     fn connect_to_unbound_port_fails_with_connect_error() {
@@ -557,6 +485,151 @@ mod tests {
         });
         let client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
         client.interrupt().expect("interrupt should succeed");
+    }
+
+    #[test]
+    fn reconnect_resumes_previous_session() {
+        // The fake server always assigns "sess-test", so a reconnect that
+        // requests that same session id back reports `resumed == true`.
+        let port = spawn_auth_ok_server(|_req, _ws| {});
+        let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+        assert_eq!(client.session_id(), Some("sess-test"));
+
+        let resumed = client.reconnect().expect("reconnect should succeed");
+        assert!(resumed, "same session id should be reported as resumed");
+        assert_eq!(client.session_id(), Some("sess-test"));
+    }
+
+    #[test]
+    fn reconnect_against_dead_server_fails_after_retries() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        // Accept once so the initial `connect()` succeeds...
+        let handler_port = port;
+        let accepted = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("accept");
+            let mut ws = tungstenite::accept(stream).expect("accept ws");
+            let _ = ws.send(Message::Text(
+                serde_json::json!({"op": "auth-required"})
+                    .to_string()
+                    .into(),
+            ));
+            let _ = ws.read();
+            let _ = ws.send(Message::Text(
+                serde_json::json!({"type": "auth_ok"}).to_string().into(),
+            ));
+            let _ = ws.send(Message::Text(
+                serde_json::json!({"op": "session-started", "session": "sess-test"})
+                    .to_string()
+                    .into(),
+            ));
+            // Then drop the connection and stop listening entirely.
+        });
+        let mut client = ReplClient::connect("127.0.0.1", handler_port, "cookie").expect("connect");
+        accepted.join().expect("server thread");
+        // Nothing is listening on this port any more, so every attempt fails
+        // with a connect error. Uses `reconnect_with_retries` directly (2
+        // attempts, 5ms apart) rather than the real `reconnect()` — which
+        // would otherwise pay `MAX_CONNECT_RETRIES * RETRY_DELAY_MS` (10 *
+        // 500ms) of real wall-clock time to exercise the same exhausted-retry
+        // path this test cares about.
+        let err = client
+            .reconnect_with_retries(2, 5)
+            .expect_err("reconnect should exhaust retries and fail");
+        assert!(err.to_string().contains("Failed to connect"));
+    }
+
+    #[test]
+    fn eval_interruptible_sends_interrupt_on_timeout_then_returns_final_response() {
+        // The fake server delays its eval response well past the 200ms
+        // per-read poll timeout `send_streaming` sets, and replies to the
+        // separate `interrupt` connection so the loop's timeout branch has
+        // something to observe alongside `interrupted`.
+        let interrupt_seen = Arc::new(AtomicBool::new(false));
+        let interrupt_seen_srv = Arc::clone(&interrupt_seen);
+        let port = spawn_auth_ok_server(move |req, ws| {
+            match req.get("op").and_then(|v| v.as_str()) {
+                Some("interrupt") => {
+                    interrupt_seen_srv.store(true, Ordering::SeqCst);
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"status": ["done"]}).to_string().into(),
+                    ));
+                }
+                Some("eval") => {
+                    // Wait long enough for the client's 200ms poll to time
+                    // out and observe `interrupted` at least once before
+                    // this connection's response arrives.
+                    std::thread::sleep(Duration::from_millis(350));
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"status": ["done"], "value": "interrupted-result"})
+                            .to_string()
+                            .into(),
+                    ));
+                }
+                _ => {}
+            }
+        });
+        let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+
+        let interrupted = Arc::new(AtomicBool::new(true));
+        let resp = client
+            .eval_interruptible("1 + 1", &interrupted)
+            .expect("eval_interruptible should still return the final response");
+        assert_eq!(resp.value, Some(serde_json::json!("interrupted-result")));
+        // The interrupt flag is consumed (swapped back to false) once observed.
+        assert!(!interrupted.load(Ordering::SeqCst));
+        assert!(
+            interrupt_seen.load(Ordering::SeqCst),
+            "server should have received a separate interrupt request"
+        );
+    }
+
+    #[test]
+    fn load_project_sends_include_tests_false() {
+        let port = spawn_auth_ok_server(|req, ws| {
+            if req.get("op").and_then(|v| v.as_str()) == Some("load-project") {
+                let include_tests = req
+                    .get("include_tests")
+                    .and_then(serde_json::Value::as_bool);
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({
+                        "status": ["done"],
+                        "value": include_tests,
+                    })
+                    .to_string()
+                    .into(),
+                ));
+            }
+        });
+        let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+        let resp = client
+            .load_project("/tmp/some-project")
+            .expect("load_project should succeed");
+        assert_eq!(resp.value, Some(serde_json::json!(false)));
+    }
+
+    #[test]
+    fn load_project_opts_sends_include_tests_true() {
+        let port = spawn_auth_ok_server(|req, ws| {
+            if req.get("op").and_then(|v| v.as_str()) == Some("load-project") {
+                let include_tests = req
+                    .get("include_tests")
+                    .and_then(serde_json::Value::as_bool);
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({
+                        "status": ["done"],
+                        "value": include_tests,
+                    })
+                    .to_string()
+                    .into(),
+                ));
+            }
+        });
+        let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+        let resp = client
+            .load_project_opts("/tmp/some-project", true)
+            .expect("load_project_opts should succeed");
+        assert_eq!(resp.value, Some(serde_json::json!(true)));
     }
 
     #[test]

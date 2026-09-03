@@ -70,7 +70,13 @@ pub fn run(name_or_id: Option<&str>, recent: Option<usize>) -> Result<()> {
     // Connect to workspace REPL backend
     let mut client = TranscriptClient::connect(node_info.connect_host(), node_info.port, &cookie)?;
 
-    // Set up Ctrl-C handler
+    // Set up Ctrl-C handler.
+    //
+    // `ctrlc::set_handler` may only be installed once per process — a second
+    // call anywhere in this binary returns `Err`. No unit test may reach this
+    // line more than once across the whole `beamtalk-cli` test binary; see
+    // this module's `tests::run_early_returns` doc comment for the tests that
+    // deliberately stop short of it.
     let running = Arc::new(AtomicBool::new(true));
     let r = Arc::clone(&running);
     ctrlc::set_handler(move || {
@@ -320,5 +326,172 @@ mod tests {
         ];
         let new = cursor.update(&updated);
         assert_eq!(new, vec!["d", "e"]);
+    }
+
+    // -- TranscriptClient --------------------------------------------------
+    //
+    // `spawn_auth_ok_server`/`spawn_auth_error_server` are the shared
+    // synchronous ADR 0020 handshake doubles in `crate::commands::test_support`
+    // (BT-3349) — see that module's doc comment.
+
+    mod transcript_client {
+        use super::super::TranscriptClient;
+        use crate::commands::test_support::{spawn_auth_error_server, spawn_auth_ok_server};
+        use tungstenite::Message;
+
+        #[test]
+        fn connect_fails_against_unbound_port() {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("local_addr").port();
+            drop(listener);
+
+            let Err(err) = TranscriptClient::connect("127.0.0.1", port, "cookie") else {
+                panic!("expected connect to fail against an unbound port");
+            };
+            assert!(err.to_string().contains("Failed to connect"));
+        }
+
+        #[test]
+        fn connect_fails_on_auth_error() {
+            let port = spawn_auth_error_server("bad cookie");
+            let Err(err) = TranscriptClient::connect("127.0.0.1", port, "wrong") else {
+                panic!("expected connect to fail on auth_error");
+            };
+            assert!(err.to_string().contains("bad cookie"));
+        }
+
+        #[test]
+        fn fetch_recent_parses_array_of_strings() {
+            let port = spawn_auth_ok_server(|req, ws| {
+                if req.get("code").and_then(|v| v.as_str()) == Some("Transcript recent") {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"status": ["done"], "value": ["hello\n", "world\n"]})
+                            .to_string()
+                            .into(),
+                    ));
+                }
+            });
+            let mut client =
+                TranscriptClient::connect("127.0.0.1", port, "cookie").expect("connect");
+            let entries = client.fetch_recent().expect("fetch_recent");
+            assert_eq!(entries, vec!["hello\n", "world\n"]);
+        }
+
+        #[test]
+        fn fetch_recent_empty_array_string_fallback_is_empty() {
+            let port = spawn_auth_ok_server(|_req, ws| {
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"status": ["done"], "value": "[]"})
+                        .to_string()
+                        .into(),
+                ));
+            });
+            let mut client =
+                TranscriptClient::connect("127.0.0.1", port, "cookie").expect("connect");
+            let entries = client.fetch_recent().expect("fetch_recent");
+            assert!(entries.is_empty());
+        }
+
+        #[test]
+        fn fetch_recent_single_string_fallback_wraps_in_vec() {
+            let port = spawn_auth_ok_server(|_req, ws| {
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"status": ["done"], "value": "solo"})
+                        .to_string()
+                        .into(),
+                ));
+            });
+            let mut client =
+                TranscriptClient::connect("127.0.0.1", port, "cookie").expect("connect");
+            let entries = client.fetch_recent().expect("fetch_recent");
+            assert_eq!(entries, vec!["solo"]);
+        }
+
+        #[test]
+        fn fetch_recent_missing_value_is_empty() {
+            let port = spawn_auth_ok_server(|_req, ws| {
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"status": ["done"]}).to_string().into(),
+                ));
+            });
+            let mut client =
+                TranscriptClient::connect("127.0.0.1", port, "cookie").expect("connect");
+            let entries = client.fetch_recent().expect("fetch_recent");
+            assert!(entries.is_empty());
+        }
+
+        #[test]
+        fn fetch_recent_server_error_is_propagated() {
+            let port = spawn_auth_ok_server(|_req, ws| {
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"error": "eval failed"})
+                        .to_string()
+                        .into(),
+                ));
+            });
+            let mut client =
+                TranscriptClient::connect("127.0.0.1", port, "cookie").expect("connect");
+            let err = client.fetch_recent().unwrap_err();
+            assert!(err.to_string().contains("eval failed"));
+        }
+    }
+
+    // -- run() early-return paths -------------------------------------------
+    //
+    // Only the pre-handshake branches are exercised here: `run` registers a
+    // process-global `ctrlc::set_handler` right after connecting, and that
+    // handler may only be installed once per test process — so no test below
+    // may reach a successful `TranscriptClient::connect`, and only one test
+    // in the whole crate can ever exercise `run`'s streaming loop. See
+    // `crate::commands::test_support` for the `WorkspaceFixture` used here.
+
+    mod run_early_returns {
+        use super::super::run;
+        use crate::commands::test_support::{WorkspaceFixture, spawn_auth_error_server};
+        use crate::commands::workspace::storage::save_workspace_cookie;
+
+        #[test]
+        fn missing_workspace_with_name_errors() {
+            let err = run(Some("bt3349-transcript-no-such-workspace"), None).unwrap_err();
+            assert!(err.to_string().contains("does not exist"), "got: {err}");
+        }
+
+        #[test]
+        fn node_not_running_errors_and_cleans_up() {
+            // Bind then drop so nothing is listening on this port — the TCP
+            // liveness probe in `is_node_running` fails.
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("local_addr").port();
+            drop(listener);
+            let fixture = WorkspaceFixture::new("not-running", port, 4_194_304);
+
+            let err = run(Some(&fixture.id), None).unwrap_err();
+            assert!(err.to_string().contains("No workspace found"), "got: {err}");
+        }
+
+        #[test]
+        fn empty_cookie_errors() {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("local_addr").port();
+            let fixture = WorkspaceFixture::new("empty-cookie", port, std::process::id());
+            // Overwrite the fixture's default "cookie" with an empty one.
+            save_workspace_cookie(&fixture.id, "").expect("save empty cookie");
+
+            let err = run(Some(&fixture.id), None).unwrap_err();
+            assert!(err.to_string().contains("cookie is empty"), "got: {err}");
+            drop(listener);
+        }
+
+        #[test]
+        fn connect_handshake_rejected_errors() {
+            // `spawn_auth_error_server` fails the handshake before `run` would
+            // reach `ctrlc::set_handler`, so this stays safe alongside the
+            // other tests in this module.
+            let port = spawn_auth_error_server("bad cookie");
+            let fixture = WorkspaceFixture::new("handshake-rejected", port, std::process::id());
+
+            let err = run(Some(&fixture.id), None).unwrap_err();
+            assert!(err.to_string().contains("bad cookie"), "got: {err}");
+        }
     }
 }

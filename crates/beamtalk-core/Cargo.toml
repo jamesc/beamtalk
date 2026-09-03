@@ -57,23 +57,19 @@ insta.workspace = true
 proptest.workspace = true
 criterion.workspace = true
 tempfile = "3.14"
-# why: BT-3344 — this crate's own `tests/codegen_property_tests.rs`
-# integration test shares `test_helpers::test_support::near_valid_beamtalk`/
-# `proptest_config_default` with `beamtalk-repl`'s copy of the same
-# properties rather than duplicating them (the "No duplicate
-# implementations" rule); `test_support` is gated behind the `test` feature,
-# same mechanism `beamtalk-compiler-port`/`fuzz` already use to reach
-# `test_support::arb_declared_type` (BT-3100). Cargo resolves `path = "."`
-# as this same package instance, not a second copy, so this doesn't
-# reintroduce the "multiple different versions of crate `beamtalk_core`"
-# problem a real cross-crate cycle would cause.
-beamtalk-core = { path = ".", features = ["test"] }
-# why: already present transitively (see Cargo.lock); used in codegen tests to
-# assert on Core Erlang shape without hardcoding fresh-variable counter values.
-regex = "1"
 # why: BT-2859 — serialises env-var-mutating tests in `ffi_type_specs`
 # (mirrors the same pattern in `beamtalk-cli`).
 serial_test = "4"
+# why: ADR 0117 step 5 (BT-3362) — `benches/compiler_pipeline.rs` and
+# `examples/compile_pipeline_corpus.rs` exercise the full pipeline
+# (lex → parse → analyse → codegen) end to end, so they need the
+# now-standalone `beamtalk-codegen` crate for its final phase. A regular
+# dependency of `beamtalk-codegen` on `beamtalk-core` plus this
+# dev-dependency of `beamtalk-core` on `beamtalk-codegen` is not a real
+# cycle: dev-dependencies are only linked for this crate's own
+# tests/benches/examples targets, never for the library itself, so nothing
+# depending on `beamtalk-core` as an ordinary library ever sees this edge.
+beamtalk-codegen.workspace = true
 
 [[bench]]
 name = "compiler_pipeline"

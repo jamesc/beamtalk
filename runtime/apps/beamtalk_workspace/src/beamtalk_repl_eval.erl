@@ -107,6 +107,10 @@ module loading to beamtalk_repl_loader (BT-863).
 -export([
     announce_binding_changed/2,
     extract_assignment/1,
+    skip_string_literal/1,
+    skip_character_literal/1,
+    skip_line_comment/1,
+    skip_block_comment/1,
     maybe_await_future/1,
     rebuild_bindings_from_steps/2,
     should_purge_module/2,
@@ -1643,13 +1647,25 @@ rebuild_bindings_from_steps(Steps, Bindings) ->
         Steps
     ).
 
--doc "Extract variable name from assignment expression.".
+-doc """
+Extract variable name from assignment expression.
+
+`Expression` is the *whole* source text of a REPL `eval` call, which may
+contain more than one top-level statement (BT-3368). The caller
+(`process_eval_result/4`) uses a match here to re-bind `VarName` to the
+call's own `Result` — correct only when `Result` and `VarName`'s assignment
+are the *same* statement, i.e. `Expression` is a single statement. Bails to
+`none` whenever `has_second_top_level_statement/1` finds a second top-level
+statement, leaving the per-statement bindings already threaded correctly
+through eval's own `State` map untouched, rather than clobbering the
+first/earlier variable with the last statement's value.
+""".
 -spec extract_assignment(string()) -> {ok, atom()} | none.
 extract_assignment(Expression) ->
-    case re:run(Expression, "\\.\\s+\\S", []) of
-        {match, _} ->
+    case has_second_top_level_statement(Expression) of
+        true ->
             none;
-        nomatch ->
+        false ->
             case
                 re:run(
                     Expression,
@@ -1662,6 +1678,211 @@ extract_assignment(Expression) ->
                 nomatch -> none
             end
     end.
+
+-doc """
+True when `Expression` has a second top-level statement following the
+first, found by scanning left to right and tracking `[]`/`()`/`{}` nesting
+depth (BT-3368). A `"..."` string or `$x` character literal is skipped
+atomically via `skip_string_literal/1`/`skip_character_literal/1` — as a
+single lexeme, never character-by-character — so nothing inside either one
+(a `.`, a newline, a bracket) is ever individually inspected. A `//...`
+line comment or `/* ... */` block comment is skipped the same way via
+`skip_line_comment/1`/`skip_block_comment/1` (BT-3372) — mirroring
+`lex_line_comment`/`lex_block_comment` (`source_analysis/lexer.rs`) — so a
+bracket, quote, period, or newline inside a comment is never read as real
+code either.
+
+Two signals count as a statement boundary, and only at depth 0:
+
+  - A `.` followed by whitespace then more content — Smalltalk-family
+    statement-separator syntax (the pre-existing check, now depth-aware:
+    `self.opened := self.opened + 1. self.opened` inside a class-method
+    block literal is two statements *of that block*, not of the enclosing
+    top-level assignment).
+  - A newline whose next line itself opens with `ident :=` — REPL input is
+    just as commonly separated by bare newlines with no `.` at all (e.g.
+    `alpha := 111\nbeta := 222`). Narrower than the period check (shape-
+    gated, not "any content") because an ordinary newline is not statement-
+    significant in this grammar at all — it's only a *weak* signal here,
+    so a single assignment whose own right-hand side merely continues onto
+    later lines (`result :=\n  42`, or a multi-line block/collection
+    literal whose body doesn't itself open with `ident :=`) must not
+    trigger it.
+""".
+-spec has_second_top_level_statement(string()) -> boolean().
+has_second_top_level_statement(Expression) ->
+    scan_for_second_top_level_statement(Expression, 0).
+
+-spec scan_for_second_top_level_statement(string(), integer()) -> boolean().
+scan_for_second_top_level_statement([], _Depth) ->
+    false;
+scan_for_second_top_level_statement([$" | _] = Chars, Depth) ->
+    case skip_string_literal(Chars) of
+        {ok, Rest} -> scan_for_second_top_level_statement(Rest, Depth);
+        unsupported -> true
+    end;
+scan_for_second_top_level_statement([$$ | _] = Chars, Depth) ->
+    scan_for_second_top_level_statement(skip_character_literal(Chars), Depth);
+scan_for_second_top_level_statement([$/, $/ | _] = Chars, Depth) ->
+    scan_for_second_top_level_statement(skip_line_comment(Chars), Depth);
+scan_for_second_top_level_statement([$/, $* | _] = Chars, Depth) ->
+    scan_for_second_top_level_statement(skip_block_comment(Chars), Depth);
+scan_for_second_top_level_statement([C | Rest], Depth) when
+    C =:= $[; C =:= $(; C =:= ${
+->
+    scan_for_second_top_level_statement(Rest, Depth + 1);
+scan_for_second_top_level_statement([C | Rest], Depth) when
+    C =:= $]; C =:= $); C =:= $}
+->
+    scan_for_second_top_level_statement(Rest, max(Depth - 1, 0));
+scan_for_second_top_level_statement([$. | Rest], 0) ->
+    case re:run(Rest, "^\\s+\\S", []) of
+        {match, _} -> true;
+        nomatch -> scan_for_second_top_level_statement(Rest, 0)
+    end;
+scan_for_second_top_level_statement([$\n | Rest], 0) ->
+    case re:run(Rest, "^\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*:=", []) of
+        {match, _} -> true;
+        nomatch -> scan_for_second_top_level_statement(Rest, 0)
+    end;
+scan_for_second_top_level_statement([_ | Rest], Depth) ->
+    scan_for_second_top_level_statement(Rest, Depth).
+
+-doc """
+Skips one string literal starting at the opening `"`, returning
+`{ok, Rest}` with the characters immediately after its closing `"`, or
+`unsupported` if the string contains string interpolation (BT-3368 review
+follow-up).
+
+Mirrors `lex_string/0` (`source_analysis/lexer.rs`) for the common,
+non-interpolated case: `""` (doubled delimiter) is a literal `"` inside the
+string, and `\` escapes whatever character follows it — including another
+`\` or a `"` — so that pair is always consumed together and never
+independently reopens/closes the string. An unterminated string (malformed
+input that would already have failed compilation before reaching here)
+returns `{ok, []}`.
+
+An unescaped `{` starts a string interpolation (`lex_interpolation_body`),
+whose body is an arbitrary expression that may itself contain a *nested*
+string literal (`skip_nested_string`) — i.e. a single BT string token can
+legitimately contain more than two `"` characters, with the interpolated
+expression's own `.`/`{`/`}`/`"` syntax interleaved. Faithfully mirroring
+that (brace depth, nested strings, comments, doubled `{{}}`, all inside one
+string) is real lexer logic this heuristic scanner isn't worth duplicating
+for what is only a display/future-rebinding optimization — so it bails out
+via `unsupported` instead of risking a wrong guess at the string's real
+extent (which could mis-pair quotes across the interpolation and produce
+an incorrect statement-boundary read either way). The caller
+(`scan_for_second_top_level_statement/2`) treats `unsupported` the same as
+a confirmed second statement — safe, since `extract_assignment/1`'s only
+use of a `none` result is to skip an optimization, never to corrupt a
+binding.
+
+Conformance-tested against the real Rust lexer via the shared corpus
+`runtime/apps/beamtalk_workspace/test/fixtures/
+string_and_character_literal_span_corpus.json` for the non-interpolated
+case — see
+`beamtalk_repl_eval_tests:string_and_character_literal_span_matches_shared_corpus_test/0`
+and `source_analysis::lexer::tests::string_and_character_literal_span_matches_shared_corpus`.
+""".
+-spec skip_string_literal(string()) -> {ok, string()} | unsupported.
+skip_string_literal([$" | Rest]) ->
+    skip_string_literal_body(Rest).
+
+-spec skip_string_literal_body(string()) -> {ok, string()} | unsupported.
+skip_string_literal_body([]) ->
+    {ok, []};
+skip_string_literal_body([${ | _Rest]) ->
+    unsupported;
+skip_string_literal_body([$", $" | Rest]) ->
+    skip_string_literal_body(Rest);
+skip_string_literal_body([$" | Rest]) ->
+    {ok, Rest};
+skip_string_literal_body([$\\, _Escaped | Rest]) ->
+    skip_string_literal_body(Rest);
+skip_string_literal_body([$\\]) ->
+    {ok, []};
+skip_string_literal_body([_ | Rest]) ->
+    skip_string_literal_body(Rest).
+
+-doc """
+Skips one character literal starting at `$`, returning the characters
+immediately after its single payload character (BT-3368 review follow-up).
+
+Mirrors `lex_character/0` (`source_analysis/lexer.rs`) exactly: `$x` (any
+payload character, including `(`, `"`, `.`, another `$`, ...) or `$\x` (an
+escaped payload — `$\n`, `$\(`, ...) is consumed atomically as one token,
+never letting the payload be read as bracket/quote/period syntax. A `$`
+with no payload (malformed/truncated input) returns `[]`.
+""".
+-spec skip_character_literal(string()) -> string().
+skip_character_literal([$$, $\\, _Escaped | Rest]) ->
+    Rest;
+skip_character_literal([$$, _Payload | Rest]) ->
+    Rest;
+skip_character_literal([$$]) ->
+    [].
+
+-doc """
+Skips one `//...` line comment starting at the opening `//`, returning the
+characters from (and including) the terminating `\n`, or `[]` if the
+comment runs to end of input (BT-3372).
+
+Mirrors `lex_line_comment/0` (`source_analysis/lexer.rs`): the comment body
+is everything up to but not including the next `\n`, consumed atomically
+so a `.`, bracket, or `"` inside it is never read as real code. The `\n`
+itself is left in `Rest` so the caller's own newline-boundary check
+(`scan_for_second_top_level_statement/2`'s `$\n` clause) still applies to
+it exactly as if the comment weren't there. A `///` doc comment shares this
+same span rule (only its semantics differ, not its termination), so this
+also handles doc comments correctly without a separate clause.
+
+Conformance-tested against the real Rust lexer via the shared corpus
+`runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json` —
+see `beamtalk_repl_eval_tests:comment_span_matches_shared_corpus_test/0` and
+`source_analysis::lexer::tests::comment_span_matches_shared_corpus`.
+""".
+-spec skip_line_comment(string()) -> string().
+skip_line_comment([$/, $/ | Rest]) ->
+    skip_line_comment_body(Rest).
+
+-spec skip_line_comment_body(string()) -> string().
+skip_line_comment_body([]) ->
+    [];
+skip_line_comment_body([$\n | _] = Chars) ->
+    Chars;
+skip_line_comment_body([_ | Rest]) ->
+    skip_line_comment_body(Rest).
+
+-doc """
+Skips one `/* ... */` block comment starting at the opening `/*`, returning
+the characters immediately after its closing `*/`, or `[]` if the comment
+is unterminated (runs to end of input) (BT-3372).
+
+Mirrors `lex_block_comment/0` (`source_analysis/lexer.rs`): the whole span,
+delimiters included, is consumed atomically, so a `.`, bracket, or `"`
+inside it is never read as real code. An unterminated block comment is a
+lex-time error in the real compiler (BT-3372's caller never reaches a
+comment that would fail to compile in practice) but is still consumed
+harmlessly to end of input here, matching `extract_assignment/1`'s existing
+policy of never raising on malformed input.
+
+Conformance-tested against the real Rust lexer via the shared corpus
+`runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json` —
+see `beamtalk_repl_eval_tests:comment_span_matches_shared_corpus_test/0` and
+`source_analysis::lexer::tests::comment_span_matches_shared_corpus`.
+""".
+-spec skip_block_comment(string()) -> string().
+skip_block_comment([$/, $* | Rest]) ->
+    skip_block_comment_body(Rest).
+
+-spec skip_block_comment_body(string()) -> string().
+skip_block_comment_body([]) ->
+    [];
+skip_block_comment_body([$*, $/ | Rest]) ->
+    Rest;
+skip_block_comment_body([_ | Rest]) ->
+    skip_block_comment_body(Rest).
 
 -doc "Auto-await a Future if the result is a tagged future tuple (BT-840).".
 -spec maybe_await_future(term()) -> term().

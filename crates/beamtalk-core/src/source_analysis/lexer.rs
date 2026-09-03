@@ -1078,15 +1078,15 @@ impl<'src> Lexer<'src> {
         ))
     }
 
-    /// Returns true if the character is a binary selector (operator) character.
+    /// Delegates to the module-level [`super::is_binary_selector_char`].
     ///
-    /// Shared between `lex_binary_selector()` and symbol operator lexing
-    /// in `lex_symbol_or_hash()` to keep the character sets in sync.
+    /// Kept as an associated function so the `Self::is_binary_selector_char`
+    /// and `self.advance_while(Self::is_binary_selector_char)` call sites
+    /// inside `lex_binary_selector` and `lex_symbol_or_hash` do not need
+    /// touching — a single point of truth for the character table lives in
+    /// the parent module where `is_valid_selector` can also reach it.
     fn is_binary_selector_char(c: char) -> bool {
-        matches!(
-            c,
-            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
-        )
+        super::is_binary_selector_char(c)
     }
 
     /// Lexes a binary selector (one or more operator characters).
@@ -2480,5 +2480,124 @@ mod tests {
                 TokenKind::Identifier("MyClass".into()),
             ]
         );
+    }
+
+    /// BT-3368 review follow-up: the REPL's `beamtalk_repl_eval` module
+    /// (`runtime/apps/beamtalk_workspace/src/beamtalk_repl_eval.erl`) has a
+    /// hand-rolled Erlang mirror of `lex_string`/`lex_character`'s span
+    /// computation (`skip_string_literal/1`/`skip_character_literal/1`),
+    /// needed because the workspace app cannot depend on this Rust crate. A
+    /// shared corpus fixture
+    /// (`runtime/apps/beamtalk_workspace/test/fixtures/
+    /// string_and_character_literal_span_corpus.json`) pins both
+    /// implementations to the same cases — string escapes (backslash and
+    /// doubled-quote) and character-literal payloads — so the two can't
+    /// silently drift apart. The Erlang side asserts the identical cases in
+    /// `beamtalk_repl_eval_tests:string_and_character_literal_span_matches_shared_corpus_test/0`.
+    #[test]
+    fn string_and_character_literal_span_matches_shared_corpus() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .join(
+                "runtime/apps/beamtalk_workspace/test/fixtures/\
+                 string_and_character_literal_span_corpus.json",
+            );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let kind = case["kind"].as_str().expect("case.kind is a string");
+            let source = case["source"].as_str().expect("case.source is a string");
+            let expected_end = case["expected_end"]
+                .as_u64()
+                .expect("case.expected_end is a number");
+            let why = case["why"].as_str().unwrap_or("");
+            let tokens = lex(source);
+            assert!(
+                !tokens.is_empty(),
+                "expected at least one token for {source:?} ({why})"
+            );
+            assert!(
+                matches!(
+                    (kind, tokens[0].kind()),
+                    ("string", TokenKind::String(_) | TokenKind::StringStart(_))
+                        | ("character", TokenKind::Character(_))
+                ),
+                "expected a {kind} token for {source:?}, got {:?} ({why})",
+                tokens[0].kind()
+            );
+            assert_eq!(
+                u64::from(tokens[0].span().end()),
+                expected_end,
+                "span-end mismatch for {source:?} ({why})"
+            );
+        }
+    }
+
+    /// BT-3372: `beamtalk_repl_eval`'s statement scanner
+    /// (`scan_for_second_top_level_statement/2`) gained a hand-rolled Erlang
+    /// mirror of `lex_line_comment`/`lex_block_comment`'s span computation
+    /// (`skip_line_comment/1`/`skip_block_comment/1`), for the same
+    /// cross-crate-dependency reason as the string/character mirror above. A
+    /// shared corpus fixture
+    /// (`runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json`)
+    /// pins both implementations to the same cases. Every corpus source
+    /// starts with the comment at offset 0 and has no leading trivia of its
+    /// own, so the comment is always the first entry in whatever token's
+    /// leading trivia collects it (the next real token's, or EOF's if the
+    /// comment runs to end of input) — its text length is directly
+    /// comparable to the Erlang side's consumed-character count. The Erlang
+    /// side asserts the identical cases in
+    /// `beamtalk_repl_eval_tests:comment_span_matches_shared_corpus_test/0`.
+    #[test]
+    fn comment_span_matches_shared_corpus() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .join("runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let kind = case["kind"].as_str().expect("case.kind is a string");
+            let source = case["source"].as_str().expect("case.source is a string");
+            let expected_end = case["expected_end"]
+                .as_u64()
+                .expect("case.expected_end is a number");
+            let why = case["why"].as_str().unwrap_or("");
+            let tokens = lex_with_eof(source);
+            assert!(
+                !tokens.is_empty(),
+                "expected at least an EOF token for {source:?} ({why})"
+            );
+            let leading = tokens[0].leading_trivia();
+            assert!(
+                !leading.is_empty(),
+                "expected leading trivia for {source:?} ({why})"
+            );
+            let comment = &leading[0];
+            assert!(
+                matches!(
+                    (kind, comment),
+                    ("line_comment", Trivia::LineComment(_))
+                        | ("block_comment", Trivia::BlockComment(_))
+                ),
+                "expected a {kind} for {source:?}, got {comment:?} ({why})"
+            );
+            assert_eq!(
+                comment.as_str().len() as u64,
+                expected_end,
+                "span-end mismatch for {source:?} ({why})"
+            );
+        }
     }
 }

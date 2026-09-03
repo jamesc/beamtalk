@@ -41,6 +41,7 @@ pub use lint_validators::check_effect_free_statements;
 pub(crate) use lint_validators::{
     check_empty_method_bodies, check_literal_boolean_condition, check_redundant_assignment,
     check_redundant_local_type_annotation, check_redundant_super_initialize,
+    check_testcase_setup_drops_field_assignments,
 };
 pub(crate) use match_validators::{
     check_match_exhaustiveness, check_type_pattern_classes, is_concrete_leaf_class,
@@ -57,9 +58,14 @@ pub(crate) use sendability_validators::{
     check_block_capture_sendability, check_undeclared_handle_class,
 };
 pub(crate) use structural_validators::{
-    check_ffi_arity, check_unresolved_classes, check_unresolved_ffi_modules,
-    check_unresolved_type_aliases, check_workspace_shadows, erlang_arity, erlang_function_name,
+    check_ffi_arity, check_native_declaration_location, check_unresolved_classes,
+    check_unresolved_ffi_modules, check_unresolved_type_aliases, check_workspace_shadows,
 };
+// BT-3361: widened from `pub(crate)` to `pub` — `queries::ffi_sites_query`
+// (Language Service) reaches these from the standalone
+// `beamtalk-language-service` crate now, so `pub(crate)` visibility is no
+// longer reachable.
+pub use structural_validators::{erlang_arity, erlang_function_name};
 pub(crate) use supervision_validators::{
     check_children_supervision_policy, check_supervision_policy_override,
 };

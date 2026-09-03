@@ -2665,3 +2665,148 @@ ffi_boundary_preserves_wrapped_error_test() ->
             end,
         ?assertEqual({dispatch_error, 'exists:'}, Got)
     end).
+
+%%% ============================================================================
+%%% open:mode:do: type guard arms — path and mode type checks
+%%%
+%%% open_mode_non_atom_mode_raises_test and open_mode_non_binary_path_raises_test
+%%% (BT-2975) cover the 2-arg open:mode: guards. The 3-arg open:mode:do: has
+%%% its own separate function clauses (source lines 570-573) that are exercised
+%%% here for the first time.
+%%% ============================================================================
+
+open_mode_do_non_atom_mode_raises_test() ->
+    %% Binary path + binary mode (not atom) + valid block → raises type_error.
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file:'open:mode:do:'(<<"x.txt">>, <<"read">>, fun(_H) -> ok end)
+    ).
+
+open_mode_do_non_binary_path_raises_test() ->
+    %% Non-binary path → raises type_error regardless of mode or block.
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file:'open:mode:do:'(42, read, fun(_H) -> ok end)
+    ).
+
+%%% ============================================================================
+%%% do_open: ensure_parent_dir failure path
+%%%
+%%% When a write/append-mode open cannot create the parent directory — because
+%%% a path component is a regular file that blocks directory creation —
+%%% do_open returns {error, io_error} via source lines 615-621. Both
+%%% open:mode: and open:mode:do: share this path through do_open/3; we test
+%%% via open:mode: to keep the setup straightforward.
+%%% ============================================================================
+
+open_mode_ensure_parent_dir_failure_test() ->
+    BlockingFile = "_bt_eunit_open_parent_blocked",
+    try
+        ok = file:write_file(BlockingFile, <<"blocker">>),
+        %% Treat BlockingFile as if it were a directory: ensure_parent_dir will
+        %% call filelib:ensure_dir/1 which tries to create BlockingFile as a
+        %% directory — and fails because it already exists as a regular file.
+        NestedPath = list_to_binary(BlockingFile ++ "/cannot_create.txt"),
+        R = beamtalk_file:'open:mode:'(NestedPath, write),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{
+                    '$beamtalk_class' := _,
+                    error := #beamtalk_error{kind = io_error}
+                }
+            },
+            R
+        )
+    after
+        file:delete(BlockingFile)
+    end.
+
+%%% ============================================================================
+%%% writeAll:/writeBinary:/appendBinary: — filelib:ensure_dir failure path
+%%%
+%%% Exercises source lines 182-187 (writeAll:), 261-266 (writeBinary:),
+%%% 305-310 (appendBinary:): the {error, Reason} arm of the ensure_dir case
+%%% when a path component is a regular file that blocks directory creation.
+%%% The open:mode: analogue is open_mode_ensure_parent_dir_failure_test above;
+%%% these three use the same blocking-file pattern for the write family.
+%%% ============================================================================
+
+writeAll_ensure_dir_failure_test() ->
+    BlockingFile = "_bt_eunit_writeAll_ensure_dir_fail.txt",
+    try
+        ok = file:write_file(BlockingFile, <<"blocker">>),
+        %% BlockingFile is a regular file; using it as a directory component
+        %% causes filelib:ensure_dir to return {error, _} (typically eexist
+        %% on OTP, enotdir on some OSes) — neither of which is eacces.
+        NestedPath = list_to_binary(BlockingFile ++ "/sub/target.txt"),
+        R = beamtalk_file:'writeAll:contents:'(NestedPath, <<"data">>),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{
+                    '$beamtalk_class' := _,
+                    error := #beamtalk_error{
+                        kind = io_error,
+                        class = 'File',
+                        selector = 'writeAll:contents:'
+                    }
+                }
+            },
+            R
+        )
+    after
+        file:delete(BlockingFile)
+    end.
+
+writeBinary_ensure_dir_failure_test() ->
+    BlockingFile = "_bt_eunit_writeBinary_ensure_dir_fail.dat",
+    try
+        ok = file:write_file(BlockingFile, <<"blocker">>),
+        NestedPath = list_to_binary(BlockingFile ++ "/sub/target.dat"),
+        R = beamtalk_file:'writeBinary:contents:'(NestedPath, <<1, 2, 3>>),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{
+                    '$beamtalk_class' := _,
+                    error := #beamtalk_error{
+                        kind = io_error,
+                        class = 'File',
+                        selector = 'writeBinary:contents:'
+                    }
+                }
+            },
+            R
+        )
+    after
+        file:delete(BlockingFile)
+    end.
+
+appendBinary_ensure_dir_failure_test() ->
+    BlockingFile = "_bt_eunit_appendBinary_ensure_dir_fail.dat",
+    try
+        ok = file:write_file(BlockingFile, <<"blocker">>),
+        NestedPath = list_to_binary(BlockingFile ++ "/sub/target.dat"),
+        R = beamtalk_file:'appendBinary:contents:'(NestedPath, <<1, 2, 3>>),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{
+                    '$beamtalk_class' := _,
+                    error := #beamtalk_error{
+                        kind = io_error,
+                        class = 'File',
+                        selector = 'appendBinary:contents:'
+                    }
+                }
+            },
+            R
+        )
+    after
+        file:delete(BlockingFile)
+    end.

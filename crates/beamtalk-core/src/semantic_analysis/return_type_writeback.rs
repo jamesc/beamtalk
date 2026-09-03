@@ -200,7 +200,7 @@ pub fn clear_return_type_writeback_for_keys(
 /// rather than typed by the user.
 ///
 /// BT-3249: also called directly by codegen's `extract_method_source`
-/// (`crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs`) on
+/// (`crates/beamtalk-codegen/src/core_erlang/gen_server/methods.rs`) on
 /// a throwaway clone of a single method, so the image-resident `__source__`
 /// text it bakes never carries an inferred `-> Type` annotation the user
 /// never wrote — while the method's *real* `return_type` (used for codegen's

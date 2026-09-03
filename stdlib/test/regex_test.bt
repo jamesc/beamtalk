@@ -94,3 +94,19 @@ TestCase subclass: RegexTest
     self deny: result isOk
     // Invalid pattern in String method still raises regex_error
     self should: ["hello" matchesRegex: "[invalid"] raise: #regex_error
+
+  // BT-3271: from:options: error path when pattern is invalid
+  testFromOptionsErrorPath =>
+    result := Regex from: "[invalid" options: #(#caseless)
+    self deny: result isOk
+
+  // BT-3271: allMatches: no-match path with a compiled Regex object
+  testAllMatchesNoMatchWithCompiledRegex =>
+    digitRegex := (Regex from: "[0-9]+") unwrap
+    self assert: ("hello" allMatches: digitRegex) equals: #()
+
+  // BT-3271: translate_option/1 for dotall, extended, ungreedy arms
+  testRegexOptionsDotatExtendedUngreedy =>
+    self assert: (Regex from: "." options: #(#dotall)) isOk
+    self assert: (Regex from: "a b" options: #(#extended)) isOk
+    self assert: (Regex from: "a+" options: #(#ungreedy)) isOk

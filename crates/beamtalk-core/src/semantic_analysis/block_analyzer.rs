@@ -496,6 +496,239 @@ mod tests {
         );
     }
 
+    // BT-3347: the tests below close specific gaps left by the tests above —
+    // an `Unknown` block context, mutation-kind/context combinations that
+    // must produce *no* diagnostic, and `collect_captures_and_mutations`
+    // recursion arms (message sends, cascades, plain field reads, returns,
+    // parenthesized expressions, match arms, literals, destructuring, string
+    // interpolation, and the deliberate no-recursion into nested blocks)
+    // that no prior test in this file exercised.
+
+    #[test]
+    fn bare_block_statement_has_unknown_context() {
+        // A block literal used as a standalone statement — not assigned,
+        // not passed as a message argument, not a control-flow argument —
+        // gets `parent_context: None`, i.e. `BlockContext::Unknown`.
+        let src = "Object subclass: Foo\n  bar =>\n    [42]";
+        let module = parse_bt(src);
+        let result = analyse(&module);
+        assert!(
+            result
+                .block_info
+                .values()
+                .any(|b| b.context == BlockContext::Unknown),
+            "Expected Unknown block context, got: {:?}",
+            result
+                .block_info
+                .values()
+                .map(|b| b.context)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn field_mutation_in_passed_block_produces_no_error() {
+        // BT-1140: field mutation in a Passed (message-argument) block is
+        // supported via Tier 2 state threading, so it must not be flagged.
+        let src = "Object subclass: Foo\n  state: x = 0\n  bar =>\n    self doWith: [self.x := 1]";
+        let module = parse_bt(src);
+        let result = analyse(&module);
+        assert!(
+            !result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("cannot assign to field")),
+            "Did not expect a field-in-passed-block error, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn field_mutation_in_control_flow_block_produces_no_error() {
+        let src = "Object subclass: Foo\n  state: x = 0\n  bar =>\n    true ifTrue: [self.x := 1]";
+        let module = parse_bt(src);
+        let result = analyse(&module);
+        assert!(
+            !result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("cannot assign to field")),
+            "Did not expect a field-in-control-flow-block error, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn pure_field_write_only_field_stored_block_produces_no_error() {
+        // BT-2797: a block stored in a field whose ONLY mutation is a field
+        // write (no captured local) is the supported cross-method-safe case
+        // — `is_field_stored` should suppress the diagnostic entirely.
+        let src = "Actor subclass: Ctr\n  state: total = 0\n  state: callback = nil\n\n  setup =>\n    self.callback := [self.total := 1]\n";
+        let module = parse_bt(src);
+        let result = analyse(&module);
+        assert!(
+            !result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("cannot assign to field")),
+            "Did not expect an error for a pure field-write field-stored block, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn block_local_variable_mutation_produces_no_diagnostic_and_no_capture() {
+        // A variable defined AND mutated only inside the block never escapes
+        // the block invocation, so it is a `LocalVariable` mutation — no
+        // state threading, and (unlike a captured variable) it must not
+        // appear in the block's capture list either.
+        let src = "Object subclass: Foo\n  bar: n =>\n    n > 0 ifTrue: [z := 1. z]";
+        let module = parse_bt(src);
+        let result = analyse(&module);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|d| !d.message.contains("cannot")),
+            "Did not expect a capture/mutation error, got: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            !result
+                .block_info
+                .values()
+                .any(|b| b.captures.iter().any(|c| c.name == "z")),
+            "Did not expect 'z' to be captured, captures: {:?}",
+            result
+                .block_info
+                .values()
+                .map(|b| &b.captures)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn collect_captures_message_send_cascade_and_field_read() {
+        // Exercises the MessageSend, Cascade, and plain-read FieldAccess arms
+        // of `collect_captures_and_mutations` (as opposed to a FieldAccess
+        // that is an *assignment target*, handled inline in `Assignment`).
+        let src = "Actor subclass: Foo\n  state: z = 0\n  bar =>\n    p := 1.\n    q := 2.\n    blk := [p foo: q. self.z. p bar; baz: q]";
+        let module = parse_bt(src);
+        let result = analyse(&module);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|d| !d.message.contains("cannot")),
+            "Did not expect a capture/mutation error, got: {:?}",
+            result.diagnostics
+        );
+        let captures: std::collections::HashSet<&str> = result
+            .block_info
+            .values()
+            .flat_map(|b| b.captures.iter().map(|c| c.name.as_str()))
+            .collect();
+        assert!(
+            captures.contains("p"),
+            "Expected 'p' captured: {captures:?}"
+        );
+        assert!(
+            captures.contains("q"),
+            "Expected 'q' captured: {captures:?}"
+        );
+    }
+
+    #[test]
+    fn collect_captures_return_and_parenthesized() {
+        let src =
+            "Object subclass: Foo\n  bar =>\n    p := 1.\n    blk1 := [^p].\n    blk2 := [(p)]";
+        let module = parse_bt(src);
+        let result = analyse(&module);
+        assert!(
+            result
+                .block_info
+                .values()
+                .any(|b| b.captures.iter().any(|c| c.name == "p")),
+            "Expected 'p' captured via Return or Parenthesized, block_info: {:?}",
+            result
+                .block_info
+                .values()
+                .map(|b| &b.captures)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn collect_captures_via_match_arm_pattern_exclusion() {
+        // BT-655: a match arm's own pattern-bound variable ('n') must not be
+        // reported as a capture of an outer variable with the same name —
+        // and here there is no such outer variable, so 'n' must never
+        // appear. The guard-less wildcard arm's body still captures the
+        // real outer variable 'p', deduplicated against the match's own
+        // (also-'p') scrutinee.
+        let src = "Object subclass: Foo\n  bar =>\n    p := 1.\n    blk := [p match: [n when: [n > 0] -> n; _ -> p]]";
+        let module = parse_bt(src);
+        let result = analyse(&module);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|d| !d.message.contains("cannot")),
+            "Did not expect a capture/mutation error, got: {:?}",
+            result.diagnostics
+        );
+        let block = result
+            .block_info
+            .values()
+            .find(|b| b.captures.iter().any(|c| c.name == "p"))
+            .expect("expected a block capturing 'p'");
+        assert_eq!(
+            block.captures.len(),
+            1,
+            "Expected 'p' deduplicated to a single capture entry, got: {:?}",
+            block.captures
+        );
+        assert!(
+            !result
+                .block_info
+                .values()
+                .any(|b| b.captures.iter().any(|c| c.name == "n")),
+            "Did not expect the arm's own pattern binding 'n' to be captured"
+        );
+    }
+
+    #[test]
+    fn collect_captures_map_list_array_destructure_and_interpolation() {
+        // Exercises the MapLiteral, ListLiteral (incl. cons tail),
+        // ArrayLiteral, DestructureAssignment, and StringInterpolation arms,
+        // plus the deliberate non-recursion into a directly nested block
+        // literal (`Block(_)` arm).
+        let src = "Object subclass: Foo\n  bar =>\n    p := 1.\n    q := 2.\n    blk := [\n      #{(p) => q}.\n      #(p, q | q).\n      #[p, q].\n      #(a, b) := p.\n      \"val {p}\".\n      [42]\n    ]";
+        let module = parse_bt(src);
+        let result = analyse(&module);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|d| !d.message.contains("cannot")),
+            "Did not expect a capture/mutation error, got: {:?}",
+            result.diagnostics
+        );
+        let captures: std::collections::HashSet<&str> = result
+            .block_info
+            .values()
+            .flat_map(|b| b.captures.iter().map(|c| c.name.as_str()))
+            .collect();
+        assert!(
+            captures.contains("p"),
+            "Expected 'p' captured: {captures:?}"
+        );
+        assert!(
+            captures.contains("q"),
+            "Expected 'q' captured: {captures:?}"
+        );
+    }
+
     #[test]
     fn block_passed_as_message_arg_has_passed_context() {
         let src = "Object subclass: Foo\n  bar => self doWith: [42]";

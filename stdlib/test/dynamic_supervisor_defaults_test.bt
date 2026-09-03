@@ -7,6 +7,12 @@
 
 TestCase subclass: DynamicSupervisorDefaultsTest
 
+  // BT-3379: TestDynamicSupervisorCustom supervise/stop registers a single
+  // node-wide, name-registered process (see beamtalk_supervisor:startLink/1).
+  // Run serially so a concurrently-running test class cannot `stop` the
+  // shared supervisor out from under this one.
+  class serial -> Boolean => true
+
   // === DynamicSupervisor class-side defaults ===
   testDynamicSupervisorMaxRestartsDefault =>
     self assert: DynamicSupervisor maxRestarts equals: 10

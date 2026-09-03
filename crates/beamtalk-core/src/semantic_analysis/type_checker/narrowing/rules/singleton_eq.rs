@@ -1,7 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `x =:= #foo` / `#foo =:= x` singleton (in)equality narrowing (BT-2617).
+//! `x =:= #foo` / `#foo =:= x` singleton (in)equality narrowing (BT-2617),
+//! also accepting the loose-equality spellings `==`/`/=` (BT-3369).
 //!
 //! Detects an (in)equality test of a variable against a singleton symbol
 //! literal (`#foo`). `detect` only sees the AST, so it records the tested
@@ -66,8 +67,14 @@ pub(crate) fn detect_binary(
     op: &EcoString,
     arguments: &[Expression],
 ) -> Option<SingletonEqDetection> {
+    // BT-3369: `==` (loose eq) is accepted alongside `=:=` (strict eq). For a
+    // symbol/atom literal operand, loose and strict equality are provably
+    // equivalent in Erlang — they only diverge on numeric cross-type coercion
+    // (`1 == 1.0`), which never applies to atoms — so treating them the same
+    // here is sound, and matches `/=` (loose ineq) already being accepted
+    // below.
     let negated = match op.as_str() {
-        "=:=" => false,
+        "=:=" | "==" => false,
         "/=" | "=/=" => true,
         _ => return None,
     };

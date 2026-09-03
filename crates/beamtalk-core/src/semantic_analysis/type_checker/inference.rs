@@ -122,7 +122,7 @@ impl TypeChecker {
     #[allow(clippy::too_many_lines)] // struct patterns expanded by BT-1569 refactor
     pub fn check_module(&mut self, module: &Module, hierarchy: &ClassHierarchy) {
         // BT-3123 test-only instrumentation — see `CHECK_MODULE_CALL_COUNT`'s doc.
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test"))]
         super::CHECK_MODULE_CALL_COUNT.with(|c| c.set(c.get() + 1));
 
         let mut env = TypeEnv::new();
@@ -5276,7 +5276,11 @@ impl TypeChecker {
         let Some(mut info) = Self::detect_narrowing(receiver) else {
             return;
         };
-        if !info.is_nil_check && info.class_test.is_none() {
+        if !info.is_nil_check
+            && info.class_test.is_none()
+            && info.singleton_eq.is_none()
+            && info.responded_selector.is_none()
+        {
             return;
         }
         if info.class_test.is_some() {
@@ -5298,6 +5302,28 @@ impl TypeChecker {
                 hierarchy,
                 self.protocol_registry.as_ref(),
             );
+        }
+        if info.singleton_eq.is_some() {
+            // BT-3369: resolve `true_type`/`false_type` the same way the
+            // primary `ifTrue:`/`ifFalse:` dispatch does, via the existing
+            // (diagnostic-free) `refine_singleton_narrowing` — the "comparison
+            // can never be true" hint for this guard already fired once
+            // during `infer_stmts` above.
+            info = Self::refine_singleton_narrowing(
+                info,
+                env,
+                hierarchy,
+                self.alias_registry.as_ref(),
+            );
+        }
+        if info.responded_selector.is_some() {
+            // BT-3369: resolve `true_type` (upgrading `Dynamic` to a concrete
+            // `Protocol` type when exactly one protocol requires the tested
+            // selector) via the existing `refine_responds_to_narrowing`.
+            // `false_type` stays `None` — there is no sound type for "doesn't
+            // respond to X" — so only the `ifFalse: [<diverge>]` guard shape
+            // below can narrow post-guard for this kind.
+            info = self.refine_responds_to_narrowing(info);
         }
 
         if is_if_true || is_if_true_if_false {

@@ -1,0 +1,138 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3396: Actor fixture for actor self-sends nested as SUB-EXPRESSIONS in
+// the positions BT-3382 (conditional receiver) and BT-3392 (binary-op
+// operand inside a conditional block body) left out: `and:`/`or:`
+// receivers, arguments to arbitrary message sends, and assignment-RHS
+// sub-expressions. Each such self-send used to compile through the
+// ordinary discarding self-dispatch codegen: the callee ran (its return
+// value is observable) but its mutation to `count`/`log` vanished.
+//
+// BT-3402: extends the same fixture with self-sends (and direct field
+// mutations) nested inside `and:`/`or:` BLOCK ARGUMENTS specifically.
+// `and:`/`or:` are ordinary self-hosted Boolean methods (Boolean.bt: `and:
+// aBlock => self ifTrue: aBlock ifFalse: [false]`), not compiler
+// intrinsics, so before this fix the block argument compiled as a plain
+// Tier 1 closure: a self-send (or `self.slot :=`) inside it ran, but its
+// state mutation never made it back to the enclosing actor method.
+
+Actor subclass: NestedSelfSendCounter
+  state: count = 0
+  state: log = #()
+  state: items :: List(Integer) = #(10, 20, 30)
+
+  // Shape 1: self-send as the RECEIVER of and:/or:, as a plain method-body
+  // statement. The receiver is evaluated first, so hoisting its dispatch
+  // ahead of the send is always order-safe; the block argument is an
+  // ordinary closure.
+  recordViaAndReceiver: flag => (self recordOnce: flag) and: [flag]
+
+  recordViaOrReceiver: flag => (self recordOnce: flag) or: [flag]
+
+  // Shape 1, nested one level deeper: the and: is itself the RECEIVER of
+  // an ifTrue:ifFalse: — neither block mutates anything, so only the
+  // receiver's nested self-send makes this conditional need inlining.
+  recordViaAndInsideIfTrue: flag =>
+    ((self recordOnce: flag) and: [true]) ifTrue: [#recorded] ifFalse: [#gaveUp]
+
+  // Shape 2: self-send as an argument to an arbitrary (non-self) keyword
+  // send, as the method's last statement.
+  recordViaKeywordArgument => self.items at: (self bumpCount)
+
+  // Shape 2, deeper: the self-send is the receiver of a unary chain inside
+  // a local-assignment RHS, as a NON-last statement.
+  recordViaUnaryReceiverInArgument =>
+    size := (self bumpCount) printString size
+    size
+
+  // Shape 2: string-interpolation segment.
+  recordViaInterpolation => "n={self bumpCount}"
+
+  // Shape 2: self-send as an argument to a SELF-send — the outer dispatch
+  // is already threaded (`DispatchingSelfSend`); the inner one was not.
+  recordViaSelfSendArgument => self record: (self bumpCount)
+
+  // Shape 2: nested inside a `^` early-return value, inside a conditional
+  // branch (NLR from the branch must carry the post-dispatch state).
+  recordViaEarlyReturnInBranch: flag =>
+    flag ifTrue: [^self.items at: (self bumpCount)]
+    0
+
+  // Shape 3: field-assignment RHS sub-expression — the exact
+  // `stdlib/test/fixtures/inheriting_counter.bt` `incrementAndLog` shape,
+  // and the exact call site (`lower_field_assignment_bind`'s
+  // `source_version` snapshot) BT-3382's reverted general fix desynced.
+  appendNextToLog =>
+    self.log := self.log ++ #(self bumpCount)
+    self.log
+
+  // Shape 3: local-var-assignment RHS sub-expression.
+  recordViaLocalAssignSubExpression =>
+    total := 100 + (self bumpCount)
+    total
+
+  // Shape 3 + evaluation order: `self.count` is read BEFORE `bumpCount`
+  // runs, so the assigned value must be (pre-bump count) + 1 — the read
+  // must not observe the hoisted dispatch's own mutation.
+  addBumpToCount =>
+    self.count := self.count + (self bumpCount)
+    self.count
+
+  // A self-send as the direct RHS of a local assignment INSIDE a
+  // conditional branch (the branch-body C2 path, distinct from the
+  // top-level `LocalAssignSelfSend` arm that was already correct).
+  recordViaLocalAssignInBranch: flag =>
+    flag
+      ifTrue: [
+        v := self bumpCount
+        v + 10
+      ]
+      ifFalse: [0]
+
+  // Nested as a non-statement sub-expression of an on:do:-protected body.
+  recordViaOnDoBody => [1 + (self bumpCount)] on: Error do: [:e | 0]
+
+  // BT-3402: self-send as the RECEIVER of `and:` (`recordOnce:`, always
+  // evaluated) plus a self-send NESTED INSIDE the block argument
+  // (`bumpCount`, evaluated only when `and:`'s receiver is true).
+  recordOnceAndBump: flag => (self recordOnce: flag) and: [self bumpCount > 0]
+
+  // Same shape for `or:` — the block runs only when the receiver is false.
+  recordOnceOrBump: flag => (self recordOnce: flag) or: [self bumpCount > 0]
+
+  // BT-3402: a direct field mutation (`self.count :=`) inside the `and:`
+  // block body itself, not via a nested self-send.
+  mutateDirectlyInAndBlock: flag =>
+    (self recordOnce: flag)
+      and: [
+        self.count := self.count + 100
+        true
+      ]
+
+  mutateDirectlyInOrBlock: flag =>
+    (self recordOnce: flag)
+      or: [
+        self.count := self.count + 100
+        true
+      ]
+
+  internal recordOnce: flag =>
+    self.count := self.count + 1
+    flag
+
+  internal bumpCount =>
+    self.count := self.count + 1
+    1
+
+  internal record: n =>
+    self.log := self.log ++ #(n)
+    n
+
+  getCount => self.count
+
+  getLog => self.log
+
+  reset =>
+    self.count := 0
+    self.log := #()

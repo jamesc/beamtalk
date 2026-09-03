@@ -1,0 +1,3079 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! Hover provider for the language service.
+//!
+//! **DDD Context:** Language Service
+//!
+//! This domain service implements the `HoverProvider` from the DDD model.
+//! It shows information on hover over symbols, literals, and keywords in the
+//! editor. The provider follows LSP terminology and aligns with the ubiquitous
+//! language defined in `docs/beamtalk-ddd-model.md`.
+//!
+//! # Design
+//!
+//! Hover information shows:
+//! - Type signatures (future work - requires type system)
+//! - Documentation comments
+//! - Value information for constants
+//!
+//! # Performance
+//!
+//! Must respond in <50ms for typical file sizes.
+//!
+//! # References
+//!
+//! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
+//! - LSP specification: Language Server Protocol hover requests
+
+use crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases;
+use crate::{HoverInfo, Position};
+use beamtalk_core::ast::{
+    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module, Pattern,
+    StateDeclaration,
+};
+use beamtalk_core::semantic_analysis::type_checker::TypeMap;
+use beamtalk_core::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
+use beamtalk_core::semantic_analysis::{AliasRegistry, ClassHierarchy, InferredType};
+use beamtalk_core::source_analysis::Span;
+
+/// Computes hover information at a given position.
+///
+/// # Arguments
+///
+/// * `module` - The parsed AST
+/// * `source` - The source text
+/// * `position` - The cursor position
+/// * `hierarchy` - The class hierarchy for type context
+/// * `native_types` - Native (Erlang FFI) type registry, for typed FFI hover
+/// * `alias_registry` - Type alias registry (ADR 0108, BT-2897), so hover on
+///   an alias-typed value or annotation resolves and displays
+///   `AliasName (expansion)` instead of an unresolved nominal class. `None`
+///   when the caller has no project-wide alias table available yet (see
+///   [`crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases`]'s
+///   doc).
+///
+/// # Returns
+///
+/// Hover information if the position is over a relevant symbol, `None` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// use beamtalk_language_service::queries::hover_provider::compute_hover;
+/// use beamtalk_language_service::Position;
+/// use beamtalk_core::semantic_analysis::ClassHierarchy;
+/// use beamtalk_core::source_analysis::{lex_with_eof, parse};
+///
+/// let source = "x := 42";
+/// let tokens = lex_with_eof(source);
+/// let (module, _) = parse(tokens);
+/// let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+///
+/// let hover = compute_hover(&module, source, Position::new(0, 0), &hierarchy, None, None);
+/// assert!(hover.is_some());
+/// ```
+#[must_use]
+pub fn compute_hover(
+    module: &Module,
+    source: &str,
+    position: Position,
+    hierarchy: &ClassHierarchy,
+    native_types: Option<&NativeTypeRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+) -> Option<HoverInfo> {
+    let offset = position.to_byte_offset(source)?;
+    let offset_val = offset.get();
+
+    // Find the class context at this position for self-type hover
+    let class_context = find_hover_class_context(module, offset_val);
+
+    // Enrich hierarchy with inferred return types and get the type map in a single
+    // TypeChecker pass (BT-1014, BT-1047). This enables chain-resolved hover for methods
+    // whose return type is not explicitly annotated but can be inferred from the method
+    // body (BT-1005). BT-2897: also alias-aware (see `alias_registry`'s doc above).
+    let enriched_hierarchy;
+    let (hierarchy, type_map) = {
+        let (enriched, type_map) = enrich_hierarchy_with_inferred_returns_and_aliases(
+            module,
+            hierarchy,
+            native_types,
+            alias_registry,
+        );
+        let h = match enriched {
+            Some(h) => {
+                enriched_hierarchy = h;
+                &enriched_hierarchy
+            }
+            None => hierarchy,
+        };
+        (h, type_map)
+    };
+
+    // Find declaration-level symbols (class names, superclasses, standalone method qualifiers)
+    if let Some(hover) = find_hover_in_declarations(module, offset_val, hierarchy) {
+        return Some(hover);
+    }
+
+    // Find the expression at this position
+    for stmt in &module.expressions {
+        if let Some(hover) = find_hover_in_expr(
+            &stmt.expression,
+            offset_val,
+            &class_context,
+            hierarchy,
+            &type_map,
+            native_types,
+            alias_registry,
+        ) {
+            return Some(hover);
+        }
+    }
+
+    // Also search inside class method bodies
+    for class in &module.classes {
+        for method in &class.methods {
+            if let Some(hover) = find_hover_on_method_signature(method, source, offset_val, false) {
+                return Some(hover);
+            }
+            for body_stmt in &method.body {
+                if let Some(hover) = find_hover_in_expr(
+                    &body_stmt.expression,
+                    offset_val,
+                    &class_context,
+                    hierarchy,
+                    &type_map,
+                    native_types,
+                    alias_registry,
+                ) {
+                    return Some(hover);
+                }
+            }
+        }
+        for method in &class.class_methods {
+            if let Some(hover) = find_hover_on_method_signature(method, source, offset_val, true) {
+                return Some(hover);
+            }
+            for body_stmt in &method.body {
+                if let Some(hover) = find_hover_in_expr(
+                    &body_stmt.expression,
+                    offset_val,
+                    &class_context,
+                    hierarchy,
+                    &type_map,
+                    native_types,
+                    alias_registry,
+                ) {
+                    return Some(hover);
+                }
+            }
+        }
+    }
+
+    // Also search standalone method definitions (Tonel-style)
+    for smd in &module.method_definitions {
+        if let Some(hover) =
+            find_hover_on_method_signature(&smd.method, source, offset_val, smd.is_class_method)
+        {
+            return Some(hover);
+        }
+        for body_stmt in &smd.method.body {
+            if let Some(hover) = find_hover_in_expr(
+                &body_stmt.expression,
+                offset_val,
+                &class_context,
+                hierarchy,
+                &type_map,
+                native_types,
+                alias_registry,
+            ) {
+                return Some(hover);
+            }
+        }
+    }
+
+    None
+}
+
+/// Finds hover information for declaration-level identifiers that are not expressions.
+fn find_hover_in_declarations(
+    module: &Module,
+    offset: u32,
+    hierarchy: &ClassHierarchy,
+) -> Option<HoverInfo> {
+    for class in &module.classes {
+        if offset >= class.name.span.start() && offset < class.name.span.end() {
+            let mut hover =
+                class_reference_hover_info(&class.name.name, None, class.name.span, hierarchy);
+            if let Some(doc) = &class.doc_comment {
+                hover = hover.with_documentation(doc.clone());
+            }
+            return Some(hover);
+        }
+        if let Some(superclass) = &class.superclass {
+            if offset >= superclass.span.start() && offset < superclass.span.end() {
+                return Some(class_reference_hover_info(
+                    &superclass.name,
+                    class.superclass_package.as_ref().map(|p| &p.name),
+                    superclass.span,
+                    hierarchy,
+                ));
+            }
+        }
+        for state in &class.state {
+            if offset >= state.name.span.start() && offset < state.name.span.end() {
+                return Some(state_declaration_hover_info(state));
+            }
+            if let Some(type_annotation) = &state.type_annotation {
+                let type_span = type_annotation.span();
+                if offset >= type_span.start() && offset < type_span.end() {
+                    return Some(HoverInfo::new(
+                        format!(
+                            "Type annotation: `{}`",
+                            beamtalk_core::unparse::unparse_type_annotation_display(
+                                type_annotation
+                            )
+                        ),
+                        type_span,
+                    ));
+                }
+            }
+        }
+    }
+
+    for smd in &module.method_definitions {
+        if offset >= smd.class_name.span.start() && offset < smd.class_name.span.end() {
+            return Some(class_reference_hover_info(
+                &smd.class_name.name,
+                smd.package.as_ref().map(|p| &p.name),
+                smd.class_name.span,
+                hierarchy,
+            ));
+        }
+    }
+
+    // ADR 0108 Phase 8 (BT-2901): hover on the alias name in its own `type
+    // Name = ...` declaration shows the (immediate, as-written) expansion —
+    // the reference-site case (hovering a value/annotation typed *through*
+    // an alias) is already handled by `compute_hover`'s `alias_registry`
+    // threading (BT-2897); this covers the declaration site itself, which
+    // that threading doesn't reach (there's no inferred/annotation type at
+    // the declaration token to look up).
+    for alias in &module.type_aliases {
+        if offset >= alias.name.span.start() && offset < alias.name.span.end() {
+            return Some(alias_definition_hover_info(alias));
+        }
+    }
+
+    None
+}
+
+/// Builds hover info for the alias name token in a `type Name = ...` (or
+/// `internal type Name = ...`) declaration (ADR 0108 Phase 8, BT-2901).
+/// Shows the RHS as written (mirrors [`state_declaration_hover_info`]'s
+/// shape) plus the doc comment, if any.
+fn alias_definition_hover_info(alias: &beamtalk_core::ast::TypeAliasDefinition) -> HoverInfo {
+    let keyword = if alias.is_internal {
+        "internal type"
+    } else {
+        "type"
+    };
+    let title = format!(
+        "`{keyword} {} = {}`",
+        alias.name.name,
+        beamtalk_core::unparse::unparse_type_annotation_display(&alias.annotation)
+    );
+    let mut hover = HoverInfo::new(title, alias.name.span);
+
+    let mut doc_parts: Vec<String> = Vec::new();
+    if let Some(doc) = alias
+        .doc_comment
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        doc_parts.push(doc.to_string());
+    }
+    doc_parts.push("_type alias_".to_string());
+    hover = hover.with_documentation(doc_parts.join("\n\n"));
+    hover
+}
+
+/// Returns hover info when the cursor is over method declaration syntax.
+///
+/// Includes selector, parameter names, parameter types, and return type annotations.
+fn find_hover_on_method_signature(
+    method: &MethodDefinition,
+    source: &str,
+    offset: u32,
+    is_class_method: bool,
+) -> Option<HoverInfo> {
+    for parameter in &method.parameters {
+        let parameter_span = parameter_name_span_in_signature(parameter.name.span, source);
+        if offset >= parameter_span.start() && offset < parameter_span.end() {
+            let mut hover = HoverInfo::new(
+                format!("Parameter: `{}`", parameter.name.name),
+                parameter_span,
+            );
+            if let Some(type_annotation) = &parameter.type_annotation {
+                hover = hover.with_documentation(format!(
+                    "Type: `{}`",
+                    beamtalk_core::unparse::unparse_type_annotation_display(type_annotation)
+                ));
+            }
+            return Some(hover);
+        }
+
+        if let Some(type_annotation) = &parameter.type_annotation {
+            let type_span = type_annotation.span();
+            if offset >= type_span.start() && offset < type_span.end() {
+                return Some(HoverInfo::new(
+                    format!(
+                        "Type annotation: `{}`",
+                        beamtalk_core::unparse::unparse_type_annotation_display(type_annotation)
+                    ),
+                    type_span,
+                ));
+            }
+        }
+    }
+
+    if let Some(return_type) = &method.return_type {
+        let return_span = return_type.span();
+        if offset >= return_span.start() && offset < return_span.end() {
+            return Some(HoverInfo::new(
+                format!(
+                    "Return type: `{}`",
+                    beamtalk_core::unparse::unparse_type_annotation_display(return_type)
+                ),
+                return_span,
+            ));
+        }
+    }
+
+    let selector_span = selector_span_in_method_signature(method, source)?;
+    if offset >= selector_span.start() && offset < selector_span.end() {
+        Some(method_declaration_selector_hover_info(
+            method,
+            selector_span,
+            is_class_method,
+        ))
+    } else {
+        None
+    }
+}
+
+/// Creates hover info for a method declaration selector with signature + docs.
+fn method_declaration_selector_hover_info(
+    method: &MethodDefinition,
+    span: Span,
+    is_class_method: bool,
+) -> HoverInfo {
+    let signature = method_signature(method);
+    let mut hover = HoverInfo::new(format!("```beamtalk\n{signature}\n```"), span);
+
+    let mut doc_parts: Vec<String> = Vec::new();
+
+    if let Some(doc_comment) = method
+        .doc_comment
+        .as_deref()
+        .map(str::trim)
+        .filter(|doc| !doc.is_empty())
+    {
+        doc_parts.push(doc_comment.to_string());
+    } else {
+        doc_parts.push(format!(
+            "Selector: `{}` (arity: {})",
+            method.selector.name(),
+            method.selector.arity()
+        ));
+    }
+
+    let side = if is_class_method {
+        "class-side"
+    } else {
+        "instance-side"
+    };
+    let mut meta = side.to_string();
+    if method.is_sealed {
+        meta.push_str(", sealed");
+    }
+    // Show visibility annotation for internal methods (ADR 0071, BT-1703)
+    if method.is_internal {
+        meta.push_str(", internal");
+    }
+    doc_parts.push(format!("_{meta}_"));
+
+    hover = hover.with_documentation(doc_parts.join("\n\n"));
+    hover
+}
+
+fn state_declaration_hover_info(state: &StateDeclaration) -> HoverInfo {
+    let title = if let Some(ty) = &state.type_annotation {
+        format!(
+            "`{} :: {}`",
+            state.name.name,
+            beamtalk_core::unparse::unparse_type_annotation_display(ty)
+        )
+    } else {
+        format!("`{}`", state.name.name)
+    };
+    let mut hover = HoverInfo::new(title, state.name.span);
+
+    let mut doc_parts: Vec<String> = Vec::new();
+    if let Some(doc) = state
+        .doc_comment
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        doc_parts.push(doc.to_string());
+    }
+    doc_parts.push("_state variable_".to_string());
+    hover = hover.with_documentation(doc_parts.join("\n\n"));
+    hover
+}
+
+/// Renders a method declaration's display signature (BT-3097): builds
+/// [`beamtalk_core::unparse::SignatureParam`]s from the AST (type text rendered via
+/// [`beamtalk_core::unparse::unparse_type_annotation_display`], the same renderer
+/// `bt fmt` and the doc extractor use) and composes them with the shared
+/// [`beamtalk_core::unparse::render_signature_text`] core. Hover shows no
+/// `sealed`/`internal` prefix and no trailing ` =>` — just the plain
+/// declaration shape, matching this function's pre-BT-3097 output.
+fn method_signature(method: &MethodDefinition) -> String {
+    use beamtalk_core::unparse::{
+        SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
+        unparse_type_annotation_display,
+    };
+
+    let return_type = method
+        .return_type
+        .as_ref()
+        .map(unparse_type_annotation_display);
+    let param_type_text = |i: usize| -> Option<String> {
+        method
+            .parameters
+            .get(i)
+            .and_then(|p| p.type_annotation.as_ref())
+            .map(unparse_type_annotation_display)
+    };
+
+    match &method.selector {
+        MessageSelector::Unary(name) => render_signature_text(
+            SignatureSelector::Unary(name),
+            return_type.as_deref(),
+            &SignatureRenderOptions::DISPLAY,
+        ),
+        MessageSelector::Binary(op) => {
+            let type_text = param_type_text(0);
+            let params = [SignatureParam {
+                keyword: op,
+                name: method.parameters.first().map(|p| p.name.name.as_str()),
+                type_text: type_text.as_deref(),
+            }];
+            render_signature_text(
+                SignatureSelector::Params(&params),
+                return_type.as_deref(),
+                &SignatureRenderOptions::DISPLAY,
+            )
+        }
+        MessageSelector::Keyword(parts) => {
+            let type_texts: Vec<Option<String>> = (0..parts.len()).map(param_type_text).collect();
+            let params: Vec<SignatureParam<'_>> = parts
+                .iter()
+                .enumerate()
+                .map(|(i, part)| SignatureParam {
+                    keyword: &part.keyword,
+                    name: method.parameters.get(i).map(|p| p.name.name.as_str()),
+                    type_text: type_texts[i].as_deref(),
+                })
+                .collect();
+            render_signature_text(
+                SignatureSelector::Params(&params),
+                return_type.as_deref(),
+                &SignatureRenderOptions::DISPLAY,
+            )
+        }
+    }
+}
+
+/// Extends a parameter-name span to include trailing `:` in signatures like `aBlock:`.
+fn parameter_name_span_in_signature(span: Span, source: &str) -> Span {
+    let end = span.end() as usize;
+    if end < source.len() && source.as_bytes()[end] == b':' {
+        Span::new(span.start(), span.end() + 1)
+    } else {
+        span
+    }
+}
+
+/// Computes the selector span inside a method signature.
+///
+/// For keyword selectors, spans are taken directly from `KeywordPart` metadata.
+/// For unary/binary selectors, we find the selector lexeme in the method header slice.
+fn selector_span_in_method_signature(method: &MethodDefinition, source: &str) -> Option<Span> {
+    match &method.selector {
+        MessageSelector::Keyword(parts) => {
+            let first = parts.first()?;
+            let last = parts.last()?;
+            Some(first.span.merge(last.span))
+        }
+        MessageSelector::Unary(name) | MessageSelector::Binary(name) => {
+            let method_start = usize::try_from(method.span.start()).ok()?;
+            let method_end = usize::try_from(method.span.end()).ok()?;
+            if method_start >= source.len()
+                || method_end > source.len()
+                || method_start >= method_end
+            {
+                return None;
+            }
+
+            // Restrict search to header area up to first body expression, when present.
+            let header_end_u32 = method
+                .body
+                .first()
+                .map_or(method.span.end(), |stmt| stmt.expression.span().start());
+            let header_end = usize::try_from(header_end_u32).ok()?.min(source.len());
+            if method_start >= header_end {
+                return None;
+            }
+
+            let header = &source[method_start..header_end];
+            let selector = name.as_str();
+            let rel = header.find(selector)?;
+            let start = method_start + rel;
+            let end = start + selector.len();
+
+            let start_u32 = u32::try_from(start).ok()?;
+            let end_u32 = u32::try_from(end).ok()?;
+            Some(Span::new(start_u32, end_u32))
+        }
+    }
+}
+
+/// The hover-relevant class context at a position.
+#[derive(Debug, Clone)]
+enum HoverClassContext<'a> {
+    InstanceMethod(&'a ClassDefinition),
+    ClassMethod(&'a ClassDefinition),
+    /// Inside a standalone instance method (`Counter >> method => ...`).
+    StandaloneInstanceMethod(&'a str),
+    /// Inside a standalone class method (`Counter class >> method => ...`).
+    StandaloneClassMethod(&'a str),
+    TopLevel,
+}
+
+/// Find which class/method the offset is inside of.
+fn find_hover_class_context(module: &Module, offset: u32) -> HoverClassContext<'_> {
+    for class in &module.classes {
+        for method in &class.methods {
+            if offset >= method.span.start() && offset < method.span.end() {
+                return HoverClassContext::InstanceMethod(class);
+            }
+        }
+        for method in &class.class_methods {
+            if offset >= method.span.start() && offset < method.span.end() {
+                return HoverClassContext::ClassMethod(class);
+            }
+        }
+    }
+    for smd in &module.method_definitions {
+        if offset >= smd.method.span.start() && offset < smd.method.span.end() {
+            if smd.is_class_method {
+                return HoverClassContext::StandaloneClassMethod(&smd.class_name.name);
+            }
+            return HoverClassContext::StandaloneInstanceMethod(&smd.class_name.name);
+        }
+    }
+    HoverClassContext::TopLevel
+}
+
+/// Creates hover information for a message selector.
+fn selector_hover_info(selector: &MessageSelector, span: Span) -> HoverInfo {
+    let (kind, name, arity) = match selector {
+        MessageSelector::Unary(name) => ("Unary message", name.as_str(), 0),
+        MessageSelector::Binary(op) => ("Binary message", op.as_str(), 1),
+        MessageSelector::Keyword(parts) => {
+            let name = selector.name();
+            return HoverInfo::new(
+                format!("Keyword message: `{name}` (arity: {})", parts.len()),
+                span,
+            )
+            .with_documentation("Keyword messages have named arguments ending in ':'");
+        }
+    };
+    HoverInfo::new(format!("{kind}: `{name}` (arity: {arity})"), span)
+}
+
+/// Recursively searches for hover information in a destructuring pattern.
+///
+/// Walks pattern variable bindings and returns hover info when the offset
+/// falls within a variable's span. Mirrors `collect_pattern_variables` from
+/// codegen but produces `HoverInfo` instead of binding names.
+fn find_hover_in_pattern(pattern: &Pattern, offset: u32, type_map: &TypeMap) -> Option<HoverInfo> {
+    let span = pattern.span();
+    if offset < span.start() || offset >= span.end() {
+        return None;
+    }
+    match pattern {
+        Pattern::Variable(ident) => {
+            if offset >= ident.span.start() && offset < ident.span.end() {
+                let type_info = type_map
+                    .get(ident.span)
+                    .and_then(InferredType::display_for_diagnostic);
+                let contents = if let Some(ty) = type_info {
+                    format!("Pattern variable: `{}` — Type: {ty}", ident.name)
+                } else {
+                    format!("Pattern variable: `{}`", ident.name)
+                };
+                Some(HoverInfo::new(contents, ident.span))
+            } else {
+                None
+            }
+        }
+        Pattern::Tuple { elements, .. } => elements
+            .iter()
+            .find_map(|p| find_hover_in_pattern(p, offset, type_map)),
+        Pattern::Array { elements, rest, .. } => elements
+            .iter()
+            .find_map(|p| find_hover_in_pattern(p, offset, type_map))
+            .or_else(|| {
+                rest.as_deref()
+                    .and_then(|r| find_hover_in_pattern(r, offset, type_map))
+            }),
+        Pattern::List { elements, tail, .. } => elements
+            .iter()
+            .find_map(|p| find_hover_in_pattern(p, offset, type_map))
+            .or_else(|| {
+                tail.as_deref()
+                    .and_then(|t| find_hover_in_pattern(t, offset, type_map))
+            }),
+        Pattern::Binary { segments, .. } => segments
+            .iter()
+            .find_map(|seg| find_hover_in_pattern(&seg.value, offset, type_map)),
+        Pattern::Map { pairs, .. } => pairs
+            .iter()
+            .find_map(|pair| find_hover_in_pattern(&pair.value, offset, type_map)),
+        Pattern::Constructor {
+            class, keywords, ..
+        } => {
+            if offset >= class.span.start() && offset < class.span.end() {
+                return Some(HoverInfo::new(
+                    format!("Constructor type: `{}`", class.name),
+                    class.span,
+                ));
+            }
+            keywords
+                .iter()
+                .find_map(|(_, p)| find_hover_in_pattern(p, offset, type_map))
+        }
+        Pattern::Type { binding, class, .. } => {
+            if offset >= class.span.start() && offset < class.span.end() {
+                return Some(HoverInfo::new(
+                    format!("Type pattern: `{}`", class.name),
+                    class.span,
+                ));
+            }
+            if offset >= binding.span.start() && offset < binding.span.end() {
+                return Some(HoverInfo::new(
+                    format!(
+                        "Pattern variable: `{}` — Type: {}",
+                        binding.name, class.name
+                    ),
+                    binding.span,
+                ));
+            }
+            None
+        }
+        Pattern::Nil(span) => Some(HoverInfo::new("Nil pattern".to_string(), *span)),
+        Pattern::Wildcard(_) | Pattern::Literal(_, _) => None,
+    }
+}
+
+/// Recursively searches for hover information in an expression.
+#[expect(clippy::too_many_lines, reason = "match on Expression variants")]
+fn find_hover_in_expr(
+    expr: &Expression,
+    offset: u32,
+    context: &HoverClassContext<'_>,
+    hierarchy: &ClassHierarchy,
+    type_map: &TypeMap,
+    native_types: Option<&NativeTypeRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+) -> Option<HoverInfo> {
+    let span = expr.span();
+    if offset < span.start() || offset >= span.end() {
+        return None;
+    }
+
+    match expr {
+        Expression::Identifier(ident) => {
+            if offset >= ident.span.start() && offset < ident.span.end() {
+                // Special handling for `self` - show type context
+                if ident.name == "self" {
+                    return Some(self_hover_info(ident.span, context));
+                }
+                // Show inferred type if available
+                let inferred = type_map.get(ident.span);
+                let type_info = inferred.and_then(InferredType::display_for_diagnostic);
+                let mut contents = if let Some(ty) = type_info {
+                    format!("Identifier: `{}` — Type: {ty}", ident.name)
+                } else {
+                    format!("Identifier: `{}`", ident.name)
+                };
+                // ADR 0103: annotate reference/handle-typed values with their
+                // sendability tier (the tier's sole v1 consumer).
+                //
+                // `alias_registry` (BT-2936, ADR 0108 follow-up to BT-2928)
+                // is threaded through from `compute_hover` so an alias-typed
+                // `Value` field's hover tier composes through the alias's
+                // expansion instead of falling back to `Tier::Unknown` for
+                // the opaque alias name.
+                if let Some(tier) = inferred.and_then(|ty| {
+                    beamtalk_core::semantic_analysis::type_checker::sendability::hover_tier_label(
+                        ty,
+                        hierarchy,
+                        alias_registry,
+                    )
+                }) {
+                    contents.push_str(" — Sendability: ");
+                    contents.push_str(&tier);
+                }
+                Some(HoverInfo::new(contents, ident.span))
+            } else {
+                None
+            }
+        }
+        Expression::ClassReference {
+            name,
+            package,
+            span,
+        } => {
+            if offset >= span.start() && offset < span.end() {
+                Some(class_reference_hover_info(
+                    &name.name,
+                    package.as_ref().map(|p| &p.name),
+                    *span,
+                    hierarchy,
+                ))
+            } else {
+                None
+            }
+        }
+        Expression::Super(span) => {
+            if offset >= span.start() && offset < span.end() {
+                Some(HoverInfo::new(
+                    "Keyword: `super` (superclass method dispatch)".to_string(),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
+        Expression::Literal(lit, span) => {
+            if offset >= span.start() && offset < span.end() {
+                // Render the literal via `unparse_literal_display` — the single
+                // source of truth for literal-to-source rendering (BT-3088) —
+                // so hover text agrees with Beamtalk quoting/escaping rules.
+                let rendered = beamtalk_core::unparse::unparse_literal_display(lit);
+                let info = match lit {
+                    Literal::Integer(_) => format!("Integer: `{rendered}`"),
+                    Literal::Float(_) => format!("Float: `{rendered}`"),
+                    Literal::String(_) => format!("String: `{rendered}`"),
+                    Literal::Symbol(_) => format!("Symbol: `{rendered}`"),
+                    Literal::List(_) => "List literal".to_string(),
+                    Literal::Character(_) => format!("Character: `{rendered}`"),
+                };
+                Some(HoverInfo::new(info, *span))
+            } else {
+                None
+            }
+        }
+        Expression::Assignment { target, value, .. } => find_hover_in_expr(
+            target,
+            offset,
+            context,
+            hierarchy,
+            type_map,
+            native_types,
+            alias_registry,
+        )
+        .or_else(|| {
+            find_hover_in_expr(
+                value,
+                offset,
+                context,
+                hierarchy,
+                type_map,
+                native_types,
+                alias_registry,
+            )
+        }),
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            span,
+            ..
+        } => {
+            // First check receiver and arguments
+            if let Some(hover) = find_hover_in_expr(
+                receiver,
+                offset,
+                context,
+                hierarchy,
+                type_map,
+                native_types,
+                alias_registry,
+            ) {
+                return Some(hover);
+            }
+            if let Some(hover) = arguments.iter().find_map(|arg| {
+                find_hover_in_expr(
+                    arg,
+                    offset,
+                    context,
+                    hierarchy,
+                    type_map,
+                    native_types,
+                    alias_registry,
+                )
+            }) {
+                return Some(hover);
+            }
+
+            // At this point we know we're not hovering over the receiver or any argument.
+            // Compute a more precise selector span based on selector type.
+            let receiver_span = receiver.span();
+            let in_selector = match selector {
+                // For unary and binary messages, the selector appears between the end
+                // of the receiver and the start of the first argument (if any), or
+                // up to the end of the message send when there are no arguments.
+                MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
+                    let start = receiver_span.end();
+                    let end = arguments
+                        .first()
+                        .map_or_else(|| span.end(), |arg| arg.span().start());
+                    offset >= start && offset < end
+                }
+                // For keyword messages, selector parts are interleaved with arguments.
+                // We approximate by treating any position within the message send span
+                // (that's not the receiver or an argument) as being over the selector.
+                MessageSelector::Keyword(_) => offset >= span.start() && offset < span.end(),
+            };
+
+            if in_selector {
+                // Compute a span for the selector region
+                let selector_span = match selector {
+                    MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
+                        let start = receiver_span.end();
+                        let end = arguments
+                            .first()
+                            .map_or_else(|| span.end(), |arg| arg.span().start());
+                        Span::new(start, end)
+                    }
+                    // For keyword messages, use the full span since parts are interleaved
+                    MessageSelector::Keyword(_) => *span,
+                };
+                if let Some(hover) = resolved_selector_hover_info(
+                    receiver,
+                    selector,
+                    selector_span,
+                    context,
+                    hierarchy,
+                    type_map,
+                    native_types,
+                ) {
+                    return Some(hover);
+                }
+                return Some(selector_hover_info(selector, selector_span));
+            }
+            None
+        }
+        Expression::Block(block) => block.body.iter().find_map(|s| {
+            find_hover_in_expr(
+                &s.expression,
+                offset,
+                context,
+                hierarchy,
+                type_map,
+                native_types,
+                alias_registry,
+            )
+        }),
+        Expression::Return { value, .. } => find_hover_in_expr(
+            value,
+            offset,
+            context,
+            hierarchy,
+            type_map,
+            native_types,
+            alias_registry,
+        ),
+        Expression::DestructureAssignment { pattern, value, .. } => {
+            find_hover_in_pattern(pattern, offset, type_map).or_else(|| {
+                find_hover_in_expr(
+                    value,
+                    offset,
+                    context,
+                    hierarchy,
+                    type_map,
+                    native_types,
+                    alias_registry,
+                )
+            })
+        }
+        Expression::Parenthesized { expression, .. } => find_hover_in_expr(
+            expression,
+            offset,
+            context,
+            hierarchy,
+            type_map,
+            native_types,
+            alias_registry,
+        ),
+        Expression::FieldAccess {
+            receiver, field, ..
+        } => {
+            if offset >= field.span.start() && offset < field.span.end() {
+                // Show declared state type if available from the class hierarchy.
+                //
+                // BT-2911: `state_field_type` returns a bare `EcoString` from
+                // `ClassHierarchy`, not a resolved `InferredType`, so it
+                // never carries a `TypeProvenance::Aliased` tag the way
+                // `type_map`'s `InferredType`s do for a local/parameter
+                // value (BT-2897). Re-resolve through
+                // `AliasRegistry::resolve_display_name` when the declared
+                // type names a registered alias so hovering a state field
+                // *access* (`self someField`) shows `AliasName (expansion)`
+                // too, matching local/parameter hover; fall back to the raw
+                // annotation text otherwise.
+                let field_type = match context {
+                    HoverClassContext::InstanceMethod(class) => {
+                        hierarchy.state_field_type(class.name.name.as_str(), field.name.as_str())
+                    }
+                    HoverClassContext::StandaloneInstanceMethod(name) => {
+                        hierarchy.state_field_type(name, field.name.as_str())
+                    }
+                    _ => None,
+                };
+                let contents = if let Some(ty) = field_type {
+                    // Alias lookup only applies to a bare `Simple` name — a
+                    // `Generic`/`Union`/etc. declared type was never a
+                    // registered alias name to begin with (ADR 0108 aliases
+                    // are single bare identifiers), so it falls straight
+                    // through to its own `Display`.
+                    let display: String = match &ty {
+                        beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType::Simple(
+                            name,
+                        ) => alias_registry
+                            .and_then(|registry| registry.resolve_display_name(name))
+                            .map_or_else(|| ty.to_string(), |s| s.to_string()),
+                        _ => ty.to_string(),
+                    };
+                    format!("`{} :: {display}`", field.name)
+                } else {
+                    format!("`{}`", field.name)
+                };
+                Some(
+                    HoverInfo::new(contents, field.span)
+                        .with_documentation("_state variable_".to_string()),
+                )
+            } else {
+                find_hover_in_expr(
+                    receiver,
+                    offset,
+                    context,
+                    hierarchy,
+                    type_map,
+                    native_types,
+                    alias_registry,
+                )
+            }
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            if let Some(hover) = find_hover_in_expr(
+                receiver,
+                offset,
+                context,
+                hierarchy,
+                type_map,
+                native_types,
+                alias_registry,
+            ) {
+                return Some(hover);
+            }
+            // Check each cascaded message
+            for msg in messages {
+                // Check arguments first
+                if let Some(hover) = msg.arguments.iter().find_map(|arg| {
+                    find_hover_in_expr(
+                        arg,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                        alias_registry,
+                    )
+                }) {
+                    return Some(hover);
+                }
+                // Compute selector span: from message start to first argument (or message end)
+                if offset >= msg.span.start() && offset < msg.span.end() {
+                    let selector_end = msg
+                        .arguments
+                        .first()
+                        .map_or_else(|| msg.span.end(), |arg| arg.span().start());
+                    let selector_span = Span::new(msg.span.start(), selector_end);
+
+                    // Only show hover if we're in the selector region (before first arg)
+                    if offset >= msg.span.start() && offset < selector_end {
+                        if let Some(hover) = resolved_selector_hover_info(
+                            receiver,
+                            &msg.selector,
+                            selector_span,
+                            context,
+                            hierarchy,
+                            type_map,
+                            native_types,
+                        ) {
+                            return Some(hover);
+                        }
+                        return Some(selector_hover_info(&msg.selector, selector_span));
+                    }
+                }
+            }
+            None
+        }
+        Expression::Match { value, arms, .. } => find_hover_in_expr(
+            value,
+            offset,
+            context,
+            hierarchy,
+            type_map,
+            native_types,
+            alias_registry,
+        )
+        .or_else(|| {
+            arms.iter().find_map(|arm| {
+                find_hover_in_pattern(&arm.pattern, offset, type_map)
+                    .or_else(|| {
+                        arm.guard.as_ref().and_then(|g| {
+                            find_hover_in_expr(
+                                g,
+                                offset,
+                                context,
+                                hierarchy,
+                                type_map,
+                                native_types,
+                                alias_registry,
+                            )
+                        })
+                    })
+                    .or_else(|| {
+                        find_hover_in_expr(
+                            &arm.body,
+                            offset,
+                            context,
+                            hierarchy,
+                            type_map,
+                            native_types,
+                            alias_registry,
+                        )
+                    })
+            })
+        }),
+        Expression::MapLiteral { pairs, span } => {
+            if offset >= span.start() && offset < span.end() {
+                // Check if hovering over a specific key or value
+                for pair in pairs {
+                    if let Some(hover) = find_hover_in_expr(
+                        &pair.key,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                        alias_registry,
+                    ) {
+                        return Some(hover);
+                    }
+                    if let Some(hover) = find_hover_in_expr(
+                        &pair.value,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                        alias_registry,
+                    ) {
+                        return Some(hover);
+                    }
+                }
+                // Hovering over the map literal itself
+                Some(HoverInfo::new(
+                    format!("Map literal with {} pairs", pairs.len()),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
+        Expression::ListLiteral {
+            elements,
+            tail,
+            span,
+        } => {
+            if offset >= span.start() && offset < span.end() {
+                for elem in elements {
+                    if let Some(hover) = find_hover_in_expr(
+                        elem,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                        alias_registry,
+                    ) {
+                        return Some(hover);
+                    }
+                }
+                if let Some(t) = tail {
+                    if let Some(hover) = find_hover_in_expr(
+                        t,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                        alias_registry,
+                    ) {
+                        return Some(hover);
+                    }
+                }
+                Some(HoverInfo::new(
+                    format!("List literal with {} elements", elements.len()),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
+        Expression::ArrayLiteral { elements, span } => {
+            if offset >= span.start() && offset < span.end() {
+                for elem in elements {
+                    if let Some(hover) = find_hover_in_expr(
+                        elem,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                        alias_registry,
+                    ) {
+                        return Some(hover);
+                    }
+                }
+                Some(HoverInfo::new(
+                    format!("Array literal with {} elements", elements.len()),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
+        Expression::Primitive {
+            name,
+            is_quoted,
+            span,
+            ..
+        } => {
+            if offset >= span.start() && offset < span.end() {
+                let display = if *is_quoted {
+                    format!("Primitive: `@primitive \"{name}\"`")
+                } else {
+                    format!("Primitive: `@primitive {name}`")
+                };
+                Some(HoverInfo::new(display, *span))
+            } else {
+                None
+            }
+        }
+        Expression::Error { message, span } => {
+            if offset >= span.start() && offset < span.end() {
+                Some(HoverInfo::new(format!("Error: {message}"), *span))
+            } else {
+                None
+            }
+        }
+        Expression::StringInterpolation { segments, span } => {
+            if offset >= span.start() && offset < span.end() {
+                // Check interpolated expressions for hover targets
+                for segment in segments {
+                    if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment {
+                        if let Some(info) = find_hover_in_expr(
+                            expr,
+                            offset,
+                            context,
+                            hierarchy,
+                            type_map,
+                            native_types,
+                            alias_registry,
+                        ) {
+                            return Some(info);
+                        }
+                    }
+                }
+                Some(HoverInfo::new("Interpolated string".to_string(), *span))
+            } else {
+                None
+            }
+        }
+        Expression::ExpectDirective { .. } => None,
+        Expression::Spread { name, span } => {
+            if offset >= span.start() && offset < span.end() {
+                Some(HoverInfo::new(
+                    format!("Rest pattern: `...{}`", name.name),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn resolved_selector_hover_info(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    span: Span,
+    context: &HoverClassContext<'_>,
+    hierarchy: &ClassHierarchy,
+    type_map: &TypeMap,
+    native_types: Option<&NativeTypeRegistry>,
+) -> Option<HoverInfo> {
+    let selector_name = selector.name();
+    let (receiver_class, class_side) =
+        resolve_receiver_class(receiver, context, hierarchy, type_map)?;
+
+    // ADR 0075 Phase 4: FFI hover for ErlangModule receivers.
+    // When hovering over a selector on an ErlangModule<module_name>, look up
+    // the function signature in NativeTypeRegistry and display typed info.
+    if receiver_class == "ErlangModule" {
+        return ffi_selector_hover_info(
+            receiver,
+            &selector_name,
+            selector,
+            span,
+            type_map,
+            native_types,
+        );
+    }
+
+    let method = if class_side {
+        hierarchy.find_class_method(receiver_class.as_str(), selector_name.as_str())?
+    } else {
+        hierarchy.find_method(receiver_class.as_str(), selector_name.as_str())?
+    };
+
+    let dispatch = if class_side {
+        "class-side"
+    } else {
+        "instance-side"
+    };
+    let typed_sig = method_info_signature(&method);
+    let summary = format!("```beamtalk\n{typed_sig}\n```");
+
+    let resolution_context = format!(
+        "Resolved on `{receiver_class}` (defined in `{}`)",
+        method.defined_in
+    );
+    let mut meta = dispatch.to_string();
+    if method.is_sealed {
+        meta.push_str(", sealed");
+    }
+    // Show visibility annotation for internal methods (ADR 0071, BT-1703)
+    if method.is_internal {
+        meta.push_str(", internal");
+    }
+    let meta_line = format!("_{meta}_");
+    let doc = match method.doc.as_deref() {
+        Some(existing) => format!("{existing}\n\n{resolution_context}\n\n{meta_line}"),
+        None => format!("{resolution_context}\n\n{meta_line}"),
+    };
+    Some(HoverInfo::new(summary, span).with_documentation(doc))
+}
+
+/// Builds hover info for an FFI call selector (ADR 0075 Phase 4).
+///
+/// Extracts the Erlang module name from the receiver's type map entry
+/// (which is `ErlangModule<module_name>`), resolves the function name and
+/// arity from the selector, and looks up the signature in `NativeTypeRegistry`.
+fn ffi_selector_hover_info(
+    receiver: &Expression,
+    selector_name: &ecow::EcoString,
+    selector: &MessageSelector,
+    span: Span,
+    type_map: &TypeMap,
+    native_types: Option<&NativeTypeRegistry>,
+) -> Option<HoverInfo> {
+    // Extract the Erlang module name from the receiver's inferred type.
+    // The receiver is typed as ErlangModule<module_name> by the type checker.
+    let module_name = extract_erlang_module_name(receiver, type_map)?;
+
+    // Extract the function name (first keyword) and arity.
+    let function_name = selector_name
+        .split(':')
+        .next()
+        .unwrap_or(selector_name.as_str());
+    let arity = match selector {
+        MessageSelector::Unary(_) => 0,
+        MessageSelector::Binary(_) => 1,
+        MessageSelector::Keyword(parts) => u8::try_from(parts.len()).unwrap_or(u8::MAX),
+    };
+
+    // Look up in NativeTypeRegistry for typed signature
+    let sig = native_types.and_then(|reg| reg.lookup(&module_name, function_name, arity));
+
+    let summary = if let Some(sig) = sig {
+        format!("```beamtalk\n{}\n```", sig.display_signature())
+    } else {
+        // Fallback: show untyped FFI call info
+        format!("```beamtalk\nErlang {module_name} {selector_name}\n```")
+    };
+
+    let provenance = if let Some(sig) = sig {
+        match sig.provenance {
+            beamtalk_core::semantic_analysis::type_checker::TypeProvenance::Extracted => {
+                "auto-extracted from `.beam`"
+            }
+            beamtalk_core::semantic_analysis::type_checker::TypeProvenance::Declared(_) => {
+                "from stub file"
+            }
+            _ => "native type registry",
+        }
+    } else {
+        "no type info available"
+    };
+
+    let doc =
+        format!("Erlang FFI: `{module_name}:{function_name}/{arity}`\n\n_Source: {provenance}_");
+    Some(HoverInfo::new(summary, span).with_documentation(doc))
+}
+
+/// Extracts the Erlang module name from an `ErlangModule<module_name>` receiver.
+///
+/// Checks the type map for the receiver's inferred type, which should be
+/// `Known { class_name: "ErlangModule", type_args: [Known { class_name: "lists" }] }`.
+/// Falls back to checking if the receiver is a `MessageSend` with `Erlang` class
+/// reference (for direct `Erlang lists reverse:` patterns).
+fn extract_erlang_module_name(receiver: &Expression, type_map: &TypeMap) -> Option<String> {
+    // First try the type map
+    if let Some(InferredType::Known { type_args, .. }) = type_map.get(receiver.span()) {
+        if let Some(InferredType::Known { class_name, .. }) = type_args.first() {
+            return Some(class_name.to_string());
+        }
+    }
+
+    // Fall back to AST inspection for `Erlang <module>` pattern:
+    // The outer expression has an inner MessageSend where receiver is ClassReference "Erlang"
+    // and selector is Unary(module_name). But in that case, `receiver` here IS the inner
+    // `Erlang lists` message send, so we look at it directly.
+    if let Expression::MessageSend {
+        receiver: inner_receiver,
+        selector: MessageSelector::Unary(module_name),
+        ..
+    } = receiver
+    {
+        if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
+            if name.name == "Erlang" {
+                return Some(module_name.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+/// Formats a `MethodInfo` from the hierarchy as a typed signature string.
+///
+/// Uses `param_types` and `return_type` from the hierarchy (populated by BT-669).
+/// Example output: `deposit: amount: Integer -> Integer`
+/// Renders a resolved-call signature from a `ClassHierarchy::MethodInfo`
+/// (BT-3097). Unlike [`method_signature`], `MethodInfo` carries only
+/// resolved *types* per parameter, no parameter names (the hierarchy
+/// doesn't retain them) — so each parameter renders as `keyword: Type`
+/// (no ` :: `) rather than the declaration's `keyword name :: Type`. This
+/// is the same shared core, driven by `SignatureParam { name: None, .. }`
+/// (see the module's Family-B parity fixture in
+/// `unparse::signature_text::tests`).
+fn method_info_signature(
+    method: &beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo,
+) -> String {
+    use beamtalk_core::unparse::{
+        SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
+    };
+
+    let selector = method.selector.as_str();
+    // BT-3076: `MethodInfo` types are structured `DeclaredType`s — render
+    // once here (`Display` matches `TypeAnnotation::type_name` verbatim)
+    // and hand the composer the text it contracts for.
+    let return_type_text = method.return_type.as_ref().map(ToString::to_string);
+    let return_type = return_type_text.as_deref();
+    let param_type_texts: Vec<Option<String>> = method
+        .param_types
+        .iter()
+        .map(|ty| ty.as_ref().map(ToString::to_string))
+        .collect();
+
+    if selector.contains(':') {
+        // Keyword message: interleave keyword parts (re-adding the trailing
+        // `:` the split strips) with param types.
+        let keywords: Vec<String> = selector
+            .split(':')
+            .filter(|s| !s.is_empty())
+            .map(|part| format!("{part}:"))
+            .collect();
+        let params: Vec<SignatureParam<'_>> = keywords
+            .iter()
+            .enumerate()
+            .map(|(i, keyword)| SignatureParam {
+                keyword,
+                name: None,
+                type_text: param_type_texts.get(i).and_then(Option::as_deref),
+            })
+            .collect();
+        render_signature_text(
+            SignatureSelector::Params(&params),
+            return_type,
+            &SignatureRenderOptions::DISPLAY,
+        )
+    } else if method.arity == 1 {
+        // Binary message
+        let params = [SignatureParam {
+            keyword: selector,
+            name: None,
+            type_text: param_type_texts.first().and_then(Option::as_deref),
+        }];
+        render_signature_text(
+            SignatureSelector::Params(&params),
+            return_type,
+            &SignatureRenderOptions::DISPLAY,
+        )
+    } else {
+        // Unary message
+        render_signature_text(
+            SignatureSelector::Unary(selector),
+            return_type,
+            &SignatureRenderOptions::DISPLAY,
+        )
+    }
+}
+
+fn resolve_receiver_class(
+    receiver: &Expression,
+    context: &HoverClassContext<'_>,
+    hierarchy: &ClassHierarchy,
+    type_map: &TypeMap,
+) -> Option<(ecow::EcoString, bool)> {
+    match receiver {
+        Expression::ClassReference { name, .. } => Some((name.name.clone(), true)),
+        Expression::Super(_) => match context {
+            HoverClassContext::InstanceMethod(class) => class
+                .superclass
+                .as_ref()
+                .map(|superclass| superclass.name.clone())
+                .map(|name| (name, false)),
+            HoverClassContext::ClassMethod(class) => class
+                .superclass
+                .as_ref()
+                .map(|superclass| superclass.name.clone())
+                .map(|name| (name, true)),
+            HoverClassContext::StandaloneInstanceMethod(name)
+            | HoverClassContext::StandaloneClassMethod(name) => hierarchy
+                .get_class(name)
+                .and_then(|info| info.superclass.clone())
+                .map(|super_name| {
+                    (
+                        super_name,
+                        matches!(context, HoverClassContext::StandaloneClassMethod(_)),
+                    )
+                }),
+            HoverClassContext::TopLevel => None,
+        },
+        Expression::Identifier(ident) if ident.name == "self" => match context {
+            HoverClassContext::InstanceMethod(class) => Some((class.name.name.clone(), false)),
+            HoverClassContext::ClassMethod(class) => Some((class.name.name.clone(), true)),
+            HoverClassContext::StandaloneInstanceMethod(name) => {
+                Some((ecow::EcoString::from(*name), false))
+            }
+            HoverClassContext::StandaloneClassMethod(name) => {
+                Some((ecow::EcoString::from(*name), true))
+            }
+            HoverClassContext::TopLevel => None,
+        },
+        _ => type_map
+            .get(receiver.span())
+            .and_then(InferredType::as_known)
+            .cloned()
+            .map(|name| (name, false)),
+    }
+}
+
+/// Creates hover info for `self` based on the class context.
+fn self_hover_info(span: Span, context: &HoverClassContext<'_>) -> HoverInfo {
+    match context {
+        HoverClassContext::InstanceMethod(class) => {
+            HoverInfo::new(format!("self: `{}`", class.name.name), span).with_documentation(
+                format!("Reference to the current `{}` instance", class.name.name),
+            )
+        }
+        HoverClassContext::ClassMethod(class) => {
+            HoverInfo::new(format!("self: `{} class`", class.name.name), span).with_documentation(
+                format!(
+                    "Reference to the `{}` class object (class-side method)",
+                    class.name.name
+                ),
+            )
+        }
+        HoverClassContext::StandaloneInstanceMethod(name) => {
+            HoverInfo::new(format!("self: `{name}`"), span)
+                .with_documentation(format!("Reference to the current `{name}` instance"))
+        }
+        HoverClassContext::StandaloneClassMethod(name) => {
+            HoverInfo::new(format!("self: `{name} class`"), span).with_documentation(format!(
+                "Reference to the `{name}` class object (class-side method)"
+            ))
+        }
+        HoverClassContext::TopLevel => {
+            HoverInfo::new("Keyword: `self` (current receiver)".to_string(), span)
+        }
+    }
+}
+
+/// Creates hover info for a class reference with hierarchy information.
+///
+/// When `package` is `Some`, the class is from a dependency package and the
+/// hover shows "from package {name}" provenance (ADR 0070 Phase 5, BT-1658).
+fn class_reference_hover_info(
+    class_name: &ecow::EcoString,
+    package: Option<&ecow::EcoString>,
+    span: Span,
+    hierarchy: &ClassHierarchy,
+) -> HoverInfo {
+    use std::fmt::Write;
+
+    let mut info = format!("Class: `{class_name}`");
+
+    // Show visibility annotation for internal classes (ADR 0071, BT-1703)
+    if let Some(class_info) = hierarchy.get_class(class_name.as_str()) {
+        if class_info.is_internal {
+            let _ = write!(info, " (internal)");
+        }
+    }
+
+    // Show package provenance for dependency classes (ADR 0070 Phase 5)
+    if let Some(pkg) = package {
+        let _ = write!(info, " (from package `{pkg}`)");
+    }
+
+    if let Some(class_info) = hierarchy.get_class(class_name.as_str()) {
+        // Add superclass info
+        if let Some(ref superclass) = class_info.superclass {
+            let _ = write!(info, "\n\nExtends: `{superclass}`");
+        }
+
+        // Add hierarchy chain
+        let chain = hierarchy.superclass_chain(class_name.as_str());
+        if !chain.is_empty() {
+            let chain_str: Vec<&str> = chain.iter().map(ecow::EcoString::as_str).collect();
+            let _ = write!(
+                info,
+                "\n\nHierarchy: {} → {}",
+                class_name,
+                chain_str.join(" → ")
+            );
+        }
+
+        // Add state info with types
+        if !class_info.state.is_empty() {
+            let state_entries: Vec<String> = class_info
+                .state
+                .iter()
+                .map(|s| {
+                    if let Some(ty) = class_info.state_types.get(s) {
+                        format!("{s}: {ty}")
+                    } else {
+                        s.to_string()
+                    }
+                })
+                .collect();
+            let _ = write!(info, "\n\nState: {}", state_entries.join(", "));
+        }
+
+        // Add typed method summary (capped to avoid unwieldy hover popups)
+        if !class_info.methods.is_empty() || !class_info.class_methods.is_empty() {
+            const MAX_METHODS: usize = 10;
+            let _ = write!(info, "\n\n**Methods:**");
+            let total_instance = class_info.methods.len();
+            for method in class_info.methods.iter().take(MAX_METHODS) {
+                let sig = method_info_signature(method);
+                let internal_tag = if method.is_internal {
+                    " (internal)"
+                } else {
+                    ""
+                };
+                let _ = write!(info, "\n- `{sig}`{internal_tag}");
+            }
+            if total_instance > MAX_METHODS {
+                let _ = write!(
+                    info,
+                    "\n- ...and {} more instance methods",
+                    total_instance - MAX_METHODS
+                );
+            }
+            let remaining_slots = MAX_METHODS.saturating_sub(total_instance);
+            let class_display = if remaining_slots > 0 {
+                remaining_slots
+            } else {
+                2 // Always show at least a couple class-side methods
+            };
+            let total_class = class_info.class_methods.len();
+            for method in class_info.class_methods.iter().take(class_display) {
+                let sig = method_info_signature(method);
+                let internal_tag = if method.is_internal { ", internal" } else { "" };
+                let _ = write!(info, "\n- `{sig}` (class{internal_tag})");
+            }
+            if total_class > class_display {
+                let _ = write!(
+                    info,
+                    "\n- ...and {} more class methods",
+                    total_class - class_display
+                );
+            }
+        }
+    }
+
+    HoverInfo::new(info, span)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ByteOffset;
+    use beamtalk_core::semantic_analysis::ClassHierarchy;
+    use beamtalk_core::source_analysis::{lex_with_eof, parse};
+
+    /// Parse source and compute hover with a fresh hierarchy.
+    fn hover_at(source: &str, position: Position) -> Option<HoverInfo> {
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        compute_hover(&module, source, position, &hierarchy, None, None)
+    }
+
+    /// Converts a byte offset (as returned by `str::find`/`str::rfind`) to a
+    /// `Position`, for test convenience.
+    fn pos_at(source: &str, offset: usize) -> Position {
+        let offset = u32::try_from(offset).expect("test source under 4GB");
+        Position::from_byte_offset(source, ByteOffset::new(offset)).unwrap()
+    }
+
+    #[test]
+    fn compute_hover_on_identifier() {
+        let hover = hover_at("x := 42", Position::new(0, 0));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(hover.contents.contains('x'));
+    }
+
+    #[test]
+    fn compute_hover_on_integer_literal() {
+        // Position 5 is at "42"
+        let hover = hover_at("x := 42", Position::new(0, 5));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(hover.contents.contains("42"));
+    }
+
+    #[test]
+    fn compute_hover_on_string_literal() {
+        // Position 5 is at the string
+        let hover = hover_at(r#"x := "hello""#, Position::new(0, 5));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(hover.contents.contains("String"));
+    }
+
+    #[test]
+    fn compute_hover_outside_expr_returns_none() {
+        // Position 100 is way out of bounds
+        let hover = hover_at("x := 42", Position::new(10, 0));
+        assert!(hover.is_none());
+    }
+
+    // --- ADR 0103: sendability tier hover (BT-2758) ---
+
+    #[test]
+    fn hover_shows_sendableref_for_pid() {
+        let src = "Object subclass: M\n  run: p :: Pid =>\n    p printString\n";
+        // Line 2, col 4 is the `p` use in the body.
+        let hover = hover_at(src, Position::new(2, 4)).expect("hover");
+        assert!(
+            hover.contents.contains("Sendability: SendableRef"),
+            "expected SendableRef tier, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_shows_composed_handle_scope_for_value() {
+        // Wrapper is a Value carrying a Port field — it inherits
+        // HandleScoped(#process) structurally, and hover must say so.
+        let src = "typed Value subclass: Wrapper\n  field: p :: Port = nil\n\n\
+                   Object subclass: M\n  run: w :: Wrapper =>\n    w printString\n";
+        // Line 5, col 4 is the `w` use in the body.
+        let hover = hover_at(src, Position::new(5, 4)).expect("hover");
+        assert!(
+            hover
+                .contents
+                .contains("Sendability: HandleScoped(#process)"),
+            "expected composed HandleScoped(#process) tier, got: {}",
+            hover.contents
+        );
+    }
+
+    /// BT-2936: an alias-typed field (`type PortAlias = Port`) composes its
+    /// sendability tier through the alias's expansion when `compute_hover`'s
+    /// `alias_registry` is threaded all the way through to `hover_tier_label`,
+    /// instead of silently omitting the tier line for the opaque alias name.
+    #[test]
+    fn hover_shows_composed_handle_scope_for_alias_typed_value_field() {
+        use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
+        use beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+        let src = "type PortAlias = Port\ntyped Value subclass: Wrapper\n  field: p :: PortAlias = nil\n\n\
+                   Object subclass: M\n  run: w :: Wrapper =>\n    w printString\n";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "parse failed: {parse_diags:?}");
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
+        assert!(diags.is_empty(), "unexpected alias diagnostics: {diags:?}");
+
+        // Line 6, col 4 is the `w` use in the body.
+        let hover = compute_hover(
+            &module,
+            src,
+            Position::new(6, 4),
+            &hierarchy,
+            None,
+            Some(&registry),
+        )
+        .expect("hover");
+        assert!(
+            hover
+                .contents
+                .contains("Sendability: HandleScoped(#process)"),
+            "expected composed HandleScoped(#process) tier through the alias, got: {}",
+            hover.contents
+        );
+
+        // Without the registry, the alias name stays opaque and the tier
+        // silently falls back to Unknown (no tier line) — the pre-BT-2936
+        // fallback this test guards against regressing back to.
+        let hover_no_registry =
+            compute_hover(&module, src, Position::new(6, 4), &hierarchy, None, None)
+                .expect("hover");
+        assert!(
+            !hover_no_registry.contents.contains("Sendability:"),
+            "without the registry the tier should stay silent (Unknown), got: {}",
+            hover_no_registry.contents
+        );
+    }
+
+    #[test]
+    fn hover_omits_tier_for_sendable() {
+        let src = "Object subclass: M\n  run: n :: Integer =>\n    n printString\n";
+        let hover = hover_at(src, Position::new(2, 4)).expect("hover");
+        assert!(
+            !hover.contents.contains("Sendability:"),
+            "Sendable values must not show a tier line, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn compute_hover_on_binary_message() {
+        // Position 7 is at the "+" operator
+        let hover = hover_at("x := 3 + 4", Position::new(0, 7));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Binary message") || hover.contents.contains("```beamtalk"),
+            "Unexpected hover contents: {}",
+            hover.contents
+        );
+        assert!(hover.contents.contains('+') || hover.contents.contains("arity"));
+    }
+
+    #[test]
+    fn compute_hover_on_unary_message() {
+        // Position 9 is at "size"
+        let hover = hover_at("x := obj size", Position::new(0, 9));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Unary message") || hover.contents.contains("Method:"),
+            "Unexpected hover contents: {}",
+            hover.contents
+        );
+        assert!(hover.contents.contains("size") || hover.contents.contains("arity"));
+    }
+
+    #[test]
+    fn hover_on_resolved_keyword_call_site_shows_method_resolution() {
+        let source = "Object subclass: Counter\n  increment => 1\n\nCounter new increment";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let selector_offset = source.rfind("increment").unwrap();
+        let pos = pos_at(source, selector_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        assert!(hover.is_some(), "Should hover call-site selector");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("```beamtalk"),
+            "Unexpected hover contents: {}",
+            hover.contents
+        );
+        assert!(
+            hover
+                .documentation
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Resolved on `Counter`"),
+            "Unexpected hover documentation: {:?}",
+            hover.documentation
+        );
+    }
+
+    #[test]
+    fn compute_hover_on_class_reference() {
+        // Position 0 is at "Counter"
+        let hover = hover_at("Counter spawn", Position::new(0, 0));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(hover.contents.contains("Class: `Counter`"));
+    }
+
+    #[test]
+    fn compute_hover_on_class_reference_camelcase() {
+        // Position 0 is at "MyCounterActor"
+        let hover = hover_at("MyCounterActor spawn", Position::new(0, 0));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(hover.contents.contains("Class: `MyCounterActor`"));
+    }
+
+    #[test]
+    fn hover_on_package_qualified_class_reference() {
+        // BT-1658: package-qualified class references show provenance
+        let source = "json@Parser new";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        // Position at "Parser" (after "json@")
+        let pos = Position::new(0, 5);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        assert!(hover.is_some(), "Should hover on package-qualified class");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Class: `Parser`"),
+            "Should contain class name: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("from package `json`"),
+            "Should show package provenance: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_unqualified_class_reference_no_package() {
+        // BT-1658: unqualified class references should NOT show package provenance
+        let hover = hover_at("Counter spawn", Position::new(0, 0));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(
+            !hover.contents.contains("from package"),
+            "Unqualified class should not show package: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_primitive_quoted() {
+        use beamtalk_core::ast::Expression;
+        use beamtalk_core::source_analysis::Span;
+
+        let ctx = HoverClassContext::TopLevel;
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        let expr = Expression::Primitive {
+            name: "erlang_add".into(),
+            is_quoted: true,
+            is_intrinsic: false,
+            is_inferred: false,
+            span: Span::new(0, 22),
+        };
+        let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new(), None, None);
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(hover.contents.contains("`@primitive \"erlang_add\"`"));
+    }
+
+    #[test]
+    fn hover_on_primitive_unquoted() {
+        use beamtalk_core::ast::Expression;
+        use beamtalk_core::source_analysis::Span;
+
+        let ctx = HoverClassContext::TopLevel;
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        let expr = Expression::Primitive {
+            name: "size".into(),
+            is_quoted: false,
+            is_intrinsic: false,
+            is_inferred: false,
+            span: Span::new(0, 15),
+        };
+        let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new(), None, None);
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(hover.contents.contains("`@primitive size`"));
+        assert!(!hover.contents.contains("'size'"));
+    }
+
+    #[test]
+    fn hover_on_self_in_instance_method() {
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // "self" appears at offset 59 in the method body
+        // Find the exact offset of "self" in the source
+        let self_offset = source.find("self.count").unwrap();
+        let pos = pos_at(source, self_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        assert!(hover.is_some(), "Should find hover for self");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("self: `Counter`"),
+            "Should show 'self: Counter', got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_self_in_class_method() {
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  class withInitial: n => self new: #{count => n}\n\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Find "self" in the class method body
+        let class_method_self = source.find("self new:").unwrap();
+        let pos = pos_at(source, class_method_self);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        assert!(
+            hover.is_some(),
+            "Should find hover for self in class method"
+        );
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("self: `Counter class`"),
+            "Should show 'self: Counter class', got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_class_reference_shows_hierarchy() {
+        // Use "Counter spawn" as top-level expression after class definition
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nCounter spawn";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Find the position of the top-level "Counter" reference
+        let counter_pos = source.rfind("Counter").unwrap();
+        let pos = pos_at(source, counter_pos);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        assert!(hover.is_some(), "Should find hover for Counter reference");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Class: `Counter`"),
+            "Should show class name, got: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("Extends: `Actor`"),
+            "Should show superclass, got: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("State: count"),
+            "Should show state variables, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_state_declaration_name() {
+        let source = "Object subclass: Counter\n  /// The current count\n  state: count :: Integer = 0\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.find("count ::").unwrap();
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+
+        assert!(hover.is_some(), "Should hover state declaration name");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("`count :: Integer`"),
+            "Should show name and type, got: {}",
+            hover.contents
+        );
+        assert!(
+            hover
+                .documentation
+                .as_deref()
+                .unwrap_or_default()
+                .contains("The current count"),
+            "Should show doc comment, got: {:?}",
+            hover.documentation
+        );
+        assert!(
+            hover
+                .documentation
+                .as_deref()
+                .unwrap_or_default()
+                .contains("state variable"),
+            "Should show state variable label, got: {:?}",
+            hover.documentation
+        );
+    }
+
+    #[test]
+    fn hover_on_state_declaration_name_no_doc() {
+        let source = "Object subclass: Counter\n  state: count = 0\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.find("count =").unwrap();
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+
+        assert!(
+            hover.is_some(),
+            "Should hover undocumented state declaration"
+        );
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("`count`"),
+            "Should show name, got: {}",
+            hover.contents
+        );
+        assert!(
+            hover
+                .documentation
+                .as_deref()
+                .unwrap_or_default()
+                .contains("state variable"),
+            "Should show state variable label, got: {:?}",
+            hover.documentation
+        );
+    }
+
+    #[test]
+    fn hover_on_builtin_class_reference_shows_hierarchy() {
+        let hover = hover_at("Integer class", Position::new(0, 0));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(hover.contents.contains("Class: `Integer`"));
+        assert!(hover.contents.contains("Extends: `Number`"));
+    }
+
+    #[test]
+    fn hover_on_self_at_top_level() {
+        let source = "self doSomething";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let hover = compute_hover(&module, source, Position::new(0, 0), &hierarchy, None, None);
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Keyword: `self`"),
+            "Top-level self should show generic info, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_identifier_shows_inferred_type() {
+        let source = "x := 42\nx";
+        let hover = hover_at(source, Position::new(1, 0));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Type: Integer"),
+            "Should show inferred type Integer, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_singleton_eq_false_branch_shows_negation() {
+        // BT-2746 / ADR 0102 §1/§4 ("REPL session"): the false branch of a
+        // singleton-eq test narrows via `difference` to a `Negation` — hover
+        // must render it as `Symbol \ #foo`, not fall back to the bare
+        // `Symbol` declared type.
+        //
+        // Uses `=:=` (strict equality) rather than bare `=`: the narrowing
+        // detector (`singleton_eq.rs`) recognises both identically, but only
+        // `=:=` has a binding power entry in the expression parser's Pratt
+        // table (`binary_binding_power`) — bare `=` is not currently wired
+        // into binary-expression parsing (it appears only as `field: x =
+        // default` syntax), so it cannot be used here.
+        let source = "x :: Symbol := #other\n(x =:= #foo) ifFalse: [x]";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Position at the `x` inside the `ifFalse:` block, not the
+        // declaration or the guard.
+        let offset = source.rfind("[x]").unwrap() + 1;
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        assert!(hover.is_some(), "Should hover on narrowed `x`");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Type: Symbol \\ #foo"),
+            "Should show narrowed Negation type `Symbol \\ #foo`, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_untyped_identifier_no_type_annotation() {
+        // Variable not yet assigned — should show identifier without type
+        let source = "x";
+        let hover = hover_at(source, Position::new(0, 0));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Identifier: `x`"),
+            "Should show identifier, got: {}",
+            hover.contents
+        );
+        assert!(
+            !hover.contents.contains("Type:"),
+            "Should NOT show type for unknown identifier, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_string_variable_shows_type() {
+        let source = "x := \"hello\"\nx";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let hover = compute_hover(&module, source, Position::new(1, 0), &hierarchy, None, None);
+        assert!(hover.is_some(), "Should find hover");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Type: String"),
+            "Should show inferred type String, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_self_in_standalone_instance_method() {
+        let source = "Counter >> increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let self_offset = source.find("self.count").unwrap();
+        let pos = pos_at(source, self_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        assert!(
+            hover.is_some(),
+            "Should find hover for self in standalone method"
+        );
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("self: `Counter`"),
+            "Should show 'self: Counter', got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_self_in_standalone_class_method() {
+        let source = "Counter class >> withInitial: n => self new: #{count => n}";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let self_offset = source.find("self new:").unwrap();
+        let pos = pos_at(source, self_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        assert!(
+            hover.is_some(),
+            "Should find hover for self in standalone class method"
+        );
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("self: `Counter class`"),
+            "Should show 'self: Counter class', got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_method_declaration_selector_unary() {
+        let source = "Object subclass: Counter\n  state: value = 0\n\n  increment => self.value := self.value + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let selector_offset = source.find("increment =>").unwrap();
+        let pos = pos_at(source, selector_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+
+        assert!(hover.is_some(), "Should hover method declaration selector");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("increment"),
+            "Unexpected hover contents: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_method_declaration_selector_keyword() {
+        let source = "Object subclass: Counter\n  at: index put: value => value";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let selector_offset = source.find("at:").unwrap();
+        let pos = pos_at(source, selector_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+
+        assert!(hover.is_some(), "Should hover keyword declaration selector");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("at: index put: value"),
+            "Unexpected hover contents: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_method_declaration_typed_parameter_name_with_colon() {
+        let source = "Object subclass: Boolean\n  and: aBlock :: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let param_offset = source.find("aBlock ::").unwrap();
+        let pos = pos_at(source, param_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+
+        assert!(hover.is_some(), "Should hover typed parameter name");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Parameter: `aBlock`"),
+            "Unexpected hover contents: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_method_declaration_parameter_type_and_return_type() {
+        let source = "Object subclass: Boolean\n  and: aBlock :: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let param_type_offset = source.find("Block ->").unwrap();
+        let param_type_pos = pos_at(source, param_type_offset);
+        let param_type_hover =
+            compute_hover(&module, source, param_type_pos, &hierarchy, None, None);
+        assert!(param_type_hover.is_some(), "Should hover parameter type");
+        let param_type_hover = param_type_hover.unwrap();
+        assert!(
+            param_type_hover
+                .contents
+                .contains("Type annotation: `Block`"),
+            "Unexpected parameter type hover: {}",
+            param_type_hover.contents
+        );
+
+        let return_type_offset = source.find("-> Boolean").unwrap() + 3;
+        let return_type_pos = pos_at(source, return_type_offset);
+        let return_type_hover =
+            compute_hover(&module, source, return_type_pos, &hierarchy, None, None);
+        assert!(return_type_hover.is_some(), "Should hover return type");
+        let return_type_hover = return_type_hover.unwrap();
+        assert!(
+            return_type_hover
+                .contents
+                .contains("Return type: `Boolean`"),
+            "Unexpected return type hover: {}",
+            return_type_hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_method_declaration_selector_prefers_doc_comment() {
+        let source = "Object subclass: Counter\n  /// Increments the counter by one\n  increment -> Integer => 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let selector_offset = source.find("increment ->").unwrap();
+        let pos = pos_at(source, selector_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+
+        assert!(hover.is_some(), "Should hover declaration selector");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("increment -> Integer"),
+            "Unexpected hover contents: {}",
+            hover.contents
+        );
+        assert!(
+            hover
+                .documentation
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Increments the counter by one"),
+            "Expected doc comment in hover documentation, got: {:?}",
+            hover.documentation
+        );
+    }
+
+    #[test]
+    fn hover_on_superclass_name_in_class_declaration() {
+        let source = "Object subclass: Counter\n  increment => 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let object_offset = source.find("Object").unwrap();
+        let pos = pos_at(source, object_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+
+        assert!(hover.is_some(), "Should hover superclass identifier");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Class: `Object`"),
+            "Unexpected hover contents: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_class_name_in_class_declaration() {
+        let source = "Object subclass: Counter\n  increment => 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let class_offset = source.find("Counter").unwrap();
+        let pos = pos_at(source, class_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+
+        assert!(hover.is_some(), "Should hover class declaration name");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Class: `Counter`"),
+            "Unexpected hover contents: {}",
+            hover.contents
+        );
+    }
+
+    // --- Chain resolution hover tests (BT-1014) ---
+    //
+    // Verify that hovering over a message selector shows the resolved return type
+    // when the receiver class is known (stdlib annotations from BT-1003,
+    // user-defined method annotations, or inferred types from BT-1005).
+
+    #[test]
+    fn hover_on_stdlib_selector_shows_return_type() {
+        // Hovering over `size` in `"hello" size` should show `size -> Integer`
+        // "hello" is 7 chars, space at 7, size starts at 8
+        let source = r#""hello" size"#;
+        let pos = pos_at(source, 8); // inside "size"
+        let hover = hover_at(source, pos);
+        assert!(hover.is_some(), "Should hover on stdlib selector");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("-> Integer"),
+            "Hover should show return type Integer for String#size. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_chained_selector_shows_return_type() {
+        // Hovering over `abs` in `"hello" size abs` should show `abs -> Integer`
+        // "hello" size = 12 chars, space at 12, abs at 13-15
+        let source = r#""hello" size abs"#;
+        let pos = pos_at(source, 13); // inside "abs"
+        let hover = hover_at(source, pos);
+        assert!(hover.is_some(), "Should hover on chained selector");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("-> Integer"),
+            "Hover should show return type Integer for Integer#abs. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_user_defined_annotated_selector_shows_return_type() {
+        // A user-defined method with an explicit -> Integer annotation
+        let source = "Object subclass: Box\n  value -> Integer => 42\n\nb := Box new\nb value";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let selector_offset = source.rfind("value").unwrap();
+        let pos = pos_at(source, selector_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        assert!(
+            hover.is_some(),
+            "Should hover on user-defined annotated selector"
+        );
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("-> Integer"),
+            "Hover should show annotated return type. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_user_defined_inferred_selector_shows_return_type() {
+        // A user-defined method whose return type is inferred from the body (BT-1005)
+        let source = "Object subclass: Box\n  value => 42\n\nb := Box new\nb value";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let selector_offset = source.rfind("value").unwrap();
+        let pos = pos_at(source, selector_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        assert!(
+            hover.is_some(),
+            "Should hover on user-defined inferred selector"
+        );
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("-> Integer"),
+            "Hover should show inferred return type. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_tuple_destructure_pattern_variable() {
+        // `{a, b} := someTuple` — hover over `a` (offset 1) and `b` (offset 4)
+        let source = "{a, b} := 42";
+        let hover_a = hover_at(source, Position::new(0, 1));
+        assert!(
+            hover_a.is_some(),
+            "Should get hover info for pattern variable `a`"
+        );
+        assert!(
+            hover_a.unwrap().contents.contains("`a`"),
+            "Hover for `a` should mention the exact variable name"
+        );
+
+        let hover_b = hover_at(source, Position::new(0, 4));
+        assert!(
+            hover_b.is_some(),
+            "Should get hover info for pattern variable `b`"
+        );
+        assert!(
+            hover_b.unwrap().contents.contains("`b`"),
+            "Hover for `b` should mention the exact variable name"
+        );
+    }
+
+    #[test]
+    fn hover_on_array_destructure_pattern_variable() {
+        // `#[a, b] := someArray` — hover over `a` (offset 2) and `b` (offset 5)
+        let source = "#[a, b] := 42";
+        let hover_a = hover_at(source, Position::new(0, 2));
+        assert!(
+            hover_a.is_some(),
+            "Should get hover info for pattern variable `a`"
+        );
+        assert!(
+            hover_a.unwrap().contents.contains("`a`"),
+            "Hover for `a` should mention the exact variable name"
+        );
+
+        let hover_b = hover_at(source, Position::new(0, 5));
+        assert!(
+            hover_b.is_some(),
+            "Should get hover info for pattern variable `b`"
+        );
+        assert!(
+            hover_b.unwrap().contents.contains("`b`"),
+            "Hover for `b` should mention the exact variable name"
+        );
+    }
+
+    #[test]
+    fn hover_on_match_arm_pattern_variable() {
+        // `x match: [v -> 1]` — hover over `v` (column 10)
+        // x=0, ' '=1, m=2, a=3, t=4, c=5, h=6, :=7, ' '=8, [=9, v=10
+        let source = "x match: [v -> 1]";
+        let hover = hover_at(source, Position::new(0, 10));
+        assert!(
+            hover.is_some(),
+            "Should get hover info for match arm pattern variable `v`"
+        );
+        assert!(
+            hover.unwrap().contents.contains("`v`"),
+            "Hover should mention the pattern variable name"
+        );
+    }
+
+    #[test]
+    fn hover_on_match_arm_pattern_tuple_variable() {
+        // `x match: [{a, b} -> a]` — hover over `a` in the arm pattern (offset 11)
+        // "x match: [{a, b} -> a]"
+        //  012345678901234567890123
+        // x=0, ' '=1, match=2-6, :=7, ' '=8, [=9, {=10, a=11
+        let source = "x match: [{a, b} -> a]";
+        let hover_a = hover_at(source, Position::new(0, 11));
+        assert!(
+            hover_a.is_some(),
+            "Should get hover info for match arm tuple pattern variable `a`"
+        );
+        assert!(
+            hover_a.unwrap().contents.contains("`a`"),
+            "Hover should mention the pattern variable name `a`"
+        );
+
+        let hover_b = hover_at(source, Position::new(0, 14));
+        assert!(
+            hover_b.is_some(),
+            "Should get hover info for match arm tuple pattern variable `b`"
+        );
+        assert!(
+            hover_b.unwrap().contents.contains("`b`"),
+            "Hover should mention the pattern variable name `b`"
+        );
+    }
+
+    #[test]
+    fn hover_on_match_arm_guard_expression() {
+        // `x match: [v when: [v > 0] -> v]` — hover over the `v` inside the guard (column 19)
+        // Indices:  0         1         2         3
+        //           012345678901234567890123456789012
+        //                             ^ column 19 (`v` in the guard)
+        let source = "x match: [v when: [v > 0] -> v]";
+        let hover = hover_at(source, Position::new(0, 19));
+        assert!(
+            hover.is_some(),
+            "Should get hover info for identifier in match arm guard"
+        );
+        assert!(
+            hover.unwrap().contents.contains("`v`"),
+            "Hover for guard expression should mention the identifier `v`"
+        );
+    }
+
+    #[test]
+    fn hover_on_destructure_rhs_still_works() {
+        // Hovering the RHS of a destructure should still show hover info
+        let source = "{a, b} := 42";
+        // offset 10 is at "42"
+        let hover = hover_at(source, Position::new(0, 10));
+        assert!(
+            hover.is_some(),
+            "Should get hover info for RHS literal in destructure"
+        );
+        assert!(
+            hover.unwrap().contents.contains("42"),
+            "Hover for RHS should mention the literal value"
+        );
+    }
+
+    // --- ADR 0071 / BT-1703: Visibility annotations in hover ---
+
+    #[test]
+    fn hover_on_internal_class_shows_visibility_annotation() {
+        // internal before "subclass:" marks the class as internal
+        let source = "Object subclass: Foo internal\n  helper => 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Hover over "Foo" (class name declaration at offset 17)
+        let pos = Position::new(0, 17);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        assert!(hover.is_some(), "Should hover on internal class name");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("(internal)"),
+            "Hover on internal class should show '(internal)'. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_internal_method_declaration_shows_visibility() {
+        let source = "Object subclass: Foo\n  internal helper => 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Hover over "helper" method selector
+        let helper_offset = source.find("helper").unwrap();
+        let pos = pos_at(source, helper_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        assert!(hover.is_some(), "Should hover on internal method selector");
+        let hover = hover.unwrap();
+        let doc = hover.documentation.as_deref().unwrap_or("");
+        assert!(
+            doc.contains("internal"),
+            "Hover on internal method should show 'internal' in docs. Got: {doc}",
+        );
+    }
+
+    // --- FFI hover tests (ADR 0075 Phase 4) ---
+
+    #[test]
+    fn ffi_hover_shows_typed_signature_from_registry() {
+        use beamtalk_core::semantic_analysis::type_checker::TypeProvenance;
+        use beamtalk_core::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, NativeTypeRegistry, ParamType,
+        };
+
+        let source = "Erlang lists reverse: #(1, 2, 3)";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![FunctionSignature {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![ParamType {
+                    keyword: Some(ecow::EcoString::from("list")),
+                    type_: InferredType::known("List"),
+                }],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+                line: None,
+            }],
+        );
+
+        // Hover over "reverse:" — the selector of the FFI call
+        // Source: "Erlang lists reverse: #(1, 2, 3)"
+        //         0123456789012345678901234
+        let reverse_offset = source.find("reverse").unwrap();
+        let pos = pos_at(source, reverse_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, Some(&registry), None);
+        let hover = hover.expect("should get hover for FFI selector");
+        assert!(
+            hover.contents.contains("reverse:"),
+            "FFI hover should show typed signature. Got: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("List"),
+            "FFI hover should show parameter type. Got: {}",
+            hover.contents
+        );
+        let doc = hover.documentation.as_deref().unwrap_or("");
+        assert!(
+            doc.contains("lists:reverse/1"),
+            "FFI hover should show Erlang module:function/arity. Got: {doc}"
+        );
+        assert!(
+            doc.contains("auto-extracted"),
+            "FFI hover should show provenance. Got: {doc}"
+        );
+    }
+
+    /// BT-2867: hovering an expression *downstream* of a well-specced FFI
+    /// call (not the FFI call site itself) must show the propagated
+    /// concrete type, not `Dynamic`. Before the fix, `compute_hover`'s
+    /// `enrich_hierarchy_with_inferred_returns` call never received the
+    /// caller's `native_types` registry, so only the FFI call site itself
+    /// (handled by a separate, special-cased lookup) resolved correctly —
+    /// everything built from its result stayed `Dynamic(UntypedFfi)`.
+    #[test]
+    fn ffi_hover_on_downstream_expression_shows_propagated_type() {
+        use beamtalk_core::semantic_analysis::type_checker::TypeProvenance;
+        use beamtalk_core::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, NativeTypeRegistry, ParamType,
+        };
+
+        let source = "Object subclass: Nav\n  run =>\n    \
+            y := Erlang lists reverse: #(1, 2, 3)\n    y";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![FunctionSignature {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![ParamType {
+                    keyword: Some(ecow::EcoString::from("list")),
+                    type_: InferredType::known("List"),
+                }],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+                line: None,
+            }],
+        );
+
+        // Hover over the second (downstream) use of `y`, not the assignment.
+        let y_use_offset = source.rfind('y').unwrap();
+        let pos = pos_at(source, y_use_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, Some(&registry), None);
+        let hover = hover.expect("should get hover for downstream identifier");
+        assert!(
+            hover.contents.contains("List"),
+            "Downstream expression should show the type propagated from the \
+             FFI call, not Dynamic. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn ffi_hover_without_registry_shows_untyped_info() {
+        let source = "Erlang lists reverse: #(1, 2, 3)";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Hover over "reverse:" — no registry provided
+        let reverse_offset = source.find("reverse").unwrap();
+        let pos = pos_at(source, reverse_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        let hover = hover.expect("should get hover even without registry");
+        let doc = hover.documentation.as_deref().unwrap_or("");
+        assert!(
+            doc.contains("Erlang FFI"),
+            "FFI hover should indicate it is an Erlang FFI call. Got: {doc}"
+        );
+    }
+
+    #[test]
+    fn hover_on_unannotated_param_shows_dynamic_reason() {
+        // An unannotated parameter `x` should show Dynamic (unannotated parameter)
+        let source = "Object subclass: Foo\n  doSomething: x => x";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Hover over the `x` in the method body (the return expression)
+        let body_x_offset = source.rfind('x').unwrap();
+        let pos = pos_at(source, body_x_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        let hover = hover.expect("should get hover for unannotated param reference");
+        assert!(
+            hover.contents.contains("Dynamic (unannotated parameter)"),
+            "Unannotated param should show reason. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_annotated_param_shows_concrete_type() {
+        // An annotated parameter should show the declared type, not Dynamic
+        let source = "Object subclass: Foo\n  doSomething: x :: Integer => x";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Hover over the `x` in the method body
+        let body_x_offset = source.rfind('x').unwrap();
+        let pos = pos_at(source, body_x_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        let hover = hover.expect("should get hover for annotated param reference");
+        assert!(
+            hover.contents.contains("Integer"),
+            "Annotated param should show Integer. Got: {}",
+            hover.contents
+        );
+        assert!(
+            !hover.contents.contains("Dynamic"),
+            "Annotated param should not be Dynamic. Got: {}",
+            hover.contents
+        );
+    }
+
+    // ── BT-2897 / ADR 0108: display-name provenance for hover ──────────────
+
+    /// Builds an `AliasRegistry` registered against `module`/`hierarchy`,
+    /// mirroring the batch registration order (classes → protocols →
+    /// aliases) `analyse_full` uses (see `alias_registry.rs`'s module doc).
+    fn alias_registry_for(module: &Module, hierarchy: &ClassHierarchy) -> AliasRegistry {
+        let protocol_registry =
+            beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(module, hierarchy, &protocol_registry);
+        assert!(diags.is_empty(), "unexpected alias diagnostics: {diags:?}");
+        registry
+    }
+
+    #[test]
+    fn hover_on_alias_typed_param_shows_alias_name_and_expansion() {
+        // ADR 0108's flagship example: hover on a `RestartStrategy`-typed
+        // value shows the alias name *and* the structural expansion, not
+        // just one or the other.
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let alias_registry = alias_registry_for(&module, &hierarchy);
+
+        // Hover over `policy` in the method body (the return expression).
+        let offset = source.rfind("=> policy").unwrap() + "=> ".len();
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(
+            &module,
+            source,
+            pos,
+            &hierarchy,
+            None,
+            Some(&alias_registry),
+        );
+        let hover = hover.expect("should get hover for alias-typed param reference");
+        assert!(
+            hover
+                .contents
+                .contains("RestartStrategy (#temporary | #transient | #permanent)"),
+            "Alias-typed value should show `AliasName (expansion)`. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_without_alias_registry_does_not_resolve_alias() {
+        // Sanity check for the `alias_registry: None` default (real LSP
+        // callers today — see `language_service::mod::hover`'s doc): without
+        // a registry, `RestartStrategy` resolves as an ordinary (unresolved)
+        // nominal class name, exactly like pre-BT-2897 behaviour — it must
+        // never show the `AliasName (expansion)` format by accident.
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.rfind("=> policy").unwrap() + "=> ".len();
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        let hover = hover.expect("should get hover for alias-typed param reference");
+        assert!(
+            !hover.contents.contains('('),
+            "Without an alias registry, hover must not show `AliasName (expansion)`. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_singleton_eq_false_branch_shows_structural_type_no_alias_name() {
+        // ADR 0108 v1 scope: narrowing residuals never carry the alias name
+        // — the false branch of `policy =:= #temporary` renders the plain
+        // structural `#transient | #permanent`, not `RestartStrategy
+        // (#transient | #permanent)`. Pins this as intentional (see
+        // `TypeProvenance::Aliased`'s doc and `union_of`'s "best provenance"
+        // exclusion), not a regression to fix later.
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\
+                       policy :: RestartStrategy := #transient\n\
+                       (policy =:= #temporary) ifFalse: [policy]";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let alias_registry = alias_registry_for(&module, &hierarchy);
+
+        // Position at `policy` inside the `ifFalse:` block, not the
+        // declaration or the guard.
+        let offset = source.rfind("[policy]").unwrap() + 1;
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(
+            &module,
+            source,
+            pos,
+            &hierarchy,
+            None,
+            Some(&alias_registry),
+        );
+        let hover = hover.expect("should hover on narrowed `policy`");
+        assert!(
+            hover.contents.contains("#transient | #permanent"),
+            "Should show the narrowed structural union. Got: {}",
+            hover.contents
+        );
+        assert!(
+            !hover.contents.contains("RestartStrategy"),
+            "Narrowing residual must not carry the alias name (ADR 0108 v1 scope). Got: {}",
+            hover.contents
+        );
+    }
+
+    // ---- ADR 0108 Phase 8 (BT-2901): hover on the alias declaration itself ----
+
+    #[test]
+    fn hover_on_alias_declaration_name_shows_expansion() {
+        // Cursor directly on `RestartStrategy` in `type RestartStrategy =
+        // ...` — distinct from the reference-site case above (hovering a
+        // value/annotation *typed through* the alias); this is the
+        // declaration token itself.
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.find("RestartStrategy").unwrap() + 3;
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        let hover = hover.expect("should get hover on the alias declaration name");
+        assert!(
+            hover.contents.contains("RestartStrategy"),
+            "Got: {}",
+            hover.contents
+        );
+        assert!(
+            hover
+                .contents
+                .contains("#temporary | #transient | #permanent"),
+            "Should show the RHS expansion. Got: {}",
+            hover.contents
+        );
+        assert_eq!(hover.span, module.type_aliases[0].name.span);
+    }
+
+    #[test]
+    fn hover_on_internal_alias_declaration_name_shows_internal_keyword() {
+        let source = "internal type JsonKey = #a | #b\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.find("JsonKey").unwrap() + 2;
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        let hover = hover.expect("should get hover on the internal alias declaration name");
+        assert!(
+            hover.contents.contains("internal type"),
+            "Got: {}",
+            hover.contents
+        );
+    }
+
+    // ── BT-2911: state field *access* hover (the `Expression::FieldAccess`
+    // gap BT-2897 left, since `state_field_type` reads a bare `EcoString`
+    // from `ClassHierarchy` with no alias provenance) ─────────────────────
+
+    #[test]
+    fn hover_on_alias_typed_state_field_access_shows_alias_name_and_expansion() {
+        // Hovering `self.policy` (a state field *access*) must show
+        // `AliasName (expansion)` too, matching what hovering an
+        // alias-typed parameter/local already shows (BT-2897's
+        // `hover_on_alias_typed_param_shows_alias_name_and_expansion`).
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Actor subclass: Supervisor\n  state: policy :: RestartStrategy = #temporary\n\n  \
+                       currentPolicy => self.policy\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let alias_registry = alias_registry_for(&module, &hierarchy);
+
+        // Hover over `policy` in `self.policy` (the field access, not the
+        // `state:` declaration itself).
+        let offset = source.rfind("self.policy").unwrap() + "self.".len();
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(
+            &module,
+            source,
+            pos,
+            &hierarchy,
+            None,
+            Some(&alias_registry),
+        );
+        let hover = hover.expect("should get hover for alias-typed state field access");
+        assert!(
+            hover
+                .contents
+                .contains("RestartStrategy (#temporary | #transient | #permanent)"),
+            "Alias-typed field access should show `AliasName (expansion)`. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_alias_typed_state_field_access_without_alias_registry_shows_raw_name() {
+        // Sanity check mirroring `hover_without_alias_registry_does_not_resolve_alias`:
+        // without a registry, the field access falls back to the raw
+        // (unresolved) declared type text — pre-BT-2911 behaviour, and the
+        // real-LSP-caller default when no project-wide alias table is
+        // available yet.
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Actor subclass: Supervisor\n  state: policy :: RestartStrategy = #temporary\n\n  \
+                       currentPolicy => self.policy\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.rfind("self.policy").unwrap() + "self.".len();
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        let hover = hover.expect("should get hover for alias-typed state field access");
+        assert!(
+            hover.contents.contains("RestartStrategy") && !hover.contents.contains('('),
+            "Without an alias registry, hover must show the raw name with no expansion. Got: {}",
+            hover.contents
+        );
+    }
+}

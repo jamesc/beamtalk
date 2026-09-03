@@ -31,7 +31,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, info, warn};
 
-use beamtalk_core::language_service::{
+use beamtalk_language_service::{
     NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolsResponse,
 };
 use beamtalk_repl_protocol::{ReplResponse, RequestBuilder, handshake};
@@ -182,7 +182,7 @@ pub struct ClassChangedEvent {
 /// BT-2779) — mirrors `beamtalk_recheck:site_ref()`
 /// (`runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl`). `line` is
 /// the 1-based line xref recorded for the call site, not a byte offset —
-/// same precedent as [`beamtalk_core::language_service::NavSite`].
+/// same precedent as [`beamtalk_language_service::NavSite`].
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ReloadSite {
     /// Selector of the caller method containing the site.
@@ -1457,163 +1457,25 @@ mod tests {
     // (`just test-mcp`).
     // ------------------------------------------------------------------
 
-    /// How the fake workspace behaves during the pre-`session-started`
-    /// handshake. One variant per branch of [`perform_auth_handshake`] and
-    /// [`read_text`].
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum Handshake {
-        /// The real sequence: `auth-required` → (client auth) → `auth_ok` →
-        /// `session-started`.
-        Ok,
-        /// Same, but a binary frame precedes each text frame — `read_text`
-        /// must skip non-text frames rather than treat them as the handshake.
-        OkWithBinaryNoise,
-        /// Close the socket before sending anything.
-        CloseImmediately,
-        /// Drop the socket (FIN, no close frame) before sending anything.
-        DropImmediately,
-        /// First frame is not JSON.
-        UnparseableAuthRequired,
-        /// First frame is JSON but not `op: auth-required`.
-        WrongPreAuthOp,
-        /// Reply to the client's auth with `auth_error`.
-        AuthError,
-        /// Reply to the client's auth with `auth_error` carrying no `message`.
-        AuthErrorWithoutMessage,
-        /// Reply to the client's auth with an unrecognised `type`.
-        UnexpectedAuthResponse,
-        /// Auth succeeds but the follow-up frame is not `op: session-started`.
-        WrongPostAuthOp,
-    }
-
-    /// Frames the fake workspace sends back for one received request.
-    type Responder = Box<dyn Fn(&serde_json::Value) -> Vec<Message> + Send + Sync>;
-
-    /// A running fake workspace. Aborts its task on drop, so a test that
-    /// returns early never leaks a listener.
-    struct FakeWorkspace {
-        port: u16,
-        /// Every request frame the server received, in arrival order.
-        seen: Arc<Mutex<Vec<serde_json::Value>>>,
-        /// Fires once the server's post-handshake read loop has exited —
-        /// i.e. the client hung up.
-        disconnected: Option<oneshot::Receiver<()>>,
-        task: tokio::task::JoinHandle<()>,
-    }
-
-    impl Drop for FakeWorkspace {
-        fn drop(&mut self) {
-            self.task.abort();
-        }
-    }
-
-    fn text(value: &serde_json::Value) -> Message {
-        Message::Text(value.to_string().into())
-    }
+    // BT-3331: the loopback WS server performing this handshake (listener
+    // bind, ADR 0020 frames, request/response loop keyed by a responder
+    // closure) used to be hand-rolled here; it's now shared with
+    // `beamtalk-mcp`'s equivalent fake REPL via
+    // `beamtalk_repl_protocol::test_support` (see that module's doc comment
+    // for the full extraction rationale). `Handshake`/`FakeWorkspace` alias
+    // the shared types under this file's existing names so every call site
+    // below (`Handshake::Ok`, `ws.seen`, `ws.port`, …) is unchanged;
+    // `spawn_workspace` adapts the shared 3-arg `spawn` (which also takes a
+    // `session_id` — unused here, since `perform_auth_handshake` only checks
+    // the `session-started` frame's `op`, never its `session` field) back to
+    // this file's original 2-arg signature.
+    use beamtalk_repl_protocol::test_support::{
+        FakeWsServer as FakeWorkspace, HandshakeMode as Handshake, Responder, text,
+    };
 
     /// Spawn a fake workspace on an ephemeral loopback port.
     async fn spawn_workspace(handshake: Handshake, responder: Responder) -> FakeWorkspace {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind loopback");
-        let port = listener.local_addr().expect("local addr").port();
-        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
-        let seen_task = Arc::clone(&seen);
-        let (done_tx, done_rx) = oneshot::channel();
-
-        let task = tokio::spawn(async move {
-            let Ok((stream, _peer)) = listener.accept().await else {
-                return;
-            };
-            let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else {
-                return;
-            };
-
-            if handshake == Handshake::DropImmediately {
-                drop(ws);
-                return;
-            }
-            if handshake == Handshake::CloseImmediately {
-                let _ = ws.close(None).await;
-                return;
-            }
-            if handshake == Handshake::OkWithBinaryNoise {
-                let _ = ws.send(Message::Binary(vec![0xF0, 0x9F].into())).await;
-            }
-
-            match handshake {
-                Handshake::UnparseableAuthRequired => {
-                    let _ = ws.send(Message::Text("not json at all".into())).await;
-                    return;
-                }
-                Handshake::WrongPreAuthOp => {
-                    let _ = ws.send(text(&json!({"op": "something-else"}))).await;
-                    return;
-                }
-                _ => {
-                    let _ = ws.send(text(&json!({"op": "auth-required"}))).await;
-                }
-            }
-
-            // The client's auth frame.
-            let auth = ws.next().await;
-            let Some(Ok(Message::Text(auth))) = auth else {
-                return;
-            };
-            let auth: serde_json::Value = serde_json::from_str(&auth).unwrap_or(json!({}));
-            seen_task.lock().await.push(auth);
-
-            if handshake == Handshake::OkWithBinaryNoise {
-                let _ = ws.send(Message::Binary(vec![0x00].into())).await;
-            }
-            match handshake {
-                Handshake::AuthError => {
-                    let _ = ws
-                        .send(text(
-                            &json!({"type": "auth_error", "message": "invalid cookie"}),
-                        ))
-                        .await;
-                    return;
-                }
-                Handshake::AuthErrorWithoutMessage => {
-                    let _ = ws.send(text(&json!({"type": "auth_error"}))).await;
-                    return;
-                }
-                Handshake::UnexpectedAuthResponse => {
-                    let _ = ws.send(text(&json!({"type": "who_are_you"}))).await;
-                    return;
-                }
-                _ => {
-                    let _ = ws.send(text(&json!({"type": "auth_ok"}))).await;
-                }
-            }
-
-            if handshake == Handshake::WrongPostAuthOp {
-                let _ = ws.send(text(&json!({"op": "not-session-started"}))).await;
-                return;
-            }
-            let _ = ws.send(text(&json!({"op": "session-started"}))).await;
-
-            while let Some(Ok(msg)) = ws.next().await {
-                let Message::Text(body) = msg else { continue };
-                let request: serde_json::Value = serde_json::from_str(&body).unwrap_or(json!({}));
-                seen_task.lock().await.push(request.clone());
-                for frame in responder(&request) {
-                    let closing = matches!(frame, Message::Close(_));
-                    if ws.send(frame).await.is_err() || closing {
-                        break;
-                    }
-                }
-            }
-            let _ = done_tx.send(());
-        });
-
-        FakeWorkspace {
-            port,
-            seen,
-            disconnected: Some(done_rx),
-            task,
-        }
+        beamtalk_repl_protocol::test_support::spawn(handshake, "", responder).await
     }
 
     /// A responder that answers every request with `value`, echoing the

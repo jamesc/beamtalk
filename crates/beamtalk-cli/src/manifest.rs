@@ -71,6 +71,10 @@ pub struct Manifest {
     /// project's registry dependencies resolve through.
     #[serde(default)]
     registry: Option<RegistryConfig>,
+    /// The optional `[stubs]` section declaring where this package's own
+    /// FFI type stub files live (ADR 0075 layer 2).
+    #[serde(default)]
+    stubs: Option<StubsConfig>,
     /// The optional `[diagnostics]` section — per-category severity overrides
     /// (ADR 0100 Rule 3). Stored as raw TOML for lazy parsing.
     ///
@@ -106,6 +110,25 @@ struct NativeSection {
 pub struct RegistryConfig {
     /// The registry index location — a git URL or a local directory path.
     pub url: String,
+}
+
+/// The `[stubs]` section of `beamtalk.toml`.
+///
+/// Declares where a package's own FFI type stub files (`declare native:`
+/// `.bt` files, ADR 0075) live, relative to the package root. A package
+/// declares stubs only for its own native Erlang code (its `native/`
+/// directory, ADR 0072) — not for its dependencies, which are typed via
+/// auto-extraction instead.
+///
+/// ```toml
+/// [stubs]
+/// path = "stubs/"
+/// ```
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct StubsConfig {
+    /// Path to the package's stub directory, relative to the package root.
+    pub path: String,
 }
 
 /// A dependency entry as it appears in `beamtalk.toml`.
@@ -646,6 +669,9 @@ pub struct ParsedManifest {
     /// The optional `[registry]` section — overrides where registry
     /// dependencies are resolved from (`None` uses the env var / default).
     pub registry: Option<RegistryConfig>,
+    /// The optional `[stubs]` section — where this package's own FFI type
+    /// stubs live (`None` if the package ships no stubs).
+    pub stubs: Option<StubsConfig>,
 }
 
 /// Parse a `beamtalk.toml` manifest file.
@@ -701,6 +727,7 @@ pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
         native_dependencies,
         diagnostics,
         registry: manifest.registry,
+        stubs: manifest.stubs,
     })
 }
 
@@ -1712,6 +1739,54 @@ version = "0.1.0"
 [registry]
 url = "https://example.test/registry"
 mirror = "https://example.test/other"
+"#,
+        );
+
+        assert!(parse_manifest_full(&path.join("beamtalk.toml")).is_err());
+    }
+
+    // --- [stubs] section ---
+
+    #[test]
+    fn test_parse_stubs_section() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[stubs]
+path = "stubs/"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.stubs.unwrap().path, "stubs/");
+    }
+
+    #[test]
+    fn test_stubs_section_absent_is_none() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(&temp, "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n");
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert!(manifest.stubs.is_none());
+    }
+
+    #[test]
+    fn test_stubs_section_rejects_unknown_fields() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[stubs]
+path = "stubs/"
+extra = "not allowed"
 "#,
         );
 

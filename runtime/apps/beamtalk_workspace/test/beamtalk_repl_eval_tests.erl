@@ -746,6 +746,248 @@ extract_assignment_multiline_test() ->
 extract_assignment_no_space_v2_test() ->
     ?assertEqual({ok, abc}, beamtalk_repl_eval:extract_assignment("abc:=123")).
 
+%% BT-3368: a second top-level statement on its own line (no `.` at all)
+%% must bail to `none`, exactly like the existing period-separated case —
+%% otherwise the first statement's variable gets clobbered with the whole
+%% call's `Result` (the last statement's value) in process_eval_result/4.
+extract_assignment_newline_separated_statements_test() ->
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("alpha := 111\nbeta := 222")),
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("a1 := 1\na2 := 2\na3 := 3")).
+
+%% A trailing newline with nothing (or only whitespace) after it is not a
+%% second statement — the single assignment is still detected.
+extract_assignment_trailing_newline_test() ->
+    ?assertEqual({ok, count}, beamtalk_repl_eval:extract_assignment("count := 0\n")),
+    ?assertEqual({ok, count}, beamtalk_repl_eval:extract_assignment("count := 0\n  \n")).
+
+%% BT-3368 regression guard: a SINGLE assignment whose right-hand side
+%% merely continues onto later lines (a multi-line block/collection
+%% literal, or the value on a continuation line) must NOT be mistaken for
+%% multiple statements — none of the continuation lines themselves open
+%% with `ident :=`, so this must still resolve to the one real assignment.
+extract_assignment_multiline_rhs_is_still_one_statement_test() ->
+    ?assertEqual({ok, result}, beamtalk_repl_eval:extract_assignment("result :=\n  42")),
+    ?assertEqual(
+        {ok, doubler},
+        beamtalk_repl_eval:extract_assignment("doubler := [\n  :x |\n  x * 2\n]")
+    ).
+
+%% BT-3368 regression guard (review follow-up): a period *nested* inside a
+%% block/collection literal — itself part of the single outer assignment's
+%% right-hand side — must not be mistaken for the pre-existing
+%% period-separates-statements signal. `docs/beamtalk-language-features.md`'s
+%% own `ClassBuilder` cascade example is exactly this shape: multiple
+%% semicolon-chained keyword sends whose block-literal bodies use `.` to
+%% separate their *own* internal statements, all as one top-level
+%% assignment.
+extract_assignment_nested_period_in_cascade_is_still_one_statement_test() ->
+    Src =
+        "account := Object classBuilder\n"
+        "  name: #Account;\n"
+        "  superclass: Object;\n"
+        "  classVars: #{ #opened => 0 };\n"
+        "  fields: #{ #balance => 0 };\n"
+        "  methods: #{ #balance => [:inst | inst fieldAt: #balance] };\n"
+        "  classMethods: #{ #open => [:self | self.opened := self.opened + 1. self.opened] };\n"
+        "  register",
+    ?assertEqual({ok, account}, beamtalk_repl_eval:extract_assignment(Src)).
+
+%% BT-3368 regression guard (review follow-up): a backslash-escaped quote
+%% inside a string literal (`"a\"b"`, per `lex_string/0`'s handling of `\`
+%% in `source_analysis/lexer.rs`) must not be mistaken for the string's
+%% closing delimiter — otherwise a `.` or newline that's still genuinely
+%% *inside* the string reads as depth-0 code and wrongly triggers a bail.
+extract_assignment_escaped_quote_in_string_is_still_one_statement_test() ->
+    %% s := "a\"b. c"  (one statement: a single-quoted string containing an
+    %% escaped quote, then ". " — which must stay inside the string).
+    Src = "s := \"a\\\"b. c\"",
+    ?assertEqual({ok, s}, beamtalk_repl_eval:extract_assignment(Src)),
+    %% Same shape, but the content after the escaped quote uses a newline +
+    %% ident-looking continuation instead of a period.
+    Src2 = "s := \"a\\\"b\nident := 1\"",
+    ?assertEqual({ok, s}, beamtalk_repl_eval:extract_assignment(Src2)),
+    %% An escaped backslash (`\\`) immediately before a REAL closing quote
+    %% must still close the string — only an odd run of backslashes escapes
+    %% the quote.
+    Src3 = "s := \"a\\\\\". y := 2",
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment(Src3)).
+
+%% BT-3368 regression guard (review follow-up): a `$`-prefixed character
+%% literal (`$(`, `$"`, `$\n`, ... — see `lex_character/0`,
+%% `source_analysis/lexer.rs`) must be consumed atomically, never letting
+%% its payload character be read as a real bracket/quote — otherwise a
+%% `$(`/`$[`/`${` inside one statement permanently unbalances `Depth` and
+%% masks a real second top-level statement later in the same call.
+extract_assignment_character_literal_payload_is_not_a_bracket_test() ->
+    %% Genuinely two statements — the bracket-payload character literal in
+    %% the first one must not swallow the real top-level `.` separator.
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("x := $( class. y := 2")),
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("x := $[ class. y := 2")),
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("x := ${ class. y := 2")),
+    %% A single statement using a bracket- or quote-payload character
+    %% literal must still resolve correctly (no false bail either).
+    ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $( class")),
+    ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $\" class")),
+    %% Escaped-payload form (`$\c`) consumes all three characters together.
+    ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $\\( class")).
+
+%% BT-3368 regression guard (review follow-up): a string containing
+%% interpolation (`"...{expr}..."`) may itself contain a *nested* string
+%% literal inside the interpolated expression (`lex_interpolation_body`/
+%% `skip_nested_string`, `source_analysis/lexer.rs`) — a single BT string
+%% token can legitimately have more than two `"` characters, with the
+%% interpolated expression's own `.`/`{`/`}`/`"` syntax interleaved.
+%% `skip_string_literal/1` doesn't attempt to mirror that (see its own doc
+%% comment) — it bails conservatively (`unsupported`) the moment it sees an
+%% unescaped `{`, which `has_second_top_level_statement/1` treats as "found
+%% a second statement" so `extract_assignment/1` safely returns `none`
+%% (skips the future-rebinding optimization) rather than mis-pairing quotes
+%% across the interpolation and misreading genuine interpolated code as a
+%% top-level statement boundary.
+extract_assignment_interpolated_string_is_not_mis_parsed_test() ->
+    %% The exact shape from review: a nested string inside the interpolated
+    %% expression, containing what would look like a `.` statement
+    %% separator if the scanner mis-closed the outer string early.
+    ?assertEqual(
+        none, beamtalk_repl_eval:extract_assignment("x := \"pre {a == \"z. bogus\"} mid\"")
+    ),
+    %% Plain interpolation, no nested string — still conservatively bails
+    %% (never mis-parsed), since the scanner doesn't try to reason about
+    %% what's inside the interpolation at all.
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("x := \"Hello {name}\"")),
+    %% A plain string with no interpolation at all is unaffected.
+    ?assertEqual(
+        {ok, x}, beamtalk_repl_eval:extract_assignment("x := \"no interpolation here\"")
+    ).
+
+%% BT-3368 review follow-up (CLAUDE.md Essential Rules: a "mirrors" claim
+%% across the Rust/Erlang boundary needs a shared conformance fixture, not
+%% just a comment): `skip_string_literal/1`/`skip_character_literal/1` are
+%% hand-rolled Erlang mirrors of the Rust lexer's `lex_string/0`/
+%% `lex_character/0` span computation. Both sides run the exact same cases
+%% from `test/fixtures/string_and_character_literal_span_corpus.json` — see
+%% `source_analysis::lexer::tests::string_and_character_literal_span_matches_shared_corpus`
+%% for the Rust side.
+string_and_character_literal_span_matches_shared_corpus_test() ->
+    Path = filename:join([
+        code:lib_dir(beamtalk_workspace),
+        "test",
+        "fixtures",
+        "string_and_character_literal_span_corpus.json"
+    ]),
+    {ok, Raw} = file:read_file(Path),
+    Cases = json:decode(Raw),
+    ?assert(length(Cases) > 0),
+    lists:foreach(fun assert_literal_span_case/1, Cases).
+
+assert_literal_span_case(#{
+    <<"kind">> := Kind,
+    <<"source">> := SourceBin,
+    <<"expected_end">> := ExpectedEnd,
+    <<"why">> := Why
+}) ->
+    Source = unicode:characters_to_list(SourceBin),
+    Remaining =
+        case Kind of
+            <<"string">> ->
+                {ok, R} = beamtalk_repl_eval:skip_string_literal(Source),
+                R;
+            <<"character">> ->
+                beamtalk_repl_eval:skip_character_literal(Source)
+        end,
+    Consumed = length(Source) - length(Remaining),
+    ?assertEqual(
+        ExpectedEnd,
+        Consumed,
+        lists:flatten(io_lib:format("span-end mismatch for ~p (~ts)", [Source, Why]))
+    ).
+
+%% BT-3372: a `//` line comment containing an unbalanced bracket, followed
+%% by a genuine second top-level statement, must still be detected as two
+%% statements — the bracket inside the comment must not permanently bump
+%% `Depth` and mask the real statement boundary that follows. Exact repro
+%% from the issue: without comment-awareness, the `(` in `// (see below`
+%% bumps `Depth` to 1 and nothing ever closes it, so `extract_assignment/1`
+%% wrongly returns `{ok, alpha}` and `process_eval_result/4` clobbers
+%% `alpha`'s already-correct binding with `beta`'s value.
+extract_assignment_line_comment_unbalanced_bracket_test() ->
+    ?assertEqual(
+        none, beamtalk_repl_eval:extract_assignment("alpha := 1 // (see below\nbeta := 2")
+    ).
+
+%% BT-3372: a `"` inside a `//` comment must not be misread as the start of
+%% a real string literal — otherwise it could swallow real code that
+%% follows and mask a second statement through a different path.
+extract_assignment_line_comment_with_quote_test() ->
+    ?assertEqual(
+        none,
+        beamtalk_repl_eval:extract_assignment(
+            "alpha := 1 // says \"hi\" here\nbeta := 2"
+        )
+    ),
+    %% A single statement with a trailing `//` comment containing a quote is
+    %% unaffected — no false bail.
+    ?assertEqual(
+        {ok, alpha},
+        beamtalk_repl_eval:extract_assignment("alpha := 1 // says \"hi\" here")
+    ).
+
+%% BT-3372: same shape, but with a `/* ... */` block comment instead of a
+%% `//` line comment — an unbalanced brace inside the block comment must
+%% not be read as real code either.
+extract_assignment_block_comment_unbalanced_brace_test() ->
+    ?assertEqual(
+        none,
+        beamtalk_repl_eval:extract_assignment("alpha := 1 /* { unbalanced */\nbeta := 2")
+    ),
+    %% A single statement with a block comment on the same line is
+    %% unaffected — no false bail.
+    ?assertEqual(
+        {ok, alpha},
+        beamtalk_repl_eval:extract_assignment("alpha := 1 /* note */")
+    ).
+
+%% BT-3372 (CLAUDE.md Essential Rules: a "mirrors" claim across the
+%% Rust/Erlang boundary needs a shared conformance fixture, not just a
+%% comment): `skip_line_comment/1`/`skip_block_comment/1` are hand-rolled
+%% Erlang mirrors of the Rust lexer's `lex_line_comment/0`/
+%% `lex_block_comment/0` span computation. Both sides run the exact same
+%% cases from `test/fixtures/comment_span_corpus.json` — see
+%% `source_analysis::lexer::tests::comment_span_matches_shared_corpus` for
+%% the Rust side.
+comment_span_matches_shared_corpus_test() ->
+    Path = filename:join([
+        code:lib_dir(beamtalk_workspace),
+        "test",
+        "fixtures",
+        "comment_span_corpus.json"
+    ]),
+    {ok, Raw} = file:read_file(Path),
+    Cases = json:decode(Raw),
+    ?assert(length(Cases) > 0),
+    lists:foreach(fun assert_comment_span_case/1, Cases).
+
+assert_comment_span_case(#{
+    <<"kind">> := Kind,
+    <<"source">> := SourceBin,
+    <<"expected_end">> := ExpectedEnd,
+    <<"why">> := Why
+}) ->
+    Source = unicode:characters_to_list(SourceBin),
+    Remaining =
+        case Kind of
+            <<"line_comment">> ->
+                beamtalk_repl_eval:skip_line_comment(Source);
+            <<"block_comment">> ->
+                beamtalk_repl_eval:skip_block_comment(Source)
+        end,
+    Consumed = length(Source) - length(Remaining),
+    ?assertEqual(
+        ExpectedEnd,
+        Consumed,
+        lists:flatten(io_lib:format("span-end mismatch for ~p (~ts)", [Source, Why]))
+    ).
+
 %% ===================================================================
 %% compile_expression_via_port catch clauses (BT-627)
 %% ===================================================================
@@ -1700,6 +1942,10 @@ eval_success_test_() ->
         {"do_eval assignment binds variable", fun do_eval_assignment_binds/0},
         {"do_eval reads existing binding", fun do_eval_reads_binding/0},
         {"do_eval multi-statement returns last", fun do_eval_multi_statement/0},
+        {"do_eval multi-statement newline-separated bindings (BT-3368)",
+            fun do_eval_multi_statement_newline_separated_bindings/0},
+        {"do_eval multi-statement newline-separated bindings, three vars (BT-3368)",
+            fun do_eval_multi_statement_newline_separated_bindings_three/0},
         {"do_eval runtime error wraps in _error", fun do_eval_runtime_error/0},
         {"do_eval inline class definition", fun do_eval_class_definition/0},
         {"do_eval protocol definition", fun do_eval_protocol_definition/0},
@@ -1804,6 +2050,29 @@ do_eval_multi_statement() ->
     {ok, Value, _Output, _Warnings, _State} =
         beamtalk_repl_eval:do_eval("1 + 1. 2 + 2. 10 * 5", state0()),
     ?assertEqual(50, Value).
+
+%% BT-3368: a multi-statement `eval` call (statements on separate lines, no
+%% `.` separators) binds every variable to its OWN value — the first
+%% variable must not be silently overwritten with the call's final value.
+do_eval_multi_statement_newline_separated_bindings() ->
+    {ok, Value, _Output, _Warnings, State} =
+        beamtalk_repl_eval:do_eval("alpha := 111\nbeta := 222", state0()),
+    ?assertEqual(222, Value),
+    Bindings = beamtalk_repl_state:get_bindings(State),
+    ?assertEqual(111, maps:get(alpha, Bindings)),
+    ?assertEqual(222, maps:get(beta, Bindings)),
+    %% A later, separate eval call sees the correctly-bound first variable.
+    {ok, AlphaValue, _Output2, _Warnings2, _State2} =
+        beamtalk_repl_eval:do_eval("alpha", State),
+    ?assertEqual(111, AlphaValue).
+
+do_eval_multi_statement_newline_separated_bindings_three() ->
+    {ok, _Value, _Output, _Warnings, State} =
+        beamtalk_repl_eval:do_eval("a1 := 1\na2 := 2\na3 := 3", state0()),
+    Bindings = beamtalk_repl_state:get_bindings(State),
+    ?assertEqual(1, maps:get(a1, Bindings)),
+    ?assertEqual(2, maps:get(a2, Bindings)),
+    ?assertEqual(3, maps:get(a3, Bindings)).
 
 do_eval_runtime_error() ->
     %% Sending an unknown message raises a does_not_understand; do_eval catches

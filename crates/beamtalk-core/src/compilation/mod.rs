@@ -18,6 +18,7 @@ pub mod extension_index;
 pub use dependency::{DependencyMap, DependencySource, DependencySpec, GitReference};
 pub use diagnostics_policy::{
     DiagnosticSeverityOverride, DiagnosticsTable, DiagnosticsTableError, apply_diagnostics_table,
+    apply_expect_directives, compute_diagnostics, compute_diagnostics_with_known_vars,
     load_diagnostics_table_for_root, parse_diagnostics_table,
     parse_diagnostics_table_from_manifest_toml, parse_package_name_from_manifest_toml,
 };

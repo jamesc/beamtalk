@@ -18,17 +18,12 @@ Tests inject_into/3 and to_list/1 for list inputs.
 %%% ============================================================================
 
 %% Load stdlib so non-list Collection classes (e.g. Interval) can dispatch do:.
+%%
+%% BT-3400: boot through the shared beamtalk_test_boot helper rather than an
+%% ad hoc pg/bootstrap/init sequence — see beamtalk_test_runner_tests's
+%% live_setup/0 for why the old sequence here was the flake's root cause.
 stdlib_setup() ->
-    case whereis(pg) of
-        undefined -> pg:start_link();
-        _ -> ok
-    end,
-    beamtalk_extensions:init(),
-    case whereis(beamtalk_bootstrap) of
-        undefined -> {ok, _} = beamtalk_bootstrap:start_link();
-        _ -> ok
-    end,
-    beamtalk_stdlib:init(),
+    beamtalk_test_boot:boot_real_stdlib('Interval'),
     ok.
 
 stdlib_teardown(_) -> ok.

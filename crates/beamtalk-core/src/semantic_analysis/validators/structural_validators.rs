@@ -451,6 +451,7 @@ const KNOWN_OTP_MODULES: &[&str] = &[
     "persistent_term",
     "proc_lib",
     "proplists",
+    "public_key",
     "queue",
     "rand",
     "re",
@@ -655,7 +656,12 @@ fn extract_erlang_module(expr: &Expression) -> Option<&str> {
 /// Keyword selectors like `seq:to:` become the first keyword part (`seq`).
 /// Unary selectors use the name directly. Binary selectors don't map to
 /// Erlang functions (they're Beamtalk operators).
-pub(crate) fn erlang_function_name(selector: &MessageSelector) -> Option<String> {
+///
+/// BT-3361: widened from `pub(crate)` to `pub` — `queries::ffi_sites_query`
+/// (Language Service) reaches this from the standalone
+/// `beamtalk-language-service` crate now, so `pub(crate)` visibility is no
+/// longer reachable.
+pub fn erlang_function_name(selector: &MessageSelector) -> Option<String> {
     match selector {
         MessageSelector::Unary(name) => Some(name.to_string()),
         MessageSelector::Keyword(parts) => parts
@@ -670,7 +676,10 @@ pub(crate) fn erlang_function_name(selector: &MessageSelector) -> Option<String>
 /// For direct Erlang FFI calls, the arity is the number of Beamtalk arguments
 /// for keyword messages (e.g. `seq: 1 to: 10` has arity 2), and 0 for unary
 /// messages (they lower to zero-argument Erlang function calls).
-pub(crate) fn erlang_arity(selector: &MessageSelector, argument_count: usize) -> usize {
+///
+/// BT-3361: widened from `pub(crate)` to `pub` — same rationale as
+/// [`erlang_function_name`] above.
+pub fn erlang_arity(selector: &MessageSelector, argument_count: usize) -> usize {
     match selector {
         MessageSelector::Unary(_) => 0,
         _ => argument_count,
@@ -726,6 +735,37 @@ fn visit_ffi_arity(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
+/// BT-1846/BT-1847: `declare native:` is only valid in a `stubs/` directory.
+///
+/// The parser accepts `declare native:` anywhere (it has no notion of file
+/// paths — see [`crate::ast::NativeDeclaration`]'s doc comment), so the build
+/// pipeline, which knows each module's source path, enforces the location
+/// rule here. Pass `is_stub_file: true` only for files under a project's,
+/// package's, or the distribution's `stubs/` directory; every other file
+/// (in particular anything under `src/`) rejects `declare native:` outright.
+pub(crate) fn check_native_declaration_location(
+    module: &Module,
+    is_stub_file: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if is_stub_file {
+        return;
+    }
+    for decl in &module.native_declarations {
+        diagnostics.push(
+            Diagnostic::error(
+                "'declare native:' is only valid in stubs/ directory",
+                decl.span,
+            )
+            .with_hint(
+                "Move this declaration into a stubs/ file, or remove it — \
+                     'declare native:' populates the Erlang FFI type registry \
+                     and never belongs in compiled source.",
+            ),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -734,7 +774,7 @@ mod tests {
         MethodDefinition, MethodKind, TypeParamDecl,
     };
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
-    use crate::source_analysis::Span;
+    use crate::source_analysis::{Severity, Span};
 
     fn test_span() -> Span {
         Span::new(0, 10)
@@ -1015,6 +1055,9 @@ mod tests {
         assert!(is_known_erlang_module("maps"));
         assert!(is_known_erlang_module("erlang"));
         assert!(is_known_erlang_module("io"));
+        assert!(is_known_erlang_module("crypto"));
+        assert!(is_known_erlang_module("ssl"));
+        assert!(is_known_erlang_module("public_key"));
     }
 
     #[test]
@@ -1049,6 +1092,27 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("custom_mod"));
         assert_eq!(diags[0].category, Some(DiagnosticCategory::UnresolvedFfi));
+    }
+
+    /// BT-3388: `public_key` ships in every standard OTP install and is the
+    /// natural companion to `ssl`/`crypto` for certificate/CA-trust work —
+    /// it must not trigger `unresolved_ffi`.
+    #[test]
+    fn test_public_key_module_does_not_warn() {
+        // Build: Erlang public_key cacerts_get
+        let send = Expression::MessageSend {
+            receiver: Box::new(class_ref("Erlang")),
+            selector: MessageSelector::Unary("public_key".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: test_span(),
+        };
+        let module = empty_module_with_exprs(vec![send]);
+        let mut diags = Vec::new();
+
+        check_unresolved_ffi_modules(&module, &mut diags);
+
+        assert!(diags.is_empty());
     }
 
     #[test]
@@ -1428,5 +1492,68 @@ mod tests {
         check_workspace_shadows(&hierarchy, &["Object", "Integer", "notAClass"], &mut diags);
 
         assert_eq!(diags.len(), 2, "Should warn for Object and Integer only");
+    }
+
+    // ── Native declaration location tests (BT-1846/BT-1847) ─────────────────
+
+    fn native_decl(module_name: &str) -> crate::ast::NativeDeclaration {
+        crate::ast::NativeDeclaration {
+            module: ident(module_name),
+            method_signatures: Vec::new(),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        }
+    }
+
+    #[test]
+    fn native_declaration_in_non_stub_file_errors() {
+        let module = Module {
+            native_declarations: vec![native_decl("lists")],
+            ..empty_module_with_exprs(vec![])
+        };
+        let mut diags = Vec::new();
+
+        check_native_declaration_location(&module, false, &mut diags);
+
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].severity, Severity::Error);
+        assert!(diags[0].message.contains("only valid in stubs/ directory"));
+    }
+
+    #[test]
+    fn native_declaration_in_stub_file_is_allowed() {
+        let module = Module {
+            native_declarations: vec![native_decl("lists")],
+            ..empty_module_with_exprs(vec![])
+        };
+        let mut diags = Vec::new();
+
+        check_native_declaration_location(&module, true, &mut diags);
+
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn module_without_native_declarations_is_always_fine() {
+        let module = empty_module_with_exprs(vec![]);
+        let mut diags = Vec::new();
+
+        check_native_declaration_location(&module, false, &mut diags);
+
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn multiple_native_declarations_each_produce_an_error() {
+        let module = Module {
+            native_declarations: vec![native_decl("lists"), native_decl("maps")],
+            ..empty_module_with_exprs(vec![])
+        };
+        let mut diags = Vec::new();
+
+        check_native_declaration_location(&module, false, &mut diags);
+
+        assert_eq!(diags.len(), 2);
     }
 }

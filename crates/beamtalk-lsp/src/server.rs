@@ -21,12 +21,6 @@ use crate::runtime::{
     RuntimeClient, RuntimeError,
 };
 
-use beamtalk_core::language_service::{
-    CallHierarchyTarget, CompletionKind, DocumentSymbolKind, LanguageService,
-    Location as BtLocation, NavQuery, NavSite, NavSymbolClass, Position as BtPosition,
-    RuntimeLocation, SimpleLanguageService, nav_site_to_location,
-};
-use beamtalk_core::queries::all_sends_query::{ReceiverKind, find_all_sends_in_source};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::source_analysis::{Severity, Span};
 use beamtalk_core::tool_expr::{
@@ -34,6 +28,12 @@ use beamtalk_core::tool_expr::{
     remove_method_if_absent_expr, save_class_expr,
 };
 use beamtalk_core::unparse::format_source;
+use beamtalk_language_service::queries::all_sends_query::{ReceiverKind, find_all_sends_in_source};
+use beamtalk_language_service::{
+    CallHierarchyTarget, CompletionKind, DocumentSymbolKind, LanguageService,
+    Location as BtLocation, NavQuery, NavSite, NavSymbolClass, Position as BtPosition,
+    RuntimeLocation, SimpleLanguageService, nav_site_to_location,
+};
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 use tower_lsp::jsonrpc::Result;
@@ -1913,7 +1913,7 @@ impl LanguageServer for Backend {
                     let range = std::fs::read_to_string(&erl_path)
                         .ok()
                         .and_then(|content| {
-                            beamtalk_core::queries::definition_provider::handle_call_clause_line(
+                            beamtalk_language_service::queries::definition_provider::handle_call_clause_line(
                                 &content,
                                 &delegate_info.selector,
                             )
@@ -4221,12 +4221,11 @@ fn configured_delegate_to_runtime(params: &InitializeParams) -> bool {
 
 /// Returns the stdlib source directory auto-discovered from the LSP binary's sysroot.
 ///
-/// Derives sysroot as `parent(parent(current_exe()))` — the same convention used
-/// by `beamtalk --print-sysroot` — then looks for `share/beamtalk/stdlib/src/`
-/// under that prefix.
+/// Derives the sysroot via the shared `beamtalk_sysroot` leaf crate — the
+/// same convention used by `beamtalk --print-sysroot` — then looks for
+/// `share/beamtalk/stdlib/src/` under that prefix.
 fn sysroot_stdlib_source_dir() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let sysroot = exe.parent()?.parent()?;
+    let sysroot = beamtalk_sysroot::current_sysroot()?;
     let candidate = sysroot.join("share/beamtalk/stdlib/src");
     canonicalize_existing_dir(&candidate)
 }
@@ -5128,7 +5127,7 @@ fn class_source_is_stdlib(
 /// would be worse than dropping the row.
 fn type_hierarchy_item(
     class_name: &str,
-    declaration: Option<&beamtalk_core::language_service::Location>,
+    declaration: Option<&beamtalk_language_service::Location>,
     svc: &SimpleLanguageService,
     fallback_uri: &Url,
 ) -> Option<TypeHierarchyItem> {
@@ -5190,7 +5189,7 @@ fn type_hierarchy_item_for_undeclared(class_name: &str, parent_uri: Url) -> Type
 /// `supertypes_of` / `subtypes_of` return) into LSP items, falling back
 /// to the parent item's URI for any class without an indexed declaration.
 fn collect_hierarchy_items<S>(
-    rows: Vec<(S, Option<beamtalk_core::language_service::Location>)>,
+    rows: Vec<(S, Option<beamtalk_language_service::Location>)>,
     svc: &SimpleLanguageService,
     parent_uri: &Url,
 ) -> Vec<TypeHierarchyItem>
@@ -5274,7 +5273,7 @@ fn position_to_offset(pos: tower_lsp::lsp_types::Position, source: &str) -> usiz
 
 /// Converts a beamtalk `Diagnostic` to an LSP `Diagnostic`.
 fn to_lsp_diagnostic(
-    diag: &beamtalk_core::language_service::Diagnostic,
+    diag: &beamtalk_language_service::Diagnostic,
     source: Option<&str>,
 ) -> tower_lsp::lsp_types::Diagnostic {
     let range = source
@@ -5309,7 +5308,7 @@ fn to_lsp_diagnostic(
 /// Converts a beamtalk `DocumentSymbol` to an LSP `DocumentSymbol`.
 #[expect(deprecated, reason = "LSP DocumentSymbol requires deprecated field")]
 fn to_lsp_symbol(
-    sym: beamtalk_core::language_service::DocumentSymbol,
+    sym: beamtalk_language_service::DocumentSymbol,
     source: &str,
 ) -> tower_lsp::lsp_types::DocumentSymbol {
     let range = span_to_range(sym.span, source);
@@ -5347,9 +5346,9 @@ fn to_lsp_symbol(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use beamtalk_core::language_service::HoverInfo;
     use beamtalk_core::test_helpers::unique_temp_dir;
     use beamtalk_core::unparse::escape_string_literal;
+    use beamtalk_language_service::HoverInfo;
     use camino::Utf8PathBuf;
     use std::fs;
 
@@ -6025,7 +6024,7 @@ mod tests {
                 .unwrap()
                 .package,
             Some(EcoString::from(
-                beamtalk_core::language_service::STDLIB_PACKAGE_MARKER,
+                beamtalk_language_service::STDLIB_PACKAGE_MARKER,
             )),
             "a didOpen racing preload must be re-stamped with the stdlib \
              package marker once preload marks the file, not keep the \
@@ -8337,7 +8336,7 @@ mod tests {
     // Erlang EUnit tests in `beamtalk_repl_ops_nav_symbols_tests.erl`.)
     // -----------------------------------------------------------------
 
-    use beamtalk_core::language_service::{NavSymbolClass as NSClass, NavSymbolMethod as NSMethod};
+    use beamtalk_language_service::{NavSymbolClass as NSClass, NavSymbolMethod as NSMethod};
 
     #[test]
     fn zero_width_range_for_line_clamps_zero_to_row_zero() {

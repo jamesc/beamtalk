@@ -900,8 +900,8 @@ fn byte_offset_to_col(source: &str, offset: u32) -> u32 {
 ///
 /// When the error carries a `Span`, formats the location as `"line N, col C"`
 /// using the source text. Falls back to the default `Display` format otherwise.
-fn format_codegen_error(e: &beamtalk_core::erlang::CodeGenError, source: &str) -> String {
-    use beamtalk_core::erlang::CodeGenError;
+fn format_codegen_error(e: &beamtalk_codegen::core_erlang::CodeGenError, source: &str) -> String {
+    use beamtalk_codegen::core_erlang::CodeGenError;
     match e {
         CodeGenError::UnsupportedFeature {
             feature,
@@ -1223,7 +1223,7 @@ fn parse_and_check_expression(
 
     let known_var_refs: Vec<&str> = known_vars.iter().map(String::as_str).collect();
     let (mut all_diagnostics, analysis) =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_analysis(
+        beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &module,
             parse_diagnostics,
             &known_var_refs,
@@ -1499,7 +1499,7 @@ fn derive_class_module_name(
     if let Some(name) = module_name_override {
         return name.to_string();
     }
-    let base_name = beamtalk_core::erlang::to_module_name(class_name);
+    let base_name = beamtalk_codegen::core_erlang::to_module_name(class_name);
     if stdlib_mode {
         format!("bt@stdlib@{base_name}")
     } else {
@@ -1602,13 +1602,14 @@ fn handle_inline_class_definition(
         }
     };
 
-    let mut codegen_options = beamtalk_core::erlang::CodegenOptions::new(&class_module_name)
-        .with_workspace_mode(true)
-        .with_source(source)
-        .with_class_superclass_index(class_superclass_index.clone())
-        .with_class_module_index(class_module_index)
-        .with_class_hierarchy(pre_class_hierarchy)
-        .with_pre_loaded_aliases(pre_loaded_aliases);
+    let mut codegen_options =
+        beamtalk_codegen::core_erlang::CodegenOptions::new(&class_module_name)
+            .with_workspace_mode(true)
+            .with_source(source)
+            .with_class_superclass_index(class_superclass_index.clone())
+            .with_class_module_index(class_module_index)
+            .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases);
     if let Some(analysis) = analysis {
         // BT-3125: prepare the AST at the driver boundary using the same
         // analysis handed off to codegen just below — codegen no longer
@@ -1620,7 +1621,7 @@ fn handle_inline_class_definition(
         );
         codegen_options = codegen_options.with_analysis(analysis);
     }
-    match beamtalk_core::erlang::generate_module(&module, codegen_options) {
+    match beamtalk_codegen::core_erlang::generate_module(&module, codegen_options) {
         Ok(code) => class_definition_ok_response(
             &code,
             &class_module_name,
@@ -1681,13 +1682,14 @@ fn handle_inline_protocol_definition(
         .map(|p| p.name.name.to_string())
         .collect();
 
-    let mut codegen_options = beamtalk_core::erlang::CodegenOptions::new(&protocol_module_name)
-        .with_workspace_mode(true)
-        .with_source(source)
-        .with_class_superclass_index(class_superclass_index.clone())
-        .with_class_module_index(class_module_index)
-        .with_class_hierarchy(pre_class_hierarchy)
-        .with_pre_loaded_aliases(pre_loaded_aliases);
+    let mut codegen_options =
+        beamtalk_codegen::core_erlang::CodegenOptions::new(&protocol_module_name)
+            .with_workspace_mode(true)
+            .with_source(source)
+            .with_class_superclass_index(class_superclass_index.clone())
+            .with_class_module_index(class_module_index)
+            .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases);
     // BT-3125: no `lower_module_for_codegen` call needed here — both callers
     // only reach this function once `module.classes` is confirmed empty (a
     // protocol-only compile), and the writeback trio only ever touches
@@ -1695,7 +1697,7 @@ fn handle_inline_protocol_definition(
     if let Some(analysis) = analysis {
         codegen_options = codegen_options.with_analysis(analysis);
     }
-    match beamtalk_core::erlang::generate_module(module, codegen_options) {
+    match beamtalk_codegen::core_erlang::generate_module(module, codegen_options) {
         Ok(code) => protocol_definition_ok_response(
             &code,
             &protocol_module_name,
@@ -1787,7 +1789,7 @@ fn handle_compile(request: &Map) -> Term {
     // hierarchy, semantic facts, and inferred method return types from
     // scratch.
     let (mut all_diagnostics, analysis) =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_analysis(
+        beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &module,
             parse_diagnostics,
             &[],
@@ -1934,7 +1936,7 @@ fn handle_compile(request: &Map) -> Term {
 
     // Generate Core Erlang
     let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
-    let mut codegen_options = beamtalk_core::erlang::CodegenOptions::new(&module_name)
+    let mut codegen_options = beamtalk_codegen::core_erlang::CodegenOptions::new(&module_name)
         .with_workspace_mode(workspace_mode)
         .with_source(&source)
         .with_class_module_index(class_module_index)
@@ -1956,7 +1958,7 @@ fn handle_compile(request: &Map) -> Term {
         );
         codegen_options = codegen_options.with_analysis(analysis);
     }
-    match beamtalk_core::erlang::generate_module(&module, codegen_options) {
+    match beamtalk_codegen::core_erlang::generate_module(&module, codegen_options) {
         Ok(code) => compile_ok_response(
             &code,
             &module_name,
@@ -2131,7 +2133,7 @@ fn handle_compile_method(request: &Map) -> Term {
     // further mutation happens before the codegen call below, so it's always
     // safe to thread through via `CodegenOptions::with_analysis`.
     let (mut all_diagnostics, analysis) =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_analysis(
+        beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &merged_module,
             merged_parse_diags,
             &[],
@@ -2194,7 +2196,7 @@ fn handle_compile_method(request: &Map) -> Term {
         &analysis.class_hierarchy,
         &analysis.method_return_types,
     );
-    let codegen_options = beamtalk_core::erlang::CodegenOptions::new(&module_name)
+    let codegen_options = beamtalk_codegen::core_erlang::CodegenOptions::new(&module_name)
         .with_workspace_mode(workspace_mode)
         .with_source(&merged_class_source)
         .with_class_module_index(class_module_index)
@@ -2205,7 +2207,7 @@ fn handle_compile_method(request: &Map) -> Term {
         // BT-3123: `analysis` was computed on `merged_module` with no
         // mutation since — always safe to hand off.
         .with_analysis(analysis);
-    match beamtalk_core::erlang::generate_module(&merged_module, codegen_options) {
+    match beamtalk_codegen::core_erlang::generate_module(&merged_module, codegen_options) {
         Ok(code) => compile_method_ok_response(
             &code,
             &module_name,
@@ -2269,7 +2271,7 @@ fn handle_diagnostics(request: &Map) -> Term {
         // it as an unknown nominal class instead of picking up the
         // redefinition, defeating the whole point of re-checking it.
         let pre_loaded_aliases = extract_known_type_aliases(request);
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_referenced_aliases(
+        beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_referenced_aliases(
             &module,
             parse_diagnostics,
             &[],
@@ -2345,7 +2347,7 @@ fn resolve_completion_type_response(
         hierarchy.add_from_beam_meta(pre_class_hierarchy);
     }
 
-    match beamtalk_core::queries::completion_provider::resolve_expression_type(
+    match beamtalk_language_service::queries::completion_provider::resolve_expression_type(
         expression,
         &hierarchy,
         Some(native_type_registry),
@@ -2378,7 +2380,9 @@ fn handle_find_senders_in_source(request: &Map) -> Term {
         return error_response(&["Missing or invalid 'selector' field".to_string()]);
     };
 
-    let lines = beamtalk_core::queries::senders_query::find_senders_in_source(&source, &selector);
+    let lines = beamtalk_language_service::queries::senders_query::find_senders_in_source(
+        &source, &selector,
+    );
     ok_lines_response(&lines)
 }
 
@@ -2406,19 +2410,20 @@ fn handle_find_all_sends_in_source(request: &Map) -> Term {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
     };
 
-    let sends = beamtalk_core::queries::all_sends_query::find_all_sends_in_source(&source);
+    let sends =
+        beamtalk_language_service::queries::all_sends_query::find_all_sends_in_source(&source);
     let send_terms: Vec<Term> = sends
         .iter()
         .map(|hit| {
             let recv = match hit.receiver {
-                beamtalk_core::queries::all_sends_query::ReceiverKind::SelfReceiver => atom("self"),
-                beamtalk_core::queries::all_sends_query::ReceiverKind::SuperReceiver => {
+                beamtalk_language_service::queries::all_sends_query::ReceiverKind::SelfReceiver => atom("self"),
+                beamtalk_language_service::queries::all_sends_query::ReceiverKind::SuperReceiver => {
                     atom("super")
                 }
-                beamtalk_core::queries::all_sends_query::ReceiverKind::ErlangFfi => {
+                beamtalk_language_service::queries::all_sends_query::ReceiverKind::ErlangFfi => {
                     atom("erlang_ffi")
                 }
-                beamtalk_core::queries::all_sends_query::ReceiverKind::Other => atom("other"),
+                beamtalk_language_service::queries::all_sends_query::ReceiverKind::Other => atom("other"),
             };
             let target_module = hit.target_module.as_deref().unwrap_or("");
             Term::from(Map::from([
@@ -2463,7 +2468,9 @@ fn handle_find_announce_sites_in_source(request: &Map) -> Term {
     };
 
     let sites =
-        beamtalk_core::queries::announce_sites_query::find_announce_sites_in_source(&source);
+        beamtalk_language_service::queries::announce_sites_query::find_announce_sites_in_source(
+            &source,
+        );
     let site_terms: Vec<Term> = sites
         .iter()
         .map(|hit| {
@@ -2506,10 +2513,11 @@ fn handle_find_references_to_in_source(request: &Map) -> Term {
         return error_response(&["Missing or invalid 'class_name' field".to_string()]);
     };
 
-    let lines = beamtalk_core::queries::references_to_query::find_references_to_in_source(
-        &source,
-        &class_name,
-    );
+    let lines =
+        beamtalk_language_service::queries::references_to_query::find_references_to_in_source(
+            &source,
+            &class_name,
+        );
     ok_lines_response(&lines)
 }
 
@@ -2535,7 +2543,9 @@ fn handle_find_field_readers_in_source(request: &Map) -> Term {
     };
 
     let lines =
-        beamtalk_core::queries::field_accesses_query::find_field_readers_in_source(&source, &field);
+        beamtalk_language_service::queries::field_accesses_query::find_field_readers_in_source(
+            &source, &field,
+        );
     ok_lines_response(&lines)
 }
 
@@ -2561,7 +2571,9 @@ fn handle_find_field_writers_in_source(request: &Map) -> Term {
     };
 
     let lines =
-        beamtalk_core::queries::field_accesses_query::find_field_writers_in_source(&source, &field);
+        beamtalk_language_service::queries::field_accesses_query::find_field_writers_in_source(
+            &source, &field,
+        );
     ok_lines_response(&lines)
 }
 
@@ -2594,7 +2606,7 @@ fn handle_find_ffi_sites_in_source(request: &Map) -> Term {
     // `arity` is optional: absent (or non-integer) means "match any arity".
     let arity = map_get(request, "arity").and_then(term_to_usize);
 
-    let lines = beamtalk_core::queries::ffi_sites_query::find_ffi_sites_in_source(
+    let lines = beamtalk_language_service::queries::ffi_sites_query::find_ffi_sites_in_source(
         &source, &module, &function, arity,
     );
     ok_lines_response(&lines)
@@ -2748,7 +2760,7 @@ fn handle_reindent_method_source(request: &Map) -> Term {
 /// `beamtalk_xref:senders_of/1` only carries a *line* number per sending
 /// method, and a whole-method span is too coarse to splice a single send's
 /// selector token(s) without corrupting the rest of the body; see
-/// [`beamtalk_core::queries::selector_rename_query::find_selector_send_spans`]
+/// [`beamtalk_language_service::queries::selector_rename_query::find_selector_send_spans`]
 /// for the full "why not regex" rationale (a multi-keyword selector like
 /// `at:put:` can have arbitrary nested expressions between its keyword
 /// parts).
@@ -2779,11 +2791,12 @@ fn handle_find_selector_send_spans(request: &Map) -> Term {
         return error_response(&["Missing or invalid 'new_selector' field".to_string()]);
     };
 
-    let occurrences = beamtalk_core::queries::selector_rename_query::find_selector_send_spans(
-        &method_source,
-        &old_selector,
-        &new_selector,
-    );
+    let occurrences =
+        beamtalk_language_service::queries::selector_rename_query::find_selector_send_spans(
+            &method_source,
+            &old_selector,
+            &new_selector,
+        );
 
     let occurrence_terms: Vec<Term> = occurrences
         .iter()
@@ -2802,7 +2815,7 @@ fn handle_find_selector_send_spans(request: &Map) -> Term {
 /// Shared `#{start, end, new_text}` term builder for both selector-rename
 /// span commands (`find_selector_send_spans`, `find_definition_selector_spans`).
 fn selector_send_span_terms(
-    spans: &[beamtalk_core::queries::selector_rename_query::SelectorSendSpan],
+    spans: &[beamtalk_language_service::queries::selector_rename_query::SelectorSendSpan],
 ) -> Vec<Term> {
     spans
         .iter()
@@ -2828,7 +2841,7 @@ fn selector_send_span_terms(
 /// class's current full source, resolve `(old_selector, side)`'s own
 /// method-definition selector-token span(s) — a narrow splice target, never
 /// the whole method body. See
-/// [`beamtalk_core::queries::selector_rename_query::find_definition_selector_spans`]'s
+/// [`beamtalk_language_service::queries::selector_rename_query::find_definition_selector_spans`]'s
 /// doc for why a whole-body replacement here would corrupt the method's own
 /// parameter names/logic on rewrite, and for how the unary/binary case
 /// (which carries no dedicated selector span from the parser) is resolved.
@@ -2847,8 +2860,8 @@ fn selector_send_span_terms(
 /// => <atom>, ...}`, mirroring `resolve_method_span`'s own error shape
 /// exactly (same [`SpanResolveError`] variants, same `method_span_error_response`).
 fn handle_find_definition_selector_spans(request: &Map) -> Term {
-    use beamtalk_core::queries::selector_rename_query::find_definition_selector_spans;
     use beamtalk_core::source_analysis::MethodSide;
+    use beamtalk_language_service::queries::selector_rename_query::find_definition_selector_spans;
 
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);

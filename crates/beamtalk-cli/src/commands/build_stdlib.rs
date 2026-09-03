@@ -60,7 +60,11 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     check_duplicate_module_names(&source_files)?;
 
     // Incremental build: skip if all outputs are newer than all inputs
-    if is_stdlib_up_to_date(&ebin_dir, &source_files) {
+    if is_stdlib_up_to_date(
+        &ebin_dir,
+        &source_files,
+        discover_runtime_ebin_dirs().as_deref(),
+    ) {
         println!("Stdlib up to date (skipped)");
         return Ok(());
     }
@@ -93,8 +97,9 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     // This is used during compilation so that @primitive expressions in method bodies
     // can reference the runtime dispatch modules.
     info!("Building primitive binding table from stdlib sources");
-    let bindings =
-        beamtalk_core::erlang::primitive_bindings::load_from_directory(lib_dir.as_std_path());
+    let bindings = beamtalk_codegen::core_erlang::primitive_bindings::load_from_directory(
+        lib_dir.as_std_path(),
+    );
     info!(
         binding_count = bindings.len(),
         "Loaded primitive bindings from stdlib"
@@ -193,7 +198,7 @@ fn compile_all_stdlib_files(
     temp_path: &Utf8Path,
     quiet: bool,
     options: &beamtalk_core::CompilerOptions,
-    bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
+    bindings: &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable,
     compile_ctx: &CompileContext<'_>,
 ) -> Result<(Vec<Utf8PathBuf>, Vec<ClassMeta>, Vec<String>)> {
     let mut core_files = Vec::new();
@@ -261,14 +266,50 @@ fn clean_ebin_dir(ebin_dir: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
+/// Discover the runtime/stdlib-Erlang/workspace/compiler `ebin/` directories
+/// that `is_stdlib_up_to_date`'s final check treats as build inputs — a
+/// `.beam` file in any of them newer than the stdlib output means native
+/// specs may have changed underneath it.
+///
+/// Returns `None` when the runtime layout can't be located at all (dev vs.
+/// installed candidates all missing, or an explicit `BEAMTALK_RUNTIME_DIR`
+/// pointing nowhere useful); callers should treat that as "force rebuild to
+/// be safe", same as any other missing-input case in this file.
+///
+/// Split out from `is_stdlib_up_to_date` itself (BT-3357) so the directory
+/// *list* is an injectable parameter there: this function's real-filesystem
+/// discovery (`beamtalk_cli::repl_startup::find_runtime_dir_with_layout`) has
+/// no test seam of its own, but `is_stdlib_up_to_date` no longer needs one —
+/// unit tests can hand it a synthetic list of temp directories directly.
+fn discover_runtime_ebin_dirs() -> Option<Vec<std::path::PathBuf>> {
+    use beamtalk_cli::repl_startup;
+    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout().ok()?;
+    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+    Some(vec![
+        paths.runtime_ebin,
+        paths.stdlib_erlang_ebin,
+        paths.workspace_ebin,
+        paths.compiler_ebin,
+    ])
+}
+
 /// Check if the stdlib build is up to date (all outputs newer than all inputs).
 ///
 /// Inputs: `lib/*.bt` source files, the compiler binary (`current_exe`), and
-/// runtime `.beam` files in `runtime/_build/default/lib/beamtalk_runtime/ebin/`.
+/// the runtime `.beam` directories in `runtime_ebin_dirs` (see
+/// [`discover_runtime_ebin_dirs`] for how the real build discovers these).
 /// Output: the `ebin/` directory modification time.
 ///
+/// `runtime_ebin_dirs` being `None` means the caller couldn't discover the
+/// runtime layout at all and is itself forcing a rebuild to be safe — same
+/// as any other missing-input case below.
+///
 /// Returns `false` (needs rebuild) if any input is missing or any error occurs.
-fn is_stdlib_up_to_date(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> bool {
+fn is_stdlib_up_to_date(
+    ebin_dir: &Utf8Path,
+    source_files: &[Utf8PathBuf],
+    runtime_ebin_dirs: Option<&[std::path::PathBuf]>,
+) -> bool {
     // Must have .beam files already
     let Ok(entries) = fs::read_dir(ebin_dir) else {
         return false;
@@ -323,23 +364,12 @@ fn is_stdlib_up_to_date(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> bo
 
     // Check runtime .beam files — if any runtime/stdlib/workspace/compiler ebin
     // has a newer .beam, force rebuild (specs may have changed).
-    // Use layout-aware discovery so invalidation matches spec extraction paths.
-    let runtime_ebins: Vec<std::path::PathBuf> = {
-        use beamtalk_cli::repl_startup;
-        if let Ok((runtime_dir, layout)) = repl_startup::find_runtime_dir_with_layout() {
-            let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
-            vec![
-                paths.runtime_ebin,
-                paths.stdlib_erlang_ebin,
-                paths.workspace_ebin,
-                paths.compiler_ebin,
-            ]
-        } else {
-            // Can't find runtime — force rebuild to be safe.
-            return false;
-        }
+    // Caller passes layout-aware discovery so invalidation matches spec
+    // extraction paths; `None` means discovery itself failed.
+    let Some(runtime_ebins) = runtime_ebin_dirs else {
+        return false;
     };
-    for runtime_ebin in &runtime_ebins {
+    for runtime_ebin in runtime_ebins {
         let Ok(entries) = fs::read_dir(runtime_ebin) else {
             continue;
         };
@@ -445,7 +475,7 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
         );
     }
 
-    let snake = beamtalk_core::codegen::core_erlang::to_module_name(stem);
+    let snake = beamtalk_codegen::core_erlang::to_module_name(stem);
 
     // ADR 0016: All stdlib modules use bt@stdlib@ prefix
     Ok(format!("bt@stdlib@{snake}"))
@@ -522,7 +552,7 @@ fn compile_stdlib_file(
     module_name: &str,
     core_file: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
-    bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
+    bindings: &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable,
     ctx: &CompileContext<'_>,
 ) -> Result<()> {
     compile_source_with_bindings(path, module_name, core_file, options, bindings, ctx, None)
@@ -1338,6 +1368,34 @@ const GENERATED_BUILTINS_PATH: &str =
 const GENERATED_BUILTINS_HRL_PATH: &str =
     "runtime/apps/beamtalk_runtime/include/beamtalk_generated_builtins.hrl";
 
+/// Write generated `content` to `dest`, but only if it differs from what's
+/// already there — skips touching the file (and downstream recompilation)
+/// when a stdlib build produces byte-identical output.
+///
+/// Shared by `generate_builtins_rs` and `generate_erlang_builtins_hrl`, which
+/// otherwise each hand-rolled this exact read-compare-write dance (BT-3357).
+/// Taking `dest` as a parameter — rather than each caller reading its own
+/// hardcoded `GENERATED_*_PATH` constant internally — is also what makes this
+/// unit-testable: real call sites still pass the hardcoded constants, but
+/// tests can point `dest` at a temp file instead of risking a write into the
+/// real checked-in generated files (see CLAUDE.md's "Generated files" rule).
+fn write_generated_file_if_changed(dest: &Utf8Path, content: &str) -> Result<()> {
+    let needs_write = match fs::read_to_string(dest) {
+        Ok(existing) => existing != content,
+        Err(_) => true,
+    };
+
+    if needs_write {
+        fs::write(dest, content)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to write '{dest}'"))?;
+        debug!("Generated {}", dest);
+    } else {
+        debug!("Generated file unchanged, skipping write: {}", dest);
+    }
+    Ok(())
+}
+
 /// Generate the `generated_builtins.rs` file from parsed stdlib class and
 /// type-alias metadata.
 ///
@@ -1449,22 +1507,7 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) 
     generate_alias_sources_section(&mut code, alias_sources);
 
     let dest = Utf8PathBuf::from(GENERATED_BUILTINS_PATH);
-
-    // Only write if content changed to avoid unnecessary recompilation
-    let needs_write = match fs::read_to_string(&dest) {
-        Ok(existing) => existing != code,
-        Err(_) => true,
-    };
-
-    if needs_write {
-        fs::write(&dest, &code)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to write '{dest}'"))?;
-        debug!("Generated {}", dest);
-    } else {
-        debug!("Generated builtins unchanged, skipping write");
-    }
-    Ok(())
+    write_generated_file_if_changed(&dest, &code)
 }
 
 /// Generate the `beamtalk_generated_builtins.hrl` Erlang header from parsed
@@ -1511,22 +1554,7 @@ fn generate_erlang_builtins_hrl(class_metadata: &[ClassMeta]) -> Result<()> {
     code.push_str("]).\n\n-endif.\n");
 
     let dest = Utf8PathBuf::from(GENERATED_BUILTINS_HRL_PATH);
-
-    // Only write if content changed to avoid unnecessary recompilation.
-    let needs_write = match fs::read_to_string(&dest) {
-        Ok(existing) => existing != code,
-        Err(_) => true,
-    };
-
-    if needs_write {
-        fs::write(&dest, &code)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to write '{dest}'"))?;
-        debug!("Generated {}", dest);
-    } else {
-        debug!("Generated Erlang builtins header unchanged, skipping write");
-    }
-    Ok(())
+    write_generated_file_if_changed(&dest, &code)
 }
 
 /// Generate a single class entry for `generated_builtin_classes()`.
@@ -1865,6 +1893,7 @@ fn generate_method_list(
 mod tests {
     use super::*;
     use std::fs;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     fn temp_utf8_dir() -> (TempDir, Utf8PathBuf) {
@@ -1943,7 +1972,8 @@ mod tests {
         assert_eq!(pre_loaded_aliases[0].name.as_str(), "Direction");
 
         let options = stdlib_compiler_options(false);
-        let bindings = beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new();
+        let bindings =
+            beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new();
 
         // Compile B with cross-file class info AND cross-file alias info —
         // should produce no "Argument ... expects" type-mismatch warning.
@@ -2054,19 +2084,20 @@ mod tests {
         // only one of them would seed `internal` aliases.
         assert_eq!(
             pre_loaded_aliases[0].package.as_deref(),
-            Some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER),
+            Some(beamtalk_language_service::STDLIB_PACKAGE_MARKER),
             "stdlib_pre_loaded_aliases' stamp must match STDLIB_PACKAGE_MARKER"
         );
         assert_eq!(
             stdlib_compiler_options(false).current_package.as_deref(),
-            Some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER),
+            Some(beamtalk_language_service::STDLIB_PACKAGE_MARKER),
             "stdlib_compiler_options' current_package must match STDLIB_PACKAGE_MARKER"
         );
 
         // The exact options `build_stdlib()` runs with — crucially with
         // `current_package: Some("stdlib")` matching the stamp above.
         let options = stdlib_compiler_options(false);
-        let bindings = beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new();
+        let bindings =
+            beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new();
 
         let core_file = lib_dir.join("internal_b.core");
         let diagnostics = compile_source_with_bindings(
@@ -2191,7 +2222,8 @@ mod tests {
         assert_eq!(protocol_infos[0].name.as_str(), "ProtocolFixtureA");
 
         let options = stdlib_compiler_options(false);
-        let bindings = beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new();
+        let bindings =
+            beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new();
 
         // Compile B the way `build_stdlib()` actually does — through
         // `compile_source_with_bindings` with `pre_loaded_protocols` seeded
@@ -3067,5 +3099,752 @@ mod tests {
              belongs there if String.bt truly inherits it unchanged from \
              Binary.bt."
         );
+    }
+
+    // --- BT-3351: is_stdlib_up_to_date / oldest_mtime_in_dir ---
+    //
+    // `is_stdlib_up_to_date` also checks the real compiler binary
+    // (`std::env::current_exe`), which isn't injectable, so the
+    // compiler-binary-newer branch is exercised deterministically via a
+    // beam/source mtime far enough in the past that any real compiler binary
+    // is newer.
+    //
+    // BT-3357: the runtime-`.beam`-newer check used to call
+    // `beamtalk_cli::repl_startup::find_runtime_dir_with_layout()` directly,
+    // with no seam to point it at a synthetic directory. `is_stdlib_up_to_date`
+    // now takes the runtime ebin directory list as a parameter (real
+    // discovery lives in `discover_runtime_ebin_dirs`, called only from the
+    // real `build_stdlib()` call site) — see the `runtime_ebin` tests below
+    // for both the "newer" (rebuild) and "older" (no rebuild) branches, plus
+    // the "discovery failed" (`None`) branch.
+
+    /// Sets a file's mtime directly — lets these tests control the
+    /// before/after ordering `is_stdlib_up_to_date` compares, without
+    /// depending on real wall-clock timing between writes.
+    fn set_mtime(path: &Utf8Path, time: SystemTime) {
+        // Windows' `SetFileTime` needs a handle opened with write access;
+        // a read-only `File::open` handle gets `PermissionDenied` (code 5).
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path.as_std_path())
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_missing_ebin_dir() {
+        let (_temp, base) = temp_utf8_dir();
+        let ebin = base.join("does_not_exist");
+        assert!(!is_stdlib_up_to_date(&ebin, &[], Some(&[])));
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_no_beam_files() {
+        let (_temp, ebin) = temp_utf8_dir();
+        fs::write(ebin.join("readme.txt"), "not a beam file").unwrap();
+        assert!(!is_stdlib_up_to_date(&ebin, &[], Some(&[])));
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_beam_source_count_mismatch() {
+        let (_temp, ebin) = temp_utf8_dir();
+        fs::write(ebin.join("a.beam"), "").unwrap();
+
+        let (_temp2, src_dir) = temp_utf8_dir();
+        let src1 = src_dir.join("A.bt");
+        let src2 = src_dir.join("B.bt");
+        fs::write(&src1, "").unwrap();
+        fs::write(&src2, "").unwrap();
+
+        // One .beam but two sources: a renamed/removed source must force a
+        // rebuild rather than silently leaving a stale .beam in place.
+        assert!(!is_stdlib_up_to_date(&ebin, &[src1, src2], Some(&[])));
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_source_newer_than_output() {
+        let (_temp, ebin) = temp_utf8_dir();
+        let beam = ebin.join("a.beam");
+        fs::write(&beam, "").unwrap();
+        set_mtime(
+            &beam,
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000),
+        );
+
+        let (_temp2, src_dir) = temp_utf8_dir();
+        let src = src_dir.join("A.bt");
+        fs::write(&src, "").unwrap(); // freshly written: newer than the beam output above
+
+        assert!(!is_stdlib_up_to_date(&ebin, &[src], Some(&[])));
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_missing_source_file_metadata() {
+        let (_temp, ebin) = temp_utf8_dir();
+        fs::write(ebin.join("a.beam"), "").unwrap();
+
+        let (_temp2, src_dir) = temp_utf8_dir();
+        let gone = src_dir.join("Gone.bt"); // listed but never created
+
+        assert!(!is_stdlib_up_to_date(&ebin, &[gone], Some(&[])));
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_compiler_binary_newer_forces_rebuild() {
+        let (_temp, ebin) = temp_utf8_dir();
+        let beam = ebin.join("a.beam");
+        fs::write(&beam, "").unwrap();
+        // Far enough in the past (1970) that the real test binary — built
+        // moments before this test ran — is deterministically newer.
+        let ancient = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        set_mtime(&beam, ancient);
+
+        let (_temp2, src_dir) = temp_utf8_dir();
+        let src = src_dir.join("A.bt");
+        fs::write(&src, "").unwrap();
+        set_mtime(&src, ancient); // same age as the beam output: not "source newer"
+
+        assert!(!is_stdlib_up_to_date(&ebin, &[src], Some(&[])));
+    }
+
+    /// Shared setup for the `runtime_ebin_dirs`-branch tests below: a
+    /// same-age beam/source pair far enough in the future that the real
+    /// compiler binary running this test is never "newer than output" —
+    /// isolating each test to just the runtime-ebin-dirs check that follows
+    /// it.
+    fn up_to_date_beam_and_source() -> (TempDir, Utf8PathBuf, TempDir, Utf8PathBuf, SystemTime) {
+        let (ebin_temp, ebin) = temp_utf8_dir();
+        let beam = ebin.join("a.beam");
+        fs::write(&beam, "").unwrap();
+        let output_time = SystemTime::UNIX_EPOCH + Duration::from_secs(4_000_000_000);
+        set_mtime(&beam, output_time);
+
+        let (src_temp, src_dir) = temp_utf8_dir();
+        let src = src_dir.join("A.bt");
+        fs::write(&src, "").unwrap();
+        set_mtime(&src, output_time - Duration::from_secs(1));
+
+        (ebin_temp, ebin, src_temp, src, output_time)
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_runtime_beam_newer_forces_rebuild() {
+        let (_ebin_temp, ebin, _src_temp, src, output_time) = up_to_date_beam_and_source();
+
+        let (_temp3, runtime_ebin) = temp_utf8_dir();
+        let runtime_beam = runtime_ebin.join("beamtalk_runtime.beam");
+        fs::write(&runtime_beam, "").unwrap();
+        set_mtime(&runtime_beam, output_time + Duration::from_secs(1));
+
+        assert!(!is_stdlib_up_to_date(
+            &ebin,
+            &[src],
+            Some(&[runtime_ebin.into_std_path_buf()]),
+        ));
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_runtime_beam_older_no_rebuild() {
+        let (_ebin_temp, ebin, _src_temp, src, output_time) = up_to_date_beam_and_source();
+
+        let (_temp3, runtime_ebin) = temp_utf8_dir();
+        let runtime_beam = runtime_ebin.join("beamtalk_runtime.beam");
+        fs::write(&runtime_beam, "").unwrap();
+        set_mtime(&runtime_beam, output_time - Duration::from_secs(1));
+
+        assert!(is_stdlib_up_to_date(
+            &ebin,
+            &[src],
+            Some(&[runtime_ebin.into_std_path_buf()]),
+        ));
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_runtime_dirs_undiscoverable_forces_rebuild() {
+        let (_ebin_temp, ebin, _src_temp, src, _output_time) = up_to_date_beam_and_source();
+
+        // `None` stands in for `discover_runtime_ebin_dirs()` failing to
+        // locate the runtime layout at all — same "force rebuild to be
+        // safe" contract as every other missing-input branch above.
+        assert!(!is_stdlib_up_to_date(&ebin, &[src], None));
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_missing_runtime_ebin_dir_is_skipped() {
+        // A runtime ebin directory that doesn't exist in this layout (e.g.
+        // an app not built yet) is skipped, not treated as an error.
+        let (_ebin_temp, ebin, _src_temp, src, _output_time) = up_to_date_beam_and_source();
+
+        let (_temp3, base) = temp_utf8_dir();
+        let missing_runtime_ebin = base.join("does_not_exist");
+
+        assert!(is_stdlib_up_to_date(
+            &ebin,
+            &[src],
+            Some(&[missing_runtime_ebin.into_std_path_buf()]),
+        ));
+    }
+
+    #[test]
+    fn test_oldest_mtime_in_dir_returns_none_when_empty() {
+        let (_temp, dir) = temp_utf8_dir();
+        assert!(oldest_mtime_in_dir(&dir, "beam").is_none());
+    }
+
+    #[test]
+    fn test_oldest_mtime_in_dir_ignores_other_extensions() {
+        let (_temp, dir) = temp_utf8_dir();
+        let unrelated = dir.join("skip.txt");
+        fs::write(&unrelated, "").unwrap();
+        assert!(oldest_mtime_in_dir(&dir, "beam").is_none());
+    }
+
+    #[test]
+    fn test_oldest_mtime_in_dir_picks_oldest_matching_extension() {
+        let (_temp, dir) = temp_utf8_dir();
+        let old = dir.join("old.beam");
+        let newer = dir.join("newer.beam");
+        let wrong_ext = dir.join("oldest_but_wrong_ext.txt");
+        fs::write(&old, "").unwrap();
+        fs::write(&newer, "").unwrap();
+        fs::write(&wrong_ext, "").unwrap();
+
+        let old_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let newer_time = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000);
+        set_mtime(&old, old_time);
+        set_mtime(&newer, newer_time);
+        // Older than either .beam file, but the wrong extension — must be ignored.
+        set_mtime(&wrong_ext, SystemTime::UNIX_EPOCH);
+
+        assert_eq!(oldest_mtime_in_dir(&dir, "beam"), Some(old_time));
+    }
+
+    // --- BT-3357: write_generated_file_if_changed ---
+    //
+    // `generate_builtins_rs`/`generate_erlang_builtins_hrl` themselves still
+    // write to the real hardcoded `GENERATED_BUILTINS_PATH`/
+    // `GENERATED_BUILTINS_HRL_PATH` constants and aren't unit-tested directly
+    // (per CLAUDE.md's "Generated files" rule, and see BT-3357's cluster-2
+    // follow-up for the rest of their orchestration). This shared helper is
+    // where the "only write if changed" and write-error branches actually
+    // live, and it takes `dest` as a parameter, so tests exercise it against
+    // a temp file instead.
+
+    #[test]
+    fn test_write_generated_file_if_changed_creates_missing_file() {
+        let (_temp, dir) = temp_utf8_dir();
+        let dest = dir.join("generated.rs");
+
+        write_generated_file_if_changed(&dest, "content v1").unwrap();
+
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "content v1");
+    }
+
+    #[test]
+    fn test_write_generated_file_if_changed_overwrites_when_content_differs() {
+        let (_temp, dir) = temp_utf8_dir();
+        let dest = dir.join("generated.rs");
+        fs::write(&dest, "content v1").unwrap();
+
+        write_generated_file_if_changed(&dest, "content v2").unwrap();
+
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "content v2");
+    }
+
+    #[test]
+    fn test_write_generated_file_if_changed_skips_write_when_unchanged() {
+        let (_temp, dir) = temp_utf8_dir();
+        let dest = dir.join("generated.rs");
+        fs::write(&dest, "same content").unwrap();
+        // Far enough in the past that an unwanted rewrite (which would bump
+        // the mtime to "now") is trivially detectable below.
+        let original_mtime = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        set_mtime(&dest, original_mtime);
+
+        write_generated_file_if_changed(&dest, "same content").unwrap();
+
+        assert_eq!(
+            fs::metadata(dest.as_std_path())
+                .unwrap()
+                .modified()
+                .unwrap(),
+            original_mtime,
+            "content was unchanged — the file must not have been rewritten"
+        );
+    }
+
+    #[test]
+    fn test_write_generated_file_if_changed_reports_write_error() {
+        let (_temp, dir) = temp_utf8_dir();
+        // Parent directory doesn't exist, so the write itself must fail —
+        // exercises the write-error path without touching any real file.
+        let dest = dir.join("no_such_subdir").join("generated.rs");
+
+        let result = write_generated_file_if_changed(&dest, "content");
+
+        assert!(result.is_err());
+    }
+
+    // --- BT-3351: mark_spawns_for_selectors and its Timer/Parallel/Collection callers ---
+
+    fn method_meta(selector: &str) -> MethodMeta {
+        MethodMeta {
+            arity: selector.matches(':').count(),
+            selector: selector.to_string(),
+            kind: MethodKindMeta::Primary,
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: None,
+            param_types: vec![],
+            doc: None,
+        }
+    }
+
+    #[test]
+    fn test_mark_spawns_for_selectors_marks_only_matching_selectors() {
+        let mut methods = vec![method_meta("after:do:"), method_meta("other:")];
+        mark_spawns_for_selectors(&mut methods, &["after:do:"], "Test").unwrap();
+        assert!(methods[0].spawns_block);
+        assert!(!methods[1].spawns_block);
+    }
+
+    #[test]
+    fn test_mark_spawns_for_selectors_errors_on_unmatched_selector() {
+        let mut methods = vec![method_meta("foo")];
+        let err =
+            mark_spawns_for_selectors(&mut methods, &["after:do:", "foo"], "Timer").unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("Timer"), "got: {message}");
+        assert!(message.contains("after:do:"), "got: {message}");
+    }
+
+    #[test]
+    fn test_mark_timer_spawns_marks_expected_selectors() {
+        let mut class_methods = vec![
+            method_meta("after:do:"),
+            method_meta("every:do:"),
+            method_meta("other:"),
+        ];
+        mark_timer_spawns(&mut class_methods).unwrap();
+        assert!(class_methods[0].spawns_block);
+        assert!(class_methods[1].spawns_block);
+        assert!(!class_methods[2].spawns_block);
+    }
+
+    #[test]
+    fn test_mark_timer_spawns_errors_when_selectors_missing() {
+        let mut class_methods = vec![method_meta("other:")];
+        assert!(mark_timer_spawns(&mut class_methods).is_err());
+    }
+
+    #[test]
+    fn test_mark_parallel_spawns_marks_all_expected_selectors() {
+        let mut class_methods = vec![
+            method_meta("all:"),
+            method_meta("all:timeout:"),
+            method_meta("any:"),
+        ];
+        mark_parallel_spawns(&mut class_methods).unwrap();
+        assert!(class_methods.iter().all(|m| m.spawns_block));
+    }
+
+    #[test]
+    fn test_mark_parallel_spawns_errors_when_selectors_missing() {
+        let mut class_methods = vec![method_meta("other:")];
+        assert!(mark_parallel_spawns(&mut class_methods).is_err());
+    }
+
+    #[test]
+    fn test_mark_parallel_collect_spawns_marks_expected_selectors() {
+        let mut methods = vec![
+            method_meta("parallelCollect:"),
+            method_meta("parallelCollect:maxConcurrency:"),
+        ];
+        mark_parallel_collect_spawns(&mut methods).unwrap();
+        assert!(methods.iter().all(|m| m.spawns_block));
+    }
+
+    #[test]
+    fn test_mark_parallel_collect_spawns_errors_when_selectors_missing() {
+        let mut methods = vec![method_meta("other:")];
+        assert!(mark_parallel_collect_spawns(&mut methods).is_err());
+    }
+
+    // --- BT-3351: extract_class_metadata error paths and Timer/Parallel/Collection triggers ---
+
+    #[test]
+    fn test_extract_class_metadata_no_class_definition_errors() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("Empty.bt");
+        fs::write(&file, "// just a comment, no class here\n").unwrap();
+
+        let err = extract_class_metadata(&file, "bt@stdlib@empty")
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("No class definition"));
+    }
+
+    #[test]
+    fn test_extract_class_metadata_multiple_classes_errors() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("Two.bt");
+        fs::write(
+            &file,
+            "Object subclass: FirstOne\n  noop => nil\n\
+             Object subclass: SecondOne\n  noop => nil\n",
+        )
+        .unwrap();
+
+        let err = extract_class_metadata(&file, "bt@stdlib@two")
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("Expected exactly one class"));
+    }
+
+    #[test]
+    fn test_extract_class_metadata_timer_marks_spawning_class_methods() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("Timer.bt");
+        fs::write(
+            &file,
+            "Object subclass: Timer\n  \
+             class after: ms do: block => nil\n  \
+             class every: ms do: block => nil\n",
+        )
+        .unwrap();
+
+        let meta = extract_class_metadata(&file, "bt@stdlib@timer").unwrap();
+        assert!(
+            meta.class_methods
+                .iter()
+                .find(|m| m.selector == "after:do:")
+                .expect("after:do: should be present")
+                .spawns_block
+        );
+        assert!(
+            meta.class_methods
+                .iter()
+                .find(|m| m.selector == "every:do:")
+                .expect("every:do: should be present")
+                .spawns_block
+        );
+    }
+
+    #[test]
+    fn test_extract_class_metadata_timer_missing_selectors_errors() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("Timer.bt");
+        fs::write(&file, "Object subclass: Timer\n  class noop => nil\n").unwrap();
+
+        let err = extract_class_metadata(&file, "bt@stdlib@timer")
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("Timer"));
+    }
+
+    #[test]
+    fn test_extract_class_metadata_parallel_marks_spawning_class_methods() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("Parallel.bt");
+        fs::write(
+            &file,
+            "Object subclass: Parallel\n  \
+             class all: blocks => nil\n  \
+             class all: blocks timeout: ms => nil\n  \
+             class any: blocks => nil\n",
+        )
+        .unwrap();
+
+        let meta = extract_class_metadata(&file, "bt@stdlib@parallel").unwrap();
+        assert!(meta.class_methods.iter().all(|m| m.spawns_block));
+    }
+
+    #[test]
+    fn test_extract_class_metadata_collection_marks_spawning_methods() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("Collection.bt");
+        fs::write(
+            &file,
+            "Object subclass: Collection\n  \
+             parallelCollect: block => nil\n  \
+             parallelCollect: block maxConcurrency: n => nil\n",
+        )
+        .unwrap();
+
+        let meta = extract_class_metadata(&file, "bt@stdlib@collection").unwrap();
+        assert!(meta.methods.iter().all(|m| m.spawns_block));
+    }
+
+    // --- BT-3351: synthesize_value_auto_methods (via extract_class_metadata) ---
+
+    #[test]
+    fn test_extract_class_metadata_value_class_generates_all_auto_methods() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("Wrapper.bt");
+        fs::write(
+            &file,
+            "Value subclass: Wrapper\n  field: value :: Integer = 0\n",
+        )
+        .unwrap();
+
+        let meta = extract_class_metadata(&file, "bt@stdlib@wrapper").unwrap();
+
+        let getter = meta
+            .methods
+            .iter()
+            .find(|m| m.selector == "value")
+            .expect("auto getter should be generated");
+        assert_eq!(getter.arity, 0);
+        assert_eq!(getter.return_type, Some(DeclaredType::simple("Integer")));
+
+        let setter = meta
+            .methods
+            .iter()
+            .find(|m| m.selector == "withValue:")
+            .expect("auto functional updater should be generated");
+        assert_eq!(setter.arity, 1);
+        assert_eq!(setter.return_type, Some(DeclaredType::simple("Wrapper")));
+
+        let ctor = meta
+            .class_methods
+            .iter()
+            .find(|m| m.selector == "value:")
+            .expect("auto keyword constructor should be generated");
+        assert_eq!(ctor.arity, 1);
+        assert_eq!(ctor.return_type, Some(DeclaredType::simple("Wrapper")));
+    }
+
+    #[test]
+    fn test_extract_class_metadata_value_class_skips_auto_methods_user_already_defines() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("Point2.bt");
+        fs::write(
+            &file,
+            "Value subclass: Point2\n  \
+             field: x :: Integer = 0\n  \
+             field: y :: Integer = 0\n  \
+             x => 42\n  \
+             withY: v => v\n  \
+             class x: ax y: ay => nil\n",
+        )
+        .unwrap();
+
+        let meta = extract_class_metadata(&file, "bt@stdlib@point2").unwrap();
+
+        // User-defined "x" getter: not duplicated by the auto-getter.
+        assert_eq!(meta.methods.iter().filter(|m| m.selector == "x").count(), 1);
+        // User-defined "withY:" setter: not duplicated by the auto-updater.
+        assert_eq!(
+            meta.methods
+                .iter()
+                .filter(|m| m.selector == "withY:")
+                .count(),
+            1
+        );
+        // User-defined "x:y:" constructor: not duplicated by the auto-constructor.
+        assert_eq!(
+            meta.class_methods
+                .iter()
+                .filter(|m| m.selector == "x:y:")
+                .count(),
+            1
+        );
+        // The fields NOT covered by a user override still get their auto method.
+        assert!(meta.methods.iter().any(|m| m.selector == "withX:"));
+        assert!(meta.methods.iter().any(|m| m.selector == "y"));
+    }
+
+    // --- BT-3351: is_protocol_only_file ---
+
+    #[test]
+    fn test_is_protocol_only_file_true_for_protocol_only_source() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("Printable.bt");
+        fs::write(&file, "Protocol define: Printable\n  asString -> String\n").unwrap();
+        assert!(is_protocol_only_file(&file).unwrap());
+    }
+
+    #[test]
+    fn test_is_protocol_only_file_false_for_class_source() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("Foo.bt");
+        fs::write(&file, "Object subclass: Foo\n  noop => nil\n").unwrap();
+        assert!(!is_protocol_only_file(&file).unwrap());
+    }
+
+    #[test]
+    fn test_is_protocol_only_file_false_on_parse_errors() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("Broken.bt");
+        // Conservative fallback: a file with parse errors is treated as a
+        // normal class file so `extract_class_metadata` reports the real
+        // error, rather than being silently misclassified as protocol-only.
+        fs::write(&file, "Object subclass: ###!!!(((\n").unwrap();
+        assert!(!is_protocol_only_file(&file).unwrap());
+    }
+
+    #[test]
+    fn test_is_protocol_only_file_errors_when_file_missing() {
+        let (_temp, dir) = temp_utf8_dir();
+        let missing = dir.join("Missing.bt");
+        assert!(is_protocol_only_file(&missing).is_err());
+    }
+
+    // --- BT-3351: collect_stdlib_protocol_infos non-fatal read errors ---
+
+    #[test]
+    fn test_collect_stdlib_protocol_infos_skips_unreadable_file() {
+        let (_temp, dir) = temp_utf8_dir();
+        let missing = dir.join("Missing.bt");
+        let real = dir.join("Printable.bt");
+        fs::write(&real, "Protocol define: Printable\n  asString -> String\n").unwrap();
+
+        let infos = collect_stdlib_protocol_infos(&[missing, real]);
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].name.as_str(), "Printable");
+    }
+
+    // --- BT-3351: alias_source_texts_sorted_by_name ---
+
+    #[test]
+    fn test_alias_source_texts_sorted_by_name_sorts_by_alias_name_not_raw_text() {
+        let (_temp, lib_dir) = temp_utf8_dir();
+        let file = lib_dir.join("Fixture.bt");
+        // Raw-text sort would put "internal type Zebra" before "type Alpha"
+        // (`i` < `t`) — the opposite of sorting by alias *name*.
+        fs::write(
+            &file,
+            "internal type Zebra = Integer\ntype Alpha = String\n\
+             Object subclass: Fixture\n  noop => nil\n",
+        )
+        .unwrap();
+
+        let alias_sources = collect_stdlib_alias_sources(&[file]).unwrap();
+        assert_eq!(alias_sources.len(), 2);
+
+        let sorted_texts = alias_source_texts_sorted_by_name(alias_sources);
+        assert_eq!(sorted_texts[0], "type Alpha = String");
+        assert_eq!(sorted_texts[1], "internal type Zebra = Integer");
+    }
+
+    // --- BT-3351: generate_class_entry multi-item fields (separator branches) ---
+
+    #[test]
+    fn test_generate_class_entry_multi_item_fields_use_separators() {
+        let meta = ClassMeta {
+            module_name: "bt@stdlib@pair".to_string(),
+            class_name: "Pair".to_string(),
+            superclass_name: "Object".to_string(),
+            modifiers: ClassModifiers::default(),
+            class_kind: beamtalk_core::ast::ClassKind::Object,
+            state: vec!["first".to_string(), "second".to_string()],
+            state_types: vec![
+                ("first".to_string(), DeclaredType::simple("Integer")),
+                ("second".to_string(), DeclaredType::simple("String")),
+            ],
+            state_has_default: vec![("first".to_string(), true), ("second".to_string(), false)],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec!["counterA".to_string(), "counterB".to_string()],
+            type_params: vec!["T".to_string(), "U".to_string()],
+            superclass_type_args: vec![DeclaredType::simple("T"), DeclaredType::simple("Concrete")],
+            handle_scope: None,
+        };
+        let mut code = String::new();
+        generate_class_entry(&mut code, &meta);
+
+        assert!(code.contains(r#"state: vec!["first".into(), "second".into()]"#));
+        assert!(code.contains(
+            r#"state_types: HashMap::from([("first".into(), DeclaredType::simple("Integer")), ("second".into(), DeclaredType::simple("String"))])"#
+        ));
+        assert!(code.contains(
+            r#"state_has_default: HashMap::from([("first".into(), true), ("second".into(), false)])"#
+        ));
+        assert!(code.contains(r#"class_variables: vec!["counterA".into(), "counterB".into()]"#));
+        assert!(code.contains(r#"type_params: vec!["T".into(), "U".into()]"#));
+        assert!(code.contains("type_param_bounds: vec![None, None]"));
+        assert!(code.contains(
+            r#"superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }, SuperclassTypeArg::Concrete { declared: DeclaredType::simple("Concrete") }]"#
+        ));
+    }
+
+    // --- BT-3351: declared_type_to_rust_expr — every DeclaredType variant ---
+
+    #[test]
+    fn test_declared_type_to_rust_expr_covers_every_variant() {
+        assert_eq!(
+            declared_type_to_rust_expr(&DeclaredType::Singleton("nil".into())),
+            r#"DeclaredType::singleton("nil")"#
+        );
+        assert_eq!(
+            declared_type_to_rust_expr(&DeclaredType::union(vec![
+                DeclaredType::simple("Integer"),
+                DeclaredType::simple("Float"),
+            ])),
+            r#"DeclaredType::union(vec![DeclaredType::simple("Integer"), DeclaredType::simple("Float")])"#
+        );
+        assert_eq!(
+            declared_type_to_rust_expr(&DeclaredType::generic(
+                "List",
+                vec![DeclaredType::simple("Integer")]
+            )),
+            r#"DeclaredType::generic("List", vec![DeclaredType::simple("Integer")])"#
+        );
+        assert_eq!(
+            declared_type_to_rust_expr(&DeclaredType::FalseOr(Box::new(DeclaredType::simple(
+                "Integer"
+            )))),
+            r#"DeclaredType::FalseOr(Box::new(DeclaredType::simple("Integer")))"#
+        );
+        assert_eq!(
+            declared_type_to_rust_expr(&DeclaredType::Difference {
+                base: Box::new(DeclaredType::simple("Object")),
+                excluded: Box::new(DeclaredType::simple("Nil")),
+            }),
+            r#"DeclaredType::Difference { base: Box::new(DeclaredType::simple("Object")), excluded: Box::new(DeclaredType::simple("Nil")) }"#
+        );
+        assert_eq!(
+            declared_type_to_rust_expr(&DeclaredType::Intersection {
+                left: Box::new(DeclaredType::simple("A")),
+                right: Box::new(DeclaredType::simple("B")),
+            }),
+            r#"DeclaredType::Intersection { left: Box::new(DeclaredType::simple("A")), right: Box::new(DeclaredType::simple("B")) }"#
+        );
+        assert_eq!(
+            declared_type_to_rust_expr(&DeclaredType::SelfType),
+            "DeclaredType::SelfType"
+        );
+        assert_eq!(
+            declared_type_to_rust_expr(&DeclaredType::SelfClass),
+            "DeclaredType::SelfClass"
+        );
+        assert_eq!(
+            declared_type_to_rust_expr(&DeclaredType::ClassOf("Counter".into())),
+            r#"DeclaredType::ClassOf("Counter".into())"#
+        );
+    }
+
+    // --- BT-3351: generate_method_list doc-string escaping ---
+
+    #[test]
+    fn test_generate_method_list_escapes_doc_special_characters() {
+        let methods = vec![MethodMeta {
+            selector: "help".to_string(),
+            arity: 0,
+            kind: MethodKindMeta::Primary,
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: None,
+            param_types: vec![],
+            doc: Some("Line one\nLine \"two\"\tend\r".to_string()),
+        }];
+        let mut code = String::new();
+        generate_method_list(&mut code, "methods", &methods, "Help");
+
+        let expected = r#"doc: Some("Line one\nLine \"two\"\tend\r".into())"#;
+        assert!(code.contains(expected), "Got: {code}");
     }
 }

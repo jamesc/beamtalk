@@ -429,6 +429,47 @@ pub struct TypeAliasDefinition {
     pub span: Span,
 }
 
+/// A native (Erlang FFI) type declaration (ADR 0075, Phase 2).
+///
+/// Declares typed method signatures for an Erlang module, for use in
+/// `stubs/*.bt` files. Reuses [`ProtocolMethodSignature`] for its body —
+/// same keyword-message-with-type-annotations syntax as a protocol, no
+/// `=>` implementation.
+///
+/// Not a class: never registered in `ClassHierarchy`, never loaded into
+/// the workspace, never produces codegen output. Exists solely to
+/// populate `NativeTypeRegistry` (BT-1847).
+///
+/// Example:
+/// ```text
+/// /// Type declarations for Erlang module `lists`.
+/// declare native: lists
+///   /// Reverse a list.
+///   reverse: list :: List(T) -> List(T)
+///   seq: from :: Integer to: to :: Integer -> List(Integer)
+/// ```
+///
+/// Type parameters (`T`, `A`, `B`, …) are method-scoped, not declared at
+/// the header — each signature introduces its own universally-quantified
+/// type variables, unlike a protocol's class-level `type_params`.
+///
+/// `declare native:` is only valid in a `stubs/` directory; a `src/`
+/// occurrence is a compile error (enforced by the build pipeline, which
+/// alone knows a module's source path).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NativeDeclaration {
+    /// The Erlang module name (e.g., `lists`, `gen_server`).
+    pub module: Identifier,
+    /// Typed function signatures for this module.
+    pub method_signatures: Vec<ProtocolMethodSignature>,
+    /// Non-doc comments (`//` and `/* */`) appearing before this declaration.
+    pub comments: CommentAttachment,
+    /// Doc comment attached to this declaration (`///` lines).
+    pub doc_comment: Option<String>,
+    /// Source location of the entire `declare native: ...` declaration.
+    pub span: Span,
+}
+
 /// Which keyword was used to declare an instance variable.
 ///
 /// Both `state:` and `field:` parse to [`StateDeclaration`]; this enum tracks

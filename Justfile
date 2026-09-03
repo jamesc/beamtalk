@@ -45,10 +45,10 @@ doctor:
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-surface-drift check-boundary test-grammar
+ci: build lint test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-codegen-boundary check-surface-drift test-grammar
 
 [windows]
-ci: build clippy fmt-check-rust test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift check-boundary
+ci: build clippy fmt-check-rust test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
 
 # Run local CI checks, skipping the slow workspace/MCP/REPL-protocol/parity
 # suites when the diff (vs origin/main, plus uncommitted changes) doesn't touch
@@ -75,8 +75,8 @@ ci-changed:
     just test
     just check-corpus
     just check-generated-builtins
+    just check-codegen-boundary
     just check-surface-drift
-    just check-boundary
 
     merge_base="$(git merge-base HEAD origin/main 2>/dev/null || true)"
     if [[ -n "$merge_base" ]]; then
@@ -653,20 +653,53 @@ check-generated-builtins: build
     fi
     echo "✅ generated stdlib builtin-class artifacts are up to date"
 
+# Guard the BT-3362 crate split's build-time win: beamtalk-lsp and beamtalk-lint
+# analyze code but never generate it, so neither should depend on beamtalk-codegen
+# (~90k lines) directly or transitively. `cargo tree -p <pkg> -i beamtalk-codegen`
+# exits non-zero with "did not match any packages" when no such edge exists, and
+# exits 0 and prints the dependency path when one does — so success here means a
+# regression. beamtalk-mcp is deliberately NOT checked: it depends on beamtalk-cli
+# for manifest/build-layout reuse (BT-2823), and beamtalk-cli genuinely drives
+# codegen, so beamtalk-mcp compiling beamtalk-codegen transitively is expected,
+# pre-existing coupling, not a regression (docs/development/architecture-principles.md §1).
+[unix]
+check-codegen-boundary:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    fail=0
+    if ! cargo tree -p beamtalk-codegen >/dev/null 2>&1; then
+        echo "❌ package 'beamtalk-codegen' no longer resolves — update check-codegen-boundary's target package"
+        exit 1
+    fi
+    for pkg in beamtalk-lsp beamtalk-lint; do
+        if ! cargo tree -p "$pkg" >/dev/null 2>&1; then
+            echo "❌ package '$pkg' no longer resolves — update check-codegen-boundary's package list"
+            fail=1
+            continue
+        fi
+        output="$(cargo tree -p "$pkg" -i beamtalk-codegen 2>&1)"
+        status=$?
+        if [[ $status -eq 0 ]]; then
+            echo "❌ $pkg depends on beamtalk-codegen — this regresses the BT-3362 crate split:"
+            echo "$output"
+            fail=1
+        elif [[ "$output" != *"did not match any packages"* ]]; then
+            echo "❌ unexpected error checking whether $pkg depends on beamtalk-codegen:"
+            echo "$output"
+            fail=1
+        fi
+    done
+    if [[ $fail -ne 0 ]]; then
+        exit 1
+    fi
+    echo "✅ beamtalk-lsp/beamtalk-lint do not depend on beamtalk-codegen"
+
 # Check that REPL ops × CLI × MCP × LSP coverage matches docs/development/surface-parity.md (BT-2082).
 # Fails if a new REPL op landed without a parity-doc row, or a binding listed
 # in the doc has no corresponding code artifact (MCP tool / REPL meta-cmd / LSP capability).
 check-surface-drift:
     @echo "🔎 Checking surface parity drift..."
     @cargo run -p beamtalk-surface-drift --quiet
-
-# Check the Compilation -> Language Service dependency direction inside
-# beamtalk-core (BT-3339, ADR 0117 Decision step 1). Fails if a production
-# `use`/fully-qualified edge from ast/source_analysis/unparse/codegen/
-# semantic_analysis/compilation reaches into queries/language_service/lint.
-check-boundary:
-    @echo "🔎 Checking Compilation -> Language Service dependency direction..."
-    @cargo run -p beamtalk-boundary-check --quiet
 
 # Evaluate search quality from structured MCP server logs (ADR 0062)
 # Usage: just search-eval /path/to/mcp-server.log
@@ -1732,6 +1765,19 @@ install PREFIX="/usr/local": build-release build-stdlib
             rel="${bt#"${STDLIB_SOURCE_SRC}"/}"
             install -d "${PREFIX}/share/beamtalk/stdlib/src/$(dirname "${rel}")"
             install -m 644 "${bt}" "${PREFIX}/share/beamtalk/stdlib/src/${rel}"
+        done
+    fi
+
+    # Curated distribution FFI type stubs (ADR 0075 layer 3), discovered at
+    # runtime via the same sysroot convention as the stdlib sources above.
+    # A no-op until curated stub content exists (BT-1848) — the repo ships
+    # no root-level stubs/ directory yet.
+    DIST_STUBS_SRC="stubs"
+    if [ -d "${DIST_STUBS_SRC}" ]; then
+        find "${DIST_STUBS_SRC}" -type f -name '*.bt' | while read -r bt; do
+            rel="${bt#"${DIST_STUBS_SRC}"/}"
+            install -d "${PREFIX}/share/beamtalk/stubs/$(dirname "${rel}")"
+            install -m 644 "${bt}" "${PREFIX}/share/beamtalk/stubs/${rel}"
         done
     fi
 

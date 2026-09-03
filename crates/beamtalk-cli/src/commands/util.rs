@@ -29,13 +29,10 @@ pub(crate) fn html_escape(s: &str) -> String {
 /// Build the BEAM module name for a user-code file stem (`bt@<normalised-stem>`).
 ///
 /// ADR 0016: all user-code modules use the `bt@` prefix. The stem is normalised
-/// via [`beamtalk_core::codegen::core_erlang::to_module_name`] so that e.g.
+/// via [`beamtalk_codegen::core_erlang::to_module_name`] so that e.g.
 /// `my-class.bt` → `bt@my_class`.
 pub(crate) fn bt_module_name_from_stem(stem: &str) -> String {
-    format!(
-        "bt@{}",
-        beamtalk_core::codegen::core_erlang::to_module_name(stem)
-    )
+    format!("bt@{}", beamtalk_codegen::core_erlang::to_module_name(stem))
 }
 
 /// What a test assertion expects: a value or an error.

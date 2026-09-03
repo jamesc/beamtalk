@@ -1,0 +1,104 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3380: An actor method whose selector collides with a Collection-protocol
+// list-op selector (`collect:`, `select:`, `reject:`, `anySatisfy:`,
+// `allSatisfy:`, `detect:`, `detect:ifNone:`, `count:`, `flatMap:`,
+// `takeWhile:`, `dropWhile:`, `partition:`, `groupBy:`, `sort:`) must return
+// its own plain result across the process boundary, not `{#ok, Result}` —
+// the list-op runtime `is_list` guard's "not a list" fallback bypassed the
+// actor reply-unwrap protocol. Same root cause as BT-3377, different codegen
+// family. See fixtures/bt3380_collection_probe_actor.bt for the full
+// root-cause writeup.
+
+TestCase subclass: BT3380ActorListOpSelectorTest
+
+  testExternalDoReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "do"
+    self assert: (probe do: [:x | x]) equals: "do"
+    probe stop
+
+  testExternalCollectReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "collect"
+    self assert: (probe collect: [:x | x]) equals: "collect"
+    probe stop
+
+  testExternalSelectReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "select"
+    self assert: (probe select: [:x | x]) equals: "select"
+    probe stop
+
+  testExternalRejectReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "reject"
+    self assert: (probe reject: [:x | x]) equals: "reject"
+    probe stop
+
+  testExternalAnySatisfyReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "anySatisfy"
+    self assert: (probe anySatisfy: [:x | x]) equals: "anySatisfy"
+    probe stop
+
+  testExternalAllSatisfyReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "allSatisfy"
+    self assert: (probe allSatisfy: [:x | x]) equals: "allSatisfy"
+    probe stop
+
+  testExternalDetectReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "detect"
+    self assert: (probe detect: [:x | x]) equals: "detect"
+    probe stop
+
+  testExternalDetectIfNoneReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "detectIfNone"
+    self assert: (probe detect: [:x | x] ifNone: [nil]) equals: "detectIfNone"
+    probe stop
+
+  testExternalCountReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "count"
+    self assert: (probe count: [:x | x]) equals: "count"
+    probe stop
+
+  testExternalFlatMapReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "flatMap"
+    self assert: (probe flatMap: [:x | x]) equals: "flatMap"
+    probe stop
+
+  testExternalTakeWhileReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "takeWhile"
+    self assert: (probe takeWhile: [:x | x]) equals: "takeWhile"
+    probe stop
+
+  testExternalDropWhileReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "dropWhile"
+    self assert: (probe dropWhile: [:x | x]) equals: "dropWhile"
+    probe stop
+
+  testExternalPartitionReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "partition"
+    self assert: (probe partition: [:x | x]) equals: "partition"
+    probe stop
+
+  testExternalGroupByReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "groupBy"
+    self assert: (probe groupBy: [:x | x]) equals: "groupBy"
+    probe stop
+
+  testExternalSortReturnsPlainResultNotOkTuple =>
+    probe := BT3380CollectionProbe spawn
+    probe setTag: "sort"
+    self assert: (probe sort: [:a :b | a < b]) equals: "sort"
+    probe stop

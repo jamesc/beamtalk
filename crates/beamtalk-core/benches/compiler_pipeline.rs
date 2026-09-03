@@ -14,7 +14,7 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 
-use beamtalk_core::codegen::core_erlang::{CodegenOptions, generate_module};
+use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::semantic_analysis::{analyse, lower_module_for_codegen};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
@@ -109,6 +109,32 @@ const INPUTS: &[BenchInput] = &[
 ];
 
 // ---------------------------------------------------------------------------
+// Shared pipeline helper
+// ---------------------------------------------------------------------------
+
+/// Run the full lex → parse → analyse → `lower_module_for_codegen` → codegen
+/// pipeline for one source module and return the generated Core Erlang string.
+///
+/// All three end-to-end / project benchmarks use this helper so that any new
+/// pipeline stage only needs to be added here — not in each call site.
+fn compile_module_full(module_name: &str, source: &str) -> String {
+    let tokens = lex_with_eof(source);
+    let (mut module, _) = parse(tokens);
+    let analysis = analyse(&module);
+    // BT-3125: drivers prepare the AST (writeback trio) at this boundary,
+    // before codegen — matches the fixed pipeline's actual call sequence.
+    lower_module_for_codegen(
+        &mut module,
+        &analysis.class_hierarchy,
+        &analysis.method_return_types,
+    );
+    let opts = CodegenOptions::new(module_name)
+        .with_source(source)
+        .with_analysis(analysis);
+    generate_module(&module, opts).expect("compile must succeed")
+}
+
+// ---------------------------------------------------------------------------
 // Benchmark groups
 // ---------------------------------------------------------------------------
 
@@ -196,23 +222,7 @@ fn bench_end_to_end(c: &mut Criterion) {
             BenchmarkId::new("compile", input.name),
             &source,
             |b, src| {
-                b.iter(|| {
-                    let tokens = lex_with_eof(src);
-                    let (mut module, _diags) = parse(tokens);
-                    let analysis = analyse(&module);
-                    // BT-3125: drivers prepare the AST (writeback trio) at
-                    // this boundary now, before codegen — matches the fixed
-                    // pipeline's actual call sequence.
-                    lower_module_for_codegen(
-                        &mut module,
-                        &analysis.class_hierarchy,
-                        &analysis.method_return_types,
-                    );
-                    let opts = CodegenOptions::new(input.module_name)
-                        .with_source(src)
-                        .with_analysis(analysis);
-                    black_box(generate_module(&module, opts).expect("compile must succeed"))
-                });
+                b.iter(|| black_box(compile_module_full(input.module_name, src)));
             },
         );
     }
@@ -245,19 +255,7 @@ fn bench_project(c: &mut Criterion) {
     c.bench_function("sequential/sicp_7_files", |b| {
         b.iter(|| {
             for (module_name, source) in &sources {
-                let tokens = lex_with_eof(source);
-                let (mut module, _) = parse(tokens);
-                let analysis = analyse(&module);
-                // BT-3125: mirrors bench_end_to_end's driver-boundary prep.
-                lower_module_for_codegen(
-                    &mut module,
-                    &analysis.class_hierarchy,
-                    &analysis.method_return_types,
-                );
-                let opts = CodegenOptions::new(module_name)
-                    .with_source(source)
-                    .with_analysis(analysis);
-                black_box(generate_module(&module, opts).unwrap());
+                black_box(compile_module_full(module_name, source));
             }
         });
     });
@@ -291,19 +289,7 @@ fn bench_project_otp(c: &mut Criterion) {
     c.bench_function("sequential/otp_tree_4_files", |b| {
         b.iter(|| {
             for (module_name, source) in &sources {
-                let tokens = lex_with_eof(source);
-                let (mut module, _) = parse(tokens);
-                let analysis = analyse(&module);
-                // BT-3125: mirrors bench_end_to_end's driver-boundary prep.
-                lower_module_for_codegen(
-                    &mut module,
-                    &analysis.class_hierarchy,
-                    &analysis.method_return_types,
-                );
-                let opts = CodegenOptions::new(module_name)
-                    .with_source(source)
-                    .with_analysis(analysis);
-                black_box(generate_module(&module, opts).unwrap());
+                black_box(compile_module_full(module_name, source));
             }
         });
     });

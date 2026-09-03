@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E regression test for BT-3367: calling a project-loaded class from a
+// method on a live-defined REPL class must work exactly like it does at the
+// REPL top level. Previously this raised a spurious "invalid argument"
+// error for a *sealed* Value class whose class-side factory method was not
+// itself declared `class sealed` — see fixtures/bt3367_sealed_factory.bt
+// and beamtalk_core::codegen::core_erlang::gen_server::methods::meta_method_entry.
+
+// @load tests/repl-protocol/fixtures/bt3367_sealed_factory.bt
+
+// Works at the REPL top level.
+Bt3367SealedResult ok: "x" details: "y"
+// => Bt3367SealedResult(checkName: "x", details: "y")
+
+// Define a class live in this REPL session whose instance method calls the
+// project-loaded class above.
+Value subclass: Bt3367DiagCheck
+  runIt => Bt3367SealedResult ok: "x" details: "y"
+// => Bt3367DiagCheck
+
+// Must succeed the same way the top-level call did, not raise "invalid argument".
+(Bt3367DiagCheck new) runIt
+// => Bt3367SealedResult(checkName: "x", details: "y")

@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3377: An Actor with an ordinary method literally named `value` (a plain
+// Integer accessor) had every EXTERNAL call to it wrapped as `{#ok, Value}`
+// instead of returning `Value` directly. Root cause: the compiler's
+// block-invocation intrinsics (`value`/`value:`/`value:value:`/
+// `value:value:value:`/`valueWithArguments:` — see `intrinsics.rs`) generate
+// a runtime `erlang:is_function/2` guard for any receiver whose type isn't
+// known at compile time, since Blocks compile to plain Erlang funs and a
+// variable holding an actor is statically indistinguishable from one holding
+// a block. The guard's "not a function" fallback dispatched via the
+// low-level `beamtalk_primitive:send/3`, which — unlike the proper generic
+// dispatcher `beamtalk_message_dispatch:send/3` — does not know how to
+// unwrap an actor's `{ok, Result} | {error, Error}` gen_server reply
+// envelope (BT-918); it forwards `gen_server:call/2`'s raw reply as-is. The
+// internal `self.value` read (a field access, not a message send) was never
+// affected — only the selector-`value`-shaped external message send was.
+//
+// The bug was never about the literal string "value" — it reproduces for
+// every selector in Block's `value`-family protocol, which is why this
+// fixture also exercises `value:`/`value:value:`/`value:value:value:`/
+// `valueWithArguments:` methods, not just the unary case from the original
+// repro.
+
+Actor subclass: BT3377ValueProbe
+  state: value :: Integer = 0
+
+  setIt -> BT3377ValueProbe =>
+    self.value := 99
+    self
+
+  // Deliberately named after Block's own protocol — see fixture doc above.
+  value -> Integer => self.value
+
+  value: a -> Integer => self.value + a
+
+  value: a value: b -> Integer => self.value + a + b
+
+  value: a value: b value: c -> Integer => self.value + a + b + c
+
+  valueWithArguments: args -> Integer =>
+    self.value + (args inject: 0 into: [:acc :each | acc + each])

@@ -14,7 +14,7 @@
 //! # Architecture
 //!
 //! The compilation process:
-//! 1. Generate Core Erlang from AST using `beamtalk_core::erlang`
+//! 1. Generate Core Erlang from AST using `beamtalk_codegen::core_erlang`
 //! 2. Write .core files to build directory
 //! 3. Batch compile .core → .beam via the selected backend
 //! 4. Collect results and report success/failure
@@ -86,7 +86,7 @@ fn is_runtime_unavailable_error(err: &miette::Report) -> bool {
     msg.starts_with(RUNTIME_UNAVAILABLE_PREFIX)
 }
 
-pub(crate) use beamtalk_core::codegen::core_erlang::escape_erlang_string;
+pub(crate) use beamtalk_codegen::core_erlang::escape_erlang_string;
 
 /// Validates that a module name contains only safe identifier characters.
 ///
@@ -614,9 +614,9 @@ pub fn write_core_erlang_with_source(
 ) -> Result<()> {
     validate_module_name(module_name)?;
 
-    let core_erlang = beamtalk_core::erlang::generate_module(
+    let core_erlang = beamtalk_codegen::core_erlang::generate_module(
         module,
-        beamtalk_core::erlang::CodegenOptions::new(module_name)
+        beamtalk_codegen::core_erlang::CodegenOptions::new(module_name)
             .with_source_opt(source_text)
             // ADR 0098 Phase 3: bake the producing-toolchain identity into __beamtalk_meta.
             .with_provenance(
@@ -719,7 +719,7 @@ pub fn write_core_erlang_with_bindings(
     module_name: &str,
     output_path: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
-    bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
+    bindings: &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable,
     hierarchy: &ClassHierarchyContext,
     source: Option<(&str, Option<&str>)>,
     native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,
@@ -731,7 +731,7 @@ pub fn write_core_erlang_with_bindings(
         Some((text, path)) => (Some(text), path),
         None => (None, None),
     };
-    let mut codegen_options = beamtalk_core::erlang::CodegenOptions::new(module_name)
+    let mut codegen_options = beamtalk_codegen::core_erlang::CodegenOptions::new(module_name)
         .with_bindings(bindings.clone())
         .with_source_opt(source_text)
         .with_workspace_mode(options.workspace_mode)
@@ -761,7 +761,7 @@ pub fn write_core_erlang_with_bindings(
     if let Some(analysis) = analysis {
         codegen_options = codegen_options.with_analysis(analysis);
     }
-    let core_erlang = beamtalk_core::erlang::generate_module(module, codegen_options)
+    let core_erlang = beamtalk_codegen::core_erlang::generate_module(module, codegen_options)
         .into_diagnostic()
         .wrap_err("Failed to generate Core Erlang")?;
 
@@ -797,7 +797,7 @@ pub fn compile_source(
         module_name,
         core_output,
         options,
-        &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+        &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
         &CompileContext::default(),
         None,
     )
@@ -820,7 +820,7 @@ pub(crate) fn compile_source_with_bindings(
     module_name: &str,
     core_output: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
-    bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
+    bindings: &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable,
     ctx: &CompileContext<'_>,
     cached_ast: Option<crate::commands::build::CachedAst>,
 ) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
@@ -861,32 +861,39 @@ pub(crate) fn compile_source_with_bindings(
             &ctx.hierarchy.pre_loaded_classes,
             &module,
         );
-    let diag_ctx = beamtalk_core::queries::diagnostic_provider::ProjectDiagnosticContext {
-        options: options.clone(),
-        cross_file_classes: cross_file_classes.clone(),
-        pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
-        // BT-2928: cross-file/package type aliases from Pass 1 — see
-        // `ClassHierarchyContext::pre_loaded_aliases`'s doc. `analyse_full`
-        // filters out any name the current module redeclares itself, so no
-        // "current file's own aliases" pre-filter is needed here (mirrors
-        // `pre_loaded_protocols` immediately above).
-        pre_loaded_aliases: ctx.hierarchy.pre_loaded_aliases.clone(),
-        cross_file_extensions: ctx.hierarchy.extension_index.clone(),
-        native_type_registry: ctx.native_type_registry.clone(),
-        dep_registry: ctx.dep_registry,
-        strict_deps: ctx.strict_deps,
-        // ADR 0100 Rule 3 (BT-2793) / BT-2800: `compute_project_diagnostics`
-        // applies this table itself (after `@expect` suppression, before
-        // returning) — the single shared pipeline both the CLI and the LSP
-        // call, so severity can never drift between the two surfaces.
-        diagnostics_overrides: ctx.diagnostics_overrides.clone(),
-    };
+    let diag_ctx =
+        beamtalk_language_service::queries::diagnostic_provider::ProjectDiagnosticContext {
+            options: options.clone(),
+            cross_file_classes: cross_file_classes.clone(),
+            pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
+            // BT-2928: cross-file/package type aliases from Pass 1 — see
+            // `ClassHierarchyContext::pre_loaded_aliases`'s doc. `analyse_full`
+            // filters out any name the current module redeclares itself, so no
+            // "current file's own aliases" pre-filter is needed here (mirrors
+            // `pre_loaded_protocols` immediately above).
+            pre_loaded_aliases: ctx.hierarchy.pre_loaded_aliases.clone(),
+            cross_file_extensions: ctx.hierarchy.extension_index.clone(),
+            native_type_registry: ctx.native_type_registry.clone(),
+            dep_registry: ctx.dep_registry,
+            strict_deps: ctx.strict_deps,
+            // ADR 0100 Rule 3 (BT-2793) / BT-2800: `compute_project_diagnostics`
+            // applies this table itself (after `@expect` suppression, before
+            // returning) — the single shared pipeline both the CLI and the LSP
+            // call, so severity can never drift between the two surfaces.
+            diagnostics_overrides: ctx.diagnostics_overrides.clone(),
+            // BT-1846/BT-1847: this compile pipeline never reaches a `stubs/`
+            // file — `find_source_files`/`collect_lint_files` exclude
+            // `stubs/` from the walk that feeds it, and `declare native:`
+            // stub declarations are parsed separately by
+            // `load_project_stub_registry`, never through here.
+            is_stub_file: false,
+        };
     // BT-3123: capture the `AnalysisResult` this pipeline's `analyse_full`
     // call already produced, so it can be handed to codegen below instead of
     // codegen re-deriving the class hierarchy, semantic facts, and inferred
     // method return types from scratch (a second full type-checking pass).
     let (new_diagnostics, analysis_result) =
-        beamtalk_core::queries::diagnostic_provider::compute_project_diagnostics_with_analysis(
+        beamtalk_language_service::queries::diagnostic_provider::compute_project_diagnostics_with_analysis(
             &module,
             &source,
             diagnostics,
@@ -1527,7 +1534,7 @@ end
             "dnu",
             &core_file,
             &options,
-            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
             &diagnostics_table_ctx(crate::commands::manifest::DiagnosticsTable::new()),
             None,
         )
@@ -1561,7 +1568,7 @@ end
             "dnu",
             &core_file,
             &options,
-            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
             &diagnostics_table_ctx(table),
             None,
         )
@@ -1600,7 +1607,7 @@ end
             "dnu",
             &core_file,
             &options,
-            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
             &diagnostics_table_ctx(table),
             None,
         );
@@ -1637,7 +1644,7 @@ end
             "dnu",
             &core_file,
             &options,
-            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
             &diagnostics_table_ctx(table),
             None,
         );
@@ -1674,7 +1681,7 @@ end
             "actor_new",
             &core_file,
             &options,
-            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
             &diagnostics_table_ctx(table),
             None,
         );
@@ -1707,7 +1714,7 @@ end
             "actor_new",
             &core_file,
             &options,
-            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
             &diagnostics_table_ctx(table),
             None,
         );
@@ -1737,7 +1744,7 @@ end
             "unresolved",
             &core_file,
             &options,
-            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
             &diagnostics_table_ctx_with_cross_file_classes(
                 crate::commands::manifest::DiagnosticsTable::new(),
             ),
@@ -1778,7 +1785,7 @@ end
             "unresolved",
             &core_file,
             &options,
-            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
             &diagnostics_table_ctx_with_cross_file_classes(table),
             None,
         );
@@ -1820,7 +1827,7 @@ end
             "unresolved",
             &core_file,
             &options,
-            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
             &diagnostics_table_ctx_with_cross_file_classes(table),
             None,
         );
@@ -1861,7 +1868,7 @@ end
             "unresolved",
             &core_file,
             &options,
-            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
             &diagnostics_table_ctx_with_cross_file_classes(table),
             None,
         );

@@ -273,7 +273,7 @@ pub(crate) fn extract_assignment_var(expression: &str) -> Option<String> {
 pub(crate) fn erlang_atom(name: &str) -> String {
     format!(
         "'{}'",
-        beamtalk_core::codegen::core_erlang::escape_atom_chars(name)
+        beamtalk_codegen::core_erlang::escape_atom_chars(name)
     )
 }
 

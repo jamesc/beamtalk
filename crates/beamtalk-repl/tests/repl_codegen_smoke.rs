@@ -1333,6 +1333,7 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
 
     let module = Module {
         type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
         expressions: vec![bare(expr)],
         classes: vec![],
         method_definitions: Vec::new(),
@@ -1386,6 +1387,7 @@ fn test_standalone_class_reference_validates_undefined_classes() {
 
     let module = Module {
         type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
         expressions: vec![bare(expr)],
         classes: vec![],
         method_definitions: Vec::new(),
@@ -1528,6 +1530,7 @@ fn test_qualified_class_reference_standalone() {
 
     let module = Module {
         type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
         expressions: vec![bare(expr)],
         classes: vec![],
         method_definitions: Vec::new(),

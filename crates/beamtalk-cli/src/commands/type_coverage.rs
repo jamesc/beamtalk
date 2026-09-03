@@ -13,9 +13,9 @@
 
 use crate::commands::OutputFormat;
 use crate::commands::build::collect_source_files_from_dir;
-use beamtalk_core::language_service::{ByteOffset, Position};
 use beamtalk_core::semantic_analysis::{ClassHierarchy, CoverageReport, infer_types};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_language_service::{ByteOffset, Position};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result};
 
@@ -255,12 +255,20 @@ fn collect_coverage_files(source_path: &Utf8Path, path: &str) -> Result<Vec<Utf8
 
     let all_files = collect_source_files_from_dir(search_dir)?;
 
-    // Exclude common non-project directories.
-    let excluded_prefixes: Vec<Utf8PathBuf> =
-        ["deps", "test", "_build", "stdlib", "bootstrap-test"]
-            .iter()
-            .map(|d| source_path.join(d))
-            .collect();
+    // Exclude common non-project directories. `stubs/` (ADR 0075, BT-1847)
+    // is type-only and never compiled — a `declare native:` block there
+    // would otherwise be swept in and rejected as a hard error.
+    let excluded_prefixes: Vec<Utf8PathBuf> = [
+        "deps",
+        "test",
+        "_build",
+        "stdlib",
+        "bootstrap-test",
+        "stubs",
+    ]
+    .iter()
+    .map(|d| source_path.join(d))
+    .collect();
 
     let files: Vec<Utf8PathBuf> = all_files
         .into_iter()

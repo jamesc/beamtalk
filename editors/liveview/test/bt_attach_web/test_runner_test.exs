@@ -63,6 +63,7 @@ defmodule BtAttachWeb.Live.TestRunnerTest do
         test_classes: nil,
         test_results: nil,
         tests_error: nil,
+        tests_error_owner: nil,
         tests_running: false,
         tests_discover_keep_error: false,
         tabs: [],

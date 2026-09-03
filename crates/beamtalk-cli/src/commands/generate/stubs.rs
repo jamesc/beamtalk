@@ -636,4 +636,132 @@ mod tests {
         // Contains space
         assert!(!is_valid_module_name("foo bar"));
     }
+
+    // --- run(): argument-validation bail branches (no `erl`/build-worker calls) ---
+
+    #[test]
+    fn run_rejects_no_modules_and_no_native_dir() {
+        let err = run(&[], None, "stubs").unwrap_err();
+        assert!(
+            err.to_string().contains("No modules specified"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn run_rejects_missing_native_dir() {
+        let dir = ScratchDir::new("missing-native-dir");
+        let missing = dir.path.join("does-not-exist");
+        let err = run(&[], Some(missing.as_str()), "stubs").unwrap_err();
+        assert!(err.to_string().contains("does not exist"), "got: {err}");
+    }
+
+    #[test]
+    fn run_rejects_native_dir_with_no_beam_files() {
+        let dir = ScratchDir::new("no-beam-files");
+        std::fs::write(dir.path.join("readme.txt").as_std_path(), b"not a beam")
+            .expect("write stub file");
+        let output_dir = dir.path.join("stubs-out");
+        let err = run(&[], Some(dir.path.as_str()), output_dir.as_str()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("No .beam files found for the requested modules"),
+            "got: {err}"
+        );
+    }
+
+    /// Build a unique scratch directory under the OS temp dir, removed on
+    /// drop even on panic, mirroring `escript.rs`'s own `ScratchDir` (kept
+    /// module-local rather than shared: BT-3349's no-duplication rule is
+    /// about *production* helpers, and both are tiny test-only RAII types
+    /// over a one-line `tempfile`-free pattern already used elsewhere in
+    /// this crate's tests).
+    struct ScratchDir {
+        path: Utf8PathBuf,
+    }
+
+    impl ScratchDir {
+        fn new(label: &str) -> Self {
+            static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+                .expect("temp dir is valid UTF-8")
+                .join(format!("bt3375-stubs-{label}-{}-{n}", std::process::id()));
+            std::fs::create_dir_all(path.as_std_path()).expect("create scratch dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(self.path.as_std_path());
+        }
+    }
+
+    // --- format_type: variants not exercised via format_signature above ---
+
+    #[test]
+    fn format_type_never() {
+        assert_eq!(format_type(&InferredType::Never), "Never");
+    }
+
+    #[test]
+    fn format_type_known_with_type_args() {
+        let ty = InferredType::Known {
+            class_name: "List".into(),
+            type_args: vec![InferredType::known("Integer")],
+            provenance: TypeProvenance::Extracted,
+        };
+        assert_eq!(format_type(&ty), "List(Integer)");
+    }
+
+    #[test]
+    fn format_type_meta_renders_class_side() {
+        let ty = InferredType::Meta {
+            class_name: "Counter".into(),
+            provenance: TypeProvenance::Extracted,
+        };
+        assert_eq!(format_type(&ty), "Counter class");
+    }
+
+    #[test]
+    fn format_type_negation_non_union_excluded() {
+        let ty = InferredType::Negation {
+            base: Box::new(InferredType::known("Symbol")),
+            excluded: Box::new(InferredType::known("#foo")),
+            provenance: TypeProvenance::Extracted,
+        };
+        assert_eq!(format_type(&ty), "Symbol \\ #foo");
+    }
+
+    #[test]
+    fn format_type_negation_union_excluded_is_parenthesized() {
+        let ty = InferredType::Negation {
+            base: Box::new(InferredType::known("Symbol")),
+            excluded: Box::new(InferredType::simple_union(&["#a", "#b"])),
+            provenance: TypeProvenance::Extracted,
+        };
+        assert_eq!(format_type(&ty), "Symbol \\ (#a | #b)");
+    }
+
+    #[test]
+    fn format_type_intersection_plain_members() {
+        let ty = InferredType::Intersection {
+            members: vec![InferredType::known("A"), InferredType::known("B")],
+            provenance: TypeProvenance::Extracted,
+        };
+        assert_eq!(format_type(&ty), "A & B");
+    }
+
+    #[test]
+    fn format_type_intersection_union_member_is_parenthesized() {
+        let ty = InferredType::Intersection {
+            members: vec![
+                InferredType::known("A"),
+                InferredType::simple_union(&["B", "C"]),
+            ],
+            provenance: TypeProvenance::Extracted,
+        };
+        assert_eq!(format_type(&ty), "A & (B | C)");
+    }
 }

@@ -14,7 +14,7 @@
 //! Additionally, a compilation test verifies the generated Core Erlang
 //! compiles successfully with `erlc +from_core` (skipped if erlc unavailable).
 
-use beamtalk_core::erlang::{CodegenOptions, generate_module};
+use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::semantic_analysis;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use camino::Utf8PathBuf;

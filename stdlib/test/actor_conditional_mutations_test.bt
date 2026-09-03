@@ -105,3 +105,74 @@ TestCase subclass: ActorConditionalMutationsTest
     self assert: (self.c decrementViaLocalVar: false) equals: -1
     self assert: (self.c decrementViaLocalVar: false) equals: -2
     self assert: (self.c decrementViaLocalVar: true) equals: -2
+
+  testSelfSendAsConditionalReceiverThreadsMutation =>
+    // BT-3382: `(self recordOnce: flag) ifTrue:ifFalse:` — the self-send is
+    // the RECEIVER of the conditional, not a statement inside either block
+    // body, so the block-mutation scan that decides whether to inline this
+    // conditional never even sees a mutation (neither block itself mutates
+    // anything). Correct branch selection alone does not prove the
+    // self-send's own state mutation was observed afterward — assert the
+    // count too, for both branches.
+    result := self.c recordThenBranch: true
+    self assert: result equals: #recorded
+    self assert: self.c getCount equals: 1
+    result2 := self.c recordThenBranch: false
+    self assert: result2 equals: #gaveUp
+    self assert: self.c getCount equals: 2
+
+  testSelfSendNestedInBinaryOpOperandThreadsMutation =>
+    // BT-3392: `1 + (self bumpCount: true)` inside an `ifTrue:` block —
+    // the self-send is a binary-op operand, not the block's own top-level
+    // statement and not the conditional's receiver. Without the fix, this
+    // silently drops `bumpCount:`'s mutation even though the arithmetic
+    // (and thus the self-send) demonstrably ran.
+    self assert: (self.c recordViaBinaryOpOperand: true) equals: 1
+
+  testSelfSendAsBinaryOpArgumentDoesNotRunBeforeEarlierRaisingOperand =>
+    // BT-3392 follow-up: `(self.items at: idx) + (self bumpCount: true)` —
+    // the self-send is a binary-op ARGUMENT, and `at:` (a non-self-send
+    // operand that can itself raise) evaluates before it in source order.
+    // Hoisting the self-send unconditionally ahead of `at:` (the original
+    // BT-3392 mechanism) would run bumpCount:'s mutation before `at:` gets
+    // a chance to fail — an out-of-bounds index must raise WITHOUT ever
+    // bumping the count.
+    self should: [
+      self.c orderSensitiveBinaryOp: 99 flag: true
+    ] raise: #index_out_of_bounds
+    self assert: self.c getCount equals: 0
+
+  testSelfSendAsBinaryOpArgumentInBoundsStillDropsMutationSilently =>
+    // BT-3399: same `(self.items at: idx) + (self bumpCount: true)` shape as
+    // above, but with `idx` IN BOUNDS this time — so `at:` succeeds and
+    // `bumpCount:` runs. BT-3392's own fallback (leaving an order-unsafe
+    // self-send un-hoisted, since `at:` could have raised) routes
+    // `bumpCount:` through the ordinary, still-discarding
+    // `generate_self_dispatch` path, so its mutation is silently lost —
+    // `getCount` stays 0 even though `bumpCount:` demonstrably ran (its
+    // return value, 1, is added to `at:`'s result and thrown away since
+    // this is the block's only, non-last statement). This is a known,
+    // documented limitation (see `hoist_self_sends_for_binary_op`'s doc
+    // comment) now surfaced via a compile-time codegen warning rather than
+    // fixed outright — pinned here as a regression guard on the observable
+    // (still-dropped) behavior, not a claim that it's correct.
+    self assert: (self.c orderSensitiveBinaryOp: 1 flag: true) equals: 0
+    self assert: self.c getCount equals: 0
+
+  testSelfSendInsideOnDoProtectedBlockAlreadyThreadsMutation =>
+    // BT-3392: verifies the shape confirmed against the actual
+    // beamtalk-watcher source (`CheckRegistry.bt`'s `spawnMonitorFor:`
+    // pattern) — a self-send as the sole statement of an on:do:-protected
+    // block, itself the sole statement of an ifTrue: block. This was
+    // already correct before BT-3392 (the pre-existing on:do:/C11 handling
+    // covers it); this test pins that down as a regression guard.
+    self assert: (self.c recordViaOnDoProtectedBlock: true) equals: 1
+
+  testNonDispatchingSelfSendAsConditionalReceiverDoesNotCrash =>
+    // BT-3382 regression: `(self respondsTo: sel) ifTrue:ifFalse:` — the
+    // receiver is a self-send, but `respondsTo:` is intercepted before
+    // self-dispatch (BT-1420) and is never a real dispatch-table entry.
+    // An over-broad receiver check previously routed this through the
+    // self-dispatch codegen shortcut, crashing with does_not_understand.
+    self assert: (self.c respondsToAsReceiver: #getCount) equals: #yes
+    self assert: (self.c respondsToAsReceiver: #bogusSelector) equals: #no

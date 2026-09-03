@@ -20,10 +20,20 @@ path = "src/main.rs"
 
 [dependencies]
 beamtalk-core = { workspace = true, features = ["serde"] }
+# why: ADR 0117 step 5 (BT-3361) — `LanguageService`/`SimpleLanguageService`
+# and the `queries`/`runtime_delegate` (nav-query) APIs moved out of
+# `beamtalk-core` into their own crate; `serde` enables `Deserialize` on the
+# nav-query request/response types this server decodes over the runtime
+# WebSocket link.
+beamtalk-language-service = { workspace = true, features = ["serde"] }
 # why: BT-3340 (ADR 0117 Decision step 2) — `project` (root discovery) moved
 # out of `beamtalk-core` into a standalone crate.
 beamtalk-project.workspace = true
 beamtalk-repl-protocol = { workspace = true }
+# why: shared leaf for deriving the installation sysroot from the running
+# executable path (see docs/development/architecture-principles.md §6) —
+# used to locate installed stdlib sources under `{sysroot}/share/beamtalk/`.
+beamtalk-sysroot = { workspace = true }
 beamtalk-workspace = { workspace = true }
 tower-lsp = { workspace = true }
 tokio = { workspace = true }
@@ -41,6 +51,9 @@ thiserror = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "rt", "macros"] }
 tempfile = "3.14"
+# why: BT-3331 — `test_support`'s shared loopback WS auth-handshake double,
+# consolidating this crate's own hand-rolled `FakeWorkspace`/`spawn_workspace`.
+beamtalk-repl-protocol = { workspace = true, features = ["test"] }
 # Drives a raw `initialize` JSON-RPC request through `LspService`'s
 # `tower::Service` impl in tests, so `Client::send_notification` (gated on
 # `ServerState::Initialized`) actually sends instead of silently no-opping —

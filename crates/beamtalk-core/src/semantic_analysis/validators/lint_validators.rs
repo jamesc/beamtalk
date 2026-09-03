@@ -515,6 +515,275 @@ fn redundant_super_initialize_diagnostic(span: Span) -> Diagnostic {
     .with_category(DiagnosticCategory::Lint)
 }
 
+// ── BT-3391/BT-3395: setUp drops field mutations unless it ends in self ──────
+
+/// BT-3391/BT-3395: Warn when a `TestCase` subclass's `setUp` method mutates
+/// a field — via `self.field := value` or a `with<Field>:` send — but its
+/// last statement isn't itself self-producing.
+///
+/// `TestCase` is a `Value subclass:` (BT-1533 exempts `self.field :=` there
+/// from the general value-immutability error, pending the `with*:` migration
+/// tracked by BT-1534). Value-type method bodies return the value of their
+/// *last* expression, with two special cases: a `self.field := value`
+/// assignment in last position evaluates to the updated `self` rather than
+/// the assigned value (BT-833/BT-900), and a `with<Field>:` send — the
+/// auto-generated copy-setter naming convention for every `Value` field
+/// (`crate::synthetic_selectors::with_star_selector`) — always returns a new,
+/// fully updated self by construction. Either shape only carries the
+/// mutation forward when it IS the last statement (a cascade of `with*:`
+/// sends included, since a cascade's value is its last message's result).
+/// Any other trailing statement (an unrelated local assignment, a `super
+/// setUp` call, a log line, …) makes the method return *that* statement's own
+/// value instead, silently discarding every field mutation made earlier in
+/// the body — the test runner then threads the wrong `self` into every test
+/// method, with no compile or runtime error.
+///
+/// Fires only for `setUp`: it is the one `TestCase` lifecycle method whose
+/// return value the runner threads as the receiver of each test method (see
+/// `stdlib/src/TestCase.bt`'s class doc comment). `tearDown` returns `Nil`
+/// and `setUpOnce`'s return is stored as a suite fixture, not threaded as
+/// `self`, so neither is affected by this trap.
+///
+/// Does NOT fire when:
+/// - `setUp` contains no `self.field := ...` assignment and no `self
+///   with<Field>: ...` send at all — there's nothing to drop.
+/// - The last statement is a bare `self`, another `self.field := value`
+///   assignment, a `self with<Field>: value` send, or a cascade on `self`
+///   ending in a `with<Field>:` message — all reliably yield the fully
+///   updated self already.
+pub(crate) fn check_testcase_setup_drops_field_assignments(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        let class_name = class.name.name.as_str();
+        if !hierarchy.is_testcase_subclass(class_name) {
+            continue;
+        }
+        for method in &class.methods {
+            if is_unary_setup(&method.selector) {
+                check_setup_body_returns_self(&method.body, diagnostics);
+            }
+        }
+    }
+    // Also check standalone (Tonel-style) method definitions.
+    for standalone in &module.method_definitions {
+        if standalone.is_class_method {
+            continue;
+        }
+        let class_name = standalone.class_name.name.as_str();
+        if !hierarchy.is_testcase_subclass(class_name) {
+            continue;
+        }
+        if is_unary_setup(&standalone.method.selector) {
+            check_setup_body_returns_self(&standalone.method.body, diagnostics);
+        }
+    }
+}
+
+/// Returns `true` if the selector is the unary `setUp` message.
+fn is_unary_setup(selector: &MessageSelector) -> bool {
+    matches!(selector, MessageSelector::Unary(name) if name.as_str() == "setUp")
+}
+
+/// Returns `true` if `expr` is `self.field := value` (any field name).
+fn is_self_field_assignment(expr: &Expression) -> bool {
+    let Expression::Assignment { target, .. } = expr.unwrap_parens() else {
+        return false;
+    };
+    let Expression::FieldAccess { receiver, .. } = target.as_ref() else {
+        return false;
+    };
+    matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+}
+
+/// Returns `true` if `expr` is the bare identifier `self`.
+fn is_bare_self(expr: &Expression) -> bool {
+    matches!(expr.unwrap_parens(), Expression::Identifier(id) if id.name == "self")
+}
+
+/// Returns `true` if `selector` is a single-keyword-part send following the
+/// `with<Field>:` copy-setter naming convention recognized by
+/// [`crate::synthetic_selectors::is_with_star_selector`] — the shared
+/// recognition counterpart to `with_star_selector`'s generation, also used
+/// by `beamtalk-lint`'s `ValueLikeObjectPass` (`value_like_object.rs`) to
+/// spot hand-written `withX:` setter methods. Structural, like
+/// `is_self_field_assignment`: it recognizes the *shape* of the convention
+/// rather than looking up whether `Field` is a real field on some class.
+fn is_with_star_selector(selector: &MessageSelector) -> bool {
+    let MessageSelector::Keyword(parts) = selector else {
+        return false;
+    };
+    if parts.len() != 1 {
+        return false;
+    }
+    crate::synthetic_selectors::is_with_star_selector(&selector.name())
+}
+
+/// Returns `true` if `expr` is a `with<Field>:` send whose receiver is
+/// itself self-producing — either literal `self` (`self withA: x`) or
+/// another self-producing expression, recursively, so an arbitrarily deep
+/// `with*:` chain (`((self withA: x) withB: y) withC: z`) is recognized
+/// throughout, not just its outermost send. See [`is_self_producing`].
+fn is_self_with_field_send(expr: &Expression) -> bool {
+    let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        ..
+    } = expr.unwrap_parens()
+    else {
+        return false;
+    };
+    arguments.len() == 1 && is_with_star_selector(selector) && is_self_producing(receiver)
+}
+
+/// Returns `true` if `expr` reliably evaluates to the fully updated `self`
+/// — a bare `self`, a `self.field := value` assignment, a `with<Field>:`
+/// send (recursively, so a chain of them also qualifies), or a `with*:`
+/// cascade whose *last* message is a `with<Field>:` send. This is the
+/// shared "self-producing" predicate: a `with<Field>:` send's receiver must
+/// satisfy it (chaining), and so must the trailing statement
+/// `check_setup_body_returns_self` requires — both need to know what the
+/// expression actually *evaluates to*, so a cascade is checked by its last
+/// message only (ADR 0067), unlike the presence-only
+/// [`is_self_with_field_cascade`] used for detecting *that* a mutation
+/// happened anywhere in the body.
+fn is_self_producing(expr: &Expression) -> bool {
+    is_bare_self(expr)
+        || is_self_field_assignment(expr)
+        || is_self_with_field_send(expr)
+        || cascade_value_is_self_producing(expr)
+}
+
+/// Returns the cascade's common receiver — the receiver of the message
+/// embedded in the `Cascade` node's own `receiver` field, which the parser
+/// always fills with the cascade's first message send (see
+/// `ast_walker::tests::walk_cascade_visits_receiver_and_message_arguments`).
+/// `None` for the (grammatically unreachable in practice) case where that
+/// field isn't itself a message send.
+fn cascade_common_receiver(receiver: &Expression) -> Option<&Expression> {
+    match receiver.unwrap_parens() {
+        Expression::MessageSend { receiver, .. } => Some(receiver.as_ref()),
+        _ => None,
+    }
+}
+
+/// Returns `true` if `expr` is a cascade whose common receiver is
+/// self-producing (literal `self`, or itself a `with<Field>:` send/chain —
+/// recursively, via [`is_self_producing`]) and *at least one* of its
+/// messages is a `with<Field>:` send — e.g. `self withCounter: 1; withDb:
+/// 2`, or a cascade with an unrelated message mixed in. Presence-only: this
+/// answers "did a field mutation happen anywhere in this cascade", which is
+/// what [`contains_self_reconstructing_send`] needs to decide whether
+/// `setUp` has anything to drop at all. It does NOT tell you whether the
+/// cascade's own *value* is self — for that (whether this expression, in
+/// trailing position, actually carries the mutation forward), use
+/// [`cascade_value_is_self_producing`], which requires the *last* message to
+/// be the `with<Field>:` send (ADR 0067: a cascade evaluates to its last
+/// message's result) — the distinction a 3+-message cascade like `self
+/// withCounter: 1; withDb: 2; log: "ready"` depends on: this function
+/// answers "true" (a mutation happened), but the cascade's value is `log:`'s
+/// result, not self, so `cascade_value_is_self_producing` must answer
+/// "false" for the same expression.
+fn is_self_with_field_cascade(expr: &Expression) -> bool {
+    let Expression::Cascade {
+        receiver, messages, ..
+    } = expr.unwrap_parens()
+    else {
+        return false;
+    };
+    cascade_common_receiver(receiver).is_some_and(is_self_producing)
+        && messages
+            .iter()
+            .any(|msg| msg.arguments.len() == 1 && is_with_star_selector(&msg.selector))
+}
+
+/// Returns `true` if `expr` is a cascade whose common receiver is
+/// self-producing AND whose *last* message is a `with<Field>:` send — the
+/// only shape of cascade that actually evaluates to the fully updated self
+/// (ADR 0067: a cascade's value is its last message's result). Used by
+/// [`is_self_producing`] wherever the code needs to know what an expression
+/// evaluates to (a chained receiver, or `setUp`'s trailing statement) —
+/// never for mere presence detection, where [`is_self_with_field_cascade`]
+/// applies instead.
+fn cascade_value_is_self_producing(expr: &Expression) -> bool {
+    let Expression::Cascade {
+        receiver, messages, ..
+    } = expr.unwrap_parens()
+    else {
+        return false;
+    };
+    cascade_common_receiver(receiver).is_some_and(is_self_producing)
+        && messages
+            .last()
+            .is_some_and(|msg| msg.arguments.len() == 1 && is_with_star_selector(&msg.selector))
+}
+
+/// Returns `true` if `expr` contains a self-reconstructing send anywhere in
+/// its subtree (including itself) — a `self.field := value` assignment, a
+/// `with<Field>:` send/chain, or a `with*:` cascade (see
+/// [`is_self_producing`], minus the bare-`self` case, which mutates
+/// nothing). Each of these shapes returns the fully updated `self`; when the
+/// containing `setUp` doesn't return that value as its very last statement,
+/// the mutation is silently dropped (BT-3391, BT-3395).
+fn contains_self_reconstructing_send(expr: &Expression) -> bool {
+    let mut found = false;
+    walk_expression(expr, &mut |e| {
+        if is_self_field_assignment(e)
+            || is_self_with_field_send(e)
+            || is_self_with_field_cascade(e)
+        {
+            found = true;
+        }
+    });
+    found
+}
+
+/// Checks one `setUp` method body: warns when it mutates a field via
+/// `self.field := value` or a `with<Field>:` send but the last statement
+/// won't carry those mutations forward as the returned `self`.
+fn check_setup_body_returns_self(
+    body: &[crate::ast::ExpressionStatement],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(last_stmt) = body.last() else {
+        return;
+    };
+    let has_field_mutation = body
+        .iter()
+        .any(|stmt| contains_self_reconstructing_send(&stmt.expression));
+    if !has_field_mutation {
+        return;
+    }
+    let last_expr = last_stmt.expression.unwrap_parens();
+    if is_self_producing(last_expr) {
+        return;
+    }
+    diagnostics.push(setup_drops_field_assignments_diagnostic(last_expr.span()));
+}
+
+/// Builds the BT-3391 diagnostic for a `setUp` whose trailing statement
+/// drops earlier `self.field :=` mutations.
+fn setup_drops_field_assignments_diagnostic(span: Span) -> Diagnostic {
+    Diagnostic::warning(
+        "`setUp` mutates a field earlier in the method (via `self.field := \
+         ...` or a `with<Field>:` send), but its last statement doesn't \
+         return the updated self — every field mutation is silently dropped \
+         for the test method"
+            .to_string(),
+        span,
+    )
+    .with_hint(
+        "End `setUp` with a bare `self` — or make the last statement a \
+         `self.field := value` assignment, a `self with<Field>: value` \
+         send, or a `with<Field>:` cascade — so the updated fields carry \
+         forward",
+    )
+    .with_category(DiagnosticCategory::Lint)
+}
+
 // ── BT-2140: Redundant local-variable type annotation ────────────────────────
 
 /// BT-2140: Lint when a local-variable assignment carries a `:: T` annotation
@@ -1322,6 +1591,389 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected no warnings for class-side keyword initialize, got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-3391: setUp drops field assignments tests ──────────────────────────
+
+    /// A single `self.field := value` statement, with nothing after it — the
+    /// documented-as-working idiom (BT-833/BT-900 special-cases the last
+    /// position). No warning.
+    #[test]
+    fn setup_single_field_assignment_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    self.dashboard := 1";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for setUp ending in self.field :=, got: {diagnostics:?}"
+        );
+    }
+
+    /// The exact BT-3391 repro: a field assignment followed by an unrelated
+    /// trailing statement — warns.
+    #[test]
+    fn setup_field_assignment_then_unrelated_statement_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    self.dashboard := 1.\n    extra := 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("silently dropped"),
+            "Expected 'silently dropped' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// A trailing `super setUp` call after a field assignment also warns —
+    /// explicitly called out as a breaking case in BT-3391.
+    #[test]
+    fn setup_field_assignment_then_super_setup_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    self.dashboard := 1.\n    super setUp";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for trailing super setUp, got: {diagnostics:?}"
+        );
+    }
+
+    /// Ending with an explicit trailing `self` after the extra statement —
+    /// the documented fix. No warning.
+    #[test]
+    fn setup_field_assignment_then_extra_then_self_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    self.dashboard := 1.\n    extra := 2.\n    self";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings when setUp ends in explicit self, got: {diagnostics:?}"
+        );
+    }
+
+    /// Two field assignments in a row, ending in the second — still safe
+    /// (each field-assignment-in-last-position threads the full self).
+    #[test]
+    fn setup_two_field_assignments_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: a = nil\n  field: b = nil\n  setUp =>\n    self.a := 1.\n    self.b := 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for two field assignments ending in the last, got: {diagnostics:?}"
+        );
+    }
+
+    /// The documented `self withCounter: ...` idiom as `setUp`'s sole/trailing
+    /// statement — its own return value already threads the updated self.
+    /// No warning.
+    #[test]
+    fn setup_with_selector_idiom_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: CounterTest\n  field: counter = nil\n  setUp =>\n    self withCounter: 1";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for with*: idiom as the trailing statement, got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-3395: with*: chain variant of the same trap ────────────────────────
+
+    /// A single `with<Field>:` send followed by an unrelated trailing
+    /// statement — the exact BT-3395 repro. Warns, same as the
+    /// `self.field :=` form.
+    #[test]
+    fn setup_with_field_send_then_unrelated_statement_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: DbTest\n  field: db = nil\n  setUp =>\n    self withDb: 1.\n    Transcript show: \"ready\"";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for with<Field>: send followed by an unrelated \
+             statement, got: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics[0].message.contains("silently dropped"),
+            "Expected 'silently dropped' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// Ending with an explicit trailing `self` after the extra statement
+    /// fixes the `with<Field>:` variant too. No warning.
+    #[test]
+    fn setup_with_field_send_then_extra_then_self_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: DbTest\n  field: db = nil\n  setUp =>\n    self withDb: 1.\n    Transcript show: \"ready\".\n    self";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings when setUp ends in explicit self, got: {diagnostics:?}"
+        );
+    }
+
+    /// A `with*:` cascade (`self withCounter: 1; withDb: 2`) as the sole
+    /// statement — ADR 0067's documented chained-setter idiom. The cascade's
+    /// own value is its last message's result, so this threads the full
+    /// self forward. No warning.
+    #[test]
+    fn setup_with_field_cascade_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: CounterDbTest\n  field: counter = nil\n  field: db = nil\n\
+                   \n  setUp =>\n    self withCounter: 1; withDb: 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for a with*: cascade as the trailing statement, got: {diagnostics:?}"
+        );
+    }
+
+    /// The same `with*:` cascade, but followed by an unrelated trailing
+    /// statement — warns, since the cascade's self-preserving value is
+    /// discarded once something follows it.
+    #[test]
+    fn setup_with_field_cascade_then_unrelated_statement_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: CounterDbTest\n  field: counter = nil\n  field: db = nil\n\
+                   \n  setUp =>\n    self withCounter: 1; withDb: 2.\n    Transcript show: \"ready\"";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for a with*: cascade followed by an unrelated \
+             statement, got: {diagnostics:?}"
+        );
+    }
+
+    /// Mixed `self.field := value` and `self with<Field>: value` sends in the
+    /// same body, ending in an unrelated statement — warns; either form
+    /// mutating a field earlier is enough to trigger the check.
+    #[test]
+    fn setup_mixed_field_assignment_and_with_field_send_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: MixedTest\n  field: counter = nil\n  field: db = nil\n\
+                   \n  setUp =>\n    self.counter := 1.\n    self withDb: 2.\n    Transcript show: \"ready\"";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for mixed self.field := and with<Field>: sends, got: {diagnostics:?}"
+        );
+    }
+
+    /// Mixed forms ending in a `with<Field>:` send — no warning, since the
+    /// trailing `with<Field>:` send itself carries every earlier mutation
+    /// (both the `self.field :=` and the earlier `with*:`) forward as self.
+    #[test]
+    fn setup_mixed_field_assignment_and_with_field_send_ending_in_with_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: MixedTest\n  field: counter = nil\n  field: db = nil\n\
+                   \n  setUp =>\n    self.counter := 1.\n    Transcript show: \"ready\".\n    self withDb: 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings when setUp ends in a with<Field>: send, got: {diagnostics:?}"
+        );
+    }
+
+    /// A `with:` send whose keyword part isn't capitalized after `with`
+    /// (e.g. a hypothetical `self with: x`) does not match the `with*:`
+    /// naming convention — no false positive from an unrelated `with:`
+    /// method.
+    #[test]
+    fn setup_bare_with_colon_send_not_recognized_as_with_star() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n\
+                   \n  setUp =>\n    self.dashboard := 1.\n    self with: 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning: trailing `self with: 2` isn't a with<Field>: \
+             send, so it doesn't carry the earlier self.dashboard := forward, \
+             got: {diagnostics:?}"
+        );
+    }
+
+    /// A chained `with*:` send — `(self withA: x) withB: y` — where the
+    /// outer send's receiver is itself a `with<Field>:` send rather than
+    /// literal `self`. The CI regression (BT-3395 fix-forward): the chain's
+    /// overall value is still the fully updated self (each `with*:` send
+    /// returns self with its own field set), so this must NOT warn as
+    /// `setUp`'s trailing statement.
+    #[test]
+    fn setup_with_field_chain_two_deep_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ChainedTest\n  field: a = nil\n  field: b = nil\n\
+                   \n  setUp =>\n    (self withA: 1) withB: 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for a 2-deep with*: chain as the trailing statement, got: {diagnostics:?}"
+        );
+    }
+
+    /// The same chain, 3 levels deep — `((self withA: x) withB: y) withC:
+    /// z` — confirming the recursive receiver check isn't hardcoded to a
+    /// single level of nesting.
+    #[test]
+    fn setup_with_field_chain_three_deep_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ChainedTest\n  field: a = nil\n  field: b = nil\n  field: c = nil\n\
+                   \n  setUp =>\n    ((self withA: 1) withB: 2) withC: 3";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for a 3-deep with*: chain as the trailing statement, got: {diagnostics:?}"
+        );
+    }
+
+    /// A 2-deep `with*:` chain followed by an unrelated trailing statement
+    /// still warns — the chain's self-preserving value is discarded once
+    /// something follows it, same trap as the single-send and cascade
+    /// forms.
+    #[test]
+    fn setup_with_field_chain_then_unrelated_statement_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ChainedTest\n  field: a = nil\n  field: b = nil\n\
+                   \n  setUp =>\n    (self withA: 1) withB: 2.\n    Transcript show: \"ready\"";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for a with*: chain followed by an unrelated statement, got: {diagnostics:?}"
+        );
+    }
+
+    /// A 3+-message cascade whose `with<Field>:` sends are NOT last —
+    /// `self withCounter: 1; withDb: 2; log: "ready"`. The cascade's actual
+    /// value is `log:`'s result, not self (ADR 0067: a cascade evaluates to
+    /// its *last* message), so both `counter` and `db` are genuinely
+    /// dropped. Must warn — a naive `.any()` check over the cascade's
+    /// messages would wrongly see the `with<Field>:` sends and call this
+    /// self-preserving.
+    #[test]
+    fn setup_with_field_cascade_with_trailing_non_with_message_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: CounterDbTest\n  field: counter = nil\n  field: db = nil\n\
+                   \n  setUp =>\n    self withCounter: 1; withDb: 2; log: \"ready\"";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning: the cascade's last message is `log:`, not a \
+             with<Field>: send, so counter/db are genuinely dropped, got: {diagnostics:?}"
+        );
+    }
+
+    /// A non-TestCase Value subclass with the identical shape does NOT warn
+    /// — this lint is scoped to `TestCase`'s documented setUp/threading
+    /// contract, not a general value-type rule.
+    #[test]
+    fn non_testcase_setup_no_warn() {
+        let src =
+            "Value subclass: Point\n  field: x = 0\n  setUp =>\n    self.x := 1.\n    extra := 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for non-TestCase class, got: {diagnostics:?}"
+        );
+    }
+
+    /// A method named `setUp` with a keyword selector part (e.g.
+    /// `setUp:` — not the case in practice, but guards the unary-only match)
+    /// does not trigger the check on unrelated methods.
+    #[test]
+    fn other_method_named_differently_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  helper =>\n    self.dashboard := 1.\n    extra := 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for a non-setUp method, got: {diagnostics:?}"
+        );
+    }
+
+    /// Standalone (Tonel-style) `setUp` method definitions are also checked.
+    #[test]
+    fn setup_in_standalone_method_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n\
+                   \nThingTest >> setUp =>\n    self.dashboard := 1.\n    extra := 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        assert_eq!(module.method_definitions.len(), 1);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning in standalone setUp method, got: {diagnostics:?}"
+        );
+    }
+
+    /// The diagnostic has the `Lint` category and a hint pointing at the fix.
+    #[test]
+    fn setup_drops_field_diagnostic_has_hint_and_category() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    self.dashboard := 1.\n    extra := 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].category, Some(DiagnosticCategory::Lint));
+        assert!(
+            diagnostics[0]
+                .hint
+                .as_ref()
+                .is_some_and(|h| h.contains("self")),
+            "Expected hint mentioning self, got: {:?}",
+            diagnostics[0].hint
         );
     }
 

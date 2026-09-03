@@ -77,6 +77,13 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # the now-released mount reads) never block.
               mount_gate: nil,
               mount_gate_consumed: false,
+              # BT-3358: a one-shot barrier for `list_tests` (the `:test_discover`
+              # task's read), armed via `arm_discover_gate/0` and released via
+              # `release_discover_gate/0` — mirrors `mount_gate` above, scoped to
+              # the Tests-pane discovery vs. `:test_op` (`run_tests`/`load_tests`)
+              # race instead of the mount-load race.
+              discover_gate: nil,
+              discover_gate_consumed: false,
               # BT-2661: optional full override for `browse_classes` so a test can
               # drive the origin-filter default against a custom set (e.g. a
               # stdlib-only workspace for the empty-project → "all" fallback). `nil`
@@ -439,7 +446,22 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   # ── New File + Revert ────────────────────────────────────────────────────
 
-  def new_class(_source, path), do: {:ok, path}
+  @doc """
+  BT-3329: tracks the created class into `:defined_classes` (mirroring
+  `eval/2`'s `subclass:` extraction) so a subsequent `browse_classes` reflects
+  it — needed for a test to reproduce the `ClassModals`/`new_class`
+  direct-write race against the mount-load fold's `browser_classes` read the
+  same way the `eval`-driven push tests above already do.
+  """
+  def new_class(source, path) do
+    case extract_class_name(source) do
+      {:ok, class_name} -> update(:defined_classes, &MapSet.put(&1, class_name))
+      :error -> :ok
+    end
+
+    {:ok, path}
+  end
+
   # `side` (ADR 0112, BT-3187): the entry's disambiguating side, unused by the stub.
   def revert(class, _selector, _side), do: {:ok, class}
 
@@ -558,6 +580,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def list_tests do
     record({:list_tests})
+    await_discover_gate()
 
     # BT-2599: simulate a discovery crash so the `:test_discover` async task hits
     # its `{:exit, …}` clause (degrade-to-error rather than crash the socket).
@@ -662,6 +685,48 @@ defmodule BtAttachWeb.StubWorkspaceClient do
       wait_for_release(gate)
     else
       :ok
+    end
+  end
+
+  @doc """
+  Test helper (BT-3358): arm a one-shot barrier on `list_tests`. The next
+  `list_tests` call (a `:test_discover` task's read — e.g. a Tests-tab-open
+  discovery) blocks until `release_discover_gate/0`, so a test can fire
+  `run_tests`/`load_tests` and let their `:test_op` complete (setting
+  `tests_error`) BEFORE the still-in-flight tab-open discovery's own fold
+  runs — deterministically reproducing the race `apply_test_classes/3`'s
+  `tests_error_owner` guard protects against. Mirrors `arm_mount_gate/0`.
+  """
+  def arm_discover_gate do
+    {:ok, gate} = Agent.start_link(fn -> false end)
+    put(:discover_gate, gate)
+    put(:discover_gate_consumed, false)
+    :ok
+  end
+
+  @doc "Test helper (BT-3358): release the armed discovery barrier (see `arm_discover_gate/0`)."
+  def release_discover_gate do
+    case get(:discover_gate) do
+      nil -> :ok
+      gate -> if Process.alive?(gate), do: Agent.update(gate, fn _ -> true end), else: :ok
+    end
+  end
+
+  # Mirrors `await_mount_gate/0`: only the FIRST `list_tests` call blocks.
+  defp await_discover_gate do
+    case get(:discover_gate) do
+      nil ->
+        :ok
+
+      gate ->
+        consumed = get(:discover_gate_consumed)
+
+        if consumed do
+          :ok
+        else
+          put(:discover_gate_consumed, true)
+          wait_for_release(gate)
+        end
     end
   end
 

@@ -287,6 +287,7 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::WorkspaceFixture;
     use std::net::TcpListener;
     use tungstenite::{Message, WebSocket};
 
@@ -299,10 +300,11 @@ mod tests {
     /// the BEAM node actually exiting after `init:stop()`.
     ///
     /// This is another hand-rolled instance of the same ADR 0020 handshake
-    /// double as `repl/client.rs`'s `spawn_auth_ok_server` (BT-3326) and the
-    /// `tokio`-async doubles in `beamtalk-lsp`/`beamtalk-mcp` — BT-3331
-    /// tracks consolidating all of these; not attempted here since none of
-    /// the existing doubles model "one request then the port closes".
+    /// double as `test_support::spawn_auth_ok_server` (BT-3326/BT-3349) and
+    /// the `tokio`-async doubles in `beamtalk-lsp`/`beamtalk-mcp` — BT-3331
+    /// tracks consolidating all of these; not folded into `spawn_auth_ok_server`
+    /// itself since none of the existing doubles model "one request then the
+    /// port closes".
     fn spawn_shutdown_server(error: Option<&'static str>) -> u16 {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
         let port = listener.local_addr().expect("local_addr").port();
@@ -335,68 +337,6 @@ mod tests {
             // `ws` (and the captured `listener`) drop here, closing the port.
         });
         port
-    }
-
-    /// Build a unique workspace ID per test so parallel `cargo test` threads
-    /// never collide on the same on-disk directory or lockfile.
-    fn unique_ws_id(label: &str) -> String {
-        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        format!("bt3333-shutdown-{label}-{}-{n}", std::process::id())
-    }
-
-    /// RAII guard owning a real (but uniquely-named) workspace directory
-    /// under `~/.beamtalk/workspaces/`, matching the pattern already used by
-    /// `storage.rs`'s and `node_state.rs`'s own tests (there is no
-    /// `BEAMTALK_HOME`-style override yet — see BT-3333's description).
-    /// Removes the directory and lockfile on drop, including on panic, so a
-    /// failing assertion never leaves real state behind.
-    struct WorkspaceFixture {
-        id: String,
-    }
-
-    impl WorkspaceFixture {
-        /// Write metadata + cookie + node.info claiming the node listens on
-        /// `port` with the given `pid`, matching the on-disk shape
-        /// `stop_workspace` reads via `storage`/`node_state`. `nonce` is left
-        /// `None` so `is_node_running` trusts the TCP probe alone.
-        fn new(label: &str, port: u16, pid: u32) -> Self {
-            use crate::commands::workspace::storage::{NodeInfo, WorkspaceMetadata};
-
-            let id = unique_ws_id(label);
-            crate::commands::workspace::storage::save_workspace_metadata(&WorkspaceMetadata {
-                workspace_id: id.clone(),
-                project_path: std::env::temp_dir(),
-                created_at: 0,
-            })
-            .expect("save metadata");
-            crate::commands::workspace::storage::save_workspace_cookie(&id, "cookie")
-                .expect("save cookie");
-            crate::commands::workspace::storage::save_node_info(
-                &id,
-                &NodeInfo {
-                    node_name: format!("{id}@localhost"),
-                    port,
-                    pid,
-                    start_time: None,
-                    nonce: None,
-                    bind_addr: None,
-                },
-            )
-            .expect("save node info");
-            Self { id }
-        }
-    }
-
-    impl Drop for WorkspaceFixture {
-        fn drop(&mut self) {
-            if let Ok(dir) = crate::commands::workspace::storage::workspace_dir(&self.id) {
-                let _ = std::fs::remove_dir_all(dir);
-            }
-            if let Ok(base) = crate::commands::workspace::storage::workspaces_base_dir() {
-                let _ = std::fs::remove_file(base.join(format!("{}.lock", self.id)));
-            }
-        }
     }
 
     // -- tcp_send_shutdown ---------------------------------------------

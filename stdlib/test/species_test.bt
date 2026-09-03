@@ -23,6 +23,15 @@ TestCase subclass: SpeciesTest
     self assert: result class equals: List
     self assert: result equals: #(2, 4, 6)
 
+  // BT-3383: a self-send block body (as opposed to an inline literal/expression)
+  // must not degrade the result species from List to Tuple.
+  someHelper: x => x * 2
+
+  testListCollectWithSelfSendBlockBodyReturnsListType =>
+    result := #(1, 2, 3) collect: [:x | self someHelper: x]
+    self assert: result class equals: List
+    self assert: result equals: #(2, 4, 6)
+
   testListSelectReturnsListType =>
     result := #(1, 2, 3, 4) select: [:x | x > 2]
     self assert: result class equals: List

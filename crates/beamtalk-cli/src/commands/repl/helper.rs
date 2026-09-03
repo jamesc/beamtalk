@@ -437,7 +437,9 @@ fn highlight_line(line: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::color::ColorGuard;
     use super::*;
+    use serial_test::serial;
 
     /// Helper: get REPL command completions for a prefix.
     fn command_completions(prefix: &str) -> Vec<String> {
@@ -756,5 +758,142 @@ mod tests {
             !candidates.iter().any(|c| c == ":m"),
             ":m alias should not appear as a completion"
         );
+    }
+
+    // === Highlighter trait methods (highlight/highlight_prompt/highlight_char/highlight_hint) ===
+    //
+    // `ReplHelper::new` connects its completion client eagerly, but a
+    // connection failure just leaves it `None` (`.ok()`), so port 0 (never
+    // a valid connect target) is a safe, network-free way to build a helper
+    // for exercising the pure `Highlighter` methods below.
+
+    fn test_helper() -> ReplHelper {
+        ReplHelper::new("127.0.0.1", 0, "cookie", None)
+    }
+
+    #[test]
+    #[serial(color)]
+    fn highlight_empty_line_returns_borrowed() {
+        let _guard = ColorGuard::enabled();
+        let helper = test_helper();
+        let ctx_line = "";
+        assert!(matches!(helper.highlight(ctx_line, 0), Cow::Borrowed("")));
+    }
+
+    #[test]
+    #[serial(color)]
+    fn highlight_returns_borrowed_when_color_disabled() {
+        let _guard = ColorGuard::disabled();
+        let helper = test_helper();
+        assert!(matches!(
+            helper.highlight("Counter spawn", 0),
+            Cow::Borrowed("Counter spawn")
+        ));
+    }
+
+    #[test]
+    #[serial(color)]
+    fn highlight_repl_command_gets_bold_cyan() {
+        let _guard = ColorGuard::enabled();
+        let helper = test_helper();
+        let result = helper.highlight(":help", 0);
+        assert!(result.contains(color::BOLD_CYAN));
+        assert!(result.contains(":help"));
+    }
+
+    #[test]
+    #[serial(color)]
+    fn highlight_regular_expression_delegates_to_highlight_line() {
+        let _guard = ColorGuard::enabled();
+        let helper = test_helper();
+        let result = helper.highlight("42", 0);
+        assert!(result.contains(color::YELLOW));
+    }
+
+    #[test]
+    #[serial(color)]
+    fn highlight_prompt_returns_borrowed_when_color_disabled() {
+        let _guard = ColorGuard::disabled();
+        let helper = test_helper();
+        assert!(matches!(
+            helper.highlight_prompt("bt> ", true),
+            Cow::Borrowed("bt> ")
+        ));
+    }
+
+    #[test]
+    #[serial(color)]
+    fn highlight_prompt_continuation_is_yellow() {
+        let _guard = ColorGuard::enabled();
+        let helper = test_helper();
+        let result = helper.highlight_prompt("..> ", true);
+        assert!(result.contains(color::YELLOW));
+        assert!(result.contains("..> "));
+    }
+
+    #[test]
+    #[serial(color)]
+    fn highlight_prompt_default_is_green() {
+        let _guard = ColorGuard::enabled();
+        let helper = test_helper();
+        let result = helper.highlight_prompt("bt> ", true);
+        assert!(result.contains(color::GREEN));
+        assert!(result.contains("bt> "));
+    }
+
+    #[test]
+    #[serial(color)]
+    fn highlight_hint_returns_borrowed_when_color_disabled() {
+        let _guard = ColorGuard::disabled();
+        let helper = test_helper();
+        assert!(matches!(
+            helper.highlight_hint("hint text"),
+            Cow::Borrowed("hint text")
+        ));
+    }
+
+    #[test]
+    #[serial(color)]
+    fn highlight_hint_is_dim_when_color_enabled() {
+        let _guard = ColorGuard::enabled();
+        let helper = test_helper();
+        let result = helper.highlight_hint("hint text");
+        assert!(result.contains(color::DIM));
+        assert!(result.contains("hint text"));
+    }
+
+    #[test]
+    fn highlight_char_always_true_for_other_and_forced_refresh() {
+        let helper = test_helper();
+        assert!(helper.highlight_char("x", 0, CmdKind::Other));
+        assert!(helper.highlight_char("x", 0, CmdKind::ForcedRefresh));
+    }
+
+    #[test]
+    fn highlight_char_move_cursor_true_near_bracket_at_pos() {
+        let helper = test_helper();
+        // Cursor sitting exactly on a bracket character.
+        assert!(helper.highlight_char("f(x)", 1, CmdKind::MoveCursor));
+    }
+
+    #[test]
+    fn highlight_char_move_cursor_true_near_bracket_before_pos() {
+        let helper = test_helper();
+        // pos == len: falls back to checking bytes[pos - 1].
+        let line = "f(x)";
+        assert!(helper.highlight_char(line, line.len(), CmdKind::MoveCursor));
+    }
+
+    #[test]
+    fn highlight_char_move_cursor_false_away_from_brackets() {
+        let helper = test_helper();
+        assert!(!helper.highlight_char("abc", 1, CmdKind::MoveCursor));
+    }
+
+    #[test]
+    fn highlight_char_move_cursor_false_at_pos_zero_empty_line() {
+        let helper = test_helper();
+        // pos == 0 on an empty line: neither branch of the MoveCursor match applies.
+        assert!(!helper.highlight_char("", 0, CmdKind::MoveCursor));
     }
 }

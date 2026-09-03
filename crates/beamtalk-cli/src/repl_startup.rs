@@ -23,7 +23,7 @@ use std::path::Path;
 #[cfg(all(test, windows))]
 use std::path::PathBuf;
 
-use beamtalk_core::codegen::core_erlang::escape_atom_chars;
+use beamtalk_codegen::core_erlang::escape_atom_chars;
 
 pub use beamtalk_core::ffi_type_specs::{
     BeamPaths, KERNEL_LOGGER_STDERR, RuntimeLayout, beam_paths, beam_paths_for_layout,

@@ -6,6 +6,11 @@
 //! Used by both `semantic_analysis` (for `DispatchKind::ControlFlow` classification)
 //! and `codegen` (for block-mutation analysis and state-threading code generation).
 //!
+//! BT-3362 (ADR 0117 Decision step 5): the module and its four predicates
+//! widened from `pub(crate)` to `pub` — `codegen`'s consumer moved out into
+//! the standalone `beamtalk-codegen` crate, so a `pub(crate)` item it reached
+//! had to become genuinely `pub` once that consumer left the crate.
+//!
 //! Predicates in this module classify selectors for block-mutation analysis.
 //! Where a selector is also part of [`WellKnownSelector`](crate::ast::WellKnownSelector)
 //! — conditionals, `on:do:` — the predicate matches on the enum via
@@ -15,6 +20,20 @@
 //! by string; the split is deliberate — `WellKnownSelector` is reserved for
 //! selectors the type-checker/codegen *intrinsify*, not every selector the
 //! compiler happens to recognise.
+//!
+//! BT-3402: `and:`/`or:` join the string-matched group for the same reason
+//! as the loop/iteration selectors — they are ordinary self-hosted
+//! `Boolean` methods (`Boolean.bt`'s `and:`/`or:`, each defined in terms of
+//! `ifTrue:ifFalse:`), not selectors the type-checker itself intrinsifies.
+//! Codegen still inlines their literal call shape the same way it inlines
+//! `ifTrue:`/`ifFalse:` (see `try_generate_boolean_protocol`'s `and:`/`or:`
+//! arms in `beamtalk-codegen`), so they need the same state-threading
+//! classification here — both as a state-threading keyword selector (so
+//! `check_actor_field_mutation_in_closure`/`DispatchKind::ControlFlow`
+//! treat a mutation inside their block argument as safe) and as a
+//! conditional selector (so `control_flow_has_mutations`/
+//! `classify_body_expr` route the enclosing statement through the same
+//! `{Result, NewState}` unpacking as `ifTrue:`/`ifFalse:`).
 
 use crate::ast::WellKnownSelector;
 
@@ -23,7 +42,7 @@ use crate::ast::WellKnownSelector;
 /// These selectors receive block arguments that are analysed for field mutations
 /// as part of state-threading control flow.
 #[must_use]
-pub(crate) fn is_state_threading_keyword_selector(sel: &str) -> bool {
+pub fn is_state_threading_keyword_selector(sel: &str) -> bool {
     if matches!(
         WellKnownSelector::from_name(sel),
         Some(
@@ -64,12 +83,15 @@ pub(crate) fn is_state_threading_keyword_selector(sel: &str) -> bool {
             | "doWithKey:"
             | "keysAndValuesDo:"
             | "ensure:"
+            // BT-3402: see module doc comment.
+            | "and:"
+            | "or:"
     )
 }
 
 /// Returns `true` if `sel` is a state-threading unary selector.
 #[must_use]
-pub(crate) fn is_state_threading_unary_selector(sel: &str) -> bool {
+pub fn is_state_threading_unary_selector(sel: &str) -> bool {
     matches!(sel, "whileTrue" | "whileFalse" | "timesRepeat")
 }
 
@@ -78,7 +100,7 @@ pub(crate) fn is_state_threading_unary_selector(sel: &str) -> bool {
 /// For these selectors the *receiver* (try body) is a block that must also be
 /// analysed for field mutations, in addition to the argument blocks.
 #[must_use]
-pub(crate) fn is_exception_selector(sel: &str) -> bool {
+pub fn is_exception_selector(sel: &str) -> bool {
     // `on:do:` is a well-known selector; `ensure:` is not (it's not
     // intrinsified by the type-checker, only by codegen's state-threading).
     matches!(
@@ -91,8 +113,12 @@ pub(crate) fn is_exception_selector(sel: &str) -> bool {
 ///
 /// For these selectors every block argument must be analysed independently,
 /// because mutations may appear in the first branch but not the second.
+///
+/// BT-3402: `and:`/`or:` are not `WellKnownSelector`s (see module doc
+/// comment) so they're matched by string, the same way `is_exception_selector`
+/// folds in `ensure:` alongside the well-known `on:do:`.
 #[must_use]
-pub(crate) fn is_conditional_selector(sel: &str) -> bool {
+pub fn is_conditional_selector(sel: &str) -> bool {
     matches!(
         WellKnownSelector::from_name(sel),
         Some(
@@ -101,7 +127,7 @@ pub(crate) fn is_conditional_selector(sel: &str) -> bool {
                 | WellKnownSelector::IfTrueIfFalse
                 | WellKnownSelector::IfNotNil,
         )
-    )
+    ) || matches!(sel, "and:" | "or:")
 }
 
 #[cfg(test)]
@@ -131,6 +157,9 @@ mod tests {
         assert!(is_state_threading_keyword_selector("eachWithIndex:"));
         assert!(is_state_threading_keyword_selector("do:separatedBy:"));
         assert!(!is_state_threading_keyword_selector("perform:"));
+        // BT-3402: `and:`/`or:` block arguments compile inline the same way.
+        assert!(is_state_threading_keyword_selector("and:"));
+        assert!(is_state_threading_keyword_selector("or:"));
     }
 
     #[test]
@@ -157,5 +186,8 @@ mod tests {
         assert!(is_conditional_selector("ifNotNil:"));
         assert!(!is_conditional_selector("on:do:"));
         assert!(!is_conditional_selector("do:"));
+        // BT-3402
+        assert!(is_conditional_selector("and:"));
+        assert!(is_conditional_selector("or:"));
     }
 }

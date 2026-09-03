@@ -6,8 +6,10 @@
 //!
 //! `workspace create` (without `--background`) and a bare `workspace list`
 //! success path both write real state under the machine's `~/.beamtalk`
-//! directory — there is no `BEAMTALK_HOME`-style override to redirect that
-//! into a hermetic tempdir (tracked as a follow-up), so this file sticks to
+//! directory. `beamtalk_home`'s `BEAMTALK_HOME` override (BT-3364) now
+//! exists, but redirecting these subprocess tests through it needs a
+//! serialization strategy shared with every other non-`#[serial]` test that
+//! touches the real directory (BT-3370), so this file still sticks to
 //! read-only and validation-only paths that never persist anything:
 //! `list`/`status` against workspaces that don't exist, and the
 //! `create --background` flag-validation errors that fire *before* any

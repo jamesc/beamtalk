@@ -538,6 +538,180 @@ pub fn format_reload_check_notice(data: &serde_json::Value) -> Option<String> {
 mod tests {
     use super::format_transcript_chunk;
 
+    mod protocol_client {
+        use std::net::TcpListener;
+        use std::time::Duration;
+
+        use tungstenite::Message;
+
+        use super::super::ProtocolClient;
+        use crate::commands::test_support::{spawn_auth_error_server, spawn_auth_ok_server};
+
+        #[test]
+        fn connect_to_unbound_port_fails_with_connect_error() {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("local_addr").port();
+            drop(listener);
+
+            let Err(err) = ProtocolClient::connect("127.0.0.1", port, "cookie", None) else {
+                panic!("expected connect to fail against an unbound port");
+            };
+            assert!(err.to_string().contains("Failed to connect"));
+        }
+
+        #[test]
+        fn connect_with_bad_cookie_surfaces_auth_error_message() {
+            let port = spawn_auth_error_server("nope");
+            let Err(err) = ProtocolClient::connect("127.0.0.1", port, "wrong-cookie", None) else {
+                panic!("expected connect to fail on auth_error");
+            };
+            assert!(err.to_string().contains("nope"));
+        }
+
+        #[test]
+        fn connect_success_assigns_server_session_id() {
+            let port = spawn_auth_ok_server(|_req, _ws| {});
+            let client =
+                ProtocolClient::connect("127.0.0.1", port, "cookie", None).expect("connect");
+            assert_eq!(client.session_id(), Some("sess-test"));
+        }
+
+        #[test]
+        fn reconnect_swaps_in_a_fresh_connection_and_reports_resumed() {
+            let port = spawn_auth_ok_server(|_req, _ws| {});
+            let mut client =
+                ProtocolClient::connect("127.0.0.1", port, "cookie", None).expect("connect");
+            let resumed = client.reconnect().expect("reconnect should succeed");
+            assert!(resumed, "fake server always assigns the same session id");
+            assert_eq!(client.session_id(), Some("sess-test"));
+        }
+
+        #[test]
+        fn reconnect_against_an_unbound_port_fails() {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("local_addr").port();
+            let handshake_port = port;
+            let server = std::thread::spawn(move || {
+                let (stream, _) = listener.accept().expect("accept");
+                let mut ws = tungstenite::accept(stream).expect("accept ws");
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"op": "auth-required"})
+                        .to_string()
+                        .into(),
+                ));
+                let _ = ws.read();
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"type": "auth_ok"}).to_string().into(),
+                ));
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"op": "session-started", "session": "sess-test"})
+                        .to_string()
+                        .into(),
+                ));
+            });
+            let mut client = ProtocolClient::connect("127.0.0.1", handshake_port, "cookie", None)
+                .expect("connect");
+            server.join().expect("server thread");
+            // Nothing is listening any more.
+            let err = client
+                .reconnect()
+                .expect_err("reconnect against a closed port should fail");
+            assert!(err.to_string().contains("Failed to connect"));
+        }
+
+        #[test]
+        fn send_request_roundtrips_a_typed_response() {
+            let port = spawn_auth_ok_server(|req, ws| {
+                if req.get("op").and_then(|v| v.as_str()) == Some("ping") {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"pong": true}).to_string().into(),
+                    ));
+                }
+            });
+            let mut client =
+                ProtocolClient::connect("127.0.0.1", port, "cookie", None).expect("connect");
+            let resp: serde_json::Value = client
+                .send_request(&serde_json::json!({"op": "ping"}))
+                .expect("send_request should succeed");
+            assert_eq!(resp, serde_json::json!({"pong": true}));
+        }
+
+        #[test]
+        fn send_request_reconnects_and_retries_once_after_server_closes_connection() {
+            // First connection: reply to auth, then close without answering
+            // `ping` at all (the client's read sees `Message::Close`).
+            // Second connection (post-reconnect): answers `ping` for real.
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("local_addr").port();
+            std::thread::spawn(move || {
+                for (i, stream) in listener.incoming().flatten().enumerate() {
+                    std::thread::spawn(move || {
+                        let Ok(mut ws) = tungstenite::accept(stream) else {
+                            return;
+                        };
+                        let _ = ws.send(Message::Text(
+                            serde_json::json!({"op": "auth-required"})
+                                .to_string()
+                                .into(),
+                        ));
+                        if ws.read().is_err() {
+                            return;
+                        }
+                        let _ = ws.send(Message::Text(
+                            serde_json::json!({"type": "auth_ok"}).to_string().into(),
+                        ));
+                        let _ = ws.send(Message::Text(
+                            serde_json::json!({"op": "session-started", "session": "sess-test"})
+                                .to_string()
+                                .into(),
+                        ));
+                        if i == 0 {
+                            // Read (and discard) the ping, then close without
+                            // ever replying — the client's `send_request`
+                            // sees this as a transport failure and retries.
+                            let _ = ws.read();
+                            let _ = ws.close(None);
+                        } else {
+                            while let Ok(Message::Text(text)) = ws.read() {
+                                if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
+                                    if req.get("op").and_then(|v| v.as_str()) == Some("ping") {
+                                        let _ = ws.send(Message::Text(
+                                            serde_json::json!({"pong": true}).to_string().into(),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    if i >= 1 {
+                        break;
+                    }
+                }
+            });
+            let mut client =
+                ProtocolClient::connect("127.0.0.1", port, "cookie", None).expect("connect");
+            let resp: serde_json::Value = client
+                .send_request(&serde_json::json!({"op": "ping"}))
+                .expect("send_request should transparently reconnect and retry");
+            assert_eq!(resp, serde_json::json!({"pong": true}));
+        }
+
+        #[test]
+        fn set_read_timeout_applies_to_underlying_socket() {
+            let port = spawn_auth_ok_server(|_req, _ws| {});
+            let client =
+                ProtocolClient::connect("127.0.0.1", port, "cookie", None).expect("connect");
+            // No direct getter exists; success (no error) is the assertion —
+            // this exercises the pass-through to the underlying TcpStream.
+            client
+                .set_read_timeout(Some(Duration::from_millis(50)))
+                .expect("setting a read timeout should succeed");
+            client
+                .set_read_timeout(None)
+                .expect("clearing the read timeout should succeed");
+        }
+    }
+
     #[test]
     fn prefix_at_start_of_line() {
         let mut bol = true;

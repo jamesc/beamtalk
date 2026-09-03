@@ -44,32 +44,18 @@ pub fn build_escript(
     options: &beamtalk_core::CompilerOptions,
     force: bool,
 ) -> Result<()> {
-    // Compile the project first (produces the project `bt@*.beam`).
+    // Validate arguments before running the (expensive) build, same
+    // validate-then-build ordering `run.rs`'s `run()` uses around
+    // `validate_class_and_selector`/`prepare_eval_environment` — fail fast on
+    // a bad `--entry`/`-o` instead of paying for a full compile first.
+    let pkg = manifest::find_manifest(project_root)?;
+    let (class_name, selector, is_keyword, output_name) =
+        resolve_entry_and_output(entry, output, pkg.as_ref().map(|p| p.name.as_str()))?;
+
+    // Compile the project (produces the project `bt@*.beam`).
     // Status output goes to stderr, matching `beamtalk run` (BT-2702, BT-2889).
     eprintln!("Building...");
     super::build::build(project_root.as_str(), options, force)?;
-
-    let pkg = manifest::find_manifest(project_root)?;
-
-    let entry = entry.ok_or_else(|| {
-        miette!(
-            "`--escript` requires `--entry \"ClassName selector\"`.\n\
-             Example: beamtalk build --escript --entry \"Greeter main:\" -o greeter"
-        )
-    })?;
-    let (class_name, selector, is_keyword) = parse_entry(entry)?;
-
-    // Output name: explicit, else the package name (lowercased).
-    let output_name = match output {
-        Some(o) => o.to_string(),
-        None => pkg.as_ref().map(|p| p.name.to_lowercase()).ok_or_else(|| {
-            miette!(
-                "No `-o <name>` given and no package manifest to derive one from.\n\
-                     Pass an explicit output name: beamtalk build --escript --entry \
-                     \"{class_name} {selector}\" -o <name>"
-            )
-        })?,
-    };
 
     // The escript boot module is named after the output basename, sanitised to a
     // valid Erlang atom; the bootstrap's `main/1` is its entry point.
@@ -159,6 +145,41 @@ pub fn build_escript(
     );
     info!(output = %output_path, "escript created");
     Ok(())
+}
+
+/// Validate `--entry` and derive the escript output name, before any build
+/// work happens. Returns `(class_name, selector, is_keyword, output_name)`.
+///
+/// `output` wins when given explicitly; otherwise the name is derived from
+/// `pkg_name` (the manifest package name, lowercased). Pulled out of
+/// [`build_escript`] as a pure seam so its argument-validation bail branches
+/// are unit-testable without a real build (BT-3381).
+fn resolve_entry_and_output(
+    entry: Option<&str>,
+    output: Option<&str>,
+    pkg_name: Option<&str>,
+) -> Result<(String, String, bool, String)> {
+    let entry = entry.ok_or_else(|| {
+        miette!(
+            "`--escript` requires `--entry \"ClassName selector\"`.\n\
+             Example: beamtalk build --escript --entry \"Greeter main:\" -o greeter"
+        )
+    })?;
+    let (class_name, selector, is_keyword) = parse_entry(entry)?;
+
+    // Output name: explicit, else the package name (lowercased).
+    let output_name = match output {
+        Some(o) => o.to_string(),
+        None => pkg_name.map(str::to_lowercase).ok_or_else(|| {
+            miette!(
+                "No `-o <name>` given and no package manifest to derive one from.\n\
+                     Pass an explicit output name: beamtalk build --escript --entry \
+                     \"{class_name} {selector}\" -o <name>"
+            )
+        })?,
+    };
+
+    Ok((class_name, selector, is_keyword, output_name))
 }
 
 /// Parse and validate `"ClassName selector"`. Returns `(class, selector, is_keyword)`.
@@ -411,6 +432,55 @@ readf(F) ->
 mod tests {
     use super::*;
 
+    // -- resolve_entry_and_output ---------------------------------------
+
+    #[test]
+    fn test_resolve_entry_and_output_missing_entry_bails() {
+        let err = resolve_entry_and_output(None, Some("greeter"), Some("pkg")).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("`--escript` requires `--entry \"ClassName selector\"`"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_entry_and_output_invalid_entry_propagates_parse_entry_error() {
+        // `parse_entry`'s own error (missing selector) must surface unchanged.
+        let err = resolve_entry_and_output(Some("Greeter"), Some("greeter"), None).unwrap_err();
+        assert!(err.to_string().contains("is missing a selector"), "{err}");
+    }
+
+    #[test]
+    fn test_resolve_entry_and_output_explicit_output_wins_over_package_name() {
+        let (class, sel, kw, output) =
+            resolve_entry_and_output(Some("Greeter main:"), Some("myapp"), Some("pkgname"))
+                .unwrap();
+        assert_eq!(class, "Greeter");
+        assert_eq!(sel, "main:");
+        assert!(kw);
+        assert_eq!(output, "myapp");
+    }
+
+    #[test]
+    fn test_resolve_entry_and_output_derives_from_lowercased_package_name() {
+        let (_, _, _, output) =
+            resolve_entry_and_output(Some("Main run"), None, Some("MyPackage")).unwrap();
+        assert_eq!(output, "mypackage");
+    }
+
+    #[test]
+    fn test_resolve_entry_and_output_no_output_no_package_bails() {
+        let err = resolve_entry_and_output(Some("Main run"), None, None).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("No `-o <name>` given and no package manifest"),
+            "got: {err}"
+        );
+        // The bail message should still reference the parsed entry.
+        assert!(err.to_string().contains("Main run"), "got: {err}");
+    }
+
     #[test]
     fn test_parse_entry_keyword() {
         let (class, sel, kw) = parse_entry("Greeter main:").unwrap();
@@ -474,5 +544,110 @@ mod tests {
             generate_boot_module("app_escript", "Main", "run", false, &["bt@app@main".into()]);
         assert!(src.contains("dispatch(ClassPid, 'run', [])"));
         assert!(!src.contains("BinArgs"));
+    }
+
+    // -- collect_project_modules --------------------------------------------
+
+    /// Build a unique scratch directory under the OS temp dir, removed on
+    /// drop even on panic (RAII), so parallel `cargo test` threads never
+    /// collide and a failing assertion never leaves stray files behind.
+    struct ScratchDir {
+        path: Utf8PathBuf,
+    }
+
+    impl ScratchDir {
+        fn new(label: &str) -> Self {
+            static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+                .expect("temp dir is valid UTF-8")
+                .join(format!("bt3349-escript-{label}-{}-{n}", std::process::id()));
+            std::fs::create_dir_all(path.as_std_path()).expect("create scratch dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(self.path.as_std_path());
+        }
+    }
+
+    #[test]
+    fn test_collect_project_modules_empty_dir_returns_empty_vec() {
+        let dir = ScratchDir::new("empty");
+        let modules = collect_project_modules(&dir.path).expect("collect");
+        assert!(modules.is_empty());
+    }
+
+    #[test]
+    fn test_collect_project_modules_filters_and_sorts_bt_beams() {
+        let dir = ScratchDir::new("filter-sort");
+        for name in [
+            "bt@app@zebra.beam",
+            "bt@app@ant.beam",
+            "not_project.beam",
+            "readme.txt",
+        ] {
+            std::fs::write(dir.path.join(name).as_std_path(), b"").expect("write beam stub");
+        }
+        let modules = collect_project_modules(&dir.path).expect("collect");
+        assert_eq!(modules, vec!["bt@app@ant", "bt@app@zebra"]);
+    }
+
+    #[test]
+    fn test_collect_project_modules_rejects_invalid_module_name() {
+        let dir = ScratchDir::new("invalid-name");
+        // A `bt@` file whose stripped name is not a valid Erlang atom (space,
+        // deliberately malformed as if a build produced a stray artifact).
+        std::fs::write(dir.path.join("bt@bad name.beam").as_std_path(), b"")
+            .expect("write beam stub");
+        let err = collect_project_modules(&dir.path).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid module name"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_collect_project_modules_missing_dir_errors() {
+        let dir = ScratchDir::new("missing-parent");
+        let missing = dir.path.join("does-not-exist");
+        let err = collect_project_modules(&missing).unwrap_err();
+        assert!(
+            err.to_string().contains("Failed to read project ebin"),
+            "got: {err}"
+        );
+    }
+
+    // -- set_executable ------------------------------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn test_set_executable_sets_unix_mode_bits() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = ScratchDir::new("set-executable");
+        let file = dir.path.join("my_escript");
+        std::fs::write(file.as_std_path(), b"#!/usr/bin/env escript\n").expect("write escript");
+        // Start from a non-executable mode to prove `set_executable` changes it.
+        std::fs::set_permissions(file.as_std_path(), std::fs::Permissions::from_mode(0o644))
+            .expect("set initial perms");
+
+        set_executable(file.as_std_path()).expect("set_executable should succeed");
+
+        let mode = std::fs::metadata(file.as_std_path())
+            .expect("stat")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o755);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_set_executable_missing_file_errors() {
+        let dir = ScratchDir::new("set-executable-missing");
+        let missing = dir.path.join("does-not-exist");
+        assert!(set_executable(missing.as_std_path()).is_err());
     }
 }

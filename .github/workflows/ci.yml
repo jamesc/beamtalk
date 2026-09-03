@@ -127,13 +127,6 @@ jobs:
         # docs/development/surface-parity.md. Fails fast on inventory drift.
         run: just check-surface-drift
 
-      - name: Compilation → Language Service boundary check (BT-3339)
-        # Fails if a production edge inside beamtalk-core crosses from the
-        # Compilation bounded context (ast/source_analysis/unparse/codegen/
-        # semantic_analysis/compilation) into Language Service (queries/
-        # language_service/lint) — see ADR 0117 Decision step 1.
-        run: just check-boundary
-
   # ─── Desktop app (Tauri) crate tests (BT-3061) ─────────────────────────
   # desktop/src-tauri is excluded from the root Cargo workspace (root
   # Cargo.toml's `exclude`, see desktop/README.md) because it needs the
@@ -229,6 +222,35 @@ jobs:
 
       - name: Check corpus.json is up to date
         run: just check-corpus
+
+  # ─── Codegen dependency boundary guard (BT-3371) ───────────────────────
+  # BT-3362 split `codegen` out of `beamtalk-core` into `beamtalk-codegen`
+  # specifically so beamtalk-lsp/beamtalk-lint (analysis only, never
+  # generation) stop compiling it. Nothing else re-checks that on every PR —
+  # a future dependency edge back onto beamtalk-codegen would compile and
+  # pass every existing test, silently regressing the build-time win. Rust-only
+  # (just resolves the dependency graph, no compilation needed), so it stays fast.
+  check-codegen-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Check beamtalk-lsp/beamtalk-lint do not depend on beamtalk-codegen
+        run: just check-codegen-boundary
 
   # ─── Full test suite on Linux only (requires Erlang/OTP) ──────────────
   # Split into parallel jobs for faster CI (~5 min wall-clock vs ~16 min sequential).

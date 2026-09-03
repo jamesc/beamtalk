@@ -1,0 +1,168 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3396: an actor self-send nested as a SUB-EXPRESSION — the receiver of
+// and:/or:, an argument to another message send, an element of a literal,
+// a segment of an interpolated string, or a sub-expression of an
+// assignment's RHS — must thread the callee's state mutation forward
+// exactly like a top-level self-send statement does. Without the fix each
+// of these compiled through the ordinary discarding self-dispatch codegen:
+// the callee ran (its return value is observable) but its mutation to
+// `count`/`log` vanished. See stdlib/test/fixtures/nested_self_send_counter.bt.
+//
+// BT-3402: tests that a self-send (or a direct field mutation) nested
+// inside an `and:`/`or:` block ARGUMENT correctly threads actor state.
+// `and:`/`or:` are self-hosted Boolean methods (Boolean.bt), not compiler
+// intrinsics, so without the fix the block argument compiles as a plain
+// Tier 1 closure and any mutation inside it is silently lost — the
+// enclosing method's returned state never reflects it, even though the
+// mutation demonstrably ran (it decides the block's own return value).
+
+TestCase subclass: ActorNestedSelfSendTest
+  field: c = nil
+
+  setUp => self withC: NestedSelfSendCounter spawn
+
+  tearDown => self.c isNil ifFalse: [self.c stop]
+
+  testSelfSendAsAndReceiverThreadsMutation =>
+    // Shape 1: `(self recordOnce: flag) and: [flag]` — the self-send's
+    // Boolean result drives and:, its mutation must survive it.
+    self assert: (self.c recordViaAndReceiver: true) equals: true
+    self assert: self.c getCount equals: 1
+    self assert: (self.c recordViaAndReceiver: false) equals: false
+    self assert: self.c getCount equals: 2
+
+  testSelfSendAsOrReceiverThreadsMutation =>
+    self assert: (self.c recordViaOrReceiver: false) equals: false
+    self assert: self.c getCount equals: 1
+    self assert: (self.c recordViaOrReceiver: true) equals: true
+    self assert: self.c getCount equals: 2
+
+  testSelfSendNestedInConditionalReceiverThreadsMutation =>
+    // Shape 1 nested: `((self recordOnce: flag) and: [true]) ifTrue:ifFalse:`
+    // — the conditional's receiver is an and: send, NOT a self-send
+    // itself; the self-send is one level deeper. Neither block mutates,
+    // so only the nested self-send makes this conditional inline.
+    self assert: (self.c recordViaAndInsideIfTrue: true) equals: #recorded
+    self assert: self.c getCount equals: 1
+    self assert: (self.c recordViaAndInsideIfTrue: false) equals: #gaveUp
+    self assert: self.c getCount equals: 2
+
+  testSelfSendAsKeywordArgumentThreadsMutation =>
+    // Shape 2: `self.items at: (self bumpCount)` — bumpCount returns 1, so
+    // at: 1 => 10 proves it ran; the count proves the mutation survived.
+    self assert: self.c recordViaKeywordArgument equals: 10
+    self assert: self.c getCount equals: 1
+
+  testSelfSendAsUnaryReceiverInsideArgumentThreadsMutation =>
+    // Shape 2, deeper: `(self bumpCount) printString size` as a non-last
+    // local-assignment RHS.
+    self assert: self.c recordViaUnaryReceiverInArgument equals: 1
+    self assert: self.c getCount equals: 1
+
+  testSelfSendInsideStringInterpolationThreadsMutation =>
+    self assert: self.c recordViaInterpolation equals: "n=1"
+    self assert: self.c getCount equals: 1
+
+  testSelfSendAsArgumentToSelfSendThreadsBothMutations =>
+    // Shape 2: `self record: (self bumpCount)` — the outer dispatch was
+    // already threaded; the inner argument's was not. Both must land.
+    self assert: self.c recordViaSelfSendArgument equals: 1
+    self assert: self.c getCount equals: 1
+    self assert: self.c getLog equals: #(1)
+
+  testSelfSendInsideEarlyReturnValueInBranchThreadsMutation =>
+    // `flag ifTrue: [^self.items at: (self bumpCount)]` — the NLR from the
+    // branch must carry the post-dispatch state, not the branch's entry state.
+    self assert: (self.c recordViaEarlyReturnInBranch: true) equals: 10
+    self assert: self.c getCount equals: 1
+    self assert: (self.c recordViaEarlyReturnInBranch: false) equals: 0
+    self assert: self.c getCount equals: 1
+
+  testSelfSendInsideFieldAssignmentRhsThreadsMutation =>
+    // Shape 3: `self.log := self.log ++ #(self bumpCount)` — the
+    // inheriting_counter.bt shape. The assignment itself must still land
+    // (log grows) AND bumpCount's own mutation must survive (count grows).
+    self assert: self.c appendNextToLog equals: #(1)
+    self assert: self.c getCount equals: 1
+    self assert: self.c appendNextToLog equals: #(1, 1)
+    self assert: self.c getCount equals: 2
+
+  testSelfSendInsideLocalAssignmentRhsThreadsMutation =>
+    self assert: self.c recordViaLocalAssignSubExpression equals: 101
+    self assert: self.c getCount equals: 1
+
+  testFieldReadBeforeNestedSelfSendSeesPreMutationValue =>
+    // `self.count := self.count + (self bumpCount)`: left-to-right, the
+    // read happens BEFORE the bump. Starting from 0: read 0, bump (count
+    // becomes 1), assign 0 + 1 = 1. Reading the post-bump count instead
+    // would give 2.
+    self assert: self.c addBumpToCount equals: 1
+    // And again from 1: read 1, bump (2), assign 1 + 1 = 2.
+    self assert: self.c addBumpToCount equals: 2
+
+  testSelfSendAsLocalAssignmentRhsInsideBranchThreadsMutation =>
+    self assert: (self.c recordViaLocalAssignInBranch: true) equals: 11
+    self assert: self.c getCount equals: 1
+    self assert: (self.c recordViaLocalAssignInBranch: false) equals: 0
+    self assert: self.c getCount equals: 1
+
+  testSelfSendNestedInOnDoBodyThreadsMutation =>
+    self assert: self.c recordViaOnDoBody equals: 2
+    self assert: self.c getCount equals: 1
+
+  testAndBlockRunsAndThreadsBothDispatchesWhenReceiverTrue =>
+    // BT-3402: `(self recordOnce: true) and: [self bumpCount > 0]` — the
+    // receiver's self-send always runs; since it returns true, `and:`
+    // also runs the block's self-send. Both mutations must be observed:
+    // count goes 0 -> 1 (recordOnce:) -> 2 (bumpCount).
+    result := self.c recordOnceAndBump: true
+    self assert: result equals: true
+    self assert: self.c getCount equals: 2
+
+  testAndBlockShortCircuitsAndSkipsNestedSelfSendWhenReceiverFalse =>
+    // `false and: [...]` must short-circuit WITHOUT evaluating the block —
+    // bumpCount must never run, so only recordOnce:'s mutation is seen.
+    result := self.c recordOnceAndBump: false
+    self assert: result equals: false
+    self assert: self.c getCount equals: 1
+
+  testOrBlockShortCircuitsAndSkipsNestedSelfSendWhenReceiverTrue =>
+    // `true or: [...]` must short-circuit WITHOUT evaluating the block —
+    // bumpCount must never run, so only recordOnce:'s mutation is seen.
+    result := self.c recordOnceOrBump: true
+    self assert: result equals: true
+    self assert: self.c getCount equals: 1
+
+  testOrBlockRunsAndThreadsBothDispatchesWhenReceiverFalse =>
+    // `(self recordOnce: false) or: [self bumpCount > 0]` — the receiver
+    // returns false, so `or:` runs the block's self-send too. Both
+    // mutations must be observed: count goes 0 -> 1 -> 2.
+    result := self.c recordOnceOrBump: false
+    self assert: result equals: true
+    self assert: self.c getCount equals: 2
+
+  testDirectFieldMutationInsideAndBlockThreadsWhenTaken =>
+    // BT-3402: `self.count := self.count + 100` directly inside the `and:`
+    // block body (no nested self-send) — must thread when the block runs.
+    result := self.c mutateDirectlyInAndBlock: true
+    self assert: result equals: true
+    self assert: self.c getCount equals: 101
+
+  testDirectFieldMutationInsideAndBlockSkippedWhenNotTaken =>
+    // Short-circuit: the block (and its field mutation) must not run.
+    result := self.c mutateDirectlyInAndBlock: false
+    self assert: result equals: false
+    self assert: self.c getCount equals: 1
+
+  testDirectFieldMutationInsideOrBlockThreadsWhenTaken =>
+    result := self.c mutateDirectlyInOrBlock: false
+    self assert: result equals: true
+    self assert: self.c getCount equals: 101
+
+  testDirectFieldMutationInsideOrBlockSkippedWhenNotTaken =>
+    // Short-circuit: the block (and its field mutation) must not run.
+    result := self.c mutateDirectlyInOrBlock: true
+    self assert: result equals: true
+    self assert: self.c getCount equals: 1

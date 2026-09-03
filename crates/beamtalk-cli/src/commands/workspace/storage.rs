@@ -21,6 +21,17 @@ pub struct WorkspaceMetadata {
     pub project_path: PathBuf,
     /// Unix timestamp (seconds) when the workspace was created.
     pub created_at: u64,
+    /// Project-identity fingerprint (BT-3355): the package `name` from the
+    /// project's `beamtalk.toml` at the time `project_path` was last
+    /// successfully recorded, or `None` if no manifest was readable then.
+    /// `create_workspace_impl`'s self-heal of a legacy non-absolute
+    /// `project_path` (BT-3354) only fires when this matches the current
+    /// caller's own directory, so a `--workspace <name>` invocation from an
+    /// unrelated directory can't silently repoint an already-fingerprinted
+    /// workspace. `#[serde(default)]` so metadata written before this field
+    /// existed deserializes as `None` (legacy, ungated) rather than failing.
+    #[serde(default)]
+    pub project_fingerprint: Option<String>,
 }
 
 /// Node information stored in ~/.beamtalk/workspaces/{id}/node.info
@@ -98,7 +109,7 @@ pub fn workspace_id_for(project_path: &Path, workspace_name: Option<&str>) -> Re
 }
 
 /// Get the base directory for all workspaces (`~/.beamtalk/workspaces/`).
-pub(super) fn workspaces_base_dir() -> Result<PathBuf> {
+pub(crate) fn workspaces_base_dir() -> Result<PathBuf> {
     beamtalk_workspace::workspaces_base_dir()
 }
 
@@ -352,6 +363,7 @@ mod tests {
     /// Verify that `get_workspace_metadata` returns a clear error for an empty file (BT-1058).
     #[test]
     fn test_get_workspace_metadata_empty_file_returns_error() {
+        let _guard = crate::commands::test_support::real_home_guard();
         let ws_id = format!("test_empty_metadata_{}", std::process::id());
         let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
         fs::create_dir_all(&ws_dir).unwrap();
@@ -374,6 +386,7 @@ mod tests {
     /// Verify that `get_workspace_metadata` returns a clear error for a whitespace-only file.
     #[test]
     fn test_get_workspace_metadata_whitespace_file_returns_error() {
+        let _guard = crate::commands::test_support::real_home_guard();
         let ws_id = format!("test_ws_metadata_{}", std::process::id());
         let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
         fs::create_dir_all(&ws_dir).unwrap();
@@ -399,6 +412,7 @@ mod tests {
     /// (BT-2057).
     #[test]
     fn test_remove_stale_runtime_files_removes_starting_tombstone() {
+        let _guard = crate::commands::test_support::real_home_guard();
         let ws_id = format!("test_stale_tombstone_{}", std::process::id());
         let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
         fs::create_dir_all(&ws_dir).unwrap();
@@ -443,6 +457,7 @@ mod tests {
     /// message to reference valid diagnostics (BT-2057).
     #[test]
     fn test_remove_stale_runtime_files_preserves_startup_log_across_retries() {
+        let _guard = crate::commands::test_support::real_home_guard();
         let ws_id = format!("test_stale_preserve_log_{}", std::process::id());
         let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
         fs::create_dir_all(&ws_dir).unwrap();
@@ -474,6 +489,7 @@ mod tests {
     /// the files are already absent (e.g. after a clean shutdown) must not error.
     #[test]
     fn test_remove_stale_runtime_files_idempotent_on_missing_files() {
+        let _guard = crate::commands::test_support::real_home_guard();
         let ws_id = format!("test_stale_idempotent_{}", std::process::id());
         let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
         fs::create_dir_all(&ws_dir).unwrap();

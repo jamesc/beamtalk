@@ -36,5 +36,6 @@ mod class_tests;
 mod expression_tests;
 mod literal_tests;
 mod method_tests;
+mod native_declaration_tests;
 mod type_alias_tests;
 mod type_tests;

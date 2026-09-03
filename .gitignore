@@ -122,6 +122,7 @@ _rel/
 # Git worktrees (created by worktree-up.ps1 or Claude Code)
 .worktrees/
 .claude/worktrees/
+.claude/shared-target/
 
 # Claude Code local settings (personal, not shared)
 .claude/settings.local.json

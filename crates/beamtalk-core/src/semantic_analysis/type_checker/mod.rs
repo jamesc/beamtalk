@@ -27,16 +27,20 @@ use ecow::EcoString;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 thread_local! {
     /// BT-3123 test-only instrumentation: counts calls to
     /// [`TypeChecker::check_module`] — the actual full type-checking pass (the
     /// costly operation the issue's "runs twice per file" complaint is about).
     /// Used by a codegen test to verify that a driver threading an
     /// `AnalysisResult` into codegen via `CodegenOptions::with_analysis` doesn't
-    /// trigger a second pass. `#[cfg(test)]` only — compiled out of release
-    /// builds entirely, so it has no runtime cost or behavioural effect outside
-    /// `cargo test`.
+    /// trigger a second pass. `#[cfg(any(test, feature = "test"))]` — compiled
+    /// out of plain release/production builds, so it has no runtime cost or
+    /// behavioural effect there. BT-3362 (ADR 0117 Decision step 5): widened
+    /// from `#[cfg(test)]` — the codegen test that reads this now lives in the
+    /// standalone `beamtalk-codegen` crate, whose own tests need the
+    /// `feature = "test"` half to see it (`#[cfg(test)]` alone only applies to
+    /// this crate's own `--cfg test` build).
     ///
     /// Thread-local (not a shared global counter): `cargo test` runs many tests
     /// concurrently across threads, and plenty of *other* tests call
@@ -45,7 +49,7 @@ thread_local! {
     /// before/after delta from unrelated tests running on other threads, since a
     /// single `#[test]` function body always runs start-to-finish on one thread
     /// with no other test scheduled onto it in between.
-    pub(crate) static CHECK_MODULE_CALL_COUNT: std::cell::Cell<usize> =
+    pub static CHECK_MODULE_CALL_COUNT: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
 }
 
@@ -55,7 +59,10 @@ mod narrowing;
 pub mod native_type_registry;
 pub mod native_types;
 mod protocol;
-pub(crate) mod sendability;
+// BT-3361 (ADR 0117 Decision step 5): widened from `pub(crate)` —
+// `hover_tier_label` is reached by `beamtalk-language-service`'s
+// `queries::hover_provider` from the standalone crate now.
+pub mod sendability;
 #[cfg(test)]
 mod tests;
 mod type_resolver;
@@ -65,7 +72,8 @@ pub(crate) mod well_known;
 
 pub use native_type_registry::{FunctionSignature, NativeTypeRegistry, ParamType};
 pub use native_types::{
-    is_specs_line, is_specs_result_error, is_specs_result_ok, map_type_name, parse_specs_line,
+    is_specs_line, is_specs_result_error, is_specs_result_ok, load_native_declarations,
+    map_type_name, parse_specs_line,
 };
 pub(in crate::semantic_analysis) use type_resolver::resolve_type_annotation;
 pub(in crate::semantic_analysis) use types::is_generic_type_param;
@@ -375,7 +383,7 @@ pub fn infer_types_and_returns(
 /// tagged with the alias's display name (see [`TypeProvenance::Aliased`]) —
 /// instead of an unresolved nominal class.
 ///
-/// Used by [`crate::queries::hover_provider`] so hover on an alias-typed
+/// Used by `beamtalk-language-service`'s `queries::hover_provider` so hover on an alias-typed
 /// binding shows `RestartStrategy (#temporary | #transient | #permanent)`
 /// rather than either the bare expansion or an "unresolved class" mis-read.
 /// `alias_registry = None` is identical to [`infer_types_and_returns`].

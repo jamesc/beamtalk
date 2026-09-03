@@ -19,7 +19,7 @@ beamtalk build test.bt
 
 # 4. Add debug output in relevant layer
 # For parser: add dbg!(&ast) in crates/beamtalk-core/src/source_analysis/parser/mod.rs
-# For codegen: add dbg!(&expr) in crates/beamtalk-core/src/codegen/core_erlang/
+# For codegen: add dbg!(&expr) in crates/beamtalk-codegen/src/core_erlang/
 ```
 
 ## Runtime Errors
@@ -117,7 +117,7 @@ beamtalk build examples/counter.bt
 diff build/counter.core build/failing.core
 
 # 4. Add codegen debug output
-# Edit crates/beamtalk-core/src/codegen/core_erlang/expressions.rs
+# Edit crates/beamtalk-codegen/src/core_erlang/expressions.rs
 dbg!(&expr);
 // Rebuild and check output
 ```
@@ -161,7 +161,7 @@ expected to produce the same wording for the same malformed input.
 State threading — actor/instance `State`, class-var `ClassVars`, value-type
 `Self`, loop-local threading, and non-local-return (NLR) relay — used to be
 coordinated only by scattered `debug_assert!`s at each emission site, each
-independently re-deriving the same invariants. `crates/beamtalk-core/src/codegen/core_erlang/threaded_ir.rs`
+independently re-deriving the same invariants. `crates/beamtalk-codegen/src/core_erlang/threaded_ir.rs`
 replaces that with a small mid-level IR (`ThreadedIr`/`ThreadedStmt`) that IS
 the `Document` emission for every construct family this table covers,
 including exception handling's `on:do:`/`ensure:` (BT-3165, the last

@@ -15,6 +15,12 @@ pub mod format;
 pub mod handshake;
 mod request;
 mod response;
+/// Test-only loopback WebSocket double shared by dependent crates' own test
+/// suites (BT-3331). Gated on `#[cfg(any(test, feature = "test"))]` to avoid
+/// prod binary bloat while allowing dependent crates to opt in via the
+/// `test` Cargo feature in their `[dev-dependencies]`.
+#[cfg(any(test, feature = "test"))]
+pub mod test_support;
 
 pub use request::{RequestBuilder, next_msg_id};
 pub use response::{ActorInfo, ClassInfo, ModuleInfo, ReplResponse, SessionInfo};

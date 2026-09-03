@@ -1,0 +1,68 @@
+[
+  {
+    "kind": "string",
+    "source": "\"hello\"",
+    "expected_end": 7,
+    "why": "simple string with no escapes closes at the final quote"
+  },
+  {
+    "kind": "string",
+    "source": "\"it\\\"s\"",
+    "expected_end": 7,
+    "why": "backslash-escaped quote stays inside the string; only the last quote closes it"
+  },
+  {
+    "kind": "string",
+    "source": "\"a\"\"b\"",
+    "expected_end": 6,
+    "why": "doubled delimiter \"\" is a literal quote inside the string, not a close-then-reopen"
+  },
+  {
+    "kind": "string",
+    "source": "\"a\\\\\"",
+    "expected_end": 5,
+    "why": "an escaped backslash (even run) leaves the following real quote free to close the string"
+  },
+  {
+    "kind": "string",
+    "source": "\"ab\" rest",
+    "expected_end": 4,
+    "why": "the literal ends at its own closing quote, not at the end of the whole source"
+  },
+  {
+    "kind": "character",
+    "source": "$a",
+    "expected_end": 2,
+    "why": "plain single-character payload"
+  },
+  {
+    "kind": "character",
+    "source": "$(",
+    "expected_end": 2,
+    "why": "an opening-bracket payload character must not be read as a real bracket"
+  },
+  {
+    "kind": "character",
+    "source": "$\"",
+    "expected_end": 2,
+    "why": "a quote payload character must not be read as a string delimiter"
+  },
+  {
+    "kind": "character",
+    "source": "$\\n",
+    "expected_end": 3,
+    "why": "backslash-escape form for a named special character (newline)"
+  },
+  {
+    "kind": "character",
+    "source": "$\\(",
+    "expected_end": 3,
+    "why": "backslash-escape form for an otherwise-unspecial payload character"
+  },
+  {
+    "kind": "character",
+    "source": "$( class",
+    "expected_end": 2,
+    "why": "the literal ends after its own payload character, not at the end of the whole source"
+  }
+]

@@ -46,15 +46,18 @@ use crate::source_analysis::{MethodSide, Span, SpanResolveError, lex_with_eof, p
 /// For a keyword selector with at least one part, merges the span of the first
 /// and last keyword tokens. Returns `None` for unary and binary selectors.
 ///
-/// Used by [`crate::queries`] siblings (`senders_query`, `all_sends_query`,
-/// `announce_sites_query`, `ffi_sites_query`) and by the send-walker in this
-/// module so the single implementation can be shared without reaching upward
-/// into `queries`.
-pub(crate) fn selector_span(selector: &MessageSelector) -> Option<Span> {
+/// Used by `beamtalk-language-service`'s `queries` siblings (`senders_query`,
+/// `all_sends_query`, `announce_sites_query`, `ffi_sites_query`) and by the
+/// send-walker in this module so the single implementation can be shared
+/// without reaching upward into `queries`.
+///
+/// BT-3361: widened from `pub(crate)` to `pub` — no longer reachable at
+/// `pub(crate)` visibility now that `queries` lives in its own crate.
+pub fn selector_span(selector: &MessageSelector) -> Option<Span> {
     match selector {
-        MessageSelector::Keyword(parts) if !parts.is_empty() => {
-            let first = parts.first().unwrap().span;
-            let last = parts.last().unwrap().span;
+        MessageSelector::Keyword(parts) => {
+            let first = parts.first()?.span;
+            let last = parts.last()?.span;
             Some(first.merge(last))
         }
         _ => None,
@@ -1083,7 +1086,8 @@ const REFS_SYNTHETIC_PREFIX: &str = "Object subclass: __SyntheticReferencesScope
 ///
 /// Used by the xref codegen (ADR 0087 Phase 2, BT-2298) to bake per-method
 /// `references` rows into `register_class/0`, and re-exported by
-/// [`crate::queries::references_to_query`] for Language Service use.
+/// `beamtalk-language-service`'s `queries::references_to_query` for Language
+/// Service use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReferenceHit {
     /// The referenced class name (as written in source).

@@ -283,6 +283,46 @@ impl WellKnownSelector {
     }
 }
 
+/// BT-3385: returns `true` if a block-literal argument at `arg_index` for
+/// `selector` is state-threaded by codegen's Value-type / class-method
+/// captured-local mutation threading — ADR 0041's "known inline call
+/// sites" for the loop/list-op family, plus BT-1392/BT-2359's conditional
+/// threading for `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`. When `true`, a
+/// reassignment to an outer local captured inside that block position is
+/// threaded back to the caller and visible after the call returns, rather
+/// than being lost.
+///
+/// Single source of truth for this table, extracted here (below both
+/// consumers in the dependency graph) specifically so they can never
+/// silently drift, per CLAUDE.md's "No duplicate implementations" rule:
+/// - `beamtalk-codegen`'s `block_arg_for_selector`
+///   (`core_erlang/control_flow/mod.rs`) uses it to decide which block
+///   argument to compile via the state-threading path, for the loop/
+///   list-op family.
+/// - `beamtalk-lint`'s `DeadAssignment` check (`dead_block_assignment.rs`)
+///   uses it to skip warning about a reassignment in one of these
+///   positions.
+///
+/// The `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` entries have no equivalent
+/// single call site in codegen to unify with — that threading is dedicated
+/// codegen (BT-1392/BT-2359 in `value_type_codegen.rs`), not a lookup
+/// table — so their conformance instead rests on the existing runtime
+/// test corpus that exercises exactly this shape
+/// (`stdlib/test/conditional_local_mutation_test.bt`,
+/// `stdlib/test/value_type_mutation_matrix_test.bt`): if that codegen ever
+/// regressed, those tests would fail independently of this table.
+pub fn is_state_threaded_block_arg(selector: &str, arg_index: usize) -> bool {
+    match selector {
+        "whileTrue:" | "whileFalse:" | "do:" | "collect:" | "select:" | "reject:"
+        | "anySatisfy:" | "allSatisfy:" | "detect:" | "count:" | "takeWhile:" | "dropWhile:"
+        | "partition:" | "groupBy:" | "timesRepeat:" | "ifTrue:" | "ifFalse:" => arg_index == 0,
+        "to:do:" | "inject:into:" => arg_index == 1,
+        "to:by:do:" => arg_index == 2,
+        "ifTrue:ifFalse:" => arg_index == 0 || arg_index == 1,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

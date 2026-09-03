@@ -91,12 +91,75 @@ abstract Object subclass: DynamicSupervisor(C)
 
   /// Start a new child with the given initialization args.
   ///
+  /// `args` is passed to the child class's `init/1` the same way
+  /// `ActorClass spawnWith: args` would — e.g. a `Dictionary` merged into
+  /// the child's declared `state:` fields.
+  ///
   /// ADR 0080 Phase 2 (BT-1999): returns `Result(C, Error)`. Use `unwrap`
   /// when failure should propagate as an exception, or `ifOk:ifError:` /
   /// `andThen:` for recoverable starts. Failures surface as
   /// `Result error: #beamtalk_error{kind = child_start_failed}`.
+  ///
+  /// ## Automatic restart replays this call's args (BT-3365)
+  ///
+  /// OTP tracks, per child, the exact args it was started with — so a
+  /// child started via `startChild: args` that later crashes under a
+  /// `#permanent`/`#transient` restart policy comes back with those SAME
+  /// `args`, not blank defaults. A child started via the no-arg `startChild`
+  /// restarts the same way it started: with no args. Either way, restart
+  /// re-runs `init/1` from scratch — it does not resume the child's prior
+  /// runtime state, only its original construction args.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DynamicSupervisor(Widget) subclass: WidgetSupervisor
+  ///   class childClass => Widget
+  ///
+  /// pool := (WidgetSupervisor supervise) unwrap
+  /// w := (pool startChild: #{#label => "y"}) unwrap  // => Widget(label: "y")
+  /// ```
   startChild: args :: Object -> Result(C, Error) =>
     (Erlang beamtalk_supervisor) startChild: self with: args
+
+  /// Start a new child with the given args, registered under `aName`.
+  ///
+  /// Combines `startChild: args` with named actor registration (ADR 0079):
+  /// the child starts under `{local, aName}` registration the same way
+  /// `SupervisionSpec withName:` does for static `Supervisor` children.
+  /// Because OTP's `simple_one_for_one` replays each dynamic child's own
+  /// start args on automatic restart (BT-3365), a crashed named child comes
+  /// back registered under the same name every time — no supervisor-side
+  /// bookkeeping needed to recover its new pid.
+  ///
+  /// Look the child up again with `ChildClass named: aName` (ADR 0079).
+  /// `DynamicSupervisor` deliberately has no `which:`/`children` listing
+  /// method — see the BT-3376 amendment in ADR 0079 for why a name-keyed
+  /// point lookup is preferred over a `which_children`-style scan.
+  ///
+  /// `aName` should come from a bounded, statically-known namespace (e.g. a
+  /// fixed set of configured workers), not a dynamically-minted atom per
+  /// request/tenant — the same atom-exhaustion guidance that applies to
+  /// `Actor>>spawnAs:` applies here, since names are Erlang atoms.
+  ///
+  /// ADR 0080 Phase 2 (BT-1999): returns `Result(C, Error)`. Failures
+  /// surface as `Result error: #beamtalk_error{kind = name_registered}`
+  /// (name already taken), `#beamtalk_error{kind = reserved_name}`, or
+  /// `#beamtalk_error{kind = child_start_failed}` for other start failures.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DynamicSupervisor(Monitor) subclass: CheckRegistry
+  ///   class childClass => Monitor
+  ///
+  /// pool := (CheckRegistry supervise) unwrap
+  /// m := (pool startChild: #{#check => "db"} name: #dbCheck) unwrap
+  /// (Monitor named: #dbCheck) unwrap == m   // => true
+  /// ```
+  startChild: args :: Object name: aName :: Symbol -> Result(C, Error) =>
+    (Erlang beamtalk_supervisor)
+      startChild: self
+      with: args
+      name: aName
 
   /// Terminate the given child process.
   ///

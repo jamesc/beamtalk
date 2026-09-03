@@ -526,6 +526,46 @@ Transcript show: "Hello"; cr; show: "World"
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
 3. Keyword messages: `dict at: #name`
 
+### Splitting a Message Send Across Lines
+
+A newline acts as a statement separator (see "Core Syntax" above), so whether
+a message send can be split across lines — receiver on one line, message on
+the next — depends on whether the following line could validly begin a *new*
+statement on its own:
+
+```beamtalk
+// Keyword messages split fine: a bare keyword part (`copyFrom:`) can never
+// start a statement on its own, so it unambiguously continues the receiver
+// above, no matter how it's indented.
+result := "abc"
+  copyFrom: 1
+  to: 2
+
+// A unary selector chained after something else on the same line also
+// splits fine, because only the *continuation* keyword moves to its own line:
+result := "abc" asList
+  collect: [:ch | ch uppercase]
+```
+
+```beamtalk
+// A unary selector alone on its own line, immediately after its intended
+// receiver, does NOT continue it — it parses as a new statement instead:
+result := "abc"
+  asList        // parsed as its own statement, not `"abc" asList`
+```
+
+This is intentional, not a bug: a bare identifier like `asList` is itself a
+valid statement (e.g. a variable reference), so the parser cannot safely
+rejoin it with the line above without risking silently swallowing a genuinely
+separate statement that happens to start with a unary-looking name. Keyword
+parts don't have this ambiguity — `bar:` alone can never be a complete
+statement — which is why only keyword-message continuation is safe to infer
+automatically.
+
+**Keep a unary selector on the same line as its receiver.** If the identifier
+that follows fails to resolve, the diagnostic hints at this — join the two
+lines instead of chasing a phantom spelling mistake.
+
 ### Binary Operators
 
 Binary operators follow standard math precedence (highest to lowest):
@@ -1122,6 +1162,43 @@ pair at: 2                  // inferred Integer
 A non-literal index (`pair at: i`) or an out-of-range literal falls back to
 `Dynamic` — no false-positive warning. An untyped `tuple()` spec (unknown
 arity) stays bare `Tuple`, so `at:` on it remains `Dynamic` as before.
+
+### FFI Type Stub Files (ADR 0075 Phase 2)
+
+When the auto-extracted Erlang `-spec` types are missing or imprecise for a module, you can provide hand-written type stubs in a project's `stubs/` directory. Each `.bt` file there uses `declare native:` to declare type signatures for Erlang module functions:
+
+```beamtalk
+/// Type declarations for Erlang module `lists`.
+declare native: lists
+  reverse: list :: List(T) -> List(T)
+  seq: from :: Integer to: to :: Integer -> List(Integer)
+  member: elem :: T in: list :: List(T) -> Boolean
+```
+
+Stub signatures use the same syntax as Protocol method signatures — parameter names with optional `:: Type` annotations and an optional `-> ReturnType` — but never have a `=>` body. Unary functions use a bare name:
+
+```beamtalk
+declare native: erlang
+  node -> Symbol
+  self -> Pid
+```
+
+`declare` is a contextual keyword — it remains a legal identifier everywhere else.
+
+**Build integration:** `beamtalk build` and `beamtalk lint` automatically scan the project's `stubs/` directory (no `beamtalk.toml` config needed). Stub declarations merge into the FFI type registry at **function/arity granularity**: a stub for `lists:reverse/1` overrides only that entry; `lists:nth/2`, not declared in the stub, still uses the auto-extracted type from the `.beam` file.
+
+**Version-drift detection:** A stub function/arity that doesn't exist in the corresponding `.beam` module's real exports produces a warning anchored to the stub file, so stubs stay in sync with the Erlang modules they describe.
+
+**Restrictions:**
+- `declare native:` is only valid in `stubs/` — using it in `src/` is a hard compile error.
+- Project-local `stubs/` only (resolution chain layer 1). Package-bundled and compiler-distribution stubs are a planned follow-up.
+
+**Generating stubs:** Use `beamtalk generate stubs` to bootstrap stub files from `.beam` abstract code:
+
+```bash
+beamtalk generate stubs lists maps string
+# Output: stubs/lists.bt, stubs/maps.bt, stubs/string.bt
+```
 
 ### Loading Code into the Workspace
 
@@ -1997,12 +2074,17 @@ render: coll :: Printable | Nil -> String =>
 | `x ifNotNil: [:v \| ...]` | `v` is non-nil in block | Block only |
 | `x ifNil: [...] ifNotNil: [:v \| ...]` | `v` is non-nil in notNil block | NotNil block |
 | `x notNil and: [...]` | `x` is non-nil in block, including nested block-argument positions | Block only |
+| `x =:= #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |
+| `x == #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |
+| `x respondsTo: #sel ifFalse: [^...]` | `x` narrows post-guard | Rest of method |
 
 The diverging-guard pattern (`isNil ifTrue: [self error: "..."]`) recognises any block whose body infers as `Never` — including calls to `error:`, `notImplemented`, or any `-> Never` method — not just non-local returns (`^`). Narrowing also works on `self.field` reads: inside `self.field isNil ifFalse: [...]`, the field narrows to non-nil within the block.
 
 **`notNil and:` (BT-2872):** `x notNil and: [...]` narrows `x` to non-nil for the whole block argument — not just where `x` is a further send's receiver, but in any nested position, including as an argument to a binary send inside a further-nested block (`local notNil and: [local > 0 and: [5 >= local]]` narrows `local` inside `5 >= local` too). The narrowing does not survive past the block — a later unguarded use of `x` after the `and:` send is unaffected.
 
 **`isKindOf:` guard-and-return (BT-2825):** the same diverging-guard treatment `isNil` gets also applies to `isKindOf:` — `(x isKindOf: Foo) ifFalse: [^default]` proves `x` is `Foo` for the rest of the method, and `(x isKindOf: Foo) ifTrue: [^default]` proves `x` is `T \ Foo`. This also closes a related gap: when `x`'s declared type is a Protocol (e.g. `Printable`) and `Foo` is a concrete class, the narrowed type collapses to the bare `Foo` — a runtime `isKindOf: Foo` check is a stronger proof than the protocol annotation, so the narrowed value is assignable to a `Foo`-typed local without an `@expect type` escape hatch.
+
+**Singleton-equality guard-and-return (BT-3369):** the same diverging-guard treatment extends to singleton-equality checks — `x == #undefined ifTrue: [^false]` proves `x` is not `#undefined` for the rest of the method, narrowing to `T \ #undefined`. Both `==` and `=:=` are accepted (they are provably equivalent for atom/symbol comparisons). `respondsTo:` guards also carry forward: `(x respondsTo: #foo) ifFalse: [^default]` narrows `x` post-guard.
 
 ### Conditional Return Type Inference
 
@@ -2704,19 +2786,46 @@ w1 := pool startChild unwrap        // => Actor(Worker, _)
 w2 := pool startChild unwrap        // => Actor(Worker, _)
 pool count                          // => 2
 
+// Start a child with custom init args — args is passed to the child's init/1
+// the same way ActorClass spawnWith: args would
+w3 := (pool startChild: #{#label => "y"}) unwrap   // => Actor(Worker, _)
+
 // Recoverable variant — useful when a failing init should not abort the caller
 pool startChild
   ifOk:    [:w | w process: 21]
   ifError: [:e | Logger warn: e message]
+pool count                          // => 4
 
 // Terminate a specific child — idempotent (Ok(nil) even if already gone)
 (pool terminateChild: w1) unwrap    // => nil
-pool count                          // => 1
+pool count                          // => 3
 
 // Stop the whole pool (unchanged — Nil, let-it-crash teardown)
 pool stop
 WorkerPool current                  // => nil
 ```
+
+**Automatic restart replays per-child args.** OTP tracks the exact args each dynamically-started child was started with. A child started via `startChild: args` that later crashes under a `#permanent` or `#transient` restart policy comes back with those same args, not blank defaults. A child started via the no-arg `startChild` restarts the same way. Restart re-runs `init/1` from scratch — it does not resume the child's prior runtime state.
+
+**Named dynamic children — identity that survives restart.** `startChild:` alone gives you a pid, and a `simple_one_for_one`-restarted child comes back as a *different*, unlabelled pid — there is no `which:`/`children` method on `DynamicSupervisor` to rediscover it (see below). `startChild: args name: aSymbol` closes that gap by combining args-replay with [named actor registration](ADR/0079-named-actor-registration.md): the child starts under `{local, aSymbol}` registration, and because OTP replays each dynamic child's own start args (including the name) on automatic restart, a crashed named child re-registers under the same name every time.
+
+```beamtalk
+DynamicSupervisor(Monitor) subclass: CheckRegistry
+  class childClass => Monitor
+
+pool := (CheckRegistry supervise) unwrap
+m := (pool startChild: #{#check => "db"} name: #dbCheck) unwrap
+// => Actor(Monitor, _)
+
+// ... time passes; #dbCheck's process crashes and OTP restarts it ...
+
+current := (Monitor named: #dbCheck) unwrap   // re-resolves to the NEW pid
+current isAlive                                // => true
+```
+
+`aSymbol` should come from a bounded, statically-known namespace (e.g. a fixed set of configured checks/workers) — the same atom-exhaustion guidance that applies to `Actor>>spawnAs:` applies here, since names are Erlang atoms.
+
+**Why no `which: id` / `children` method on `DynamicSupervisor`.** Static `Supervisor>>which:` and `>>children` (below) work because OTP's plain `one_for_one` gives every statically-declared child a stable childspec id. `DynamicSupervisor`'s `simple_one_for_one` children are anonymous — matched only by pid — and `supervisor:which_children/1` is a documented performance cliff at scale (it copies the whole child list out of the supervisor process in one message). `startChild:name:` + `Actor named:` gives "find this dynamic child again by a stable identity, surviving restart" without either limitation: a `whereis/1`-backed point lookup, not a full-list scan. This differs from `DynamicSupervisor>>count`, which only reports an aggregate number with no per-child identity at all.
 
 ### Nested Supervisors
 
@@ -2746,6 +2855,7 @@ Supervisor lifecycle methods that can fail at a startup / registry boundary retu
 | `Supervisor>>which: aClass` | `-> Result(Object, Error)` | `#stale_handle` |
 | `DynamicSupervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
 | `DynamicSupervisor>>startChild` / `startChild: args` | `-> Result(C, Error)` | `#child_start_failed`, `#stale_handle` |
+| `DynamicSupervisor>>startChild: args name: aSymbol` | `-> Result(C, Error)` | `#child_start_failed`, `#name_registered`, `#reserved_name`, `#stale_handle` |
 | `DynamicSupervisor>>terminateChild: child` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
 
 `stop`, `current`, `children`, and `count` are **unchanged** — they are teardown / lookup / inspection operations over an already-valid handle and follow let-it-crash semantics (teardown) or nil-on-miss (lookup), matching the rules established in [ADR 0079](ADR/0079-named-actor-registration.md) for the parallel `Actor` surface.
@@ -5967,14 +6077,14 @@ Each `AtomicCounter` owns its own named ETS table. When `delete` is called, the 
 TestCase subclass: CounterTest
   field: counter = nil
 
-  setUp => self withCounter: (Counter spawn)
+  setUp => self.counter := Counter spawn
 
   testIncrement =>
     self.counter increment.
     self assert: (self.counter getValue) equals: 1
 ```
 
-For multiple fields, `with*:` calls chain via cascades:
+For multiple fields, chain the assignments — the LAST statement is what the runner threads through as `self`:
 
 ```beamtalk
 TestCase subclass: IntegrationTest
@@ -5982,7 +6092,8 @@ TestCase subclass: IntegrationTest
   field: cache = nil
 
   setUp =>
-    (self withDb: (DB connect)) withCache: (Cache spawn)
+    self.db := DB connect
+    self.cache := Cache spawn
 
   testLookup =>
     self.cache at: "key" put: "value".
@@ -5991,8 +6102,31 @@ TestCase subclass: IntegrationTest
 
 **Key points:**
 - Declare test instance variables with `field:` (not `state:`) since TestCase is a Value subclass
-- `setUp` returns a new self via `with*:` methods instead of using `self.x :=` assignment
+- `self.field := value` in the LAST statement of `setUp` returns the updated self — this is a special case for value-type field assignment (BT-833/BT-900), not the general rule that a bare assignment evaluates to the assigned value
 - Each test method receives the setUp'd value as `self` — mutations to actor references work normally, but `self` itself is immutable
+
+**Any statement after the last `self.field := value` silently drops that field** (BT-3391) — `setUp`'s return value is always its last expression's value, and only a trailing field assignment (or bare `self`) evaluates to the updated self. Adding one more line after your last assignment — a `super setUp` call, a log line, an unrelated local — makes `setUp` return THAT statement's value instead, and every field set above it reads back as its default in every test method, with no compile or runtime error:
+
+```beamtalk
+setUp =>
+  self.db := DB connect
+  self.cache := Cache spawn
+  Transcript show: "set up".   // <- adding this line breaks self.db and self.cache!
+```
+
+Fix it by ending with an explicit trailing `self`:
+
+```beamtalk
+setUp =>
+  self.db := DB connect
+  self.cache := Cache spawn
+  Transcript show: "set up".
+  self   // <- carries both field mutations forward
+```
+
+`beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field — via `self.field := value` or a `with<Field>:` send — and its last statement isn't a bare `self`, another field assignment, a `with<Field>:` send, or a `with*:` cascade.
+
+Chained `with*:` setters (`self withCounter: (Counter spawn)`) remain a valid alternative to `self.field := value` — each `with*:` call itself returns the fully updated self, so the chain's own last call already carries every field set through. This only holds when the `with*:` chain is itself the trailing statement of `setUp`: like a bare `self.field := value`, its self-preserving return value only threads through when nothing follows it — the same trap applies, and `beamtalk lint` (BT-3391/BT-3395) warns for both forms.
 
 #### Suite-Level Setup — setUpOnce / tearDownOnce
 

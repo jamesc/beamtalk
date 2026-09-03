@@ -87,8 +87,15 @@ impl NameResolver {
         self.scope.define("nil", module.span, BindingKind::Local);
 
         // Resolve top-level expressions
-        for stmt in &module.expressions {
+        for (i, stmt) in module.expressions.iter().enumerate() {
+            let diagnostics_before = self.diagnostics.len();
             self.resolve_expression(&stmt.expression);
+            self.refine_undefined_identifier_hint(
+                &stmt.expression,
+                i > 0,
+                stmt.preceding_blank_line,
+                diagnostics_before,
+            );
         }
 
         // Resolve classes
@@ -616,7 +623,7 @@ impl NameResolver {
         let mut saw_return = false;
         let mut warned = false;
 
-        for stmt in body {
+        for (i, stmt) in body.iter().enumerate() {
             let expr = &stmt.expression;
             if saw_return && !warned {
                 // First unreachable expression after early return — warn once
@@ -628,11 +635,72 @@ impl NameResolver {
                 warned = true;
             }
 
+            let diagnostics_before = self.diagnostics.len();
             self.resolve_expression(expr);
+            self.refine_undefined_identifier_hint(
+                expr,
+                i > 0,
+                stmt.preceding_blank_line,
+                diagnostics_before,
+            );
 
             if matches!(expr, Expression::Return { .. }) {
                 saw_return = true;
             }
+        }
+    }
+
+    /// BT-3386: refines the hint on an "Undefined variable" diagnostic when a
+    /// bare identifier statement looks like an attempted unary-message
+    /// continuation split across lines, e.g.:
+    ///
+    /// ```text
+    /// result := "abc"
+    ///   asList
+    /// ```
+    ///
+    /// The parser deliberately treats a unary selector alone on its own line
+    /// as the start of a *new* statement rather than a continuation of the
+    /// receiver above (see `parse_unary_message`, BT-360): unlike a keyword
+    /// part (which can never validly start a statement, making `foo\n  bar:
+    /// 1` unambiguous), a bare identifier like `asList` IS a valid statement
+    /// on its own — so the parser cannot safely rejoin it with the previous
+    /// line without risking silently swallowing an intentional new statement.
+    ///
+    /// When that identifier then fails to resolve, "Check the spelling" is
+    /// misleading — the far more likely mistake is a message send that
+    /// should have stayed on one line. We only refine the hint when the
+    /// statement is a bare identifier immediately following another
+    /// statement with no blank line between them — the same adjacency that
+    /// makes the ambiguity possible in the first place, so this stays
+    /// targeted rather than firing on every unrelated undefined-variable typo.
+    fn refine_undefined_identifier_hint(
+        &mut self,
+        expr: &Expression,
+        has_predecessor: bool,
+        preceding_blank_line: bool,
+        diagnostics_before: usize,
+    ) {
+        if !has_predecessor || preceding_blank_line {
+            return;
+        }
+        let Expression::Identifier(id) = expr else {
+            return;
+        };
+        if let Some(diag) = self.diagnostics[diagnostics_before..]
+            .iter_mut()
+            .find(|d| d.span == id.span && d.message.starts_with("Undefined variable"))
+        {
+            diag.hint = Some(
+                format!(
+                    "A unary message must stay on the same line as its receiver — \
+                     if `{name}` was meant to be sent to the expression on the line \
+                     above, join them onto one line (e.g. `... {name}`); otherwise, \
+                     define `{name}` with `:=` before use",
+                    name = id.name
+                )
+                .into(),
+            );
         }
     }
 
@@ -859,6 +927,62 @@ mod tests {
                 .any(|d| d.message.contains("Undefined variable: undeclared_var")),
             "Expected undefined variable error, got: {:?}",
             resolver.diagnostics()
+        );
+    }
+
+    #[test]
+    fn unary_selector_on_own_line_gets_continuation_hint() {
+        // BT-3386: `asList` on its own line right after `result := "abc"` is
+        // parsed as a new bare-identifier statement (BT-360 — a bare
+        // identifier can validly start a statement, so the parser cannot
+        // safely rejoin it with the receiver above). The identifier then
+        // fails to resolve; the hint should explain the real newline
+        // constraint instead of suggesting a spelling mistake.
+        let resolver =
+            run("Object subclass: Foo\n  testIt =>\n    result := \"abc\"\n      asList");
+        let diag = resolver
+            .diagnostics()
+            .iter()
+            .find(|d| d.message.contains("Undefined variable: asList"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "Expected undefined variable error, got: {:?}",
+                    resolver.diagnostics()
+                )
+            });
+        let hint = diag.hint.as_deref().unwrap_or_default();
+        assert!(
+            hint.contains("same line as its receiver"),
+            "Expected a hint explaining the newline constraint, got: {hint:?}"
+        );
+        assert!(
+            !hint.contains("Check the spelling"),
+            "Hint should no longer be the generic spelling hint, got: {hint:?}"
+        );
+    }
+
+    #[test]
+    fn unary_selector_after_blank_line_keeps_generic_hint() {
+        // Guard against over-firing: when a blank line separates the
+        // undefined identifier from the previous statement, it reads as an
+        // intentional new statement rather than a split message send, so the
+        // generic "check spelling" hint remains appropriate.
+        let resolver =
+            run("Object subclass: Foo\n  testIt =>\n    result := \"abc\"\n\n    asList");
+        let diag = resolver
+            .diagnostics()
+            .iter()
+            .find(|d| d.message.contains("Undefined variable: asList"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "Expected undefined variable error, got: {:?}",
+                    resolver.diagnostics()
+                )
+            });
+        let hint = diag.hint.as_deref().unwrap_or_default();
+        assert!(
+            hint.contains("Check the spelling"),
+            "Expected the generic spelling hint after a blank line, got: {hint:?}"
         );
     }
 
