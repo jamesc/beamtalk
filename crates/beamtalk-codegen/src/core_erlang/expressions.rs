@@ -1702,31 +1702,48 @@ impl CoreErlangGenerator {
         let builder_ctx: Option<(String, Vec<String>)> =
             super::class_builder_source::builder_class_method_context(receiver, messages);
 
+        // BT-3412: snapshot the class-var version *before* generating
+        // anything — the receiver included — so we can tell, once the last
+        // message's own arguments have been generated, whether *any* part of
+        // this cascade (the receiver or any message's arguments) hoisted a
+        // `ClassVarsN` rebind (`class_var_version` is never rolled back after
+        // a hoist — see `split_subexpr_for_preamble`). If so, the whole
+        // cascade must stay an *open* let-chain (like an ordinary
+        // class-method self-send) rather than a self-contained Document, so
+        // the rebind stays visible to the caller instead of being scoped
+        // only to this cascade's own value-defining subexpression.
+        let class_var_version_before_cascade = self.class_var_version();
+
         let receiver_var = self.fresh_temp_var("Receiver");
-        // BT-3412 review: use `closed_expression_doc`, not plain `expression_doc`
-        // — `underlying_receiver` can itself open a scope (e.g. a nested cascade
-        // whose own last message hoists a `ClassVarsN` rebind, now that this
-        // function can produce one). `expression_doc` doesn't consume
-        // `last_open_scope_result`, so a dangling `let ... in` would otherwise
-        // land unclosed inside `recv_doc`.
-        let recv_doc = self.closed_expression_doc(underlying_receiver)?;
-        let mut docs: Vec<Document<'static>> = vec![docvec![
+        // BT-3412 review: thread the receiver's open scope rather than close
+        // it — `underlying_receiver` can itself rebind `ClassVarsN` (e.g. a
+        // same-class self-send, or a nested cascade whose own last message
+        // hoists a rebind, now that this function can produce one).
+        // `closed_expression_doc` would splice `expr_doc, leaf::var(result_var)`
+        // in as `recv_doc`'s own value, trapping the `ClassVarsN` binding
+        // inside this `let Receiver = ... in` wrapper's closed subexpression —
+        // invisible to the rest of `docs` and to the enclosing class method's
+        // own closing `class_var_result` tuple, the exact failure class this
+        // whole fix addresses, just relocated to receiver position. Instead,
+        // splice any preamble into `docs` first (mirroring how
+        // `capture_subexpr_sequence`/`bind_args_to_temps` already do this for
+        // ordinary message-send receivers/arguments), so a rebind stays
+        // visible at the same nesting level as everything else in `docs` —
+        // and is caught by the `class_var_version_before_cascade` snapshot
+        // above, taken before this call runs.
+        let (receiver_preamble, receiver_value_doc) =
+            self.split_subexpr_for_preamble(underlying_receiver)?;
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        if !matches!(receiver_preamble, Document::Nil) {
+            docs.push(receiver_preamble);
+        }
+        docs.push(docvec![
             "let ",
             leaf::var(receiver_var.clone()),
             " = ",
-            recv_doc,
+            receiver_value_doc,
             " in "
-        ]];
-
-        // BT-3412: snapshot the class-var version so we can tell, once the
-        // last message's own arguments have been generated, whether *any*
-        // message's arguments hoisted a `ClassVarsN` rebind (`class_var_version`
-        // is never rolled back after a hoist — see `split_subexpr_for_preamble`).
-        // If so, the whole cascade must stay an *open* let-chain (like an
-        // ordinary class-method self-send) rather than a self-contained
-        // Document, so the rebind stays visible to the caller instead of being
-        // scoped only to this cascade's own value-defining subexpression.
-        let class_var_version_before_cascade = self.class_var_version();
+        ]);
 
         let total_messages = all_messages.len();
         for (index, (selector, arguments)) in all_messages.into_iter().enumerate() {

@@ -14420,6 +14420,29 @@
       "explanation": "BT-3380: An actor method whose selector collides with a Collection-protocol list-op selector (`collect:`, `select:`, `reject:`, `anySatisfy:`, `allSatisfy:`, `detect:`, `detect:ifNone:`, `count:`, `flatMap:`, `takeWhile:`, `dropWhile:`, `partition:`, `groupBy:`, `sort:`) must return its own plain result across the process boundary, not `{#ok, Result}` — the list-op runtime `is_list` guard's \"not a list\" fallback bypassed the actor reply-unwrap protocol. Same root cause as BT-3377, different codegen family. See fixtures/bt3380_collection_probe_actor.bt for the full root-cause writeup."
     },
     {
+      "id": "stdlib-test-cascade-classvar-rebind-receiver-position-test",
+      "title": "CascadeClassVarRebindReceiverPositionTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "CascadeClassVarRebindReceiverPositionTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "cascade_classvar_rebind_receiver_position_test",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing",
+        "testNonTailCascadeWithSelfSendReceiverCompilesInKeywordClassMethod"
+      ],
+      "source": "// BT-3412 review follow-up: regression test for the cascade-receiver variant\n// of the ClassVars-rebind scoping bug. See\n// stdlib/test/fixtures/cascade_classvar_rebind_receiver_position.bt for the\n// fixture and full context. This test compiling at all is itself most of\n// the regression coverage; the assertion additionally confirms the\n// self-send receiver actually ran.\n\nTestCase subclass: CascadeClassVarRebindReceiverPositionTest\n\n  testNonTailCascadeWithSelfSendReceiverCompilesInKeywordClassMethod =>\n    log := CascadeClassVarRebindLog spawn\n    CascadeClassVarRebindReceiverPosition run: log\n    self assert: log entries equals: #(#spawned)",
+      "explanation": "BT-3412 review follow-up: regression test for the cascade-receiver variant of the ClassVars-rebind scoping bug. See stdlib/test/fixtures/cascade_classvar_rebind_receiver_position.bt for the fixture and full context. This test compiling at all is itself most of the regression coverage; the assertion additionally confirms the self-send receiver actually ran."
+    },
+    {
       "id": "stdlib-test-cascade-classvar-rebind-test",
       "title": "CascadeClassVarRebindTest",
       "category": "stdlib-tests",
@@ -20071,6 +20094,29 @@
       ],
       "source": "// BT-3412: minimal cascade receiver for\n// stdlib/test/fixtures/cascade_classvar_rebind.bt — see that file for full\n// context. `add:value:`'s own arguments are irrelevant to the test (only the\n// hoisting they trigger matters); `noop` exists purely to make the cascade a\n// genuine 2-message cascade rather than a single send.\n\nActor subclass: CascadeClassVarRebindReceiver\n\n  add: _a value: _b -> Nil => nil\n\n  noop -> Nil => nil",
       "explanation": "BT-3412: minimal cascade receiver for stdlib/test/fixtures/cascade_classvar_rebind.bt — see that file for full context. `add:value:`'s own arguments are irrelevant to the test (only the hoisting they trigger matters); `noop` exists purely to make the cascade a genuine 2-message cascade rather than a single send."
+    },
+    {
+      "id": "stdlib-test-fixtures-cascade-classvar-rebind-receiver-position",
+      "title": "CascadeClassVarRebindReceiverPosition",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "CascadeClassVarRebindReceiverPosition",
+        "Object",
+        "cascade_classvar_rebind_receiver_position",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "object",
+        "property",
+        "run:",
+        "spawnReceiver:",
+        "subclassing"
+      ],
+      "source": "// BT-3412 review follow-up: the same `ClassVarsN`-scoping hazard as\n// stdlib/test/fixtures/cascade_classvar_rebind.bt, but with the same-class\n// self-send as the cascade's *receiver* rather than a message argument —\n// `generate_cascade`'s receiver capture must thread an open scope produced\n// by `underlying_receiver`, not close it away, or the rebind is trapped\n// inside the receiver's own closed subexpression instead of the argument's.\n//\n// Reuses CascadeClassVarRebindLog/CascadeClassVarRebindReceiver from\n// cascade_classvar_rebind_log.bt / cascade_classvar_rebind_receiver.bt.\n\nObject subclass: CascadeClassVarRebindReceiverPosition\n  classState: dummy = 0\n\n  class run: log :: CascadeClassVarRebindLog -> Nil =>\n    (CascadeClassVarRebindReceiverPosition spawnReceiver: log) add: 1 value: 2; noop\n    nil\n\n  class spawnReceiver: log :: CascadeClassVarRebindLog -> CascadeClassVarRebindReceiver =>\n    log record: #spawned\n    CascadeClassVarRebindReceiver spawn",
+      "explanation": "BT-3412 review follow-up: the same `ClassVarsN`-scoping hazard as stdlib/test/fixtures/cascade_classvar_rebind.bt, but with the same-class self-send as the cascade's *receiver* rather than a message argument — `generate_cascade`'s receiver capture must thread an open scope produced by `underlying_receiver`, not close it away, or the rebind is trapped inside the receiver's own closed subexpression instead of the argument's.  Reuses CascadeClassVarRebindLog/CascadeClassVarRebindReceiver from cascade_classvar_rebind_log.bt / cascade_classvar_rebind_receiver.bt."
     },
     {
       "id": "stdlib-test-fixtures-cascade-nested-keyword-arg",
