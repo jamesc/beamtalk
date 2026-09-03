@@ -3,6 +3,27 @@
 ## Status
 Accepted (2026-09-03)
 
+## Implementation Tracking
+
+**Epic:** [BT-3413](https://linear.app/beamtalk/issue/BT-3413)
+**Status:** Planned
+
+| Phase | Issue | Description | Size |
+|---|---|---|---|
+| 0 | [BT-3414](https://linear.app/beamtalk/issue/BT-3414) | Self-send position regression matrix + threading-predicate conformance test | M |
+| 1a | [BT-3415](https://linear.app/beamtalk/issue/BT-3415) | `ThreadedValue`, `close()`, `StateEffectEscapesExpression`; self-dispatch producer; Actor body consumer; sequencing rule for sends and binary operands | M |
+| 1b | [BT-3416](https://linear.app/beamtalk/issue/BT-3416) | Sequencing rule for literals, interpolation, return, assignment, cascade, `match:` scrutinee | M |
+| 2a | [BT-3417](https://linear.app/beamtalk/issue/BT-3417) | Conditional arms, exception arms, stateful-block bodies, conditional receiver consume `ThreadedValue` | M |
+| 2b | [BT-3418](https://linear.app/beamtalk/issue/BT-3418) | Loop-body consumers; delete planner, `HoistSink`, registries, BT-3399 warning | M |
+| 3 | [BT-3419](https://linear.app/beamtalk/issue/BT-3419) | `ConditionalLoop` condition as IR | M |
+| 4 | [BT-3420](https://linear.app/beamtalk/issue/BT-3420) | Inline-threaded control flow as producer; `ifNil:ifNotNil:`, `match:` arms, `ifNone:`, generic Tier 2 blocks | M |
+| 5a | [BT-3421](https://linear.app/beamtalk/issue/BT-3421) | ClassVars producers via `ThreadedValue`, open-scope shimmed | M |
+| 5b | [BT-3422](https://linear.app/beamtalk/issue/BT-3422) | Delete the open-scope protocol and helpers | M |
+| 6 | [BT-3423](https://linear.app/beamtalk/issue/BT-3423) | One `state_effects` fact, one selector table, gates collapsed | M |
+| 7 | [BT-3424](https://linear.app/beamtalk/issue/BT-3424) | Close-out: gates removed, `verify-threaded-ir`, docs, ADR 0111 addendum, measurement, REPL e2e | S |
+
+Dependency order: 3414 → 3415 → 3416 → 3417 → 3418 → {3419, 3420, 3421} → 3422 → 3423 → 3424.
+
 ## Context
 
 ### Problem statement
@@ -581,6 +602,7 @@ and `state_threading_selectors.rs`, `crates/beamtalk-lint` (selector table
 consumer), `stdlib/test/`, `docs/development/debugging.md`.
 
 ## References
+- Epic: BT-3413 (issues BT-3414 – BT-3424)
 - Related issues: BT-3374, BT-3382, BT-3392, BT-3396, BT-3399, BT-3402,
   BT-3403, BT-3405, BT-3406, BT-3385 (the ten position-specific fixes this
   ADR replaces); BT-3141, BT-3155 (ADR 0111 epics)
