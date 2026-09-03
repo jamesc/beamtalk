@@ -535,6 +535,7 @@ fn is_diagnostic_error(msg: &str) -> bool {
 
 /// The semantic category of a diagnostic, used by `@expect` for suppression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DiagnosticCategory {
     /// Does-not-understand (DNU) hint.
     Dnu,
@@ -589,6 +590,7 @@ pub enum DiagnosticCategory {
 /// from `Dictionary at:ifAbsent:` at line 42". The optional span points to the
 /// origin location in source code.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DiagnosticNote {
     /// The note message.
     pub message: EcoString,
@@ -598,6 +600,7 @@ pub struct DiagnosticNote {
 
 /// A diagnostic message (error, warning, or hint).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Diagnostic {
     /// The severity of the diagnostic.
     pub severity: Severity,
@@ -699,6 +702,7 @@ impl Diagnostic {
 
 /// Diagnostic severity level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Severity {
     /// An error that prevents compilation.
     Error,

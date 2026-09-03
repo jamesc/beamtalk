@@ -100,6 +100,38 @@ impl CompileDiagnostic {
     }
 }
 
+/// Prints each of `diagnostics` as a beautiful miette report against
+/// `source`, respecting `options.suppress_warnings`/`options.warnings_as_errors`
+/// and always skipping `Lint`-severity diagnostics (shown only by `beamtalk
+/// lint`).
+///
+/// BT-3410: shared by `compile_source_with_bindings` (a freshly-compiled
+/// file) and `build.rs`'s incremental-skip path (an unchanged file's
+/// diagnostics, replayed from the on-disk diagnostics cache so they don't
+/// silently vanish from `beamtalk build`'s output once a file stops being
+/// recompiled) — extracted so the suppression rules can't drift between the
+/// two call sites.
+pub fn print_diagnostics_text(
+    diagnostics: &[CoreDiagnostic],
+    source_path: &str,
+    source: &str,
+    options: &beamtalk_core::CompilerOptions,
+) {
+    for diagnostic in diagnostics {
+        if matches!(diagnostic.severity, Severity::Lint) {
+            continue;
+        }
+        if options.suppress_warnings
+            && !options.warnings_as_errors
+            && matches!(diagnostic.severity, Severity::Warning | Severity::Hint)
+        {
+            continue;
+        }
+        let compile_diag = CompileDiagnostic::from_core_diagnostic(diagnostic, source_path, source);
+        eprintln!("{:?}", miette::Report::new(compile_diag));
+    }
+}
+
 /// Render a beamtalk-core diagnostic as the single JSON shape every
 /// `--format=json` diagnostic stream uses (`beamtalk lint`'s per-diagnostic
 /// lines, and `load_project_stub_registry`'s stub diagnostics).

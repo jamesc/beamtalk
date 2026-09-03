@@ -310,6 +310,101 @@ pub(crate) fn save_beam_hash_cache(build_dir: &Utf8Path, hashes: &HashMap<String
     );
 }
 
+/// Name of the sidecar file recording, for each source file, the diagnostics
+/// produced the last time it was actually compiled (BT-3410).
+const DIAGNOSTICS_CACHE_FILENAME: &str = ".beamtalk-diagnostics-cache.json";
+
+/// Format version for the diagnostics sidecar. Bump when the layout changes.
+const DIAGNOSTICS_CACHE_VERSION: u32 = 1;
+
+/// On-disk representation of the diagnostics sidecar.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct DiagnosticsCache {
+    /// Format version — if this doesn't match `DIAGNOSTICS_CACHE_VERSION` the
+    /// cache is discarded silently (every file then replays no diagnostics
+    /// until it's next actually compiled).
+    version: u32,
+    /// Source path (as string) → the diagnostics produced compiling it, as of
+    /// the content hash recorded for it in the beam-hash sidecar. Kept as a
+    /// separate file (rather than folded into `BeamHashCache`) so a build
+    /// that only touches hashes never has to rewrite every file's
+    /// diagnostics, and vice versa.
+    diagnostics: HashMap<String, Vec<beamtalk_core::source_analysis::Diagnostic>>,
+}
+
+/// Load the diagnostics sidecar for `build_dir` (BT-3410).
+///
+/// Returns an empty map on any miss — no file, corrupt JSON, or a version
+/// mismatch. `build.rs`'s incremental-skip path treats a file with no
+/// recorded diagnostics as having none to replay, which is only ever a
+/// (self-healing, one-build-cycle) under-report, never a stale over-report:
+/// the sidecar is rewritten from scratch after every successful compile.
+pub(crate) fn load_diagnostics_cache(
+    build_dir: &Utf8Path,
+) -> HashMap<String, Vec<beamtalk_core::source_analysis::Diagnostic>> {
+    let cache_path = build_dir.join(DIAGNOSTICS_CACHE_FILENAME);
+    let Ok(data) = fs::read_to_string(&cache_path) else {
+        debug!("No diagnostics cache found at {cache_path}");
+        return HashMap::new();
+    };
+
+    let Ok(cache) = serde_json::from_str::<DiagnosticsCache>(&data) else {
+        warn!("Diagnostics cache is corrupt or unreadable — treating all files as having none");
+        return HashMap::new();
+    };
+
+    if cache.version != DIAGNOSTICS_CACHE_VERSION {
+        info!(
+            cached = cache.version,
+            current = DIAGNOSTICS_CACHE_VERSION,
+            "Diagnostics cache version mismatch — treating all files as having none"
+        );
+        return HashMap::new();
+    }
+
+    debug!(
+        entries = cache.diagnostics.len(),
+        "Loaded diagnostics cache from {cache_path}"
+    );
+    cache.diagnostics
+}
+
+/// Save the diagnostics sidecar to `build_dir` (BT-3410).
+///
+/// Call with the diagnostics for every file in this build's `file_module_pairs`
+/// (both freshly compiled and unchanged-and-replayed) so a file removed from
+/// the project — or one that stops producing a diagnostic — doesn't leave a
+/// stale entry behind. Best-effort like [`save_beam_hash_cache`]:
+/// serialization or I/O failures are logged, never fatal.
+pub(crate) fn save_diagnostics_cache(
+    build_dir: &Utf8Path,
+    diagnostics: &HashMap<String, Vec<beamtalk_core::source_analysis::Diagnostic>>,
+) {
+    let cache = DiagnosticsCache {
+        version: DIAGNOSTICS_CACHE_VERSION,
+        diagnostics: diagnostics.clone(),
+    };
+
+    let cache_path = build_dir.join(DIAGNOSTICS_CACHE_FILENAME);
+    let data = match serde_json::to_string(&cache) {
+        Ok(d) => d,
+        Err(e) => {
+            warn!(error = %e, "Failed to serialise diagnostics cache");
+            return;
+        }
+    };
+
+    if let Err(e) = fs::write(&cache_path, &data) {
+        warn!(error = %e, "Failed to write diagnostics cache to {cache_path}");
+        return;
+    }
+
+    debug!(
+        entries = cache.diagnostics.len(),
+        "Saved diagnostics cache to {cache_path}"
+    );
+}
+
 /// Perform an incremental Pass 1 scan.
 ///
 /// Loads the existing cache (if any), determines which files are stale,
