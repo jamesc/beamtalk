@@ -161,7 +161,11 @@ We use ETS for the class hierarchy walk (no gen_server needed for lookup).
 -spec static_init(module(), atom()) -> {ok, {map(), [map()]}}.
 static_init(Module, ClassName) ->
     ClassSelf = make_init_class_self(ClassName, Module),
-    ClassVars = #{},
+    %% BT-3407: read the class's live classState snapshot instead of a
+    %% hardcoded empty map, so a value set via an ordinary class-method call
+    %% before `supervise` (e.g. `configure:`) is visible to `class children`
+    %% here.
+    ClassVars = class_vars_snapshot(ClassSelf),
     Children = call_class_method_direct(ClassName, Module, class_children, ClassSelf, ClassVars),
     BtStrategy = call_class_method_direct(ClassName, Module, class_strategy, ClassSelf, ClassVars),
     MaxR = call_class_method_direct(ClassName, Module, class_maxRestarts, ClassSelf, ClassVars),
@@ -189,7 +193,8 @@ Same deadlock avoidance rationale as `static_init/2`.
 -spec dynamic_init(module(), atom()) -> {ok, {map(), [map()]}}.
 dynamic_init(Module, ClassName) ->
     ClassSelf = make_init_class_self(ClassName, Module),
-    ClassVars = #{},
+    %% BT-3407: see static_init/2's identical comment.
+    ClassVars = class_vars_snapshot(ClassSelf),
     ChildClass = call_class_method_direct(
         ClassName, Module, class_childClass, ClassSelf, ClassVars
     ),
@@ -743,7 +748,8 @@ initial `class_initialize:` method lookup (same pattern as `static_init/2`).
 -spec run_initialize(term()) -> ok.
 run_initialize({beamtalk_supervisor, ClassName, Module, _Pid} = SupTuple) ->
     ClassSelf = make_init_class_self(ClassName, Module),
-    ClassVars = #{},
+    %% BT-3407: see static_init/2's identical comment.
+    ClassVars = class_vars_snapshot(ClassSelf),
     call_class_method_direct(ClassName, Module, 'class_initialize:', ClassSelf, ClassVars, [
         SupTuple
     ]),
@@ -759,6 +765,21 @@ make_init_class_self(ClassName, Module) ->
     ClassPid = beamtalk_class_registry:whereis_class(ClassName),
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
     {beamtalk_object, ClassTag, Module, ClassPid}.
+
+-doc """
+Read a class's live classState snapshot (BT-3407), given the `ClassSelf`
+tuple `make_init_class_self/2` already built for the same call site.
+
+Reuses `ClassSelf`'s own `ClassPid` (position 4) rather than re-resolving
+it via a second `whereis_class/1` call — every one of this function's
+callers has just built `ClassSelf` from that exact pid. Deadlock-safe like
+`class_state_snapshot/1` itself: reads an ETS mirror, never messages the
+class gen_server (which may be blocked waiting for this `init/1` to
+return).
+""".
+-spec class_vars_snapshot(beamtalk_object()) -> map().
+class_vars_snapshot(ClassSelf) ->
+    beamtalk_class_registry:class_state_snapshot(element(4, ClassSelf)).
 
 -doc """
 Call a class method directly by invoking the module function, bypassing the class
@@ -951,7 +972,8 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
     put(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY, true),
     try
         ClassSelf = make_init_class_self(ClassName, Module),
-        ClassVars = #{},
+        %% BT-3407: see static_init/2's identical comment.
+        ClassVars = class_vars_snapshot(ClassSelf),
         RawResult = call_class_method_direct(
             ClassName, Module, Selector, ClassSelf, ClassVars, Args
         ),
