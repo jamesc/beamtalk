@@ -2601,26 +2601,11 @@ impl CoreErlangGenerator {
             }
         }
 
-        let any_hoisted = splits
-            .iter()
-            .any(|(preamble, _)| !matches!(preamble, Document::Nil));
-
-        let arg_docs = if any_hoisted {
-            let mut hoisted_docs = Vec::with_capacity(splits.len());
-            for (preamble, doc) in splits {
-                if matches!(preamble, Document::Nil) {
-                    let var = self.fresh_temp_var("CascadeArg");
-                    docs.push(docvec!["let ", leaf::var(var.clone()), " = ", doc, " in "]);
-                    hoisted_docs.push(leaf::var(var));
-                } else {
-                    docs.push(preamble);
-                    hoisted_docs.push(doc);
-                }
-            }
-            hoisted_docs
-        } else {
-            splits.into_iter().map(|(_, doc)| doc).collect()
-        };
+        let (any_hoisted, preamble_parts, arg_docs) =
+            self.hoist_subexpr_splits(splits, "CascadeArg");
+        if any_hoisted {
+            docs.extend(preamble_parts);
+        }
         Ok(arg_docs)
     }
 
