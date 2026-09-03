@@ -701,6 +701,16 @@ pub struct CompileContext<'a> {
     /// `[diagnostics]` section (ADR 0100 Rule 3). Empty when the package has
     /// no manifest or no `[diagnostics]` section — absence preserves today's
     /// Rule 1 completeness-ladder defaults.
+    ///
+    /// BT-3410: an unchanged file's diagnostics, replayed from `build.rs`'s
+    /// diagnostics sidecar instead of recompiled, keep whatever
+    /// `diagnostics_overrides` (and `suppress_warnings`/`warnings_as_errors`)
+    /// were in effect the last time that file was *actually* compiled.
+    /// Editing `beamtalk.toml`'s `[diagnostics]` table, or passing different
+    /// warning flags, without touching any `.bt` source therefore doesn't
+    /// re-filter already-unchanged files until they're next recompiled
+    /// (content change or `--force`) — a known, narrow limitation of the
+    /// replay path, not a bug in this field itself.
     pub diagnostics_overrides: crate::commands::manifest::DiagnosticsTable,
 }
 

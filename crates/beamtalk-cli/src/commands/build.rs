@@ -1001,41 +1001,65 @@ fn execute_build_passes(
         Vec<beamtalk_core::source_analysis::Diagnostic>,
     > = HashMap::with_capacity(file_module_pairs.len());
     // BT-3410: every changed file (always known) plus every unchanged file
-    // whose diagnostics were actually found in the cache and replayed —
-    // an unchanged file with no cache entry contributes nothing to
-    // `all_build_diags`, so it must not be counted as checked either.
+    // whose diagnostics were actually found in the cache and replayed, or
+    // recompiled below because they weren't.
     let mut files_with_known_diagnostics = 0usize;
+    // BT-3410: unchanged files recompiled this build solely because the
+    // diagnostics sidecar had no entry for them (a fresh sidecar right after
+    // upgrading to this feature, corruption, or a cache-version bump) — their
+    // .beam is already current, only their diagnostics were unknown. Counted
+    // separately so the "Compiling N of M files" summary below still
+    // reflects what `core_files` actually holds.
+    let mut diagnostics_cache_miss_recompiles = 0usize;
 
     for (file, module_name, core_file) in &file_module_pairs {
         module_names.push(module_name.clone());
 
-        if !changed_set.contains(file.as_path()) {
-            debug!(file = %file, "Skipping unchanged file");
-            if let Some(cached_diags) = previous_diagnostics_cache.get(file.as_str()) {
-                if !cached_diags.is_empty() {
-                    // A cached diagnostic's span is only valid against the
-                    // exact content that produced it — `changed_set` already
-                    // guarantees this file's content hash hasn't moved since
-                    // then, so re-reading it now is safe to render against.
-                    if let Ok(source) = fs::read_to_string(file) {
-                        crate::diagnostic::print_diagnostics_text(
-                            cached_diags,
-                            file.as_str(),
-                            &source,
-                            options,
-                        );
-                    }
-                }
-                files_with_known_diagnostics += 1;
-                all_build_diags.extend(cached_diags.iter().cloned());
-                new_diagnostics_cache.insert(file.as_str().to_string(), cached_diags.clone());
-            }
+        if changed_set.contains(file.as_path()) {
+            let cached = cached_asts.remove(file);
+            let file_diags =
+                compile_file(file, module_name, core_file, options, &compile_ctx, cached)?;
+            files_with_known_diagnostics += 1;
+            new_diagnostics_cache.insert(file.as_str().to_string(), file_diags.clone());
+            all_build_diags.extend(file_diags);
+            core_files.push(core_file.clone());
             continue;
         }
 
+        if let Some(cached_diags) = previous_diagnostics_cache.get(file.as_str()) {
+            debug!(file = %file, "Skipping unchanged file (diagnostics replayed from cache)");
+            if !cached_diags.is_empty() {
+                // A cached diagnostic's span is only valid against the exact
+                // content that produced it — `changed_set` already
+                // guarantees this file's content hash hasn't moved since
+                // then, so re-reading it now is safe to render against.
+                if let Ok(source) = fs::read_to_string(file) {
+                    crate::diagnostic::print_diagnostics_text(
+                        cached_diags,
+                        file.as_str(),
+                        &source,
+                        options,
+                    );
+                }
+            }
+            files_with_known_diagnostics += 1;
+            all_build_diags.extend(cached_diags.iter().cloned());
+            new_diagnostics_cache.insert(file.as_str().to_string(), cached_diags.clone());
+            continue;
+        }
+
+        // BT-3410: unchanged, but no diagnostics cache entry — recompile now
+        // so the gap closes within this one build instead of leaving the
+        // file silently unreported until its content next changes or
+        // `--force` is used. `compile_file` transparently falls back to
+        // reading and parsing from disk when Pass 1 didn't cache this file's
+        // AST either (its own, separate incremental cache), so this is safe
+        // even though the file was never in `cached_asts`.
+        debug!(file = %file, "Unchanged file has no diagnostics cache entry — recompiling");
         let cached = cached_asts.remove(file);
         let file_diags = compile_file(file, module_name, core_file, options, &compile_ctx, cached)?;
         files_with_known_diagnostics += 1;
+        diagnostics_cache_miss_recompiles += 1;
         new_diagnostics_cache.insert(file.as_str().to_string(), file_diags.clone());
         all_build_diags.extend(file_diags);
         core_files.push(core_file.clone());
@@ -1044,19 +1068,24 @@ fn execute_build_passes(
     compile_to_beam(
         &env.build_dir,
         &core_files,
-        changes.changed_files.len(),
-        changes.unchanged_files.len(),
+        changes.changed_files.len() + diagnostics_cache_miss_recompiles,
+        changes.unchanged_files.len() - diagnostics_cache_miss_recompiles,
         file_module_pairs.len(),
     )?;
 
+    // BT-3410: persist diagnostics before the beam-hash sidecar. If the
+    // process dies between these two writes, the hash cache must be the one
+    // left stale — an unchanged-looking file whose diagnostics entry is
+    // missing/superseded falls through to "unknown" and gets skipped safely,
+    // whereas writing the hash cache first would let a crash leave it
+    // already matching the new content while the diagnostics cache still
+    // held the superseded file's diagnostics, which would then get replayed
+    // as if it were current.
+    super::build_cache::save_diagnostics_cache(&env.build_dir, &new_diagnostics_cache);
     // BT-3120: only persist the beam-hash sidecar once compilation has
     // actually succeeded (the `?` above already returned on failure) — the
     // saved hashes assert "this content produced the `.beam` now on disk".
     super::build_cache::save_beam_hash_cache(&env.build_dir, &changes.source_hashes);
-    // BT-3410: same success gate — persist this build's diagnostics (both
-    // freshly compiled and replayed-unchanged) so the next build can replay
-    // them again for whichever files remain unchanged then.
-    super::build_cache::save_diagnostics_cache(&env.build_dir, &new_diagnostics_cache);
 
     let diagnostic_summary = beamtalk_core::source_analysis::DiagnosticSummary::from_diagnostics(
         &all_build_diags,

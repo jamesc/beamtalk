@@ -321,8 +321,9 @@ const DIAGNOSTICS_CACHE_VERSION: u32 = 1;
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct DiagnosticsCache {
     /// Format version — if this doesn't match `DIAGNOSTICS_CACHE_VERSION` the
-    /// cache is discarded silently (every file then replays no diagnostics
-    /// until it's next actually compiled).
+    /// cache is discarded silently (every unchanged file then has no cache
+    /// entry, which `build.rs`'s incremental-skip path treats as a signal to
+    /// recompile it this build — see `load_diagnostics_cache`'s doc).
     version: u32,
     /// Source path (as string) → the diagnostics produced compiling it, as of
     /// the content hash recorded for it in the beam-hash sidecar. Kept as a
@@ -335,10 +336,17 @@ struct DiagnosticsCache {
 /// Load the diagnostics sidecar for `build_dir` (BT-3410).
 ///
 /// Returns an empty map on any miss — no file, corrupt JSON, or a version
-/// mismatch. `build.rs`'s incremental-skip path treats a file with no
-/// recorded diagnostics as having none to replay, which is only ever a
-/// (self-healing, one-build-cycle) under-report, never a stale over-report:
-/// the sidecar is rewritten from scratch after every successful compile.
+/// mismatch. Unlike the beam-hash sidecar (where a miss means "assume
+/// changed"), a missing diagnostics entry for an otherwise-unchanged file is
+/// not silently treated as "no diagnostics": `build.rs`'s incremental-skip
+/// path looks the file up in this map, and on a miss falls back to actually
+/// recompiling that one file this build (its `.beam` is untouched — only its
+/// diagnostics were unknown) rather than reporting nothing for it. So a
+/// version bump, corruption, or a fresh sidecar right after upgrading to
+/// this feature self-heals within the *same* build, not a later one — every
+/// file's diagnostics are known by the time this build finishes, and the
+/// sidecar it writes back out (rebuilt from scratch, never mutated in
+/// place) reflects that.
 pub(crate) fn load_diagnostics_cache(
     build_dir: &Utf8Path,
 ) -> HashMap<String, Vec<beamtalk_core::source_analysis::Diagnostic>> {
