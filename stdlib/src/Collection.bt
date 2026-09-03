@@ -309,17 +309,22 @@ abstract typed Value subclass: Collection(E)
   ///
   /// Uses `^` (non-local return) for early exit — compiles to throw/catch on BEAM.
   ///
-  /// `noneBlock` is deliberately `Block(Object)`, not `Block(E)`: the fallback
-  /// commonly produces a value outside the element type (`ifNone: [nil]`,
-  /// `ifNone: [#missing]`), so narrowing it to `E` would reject those
-  /// legitimate uses. The trade-off — a wrong-typed default is not flagged —
-  /// is intentional, and is why the return type is `E | Object`.
+  /// `noneBlock` is deliberately `Block(T)`, a fresh type param, not
+  /// `Block(E)`: the fallback commonly produces a value outside the element
+  /// type (`ifNone: [nil]`, `ifNone: [#missing]`), so narrowing it to `E`
+  /// would reject those legitimate uses. The trade-off — a wrong-typed
+  /// default is not flagged — is intentional, and is why the return type is
+  /// `E | T` rather than plain `E`. Using `T` instead of a hardcoded
+  /// `Object` (BT-3409) lets the return type narrow to what `noneBlock`
+  /// actually returns — `ifNone: [nil]` infers `E | Nil`, not the far wider
+  /// `E | Object` — mirroring `Dictionary>>at:ifAbsent:`'s identical fix
+  /// (BT-3408).
   ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2) detect: [:x | x > 5] ifNone: [0]  // => 0
   /// ```
-  detect: block :: Block(E, Boolean) ifNone: noneBlock :: Block(Object) -> E | Object =>
+  detect: block :: Block(E, Boolean) ifNone: noneBlock :: Block(T) -> E | T =>
     self do: [:each | (block value: each) ifTrue: [^each]]
     noneBlock value
 
