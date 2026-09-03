@@ -885,6 +885,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(env_var)]
     fn prepare_workspace_paths_falls_back_to_default_idle_timeout() {
         let fixture =
             crate::commands::test_support::WorkspaceFixture::new("prep-paths-default-idle", 0, 1);
