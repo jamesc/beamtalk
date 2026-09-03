@@ -1990,13 +1990,10 @@ impl CoreErlangGenerator {
                 // instead of a closure to ensure mutations persist correctly.
                 if self.context == CodeGenContext::Actor || self.in_loop_body {
                     if let Expression::Block(block) = &arguments[0] {
-                        let analysis = block_analysis::analyze_block(block);
                         // BT-2356: inline when a nested list op mutates an outer local (see IfTrue).
                         // BT-3382: also inline for a self-send receiver (see IfTrue above).
-                        let needs_threading = self.needs_mutation_threading(&analysis)
-                            || self.body_has_list_op_cross_scope_mutations(block)
-                            || (self.in_loop_body && !analysis.local_writes.is_empty())
-                            || self.contains_hoistable_self_send(receiver);
+                        let needs_threading =
+                            self.conditional_needs_mutation_threading(receiver, &[block]);
                         if needs_threading {
                             // Validate arity before generating mutation-threaded code.
                             // This ensures a block with >1 params still raises
@@ -2623,7 +2620,6 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         use super::CodeGenContext;
-        use super::block_analysis;
 
         // Only applies in actor context, REPL context, or when inside a loop body
         // (BT-1053: value-type methods may have inline conditionals mutating captured
@@ -2688,7 +2684,6 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::IfTrue) => {
                 debug_assert_eq!(arguments.len(), 1);
                 if let Expression::Block(block) = &arguments[0] {
-                    let analysis = block_analysis::analyze_block(block);
                     // BT-1053: When inside a loop body, also trigger for any local write
                     // (the outer loop has already determined which locals need threading).
                     // BT-2356: also inline when the branch contains a nested list op that
@@ -2703,10 +2698,8 @@ impl CoreErlangGenerator {
                     // x) and: [y]) ifTrue:`) via the same walker
                     // `compile_conditional_receiver` emits with. See that function's doc
                     // comment for how the receiver position threads it.
-                    let needs_threading = self.needs_mutation_threading(&analysis)
-                        || self.body_has_list_op_cross_scope_mutations(block)
-                        || (self.in_loop_body && !analysis.local_writes.is_empty())
-                        || self.contains_hoistable_self_send(receiver);
+                    let needs_threading =
+                        self.conditional_needs_mutation_threading(receiver, &[block]);
                     if needs_threading {
                         // BT-1392: Set repl_loop_mutated so the REPL unpacks {Result, State}
                         if self.is_repl_mode() {
@@ -2720,13 +2713,10 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::IfFalse) => {
                 debug_assert_eq!(arguments.len(), 1);
                 if let Expression::Block(block) = &arguments[0] {
-                    let analysis = block_analysis::analyze_block(block);
                     // BT-2356: inline when a nested list op mutates an outer local (see IfTrue).
                     // BT-3382: also inline for a self-send receiver (see IfTrue above).
-                    let needs_threading = self.needs_mutation_threading(&analysis)
-                        || self.body_has_list_op_cross_scope_mutations(block)
-                        || (self.in_loop_body && !analysis.local_writes.is_empty())
-                        || self.contains_hoistable_self_send(receiver);
+                    let needs_threading =
+                        self.conditional_needs_mutation_threading(receiver, &[block]);
                     if needs_threading {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
@@ -2741,19 +2731,11 @@ impl CoreErlangGenerator {
                 if let (Expression::Block(true_block), Expression::Block(false_block)) =
                     (&arguments[0], &arguments[1])
                 {
-                    let true_analysis = block_analysis::analyze_block(true_block);
-                    let false_analysis = block_analysis::analyze_block(false_block);
                     // BT-2356: inline when either branch has a nested list op mutating an
                     // outer local (see IfTrue).
                     // BT-3382: also inline for a self-send receiver (see IfTrue above).
-                    let needs_threading = self.needs_mutation_threading(&true_analysis)
-                        || self.needs_mutation_threading(&false_analysis)
-                        || self.body_has_list_op_cross_scope_mutations(true_block)
-                        || self.body_has_list_op_cross_scope_mutations(false_block)
-                        || (self.in_loop_body
-                            && (!true_analysis.local_writes.is_empty()
-                                || !false_analysis.local_writes.is_empty()))
-                        || self.contains_hoistable_self_send(receiver);
+                    let needs_threading = self
+                        .conditional_needs_mutation_threading(receiver, &[true_block, false_block]);
                     if needs_threading {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
@@ -2806,13 +2788,35 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
     ) -> bool {
+        self.conditional_needs_mutation_threading(receiver, &[block])
+    }
+
+    /// BT-3414 (ADR 0118 phase 0): the one gate behind `ifTrue:`, `ifFalse:`,
+    /// `ifTrue:ifFalse:`, `ifNotNil:`, and (via
+    /// [`Self::and_or_needs_mutation_threading`]) `and:`/`or:` — "does this
+    /// conditional-shaped construct need the inline mutation-threading path
+    /// rather than a plain closure?" Block-body mutations, a cross-scope
+    /// list-op mutation, an outer loop-body local write in ANY branch block,
+    /// or a hoistable actor self-send anywhere in the receiver's hoistable
+    /// sub-tree. `ifTrue:ifFalse:` passes both its branch blocks; every other
+    /// caller passes its one block. Extracted so the "same four-term
+    /// disjunction inlined four times" the ADR 0118 §Context problem
+    /// statement calls out collapses to one function, callable (and thus
+    /// testable for agreement — see `threading_gates_agree_on_fixture_set`)
+    /// instead of four `let` bindings.
+    pub(in crate::core_erlang) fn conditional_needs_mutation_threading(
+        &self,
+        receiver: &Expression,
+        blocks: &[&Block],
+    ) -> bool {
         use super::block_analysis;
 
-        let analysis = block_analysis::analyze_block(block);
-        self.needs_mutation_threading(&analysis)
-            || self.body_has_list_op_cross_scope_mutations(block)
-            || (self.in_loop_body && !analysis.local_writes.is_empty())
-            || self.contains_hoistable_self_send(receiver)
+        blocks.iter().any(|block| {
+            let analysis = block_analysis::analyze_block(block);
+            self.needs_mutation_threading(&analysis)
+                || self.body_has_list_op_cross_scope_mutations(block)
+                || (self.in_loop_body && !analysis.local_writes.is_empty())
+        }) || self.contains_hoistable_self_send(receiver)
     }
 
     /// BT-1435: Tries to generate inline `logger:log/3` calls for Logger class sends.

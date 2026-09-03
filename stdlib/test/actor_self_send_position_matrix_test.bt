@@ -1,0 +1,392 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3414 (ADR 0118 phase 0): the self-send POSITION regression matrix.
+//
+// Every test method below drives one method of
+// stdlib/test/fixtures/self_send_position_counter.bt — one canonical
+// syntactic position for a self-send (or an `and:`/`or:` receiver/block
+// that carries one), asserting both the method's own return value and the
+// observed state-field mutation (`getCount`/`getLog`).
+//
+// Axes pinned here (see docs/ADR/0118-expression-level-state-threading-preludes.md
+// §Context for the source probe table):
+//   - PASSING positions (today, and expected to keep passing through every
+//     ADR 0118 phase): loop bounds/receiver/body, ensure:, on:do: handler,
+//     block `value`, count:/allSatisfy:/reject:/anySatisfy:, list-op
+//     receiver, inject:into: initial value, do:separatedBy:, map literal,
+//     interpolation, keyword arg, self-send arg, early return in a branch,
+//     plain assignment RHS, and:/or: receiver and block.
+//   - BROKEN positions (today): gated behind one `adr0118PhaseNPending`
+//     switch per ADR 0118 phase (see the phase table in the ADR's
+//     Implementation Tracking section). While a switch is `true` the test
+//     asserts the CURRENT (wrong) behaviour — a dropped mutation or a
+//     runtime crash — so the gate cannot silently mask a change; flipping a
+//     switch to `false` (once that phase lands) must be paired with
+//     updating the assertion to the correct value in the same commit.
+//
+// Three shapes from the same probe PANIC the ThreadedIr verifier today (a
+// self-send/`and:` in a `whileTrue:` CONDITION block, and a bare-receiver
+// `and:` inside an `ifTrue:` branch inside a `do:` body) and are pinned
+// instead as `#[should_panic]` Rust unit tests in
+// crates/beamtalk-codegen/src/core_erlang/tests/gen_server.rs — a
+// debug-build verifier panic would abort this whole BUnit file.
+
+TestCase subclass: ActorSelfSendPositionMatrixTest
+  field: c = nil
+
+  setUp => self withC: SelfSendPositionCounter spawn
+
+  tearDown => self.c isNil ifFalse: [self.c stop]
+
+  // ADR 0118 phase 1a: ThreadedValue, self-dispatch producer, Actor body
+  // consumer, sequencing rule for sends/binary operands. `to:do:`/
+  // `timesRepeat:` route their bound/receiver argument through a
+  // dedicated loop-construct codegen path rather than the general
+  // self-send-hoisting machinery BT-3396 wired for ordinary message
+  // arguments, so a self-send there is dropped today exactly like an
+  // un-migrated ordinary argument would have been before BT-3396.
+  adr0118Phase1aPending => true
+
+  // ADR 0118 phase 1b: sequencing rule for literals, interpolation,
+  // return, assignment, cascade, match: scrutinee.
+  adr0118Phase1bPending => true
+
+  // ADR 0118 phase 2a: conditional arms, exception arms, stateful-block
+  // bodies, conditional receiver consume ThreadedValue.
+  adr0118Phase2aPending => true
+
+  // ADR 0118 phase 2b: loop-body consumers; delete planner, HoistSink,
+  // registries, BT-3399 warning.
+  adr0118Phase2bPending => true
+
+  // ADR 0118 phase 3: ConditionalLoop condition as IR.
+  adr0118Phase3Pending => true
+
+  // ADR 0118 phase 4: inline-threaded control flow as a producer;
+  // ifNil:ifNotNil:, match: arms, ifNone:, generic Tier 2 blocks.
+  adr0118Phase4Pending => true
+
+  // ════════════════════════════════════════════════════════════════════
+  //  PASSING POSITIONS
+  // ════════════════════════════════════════════════════════════════════
+  testWhileTrueBodySelfSend =>
+    self assert: self.c whileTrueBodySelfSend equals: 3
+    self assert: self.c getCount equals: 3
+
+  testWhileFalseBodySelfSend =>
+    self assert: self.c whileFalseBodySelfSend equals: 3
+    self assert: self.c getCount equals: 3
+
+  testToByDoBodySelfSend =>
+    self assert: self.c toByDoBodySelfSend equals: 3
+    self assert: self.c getCount equals: 3
+
+  testEnsureSelfSend =>
+    self assert: self.c ensureSelfSend equals: 1
+    self assert: self.c getCount equals: 1
+
+  testOnDoHandlerSelfSend =>
+    self assert: self.c onDoHandlerSelfSend equals: 1
+    self assert: self.c getCount equals: 1
+
+  testBlockValueSelfSend =>
+    self assert: self.c blockValueSelfSend equals: 1
+    self assert: self.c getCount equals: 1
+
+  testCountBlockSelfSend =>
+    self assert: self.c countBlockSelfSend equals: 3
+    self assert: self.c getCount equals: 3
+
+  testAllSatisfyBlockSelfSend =>
+    self assert: self.c allSatisfyBlockSelfSend equals: true
+    self assert: self.c getCount equals: 3
+
+  testRejectBlockSelfSend =>
+    self assert: self.c rejectBlockSelfSend equals: #()
+    self assert: self.c getCount equals: 3
+
+  testAnySatisfyBlockSelfSend =>
+    self assert: self.c anySatisfyBlockSelfSend equals: false
+    self assert: self.c getCount equals: 3
+
+  testListOpReceiverSelfSend =>
+    self assert: self.c listOpReceiverSelfSend equals: 1
+    self assert: self.c getCount equals: 1
+
+  testInjectIntoInitialValueSelfSend =>
+    self assert: self.c injectIntoInitialValueSelfSend equals: 61
+    self assert: self.c getCount equals: 1
+
+  testDoSeparatedBySelfSend =>
+    self assert: self.c doSeparatedBySelfSend equals: 2
+    self assert: self.c getCount equals: 2
+
+  testMapLiteralSelfSend =>
+    self assert: self.c mapLiteralSelfSend equals: 1
+    self assert: self.c getCount equals: 1
+
+  testInterpolationSelfSend =>
+    self assert: self.c interpolationSelfSend equals: "n=1"
+    self assert: self.c getCount equals: 1
+
+  testKeywordArgSelfSend =>
+    self assert: self.c keywordArgSelfSend equals: 10
+    self assert: self.c getCount equals: 1
+
+  testSelfSendArgSelfSend =>
+    self assert: self.c selfSendArgSelfSend equals: 1
+    self assert: self.c getCount equals: 1
+    self assert: self.c getLog equals: #(1)
+
+  testEarlyReturnInBranchSelfSendTrue =>
+    self assert: (self.c earlyReturnInBranchSelfSend: true) equals: 10
+    self assert: self.c getCount equals: 1
+
+  testEarlyReturnInBranchSelfSendFalse =>
+    self assert: (self.c earlyReturnInBranchSelfSend: false) equals: 0
+    self assert: self.c getCount equals: 0
+
+  testAssignmentRhsSelfSend =>
+    self assert: self.c assignmentRhsSelfSend equals: 1
+    self assert: self.c getCount equals: 1
+
+  testAndReceiverSelfSend =>
+    self assert: self.c andReceiverSelfSend equals: true
+    self assert: self.c getCount equals: 1
+
+  testAndBlockSelfSend =>
+    self assert: self.c andBlockSelfSend equals: true
+    self assert: self.c getCount equals: 1
+
+  testOrReceiverSelfSend =>
+    self assert: self.c orReceiverSelfSend equals: true
+    self assert: self.c getCount equals: 1
+
+  testOrBlockSelfSend =>
+    self assert: self.c orBlockSelfSend equals: true
+    self assert: self.c getCount equals: 1
+
+  // ════════════════════════════════════════════════════════════════════
+  //  BROKEN POSITIONS — gated, asserting current (wrong) behaviour
+  // ════════════════════════════════════════════════════════════════════
+
+  // ADR 0118 phase 1a: `to:do:`'s upper-bound argument is a self-send.
+  // The sum still computes correctly (the bound literally is 3, so
+  // `bumpCount`'s return value fed through), but the mutation to the
+  // actor's own `count` field never lands.
+  testToDoBoundsSelfSend =>
+    self assert: self.c toDoBoundsSelfSend equals: 6
+    self adr0118Phase1aPending ifTrue: [
+      self assert: self.c getCount equals: 0
+    ] ifFalse: [self assert: self.c getCount equals: 1]
+
+  // `timesRepeat:`'s receiver is a self-send: the block runs the correct
+  // number of times (`n` = 1, matching `bumpCount`'s return value), but
+  // the mutation to the actor's own `count` field is dropped (ADR 0118
+  // phase 1a).
+  testTimesRepeatReceiverSelfSend =>
+    self assert: self.c timesRepeatReceiverSelfSend equals: 1
+    self adr0118Phase1aPending ifTrue: [
+      self assert: self.c getCount equals: 0
+    ] ifFalse: [self assert: self.c getCount equals: 1]
+
+  // ADR 0118 phase 3 (ConditionalLoop condition as IR): a self-send used
+  // as a binary-op operand inside a whileTrue: CONDITION block crashes
+  // today (arity mismatch); once the condition's prelude runs in the
+  // loop's own frame, `i` should settle at 3 and `bumpCount` run 3 times.
+  testWhileTrueConditionBinaryOpSelfSend =>
+    self adr0118Phase3Pending
+      ifTrue: [
+        self should: [
+          self.c whileTrueConditionBinaryOpSelfSend
+        ] raise: #arity_mismatch
+      ]
+      ifFalse: [
+        self assert: self.c whileTrueConditionBinaryOpSelfSend equals: 3
+        self assert: self.c getCount equals: 3
+      ]
+
+  testWhileTrueConditionAndOperandSelfSend =>
+    self adr0118Phase3Pending
+      ifTrue: [
+        self should: [
+          self.c whileTrueConditionAndOperandSelfSend
+        ] raise: #arity_mismatch
+      ]
+      ifFalse: [
+        self assert: self.c whileTrueConditionAndOperandSelfSend equals: 3
+        self assert: self.c getCount equals: 2
+      ]
+
+  // ADR 0118 phase 4 (inline-threaded control flow as a producer): a
+  // conditional used as a keyword-send argument leaks the RAW
+  // `{Result, State}` tuple into the argument today — `record:` appends
+  // the whole tuple to `log`, and the ACTUAL actor state (`count`) never
+  // advances because the leaked tuple, not a real dispatch reply, is what
+  // the caller sees. Pinned via `printString` (a Beamtalk literal cannot
+  // express a raw Erlang tuple) rather than by reconstructing the leak.
+  testConditionalArgToKeywordSendSelfSendTrue =>
+    self adr0118Phase4Pending
+      ifTrue: [
+        leaked := self.c conditionalArgToKeywordSendSelfSend: true
+        self assert: (leaked printString includesSubstring: "SelfSendPositionCounter") equals: true
+        self assert: self.c getCount equals: 0
+      ]
+      ifFalse: [
+        self assert: (self.c conditionalArgToKeywordSendSelfSend: true) equals: 1
+        self assert: self.c getCount equals: 1
+        self assert: self.c getLog equals: #(1)
+      ]
+
+  testConditionalArgToKeywordSendSelfSendFalse =>
+    self adr0118Phase4Pending
+      ifTrue: [
+        leaked := self.c conditionalArgToKeywordSendSelfSend: false
+        self assert: (leaked printString includesSubstring: "SelfSendPositionCounter") equals: true
+        self assert: self.c getCount equals: 0
+      ]
+      ifFalse: [
+        self assert: (self.c conditionalArgToKeywordSendSelfSend: false) equals: 0
+        self assert: self.c getCount equals: 0
+        self assert: self.c getLog equals: #(0)
+      ]
+
+  testConditionalArgToAtColonSelfSendTrue =>
+    self adr0118Phase4Pending
+      ifTrue: [
+        self should: [
+          self.c conditionalArgToAtColonSelfSend: true
+        ] raise: #type_error
+      ]
+      ifFalse: [
+        self assert: (self.c conditionalArgToAtColonSelfSend: true) equals: 10
+        self assert: self.c getCount equals: 1
+      ]
+
+  testConditionalArgToAtColonSelfSendFalse =>
+    self adr0118Phase4Pending
+      ifTrue: [
+        self should: [
+          self.c conditionalArgToAtColonSelfSend: false
+        ] raise: #type_error
+      ]
+      ifFalse: [
+        self assert: (self.c conditionalArgToAtColonSelfSend: false) equals: 20
+        self assert: self.c getCount equals: 0
+      ]
+
+  testDetectIfNoneSelfSend =>
+    self adr0118Phase4Pending
+      ifTrue: [
+        self should: [self.c detectIfNoneSelfSend] raise: #argument_error
+      ]
+      ifFalse: [
+        self assert: self.c detectIfNoneSelfSend equals: 1
+        self assert: self.c getCount equals: 1
+      ]
+
+  // ADR 0118 phase 1b (sequencing rule for cascade): a cascade on `self`
+  // silently drops every message's mutation today — no crash, no warning.
+  testCascadeOnSelfSelfSend =>
+    self adr0118Phase1bPending
+      ifTrue: [
+        self assert: self.c cascadeOnSelfSelfSend equals: #()
+        self assert: self.c getCount equals: 0
+      ]
+      ifFalse: [
+        self assert: self.c cascadeOnSelfSelfSend equals: #(1, 2)
+        self assert: self.c getCount equals: 0
+      ]
+
+  testCascadeArgumentSelfSendSelfSend =>
+    self adr0118Phase1bPending
+      ifTrue: [
+        self assert: self.c cascadeArgumentSelfSendSelfSend equals: #()
+        self assert: self.c getCount equals: 0
+      ]
+      ifFalse: [
+        self assert: self.c cascadeArgumentSelfSendSelfSend equals: #(1, 1)
+        self assert: self.c getCount equals: 1
+      ]
+
+  // ADR 0118 phase 2a (conditional-arm-shaped consumers, ifNil:ifNotNil:):
+  // the block's own computed VALUE is correct today — only the nested
+  // self-send's actor-state mutation is silently lost.
+  testIfNilIfNotNilBlockArgSelfSendNonNil =>
+    self assert: (self.c ifNilIfNotNilBlockArgSelfSend: 5) equals: 6
+    self adr0118Phase2aPending ifTrue: [
+      self assert: self.c getCount equals: 0
+    ] ifFalse: [self assert: self.c getCount equals: 1]
+
+  testIfNilIfNotNilBlockArgSelfSendNil =>
+    self assert: (self.c ifNilIfNotNilBlockArgSelfSend: nil) equals: 0
+    self assert: self.c getCount equals: 0
+
+  // ADR 0118 phase 2a (match: arm consumes ThreadedValue): same shape —
+  // the arm's own value is correct, the nested mutation is dropped.
+  testMatchArmSelfSendMatchingArm =>
+    self assert: (self.c matchArmSelfSend: 1) equals: 2
+    self adr0118Phase2aPending ifTrue: [
+      self assert: self.c getCount equals: 0
+    ] ifFalse: [self assert: self.c getCount equals: 1]
+
+  testMatchArmSelfSendWildcardArm =>
+    self assert: (self.c matchArmSelfSend: 2) equals: 0
+    self assert: self.c getCount equals: 0
+
+  // ADR 0118 phase 1b (match: scrutinee sequencing rule).
+  testMatchScrutineeSelfSend =>
+    self assert: self.c matchScrutineeSelfSend equals: #one
+    self adr0118Phase1bPending ifTrue: [
+      self assert: self.c getCount equals: 0
+    ] ifFalse: [self assert: self.c getCount equals: 1]
+
+  // ADR 0118 phase 2b (loop-body-shaped block-taking consumers): sort:'s
+  // own comparator never affects ordering here, so the sorted VALUE is
+  // already correct; only the comparator's self-send mutation is dropped.
+  testSortBlockSelfSend =>
+    self assert: self.c sortBlockSelfSend equals: #(10, 30)
+    self adr0118Phase2bPending ifTrue: [
+      self assert: self.c getCount equals: 0
+    ] ifFalse: [self assert: self.c getCount equals: 1]
+
+  // Loop-body field-assignment RHS with a nested self-send: unlike the
+  // ADR 0118 §Context probe's informal note for this shape, empirically
+  // this position ALREADY threads correctly today (BT-3176 axis 4's
+  // "state field threaded like an outer local" mechanism already covers
+  // a field read-then-write whose RHS nests a self-send, even inside a
+  // `do:` loop body) — not gated. Per-iteration, `count` is read BEFORE
+  // `bumpCount` runs (evaluation order), then reassigned to
+  // read-value + bumpCount's return: 0+1=1, then 1+2=3, then 3+4=7.
+  testDoLoopFieldAssignRhsSelfSend =>
+    self assert: self.c doLoopFieldAssignRhsSelfSend equals: 7
+
+  // ADR 0118 phase 2b (loop-body local-assignment RHS; deletes the
+  // BT-3399 warning): the outer LOCAL `y` still threads correctly via the
+  // pre-existing loop-local mechanism; the nested self-send's actor-state
+  // mutation is what the BT-3399 warning already flags as dropped.
+  testDoLoopLocalAssignRhsSelfSend =>
+    self adr0118Phase2bPending
+      ifTrue: [self assert: self.c getCount equals: 0]
+      ifFalse: [
+        self assert: self.c doLoopLocalAssignRhsSelfSend equals: 4
+        self assert: self.c getCount equals: 3
+      ]
+
+  // ADR 0118 phase 1b (assignment-RHS binary-op sequencing; deletes the
+  // BT-3399 warning for this shape): `total` computes correctly from
+  // `bumpCount`'s return value; the actor-state mutation is dropped.
+  testAssignRhsBinaryOpSelfSend =>
+    self assert: self.c assignRhsBinaryOpSelfSend equals: 4
+    self adr0118Phase1bPending ifTrue: [
+      self assert: self.c getCount equals: 0
+    ] ifFalse: [self assert: self.c getCount equals: 1]
+
+  // ADR 0118 phase 1b (interpolation-segment binary-op sequencing;
+  // deletes the BT-3399 warning for this shape).
+  testInterpolationBinaryOpSelfSend =>
+    self assert: self.c interpolationBinaryOpSelfSend equals: "3-1"
+    self adr0118Phase1bPending ifTrue: [
+      self assert: self.c getCount equals: 0
+    ] ifFalse: [self assert: self.c getCount equals: 1]

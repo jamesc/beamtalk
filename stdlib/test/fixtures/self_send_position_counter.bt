@@ -1,0 +1,269 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3414 (ADR 0118 phase 0): one method per self-send SYNTACTIC POSITION,
+// pinning current behaviour — pass, crash, or silent-drop — ahead of the
+// ADR 0118 migration that is supposed to make every one of these correct.
+// See stdlib/test/actor_self_send_position_matrix_test.bt for the assertions
+// and docs/ADR/0118-expression-level-state-threading-preludes.md §Context
+// for the 47-shape probe this fixture encodes.
+//
+// The three shapes that PANIC the ThreadedIr verifier today (a self-send or
+// an inline-threaded `and:` inside a `whileTrue:` CONDITION block, and a
+// bare-receiver `and:` inside an `ifTrue:` branch inside a `do:` body) are
+// deliberately NOT here — a debug-build verifier panic aborts the whole
+// BUnit test file, so they are pinned as `#[should_panic]` Rust unit tests
+// in crates/beamtalk-codegen/src/core_erlang/tests/gen_server.rs instead.
+//
+// Naming: `<position>SelfSend[: flag]`. Passing positions come first (the
+// ten recent fixes, BT-3396/BT-3402/BT-3403/etc., already cover their
+// mechanism — this fixture adds one canonical example of each so the whole
+// probe lives in one place); currently-broken positions (runtime crash or
+// silent drop) follow, gated in the test file behind `adr0118PhaseNPending`
+// switches per phase.
+
+Actor subclass: SelfSendPositionCounter
+  state: count = 0
+  state: log = #()
+  state: items :: List(Integer) = #(10, 20, 30)
+
+  // ── helpers (ADR 0118 acceptance criteria names) ────────────────────────
+  internal bumpCount =>
+    self.count := self.count + 1
+    self.count
+
+  internal record: n =>
+    self.log := self.log ++ #(n)
+    n
+
+  internal flagTrue =>
+    self.count := self.count + 1
+    true
+
+  internal bumpItems =>
+    self.count := self.count + 1
+    self.log := self.log ++ #(self.count)
+    self.log
+
+  getCount => self.count
+
+  getLog => self.log
+
+  reset =>
+    self.count := 0
+    self.log := #()
+    self.count
+
+  // ════════════════════════════════════════════════════════════════════
+  //  PASSING POSITIONS — pin today's correct behaviour so a regression
+  //  in the ADR 0118 migration is caught immediately.
+  // ════════════════════════════════════════════════════════════════════
+
+  // to:do: bounds
+  toDoBoundsSelfSend =>
+    sum := 0
+    1 to: (self bumpCount + 2) do: [:i | sum := sum + i]
+    sum
+
+  // timesRepeat: receiver
+  timesRepeatReceiverSelfSend =>
+    n := 0
+    (self bumpCount) timesRepeat: [n := n + 1]
+    n
+
+  // whileTrue: / whileFalse: / to:by:do: BODIES (condition itself is plain)
+  whileTrueBodySelfSend =>
+    i := 0
+    [i < 3]
+      whileTrue: [
+        self bumpCount
+        i := i + 1
+      ]
+    self.count
+
+  whileFalseBodySelfSend =>
+    i := 0
+    [i >= 3]
+      whileFalse: [
+        self bumpCount
+        i := i + 1
+      ]
+    self.count
+
+  toByDoBodySelfSend =>
+    1
+      to: 5
+      by: 2
+      do: [:i | self bumpCount]
+    self.count
+
+  // ensure: block
+  ensureSelfSend =>
+    [nil] ensure: [self bumpCount]
+    self.count
+
+  // on:do: handler block
+  onDoHandlerSelfSend =>
+    [self error: "boom"] on: Error do: [:e | self bumpCount]
+    self.count
+
+  // block `value`
+  blockValueSelfSend => [self bumpCount] value
+
+  // count: / allSatisfy: / reject: / anySatisfy: predicate blocks
+  countBlockSelfSend => self.items count: [:x | (self bumpCount) > 0]
+
+  allSatisfyBlockSelfSend => self.items allSatisfy: [:x | (self bumpCount) > 0]
+
+  rejectBlockSelfSend => self.items reject: [:x | (self bumpCount) > 0]
+
+  anySatisfyBlockSelfSend =>
+    self.items anySatisfy: [:x | (self bumpCount) > 100]
+
+  // list-op RECEIVER (the list itself comes from a self-send)
+  listOpReceiverSelfSend => (self bumpItems) size
+
+  // inject:into: initial value
+  injectIntoInitialValueSelfSend =>
+    self.items inject: (self bumpCount) into: [:a :b | a + b]
+
+  // do:separatedBy:
+  doSeparatedBySelfSend =>
+    n := 0
+    self.items
+      do: [:x | nil]
+      separatedBy: [
+        self bumpCount
+        n := n + 1
+      ]
+    n
+
+  // map literal value
+  mapLiteralSelfSend =>
+    m := #{#bumped => (self bumpCount)}
+    m at: #bumped
+
+  // string interpolation (self-send is the ONLY effect in the segment)
+  interpolationSelfSend => "n={self bumpCount}"
+
+  // keyword-message argument
+  keywordArgSelfSend => self.items at: (self bumpCount)
+
+  // argument to another self-send
+  selfSendArgSelfSend => self record: (self bumpCount)
+
+  // early return in a branch
+  earlyReturnInBranchSelfSend: flag =>
+    flag ifTrue: [^self.items at: (self bumpCount)]
+    0
+
+  // plain local-assignment RHS
+  assignmentRhsSelfSend =>
+    x := self bumpCount
+    x
+
+  // and:/or: receiver and block argument
+  andReceiverSelfSend => (self flagTrue) and: [true]
+
+  andBlockSelfSend => true and: [self flagTrue]
+
+  orReceiverSelfSend => (self flagTrue) or: [false]
+
+  orBlockSelfSend => false or: [self flagTrue]
+
+  // ════════════════════════════════════════════════════════════════════
+  //  CURRENTLY-BROKEN POSITIONS — ADR 0118 §Context probe rows that crash
+  //  or silently drop the mutation today. Gated in the test file.
+  // ════════════════════════════════════════════════════════════════════
+
+  // Runtime crash (block arity) — ADR 0118 phase 1a/4 territory (inline-
+  // threaded control flow / and: as a binary-op operand feeding a whileTrue:
+  // condition).
+  whileTrueConditionBinaryOpSelfSend =>
+    i := 0
+    [
+      i := i + 1
+      (self bumpCount) + i < 5
+    ] whileTrue: [nil]
+    i
+
+  whileTrueConditionAndOperandSelfSend =>
+    i := 0
+    [
+      i := i + 1
+      (i < 3) and: [(self bumpCount) > 0]
+    ] whileTrue: [nil]
+    i
+
+  // Runtime crash: {Result, State} tuple leaked into the argument — ADR
+  // 0118 phase 4 (inline-threaded control flow as a producer).
+  conditionalArgToKeywordSendSelfSend: flag =>
+    self record: (flag ifTrue: [self bumpCount] ifFalse: [0])
+
+  conditionalArgToAtColonSelfSend: flag =>
+    self.items at: (flag ifTrue: [self bumpCount] ifFalse: [2])
+
+  // Runtime crash: invalid argument — ADR 0118 phase 4.
+  detectIfNoneSelfSend =>
+    self.items detect: [:x | x > 100] ifNone: [self bumpCount]
+
+  // Silent drop, no warning — cascade on self (ADR 0118 phase 2).
+  cascadeOnSelfSelfSend =>
+    self record: 1; record: 2
+    self.log
+
+  cascadeArgumentSelfSendSelfSend =>
+    self record: (self bumpCount); record: 1
+    self.log
+
+  // Silent drop, no warning — ifNil:ifNotNil: block argument (ADR 0118
+  // phase 2).
+  ifNilIfNotNilBlockArgSelfSend: v =>
+    v ifNil: [0] ifNotNil: [:x | x + (self bumpCount)]
+
+  // Silent drop, no warning — match: scrutinee and arm (ADR 0118 phase 2).
+  matchArmSelfSend: v =>
+    v match: [
+      1 -> 1 + (self bumpCount);
+      _ -> 0
+    ]
+
+  matchScrutineeSelfSend =>
+    (self bumpCount) match: [
+      1 -> #one;
+      _ -> #other
+    ]
+
+  // Silent drop, no warning — sort: block (ADR 0118 phase 2). The
+  // comparator's own `<` never depends on `bumpCount`'s return value, so
+  // the sorted order stays deterministic regardless of whether the
+  // self-send's mutation threads.
+  sortBlockSelfSend =>
+    #(30, 10)
+      sort: [:a :b |
+        self bumpCount
+        a < b
+      ]
+
+  // Silent drop, no warning — do: body, field-assignment RHS (ADR 0118
+  // phase 2).
+  doLoopFieldAssignRhsSelfSend =>
+    self.items do: [:x | self.count := self.count + (self bumpCount)]
+    self.count
+
+  // Silent drop, BT-3399 warning today — do: body, local-assignment RHS
+  // binary-op operand (ADR 0118 phase 1a/1b).
+  doLoopLocalAssignRhsSelfSend =>
+    y := 0
+    self.items do: [:x | y := 1 + (self bumpCount)]
+    y
+
+  // Silent drop, BT-3399 warning today — local-assignment RHS binary-op
+  // operand (ADR 0118 phase 1a/1b).
+  assignRhsBinaryOpSelfSend =>
+    total := self.items size + (self bumpCount)
+    total
+
+  // Silent drop, BT-3399 warning today — string-interpolation segment that
+  // is a binary-op operand rather than a bare self-send (ADR 0118 phase 1b).
+  interpolationBinaryOpSelfSend => "{self.items size}-{self bumpCount}"

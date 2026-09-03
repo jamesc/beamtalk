@@ -7011,3 +7011,239 @@ fn bt3396_self_dispatch_in_later_interpolation_segment_is_not_hoisted_past_earli
     );
     assert_compiles_through_erlc("bt3396_first_interpolation_segment_hoisted", &code);
 }
+
+// BT-3414 (ADR 0118 phase 0): three shapes from the ADR's 47-shape self-send
+// position probe (§Context) PANIC the ThreadedIr verifier today rather than
+// merely crashing at runtime or silently dropping a mutation. A debug-build
+// verifier panic (`report_threaded_ir_verify_errors`'s `debug_assert!`,
+// control_flow/mod.rs) aborts the WHOLE test-binary invocation, so — unlike
+// every other row in the same probe — these three cannot live in a BUnit
+// `.bt` fixture (see stdlib/test/fixtures/self_send_position_counter.bt's
+// header comment); they are pinned here as `#[should_panic]` unit tests
+// instead. Each names the ADR 0118 phase expected to turn it into ordinary,
+// compiling, correct code.
+
+#[test]
+#[should_panic(expected = "ThreadedIr verify")]
+#[cfg(debug_assertions)]
+fn bt3414_self_send_in_and_receiver_inside_while_true_condition_panics_verifier() {
+    // `[i := i + 1. (self bumpCount) > 0 and: [i < 3]] whileTrue: [nil]` —
+    // a self-send as the RECEIVER of an inline-threaded `and:`, itself the
+    // whileTrue: CONDITION block's last expression. The condition compiles
+    // outside the loop's own ThreadedIr frame, so the self-send's `Bind`
+    // lands somewhere the verifier's frame-flow check cannot see when the
+    // loop later references its version: `UnboundVersion`. ADR 0118 phase 3
+    // (`ConditionalLoop` carries its condition as IR) closes this row.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    i := 0\n    [\n      i := i + 1\n      (self bumpCount) > 0 and: [i < 3]\n    ] whileTrue: [nil]\n    i\n\n  internal bumpCount =>\n    self.count := self.count + 1\n    self.count\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let _ = generate_module(
+        &module,
+        CodegenOptions::new("bt3414_and_receiver_self_send_in_while_condition")
+            .with_workspace_mode(true),
+    );
+}
+
+#[test]
+#[should_panic(expected = "ThreadedIr verify")]
+#[cfg(debug_assertions)]
+fn bt3414_self_send_as_and_receiver_alone_inside_while_true_condition_panics_verifier() {
+    // `[i := i + 1. (self flagTrue) and: [i < 3]] whileTrue: [nil]` — same
+    // shape as above with a bare self-send (no binary-op wrapper) as the
+    // `and:` receiver. Also `UnboundVersion`; also closed by ADR 0118
+    // phase 3.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    i := 0\n    [\n      i := i + 1\n      (self flagTrue) and: [i < 3]\n    ] whileTrue: [nil]\n    i\n\n  internal flagTrue =>\n    self.count := self.count + 1\n    true\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let _ = generate_module(
+        &module,
+        CodegenOptions::new("bt3414_bare_and_receiver_self_send_in_while_condition")
+            .with_workspace_mode(true),
+    );
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn threading_gates_agree_on_fixture_set() {
+    // BT-3414 (ADR 0118 phase 0): "does this conditional-shaped construct
+    // need the inline mutation-threading path" has historically been
+    // answered by several overlapping predicates — `control_flow_has_mutations`
+    // (gen_server/methods.rs, used by the statement-level C11/C12 dispatch
+    // to decide whether a `Match`/conditional send needs threaded lowering),
+    // `contains_hoistable_self_send` (control_flow/conditionals.rs, one
+    // disjunct of the same question), and the gate behind `ifTrue:`,
+    // `ifFalse:`, `ifTrue:ifFalse:`, `ifNotNil:`, and `and:`/`or:`
+    // (intrinsics.rs, collapsed by this same issue into
+    // `conditional_needs_mutation_threading` /
+    // `and_or_needs_mutation_threading`) — under a "must stay in sync"
+    // comment (gen_server/methods.rs) with no enforcing test until now.
+    //
+    // For a fixture set of real parsed `and:`/`or:`/`ifTrue:ifFalse:` sends,
+    // assert every predicate that claims to answer this question agrees.
+    struct Case {
+        name: &'static str,
+        snippet: &'static str,
+        expect_needs_threading: bool,
+    }
+
+    let cases = [
+        Case {
+            name: "and_no_mutation_no_self_send",
+            snippet: "true and: [false]",
+            expect_needs_threading: false,
+        },
+        Case {
+            name: "and_block_mutates_field",
+            snippet: "true and: [self.count := self.count + 1. true]",
+            expect_needs_threading: true,
+        },
+        Case {
+            name: "and_receiver_is_hoistable_self_send",
+            snippet: "(self bumpCount) and: [true]",
+            expect_needs_threading: true,
+        },
+        Case {
+            name: "or_no_mutation_no_self_send",
+            snippet: "false or: [true]",
+            expect_needs_threading: false,
+        },
+        Case {
+            name: "or_block_mutates_field",
+            snippet: "false or: [self.count := self.count + 1. true]",
+            expect_needs_threading: true,
+        },
+        Case {
+            name: "or_receiver_is_hoistable_self_send",
+            snippet: "(self bumpCount) or: [false]",
+            expect_needs_threading: true,
+        },
+    ];
+
+    for case in cases {
+        let src = format!(
+            "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    {}\n\n  internal bumpCount =>\n    self.count := self.count + 1\n    self.count\n",
+            case.snippet
+        );
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+        let (module, diags) = beamtalk_core::source_analysis::parse(tokens);
+        assert!(
+            diags.is_empty(),
+            "case {:?}: fixture must parse cleanly. Got: {diags:?}",
+            case.name
+        );
+        let class = module.classes.first().expect("one class");
+        let method = class
+            .methods
+            .iter()
+            .find(|m| matches!(&m.selector, MessageSelector::Unary(s) if s.as_str() == "triggerDirectly"))
+            .expect("triggerDirectly method");
+        let expr = &method
+            .body
+            .first()
+            .expect("triggerDirectly has one statement")
+            .expression;
+        let Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } = expr
+        else {
+            panic!("case {:?}: expected a MessageSend, got {expr:?}", case.name);
+        };
+        let Expression::Block(block) = &arguments[0] else {
+            panic!("case {:?}: expected a block argument", case.name);
+        };
+
+        let generator = CoreErlangGenerator::new("bt3414_gate_agreement");
+
+        let and_or = generator.and_or_needs_mutation_threading(receiver, block);
+        assert_eq!(
+            and_or, case.expect_needs_threading,
+            "case {:?}: and_or_needs_mutation_threading disagreed",
+            case.name
+        );
+
+        let collapsed = generator.conditional_needs_mutation_threading(receiver, &[block]);
+        assert_eq!(
+            collapsed, case.expect_needs_threading,
+            "case {:?}: conditional_needs_mutation_threading disagreed",
+            case.name
+        );
+
+        let hoistable = generator.contains_hoistable_self_send(receiver);
+        assert!(
+            !hoistable || case.expect_needs_threading,
+            "case {:?}: contains_hoistable_self_send(receiver) was true but the case did not \
+             expect threading — a hoistable self-send in the receiver must always force threading",
+            case.name
+        );
+
+        let control_flow = generator.control_flow_has_mutations(expr);
+        assert_eq!(
+            control_flow, case.expect_needs_threading,
+            "case {:?}: control_flow_has_mutations disagreed",
+            case.name
+        );
+    }
+
+    // `ifTrue:ifFalse:` exercises `conditional_needs_mutation_threading`'s
+    // two-block path (both `true_block` and `false_block` are checked).
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly: flag =>\n    flag ifTrue: [self.count := self.count + 1] ifFalse: [nil]\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, diags) = beamtalk_core::source_analysis::parse(tokens);
+    assert!(
+        diags.is_empty(),
+        "ifTrue:ifFalse: fixture must parse cleanly. Got: {diags:?}"
+    );
+    let class = module.classes.first().expect("one class");
+    let method = class
+        .methods
+        .iter()
+        .find(|m| {
+            matches!(&m.selector, MessageSelector::Keyword(parts) if parts.len() == 1 && parts[0].keyword == "triggerDirectly:")
+        })
+        .expect("triggerDirectly: method");
+    let expr = &method.body.first().expect("one statement").expression;
+    let Expression::MessageSend {
+        receiver,
+        arguments,
+        ..
+    } = expr
+    else {
+        panic!("expected a MessageSend, got {expr:?}");
+    };
+    let (Expression::Block(true_block), Expression::Block(false_block)) =
+        (&arguments[0], &arguments[1])
+    else {
+        panic!("expected two block arguments");
+    };
+    let generator = CoreErlangGenerator::new("bt3414_gate_agreement_if_true_if_false");
+    assert!(
+        generator.conditional_needs_mutation_threading(receiver, &[true_block, false_block]),
+        "ifTrue:ifFalse: with a mutating true-branch must need threading"
+    );
+    assert!(
+        generator.control_flow_has_mutations(expr),
+        "control_flow_has_mutations must agree that this ifTrue:ifFalse: needs threading"
+    );
+}
+
+#[test]
+#[should_panic(expected = "ThreadedIr verify")]
+#[cfg(debug_assertions)]
+fn bt3414_bare_and_inside_if_true_branch_inside_do_body_panics_verifier() {
+    // `items do: [:x | x > 0 ifTrue: [(self flagTrue) and: [true]] ifFalse:
+    // [nil]]` — a bare-receiver `and:` (self-send as its receiver) inside an
+    // `ifTrue:` branch, itself inside a `do:` loop body. The conditional
+    // branch's own ThreadedIr frame and the enclosing loop body's frame both
+    // end up producing a Bind for the same version: `NonLinearVersion`.
+    // ADR 0118 phase 2a (conditional arms/receiver consume ThreadedValue)
+    // and phase 2b (loop-body consumers) together close this row.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    #(1) do: [:x |\n      x > 0\n        ifTrue: [(self flagTrue) and: [true]]\n        ifFalse: [nil]\n    ]\n    self.count\n\n  internal flagTrue =>\n    self.count := self.count + 1\n    true\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let _ = generate_module(
+        &module,
+        CodegenOptions::new("bt3414_bare_and_in_if_true_inside_do_body").with_workspace_mode(true),
+    );
+}
