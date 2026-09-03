@@ -125,16 +125,19 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// Return first element matching predicate, or evaluate `default` if none
   /// matches (terminal).
   ///
-  /// `default` is deliberately `Block(Object)`, not `Block(E)` — matching the
-  /// `Collection` and `List` versions. The fallback commonly produces a value
-  /// outside the element type (`ifNone: [nil]`, `ifNone: [#missing]`), hence
-  /// the `E | Object` return type.
+  /// `default` is deliberately `Block(T)`, a fresh type param, not
+  /// `Block(E)` — matching the `Collection` and `List` versions (BT-3409).
+  /// The fallback commonly produces a value outside the element type
+  /// (`ifNone: [nil]`, `ifNone: [#missing]`), hence the `E | T` return
+  /// type — narrowing to what `default` actually returns (`ifNone: [nil]`
+  /// infers `E | Nil`) rather than the wider `E | Object` a hardcoded
+  /// `Object` type param gave.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (Stream on: #(1, 2)) detect: [:n | n > 5] ifNone: [0]  // => 0
   /// ```
-  detect: predicate :: Block(E, Boolean) ifNone: default :: Block(Object) -> E | Object =>
+  detect: predicate :: Block(E, Boolean) ifNone: default :: Block(T) -> E | T =>
     self delegate
 
   /// Materialize entire stream to a List (terminal).

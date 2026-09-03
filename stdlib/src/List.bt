@@ -183,17 +183,20 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Find the first element matching `block`, or evaluate `default` if none.
   ///
-  /// `default` is deliberately `Block(Object)`, not `Block(E)` — matching the
-  /// `Collection` ancestor. The fallback commonly produces a value outside the
-  /// element type (`ifNone: [nil]`, `ifNone: [#missing]`), so narrowing it to
-  /// `E` would reject those legitimate uses; a wrong-typed default going
-  /// unflagged is the accepted trade-off, hence the `E | Object` return type.
+  /// `default` is deliberately `Block(T)`, a fresh type param, not
+  /// `Block(E)` — matching the `Collection` ancestor (BT-3409). The
+  /// fallback commonly produces a value outside the element type (`ifNone:
+  /// [nil]`, `ifNone: [#missing]`), so narrowing it to `E` would reject
+  /// those legitimate uses; a wrong-typed default going unflagged is the
+  /// accepted trade-off, hence the `E | T` return type — narrowing to what
+  /// `default` actually returns (`ifNone: [nil]` infers `E | Nil`) rather
+  /// than the wider `E | Object` a hardcoded `Object` type param gave.
   ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2) detect: [:x | x > 5] ifNone: [0]   // => 0
   /// ```
-  detect: block :: Block(E, Boolean) ifNone: default :: Block(Object) -> E | Object =>
+  detect: block :: Block(E, Boolean) ifNone: default :: Block(T) -> E | T =>
     @primitive
 
   // === Enumerating ===

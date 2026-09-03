@@ -107,11 +107,16 @@ typed Value subclass: SupervisionTree
   /// The first node for which `aBlock` answers `true`, or the value of
   /// `noneBlock` if none match.
   ///
+  /// `noneBlock` is `Block(T)`, a fresh type param, so the result narrows
+  /// to what it actually returns (`ifNone: [nil]` infers `SupervisionNode |
+  /// Nil`) instead of the previous bare `Object` — which didn't even
+  /// preserve `SupervisionNode` in the result type (BT-3409).
+  ///
   /// ## Examples
   /// ```beamtalk
   /// tree detect: [:n | n isSupervisor] ifNone: [nil]
   /// ```
-  detect: aBlock :: Block(SupervisionNode, Boolean) ifNone: noneBlock :: Block(Object) -> Object =>
+  detect: aBlock :: Block(SupervisionNode, Boolean) ifNone: noneBlock :: Block(T) -> SupervisionNode | T =>
     self nodes detect: aBlock ifNone: noneBlock
 
   /// Collect the result of applying `aBlock` to every node.
