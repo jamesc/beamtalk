@@ -61,6 +61,42 @@ fn lint_json_format_streams_stub_diagnostics_as_json_lines() {
         .stderr(contains("definitelyNotARealExport").not());
 }
 
+/// BT-3404 regression: `check_native_declaration_location`'s diagnostic
+/// previously had no `DiagnosticCategory`, so `collect_diagnostics`'s
+/// `.filter(|d| d.category.is_some())` silently dropped it — a direct
+/// file-target `beamtalk lint <file>` pointed at a `declare native:` block
+/// outside `stubs/` reported no diagnostic at all, even though `beamtalk
+/// build`/`check` would reject the same file. `collect_lint_files`'s
+/// `stubs/` exclusion (see `lint_succeeds_with_project_local_stubs_directory`
+/// above) only applies to *directory* walks, so a direct file target
+/// bypasses it entirely and must be judged purely on the diagnostic's own
+/// category.
+///
+/// Asserts the diagnostic and its summary row are now printed. Not asserted
+/// here: process exit code — `run_lint`'s own failure threshold
+/// (`total_lint_count`) only counts `Severity::Lint` diagnostics; this one is
+/// `Severity::Error` like several other pre-existing, already-categorized
+/// structural diagnostics (e.g. `EmptyBody`, `Type`, `Visibility`), so it was
+/// already outside that threshold's scope before this fix and stays so —
+/// widening `run_lint`'s failure threshold is a separate concern from
+/// BT-3404's category-filter fix.
+#[test]
+fn lint_direct_file_target_reports_declare_native_outside_stubs() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/misplaced_native.bt"),
+        "declare native: lists\n  reverse: list :: List -> List\n",
+    )
+    .expect("write src/misplaced_native.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["lint", "src/misplaced_native.bt"])
+        .assert()
+        .stderr(contains("only valid in stubs/ directory"))
+        .stderr(contains("NativeDeclarationLocation"));
+}
+
 #[test]
 fn lint_clean_project_text_format_exits_zero() {
     let project = cli_common::fixture_project();

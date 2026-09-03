@@ -3486,16 +3486,19 @@ mod tests {
     /// `src/`), then with `is_stub_file: true` (what a real `stubs/` call
     /// site now derives) and confirming it no longer would.
     ///
-    /// `check_native_declaration_location`'s diagnostic has no
-    /// `DiagnosticCategory` (a separate, pre-existing gap shared by `beamtalk
-    /// lint`'s own `collect_diagnostics` — filed as BT-3399), so
-    /// `run_module_analysis`'s `category.is_some()` filter drops it from the
-    /// *returned* diagnostics regardless of `is_stub_file`. This test
-    /// therefore asserts on `analyse_full`'s pre-filter diagnostics — built
-    /// with the identical `AnalysisContext` construction `run_module_analysis`
-    /// uses — rather than `run_module_analysis`'s own return value, so it
-    /// actually exercises the `is_stub_file` wiring instead of vacuously
-    /// passing either way.
+    /// At the time this test was written, `check_native_declaration_location`'s
+    /// diagnostic had no `DiagnosticCategory` (a separate, pre-existing gap
+    /// shared by `beamtalk lint`'s own `collect_diagnostics` — filed and
+    /// fixed as BT-3404), so `run_module_analysis`'s `category.is_some()`
+    /// filter dropped it from the *returned* diagnostics regardless of
+    /// `is_stub_file`. This test therefore asserts on `analyse_full`'s
+    /// pre-filter diagnostics — built with the identical `AnalysisContext`
+    /// construction `run_module_analysis` uses — rather than
+    /// `run_module_analysis`'s own return value, so it actually exercises the
+    /// `is_stub_file` wiring instead of vacuously passing either way. Now that
+    /// BT-3404 has given the diagnostic a category, the *returned* diagnostics
+    /// carry it too — see
+    /// `run_module_analysis_reports_native_declaration_location_error` below.
     #[test]
     fn run_module_analysis_is_stub_file_suppresses_native_declaration_location_error() {
         let source = "declare native: lists\n";
@@ -3519,6 +3522,32 @@ mod tests {
         assert!(
             !has_location_error(true),
             "declare native: inside stubs/ should not be rejected"
+        );
+    }
+
+    /// BT-3404 regression: `check_native_declaration_location`'s diagnostic
+    /// now carries a `DiagnosticCategory`
+    /// (`NativeDeclarationLocation`), so `run_module_analysis`'s
+    /// `category.is_some()` filter no longer silently drops it from the
+    /// diagnostics MCP `lint`/`diagnostic_summary` actually return — unlike
+    /// before this fix, where the previous test had to reach past
+    /// `run_module_analysis` into `analyse_full`'s pre-filter diagnostics to
+    /// observe the check running at all.
+    #[test]
+    fn run_module_analysis_reports_native_declaration_location_error() {
+        let source = "declare native: lists\n";
+        let tokens = lex_with_eof(source);
+        let (module, _parse_diags) = parse(tokens);
+
+        let (diags, _) =
+            run_module_analysis(&module, source, &[], Vec::new(), false, None, None, false);
+
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("only valid in stubs/ directory")),
+            "declare native: outside stubs/ should be reported by run_module_analysis, \
+             not silently dropped: {diags:?}"
         );
     }
 

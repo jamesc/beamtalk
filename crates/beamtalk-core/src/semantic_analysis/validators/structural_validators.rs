@@ -761,7 +761,8 @@ pub(crate) fn check_native_declaration_location(
                 "Move this declaration into a stubs/ file, or remove it — \
                      'declare native:' populates the Erlang FFI type registry \
                      and never belongs in compiled source.",
-            ),
+            )
+            .with_category(DiagnosticCategory::NativeDeclarationLocation),
         );
     }
 }
@@ -1519,6 +1520,12 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].severity, Severity::Error);
         assert!(diags[0].message.contains("only valid in stubs/ directory"));
+        // BT-3404: must carry a category, or `beamtalk lint`'s and MCP's
+        // `.filter(|d| d.category.is_some())` silently drop it.
+        assert_eq!(
+            diags[0].category,
+            Some(DiagnosticCategory::NativeDeclarationLocation)
+        );
     }
 
     #[test]

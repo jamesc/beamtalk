@@ -154,6 +154,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::TypeAnnotation => "TypeAnnotation",
         DiagnosticCategory::Inheritance => "Inheritance",
         DiagnosticCategory::Sendability => "Sendability",
+        DiagnosticCategory::NativeDeclarationLocation => "NativeDeclarationLocation",
     }
 }
 
@@ -366,6 +367,10 @@ mod tests {
             (DiagnosticCategory::TypeAnnotation, "TypeAnnotation"),
             (DiagnosticCategory::Inheritance, "Inheritance"),
             (DiagnosticCategory::Sendability, "Sendability"),
+            (
+                DiagnosticCategory::NativeDeclarationLocation,
+                "NativeDeclarationLocation",
+            ),
         ];
         for (cat, expected) in all {
             assert_eq!(category_label(cat), expected);
