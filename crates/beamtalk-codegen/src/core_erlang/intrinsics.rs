@@ -2637,6 +2637,53 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
 
+        // BT-3402: `and:`/`or:` short-circuit boolean protocol. Both are
+        // ordinary self-hosted `Boolean` methods (`Boolean.bt`: `and: aBlock
+        // => self ifTrue: aBlock ifFalse: [false]`, `or: aBlock => self
+        // ifTrue: [true] ifFalse: aBlock`) — not `WellKnownSelector`s (see
+        // `state_threading_selectors`'s doc comment), so generic dispatch
+        // reaches them with no special-casing at all today, and the block
+        // literal argument compiles as an ordinary Tier 1 closure. A
+        // self-send (or `self.slot :=` field mutation) nested inside that
+        // closure then discards its own `NewState` exactly like `ifTrue:`
+        // blocks did before BT-915 — see this function's `IfTrue`/`IfFalse`
+        // arms below, which this mirrors. Recognizing the literal `and:`/
+        // `or:` call shape here, before generic dispatch (and Boolean.bt's
+        // self-hosted definition) is ever reached, lets the block compile
+        // through the same `generate_conditional_branch_inline` machinery
+        // `ifTrue:`/`ifFalse:` use, so nested self-sends and field
+        // mutations thread state correctly. Only intercepts when threading
+        // is actually needed; otherwise falls through to ordinary generic
+        // dispatch so the ordinary (non-mutating) codegen shape is
+        // unchanged.
+        if let MessageSelector::Keyword(parts) = selector {
+            if parts.len() == 1 && arguments.len() == 1 {
+                let kw = parts[0].keyword.as_str();
+                if kw == "and:" || kw == "or:" {
+                    if let Expression::Block(block) = &arguments[0] {
+                        // Same threading gate as IfTrue/IfFalse below, shared
+                        // with `compile_conditional_receiver` (BT-3402/BT-3396
+                        // interaction fix) so the two can never disagree about
+                        // whether a given `and:`/`or:` needs the inline
+                        // mutation-threading path — see
+                        // `and_or_needs_mutation_threading`'s doc comment.
+                        let needs_threading = self.and_or_needs_mutation_threading(receiver, block);
+                        if needs_threading {
+                            if self.is_repl_mode() {
+                                self.set_repl_loop_mutated(true);
+                            }
+                            let doc = if kw == "and:" {
+                                self.generate_and_with_mutations(receiver, block)?
+                            } else {
+                                self.generate_or_with_mutations(receiver, block)?
+                            };
+                            return Ok(Some(doc));
+                        }
+                    }
+                }
+            }
+        }
+
         match selector.well_known() {
             Some(WellKnownSelector::IfTrue) => {
                 debug_assert_eq!(arguments.len(), 1);
@@ -2724,6 +2771,46 @@ impl CoreErlangGenerator {
         }
 
         Ok(None)
+    }
+
+    /// BT-3402/BT-3396 interaction fix: the shared "does this `and:`/`or:`
+    /// need the inline mutation-threading path" gate — block-body mutations,
+    /// a cross-scope list-op mutation, an outer loop-body local write, or the
+    /// receiver itself being a dispatching actor self-send. Shared by
+    /// [`Self::try_generate_boolean_protocol`] (deciding whether `and:`/`or:`
+    /// is itself the top-level construct to inline) and
+    /// [`super::control_flow::conditionals::CoreErlangGenerator::compile_conditional_receiver`]
+    /// (deciding whether a NESTED `and:`/`or:` sub-expression — e.g. `((self
+    /// recordOnce: x) and: [y]) ifTrue:...` — must be compiled through
+    /// [`Self::generate_and_with_mutations`]/[`Self::generate_or_with_mutations`]
+    /// and its `{Result, NewState}` tuple unwrapped, rather than through the
+    /// generic self-send-hoisting walk).
+    ///
+    /// Extracting one gate for both call sites matters here specifically:
+    /// before this fix, `compile_conditional_receiver`'s hoist walk treated
+    /// `and:`/`or:` as opaque (`is_conditional_selector`) and left threading
+    /// entirely to `try_generate_boolean_protocol`'s own re-entrant compile of
+    /// the receiver — but that path returns a *tuple*-valued document where
+    /// `compile_conditional_receiver`'s contract requires a plain boolean
+    /// value, corrupting the enclosing conditional's state-version numbering
+    /// (`unbound variable 'State1'` from `core_lint` on a fixture combining
+    /// BT-3396's `((self recordOnce: x) and: [true]) ifTrue:ifFalse:` with
+    /// any BT-3402 mutation-threaded `and:`/`or:`). The two decisions must
+    /// agree on exactly the same predicate — CLAUDE.md's
+    /// no-duplicate-implementations rule — so `compile_conditional_receiver`
+    /// now special-cases this shape itself using this same gate.
+    pub(in crate::core_erlang) fn and_or_needs_mutation_threading(
+        &self,
+        receiver: &Expression,
+        block: &Block,
+    ) -> bool {
+        use super::block_analysis;
+
+        let analysis = block_analysis::analyze_block(block);
+        self.needs_mutation_threading(&analysis)
+            || self.body_has_list_op_cross_scope_mutations(block)
+            || (self.in_loop_body && !analysis.local_writes.is_empty())
+            || self.is_dispatching_actor_self_send(receiver.unwrap_parens())
     }
 
     /// BT-1435: Tries to generate inline `logger:log/3` calls for Logger class sends.

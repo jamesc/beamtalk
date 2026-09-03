@@ -9,6 +9,14 @@
 // of these compiled through the ordinary discarding self-dispatch codegen:
 // the callee ran (its return value is observable) but its mutation to
 // `count`/`log` vanished. See stdlib/test/fixtures/nested_self_send_counter.bt.
+//
+// BT-3402: tests that a self-send (or a direct field mutation) nested
+// inside an `and:`/`or:` block ARGUMENT correctly threads actor state.
+// `and:`/`or:` are self-hosted Boolean methods (Boolean.bt), not compiler
+// intrinsics, so without the fix the block argument compiles as a plain
+// Tier 1 closure and any mutation inside it is silently lost — the
+// enclosing method's returned state never reflects it, even though the
+// mutation demonstrably ran (it decides the block's own return value).
 
 TestCase subclass: ActorNestedSelfSendTest
   field: c = nil
@@ -102,4 +110,59 @@ TestCase subclass: ActorNestedSelfSendTest
 
   testSelfSendNestedInOnDoBodyThreadsMutation =>
     self assert: self.c recordViaOnDoBody equals: 2
+    self assert: self.c getCount equals: 1
+
+  testAndBlockRunsAndThreadsBothDispatchesWhenReceiverTrue =>
+    // BT-3402: `(self recordOnce: true) and: [self bumpCount > 0]` — the
+    // receiver's self-send always runs; since it returns true, `and:`
+    // also runs the block's self-send. Both mutations must be observed:
+    // count goes 0 -> 1 (recordOnce:) -> 2 (bumpCount).
+    result := self.c recordOnceAndBump: true
+    self assert: result equals: true
+    self assert: self.c getCount equals: 2
+
+  testAndBlockShortCircuitsAndSkipsNestedSelfSendWhenReceiverFalse =>
+    // `false and: [...]` must short-circuit WITHOUT evaluating the block —
+    // bumpCount must never run, so only recordOnce:'s mutation is seen.
+    result := self.c recordOnceAndBump: false
+    self assert: result equals: false
+    self assert: self.c getCount equals: 1
+
+  testOrBlockShortCircuitsAndSkipsNestedSelfSendWhenReceiverTrue =>
+    // `true or: [...]` must short-circuit WITHOUT evaluating the block —
+    // bumpCount must never run, so only recordOnce:'s mutation is seen.
+    result := self.c recordOnceOrBump: true
+    self assert: result equals: true
+    self assert: self.c getCount equals: 1
+
+  testOrBlockRunsAndThreadsBothDispatchesWhenReceiverFalse =>
+    // `(self recordOnce: false) or: [self bumpCount > 0]` — the receiver
+    // returns false, so `or:` runs the block's self-send too. Both
+    // mutations must be observed: count goes 0 -> 1 -> 2.
+    result := self.c recordOnceOrBump: false
+    self assert: result equals: true
+    self assert: self.c getCount equals: 2
+
+  testDirectFieldMutationInsideAndBlockThreadsWhenTaken =>
+    // BT-3402: `self.count := self.count + 100` directly inside the `and:`
+    // block body (no nested self-send) — must thread when the block runs.
+    result := self.c mutateDirectlyInAndBlock: true
+    self assert: result equals: true
+    self assert: self.c getCount equals: 101
+
+  testDirectFieldMutationInsideAndBlockSkippedWhenNotTaken =>
+    // Short-circuit: the block (and its field mutation) must not run.
+    result := self.c mutateDirectlyInAndBlock: false
+    self assert: result equals: false
+    self assert: self.c getCount equals: 1
+
+  testDirectFieldMutationInsideOrBlockThreadsWhenTaken =>
+    result := self.c mutateDirectlyInOrBlock: false
+    self assert: result equals: true
+    self assert: self.c getCount equals: 101
+
+  testDirectFieldMutationInsideOrBlockSkippedWhenNotTaken =>
+    // Short-circuit: the block (and its field mutation) must not run.
+    result := self.c mutateDirectlyInOrBlock: true
+    self assert: result equals: true
     self assert: self.c getCount equals: 1

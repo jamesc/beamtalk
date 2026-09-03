@@ -151,6 +151,64 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
     ) -> Result<(Document<'static>, Document<'static>)> {
+        // BT-3402/BT-3396 interaction: when `receiver` is ITSELF an `and:`/
+        // `or:` send that needs the inline mutation-threading path (the same
+        // gate `try_generate_boolean_protocol` uses — see
+        // `and_or_needs_mutation_threading`'s doc comment), compile it
+        // through `generate_and_with_mutations`/`generate_or_with_mutations`
+        // directly and unwrap its `{Result, NewState}` tuple here, instead of
+        // falling into the generic self-send-hoisting walk below. That walk
+        // treats `and:`/`or:` as opaque (`is_conditional_selector`,
+        // `hoist_plan_walk`'s `MessageSend` arm) precisely because compiling
+        // the receiver afterward as a plain expression is what is supposed to
+        // thread it — but a mutation-threaded `and:`/`or:` compiles to a
+        // *tuple*-valued document (`generate_and_with_mutations`'s own `{Result,
+        // NewState}` contract), not the plain boolean/nil value this
+        // function's callers require. Left unhandled, the receiver's own
+        // re-entrant compile (`expression_doc_with_open_scope` below, via
+        // `try_generate_boolean_protocol`) still produces that tuple with no
+        // unwrap, corrupting the enclosing conditional's state-version
+        // numbering (`unbound variable 'State1'` from `core_lint` — e.g.
+        // BT-3396's `((self recordOnce: x) and: [true]) ifTrue:ifFalse:`).
+        if let Expression::MessageSend {
+            receiver: and_or_receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = receiver.unwrap_parens()
+        {
+            if parts.len() == 1 && arguments.len() == 1 {
+                let kw = parts[0].keyword.as_str();
+                if kw == "and:" || kw == "or:" {
+                    if let Expression::Block(block) = &arguments[0] {
+                        if self.and_or_needs_mutation_threading(and_or_receiver, block) {
+                            let tuple_doc = if kw == "and:" {
+                                self.generate_and_with_mutations(and_or_receiver, block)?
+                            } else {
+                                self.generate_or_with_mutations(and_or_receiver, block)?
+                            };
+                            let tuple_var = self.fresh_temp_var("CondRecvTuple");
+                            let new_state = self.next_state_var();
+                            let preamble = docvec![
+                                "let ",
+                                leaf::var(tuple_var.clone()),
+                                " = ",
+                                tuple_doc,
+                                " in let ",
+                                leaf::var(new_state),
+                                " = call 'erlang':'element'(2, ",
+                                leaf::var(tuple_var.clone()),
+                                ") in ",
+                            ];
+                            let value_doc =
+                                docvec!["call 'erlang':'element'(1, ", leaf::var(tuple_var), ")",];
+                            return Ok((preamble, value_doc));
+                        }
+                    }
+                }
+            }
+        }
+
         let mut hoisted: Vec<Document<'static>> = Vec::new();
         self.hoist_nested_self_sends(receiver, &mut HoistSink::OpenDocs(&mut hoisted))?;
         let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
@@ -293,6 +351,46 @@ impl CoreErlangGenerator {
     /// The same plan pass the emitting walk runs, so it cannot drift from
     /// what that walk actually does.
     pub(in crate::core_erlang) fn contains_hoistable_self_send(&self, expr: &Expression) -> bool {
+        // BT-3402/BT-3396 interaction: `and:`/`or:` is `is_conditional_selector`
+        // (widened by BT-3402), so `hoist_plan_walk`'s `MessageSend` arm treats
+        // it as opaque — walking no further and never emitting a
+        // `HoistAction::Dispatch` for a bare self-send that is ITS OWN
+        // receiver (`(self recordOnce: x) and: [true]`). That opacity is
+        // correct for the *walk* (this exact shape is threaded by
+        // `compile_conditional_receiver`'s own and:/or: special case instead
+        // of a generic hoist), but this predicate is also the decision this
+        // conditional's ENCLOSING caller (`try_generate_boolean_protocol`'s
+        // `IfTrue`/`IfFalse`/`IfTrueIfFalse`, `control_flow_has_mutations`)
+        // uses to decide whether ITS receiver needs the inline
+        // mutation-threading path at all. Losing this signal here left the
+        // outer conditional wrongly classified as not needing threading —
+        // falling through to plain generic dispatch, where `and:`/`or:`'s own
+        // `try_generate_boolean_protocol` interception still unconditionally
+        // fires and compiles to a `{Result, NewState}` *tuple* value with no
+        // caller positioned to unwrap it, corrupting the state-version
+        // numbering (`unbound variable 'State1'`). So: explicitly recognize
+        // this exact shape here too — same gate
+        // (`and_or_needs_mutation_threading`) `compile_conditional_receiver`
+        // uses to actually execute it — before falling back to the ordinary
+        // walk-based probe for every other shape.
+        if let Expression::MessageSend {
+            receiver: and_or_receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr.unwrap_parens()
+        {
+            if parts.len() == 1 && arguments.len() == 1 {
+                let kw = parts[0].keyword.as_str();
+                if kw == "and:" || kw == "or:" {
+                    if let Expression::Block(block) = &arguments[0] {
+                        if self.and_or_needs_mutation_threading(and_or_receiver, block) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
         self.plan_self_send_hoists(std::slice::from_ref(expr))
             .iter()
             .any(|action| matches!(action, HoistAction::Dispatch(_)))
@@ -673,6 +771,109 @@ impl CoreErlangGenerator {
             " in case ",
             leaf::var(cond_var),
             " of <'true'> when 'true' -> {'nil', ",
+            leaf::var(base_state.clone()),
+            "} <'false'> when 'true' -> let StateAcc = ",
+            leaf::var(base_state),
+            " in ",
+            branch_doc,
+            no_match_fallback,
+            " end",
+        ])
+    }
+
+    /// BT-3402: generates inline code for `flag and: [block]` in actor
+    /// context when the block contains field mutations (or the receiver is
+    /// itself a hoistable actor self-send — see `compile_conditional_receiver`).
+    ///
+    /// Structurally identical to [`Self::generate_if_true_with_mutations`] —
+    /// `and:` short-circuits to the *literal* `false` on the non-taken path
+    /// rather than `ifTrue:`'s `nil`, matching `Boolean.bt`'s own
+    /// self-hosted definition (`and: aBlock => self ifTrue: aBlock ifFalse:
+    /// [false]`), so the inlined fast path stays behaviorally identical to
+    /// the generic-dispatch path it replaces.
+    ///
+    /// Returns `{Result, NewState}`:
+    /// - True branch: `{block_result, mutated_state}`
+    /// - False branch: `{'false', unchanged_state}`
+    pub(in crate::core_erlang) fn generate_and_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+    ) -> Result<Document<'static>> {
+        let (cond_preamble, cond_val_doc) = self.compile_conditional_receiver(receiver)?;
+        let cond_var = self.fresh_temp_var("Cond");
+        let outer_state = self.current_state_var();
+        // BT-2355: seed threaded outer-locals so the non-taken (false) branch and
+        // the post-conditional extraction always see the `__local__` keys.
+        let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
+
+        let (branch_doc, _branch_final) =
+            self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+        // BT-3161: explicit wildcard so this boolean `case` is statically
+        // exhaustive — see `case_clause_fallback`'s doc comment.
+        let no_match_fallback = self.case_clause_fallback("CondNoMatch");
+
+        Ok(docvec![
+            cond_preamble,
+            seed_doc,
+            "let ",
+            leaf::var(cond_var.clone()),
+            " = ",
+            cond_val_doc,
+            " in case ",
+            leaf::var(cond_var),
+            " of <'true'> when 'true' -> let StateAcc = ",
+            leaf::var(base_state.clone()),
+            " in ",
+            branch_doc,
+            " <'false'> when 'true' -> {'false', ",
+            leaf::var(base_state),
+            "}",
+            no_match_fallback,
+            " end",
+        ])
+    }
+
+    /// BT-3402: generates inline code for `flag or: [block]` in actor
+    /// context when the block contains field mutations (or the receiver is
+    /// itself a hoistable actor self-send).
+    ///
+    /// The mirror image of [`Self::generate_and_with_mutations`] — see its
+    /// doc comment. `or:`'s non-taken (true) path short-circuits to the
+    /// literal `true`, matching `Boolean.bt`'s `or: aBlock => self ifTrue:
+    /// [true] ifFalse: aBlock`.
+    ///
+    /// Returns `{Result, NewState}`:
+    /// - True branch: `{'true', unchanged_state}`
+    /// - False branch: `{block_result, mutated_state}`
+    pub(in crate::core_erlang) fn generate_or_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+    ) -> Result<Document<'static>> {
+        let (cond_preamble, cond_val_doc) = self.compile_conditional_receiver(receiver)?;
+        let cond_var = self.fresh_temp_var("Cond");
+        let outer_state = self.current_state_var();
+        // BT-2355: seed threaded outer-locals so the non-taken (true) branch and
+        // the post-conditional extraction always see the `__local__` keys.
+        let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
+
+        let (branch_doc, _branch_final) =
+            self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+        // BT-3161: explicit wildcard so this boolean `case` is statically
+        // exhaustive — see `case_clause_fallback`'s doc comment.
+        let no_match_fallback = self.case_clause_fallback("CondNoMatch");
+
+        Ok(docvec![
+            cond_preamble,
+            seed_doc,
+            "let ",
+            leaf::var(cond_var.clone()),
+            " = ",
+            cond_val_doc,
+            " in case ",
+            leaf::var(cond_var),
+            " of <'true'> when 'true' -> {'true', ",
             leaf::var(base_state.clone()),
             "} <'false'> when 'true' -> let StateAcc = ",
             leaf::var(base_state),

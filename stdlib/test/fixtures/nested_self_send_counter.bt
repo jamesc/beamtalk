@@ -6,10 +6,16 @@
 // operand inside a conditional block body) left out: `and:`/`or:`
 // receivers, arguments to arbitrary message sends, and assignment-RHS
 // sub-expressions. Each such self-send used to compile through the
-// ordinary discarding self-dispatch path, so the callee's own state
-// mutation was silently dropped even though the callee demonstrably ran.
-// Every method below returns something that proves the self-send ran AND
-// leaves a mutation (`count`/`log`) the test asserts on afterward.
+// ordinary discarding self-dispatch codegen: the callee ran (its return
+// value is observable) but its mutation to `count`/`log` vanished.
+//
+// BT-3402: extends the same fixture with self-sends (and direct field
+// mutations) nested inside `and:`/`or:` BLOCK ARGUMENTS specifically.
+// `and:`/`or:` are ordinary self-hosted Boolean methods (Boolean.bt: `and:
+// aBlock => self ifTrue: aBlock ifFalse: [false]`), not compiler
+// intrinsics, so before this fix the block argument compiled as a plain
+// Tier 1 closure: a self-send (or `self.slot :=`) inside it ran, but its
+// state mutation never made it back to the enclosing actor method.
 
 Actor subclass: NestedSelfSendCounter
   state: count = 0
@@ -86,6 +92,30 @@ Actor subclass: NestedSelfSendCounter
 
   // Nested as a non-statement sub-expression of an on:do:-protected body.
   recordViaOnDoBody => [1 + (self bumpCount)] on: Error do: [:e | 0]
+
+  // BT-3402: self-send as the RECEIVER of `and:` (`recordOnce:`, always
+  // evaluated) plus a self-send NESTED INSIDE the block argument
+  // (`bumpCount`, evaluated only when `and:`'s receiver is true).
+  recordOnceAndBump: flag => (self recordOnce: flag) and: [self bumpCount > 0]
+
+  // Same shape for `or:` — the block runs only when the receiver is false.
+  recordOnceOrBump: flag => (self recordOnce: flag) or: [self bumpCount > 0]
+
+  // BT-3402: a direct field mutation (`self.count :=`) inside the `and:`
+  // block body itself, not via a nested self-send.
+  mutateDirectlyInAndBlock: flag =>
+    (self recordOnce: flag)
+      and: [
+        self.count := self.count + 100
+        true
+      ]
+
+  mutateDirectlyInOrBlock: flag =>
+    (self recordOnce: flag)
+      or: [
+        self.count := self.count + 100
+        true
+      ]
 
   internal recordOnce: flag =>
     self.count := self.count + 1
