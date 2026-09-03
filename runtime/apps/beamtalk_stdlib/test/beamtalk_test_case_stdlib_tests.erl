@@ -480,20 +480,25 @@ run_single_structured_fail_test() ->
 %%% run, the same way a hand-written stub (which needs none of that
 %%% machinery) never had to.
 %%%
-%%% The canary passed to boot_real_stdlib/1 is 'TestCase' itself, NOT
-%%% 'BifFallbackTestCase': the fixture is loaded ad hoc via
-%%% resolve_module/1's own code:ensure_loaded/1 (mirroring how a real BIF
-%%% fallback caller would reach an arbitrary compiled test class), not
-%%% through beamtalk_stdlib:init/0's activation walk — so it never gets a
-%%% live class gen_server process of its own and
-%%% beamtalk_class_registry:whereis_class/1 would never resolve it.
-%%% Waiting on 'TestCase' instead confirms the real ancestor chain
-%%% (TestCase -> Value -> Object -> ProtoObject) that assert:equals: needs
-%%% is loaded and registered before dispatching into the fixture.
+%%% The canary passed to boot_real_stdlib/1 is 'TestCase' itself; once that
+%%% returns, the full ancestor chain (TestCase -> Value -> Object ->
+%%% ProtoObject) that assert:equals: needs is registered.  After the canary
+%%% wait, setup explicitly loads bt@bif_fallback_test_case so its on_load
+%%% (register_class/0) runs while the runtime is fully initialised — if
+%%% loading were deferred to resolve_module/1's first code:ensure_loaded
+%%% call inside run_all, CI startup timing can leave beamtalk_protocol_registry
+%%% in a transient state that causes register_class to return {error,...},
+%%% which makes on_load fail and every subsequent dispatch raise undef.
 %%% ============================================================================
 
 bif_fallback_setup() ->
-    beamtalk_test_boot:boot_real_stdlib('TestCase').
+    _ = beamtalk_test_boot:boot_real_stdlib('TestCase'),
+    %% Force module load now, while the runtime is fully initialised and
+    %% TestCase is registered (so register_class/0's superclass lookup
+    %% succeeds). Without this, code:ensure_loaded runs lazily inside
+    %% resolve_module/1 and races with CI runtime initialisation.
+    {module, 'bt@bif_fallback_test_case'} = code:ensure_loaded('bt@bif_fallback_test_case'),
+    ok.
 
 bif_fallback_bif_path_test_() ->
     {setup, fun bif_fallback_setup/0, fun(_) -> ok end, [
@@ -503,12 +508,19 @@ bif_fallback_bif_path_test_() ->
             %% safe_module_exports/1. Pre-fix, this raised an uncaught `undef`.
             Result = beamtalk_test_case:run_all('BifFallbackTestCase'),
             ?assert(is_binary(Result)),
-            ?assertNotEqual(nomatch, binary:match(Result, <<"2 tests, 1 passed, 1 failed">>))
+            %% Use ?assertEqual on mismatch so EUnit shows the full binary on failure.
+            case binary:match(Result, <<"2 tests, 1 passed, 1 failed">>) of
+                nomatch -> ?assertEqual(<<"2 tests, 1 passed, 1 failed">>, Result);
+                _ -> ok
+            end
         end},
         {"run_single/2 passes a genuinely passing test", fun() ->
             Result = beamtalk_test_case:run_single('BifFallbackTestCase', testPasses),
             ?assert(is_binary(Result)),
-            ?assertNotEqual(nomatch, binary:match(Result, <<"1 tests, 1 passed">>))
+            case binary:match(Result, <<"1 tests, 1 passed">>) of
+                nomatch -> ?assertEqual(<<"1 tests, 1 passed">>, Result);
+                _ -> ok
+            end
         end},
         {"run_single/2 fails a genuinely failing test", fun() ->
             Result = beamtalk_test_case:run_single('BifFallbackTestCase', testFails),
