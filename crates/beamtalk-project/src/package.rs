@@ -61,6 +61,32 @@ pub fn find_package_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Returns `true` if `file` lives under `root`'s `stubs/` directory (ADR
+/// 0075, BT-1846/BT-1847) — `declare native:` is only legal there, see
+/// `beamtalk_core::semantic_analysis::validators::check_native_declaration_location`'s
+/// doc.
+///
+/// Both `root` and `file` are canonicalized before the containment check
+/// (mirroring [`resolve_extraction_files`]'s own `try_canonicalize` use for
+/// its `target_set`), so a caller may pass either a relative or an
+/// already-canonical path for `file` and still get a correct answer — in
+/// particular `root` need not have been canonicalized by the caller first,
+/// even though [`find_package_root`] already returns a canonical path.
+///
+/// BT-3398: shared by the MCP server's `run_module_analysis` (which derives
+/// `root` from [`find_package_root`] once per call, since it has no
+/// long-lived workspace-root registry) so it doesn't reimplement this
+/// root-containment check independently of
+/// `beamtalk_language_service::ProjectIndex::is_stub_file` (the LSP's
+/// equivalent, built instead on a registry of workspace roots pushed in by
+/// `beamtalk-lsp` — a genuinely different derivation strategy, not a literal
+/// duplicate of this one, since the MCP server has no persistent workspace
+/// state to register roots into).
+#[must_use]
+pub fn is_under_stubs_dir(root: &Path, file: &Path) -> bool {
+    try_canonicalize(file).starts_with(try_canonicalize(root).join("stubs"))
+}
+
 /// Collect all `.bt` files from a package's conventional source directories
 /// (`src/` and `test/`) for cross-file class resolution.
 ///
@@ -203,6 +229,50 @@ mod tests {
         let found = find_package_root(&file);
         let expected = fs::canonicalize(dir).unwrap();
         assert_eq!(found.as_deref(), Some(expected.as_path()));
+    }
+
+    /// BT-3398: mirrors
+    /// `beamtalk_language_service::project_index::tests::is_stub_file_true_for_file_under_a_root_stubs_dir`
+    /// — the MCP server's single-root derivation should agree with the LSP's
+    /// multi-root registry check on the same fixture shape.
+    #[test]
+    fn is_under_stubs_dir_true_for_file_under_root_stubs_dir() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let stubs_dir = root.join("stubs");
+        fs::create_dir_all(&stubs_dir).unwrap();
+        let stub_file = stubs_dir.join("lists.bt");
+        fs::write(&stub_file, "declare native: lists\n").unwrap();
+
+        assert!(is_under_stubs_dir(root, &stub_file));
+    }
+
+    #[test]
+    fn is_under_stubs_dir_false_for_file_under_src() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let src_dir = root.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let src_file = src_dir.join("foo.bt");
+        fs::write(&src_file, "Object subclass: Foo\n").unwrap();
+
+        assert!(!is_under_stubs_dir(root, &src_file));
+    }
+
+    /// A file that merely has "stubs" somewhere in its path, but outside the
+    /// given root's own `stubs/` directory, must not be misidentified —
+    /// mirrors `is_stub_file_false_for_unrooted_file`'s same guard against a
+    /// path-substring false positive.
+    #[test]
+    fn is_under_stubs_dir_false_for_unrelated_root() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("a");
+        fs::create_dir_all(&root).unwrap();
+        let other_stubs_file = tmp.path().join("elsewhere").join("stubs").join("lists.bt");
+        fs::create_dir_all(other_stubs_file.parent().unwrap()).unwrap();
+        fs::write(&other_stubs_file, "declare native: lists\n").unwrap();
+
+        assert!(!is_under_stubs_dir(&root, &other_stubs_file));
     }
 
     #[test]
