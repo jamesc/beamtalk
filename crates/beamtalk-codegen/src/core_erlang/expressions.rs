@@ -2556,6 +2556,20 @@ impl CoreErlangGenerator {
     ///
     /// BT-884: This is a helper to avoid duplicating the hoisting logic across the
     /// `MessageSend` and fallback branches of `generate_cascade`.
+    ///
+    /// BT-3406: a non-field-assignment argument that is itself a same-class
+    /// class-method call emits an *open* let-chain ending in `... in ` with
+    /// no trailing value expression (`ClassVarsN` must stay visible to
+    /// subsequent cascade messages — see `emit_class_var_result_unwrap`'s
+    /// doc comment), relying on the caller to append the result variable and
+    /// keep the chain's bindings in scope. Each argument doc here used to be
+    /// placed directly into a `send(...)` argument list with no such append,
+    /// so an open-scope arg left dangling produced malformed Core Erlang (a
+    /// `let ... in` immediately followed by the list's closing `]`). Like
+    /// the field-assignment branch just above, an open-scope arg's preamble
+    /// is hoisted to the outer `docs` (so its bindings — e.g. a rebound
+    /// `ClassVarsN` — remain visible to later cascade messages), leaving
+    /// just a reference to its result value as the argument itself.
     pub(super) fn generate_cascade_args(
         &mut self,
         arguments: &[Expression],
@@ -2569,7 +2583,18 @@ impl CoreErlangGenerator {
                 docs.push(doc);
                 arg_docs.push(leaf::var(val_var));
             } else {
-                arg_docs.push(self.expression_doc(arg)?);
+                let (doc, open_scope) = self.expression_doc_with_open_scope(arg)?;
+                match open_scope {
+                    Some(OpenScopeResult::Value(result_var)) => {
+                        docs.push(doc);
+                        arg_docs.push(leaf::var(result_var));
+                    }
+                    Some(OpenScopeResult::NoValue) => {
+                        docs.push(doc);
+                        arg_docs.push(Document::Str("'nil'"));
+                    }
+                    None => arg_docs.push(doc),
+                }
             }
         }
         Ok(arg_docs)

@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3406: Worker actor for the cascade + nested-keyword-message-argument
+// codegen crash — see stdlib/test/fixtures/cascade_nested_keyword_arg.bt for
+// the cascade itself and full context.
+
+Actor subclass: CascadeNestedKeywordArgWorker
+  state: items :: List = #()
+
+  add: label :: String value: _n :: Integer -> Nil =>
+    self.items := self.items add: label
+    nil
+
+  sub: label :: String value: _n :: Integer -> Nil =>
+    self.items := self.items add: label
+    nil
+
+  items -> List => self.items

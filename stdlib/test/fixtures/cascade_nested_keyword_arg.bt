@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3406: a cascade where a cascaded keyword message takes a parenthesized
+// nested keyword-message send as an argument (`(Receiver kw: arg)`) used to
+// crash Core Erlang codegen with a `core_parse_error` — the same-class
+// class-method call argument (`CascadeNestedKeywordArg noop:`) opens a
+// `ClassVarsN`-threading let-chain (`emit_class_var_result_unwrap`) that
+// `generate_cascade_args` placed directly into the cascaded `send(...)`
+// call's argument list with no trailing value expression to close it,
+// producing a dangling `let ... in` immediately followed by the list's `]`.
+//
+// The worker actor lives in its own file,
+// cascade_nested_keyword_arg_worker.bt, since a .bt file may only declare
+// one class.
+
+Object subclass: CascadeNestedKeywordArg
+
+  class run -> CascadeNestedKeywordArgWorker =>
+    w := CascadeNestedKeywordArgWorker spawn
+    w add: "one" value: (CascadeNestedKeywordArg noop: 1); sub: "two" value: (CascadeNestedKeywordArg noop: 2)
+    w
+
+  class noop: n :: Integer -> Integer => n
