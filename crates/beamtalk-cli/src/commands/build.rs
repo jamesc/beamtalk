@@ -1357,22 +1357,18 @@ fn warn_on_package_stub_collisions(
                         second_owner = %dep_name,
                         "Package-bundled stub collision between sibling dependencies"
                     );
+                    let diagnostic =
+                        beamtalk_core::source_analysis::Diagnostic::warning(message, span);
                     match format {
-                        OutputFormat::Text => eprintln!("warning: {message}"),
+                        OutputFormat::Text => eprintln!("warning: {}", diagnostic.message),
                         OutputFormat::Json => {
                             println!(
                                 "{}",
-                                serde_json::json!({
-                                    "file": dep_name,
-                                    "severity": "warning",
-                                    "message": message,
-                                })
+                                crate::diagnostic::diagnostic_to_json(dep_name, &diagnostic)
                             );
                         }
                     }
-                    collisions.push(beamtalk_core::source_analysis::Diagnostic::warning(
-                        message, span,
-                    ));
+                    collisions.push(diagnostic);
                 }
                 _ => {}
             }
