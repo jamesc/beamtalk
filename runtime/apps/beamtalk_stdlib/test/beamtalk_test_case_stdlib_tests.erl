@@ -644,3 +644,105 @@ setup_raises_generic_error_test() ->
     ?assertMatch({fail, testPass, Msg} when is_binary(Msg), Result),
     {fail, _, Msg} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"setUp failed">>)).
+
+%%% ============================================================================
+%%% run_test_method/5 setUp outer catch — raw beamtalk_error and undef paths
+%%% (lines 854-863 of beamtalk_test_case.erl)
+%%%
+%%% Lines 854-856: setUp raises a raw #beamtalk_error{} record (not wrapped).
+%%% Lines 857-863: setUp triggers error:undef (undefined function call).
+%%% ============================================================================
+
+%% Lines 854-856: error:#beamtalk_error{} from setUp → {fail, MethodName, "setUp failed: ..."}
+setup_raises_beamtalk_error_test() ->
+    FlatMethods = #{setUp => {'FakeTest', {}}, testPass => {'FakeTest', {}}},
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_setup_beamtalk_error_helper, testPass, FlatMethods, nil
+    ),
+    ?assertMatch({fail, testPass, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"setUp failed">>)).
+
+%% Lines 857-863: error:undef from setUp → ensure_wrapped → {fail, MethodName, "setUp failed: ..."}
+setup_raises_undef_test() ->
+    FlatMethods = #{setUp => {'FakeTest', {}}, testPass => {'FakeTest', {}}},
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_setup_undef_helper, testPass, FlatMethods, nil
+    ),
+    ?assertMatch({fail, testPass, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"setUp failed">>)).
+
+%%% ============================================================================
+%%% skipTest/1 — atom and non-binary/non-atom paths (lines 1143-1146)
+%%%
+%%% skipTest/1 is the FFI shim for the Beamtalk `skip:` message; the binary
+%%% clause (line 1140) is the normal path. The atom (line 1143) and catch-all
+%%% (line 1145) clauses coerce other types to binary before raising.
+%%% ============================================================================
+
+%% Line 1143-1144: skipTest(Reason) when is_atom(Reason) → atom_to_binary → raise bunit_skip
+skip_test_ffi_with_atom_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = bunit_skip, message = <<"unix_only">>}},
+        beamtalk_test_case:skipTest(unix_only)
+    ).
+
+%% Line 1145-1146: skipTest(Reason) catch-all → print_string → raise bunit_skip
+skip_test_ffi_with_integer_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = bunit_skip, message = _}},
+        beamtalk_test_case:skipTest(42)
+    ).
+
+%%% ============================================================================
+%%% suiteFixture/1 — non-map clause (lines 1155-1156)
+%%%
+%%% suiteFixture/1 returns nil when Self is not a map. The map clause returns
+%%% maps:get(suiteFixture, Self, nil); the non-map clause always returns nil.
+%%% ============================================================================
+
+%% Line 1155-1156: suiteFixture(_Self) when not a map → nil
+suite_fixture_non_map_test() ->
+    ?assertEqual(nil, beamtalk_test_case:suiteFixture(not_a_map)).
+
+suite_fixture_atom_test() ->
+    ?assertEqual(nil, beamtalk_test_case:suiteFixture(some_atom)).
+
+suite_fixture_integer_test() ->
+    ?assertEqual(nil, beamtalk_test_case:suiteFixture(42)).
+
+%%% ============================================================================
+%%% runAll/1, runClass/2 FFI wrappers and ffi_extract_class_name/1 error path
+%%% (lines 1130, 1133, 1162-1173)
+%%%
+%%% runAll/1 and runClass/2 take a Beamtalk class reference tuple whose
+%%% element 2 is 'ClassName class'. ffi_extract_class_name/1 strips " class"
+%%% (6 chars) and calls list_to_existing_atom/1. An unknown class name causes
+%%% list_to_existing_atom/1 to raise badarg, which is caught and re-raised as
+%%% a does_not_understand beamtalk_error.
+%%% ============================================================================
+
+%% Line 1130: runAll(ClassRef) → ffi_extract_class_name → 'TcStub' → run_all/1
+run_all_ffi_wrapper_test() ->
+    %% 'TcStub class': strip " class" → "TcStub" → list_to_existing_atom → 'TcStub'
+    %% resolve_module('TcStub') → bt@tc_stub (loaded test helper)
+    ClassRef = {class_object, 'TcStub class'},
+    Result = beamtalk_test_case:runAll(ClassRef),
+    ?assert(is_binary(Result)).
+
+%% Line 1133: runClass(ClassRef, TestName) → ffi_extract_class_name → run_single/2
+run_class_ffi_wrapper_test() ->
+    ClassRef = {class_object, 'TcStub class'},
+    Result = beamtalk_test_case:runClass(ClassRef, testStubPass),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"passed">>)).
+
+%% Lines 1163-1173: ffi_extract_class_name/1 — list_to_existing_atom fails → DNU error
+run_all_ffi_unknown_class_test() ->
+    %% This atom is never registered in any loaded module — badarg → does_not_understand
+    ClassRef = {class_object, 'BeamtalkNightlyCoverageXyzUniq99999 class'},
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
+        beamtalk_test_case:runAll(ClassRef)
+    ).
