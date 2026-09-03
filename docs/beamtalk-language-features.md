@@ -1163,6 +1163,43 @@ A non-literal index (`pair at: i`) or an out-of-range literal falls back to
 `Dynamic` — no false-positive warning. An untyped `tuple()` spec (unknown
 arity) stays bare `Tuple`, so `at:` on it remains `Dynamic` as before.
 
+### FFI Type Stub Files (ADR 0075 Phase 2)
+
+When the auto-extracted Erlang `-spec` types are missing or imprecise for a module, you can provide hand-written type stubs in a project's `stubs/` directory. Each `.bt` file there uses `declare native:` to declare type signatures for Erlang module functions:
+
+```beamtalk
+/// Type declarations for Erlang module `lists`.
+declare native: lists
+  reverse: list :: List(T) -> List(T)
+  seq: from :: Integer to: to :: Integer -> List(Integer)
+  member: elem :: T in: list :: List(T) -> Boolean
+```
+
+Stub signatures use the same syntax as Protocol method signatures — parameter names with optional `:: Type` annotations and an optional `-> ReturnType` — but never have a `=>` body. Unary functions use a bare name:
+
+```beamtalk
+declare native: erlang
+  node -> Symbol
+  self -> Pid
+```
+
+`declare` is a contextual keyword — it remains a legal identifier everywhere else.
+
+**Build integration:** `beamtalk build` and `beamtalk lint` automatically scan the project's `stubs/` directory (no `beamtalk.toml` config needed). Stub declarations merge into the FFI type registry at **function/arity granularity**: a stub for `lists:reverse/1` overrides only that entry; `lists:nth/2`, not declared in the stub, still uses the auto-extracted type from the `.beam` file.
+
+**Version-drift detection:** A stub function/arity that doesn't exist in the corresponding `.beam` module's real exports produces a warning anchored to the stub file, so stubs stay in sync with the Erlang modules they describe.
+
+**Restrictions:**
+- `declare native:` is only valid in `stubs/` — using it in `src/` is a hard compile error.
+- Project-local `stubs/` only (resolution chain layer 1). Package-bundled and compiler-distribution stubs are a planned follow-up.
+
+**Generating stubs:** Use `beamtalk generate stubs` to bootstrap stub files from `.beam` abstract code:
+
+```bash
+beamtalk generate stubs lists maps string
+# Output: stubs/lists.bt, stubs/maps.bt, stubs/string.bt
+```
+
 ### Loading Code into the Workspace
 
 Beamtalk source files are loaded into the live workspace via `:load` or the `Workspace` singleton. Loaded classes are immediately available — existing actors pick up new code on next dispatch.
