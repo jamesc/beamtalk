@@ -1712,6 +1712,16 @@ impl CoreErlangGenerator {
             " in "
         ]];
 
+        // BT-3412: snapshot the class-var version so we can tell, once the
+        // last message's own arguments have been generated, whether *any*
+        // message's arguments hoisted a `ClassVarsN` rebind (`class_var_version`
+        // is never rolled back after a hoist — see `split_subexpr_for_preamble`).
+        // If so, the whole cascade must stay an *open* let-chain (like an
+        // ordinary class-method self-send) rather than a self-contained
+        // Document, so the rebind stays visible to the caller instead of being
+        // scoped only to this cascade's own value-defining subexpression.
+        let class_var_version_before_cascade = self.class_var_version();
+
         let total_messages = all_messages.len();
         for (index, (selector, arguments)) in all_messages.into_iter().enumerate() {
             let is_last = index == total_messages - 1;
@@ -1762,10 +1772,24 @@ impl CoreErlangGenerator {
                 _ => self.generate_cascade_args(arguments, &mut docs)?,
             };
 
-            if !is_last {
-                // For all but the last message, discard the result
-                docs.push(Document::Str("let _ = "));
-            }
+            // BT-3412: once the last message's own (possibly hoisting) args
+            // are generated, `class_var_version` reflects every rebind the
+            // whole cascade produced. If it advanced, this last send must
+            // stay open too (`let _CascadeResult = ... in `) instead of being
+            // left as the cascade's bare tail value, so the rebind escapes
+            // into the caller's own let-chain via `last_open_scope_result`.
+            let last_rebind_result_var =
+                if is_last && self.class_var_version() != class_var_version_before_cascade {
+                    let result_var = self.fresh_temp_var("CascadeResult");
+                    docs.push(docvec!["let ", leaf::var(result_var.clone()), " = "]);
+                    Some(result_var)
+                } else {
+                    if !is_last {
+                        // For all but the last message, discard the result
+                        docs.push(Document::Str("let _ = "));
+                    }
+                    None
+                };
 
             docs.push(docvec![
                 "call 'beamtalk_message_dispatch':'send'(",
@@ -1783,8 +1807,12 @@ impl CoreErlangGenerator {
 
             docs.push(Document::Str("])"));
 
-            if !is_last {
+            if !is_last || last_rebind_result_var.is_some() {
                 docs.push(Document::Str(" in "));
+            }
+
+            if let Some(result_var) = last_rebind_result_var {
+                self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
             }
         }
 
