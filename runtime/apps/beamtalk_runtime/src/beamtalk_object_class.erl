@@ -598,6 +598,7 @@ init({ClassName, ClassInfo}) ->
     beamtalk_class_registry:ensure_pid_table(),
     beamtalk_class_registry:ensure_loaded_classes_table(),
     beamtalk_class_registry:ensure_backing_module_index_table(),
+    beamtalk_class_registry:ensure_class_state_table(),
     ok = pg:join(beamtalk_classes, self()),
 
     Superclass = maps:get(superclass, ClassInfo, none),
@@ -747,6 +748,12 @@ init({ClassName, ClassInfo}) ->
         class_method_docs = maps:get(class_method_docs, ClassInfo, #{}),
         is_internal = IsInternal
     },
+
+    %% BT-3407: seed the live classVars snapshot with the declared defaults
+    %% before this init/1 returns, so a `static_init`/`dynamic_init`/direct
+    %% class-method-call reader never observes a gap between the class
+    %% process existing and its snapshot existing.
+    beamtalk_class_registry:record_class_state_snapshot(self(), State#class_state.class_state),
 
     %% ADR 0087 Phase 2 (BT-2298): Forward the per-method cross-reference index
     %% to beamtalk_xref synchronously, before init returns. Running inside init/1
@@ -932,6 +939,8 @@ handle_call(
                 )
             of
                 {reply, Result, NewClassVars} ->
+                    %% BT-3407: keep the live snapshot in sync with this mutation.
+                    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
                     {reply, Result, State#class_state{class_state = NewClassVars}};
                 {error, not_found} ->
                     Err = beamtalk_error:new(does_not_understand, ClassName, 'new:'),
@@ -1297,7 +1306,10 @@ handle_call(get_module, _From, #class_state{module = Module} = State) ->
 handle_call({get_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
     {reply, maps:get(Name, ClassVars, nil), State};
 handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
-    {reply, Value, State#class_state{class_state = ClassVars#{Name => Value}}}.
+    NewClassVars = ClassVars#{Name => Value},
+    %% BT-3407: keep the live snapshot in sync with this mutation.
+    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
+    {reply, Value, State#class_state{class_state = NewClassVars}}.
 
 %% ADR 0032 Phase 1: Passes instance_methods (local only) instead of flattened table.
 handle_cast(
@@ -1410,6 +1422,8 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
         )
     of
         {reply, Result, NewClassVars} ->
+            %% BT-3407: keep the live snapshot in sync with this mutation.
+            beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
             {reply, Result, State#class_state{class_state = NewClassVars}};
         test_spawn ->
             beamtalk_test_case:spawn_test_execution(

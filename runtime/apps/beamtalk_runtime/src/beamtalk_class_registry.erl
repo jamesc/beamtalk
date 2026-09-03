@@ -74,7 +74,10 @@ Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
     ensure_backing_module_index_table/0,
     record_backing_module_entry/3,
     forget_backing_module_entries/2,
-    classes_backing_module/1
+    classes_backing_module/1,
+    ensure_class_state_table/0,
+    record_class_state_snapshot/2,
+    class_state_snapshot/1
 ]).
 
 -export_type([
@@ -802,6 +805,85 @@ class_name_for_pid(Pid) ->
             case ets:lookup(beamtalk_class_pids, Pid) of
                 [{_, ClassName}] -> {ok, ClassName};
                 [] -> not_found
+            end
+    end.
+
+%%====================================================================
+%% Class-State (classState:) Live Snapshot (BT-3407)
+%%====================================================================
+
+-doc """
+Ensure the classVars live-snapshot table exists (idempotent).
+
+BT-3407: `beamtalk_supervisor:static_init/2`, `dynamic_init/2`, and the
+`class_initialize:`/`withClassMethod:` direct-call helpers all invoke a
+class method *without* going through the class gen_server — calling
+`gen_server:call` back into it from inside a supervisor's `init/1` (or from
+the supervisor process itself) would deadlock, since that class gen_server
+is the one blocked waiting for `supervisor:start_link` to return. Those
+call sites previously used a hardcoded empty `ClassVars = #{}`, silently
+discarding any `classState:` value set via an ordinary class-method call
+before `supervise` — this table lets them read the current, live snapshot
+instead, without messaging the (possibly blocked) class process.
+Read-concurrency + `{heir, ...}` mirrors `ensure_pid_table/0`.
+""".
+-spec ensure_class_state_table() -> ok.
+ensure_class_state_table() ->
+    case ets:info(beamtalk_class_state_snapshot) of
+        undefined ->
+            try
+                ets:new(
+                    beamtalk_class_state_snapshot,
+                    [
+                        set,
+                        public,
+                        named_table,
+                        {read_concurrency, true}
+                        | heir_option()
+                    ]
+                ),
+                ok
+            catch
+                error:badarg -> ok
+            end;
+        _ ->
+            maybe_set_heir(beamtalk_class_state_snapshot),
+            ok
+    end.
+
+-doc """
+Record the current `classState:` map for a class process (BT-3407).
+
+Called from `beamtalk_object_class:init/1` (the initial, default-seeded
+map) and every `handle_call` clause that rebinds `State#class_state.class_state`
+to a new map, so the snapshot never lags more than one `handle_call` behind
+the class gen_server's own authoritative state.
+""".
+-spec record_class_state_snapshot(pid(), map()) -> ok.
+record_class_state_snapshot(Pid, ClassVars) ->
+    ensure_class_state_table(),
+    ets:insert(beamtalk_class_state_snapshot, {Pid, ClassVars}),
+    ok.
+
+-doc """
+Look up the current `classState:` map for a class process (BT-3407).
+
+Returns `#{}` if the table doesn't exist yet or the class process has no
+snapshot recorded (e.g. a class with no `classState:` declarations at all).
+Never messages `Pid` — safe to call from inside another process's `init/1`
+even when `Pid` itself is blocked waiting on that very call to return.
+""".
+-spec class_state_snapshot(pid() | undefined) -> map().
+class_state_snapshot(undefined) ->
+    #{};
+class_state_snapshot(Pid) ->
+    case ets:info(beamtalk_class_state_snapshot) of
+        undefined ->
+            #{};
+        _ ->
+            case ets:lookup(beamtalk_class_state_snapshot, Pid) of
+                [{_, ClassVars}] -> ClassVars;
+                [] -> #{}
             end
     end.
 
