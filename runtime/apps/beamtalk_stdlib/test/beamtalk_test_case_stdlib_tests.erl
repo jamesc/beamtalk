@@ -684,7 +684,10 @@ setup_raises_undef_test() ->
 %% Line 1143-1144: skipTest(Reason) when is_atom(Reason) → atom_to_binary → raise bunit_skip
 skip_test_ffi_with_atom_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = bunit_skip, message = <<"unix_only">>}},
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = bunit_skip, message = <<"unix_only">>}
+        },
         beamtalk_test_case:skipTest(unix_only)
     ).
 
