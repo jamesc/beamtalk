@@ -77,7 +77,8 @@ Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
     classes_backing_module/1,
     ensure_class_state_table/0,
     record_class_state_snapshot/2,
-    class_state_snapshot/1
+    class_state_snapshot/1,
+    forget_class_state_snapshot/1
 ]).
 
 -export_type([
@@ -885,6 +886,33 @@ class_state_snapshot(Pid) ->
                 [{_, ClassVars}] -> ClassVars;
                 [] -> #{}
             end
+    end.
+
+-doc """
+Remove a class process's row from the classVars live-snapshot table
+(BT-3407 review follow-up).
+
+Called from `beamtalk_object_class:terminate/1` alongside
+`forget_loaded_class/2` and `forget_backing_module_entries/2` — this table
+is Pid-keyed like those two (not name-keyed like `beamtalk_class_pids`,
+which deliberately keeps its rows forever for crash-recovery lookup by dead
+pid), so a row for a dead or hot-reloaded class process can never be read
+again: nothing looks it up by class name, only by the live pid a caller
+already resolved via `whereis_class/1`. Without this cleanup, rows
+accumulate for the life of the node — unbounded growth across a long
+hot-reload session, which is a core REPL/dev workflow. On a hard crash
+`terminate/1` does not run, so a dead row can linger there too; harmless,
+since `class_state_snapshot/1` is only ever called with a pid a caller just
+resolved as live.
+""".
+-spec forget_class_state_snapshot(pid()) -> ok.
+forget_class_state_snapshot(Pid) when is_pid(Pid) ->
+    case ets:info(beamtalk_class_state_snapshot) of
+        undefined ->
+            ok;
+        _ ->
+            ets:delete(beamtalk_class_state_snapshot, Pid),
+            ok
     end.
 
 %%====================================================================

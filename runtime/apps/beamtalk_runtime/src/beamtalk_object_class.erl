@@ -1378,6 +1378,18 @@ terminate(_Reason, #class_state{name = ClassName}) ->
         catch
             _:_ -> ok
         end),
+    %% BT-3407 review follow-up: drop this class's classVars live-snapshot
+    %% row. Pid-keyed like beamtalk_loaded_classes/beamtalk_backing_module_index
+    %% above (not name-keyed like beamtalk_class_pids, which is deliberately
+    %% kept forever), so an uncleaned row for a dead/reloaded pid could never
+    %% be read again — pure accumulation for the life of the node across
+    %% hot-reload, a core dev workflow.
+    _ =
+        (try
+            beamtalk_class_registry:forget_class_state_snapshot(self())
+        catch
+            _:_ -> ok
+        end),
     ok.
 
 %% ADR 0032 Phase 1: No flattened tables to rebuild after hot reload.
