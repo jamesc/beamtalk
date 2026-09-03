@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3406 review follow-up: see stdlib/test/fixtures/cascade_order_preserved.bt
+// for full context. Asserts left-to-right evaluation order is preserved
+// when one cascade argument needs hoisting (an open-scope same-class
+// class-method call) and another, earlier argument in the same message is
+// plain but side-effecting.
+
+TestCase subclass: CascadeOrderPreservedTest
+
+  testEvaluationOrderPreservedWhenHoistingMixesWithPlainArgs =>
+    log := CascadeOrderPreserved run
+    self assert: log entries equals: #(#plainFirst, #selfSendSecond)

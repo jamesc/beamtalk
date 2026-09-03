@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3406: regression test for the cascade + nested-keyword-message-argument
+// Core Erlang codegen crash. See
+// stdlib/test/fixtures/cascade_nested_keyword_arg.bt for the fixture and
+// full context. This test compiling and passing at all is itself most of
+// the regression coverage (the bug was a compiler crash, not a wrong
+// result); the assertion additionally confirms both cascaded messages ran
+// and the `ClassVarsN` rebind from the first nested class-method call
+// stayed correctly threaded into the second.
+
+TestCase subclass: CascadeNestedKeywordArgTest
+
+  testCascadeWithNestedKeywordArgCompilesAndThreadsBothMessages =>
+    w := CascadeNestedKeywordArg run
+    self assert: w items equals: #("one", "two")

@@ -324,20 +324,45 @@ impl CoreErlangGenerator {
             splits.push(self.split_subexpr_for_preamble(expr)?);
         }
 
-        let any_open = splits.iter().any(|(p, _)| !matches!(p, Document::Nil));
+        let (any_hoisted, preamble_parts, docs) = self.hoist_subexpr_splits(splits, prefix);
+        if any_hoisted {
+            Ok((Document::Vec(preamble_parts), docs))
+        } else {
+            Ok((Document::Nil, docs))
+        }
+    }
 
-        if !any_open {
-            // Fast path: no hoisting needed. Inline all sub-expression docs.
+    /// BT-3406 review follow-up: shared "decide once, hoist all or none" step
+    /// behind both [`capture_subexpr_sequence`](Self::capture_subexpr_sequence)
+    /// and `generate_cascade_args` (`expressions.rs`) — see the doc on
+    /// `capture_subexpr_sequence` for the evaluation-order invariant this
+    /// preserves.
+    ///
+    /// Given per-sub-expression `(preamble, value_doc)` splits (as produced by
+    /// [`split_subexpr_for_preamble`](Self::split_subexpr_for_preamble) or
+    /// `generate_field_assignment_open`), returns:
+    /// - `(false, vec![], value_docs)` if no sub-expression needs hoisting —
+    ///   `value_docs` are the original docs, safe to inline as-is.
+    /// - `(true, preamble_parts, value_docs)` if at least one sub-expression
+    ///   opened a scope — every sub-expression has been hoisted in order (a
+    ///   plain one via a fresh `let <prefix>N = ... in`, an already-open one
+    ///   by forwarding its existing preamble), and `value_docs` reference the
+    ///   hoisted results. The caller is responsible for splicing
+    ///   `preamble_parts` into its own preamble in order.
+    pub(super) fn hoist_subexpr_splits(
+        &mut self,
+        splits: Vec<(Document<'static>, Document<'static>)>,
+        prefix: &str,
+    ) -> (bool, Vec<Document<'static>>, Vec<Document<'static>>) {
+        let any_hoisted = splits.iter().any(|(p, _)| !matches!(p, Document::Nil));
+
+        if !any_hoisted {
             let docs: Vec<_> = splits.into_iter().map(|(_, d)| d).collect();
-            return Ok((Document::Nil, docs));
+            return (false, Vec::new(), docs);
         }
 
-        // Hoist every sub-expression to preserve evaluation order.
-        // - Sub-expressions that already produced an open scope contribute
-        //   their existing chain (no rebinding).
-        // - Plain sub-expressions get a fresh let binding.
-        let mut preamble_parts: Vec<Document<'static>> = Vec::new();
-        let mut var_docs: Vec<Document<'static>> = Vec::with_capacity(exprs.len());
+        let mut preamble_parts: Vec<Document<'static>> = Vec::with_capacity(splits.len());
+        let mut var_docs: Vec<Document<'static>> = Vec::with_capacity(splits.len());
         for (expr_preamble, expr_doc) in splits {
             if matches!(expr_preamble, Document::Nil) {
                 let var = self.fresh_temp_var(prefix);
@@ -355,7 +380,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        Ok((Document::Vec(preamble_parts), var_docs))
+        (true, preamble_parts, var_docs)
     }
 
     /// BT-1937: Captures an argument list using
@@ -465,7 +490,7 @@ impl CoreErlangGenerator {
     /// the `ClassVarsN` binding remains in scope at the outer level so
     /// subsequent code (later args, the enclosing call, following statements)
     /// can reference the new version.
-    fn split_subexpr_for_preamble(
+    pub(super) fn split_subexpr_for_preamble(
         &mut self,
         expr: &Expression,
     ) -> Result<(Document<'static>, Document<'static>)> {

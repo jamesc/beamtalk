@@ -2556,21 +2556,55 @@ impl CoreErlangGenerator {
     ///
     /// BT-884: This is a helper to avoid duplicating the hoisting logic across the
     /// `MessageSend` and fallback branches of `generate_cascade`.
+    ///
+    /// BT-3406: a non-field-assignment argument that is itself a same-class
+    /// class-method call emits an *open* let-chain ending in `... in ` with
+    /// no trailing value expression (`ClassVarsN` must stay visible to
+    /// subsequent cascade messages — see `emit_class_var_result_unwrap`'s
+    /// doc comment), relying on the caller to append the result variable and
+    /// keep the chain's bindings in scope. Each argument doc here used to be
+    /// placed directly into a `send(...)` argument list with no such append,
+    /// so an open-scope arg left dangling produced malformed Core Erlang (a
+    /// `let ... in` immediately followed by the list's closing `]`).
+    ///
+    /// BT-3406 review follow-up: hoisting only the argument(s) that need it
+    /// while a *different*, side-effecting-but-plain argument in the same
+    /// message stays inline can reverse their observable left-to-right
+    /// evaluation order — the hoisted one's preamble now runs before the
+    /// whole `send(...)`, while the plain one only evaluates inline at call
+    /// time. This is exactly the hazard
+    /// [`Self::capture_subexpr_sequence`] (BT-1937) exists to avoid for
+    /// ordinary (non-cascade) argument lists: decide *once*, for the whole
+    /// list, whether any argument needs hoisting — if so, hoist every
+    /// argument (binding a plain one to a fresh `let` too), never just
+    /// some. Splits every argument first (field assignments via
+    /// [`Self::generate_field_assignment_open`], everything else via
+    /// [`Self::split_subexpr_for_preamble`] — same conversion
+    /// `capture_subexpr_sequence` itself uses) so each argument is compiled
+    /// exactly once regardless of which branch below is taken, then makes
+    /// that same all-or-nothing decision. `capture_subexpr_sequence` isn't
+    /// reused directly here since it has no field-assignment case — cascade
+    /// arguments are the one call site that needs both.
     pub(super) fn generate_cascade_args(
         &mut self,
         arguments: &[Expression],
         docs: &mut Vec<Document<'static>>,
     ) -> Result<Vec<Document<'static>>> {
-        let mut arg_docs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+        let mut splits: Vec<(Document<'static>, Document<'static>)> =
+            Vec::with_capacity(arguments.len());
         for arg in arguments {
             if Self::is_field_assignment(arg) {
-                // Push hoisted binding directly to docs (preserves source order).
                 let (doc, val_var) = self.generate_field_assignment_open(arg)?;
-                docs.push(doc);
-                arg_docs.push(leaf::var(val_var));
+                splits.push((doc, leaf::var(val_var)));
             } else {
-                arg_docs.push(self.expression_doc(arg)?);
+                splits.push(self.split_subexpr_for_preamble(arg)?);
             }
+        }
+
+        let (any_hoisted, preamble_parts, arg_docs) =
+            self.hoist_subexpr_splits(splits, "CascadeArg");
+        if any_hoisted {
+            docs.extend(preamble_parts);
         }
         Ok(arg_docs)
     }
