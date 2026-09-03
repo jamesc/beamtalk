@@ -115,14 +115,13 @@ fn is_with_setter(method: &MethodDefinition, field_names: &HashSet<&str>) -> boo
         return false;
     }
 
-    // Selector must match the `withField:` naming convention (e.g. `withX:`, `withName:`)
+    // Selector must match the `withField:` naming convention (e.g. `withX:`,
+    // `withName:`, not `withdraw:`) — the shared recognition counterpart to
+    // `synthetic_selectors::with_star_selector`'s generation, also used by
+    // `beamtalk-core`'s `check_testcase_setup_drops_field_assignments` lint
+    // (BT-3395) to spot `self withField: value` sends.
     let selector_name = method.selector.name();
-    if !selector_name.starts_with("with") {
-        return false;
-    }
-    // The character after "with" must be uppercase (e.g. `withX:`, not `withdraw:`)
-    let after_with = &selector_name[4..];
-    if after_with.is_empty() || !after_with.starts_with(|c: char| c.is_ascii_uppercase()) {
+    if !beamtalk_core::synthetic_selectors::is_with_star_selector(&selector_name) {
         return false;
     }
 
