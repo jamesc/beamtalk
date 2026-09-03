@@ -353,3 +353,41 @@ Actor subclass: MutationCorpusActor
         seen := seen + 1
       ]
     self.total
+
+  // ── self-send POSITION axis (BT-3414, ADR 0118 phase 0) ─────────────────
+  // `bump`'s own mutation to `self.total`, nested at one SYNTACTIC POSITION
+  // per fragment — the same axis
+  // stdlib/test/fixtures/self_send_position_counter.bt /
+  // stdlib/test/actor_self_send_position_matrix_test.bt pin in isolation,
+  // joining the shared corpus so the absolute oracle
+  // (value_type_mutation_matrix_test.bt) and the metamorphic oracle
+  // (metamorphic_threading_test.bt) cover it too. Actor-only: a self-send
+  // that mutates actor state has no Value/class-method analogue.
+  binaryOperandSelfSendReadWrite =>
+    n := 1 + (self bump)
+    n
+
+  keywordArgumentSelfSendReadWrite => #(10, 20, 30) at: (self bump)
+
+  assignRhsSubExprSelfSendReadWrite =>
+    n := 0
+    n := 100 + (self bump)
+    n
+
+  cascadeOnSelfReadWrite =>
+    self bump; bump
+    self.total
+
+  whileTrueConditionSelfSendReadWrite =>
+    i := 0
+    [
+      i := i + 1
+      (self bump) + i < 5
+    ] whileTrue: [nil]
+    i
+
+  matchArmSelfSendReadWrite: v =>
+    v match: [
+      1 -> 1 + (self bump);
+      _ -> 0
+    ]

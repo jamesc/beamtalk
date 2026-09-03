@@ -600,3 +600,52 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testClassVarIfTrueNonLastReadWriteFalseClassMethod =>
     self assert: (MutationCorpusClassMethod classVarIfTrueNonLastReadWrite: false) equals: 0
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  BT-3414 (ADR 0118 phase 0) — self-send POSITION axis, Actor-only
+  //  (mutation_corpus_actor.bt; a self-send that mutates actor state has no
+  //  Value/class-method analogue). See
+  //  stdlib/test/actor_self_send_position_matrix_test.bt for the full
+  //  position matrix this corpus axis samples from, and
+  //  docs/ADR/0118-expression-level-state-threading-preludes.md for the
+  //  phase each `adr0118*Pending` switch corresponds to.
+  // ════════════════════════════════════════════════════════════════════════
+  testBinaryOperandSelfSendReadWriteActor =>
+    self assert: self actorCorpus binaryOperandSelfSendReadWrite equals: 2
+
+  testKeywordArgumentSelfSendReadWriteActor =>
+    self assert: self actorCorpus keywordArgumentSelfSendReadWrite equals: 10
+
+  testAssignRhsSubExprSelfSendReadWriteActor =>
+    self assert: self actorCorpus assignRhsSubExprSelfSendReadWrite equals: 101
+
+  // ADR 0118 phase 1b: cascade on self.
+  adr0118Phase1bCascadeOnSelfPending => true
+
+  testCascadeOnSelfReadWriteActor =>
+    self adr0118Phase1bCascadeOnSelfPending ifTrue: [
+      self assert: self actorCorpus cascadeOnSelfReadWrite equals: 0
+    ] ifFalse: [self assert: self actorCorpus cascadeOnSelfReadWrite equals: 2]
+
+  // ADR 0118 phase 3: self-send as a whileTrue: CONDITION binary-op operand.
+  adr0118Phase3WhileTrueConditionSelfSendPending => true
+
+  testWhileTrueConditionSelfSendReadWriteActor =>
+    self adr0118Phase3WhileTrueConditionSelfSendPending
+      ifTrue: [
+        self should: [
+          self actorCorpus whileTrueConditionSelfSendReadWrite
+        ] raise: #arity_mismatch
+      ]
+      ifFalse: [
+        self assert: self actorCorpus whileTrueConditionSelfSendReadWrite equals: 3
+      ]
+
+  // ADR 0118 phase 2a: self-send in a match: arm.
+  adr0118Phase2aMatchArmSelfSendPending => true
+
+  testMatchArmSelfSendReadWriteActorMatching =>
+    self assert: (self actorCorpus matchArmSelfSendReadWrite: 1) equals: 2
+
+  testMatchArmSelfSendReadWriteActorWildcard =>
+    self assert: (self actorCorpus matchArmSelfSendReadWrite: 2) equals: 0

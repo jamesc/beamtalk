@@ -420,3 +420,33 @@ TestCase subclass: MetamorphicThreadingTest
     self assert: self fragRangeDoNonLastReadWrite equals: ref
     self assert: self fragTimesRepeatAccumulator equals: ref
     self assert: self fragWhileTrueAccumulator equals: ref
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  RELATION 4 — Repeatability (BT-3414 self-send-position axis)
+  //
+  //  These fragments (mutation_corpus_actor.bt) are Actor-only — a self-send
+  //  that mutates actor state has no Value/class-method analogue, so
+  //  Relation 1's cross-context equality does not apply. Instead: a FRESH
+  //  actor running the same fragment with the same input must produce the
+  //  same result every time — a determinism/repeatability check, still a
+  //  relative oracle with no hand-written expected value. See
+  //  stdlib/test/actor_self_send_position_matrix_test.bt for the absolute
+  //  ground-truth values this axis samples from. The whileTrue:-condition
+  //  fragment is excluded — it crashes today (ADR 0118 phase 3), so this
+  //  relation would need to compare raised-error kinds instead of values.
+  // ════════════════════════════════════════════════════════════════════════
+  testRepeatabilityBinaryOperandSelfSend =>
+    self assert: self actorCorpus binaryOperandSelfSendReadWrite equals: self actorCorpus binaryOperandSelfSendReadWrite
+
+  testRepeatabilityKeywordArgumentSelfSend =>
+    self assert: self actorCorpus keywordArgumentSelfSendReadWrite equals: self actorCorpus keywordArgumentSelfSendReadWrite
+
+  testRepeatabilityAssignRhsSubExprSelfSend =>
+    self assert: self actorCorpus assignRhsSubExprSelfSendReadWrite equals: self actorCorpus assignRhsSubExprSelfSendReadWrite
+
+  testRepeatabilityCascadeOnSelf =>
+    self assert: self actorCorpus cascadeOnSelfReadWrite equals: self actorCorpus cascadeOnSelfReadWrite
+
+  testRepeatabilityMatchArmSelfSend =>
+    self assert: (self actorCorpus matchArmSelfSendReadWrite: 1) equals: (self actorCorpus matchArmSelfSendReadWrite: 1)
+    self assert: (self actorCorpus matchArmSelfSendReadWrite: 2) equals: (self actorCorpus matchArmSelfSendReadWrite: 2)
