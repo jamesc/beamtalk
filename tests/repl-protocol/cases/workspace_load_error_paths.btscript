@@ -86,7 +86,7 @@ Workspace load: _brokenPath
 // => ERROR:
 
 _error kind
-// => _
+// => compile_error
 
 // ===========================================================================
 // UNDEFINED CLASS REFERENCE IN A METHOD BODY — `Workspace load:` succeeds
