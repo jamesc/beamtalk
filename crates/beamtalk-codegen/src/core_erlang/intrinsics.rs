@@ -2773,10 +2773,12 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
-    /// BT-3402/BT-3396 interaction fix: the shared "does this `and:`/`or:`
-    /// need the inline mutation-threading path" gate — block-body mutations,
-    /// a cross-scope list-op mutation, an outer loop-body local write, or the
-    /// receiver itself being a dispatching actor self-send. Shared by
+    /// BT-3402/BT-3396/BT-3405 interaction fix: the shared "does this
+    /// `and:`/`or:` need the inline mutation-threading path" gate —
+    /// block-body mutations, a cross-scope list-op mutation, an outer
+    /// loop-body local write, or a hoistable actor self-send anywhere in the
+    /// receiver's hoistable sub-tree (the receiver itself, or nested inside
+    /// it — e.g. a binary-op operand). Shared by
     /// [`Self::try_generate_boolean_protocol`] (deciding whether `and:`/`or:`
     /// is itself the top-level construct to inline) and
     /// [`super::control_flow::conditionals::CoreErlangGenerator::compile_conditional_receiver`]
@@ -2810,7 +2812,7 @@ impl CoreErlangGenerator {
         self.needs_mutation_threading(&analysis)
             || self.body_has_list_op_cross_scope_mutations(block)
             || (self.in_loop_body && !analysis.local_writes.is_empty())
-            || self.is_dispatching_actor_self_send(receiver.unwrap_parens())
+            || self.contains_hoistable_self_send(receiver)
     }
 
     /// BT-1435: Tries to generate inline `logger:log/3` calls for Logger class sends.
