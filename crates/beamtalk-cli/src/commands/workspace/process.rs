@@ -826,6 +826,177 @@ mod tests {
         assert!(matches!(result, Ok(None)));
     }
 
+    #[test]
+    fn read_pid_file_returns_pid_for_valid_content() {
+        let fixture = crate::commands::test_support::WorkspaceFixture::new("read-pid-valid", 0, 1);
+        let dir = workspace_dir(&fixture.id).unwrap();
+        std::fs::write(dir.join("pid"), "12345\n").unwrap();
+
+        assert_eq!(read_pid_file(&fixture.id).unwrap(), Some(12345));
+    }
+
+    #[test]
+    fn read_pid_file_treats_zero_as_sentinel_for_no_pid() {
+        // 0 is the "PID unavailable" sentinel used by force-kill flows, not a
+        // real PID — must come back as None like a missing file, not Some(0).
+        let fixture = crate::commands::test_support::WorkspaceFixture::new("read-pid-zero", 0, 1);
+        let dir = workspace_dir(&fixture.id).unwrap();
+        std::fs::write(dir.join("pid"), "0").unwrap();
+
+        assert_eq!(read_pid_file(&fixture.id).unwrap(), None);
+    }
+
+    #[test]
+    fn read_pid_file_returns_none_for_unparseable_content() {
+        let fixture =
+            crate::commands::test_support::WorkspaceFixture::new("read-pid-garbage", 0, 1);
+        let dir = workspace_dir(&fixture.id).unwrap();
+        std::fs::write(dir.join("pid"), "not-a-pid").unwrap();
+
+        assert_eq!(read_pid_file(&fixture.id).unwrap(), None);
+    }
+
+    // --- prepare_workspace_paths ---
+
+    fn base_workspace_config() -> crate::commands::workspace::WorkspaceConfig<'static> {
+        crate::commands::workspace::WorkspaceConfig {
+            port: 0,
+            bind_addr: None,
+            auto_cleanup: true,
+            max_idle_seconds: None,
+            log_level: "info",
+            otp_app_name: None,
+            hex_dep_names: &[],
+        }
+    }
+
+    #[test]
+    fn prepare_workspace_paths_uses_explicit_idle_timeout_over_default() {
+        let fixture =
+            crate::commands::test_support::WorkspaceFixture::new("prep-paths-explicit-idle", 0, 1);
+        let mut config = base_workspace_config();
+        config.max_idle_seconds = Some(120);
+
+        let (eval_cmd, _project_path) = prepare_workspace_paths(&fixture.id, &config).unwrap();
+        assert!(
+            eval_cmd.contains("max_idle_seconds => 120"),
+            "explicit max_idle_seconds must override the default: {eval_cmd}"
+        );
+    }
+
+    #[test]
+    fn prepare_workspace_paths_falls_back_to_default_idle_timeout() {
+        let fixture =
+            crate::commands::test_support::WorkspaceFixture::new("prep-paths-default-idle", 0, 1);
+        let config = base_workspace_config();
+
+        let (eval_cmd, _project_path) = prepare_workspace_paths(&fixture.id, &config).unwrap();
+        assert!(
+            eval_cmd.contains(&format!(
+                "max_idle_seconds => {DEFAULT_IDLE_TIMEOUT_SECONDS}"
+            )),
+            "no explicit timeout or env var must fall back to the default: {eval_cmd}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn prepare_workspace_paths_falls_back_to_env_var_idle_timeout() {
+        let fixture =
+            crate::commands::test_support::WorkspaceFixture::new("prep-paths-env-idle", 0, 1);
+        let config = base_workspace_config();
+
+        // SAFETY: serialized via #[serial(env_var)]; removed before returning.
+        unsafe { std::env::set_var("BEAMTALK_WORKSPACE_TIMEOUT", "77") };
+        let result = prepare_workspace_paths(&fixture.id, &config);
+        // SAFETY: see above.
+        unsafe { std::env::remove_var("BEAMTALK_WORKSPACE_TIMEOUT") };
+
+        let (eval_cmd, _project_path) = result.unwrap();
+        assert!(
+            eval_cmd.contains("max_idle_seconds => 77"),
+            "BEAMTALK_WORKSPACE_TIMEOUT must be used when no explicit arg is given: {eval_cmd}"
+        );
+    }
+
+    #[test]
+    fn prepare_workspace_paths_writes_starting_tombstone() {
+        let fixture =
+            crate::commands::test_support::WorkspaceFixture::new("prep-paths-tombstone", 0, 1);
+        let config = base_workspace_config();
+
+        prepare_workspace_paths(&fixture.id, &config).unwrap();
+
+        let dir = workspace_dir(&fixture.id).unwrap();
+        assert!(
+            dir.join("starting").exists(),
+            "tombstone must be written before the caller spawns the BEAM node"
+        );
+    }
+
+    #[test]
+    fn prepare_workspace_paths_clears_stale_startup_log() {
+        let fixture =
+            crate::commands::test_support::WorkspaceFixture::new("prep-paths-clear-log", 0, 1);
+        let dir = workspace_dir(&fixture.id).unwrap();
+        std::fs::write(dir.join("startup.log"), "stale crash from a previous run").unwrap();
+        let config = base_workspace_config();
+
+        prepare_workspace_paths(&fixture.id, &config).unwrap();
+
+        assert!(
+            !dir.join("startup.log").exists(),
+            "a stale startup.log must not leak into the new attempt's error reporting"
+        );
+    }
+
+    #[test]
+    fn prepare_workspace_paths_errors_for_unknown_workspace() {
+        let _guard = crate::commands::test_support::real_home_guard();
+        let config = base_workspace_config();
+        let result = prepare_workspace_paths("__bt3401_nonexistent_ws__", &config);
+        assert!(result.is_err());
+    }
+
+    // --- configure_startup_logging ---
+
+    #[test]
+    fn configure_startup_logging_enables_log_file_and_sets_kernel_logger_arg() {
+        let fixture =
+            crate::commands::test_support::WorkspaceFixture::new("startup-logging-ok", 0, 1);
+        let mut cmd = std::process::Command::new("true");
+
+        let (log_path, enabled) = configure_startup_logging(&mut cmd, &fixture.id).unwrap();
+
+        assert!(enabled, "opening a fresh startup.log must succeed");
+        assert_eq!(
+            log_path,
+            workspace_dir(&fixture.id).unwrap().join("startup.log")
+        );
+        let args: Vec<_> = cmd.get_args().collect();
+        assert!(args.contains(&std::ffi::OsStr::new("-kernel")));
+        assert!(args.contains(&std::ffi::OsStr::new("logger")));
+    }
+
+    #[test]
+    fn configure_startup_logging_falls_back_when_log_path_is_unwritable() {
+        // Make `startup.log` a directory so `OpenOptions::open` fails with a
+        // real IO error, exercising the non-fatal fallback branch — still
+        // returns Ok with `enabled = false` rather than propagating the error.
+        let fixture =
+            crate::commands::test_support::WorkspaceFixture::new("startup-logging-fallback", 0, 1);
+        let dir = workspace_dir(&fixture.id).unwrap();
+        std::fs::create_dir(dir.join("startup.log")).unwrap();
+        let mut cmd = std::process::Command::new("true");
+
+        let (_log_path, enabled) = configure_startup_logging(&mut cmd, &fixture.id).unwrap();
+
+        assert!(
+            !enabled,
+            "an unwritable startup.log must be a non-fatal fallback, not an error"
+        );
+    }
+
     // --- wait_for_tcp_ready ---
 
     /// `wait_for_tcp_ready`'s success path (BT-3370): a live BEAM node isn't
