@@ -415,6 +415,60 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_class_info_parse_error_returns_none() {
+        // A stray unmatched closing paren is a genuine syntax error (not just
+        // "no class definition"), exercising the `has_errors` bail branch —
+        // distinct from `test_parse_class_info_no_class` above.
+        let temp = TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let file = dir.join("broken.bt");
+        let source = "Object subclass: Broken\n  foo => )\n";
+        fs::write(&file, source).unwrap();
+
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
+        let (_module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error),
+            "fixture must actually contain a parse error for this test to be meaningful"
+        );
+
+        let info = parse_class_info(&dir, &file).unwrap();
+        assert!(
+            info.is_none(),
+            "parse errors must yield None, not a partial ClassInfo"
+        );
+    }
+
+    #[test]
+    fn test_parse_class_info_binary_and_keyword_selectors_and_class_methods() {
+        // Exercises `format_signature`'s Binary and Keyword arms (only the
+        // Unary arm was covered above) plus the `class_methods` mapping,
+        // which is otherwise untouched by every other `parse_class_info` test.
+        let temp = TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let file = dir.join("Vector.bt");
+        fs::write(
+            &file,
+            "Object subclass: Vector\n  + other :: Vector -> Vector => self\n  at: index :: Integer put: value :: Object -> Object => value\n  class zero => self new\n",
+        )
+        .unwrap();
+
+        let info = parse_class_info(&dir, &file).unwrap().unwrap();
+        assert_eq!(info.name, "Vector");
+        assert_eq!(
+            info.methods
+                .iter()
+                .map(|m| m.signature.as_str())
+                .collect::<Vec<_>>(),
+            vec!["+ other", "at: index put: value"]
+        );
+        assert_eq!(info.class_methods.len(), 1);
+        assert_eq!(info.class_methods[0].signature, "zero");
+    }
+
+    #[test]
     fn test_html_escape() {
         assert_eq!(html_escape("<div>"), "&lt;div&gt;");
         assert_eq!(html_escape("a & b"), "a &amp; b");
