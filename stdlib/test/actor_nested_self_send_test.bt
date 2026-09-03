@@ -122,6 +122,32 @@ TestCase subclass: ActorNestedSelfSendTest
     self assert: self.c recordViaOnDoBody equals: 2
     self assert: self.c getCount equals: 1
 
+  testSelfSendInDoLoopBinaryOpThreadsMutation =>
+    // BT-3403: `self.items do: [:x | 1 + (self bumpCount)]` — items has 3
+    // elements, so bumpCount must run (and thread its mutation) 3 times.
+    self.c recordViaDoLoopBinaryOp
+    self assert: self.c getCount equals: 3
+
+  testSelfSendInCollectLoopBinaryOpThreadsMutation =>
+    // bumpCount always returns 1, so each element becomes x + 1.
+    self assert: self.c recordViaCollectLoopBinaryOp equals: #(11, 21, 31)
+    self assert: self.c getCount equals: 3
+
+  testSelfSendInInjectLoopBinaryOpThreadsMutation =>
+    // acc: 0+10+1=11, 11+20+1=32, 32+30+1=63.
+    self assert: self.c recordViaInjectLoopBinaryOp equals: 63
+    self assert: self.c getCount equals: 3
+
+  testSelfSendInSelectLoopBinaryOpThreadsMutation =>
+    self assert: self.c recordViaSelectLoopBinaryOp equals: #(10, 20, 30)
+    self assert: self.c getCount equals: 3
+
+  testSelfSendInTimesRepeatBinaryOpThreadsMutation =>
+    // BT-3403: Letrec-bodied loop (timesRepeat:), not a Foldl* — same
+    // silent-drop shape, different BodyKind arm.
+    self.c recordViaTimesRepeatBinaryOp
+    self assert: self.c getCount equals: 3
+
   testAndBlockRunsAndThreadsBothDispatchesWhenReceiverTrue =>
     // BT-3402: `(self recordOnce: true) and: [self bumpCount > 0]` — the
     // receiver's self-send always runs; since it returns true, `and:`
