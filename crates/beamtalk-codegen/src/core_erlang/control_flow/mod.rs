@@ -2306,7 +2306,7 @@ impl CoreErlangGenerator {
                     expr,
                     i,
                     is_last,
-                    has_mutations,
+                    &mut has_mutations,
                     has_plain_lets,
                     has_direct_field_assignments,
                     kind,
@@ -3202,13 +3202,40 @@ impl CoreErlangGenerator {
         expr: &Expression,
         _i: usize,
         is_last: bool,
-        has_mutations: bool,
+        has_mutations: &mut bool,
         has_plain_lets: bool,
         has_direct_field_assignments: bool,
         kind: &BodyKind,
         pred_var: Option<&String>,
         plan: &ThreadingPlan,
     ) -> Result<()> {
+        // BT-3403: hoist any actor self-send nested as a sub-expression of
+        // `expr` (e.g. `1 + (self bumpCount)`) ahead of `expr`'s own compile,
+        // the same `HoistSink::OpenDocs` mechanism `compile_conditional_receiver`
+        // uses for a conditional's receiver. Each hoisted dispatch is a real
+        // `generate_self_dispatch_open` call that advances `state_version()`
+        // and registers its result in `hoisted_self_send_results`, so the
+        // `expression_doc`/`closed_expression_doc`/`bind_closed_expr_threading_class_vars`
+        // call below (which reach the same self-send only through the
+        // ordinary, mutation-discarding `generate_self_dispatch` path)
+        // substitutes the already-threaded result instead of re-dispatching
+        // and dropping the mutation. Must run before every arm below reads
+        // `state_version()`/`current_state_var()`/`*has_mutations` — a
+        // hoisted dispatch is exactly as state-advancing as any other
+        // mutation this function already detects, so `*has_mutations` is set
+        // here BEFORE any arm's own `current_state_var()` vs `"StateAcc"`
+        // choice reads it (both the ones inside this function and the
+        // caller's own post-loop `FoldlFilter`/`FoldlBoolPredicate`-family
+        // wrap, which reads the same accumulator after this call returns).
+        let mut hoisted: Vec<Document<'static>> = Vec::new();
+        self.hoist_nested_self_sends(expr, &mut HoistSink::OpenDocs(&mut hoisted))?;
+        let hoisted_anything = !hoisted.is_empty();
+        if hoisted_anything {
+            docs.push(Document::Vec(hoisted));
+            *has_mutations = true;
+        }
+        let has_mutations = *has_mutations;
+
         // BT-3172: the nested-loop/fold `ClassVars`-loss check runs once, at
         // the top of `generate_threaded_loop_body_inner`'s per-statement
         // loop — ahead of every dispatch branch, not just this function's
@@ -3226,23 +3253,44 @@ impl CoreErlangGenerator {
                     let expr_code = self.expression_doc(expr)?;
                     docs.push(expr_code);
                 } else if is_last && !has_direct_field_assignments {
-                    // BT-478/BT-483: Mutations come from nested constructs.
-                    // Extract updated state via element(2).
-                    let next_var = self.peek_next_state_var();
-                    let tuple_var = format!("_NestTuple{}", self.state_version() + 1);
-                    let expr_code = self.expression_doc(expr)?;
-                    let _ = self.next_state_var();
-                    docs.push(docvec![
-                        "let ",
-                        leaf::var(tuple_var.clone()),
-                        " = ",
-                        expr_code,
-                        " in let ",
-                        leaf::var(next_var),
-                        " = call 'erlang':'element'(2, ",
-                        leaf::var(tuple_var),
-                        ") in",
-                    ]);
+                    // BT-478/BT-483: Mutations come from nested constructs
+                    // (a bare nested loop/fold statement, whose own compile
+                    // is itself a `{Result, State}` tuple) — extract updated
+                    // state via element(2).
+                    //
+                    // BT-3403: that assumption does NOT hold when THIS
+                    // statement's own mutation came entirely from a self-send
+                    // hoisted above (`hoisted_anything`) — `expr`'s own
+                    // compile is then just a plain value (the hoisted
+                    // dispatch's result was substituted in by
+                    // `try_handle_self_dispatch`), not a tuple, and wrapping
+                    // it in a phantom `element(2, ...)` unwrap crashes
+                    // (`badarg`, confirmed empirically for `N timesRepeat: [1
+                    // + (self bumpCount)]`). The hoist's own let-chain already
+                    // rebound `current_state_var()` to the post-dispatch
+                    // state, so just discard `expr`'s plain value and use it
+                    // directly — the same pattern the `else` branch below
+                    // uses for a non-last statement.
+                    if hoisted_anything {
+                        let expr_code = self.expression_doc(expr)?;
+                        docs.push(docvec!["let _ = ", expr_code, " in"]);
+                    } else {
+                        let next_var = self.peek_next_state_var();
+                        let tuple_var = format!("_NestTuple{}", self.state_version() + 1);
+                        let expr_code = self.expression_doc(expr)?;
+                        let _ = self.next_state_var();
+                        docs.push(docvec![
+                            "let ",
+                            leaf::var(tuple_var.clone()),
+                            " = ",
+                            expr_code,
+                            " in let ",
+                            leaf::var(next_var),
+                            " = call 'erlang':'element'(2, ",
+                            leaf::var(tuple_var),
+                            ") in",
+                        ]);
+                    }
                 } else {
                     let expr_code = self.expression_doc(expr)?;
                     docs.push(docvec!["let _ = ", expr_code, " in"]);

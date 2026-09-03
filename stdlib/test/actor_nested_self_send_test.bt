@@ -49,6 +49,16 @@ TestCase subclass: ActorNestedSelfSendTest
     self assert: (self.c recordViaAndInsideIfTrue: false) equals: #gaveUp
     self assert: self.c getCount equals: 2
 
+  testSelfSendsInAndReceiverBinaryOpThreadBothMutations =>
+    // BT-3405: `((self bumpCount) + (self bumpCount) > 0 and: [flag])
+    // ifTrue:ifFalse:` — both self-sends are nested inside a binary-op
+    // operand of the and:'s receiver (not the receiver itself). Before the
+    // fix, one of the two `bumpCount` mutations was silently dropped.
+    self assert: (self.c recordViaAndReceiverBinaryOp: true) equals: #yes
+    self assert: self.c getCount equals: 2
+    self assert: (self.c recordViaAndReceiverBinaryOp: false) equals: #no
+    self assert: self.c getCount equals: 4
+
   testSelfSendAsKeywordArgumentThreadsMutation =>
     // Shape 2: `self.items at: (self bumpCount)` — bumpCount returns 1, so
     // at: 1 => 10 proves it ran; the count proves the mutation survived.
@@ -111,6 +121,32 @@ TestCase subclass: ActorNestedSelfSendTest
   testSelfSendNestedInOnDoBodyThreadsMutation =>
     self assert: self.c recordViaOnDoBody equals: 2
     self assert: self.c getCount equals: 1
+
+  testSelfSendInDoLoopBinaryOpThreadsMutation =>
+    // BT-3403: `self.items do: [:x | 1 + (self bumpCount)]` — items has 3
+    // elements, so bumpCount must run (and thread its mutation) 3 times.
+    self.c recordViaDoLoopBinaryOp
+    self assert: self.c getCount equals: 3
+
+  testSelfSendInCollectLoopBinaryOpThreadsMutation =>
+    // bumpCount always returns 1, so each element becomes x + 1.
+    self assert: self.c recordViaCollectLoopBinaryOp equals: #(11, 21, 31)
+    self assert: self.c getCount equals: 3
+
+  testSelfSendInInjectLoopBinaryOpThreadsMutation =>
+    // acc: 0+10+1=11, 11+20+1=32, 32+30+1=63.
+    self assert: self.c recordViaInjectLoopBinaryOp equals: 63
+    self assert: self.c getCount equals: 3
+
+  testSelfSendInSelectLoopBinaryOpThreadsMutation =>
+    self assert: self.c recordViaSelectLoopBinaryOp equals: #(10, 20, 30)
+    self assert: self.c getCount equals: 3
+
+  testSelfSendInTimesRepeatBinaryOpThreadsMutation =>
+    // BT-3403: Letrec-bodied loop (timesRepeat:), not a Foldl* — same
+    // silent-drop shape, different BodyKind arm.
+    self.c recordViaTimesRepeatBinaryOp
+    self assert: self.c getCount equals: 3
 
   testAndBlockRunsAndThreadsBothDispatchesWhenReceiverTrue =>
     // BT-3402: `(self recordOnce: true) and: [self bumpCount > 0]` — the

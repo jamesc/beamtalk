@@ -36,6 +36,18 @@ Actor subclass: NestedSelfSendCounter
   recordViaAndInsideIfTrue: flag =>
     ((self recordOnce: flag) and: [true]) ifTrue: [#recorded] ifFalse: [#gaveUp]
 
+  // BT-3405: self-sends nested inside a BINARY-OP OPERAND of an and:'s own
+  // RECEIVER (not the receiver itself, and not inside the block argument),
+  // with the and: itself the receiver of an outer ifTrue:ifFalse:. Both
+  // `bumpCount` self-sends must thread — before the fix,
+  // `and_or_needs_mutation_threading`'s receiver check only recognized a
+  // bare self-send receiver, so this shape fell through to plain
+  // (non-hoisting) codegen and silently dropped one mutation.
+  recordViaAndReceiverBinaryOp: flag =>
+    ((self bumpCount) + (self bumpCount) > 0 and: [
+      flag
+    ]) ifTrue: [#yes] ifFalse: [#no]
+
   // Shape 2: self-send as an argument to an arbitrary (non-self) keyword
   // send, as the method's last statement.
   recordViaKeywordArgument => self.items at: (self bumpCount)
@@ -92,6 +104,25 @@ Actor subclass: NestedSelfSendCounter
 
   // Nested as a non-statement sub-expression of an on:do:-protected body.
   recordViaOnDoBody => [1 + (self bumpCount)] on: Error do: [:e | 0]
+
+  // BT-3403: self-send nested as a sub-expression of a Document-based
+  // loop-body catch-all's own top-level expression (`emit_non_assign_expr`)
+  // — one per `BodyKind` arm. Before the fix, `1 + (self bumpCount)` ran
+  // `bumpCount` (its return value is observable) but silently dropped its
+  // `count` mutation on every arm, since `emit_non_assign_expr` reached it
+  // through the ordinary, discarding `expression_doc` compile.
+  recordViaDoLoopBinaryOp => self.items do: [:x | 1 + (self bumpCount)]
+
+  recordViaCollectLoopBinaryOp =>
+    self.items collect: [:x | x + (self bumpCount)]
+
+  recordViaInjectLoopBinaryOp =>
+    self.items inject: 0 into: [:acc :x | acc + x + (self bumpCount)]
+
+  recordViaSelectLoopBinaryOp =>
+    self.items select: [:x | (x + (self bumpCount)) > 0]
+
+  recordViaTimesRepeatBinaryOp => 3 timesRepeat: [1 + (self bumpCount)]
 
   // BT-3402: self-send as the RECEIVER of `and:` (`recordOnce:`, always
   // evaluated) plus a self-send NESTED INSIDE the block argument
