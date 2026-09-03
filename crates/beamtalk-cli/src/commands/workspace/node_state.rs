@@ -172,7 +172,7 @@ pub(super) use beamtalk_cli::pid_liveness::is_process_alive;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::test_support::real_home_guard;
+    use crate::commands::test_support::{BeamtalkHomeOverride, real_home_guard};
     use std::net::TcpListener;
     use std::path::Path;
 
@@ -320,7 +320,28 @@ mod tests {
 
     #[test]
     fn is_node_running_none_fallback_scans_workspaces_base_dir() {
-        let _guard = real_home_guard();
+        // Hermetic `BeamtalkHomeOverride`, *not* `real_home_guard`: unlike
+        // every other test in this file, this one exercises the O(N)
+        // `read_port_file_nonce` scan, which walks *every* subdirectory of
+        // `workspaces_base_dir()` and returns on the first `port` file whose
+        // recorded port matches — it does not check which workspace ID that
+        // file belongs to. `real_home_guard` only serializes against a
+        // `BeamtalkHomeOverride`; it deliberately lets other real-directory
+        // tests run concurrently against the *same* real `~/.beamtalk/workspaces`
+        // tree (safe for them, since each reads/writes only its own uniquely
+        // named `ws_id` subdirectory via the `Some(id)` fast path). This test
+        // has no such isolation: if another concurrently-running test's
+        // OS-assigned ephemeral port happens to match this test's port before
+        // this test's own directory is reached in listing order, the scan
+        // matches that unrelated entry (with a different nonce) instead and
+        // `is_node_running` returns `false` — a directory-listing-order race
+        // that widens under the slower, more heavily loaded parallel test
+        // execution seen on macOS CI runners (BT-3401). `BeamtalkHomeOverride`
+        // points the scan at a fresh, exclusive temp directory instead, so no
+        // other test's entries can ever be present during the scan.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _override = BeamtalkHomeOverride::new(tmp.path());
+
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("local_addr").port();
         let ws_id = format!("bt3401-node-state-fallback-{}", std::process::id());
@@ -334,7 +355,6 @@ mod tests {
         assert!(is_node_running(&info, None));
 
         drop(listener);
-        let _ = std::fs::remove_dir_all(base.join(&ws_id));
     }
 
     #[test]
