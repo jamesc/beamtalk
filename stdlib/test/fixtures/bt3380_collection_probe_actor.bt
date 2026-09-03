@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3380: An Actor with its own methods literally named after Collection
+// protocol list-op selectors (`collect:`, `select:`, `reject:`,
+// `anySatisfy:`, `allSatisfy:`, `detect:`, `detect:ifNone:`, `count:`,
+// `flatMap:`, `takeWhile:`, `dropWhile:`, `partition:`, `groupBy:`, `sort:`)
+// had every EXTERNAL call to those methods wrapped as `{#ok, Result}`
+// instead of returning `Result` directly. Root cause: `try_generate_list_message`
+// (see `intrinsics.rs`) unconditionally intercepts these selectors for ANY
+// receiver expression — including a variable holding a live Actor — and
+// generates a runtime `erlang:is_list/1` guard around the fast BIF path.
+// The guard's "not a list" fallback dispatched via the low-level
+// `beamtalk_primitive:send/3`, which — unlike the proper generic dispatcher
+// `beamtalk_message_dispatch:send/3` — does not know how to unwrap an
+// actor's `{ok, Result} | {error, Error}` gen_server reply envelope
+// (BT-918); it forwards `gen_server:call/2`'s raw reply as-is. Same root
+// cause as BT-3377 (Block's `value`-family selectors), in a structurally
+// separate codegen family (Collection-protocol list ops, not Block
+// invocation).
+//
+// Each overridden method here deliberately ignores its block argument(s)
+// and returns `self.tag` (a plain String) — proving the *actor's own*
+// result crosses the process boundary unwrapped, not the block's.
+
+Actor subclass: BT3380CollectionProbe
+  state: tag :: String = ""
+
+  setTag: t -> BT3380CollectionProbe =>
+    self.tag := t
+    self
+
+  do: _aBlock -> String => self.tag
+
+  collect: _aBlock -> String => self.tag
+
+  select: _aBlock -> String => self.tag
+
+  reject: _aBlock -> String => self.tag
+
+  anySatisfy: _aBlock -> String => self.tag
+
+  allSatisfy: _aBlock -> String => self.tag
+
+  detect: _aBlock -> String => self.tag
+
+  detect: _aBlock ifNone: _noneBlock -> String => self.tag
+
+  count: _aBlock -> String => self.tag
+
+  flatMap: _aBlock -> String => self.tag
+
+  takeWhile: _aBlock -> String => self.tag
+
+  dropWhile: _aBlock -> String => self.tag
+
+  partition: _aBlock -> String => self.tag
+
+  groupBy: _aBlock -> String => self.tag
+
+  sort: _aBlock -> String => self.tag

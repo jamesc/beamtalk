@@ -491,7 +491,9 @@ fn test_drop_while_pure_generates_dropwhile() {
 #[test]
 fn test_any_satisfy_pure_generates_lists_any() {
     // BT-1481: Pure anySatisfy: (no mutations) delegates to lists:any/2 with an
-    // is_list guard so non-list receivers fall back to beamtalk_primitive:send.
+    // is_list guard so non-list receivers fall back to beamtalk_message_dispatch:send
+    // (BT-3380: not beamtalk_primitive:send — the receiver may be a live actor,
+    // whose reply envelope only beamtalk_actor:sync_send/3 knows how to unwrap).
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items anySatisfy: [:item | item > 0]\n";
     let code = codegen(src);
     assert!(
@@ -503,8 +505,8 @@ fn test_any_satisfy_pure_generates_lists_any() {
         "Pure anySatisfy: should guard with erlang:is_list. Got:\n{code}"
     );
     assert!(
-        code.contains("'beamtalk_primitive':'send'("),
-        "Pure anySatisfy: should fall back to beamtalk_primitive:send for non-lists. Got:\n{code}"
+        code.contains("'beamtalk_message_dispatch':'send'("),
+        "Pure anySatisfy: should fall back to beamtalk_message_dispatch:send for non-lists. Got:\n{code}"
     );
     assert!(
         !code.contains("'lists':'foldl'"),
@@ -530,7 +532,8 @@ fn test_all_satisfy_pure_generates_lists_all() {
 #[test]
 fn test_detect_pure_generates_beamtalk_list_detect() {
     // BT-1486: Pure detect: (no mutations) delegates to beamtalk_list:detect/2
-    // with an is_list guard for non-list fallback via beamtalk_primitive:send.
+    // with an is_list guard for non-list fallback via beamtalk_message_dispatch:send
+    // (BT-3380).
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items detect: [:item | item > 0]\n";
     let code = codegen(src);
     assert!(
@@ -546,7 +549,8 @@ fn test_detect_pure_generates_beamtalk_list_detect() {
 #[test]
 fn test_detect_if_none_pure_dispatches_to_runtime() {
     // BT-1486: Pure detect:ifNone: (no mutations) dispatches to runtime via
-    // beamtalk_primitive:send with the predicate and ifNone block as arguments.
+    // beamtalk_message_dispatch:send (BT-3380) with the predicate and ifNone
+    // block as arguments.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items detect: [:item | item > 0] ifNone: [42]\n";
     let code = codegen(src);
     assert!(
@@ -554,8 +558,8 @@ fn test_detect_if_none_pure_dispatches_to_runtime() {
         "Pure detect:ifNone: should dispatch with selector 'detect:ifNone:'. Got:\n{code}"
     );
     assert!(
-        code.contains("'beamtalk_primitive':'send'"),
-        "Pure detect:ifNone: should use beamtalk_primitive:send. Got:\n{code}"
+        code.contains("'beamtalk_message_dispatch':'send'"),
+        "Pure detect:ifNone: should use beamtalk_message_dispatch:send. Got:\n{code}"
     );
     assert!(
         !code.contains("'lists':'foldl'"),
@@ -949,7 +953,7 @@ fn test_detect_if_none_nested_in_direct_params_loop() {
 #[test]
 fn test_count_pure_generates_filter_then_length() {
     // Pure count: (no mutations) uses lists:filter + erlang:length on the filtered result.
-    // Falls back to beamtalk_primitive:send for non-list receivers.
+    // Falls back to beamtalk_message_dispatch:send (BT-3380) for non-list receivers.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items count: [:item | item > 0]\n";
     let code = codegen(src);
     assert!(
@@ -1028,7 +1032,7 @@ fn test_count_with_local_mutation_uses_tuple_acc() {
 #[test]
 fn test_flat_map_pure_generates_lists_flatmap() {
     // Pure flatMap: (no mutations) delegates to lists:flatmap with an is_list guard.
-    // Non-list receivers fall back to beamtalk_primitive:send.
+    // Non-list receivers fall back to beamtalk_message_dispatch:send (BT-3380).
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items flatMap: [:item | #(item, item)]\n";
     let code = codegen(src);
     assert!(
@@ -1040,8 +1044,8 @@ fn test_flat_map_pure_generates_lists_flatmap() {
         "Pure flatMap: should NOT use lists:foldl. Got:\n{code}"
     );
     assert!(
-        code.contains("'beamtalk_primitive':'send'("),
-        "Pure flatMap: should fall back to beamtalk_primitive:send for non-lists. Got:\n{code}"
+        code.contains("'beamtalk_message_dispatch':'send'("),
+        "Pure flatMap: should fall back to beamtalk_message_dispatch:send for non-lists. Got:\n{code}"
     );
 }
 
@@ -1452,7 +1456,7 @@ fn test_value_type_do_non_literal_callable_seeds_empty_state() {
 fn test_list_reject_pure_generates_negated_filter() {
     // Pure reject: (no mutations) wraps the predicate in an `erlang:not` negating fun
     // and delegates to lists:filter. An is_list guard routes non-list receivers to
-    // beamtalk_primitive:send with 'reject:' selector.
+    // beamtalk_message_dispatch:send (BT-3380) with 'reject:' selector.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items reject: [:item | item > 0]\n";
     let code = codegen(src);
     assert!(
@@ -1539,8 +1543,9 @@ fn test_list_reject_with_local_mutation_uses_tuple_acc() {
 #[test]
 fn test_sort_pure_generates_beamtalk_list_sort_with() {
     // Pure sort: (no mutations) delegates to beamtalk_list:sort_with/2 with an
-    // is_list guard. Non-list receivers fall back to beamtalk_primitive:send with
-    // 'sort:' selector. The mutation path (lists:sort + process-dict) must NOT appear.
+    // is_list guard. Non-list receivers fall back to beamtalk_message_dispatch:send
+    // (BT-3380) with 'sort:' selector. The mutation path (lists:sort + process-dict)
+    // must NOT appear.
     let src =
         "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items sort: [:a :b | a < b]\n";
     let code = codegen(src);
@@ -1553,8 +1558,8 @@ fn test_sort_pure_generates_beamtalk_list_sort_with() {
         "Pure sort: should guard with erlang:is_list. Got:\n{code}"
     );
     assert!(
-        code.contains("'beamtalk_primitive':'send'("),
-        "Pure sort: should fall back to beamtalk_primitive:send for non-lists. Got:\n{code}"
+        code.contains("'beamtalk_message_dispatch':'send'("),
+        "Pure sort: should fall back to beamtalk_message_dispatch:send for non-lists. Got:\n{code}"
     );
     // Runtime fallback selector is 'sort:' (consistent with 'select:' / 'reject:' pattern).
     assert!(

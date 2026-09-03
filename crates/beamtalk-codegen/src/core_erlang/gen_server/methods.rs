@@ -8,6 +8,7 @@
 //! Generates method dispatch case clauses, method body with state threading
 //! and reply tuples, and the `register_class/0` on-load function.
 
+use super::super::control_flow::HoistSink;
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::spec_codegen;
 use super::super::value_type_codegen::has_opaque_native_representation;
@@ -1232,6 +1233,15 @@ impl CoreErlangGenerator {
                             stmts.push(ThreadedStmt::Statement(reply, span));
                         }
                         BodyExprKind::DispatchingSelfSend => {
+                            // BT-3396: `^self log: (self nextId)`.
+                            self.hoist_self_send_arguments(
+                                value,
+                                &mut HoistSink::Threaded {
+                                    stmts: &mut stmts,
+                                    frame: threaded_ir::FrameId::ROOT,
+                                    span,
+                                },
+                            )?;
                             let (doc, dispatch_var) = self.generate_self_dispatch_open(value)?;
                             stmts.push(ThreadedStmt::Statement(doc, span));
                             let reply = self.dispatch_reply_doc(&dispatch_var);
@@ -1295,6 +1305,18 @@ impl CoreErlangGenerator {
                             }
                         }
                         _ => {
+                            // BT-3396: `^ Array with: (self bump)` — thread
+                            // every order-safe nested self-send as real
+                            // `Bind`s ahead of the value's compile, then
+                            // reply with the post-dispatch state.
+                            self.hoist_nested_self_sends(
+                                value,
+                                &mut HoistSink::Threaded {
+                                    stmts: &mut stmts,
+                                    frame: threaded_ir::FrameId::ROOT,
+                                    span,
+                                },
+                            )?;
                             let final_state = self.current_state_var();
                             let value_str = self.expression_doc(value)?;
                             stmts.push(ThreadedStmt::Statement(
@@ -1337,6 +1359,21 @@ impl CoreErlangGenerator {
                     }
                 }
                 BodyExprKind::FieldAssignment => {
+                    // BT-3396: `self.log := self.log ++ #(self getValue)` —
+                    // thread every order-safe self-send nested in the RHS
+                    // as real `Bind`s BEFORE `source_version` is read (the
+                    // exact snapshot BT-3382's reverted prototype desynced)
+                    // and before the shared open helper mints its own step.
+                    if let Expression::Assignment { value, .. } = expr {
+                        self.hoist_nested_self_sends(
+                            value,
+                            &mut HoistSink::Threaded {
+                                stmts: &mut stmts,
+                                frame: threaded_ir::FrameId::ROOT,
+                                span,
+                            },
+                        )?;
+                    }
                     if is_last {
                         if let Expression::Assignment { target, value, .. } = expr {
                             if let Expression::FieldAccess { field, .. } = target.as_ref() {
@@ -1741,6 +1778,15 @@ impl CoreErlangGenerator {
                             let core_var = self
                                 .lookup_var(var_name)
                                 .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                            // BT-3396: `v := self log: (self nextId)`.
+                            self.hoist_self_send_arguments(
+                                value,
+                                &mut HoistSink::Threaded {
+                                    stmts: &mut stmts,
+                                    frame: threaded_ir::FrameId::ROOT,
+                                    span,
+                                },
+                            )?;
                             // Dispatch the self-send (threads state, returns dispatch var)
                             let (dispatch_doc, dispatch_var) =
                                 self.generate_self_dispatch_open(value)?;
@@ -1800,6 +1846,15 @@ impl CoreErlangGenerator {
                             let core_var = self
                                 .lookup_var(var_name)
                                 .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                            // BT-3396: `ok := (self recordOnce: x) and: [y]`.
+                            self.hoist_nested_self_sends(
+                                value,
+                                &mut HoistSink::Threaded {
+                                    stmts: &mut stmts,
+                                    frame: threaded_ir::FrameId::ROOT,
+                                    span,
+                                },
+                            )?;
                             let value_str = self.expression_doc(value)?;
                             self.bind_var(var_name, &core_var);
                             stmts.push(ThreadedStmt::Statement(
@@ -2019,6 +2074,15 @@ impl CoreErlangGenerator {
                     }
                 }
                 BodyExprKind::DispatchingSelfSend => {
+                    // BT-3396: `self log: (self nextId)`.
+                    self.hoist_self_send_arguments(
+                        expr,
+                        &mut HoistSink::Threaded {
+                            stmts: &mut stmts,
+                            frame: threaded_ir::FrameId::ROOT,
+                            span,
+                        },
+                    )?;
                     let (doc, dispatch_var) = self.generate_self_dispatch_open(expr)?;
                     stmts.push(ThreadedStmt::Statement(doc, span));
                     if is_last {
@@ -2031,7 +2095,23 @@ impl CoreErlangGenerator {
                         "EarlyReturn should be handled before match dispatch".to_string(),
                     ));
                 }
+                // BT-3396: the top-level counterpart of `conditionals.rs`'s
+                // C12 catch-all — `Array with: (self bump)`, `(self
+                // recordOnce: x) and: [y]`, `"{self next}"` as a method-body
+                // statement of its own. Every order-safe nested self-send
+                // is threaded as a real `Bind` ahead of the compile, so the
+                // `post_state` read after it (and the next statement) see
+                // the dispatch's `NewState`. No-op when there is nothing to
+                // hoist.
                 BodyExprKind::Pure => {
+                    self.hoist_nested_self_sends(
+                        expr,
+                        &mut HoistSink::Threaded {
+                            stmts: &mut stmts,
+                            frame: threaded_ir::FrameId::ROOT,
+                            span,
+                        },
+                    )?;
                     if is_last {
                         let expr_str = self.expression_doc(expr)?;
                         let post_state = self.current_state_var();
@@ -4977,7 +5057,11 @@ impl CoreErlangGenerator {
             // check — the two are independently-computed decisions that
             // must agree (see this file's own commentary on that class of
             // bug, e.g. BT-2356's "two decision points disagree" note).
-            if self.is_dispatching_actor_self_send(receiver.unwrap_parens()) {
+            // BT-3396: widened to any hoistable self-send in the receiver's
+            // sub-tree (`((self recordOnce: x) and: [y]) ifTrue: [...]`) —
+            // the same `Probe` walk `compile_conditional_receiver` emits
+            // with, so the two cannot disagree.
+            if self.contains_hoistable_self_send(receiver) {
                 return true;
             }
             for arg in arguments {
