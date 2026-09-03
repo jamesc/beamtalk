@@ -177,6 +177,115 @@ fn build_touch_without_content_change_is_not_recompiled() {
         .stderr(contains("unchanged").not());
 }
 
+/// BT-3410 acceptance criterion: an unchanged file's previously-known
+/// diagnostics must still be reported on every `build` invocation, not just
+/// the one that first recompiled it. Before the fix, `beamtalk build`'s
+/// incremental change-detection skipped diagnostic computation entirely for
+/// an unchanged file — a real diagnostic (even a non-fatal `Hint`, as here)
+/// was shown once and then silently vanished from every subsequent plain
+/// `build` until something forced a full recompile.
+#[test]
+fn build_replays_diagnostics_for_unchanged_file_on_every_run() {
+    let project = cli_common::fixture_project();
+    let greeter = project.path().join("src/Greeter.bt");
+    let original = std::fs::read_to_string(&greeter).unwrap();
+    // A DNU is only a `Hint` (non-fatal) — the build must still succeed both
+    // times, exercising the exact "shown once, then vanishes" trap from the
+    // issue rather than an error that would fail the build outright.
+    std::fs::write(
+        &greeter,
+        format!("{original}\n  typo => 3 fooBarBaz: 1 quux: 2\n"),
+    )
+    .unwrap();
+
+    // First build actually compiles the file and reports the diagnostic.
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success()
+        .stderr(contains("does not understand"));
+
+    // Second build sees no content change and skips recompilation — the
+    // diagnostic must still be reported, replayed from the incremental cache.
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success()
+        .stderr(
+            contains("unchanged")
+                .or(contains("nothing to compile"))
+                .and(contains("does not understand")),
+        );
+
+    // A third build confirms this isn't a one-time carry-over from the first
+    // (changed) build's own in-process state.
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success()
+        .stderr(contains("does not understand"));
+}
+
+/// BT-3410 review follow-up: a diagnostics-cache miss for an otherwise
+/// unchanged file (simulating a fresh sidecar right after upgrading to this
+/// feature, corruption, or a version bump) must self-heal within the *same*
+/// build — recompiling just that file — rather than silently reporting
+/// nothing for it until its content changes or `--force` is used.
+#[test]
+fn build_recompiles_unchanged_file_on_diagnostics_cache_miss() {
+    let project = cli_common::fixture_project();
+    let greeter = project.path().join("src/Greeter.bt");
+    let original = std::fs::read_to_string(&greeter).unwrap();
+    std::fs::write(
+        &greeter,
+        format!("{original}\n  typo => 3 fooBarBaz: 1 quux: 2\n"),
+    )
+    .unwrap();
+
+    // First build populates both the beam-hash and diagnostics sidecars.
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success()
+        .stderr(contains("does not understand"));
+
+    let diagnostics_cache = project
+        .path()
+        .join("_build/dev/ebin/.beamtalk-diagnostics-cache.json");
+    assert!(
+        diagnostics_cache.exists(),
+        "expected a diagnostics cache sidecar at {diagnostics_cache:?} after the first build"
+    );
+    std::fs::remove_file(&diagnostics_cache).unwrap();
+
+    // Second build: the beam-hash cache still says Greeter.bt is unchanged,
+    // but the diagnostics cache has no entry for it — this must trigger a
+    // real recompile of just that file (not a silent "nothing to compile"
+    // that drops the diagnostic).
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success()
+        .stderr(contains("does not understand").and(contains("nothing to compile").not()));
+
+    // Third build: the diagnostics cache is repopulated, so this returns to
+    // the normal unchanged/replay path.
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success()
+        .stderr(
+            contains("does not understand")
+                .and(contains("unchanged").or(contains("nothing to compile"))),
+        );
+}
+
 // ---------------------------------------------------------------------------
 // BT-2920: E0401/E0402 visibility checks must fire at build time
 // ---------------------------------------------------------------------------

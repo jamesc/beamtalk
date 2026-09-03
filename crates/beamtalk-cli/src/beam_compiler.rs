@@ -701,6 +701,16 @@ pub struct CompileContext<'a> {
     /// `[diagnostics]` section (ADR 0100 Rule 3). Empty when the package has
     /// no manifest or no `[diagnostics]` section — absence preserves today's
     /// Rule 1 completeness-ladder defaults.
+    ///
+    /// BT-3410: an unchanged file's diagnostics, replayed from `build.rs`'s
+    /// diagnostics sidecar instead of recompiled, keep whatever
+    /// `diagnostics_overrides` (and `suppress_warnings`/`warnings_as_errors`)
+    /// were in effect the last time that file was *actually* compiled.
+    /// Editing `beamtalk.toml`'s `[diagnostics]` table, or passing different
+    /// warning flags, without touching any `.bt` source therefore doesn't
+    /// re-filter already-unchanged files until they're next recompiled
+    /// (content change or `--force`) — a known, narrow limitation of the
+    /// replay path, not a bug in this field itself.
     pub diagnostics_overrides: crate::commands::manifest::DiagnosticsTable,
 }
 
@@ -824,8 +834,6 @@ pub(crate) fn compile_source_with_bindings(
     ctx: &CompileContext<'_>,
     cached_ast: Option<crate::commands::build::CachedAst>,
 ) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
-    use crate::diagnostic::CompileDiagnostic;
-
     debug!("Compiling module '{}' with bindings", module_name);
 
     // BT-1544: Reuse pre-parsed source + AST from Pass 1 when available,
@@ -939,33 +947,12 @@ pub(crate) fn compile_source_with_bindings(
             diagnostic_count = diagnostics.len(),
             "Found diagnostics during compilation"
         );
-        for diagnostic in &diagnostics {
-            // Skip warnings and hints when suppress_warnings is enabled.
-            // Always skip Lint diagnostics during normal compilation — they are
-            // only shown by `beamtalk lint`.
-            if matches!(
-                diagnostic.severity,
-                beamtalk_core::source_analysis::Severity::Lint
-            ) {
-                continue;
-            }
-            // Suppress warnings/hints only when suppress_warnings is set AND
-            // warnings_as_errors is not — if warnings_as_errors is on, the diagnostic
-            // caused a failure and must be shown regardless of suppress_warnings.
-            if options.suppress_warnings
-                && !options.warnings_as_errors
-                && matches!(
-                    diagnostic.severity,
-                    beamtalk_core::source_analysis::Severity::Warning
-                        | beamtalk_core::source_analysis::Severity::Hint
-                )
-            {
-                continue;
-            }
-            let compile_diag =
-                CompileDiagnostic::from_core_diagnostic(diagnostic, source_path.as_str(), &source);
-            eprintln!("{:?}", miette::Report::new(compile_diag));
-        }
+        crate::diagnostic::print_diagnostics_text(
+            &diagnostics,
+            source_path.as_str(),
+            &source,
+            options,
+        );
     }
 
     if has_errors {
