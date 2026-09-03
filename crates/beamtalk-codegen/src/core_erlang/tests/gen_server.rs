@@ -6818,6 +6818,38 @@ fn bt3392_binary_op_hoist_does_not_reorder_past_a_non_self_send_operand() {
 }
 
 #[test]
+fn bt3399_order_unsafe_self_send_in_binary_op_emits_warning_and_still_compiles() {
+    // BT-3399: same order-unsafe shape as the test above — `(self.items at:
+    // idx) + (self bumpCount)` — but this time asserting the *fallback's*
+    // own behavior rather than just that it compiles: the un-hoisted
+    // self-send's mutation is silently dropped (no `element(2, ...)`
+    // extraction for it — only the field-write path via `bumpCount`'s own
+    // body, which never runs here through the C12 catch-all), and a
+    // compile-time warning is emitted naming the dropped self-send so this
+    // silent-drop case is at least visible. Regression coverage for the
+    // in-bounds/non-raising case BT-3392's own regression test
+    // (`bt3392_binary_op_hoist_does_not_reorder_past_a_non_self_send_operand`)
+    // left uncovered.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = 0\n\n  triggerDirectly: flag =>\n    flag ifTrue: [\n      (self.items at: 1) + (self bumpCount)\n    ] ifFalse: [\n      0\n    ].\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let generated = generate_module_with_warnings(
+        &module,
+        CodegenOptions::new("bt3399_order_unsafe_self_send_warning").with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert_compiles_through_erlc("bt3399_order_unsafe_self_send_warning", &generated.code);
+    assert!(
+        generated
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("bumpCount") && w.message.contains("silently dropped")),
+        "expected a warning naming the dropped `bumpCount` self-send. Got: {:?}",
+        generated.warnings
+    );
+}
+
+#[test]
 fn bt3396_self_dispatch_nested_in_conditional_receiver_and_threads_state_and_compiles_through_erlc()
 {
     // BT-3396 shape 1: `((self recordOnce: which) and: [true]) ifTrue:ifFalse:`

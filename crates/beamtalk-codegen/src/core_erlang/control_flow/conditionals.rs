@@ -60,7 +60,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression, MessageSelector, StringSegment};
-use beamtalk_core::source_analysis::Span;
+use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 impl CoreErlangGenerator {
     /// BT-2355: Seeds the `__local__` keys for the outer locals a conditional's
@@ -239,6 +239,26 @@ impl CoreErlangGenerator {
     /// (`in_class_method()`): a class-method self-send threads `ClassVars`
     /// (ADR 0110), never `State`, and never reaches
     /// `try_handle_self_dispatch` — same exclusion as C0b (BT-3374).
+    ///
+    /// BT-3399: a self-send left un-hoisted by the order-safety check above
+    /// still falls through to the C12 catch-all's plain
+    /// `expression_doc(expr)` compile, which routes it through the
+    /// ordinary, still-discarding `generate_self_dispatch` path — so its
+    /// mutation (if any) is silently dropped, exactly as every such
+    /// self-send's mutation was before BT-3392/BT-3396, just narrowed to
+    /// this order-unsafe subset. Fully preserving the mutation here would
+    /// require interleaving hoisted `Bind`s with placeholders for the
+    /// non-hoisted subtrees at their natural position, which the C12
+    /// catch-all's generic, AST-directed `expression_doc` call does not
+    /// support without teaching general expression codegen about
+    /// state-threading placeholders (exactly what CLAUDE.md's "general
+    /// expression codegen stays AST-directed" rule rules out doing
+    /// informally). Judged out of scope for this fix: instead,
+    /// [`HoistAction::Dropped`] records the occurrence during the walk and
+    /// [`Self::emit_hoist_plan`] turns it into a compile-time warning
+    /// (`warn_order_unsafe_self_send_dropped`) at the self-send's own span,
+    /// so this silent drop is at least visible, rather than invisible, to
+    /// the author of the code that triggers it.
     pub(in crate::core_erlang) fn hoist_nested_self_sends(
         &mut self,
         expr: &Expression,
@@ -316,11 +336,17 @@ impl CoreErlangGenerator {
             for arg in arguments {
                 self.hoist_plan_walk(arg, walk);
             }
-            if !walk.safe_to_hoist
-                || self
-                    .hoisted_self_send_results
-                    .contains_key(&receiver.span())
+            if self
+                .hoisted_self_send_results
+                .contains_key(&receiver.span())
             {
+                return;
+            }
+            if !walk.safe_to_hoist {
+                // BT-3399: cannot be safely hoisted ahead of an earlier,
+                // non-effect-free operand — record it so `emit_hoist_plan`
+                // can warn, rather than silently dropping the mutation.
+                walk.actions.push(HoistAction::Dropped(expr));
                 return;
             }
             let reads = std::mem::take(&mut walk.pending_field_reads);
@@ -464,9 +490,45 @@ impl CoreErlangGenerator {
                     }
                     self.hoisted_field_reads.insert(field.span, snap_var);
                 }
+                HoistAction::Dropped(send) => {
+                    self.warn_order_unsafe_self_send_dropped(send);
+                }
             }
         }
         Ok(())
+    }
+
+    /// BT-3399: emits a warning for a self-send that [`Self::hoist_plan_walk`]
+    /// recorded as [`HoistAction::Dropped`] — left un-hoisted because a
+    /// preceding, non-effect-free operand in the same expression made
+    /// hoisting order-unsafe. That self-send still compiles — through the
+    /// C12 catch-all's ordinary `expression_doc`/`generate_self_dispatch`
+    /// path — but its actor-state mutation, if any, is silently dropped;
+    /// this warning is the only signal the author gets that it happened.
+    /// `self_send` must be the (already paren-unwrapped) `MessageSend`
+    /// node itself, matching the shape `is_dispatching_actor_self_send`
+    /// just confirmed for it.
+    fn warn_order_unsafe_self_send_dropped(&mut self, self_send: &Expression) {
+        let Expression::MessageSend { selector, span, .. } = self_send else {
+            return;
+        };
+        self.add_codegen_warning(
+            Diagnostic::warning(
+                format!(
+                    "self-send `{}` follows an earlier sub-expression in the same \
+                     expression that may raise or have a side effect, \
+                     so it cannot be safely hoisted ahead of it — its actor-state mutation \
+                     (if any) is silently dropped",
+                    selector.name()
+                ),
+                *span,
+            )
+            .with_hint(
+                "extract this self-send into its own statement before the expression, or \
+                 reorder the expression so the self-send is evaluated first",
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
     }
 }
 
@@ -499,6 +561,12 @@ enum HoistAction<'e> {
     /// Dispatch this actor self-send (a `MessageSend` node) and register
     /// its result.
     Dispatch(&'e Expression),
+    /// BT-3399: this actor self-send (a `MessageSend` node) could not be
+    /// safely hoisted ahead of an earlier, non-effect-free operand — its
+    /// mutation (if any) is silently dropped by the ordinary
+    /// `expression_doc` compile that follows, so `emit_hoist_plan` warns
+    /// at its span via `warn_order_unsafe_self_send_dropped`.
+    Dropped(&'e Expression),
 }
 
 /// Per-walk traversal state for
@@ -1622,7 +1690,11 @@ impl CoreErlangGenerator {
                 // `hoist_nested_self_sends`'s doc comment. When nothing
                 // needed hoisting (the overwhelmingly common case), this is
                 // a no-op and `expression_doc` below behaves exactly as
-                // before.
+                // before. BT-3399: a self-send left un-hoisted because an
+                // earlier operand made hoisting order-unsafe still silently
+                // drops its mutation through `expression_doc` below —
+                // `hoist_nested_self_sends` emits a compile-time warning for
+                // that case so it's at least visible.
                 _ => {
                     self.hoist_nested_self_sends(
                         expr,

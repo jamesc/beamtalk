@@ -142,6 +142,23 @@ TestCase subclass: ActorConditionalMutationsTest
     ] raise: #index_out_of_bounds
     self assert: self.c getCount equals: 0
 
+  testSelfSendAsBinaryOpArgumentInBoundsStillDropsMutationSilently =>
+    // BT-3399: same `(self.items at: idx) + (self bumpCount: true)` shape as
+    // above, but with `idx` IN BOUNDS this time — so `at:` succeeds and
+    // `bumpCount:` runs. BT-3392's own fallback (leaving an order-unsafe
+    // self-send un-hoisted, since `at:` could have raised) routes
+    // `bumpCount:` through the ordinary, still-discarding
+    // `generate_self_dispatch` path, so its mutation is silently lost —
+    // `getCount` stays 0 even though `bumpCount:` demonstrably ran (its
+    // return value, 1, is added to `at:`'s result and thrown away since
+    // this is the block's only, non-last statement). This is a known,
+    // documented limitation (see `hoist_self_sends_for_binary_op`'s doc
+    // comment) now surfaced via a compile-time codegen warning rather than
+    // fixed outright — pinned here as a regression guard on the observable
+    // (still-dropped) behavior, not a claim that it's correct.
+    self assert: (self.c orderSensitiveBinaryOp: 1 flag: true) equals: 0
+    self assert: self.c getCount equals: 0
+
   testSelfSendInsideOnDoProtectedBlockAlreadyThreadsMutation =>
     // BT-3392: verifies the shape confirmed against the actual
     // beamtalk-watcher source (`CheckRegistry.bt`'s `spawnMonitorFor:`
