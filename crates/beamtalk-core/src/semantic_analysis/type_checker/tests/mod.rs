@@ -28,6 +28,7 @@ mod bt2872_and_not_nil_narrowing;
 mod bt2879_cascade_meta_branch;
 mod bt2949_generic_container_element_check;
 mod bt3075_never_through_class_side_send;
+mod bt3408_dictionary_at_ifabsent_block_return_widening;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;

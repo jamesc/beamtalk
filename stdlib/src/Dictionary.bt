@@ -57,11 +57,16 @@ sealed typed Collection(V) subclass: Dictionary(K, V)
 
   /// Return the value for `key`, or evaluate `block` if absent.
   ///
+  /// `block`'s return type need not match `V` — e.g. `dict at: k ifAbsent:
+  /// [nil]` type-checks as `V | Nil` even when `V` doesn't itself include
+  /// `Nil`, the same way `Behaviour>>removeSelector:ifAbsent:` widens
+  /// through its own absent-block.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #{#a => 1} at: #b ifAbsent: [0]            // => 0
   /// ```
-  at: key :: K ifAbsent: block :: Block(V) -> V => @primitive
+  at: key :: K ifAbsent: block :: Block(T) -> V | T => @primitive
 
   /// Return a new dictionary with `key` mapped to `value`.
   ///
