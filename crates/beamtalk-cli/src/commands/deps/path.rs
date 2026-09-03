@@ -64,6 +64,26 @@ pub struct ResolvedDependency {
     /// dep is reached. E.g., `["json"]` if the root depends on `json` which
     /// depends on this package. Empty for direct dependencies.
     pub via_chain: Vec<String>,
+    /// This dependency's own package-bundled FFI type stubs directory (ADR
+    /// 0075 layer 2), resolved from its `beamtalk.toml` `[stubs] path` —
+    /// `None` if it declares no `[stubs]` section. Covers only this
+    /// package's own native code, never its own dependencies' stubs.
+    pub stubs_dir: Option<Utf8PathBuf>,
+}
+
+/// Resolve a dependency's own package-bundled stubs directory (ADR 0075
+/// layer 2) from its `beamtalk.toml` `[stubs] path`.
+///
+/// Returns `None` if the dependency declares no `[stubs]` section, or if its
+/// manifest cannot be parsed (already validated earlier in discovery).
+pub(crate) fn resolve_dep_stubs_dir(
+    dep_manifest: &ParsedManifest,
+    dep_root: &Utf8Path,
+) -> Option<Utf8PathBuf> {
+    dep_manifest
+        .stubs
+        .as_ref()
+        .map(|stubs| dep_root.join(&stubs.path))
 }
 
 /// Resolve and compile all path dependencies for a package.
@@ -253,6 +273,8 @@ fn resolve_single_path_dep(
     let (_, class_infos, protocol_infos, alias_infos) =
         build_dep_class_index(&dep_root, name).unwrap_or_default();
 
+    let stubs_dir = resolve_dep_stubs_dir(&dep_manifest, &dep_root);
+
     resolved.push(ResolvedDependency {
         name: name.to_string(),
         root: dep_root.clone(),
@@ -263,6 +285,7 @@ fn resolve_single_path_dep(
         alias_infos,
         is_direct: true, // Legacy path — all treated as direct
         via_chain: Vec::new(),
+        stubs_dir,
     });
 
     Ok(())
@@ -302,6 +325,10 @@ pub(crate) fn compile_dependency_at(
     let (_, class_infos, protocol_infos, alias_infos) =
         build_dep_class_index(dep_root, dep_name).unwrap_or_default();
 
+    let stubs_dir = manifest::parse_manifest_full(&dep_root.join("beamtalk.toml"))
+        .ok()
+        .and_then(|dep_manifest| resolve_dep_stubs_dir(&dep_manifest, dep_root));
+
     Ok(ResolvedDependency {
         name: dep_name.to_string(),
         root: dep_root.to_path_buf(),
@@ -312,6 +339,7 @@ pub(crate) fn compile_dependency_at(
         alias_infos,
         is_direct: false, // Caller sets this based on graph knowledge
         via_chain: Vec::new(),
+        stubs_dir,
     })
 }
 
@@ -901,6 +929,60 @@ pkg_b = { path = "pkg_b" }"#,
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].name, "pkg_c");
         assert_eq!(result[1].name, "pkg_b");
+    }
+
+    /// ADR 0075 layer 2: a path dependency's own `[stubs] path` is recorded
+    /// as an absolute `stubs_dir` on its `ResolvedDependency`.
+    #[test]
+    fn test_resolve_dep_records_own_stubs_dir() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let dep_dir = temp.path().join("dep_pkg");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "dep_pkg", "0.1.0", "[stubs]\npath = \"stubs/\"\n");
+
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            r#"[dependencies]
+dep_pkg = { path = "dep_pkg" }"#,
+        );
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = resolve_path_dependencies(&project_root, &options).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].stubs_dir,
+            Some(Utf8PathBuf::from_path_buf(dep_dir.join("stubs")).unwrap())
+        );
+    }
+
+    /// A dependency with no `[stubs]` section resolves to `stubs_dir: None`.
+    #[test]
+    fn test_resolve_dep_without_stubs_section_is_none() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let dep_dir = temp.path().join("dep_pkg");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "dep_pkg", "0.1.0", "");
+
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            r#"[dependencies]
+dep_pkg = { path = "dep_pkg" }"#,
+        );
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = resolve_path_dependencies(&project_root, &options).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].stubs_dir, None);
     }
 
     #[test]

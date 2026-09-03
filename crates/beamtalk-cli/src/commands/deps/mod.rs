@@ -172,6 +172,9 @@ struct DiscoveredDep {
     /// commonly declares only a path dependency, with the git/registry dep
     /// whose version actually matters appearing several levels down.
     source: beamtalk_core::compilation::DependencySource,
+    /// This dependency's own package-bundled FFI type stubs directory (ADR
+    /// 0075 layer 2), from its own `beamtalk.toml` `[stubs] path`.
+    stubs_dir: Option<Utf8PathBuf>,
 }
 
 /// Recursively discover all dependency names and roots by walking manifests.
@@ -238,6 +241,15 @@ fn discover_all_dep_roots(
 
             let is_direct = direct_names.contains(dep_name.as_str());
 
+            // Parse this dep's own manifest up front so its package-bundled
+            // stubs (ADR 0075 layer 2, one hop only — never its own deps'
+            // stubs) can be recorded alongside it.
+            let dep_manifest_path = dep_root.join("beamtalk.toml");
+            let dep_parsed = manifest::parse_manifest_full(&dep_manifest_path).ok();
+            let stubs_dir = dep_parsed
+                .as_ref()
+                .and_then(|m| path::resolve_dep_stubs_dir(m, &dep_root));
+
             result.push(DiscoveredDep {
                 name: dep_name.clone(),
                 root: dep_root.clone(),
@@ -249,11 +261,11 @@ fn discover_all_dep_roots(
                     via_chain.clone()
                 },
                 source: spec.source.clone(),
+                stubs_dir,
             });
 
             // Enqueue this dep's own dependencies for discovery
-            let dep_manifest_path = dep_root.join("beamtalk.toml");
-            if let Ok(dep_parsed) = manifest::parse_manifest_full(&dep_manifest_path) {
+            if let Some(dep_parsed) = dep_parsed {
                 if !dep_parsed.dependencies.is_empty() {
                     let mut child_chain = via_chain.clone();
                     child_chain.push(dep_name.clone());
@@ -303,6 +315,7 @@ fn collect_fresh_deps(
             alias_infos,
             is_direct: dep.is_direct,
             via_chain: dep.via_chain.clone(),
+            stubs_dir: dep.stubs_dir.clone(),
         });
     }
 
@@ -1309,6 +1322,7 @@ mod tests {
             alias_infos: Vec::new(),
             is_direct: true,
             via_chain: Vec::new(),
+            stubs_dir: None,
         }];
 
         clean_stale_deps(&root, &resolved).unwrap();
@@ -1341,6 +1355,7 @@ mod tests {
                 alias_infos: Vec::new(),
                 is_direct: true,
                 via_chain: Vec::new(),
+                stubs_dir: None,
             },
             path::ResolvedDependency {
                 name: "b".to_string(),
@@ -1352,6 +1367,7 @@ mod tests {
                 alias_infos: Vec::new(),
                 is_direct: true,
                 via_chain: Vec::new(),
+                stubs_dir: None,
             },
         ];
 

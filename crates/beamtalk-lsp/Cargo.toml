@@ -30,6 +30,10 @@ beamtalk-language-service = { workspace = true, features = ["serde"] }
 # out of `beamtalk-core` into a standalone crate.
 beamtalk-project.workspace = true
 beamtalk-repl-protocol = { workspace = true }
+# why: shared leaf for deriving the installation sysroot from the running
+# executable path (see docs/development/architecture-principles.md §6) —
+# used to locate installed stdlib sources under `{sysroot}/share/beamtalk/`.
+beamtalk-sysroot = { workspace = true }
 beamtalk-workspace = { workspace = true }
 tower-lsp = { workspace = true }
 tokio = { workspace = true }

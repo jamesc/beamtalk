@@ -480,7 +480,7 @@ fn main() {
 /// running binary, falling back to `/usr/local`.
 fn compute_sysroot() -> PathBuf {
     match std::env::current_exe() {
-        Ok(exe) => sysroot_from_exe_path(&exe),
+        Ok(exe) => sysroot_from_exe_path_or_fallback(&exe),
         Err(err) => {
             eprintln!("warning: failed to read executable path: {err}; falling back to /usr/local");
             PathBuf::from("/usr/local")
@@ -488,18 +488,19 @@ fn compute_sysroot() -> PathBuf {
     }
 }
 
-/// Derives the sysroot from a (real or hypothetical) binary path, split out
-/// from [`compute_sysroot`] so the "no grandparent directory" fallback branch
-/// is reachable without depending on `std::env::current_exe()`'s actual value.
-fn sysroot_from_exe_path(exe: &std::path::Path) -> PathBuf {
-    if let Some(sysroot) = exe.parent().and_then(|bin| bin.parent()) {
-        return sysroot.to_path_buf();
-    }
-    eprintln!(
-        "warning: unable to determine sysroot from '{}'; falling back to /usr/local",
-        exe.display()
-    );
-    PathBuf::from("/usr/local")
+/// Wraps the shared [`beamtalk_sysroot::sysroot_from_exe_path`] derivation
+/// with this binary's own fallback behavior — a warning to stderr and
+/// `/usr/local` when the sysroot can't be derived. Split out from
+/// [`compute_sysroot`] so the fallback branch is testable without depending
+/// on `std::env::current_exe()`'s actual value.
+fn sysroot_from_exe_path_or_fallback(exe: &std::path::Path) -> PathBuf {
+    beamtalk_sysroot::sysroot_from_exe_path(exe).unwrap_or_else(|| {
+        eprintln!(
+            "warning: unable to determine sysroot from '{}'; falling back to /usr/local",
+            exe.display()
+        );
+        PathBuf::from("/usr/local")
+    })
 }
 
 /// CLI entry point: parse arguments and dispatch to the appropriate subcommand.
@@ -744,12 +745,19 @@ fn dispatch_command(command: Command) -> Result<()> {
 mod tests {
     use super::*;
 
-    // --- sysroot_from_exe_path ---
+    // --- sysroot_from_exe_path_or_fallback ---
+    //
+    // The pure "walk up two parents" derivation itself is tested in
+    // `beamtalk-sysroot` (the shared leaf both this binary and beamtalk-lsp
+    // depend on); these tests cover only this binary's own fallback wrapper.
 
     #[test]
     fn sysroot_from_exe_path_returns_grandparent_of_binary() {
         let exe = PathBuf::from("/opt/beamtalk/bin/beamtalk");
-        assert_eq!(sysroot_from_exe_path(&exe), PathBuf::from("/opt/beamtalk"));
+        assert_eq!(
+            sysroot_from_exe_path_or_fallback(&exe),
+            PathBuf::from("/opt/beamtalk")
+        );
     }
 
     #[test]
@@ -757,14 +765,20 @@ mod tests {
         // A bare filename has no parent directories to walk up from, so the
         // fallback path is used (and a warning printed to stderr).
         let exe = PathBuf::from("beamtalk");
-        assert_eq!(sysroot_from_exe_path(&exe), PathBuf::from("/usr/local"));
+        assert_eq!(
+            sysroot_from_exe_path_or_fallback(&exe),
+            PathBuf::from("/usr/local")
+        );
     }
 
     #[test]
     fn sysroot_from_exe_path_falls_back_with_single_component() {
         // "/beamtalk" has a parent ("/") but that parent has no parent itself.
         let exe = PathBuf::from("/beamtalk");
-        assert_eq!(sysroot_from_exe_path(&exe), PathBuf::from("/usr/local"));
+        assert_eq!(
+            sysroot_from_exe_path_or_fallback(&exe),
+            PathBuf::from("/usr/local")
+        );
     }
 
     // --- dispatch_command: safe validation branches (no filesystem/subprocess) ---

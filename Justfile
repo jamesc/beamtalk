@@ -1768,6 +1768,19 @@ install PREFIX="/usr/local": build-release build-stdlib
         done
     fi
 
+    # Curated distribution FFI type stubs (ADR 0075 layer 3), discovered at
+    # runtime via the same sysroot convention as the stdlib sources above.
+    # A no-op until curated stub content exists (BT-1848) — the repo ships
+    # no root-level stubs/ directory yet.
+    DIST_STUBS_SRC="stubs"
+    if [ -d "${DIST_STUBS_SRC}" ]; then
+        find "${DIST_STUBS_SRC}" -type f -name '*.bt' | while read -r bt; do
+            rel="${bt#"${DIST_STUBS_SRC}"/}"
+            install -d "${PREFIX}/share/beamtalk/stubs/$(dirname "${rel}")"
+            install -m 644 "${bt}" "${PREFIX}/share/beamtalk/stubs/${rel}"
+        done
+    fi
+
     echo "✅ Installed beamtalk to ${PREFIX}"
     echo "   Binary:  ${PREFIX}/bin/beamtalk"
     echo "   LSP:     ${PREFIX}/bin/beamtalk-lsp"

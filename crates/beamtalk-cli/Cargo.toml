@@ -38,6 +38,10 @@ beamtalk-lint.workspace = true
 beamtalk-project.workspace = true
 beamtalk-repl.workspace = true
 beamtalk-repl-protocol.workspace = true
+# why: shared leaf for deriving the installation sysroot from the running
+# executable path (see docs/development/architecture-principles.md §6) —
+# used by `--print-sysroot` and distribution FFI stub discovery (ADR 0075).
+beamtalk-sysroot.workspace = true
 beamtalk-workspace.workspace = true
 # why: BT-3117 -- test_metamorphic's AST name-renaming transform keys its
 # rename map by beamtalk-core's identifier name type (EcoString) directly,

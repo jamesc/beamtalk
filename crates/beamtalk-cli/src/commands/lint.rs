@@ -224,14 +224,18 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // Merge dependency class/protocol/alias metadata so lint sees the same
     // cross-package picture as build. Without this, @expect annotations that
     // suppress real cross-package diagnostics would be reported as stale.
-    if let Some(ref project_root) = package_root {
+    // The resolved deps are also needed below for their `stubs_dir`s (ADR
+    // 0075 layer 2).
+    let resolved_deps = if let Some(ref project_root) = package_root {
         merge_dependency_infos(
             project_root,
             &mut all_class_infos,
             &mut all_protocol_infos,
             &mut all_alias_infos,
-        );
-    }
+        )
+    } else {
+        Vec::new()
+    };
 
     // BT-2134 / BT-2851: Populate the FFI type registry via the same
     // `extract_type_specs` that `beamtalk build` calls, instead of only
@@ -245,23 +249,37 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // build`/`test` agree on the FFI type registry by construction: a fresh
     // cache still short-circuits to zero `.beam` reads, and a cold/stale one
     // extracts once and writes the same cache a subsequent build would.
-    // BT-1847: project-local stubs/ override auto-extract at the
-    // function/arity level — same merge `beamtalk build` performs, via the
-    // same shared `load_project_stub_registry`, so `beamtalk lint` and
+    // BT-1847 / BT-3394: the full ADR 0075 stub resolution chain overrides
+    // auto-extract at the function/arity level — same merge `beamtalk build`
+    // performs, via the same shared loaders, so `beamtalk lint` and
     // `beamtalk build` agree on stub-derived FFI types too, not just
-    // auto-extracted ones. `load_project_stub_registry` prints its own
-    // diagnostics (skipped signatures, version drift) directly; they are
-    // not folded into `all_diags` below, which is scoped to `.bt` diagnostics.
+    // auto-extracted ones. These loaders print their own diagnostics
+    // (skipped signatures, version drift) directly; they are not folded into
+    // `all_diags` below, which is scoped to `.bt` diagnostics.
     let native_type_registry = package_root.as_deref().and_then(|root| {
         let layout = crate::commands::build_layout::BuildLayout::new(root);
         let auto_extract = super::build::extract_type_specs(&layout, true, false);
-        match super::build::load_project_stub_registry(root, auto_extract.as_ref(), format) {
-            Some((stub_registry, _stub_diags)) => {
-                let mut merged = auto_extract.unwrap_or_default();
-                merged.apply_overrides(stub_registry);
-                Some(merged)
+
+        let dependency_stubs = super::build::load_dependency_stub_registries(
+            &resolved_deps,
+            super::build::distribution_stubs_dir().as_deref(),
+            auto_extract.as_ref(),
+            format,
+        );
+        let project_stubs =
+            super::build::load_project_stub_registry(root, auto_extract.as_ref(), format);
+
+        if dependency_stubs.is_none() && project_stubs.is_none() {
+            auto_extract
+        } else {
+            let mut merged = auto_extract.unwrap_or_default();
+            if let Some((dep_registry, _dep_diags)) = dependency_stubs {
+                merged.apply_overrides(dep_registry);
             }
-            None => auto_extract,
+            if let Some((stub_registry, _stub_diags)) = project_stubs {
+                merged.apply_overrides(stub_registry);
+            }
+            Some(merged)
         }
         .map(std::sync::Arc::new)
     });
@@ -693,12 +711,17 @@ pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
 /// BT-2910: Renamed from `merge_dependency_class_infos` — now also merges
 /// `dep.protocol_infos`/`dep.alias_infos`, giving `beamtalk lint` the same
 /// cross-package protocol/alias resolution `beamtalk build` has.
+/// Resolves the project's dependencies, merges their class/protocol/alias
+/// metadata into the running lists, and returns the resolved dependencies
+/// (empty on resolution failure) so callers can also use their
+/// `stubs_dir`s (ADR 0075 layer 2) — see [`run_lint`]'s
+/// `native_type_registry` construction.
 fn merge_dependency_infos(
     project_root: &Utf8Path,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     all_protocol_infos: &mut Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     all_alias_infos: &mut Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
-) {
+) -> Vec<super::deps::path::ResolvedDependency> {
     let options = beamtalk_core::CompilerOptions::default();
     match super::deps::ensure_deps_resolved(project_root, &options) {
         Ok(resolved_deps) => {
@@ -707,6 +730,7 @@ fn merge_dependency_infos(
                 all_protocol_infos.extend(dep.protocol_infos.clone());
                 all_alias_infos.extend(dep.alias_infos.clone());
             }
+            resolved_deps
         }
         Err(e) => {
             warn!(
@@ -714,6 +738,7 @@ fn merge_dependency_infos(
                 "Failed to resolve dependencies for lint; \
                  dependency classes/protocols/aliases may not be available"
             );
+            Vec::new()
         }
     }
 }
