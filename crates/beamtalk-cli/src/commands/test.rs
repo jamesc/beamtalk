@@ -2186,7 +2186,9 @@ mod tests {
 
     fn temp_utf8_dir() -> (tempfile::TempDir, Utf8PathBuf) {
         let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let canonical =
+            std::fs::canonicalize(temp.path()).unwrap_or_else(|_| temp.path().to_path_buf());
+        let dir = Utf8PathBuf::from_path_buf(canonical).unwrap();
         (temp, dir)
     }
 
