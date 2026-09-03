@@ -36,6 +36,18 @@ Actor subclass: NestedSelfSendCounter
   recordViaAndInsideIfTrue: flag =>
     ((self recordOnce: flag) and: [true]) ifTrue: [#recorded] ifFalse: [#gaveUp]
 
+  // BT-3405: self-sends nested inside a BINARY-OP OPERAND of an and:'s own
+  // RECEIVER (not the receiver itself, and not inside the block argument),
+  // with the and: itself the receiver of an outer ifTrue:ifFalse:. Both
+  // `bumpCount` self-sends must thread — before the fix,
+  // `and_or_needs_mutation_threading`'s receiver check only recognized a
+  // bare self-send receiver, so this shape fell through to plain
+  // (non-hoisting) codegen and silently dropped one mutation.
+  recordViaAndReceiverBinaryOp: flag =>
+    ((self bumpCount) + (self bumpCount) > 0 and: [
+      flag
+    ]) ifTrue: [#yes] ifFalse: [#no]
+
   // Shape 2: self-send as an argument to an arbitrary (non-self) keyword
   // send, as the method's last statement.
   recordViaKeywordArgument => self.items at: (self bumpCount)

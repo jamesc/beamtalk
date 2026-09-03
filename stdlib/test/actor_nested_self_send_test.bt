@@ -49,6 +49,16 @@ TestCase subclass: ActorNestedSelfSendTest
     self assert: (self.c recordViaAndInsideIfTrue: false) equals: #gaveUp
     self assert: self.c getCount equals: 2
 
+  testSelfSendsInAndReceiverBinaryOpThreadBothMutations =>
+    // BT-3405: `((self bumpCount) + (self bumpCount) > 0 and: [flag])
+    // ifTrue:ifFalse:` — both self-sends are nested inside a binary-op
+    // operand of the and:'s receiver (not the receiver itself). Before the
+    // fix, one of the two `bumpCount` mutations was silently dropped.
+    self assert: (self.c recordViaAndReceiverBinaryOp: true) equals: #yes
+    self assert: self.c getCount equals: 2
+    self assert: (self.c recordViaAndReceiverBinaryOp: false) equals: #no
+    self assert: self.c getCount equals: 4
+
   testSelfSendAsKeywordArgumentThreadsMutation =>
     // Shape 2: `self.items at: (self bumpCount)` — bumpCount returns 1, so
     // at: 1 => 10 proves it ran; the count proves the mutation survived.
