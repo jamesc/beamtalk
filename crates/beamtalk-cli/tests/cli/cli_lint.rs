@@ -34,6 +34,32 @@ fn lint_succeeds_with_project_local_stubs_directory() {
         .success();
 }
 
+/// BT-3404 review fix: `collect_lint_files`'s `stubs/` exclusion above only
+/// applies to a *directory* walk (no path argument) — a direct single-file
+/// target bypasses it entirely, so once `check_native_declaration_location`'s
+/// diagnostic gained a category (making it survive `collect_diagnostics`'s
+/// `category.is_some()` filter), a legitimate `stubs/lists.bt` linted
+/// directly by path would have started reporting a false "only valid in
+/// stubs/ directory" error. `collect_diagnostics`'s caller must derive
+/// `is_stub_file` itself (`beamtalk_project::package::is_under_stubs_dir`),
+/// the same way MCP's `run_module_analysis` already does for BT-3398.
+#[test]
+fn lint_direct_file_target_succeeds_on_legitimate_stub_file() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("stubs")).expect("mkdir stubs");
+    std::fs::write(
+        project.path().join("stubs/lists.bt"),
+        "declare native: lists\n  reverse: list :: List -> List\n",
+    )
+    .expect("write stubs/lists.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["lint", "stubs/lists.bt"])
+        .assert()
+        .stderr(contains("only valid in stubs/ directory").not());
+}
+
 /// Review follow-up on PR #3679: `load_project_stub_registry`'s own stub
 /// diagnostics (skipped signatures, version drift) used to always render as
 /// miette text on stderr regardless of `--format`, so a machine consumer of
@@ -59,6 +85,42 @@ fn lint_json_format_streams_stub_diagnostics_as_json_lines() {
         .stdout(contains("definitelyNotARealExport"))
         .stdout(contains("out of date"))
         .stderr(contains("definitelyNotARealExport").not());
+}
+
+/// BT-3404 regression: `check_native_declaration_location`'s diagnostic
+/// previously had no `DiagnosticCategory`, so `collect_diagnostics`'s
+/// `.filter(|d| d.category.is_some())` silently dropped it — a direct
+/// file-target `beamtalk lint <file>` pointed at a `declare native:` block
+/// outside `stubs/` reported no diagnostic at all, even though `beamtalk
+/// build`/`check` would reject the same file. `collect_lint_files`'s
+/// `stubs/` exclusion (see `lint_succeeds_with_project_local_stubs_directory`
+/// above) only applies to *directory* walks, so a direct file target
+/// bypasses it entirely and must be judged purely on the diagnostic's own
+/// category.
+///
+/// Asserts the diagnostic and its summary row are now printed. Not asserted
+/// here: process exit code — `run_lint`'s own failure threshold
+/// (`total_lint_count`) only counts `Severity::Lint` diagnostics; this one is
+/// `Severity::Error` like several other pre-existing, already-categorized
+/// structural diagnostics (e.g. `EmptyBody`, `Type`, `Visibility`), so it was
+/// already outside that threshold's scope before this fix and stays so —
+/// widening `run_lint`'s failure threshold is a separate concern from
+/// BT-3404's category-filter fix.
+#[test]
+fn lint_direct_file_target_reports_declare_native_outside_stubs() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/misplaced_native.bt"),
+        "declare native: lists\n  reverse: list :: List -> List\n",
+    )
+    .expect("write src/misplaced_native.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["lint", "src/misplaced_native.bt"])
+        .assert()
+        .stderr(contains("only valid in stubs/ directory"))
+        .stderr(contains("NativeDeclarationLocation"));
 }
 
 #[test]

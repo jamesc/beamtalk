@@ -131,6 +131,7 @@ fn diagnostic_category_from_kebab(key: &str) -> Option<DiagnosticCategory> {
         "type-annotation" => DiagnosticCategory::TypeAnnotation,
         "inheritance" => DiagnosticCategory::Inheritance,
         "sendability" => DiagnosticCategory::Sendability,
+        "native-declaration-location" => DiagnosticCategory::NativeDeclarationLocation,
         _ => return None,
     })
 }
@@ -156,6 +157,7 @@ const DIAGNOSTIC_CATEGORY_KEYS: &[&str] = &[
     "type-annotation",
     "inheritance",
     "sendability",
+    "native-declaration-location",
 ];
 
 /// Return a human-readable TOML type name for error messages.
@@ -968,6 +970,7 @@ shadowed-class = "warn"
 type-annotation = "hint"
 inheritance = "error"
 sendability = "hint"
+native-declaration-location = "error"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();

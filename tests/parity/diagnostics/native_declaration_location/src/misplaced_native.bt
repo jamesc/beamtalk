@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A `declare native:` block outside `stubs/` (BT-3404) must produce a
+/// `'declare native:' is only valid in stubs/ directory` error on every
+/// diagnostic surface.
+declare native: lists
+  reverse: list :: List -> List

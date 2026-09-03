@@ -22,6 +22,7 @@
 //! | `mixed_diagnostics`          | type / dnu / lint mix |
 //! | `unreadable_target`          | BT-2067 — unreadable target file (Unix only) |
 //! | `unreadable_package`         | BT-2056 — unreadable extraction file (Unix only) |
+//! | `native_declaration_location`| BT-3404 — misplaced `declare native:` block |
 //!
 //! Each fixture is checked four ways. A minimum diagnostic count is
 //! locked in **per surface** so legitimate-but-bounded divergences (e.g.
@@ -273,6 +274,24 @@ fn corpus_cases() -> Vec<CorpusCase> {
             },
             unreadable_files: &["src/locked_sibling.bt"],
             why: "BT-2056: unreadable package-extraction file must produce warnings on lint surfaces",
+        },
+        CorpusCase {
+            name: "native_declaration_location",
+            lsp_target: "src/misplaced_native.bt",
+            lint_target: "",
+            // BT-3404: `check_native_declaration_location`'s diagnostic now
+            // carries a `DiagnosticCategory`, so it survives every surface's
+            // `category.is_some()` filter (CLI lint, MCP lint, MCP summary)
+            // the same way LSP — which never filtered by category — already
+            // reported it.
+            expected: ExpectedCounts {
+                cli_lint: 1,
+                mcp_lint: 1,
+                mcp_summary: 1,
+                lsp: 1,
+            },
+            unreadable_files: &[],
+            why: "BT-3404: a declare native: block outside stubs/ must be reported on every surface",
         },
     ]
 }

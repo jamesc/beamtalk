@@ -578,6 +578,9 @@ pub enum DiagnosticCategory {
     /// boundary (actor message arg, `spawnWith:`, block capture, Announcement
     /// payload), or an FFI-wrapping class with no declared `handleScope:`.
     Sendability,
+    /// Misplaced `declare native:` block (BT-3404) — an Erlang FFI type
+    /// declaration outside a `stubs/` directory.
+    NativeDeclarationLocation,
 }
 
 /// A secondary note attached to a diagnostic (BT-1588).
