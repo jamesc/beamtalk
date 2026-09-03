@@ -34,6 +34,32 @@ fn lint_succeeds_with_project_local_stubs_directory() {
         .success();
 }
 
+/// BT-3404 review fix: `collect_lint_files`'s `stubs/` exclusion above only
+/// applies to a *directory* walk (no path argument) — a direct single-file
+/// target bypasses it entirely, so once `check_native_declaration_location`'s
+/// diagnostic gained a category (making it survive `collect_diagnostics`'s
+/// `category.is_some()` filter), a legitimate `stubs/lists.bt` linted
+/// directly by path would have started reporting a false "only valid in
+/// stubs/ directory" error. `collect_diagnostics`'s caller must derive
+/// `is_stub_file` itself (`beamtalk_project::package::is_under_stubs_dir`),
+/// the same way MCP's `run_module_analysis` already does for BT-3398.
+#[test]
+fn lint_direct_file_target_succeeds_on_legitimate_stub_file() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("stubs")).expect("mkdir stubs");
+    std::fs::write(
+        project.path().join("stubs/lists.bt"),
+        "declare native: lists\n  reverse: list :: List -> List\n",
+    )
+    .expect("write stubs/lists.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["lint", "stubs/lists.bt"])
+        .assert()
+        .stderr(contains("only valid in stubs/ directory").not());
+}
+
 /// Review follow-up on PR #3679: `load_project_stub_registry`'s own stub
 /// diagnostics (skipped signatures, version drift) used to always render as
 /// miette text on stderr regardless of `--format`, so a machine consumer of

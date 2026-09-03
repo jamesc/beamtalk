@@ -1,0 +1,12 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Diagnostic-parity fixture: a `declare native:` block outside `stubs/` must
+# produce an error on every diagnostic surface (BT-3404).
+
+[package]
+name = "parity_native_declaration_location"
+version = "0.1.0"
+description = "Misplaced declare native: diagnostic parity fixture"
+
+[dependencies]

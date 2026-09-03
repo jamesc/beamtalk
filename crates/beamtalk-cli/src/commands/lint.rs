@@ -44,6 +44,14 @@ use tracing::warn;
 /// scan `source` directly (`beamtalk_core::near_miss_divider::check_near_miss_dividers`)
 /// instead of relying on the AST's `Comment::span`, which is actually the
 /// *following declaration's* span, not the comment's own.
+///
+/// `is_stub_file` gates `check_native_declaration_location` (BT-3404): a
+/// legitimate `declare native:` block is only valid inside a `stubs/`
+/// directory, so a genuine stub file must not be flagged. Callers derive
+/// this the same way MCP's `run_module_analysis` does for BT-3398 —
+/// [`beamtalk_project::package::is_under_stubs_dir`] against the file's own
+/// path — since `collect_lint_files`'s `stubs/` exclusion only applies to
+/// its *directory-walk* branch, not a direct single-file lint target.
 #[allow(clippy::too_many_arguments)] // BT-2910 added pre_loaded_protocols/pre_loaded_aliases; each param is load-bearing context
 fn collect_diagnostics(
     module: &beamtalk_core::ast::Module,
@@ -59,6 +67,7 @@ fn collect_diagnostics(
     cross_file_extensions: &beamtalk_core::compilation::extension_index::ExtensionIndex,
     has_package_dependencies: bool,
     current_package: Option<&str>,
+    is_stub_file: bool,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     // Collect parser-level lint diagnostics (e.g. unnecessary `.` — BT-948)
     // plus AST-level lint passes.
@@ -98,7 +107,8 @@ fn collect_diagnostics(
         .with_pre_loaded_protocols(pre_loaded_protocols)
         .with_pre_loaded_aliases(pre_loaded_aliases)
         .with_native_type_registry(native_type_registry)
-        .with_cross_file_extensions(cross_file_extensions);
+        .with_cross_file_extensions(cross_file_extensions)
+        .with_is_stub_file(is_stub_file);
     let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
     lint_diags.extend(
         analysis_result
@@ -320,6 +330,16 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
                 &module,
             );
 
+        // BT-3404: `collect_lint_files`'s `stubs/` exclusion only covers its
+        // directory-walk branch — a direct single-file lint target (e.g.
+        // `beamtalk lint stubs/lists.bt`) bypasses it entirely, so a
+        // legitimate stub file must be recognised here or
+        // `check_native_declaration_location` reports a false
+        // "only valid in stubs/ directory" error on it.
+        let is_stub_file = package_root.as_deref().is_some_and(|root| {
+            package::is_under_stubs_dir(root.as_std_path(), file.as_std_path())
+        });
+
         let lint_diags = collect_diagnostics(
             &module,
             &source,
@@ -332,6 +352,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             &extension_index,
             has_package_dependencies,
             current_package.as_deref(),
+            is_stub_file,
         );
 
         // BT-3043: Drop repeat sightings of a pre-loaded alias collision —
@@ -782,6 +803,18 @@ pub(crate) fn diagnostic_summary_to_json(
 /// Convenience wrapper for tests: parse source and collect lint diagnostics.
 #[cfg(test)]
 fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
+    collect_lint_diagnostics_with_stub_flag(source, false)
+}
+
+/// As [`collect_lint_diagnostics`], but with `is_stub_file` set explicitly —
+/// BT-3404's regression test for a direct-file-target `beamtalk lint` on a
+/// genuine `stubs/` file needs `is_stub_file: true` to reproduce what
+/// `collect_diagnostics`'s real caller now derives via `is_under_stubs_dir`.
+#[cfg(test)]
+fn collect_lint_diagnostics_with_stub_flag(
+    source: &str,
+    is_stub_file: bool,
+) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     let tokens = lex_with_eof(source);
     let (module, parse_diags) = parse(tokens);
     collect_diagnostics(
@@ -796,6 +829,7 @@ fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis:
         &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
         false,
         None,
+        is_stub_file,
     )
 }
 
@@ -823,6 +857,44 @@ mod tests {
         assert!(
             !stale,
             "@expect type should not be stale when DNU hint is present, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn declare_native_outside_stubs_is_reported() {
+        // BT-3404: a `declare native:` block outside `stubs/` (is_stub_file:
+        // false, what `collect_diagnostics`'s real caller derives for a
+        // direct file-target NOT under `stubs/`) must be reported.
+        let source = "declare native: lists\n";
+        let diags = collect_lint_diagnostics_with_stub_flag(source, false);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("only valid in stubs/ directory")),
+            "declare native: outside stubs/ should be reported: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn declare_native_inside_stubs_is_not_reported() {
+        // BT-3404 review fix: giving `check_native_declaration_location`'s
+        // diagnostic a category (so it survives `collect_diagnostics`'s
+        // `category.is_some()` filter) would otherwise newly surface a FALSE
+        // positive on a legitimate stub file reached via a direct
+        // single-file lint target — `collect_lint_files`'s `stubs/`
+        // exclusion only covers its directory-walk branch, so the real
+        // caller must derive `is_stub_file` itself (via
+        // `beamtalk_project::package::is_under_stubs_dir`) rather than
+        // relying on that exclusion. This test pins the `is_stub_file: true`
+        // half directly, mirroring how a real `stubs/lists.bt` target is
+        // classified.
+        let source = "declare native: lists\n";
+        let diags = collect_lint_diagnostics_with_stub_flag(source, true);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.contains("only valid in stubs/ directory")),
+            "declare native: inside stubs/ should not be reported: {diags:?}"
         );
     }
 
@@ -957,6 +1029,7 @@ mod tests {
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
             None,
+            false,
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
@@ -1160,6 +1233,7 @@ mod tests {
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
             None,
+            false,
         );
 
         let unresolved: Vec<_> = diags
@@ -1363,6 +1437,7 @@ mod tests {
             &extension_index,
             true, // has_package_dependencies
             Some("consumer"),
+            false,
         );
 
         let unresolved_names: Vec<String> = diags
@@ -1549,6 +1624,7 @@ mod tests {
                 &extension_index,
                 true,
                 Some("consumer"),
+                false,
             )
             .into_iter()
             .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
@@ -1666,6 +1742,7 @@ mod tests {
                 &extension_index,
                 true,
                 Some("consumer"),
+                false,
             )
             .into_iter()
             .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
@@ -1825,6 +1902,7 @@ mod tests {
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
             None,
+            false,
         );
 
         let has_untyped_ffi = diags.iter().any(|d| d.message.contains("untyped FFI"));
@@ -1876,6 +1954,7 @@ mod tests {
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
             None,
+            false,
         );
 
         let untyped_ffi: Vec<_> = diags
@@ -1941,6 +2020,7 @@ mod tests {
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
             None,
+            false,
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
