@@ -465,7 +465,7 @@ impl CoreErlangGenerator {
     /// the `ClassVarsN` binding remains in scope at the outer level so
     /// subsequent code (later args, the enclosing call, following statements)
     /// can reference the new version.
-    fn split_subexpr_for_preamble(
+    pub(super) fn split_subexpr_for_preamble(
         &mut self,
         expr: &Expression,
     ) -> Result<(Document<'static>, Document<'static>)> {

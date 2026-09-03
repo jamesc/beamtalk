@@ -2565,38 +2565,62 @@ impl CoreErlangGenerator {
     /// keep the chain's bindings in scope. Each argument doc here used to be
     /// placed directly into a `send(...)` argument list with no such append,
     /// so an open-scope arg left dangling produced malformed Core Erlang (a
-    /// `let ... in` immediately followed by the list's closing `]`). Like
-    /// the field-assignment branch just above, an open-scope arg's preamble
-    /// is hoisted to the outer `docs` (so its bindings — e.g. a rebound
-    /// `ClassVarsN` — remain visible to later cascade messages), leaving
-    /// just a reference to its result value as the argument itself.
+    /// `let ... in` immediately followed by the list's closing `]`).
+    ///
+    /// BT-3406 review follow-up: hoisting only the argument(s) that need it
+    /// while a *different*, side-effecting-but-plain argument in the same
+    /// message stays inline can reverse their observable left-to-right
+    /// evaluation order — the hoisted one's preamble now runs before the
+    /// whole `send(...)`, while the plain one only evaluates inline at call
+    /// time. This is exactly the hazard
+    /// [`Self::capture_subexpr_sequence`] (BT-1937) exists to avoid for
+    /// ordinary (non-cascade) argument lists: decide *once*, for the whole
+    /// list, whether any argument needs hoisting — if so, hoist every
+    /// argument (binding a plain one to a fresh `let` too), never just
+    /// some. Splits every argument first (field assignments via
+    /// [`Self::generate_field_assignment_open`], everything else via
+    /// [`Self::split_subexpr_for_preamble`] — same conversion
+    /// `capture_subexpr_sequence` itself uses) so each argument is compiled
+    /// exactly once regardless of which branch below is taken, then makes
+    /// that same all-or-nothing decision. `capture_subexpr_sequence` isn't
+    /// reused directly here since it has no field-assignment case — cascade
+    /// arguments are the one call site that needs both.
     pub(super) fn generate_cascade_args(
         &mut self,
         arguments: &[Expression],
         docs: &mut Vec<Document<'static>>,
     ) -> Result<Vec<Document<'static>>> {
-        let mut arg_docs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+        let mut splits: Vec<(Document<'static>, Document<'static>)> =
+            Vec::with_capacity(arguments.len());
         for arg in arguments {
             if Self::is_field_assignment(arg) {
-                // Push hoisted binding directly to docs (preserves source order).
                 let (doc, val_var) = self.generate_field_assignment_open(arg)?;
-                docs.push(doc);
-                arg_docs.push(leaf::var(val_var));
+                splits.push((doc, leaf::var(val_var)));
             } else {
-                let (doc, open_scope) = self.expression_doc_with_open_scope(arg)?;
-                match open_scope {
-                    Some(OpenScopeResult::Value(result_var)) => {
-                        docs.push(doc);
-                        arg_docs.push(leaf::var(result_var));
-                    }
-                    Some(OpenScopeResult::NoValue) => {
-                        docs.push(doc);
-                        arg_docs.push(Document::Str("'nil'"));
-                    }
-                    None => arg_docs.push(doc),
-                }
+                splits.push(self.split_subexpr_for_preamble(arg)?);
             }
         }
+
+        let any_hoisted = splits
+            .iter()
+            .any(|(preamble, _)| !matches!(preamble, Document::Nil));
+
+        let arg_docs = if any_hoisted {
+            let mut hoisted_docs = Vec::with_capacity(splits.len());
+            for (preamble, doc) in splits {
+                if matches!(preamble, Document::Nil) {
+                    let var = self.fresh_temp_var("CascadeArg");
+                    docs.push(docvec!["let ", leaf::var(var.clone()), " = ", doc, " in "]);
+                    hoisted_docs.push(leaf::var(var));
+                } else {
+                    docs.push(preamble);
+                    hoisted_docs.push(doc);
+                }
+            }
+            hoisted_docs
+        } else {
+            splits.into_iter().map(|(_, doc)| doc).collect()
+        };
         Ok(arg_docs)
     }
 
