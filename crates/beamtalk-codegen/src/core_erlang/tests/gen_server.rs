@@ -6920,8 +6920,14 @@ fn bt3396_self_dispatch_in_field_assignment_rhs_snapshots_prior_field_read_and_c
     // assignment's RHS (the `lower_field_assignment_bind`/`FieldAssignment`
     // `source_version` hazard BT-3382's reverted prototype hit), AND the
     // `self.count` read precedes it in evaluation order. The read must be
-    // snapshotted into a temp BEFORE the hoisted dispatch runs, so it
-    // keeps its source-order (pre-bump) value.
+    // bound BEFORE the dispatch runs, so it keeps its source-order
+    // (pre-bump) value.
+    //
+    // ADR 0118 phase 1a (BT-3415): the sequencing rule binds the preceding
+    // `self.count` read to a `_TmpN` temp (it is compiled against the
+    // pre-dispatch `State` and bound ahead of the dispatch's `Bind`) — the
+    // planner's `FieldSnap` snapshot is the same rule applied to one node
+    // kind, and is no longer what this position goes through.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    self.count := self.count + (self bumpCount).\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -6931,45 +6937,315 @@ fn bt3396_self_dispatch_in_field_assignment_rhs_snapshots_prior_field_read_and_c
             .with_workspace_mode(true),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
-    let snapshot_at = code.find("FieldSnap").unwrap_or_else(|| {
-        panic!("the preceding self.count read must be snapshotted. Got:\n{code}")
+    let read_at = code.find("let _Tmp").unwrap_or_else(|| {
+        panic!("the preceding self.count read must be temp-bound. Got:\n{code}")
     });
     let dispatch_at = code
         .find("'safe_dispatch'('bumpCount'")
         .unwrap_or_else(|| panic!("the nested self-send must be dispatched. Got:\n{code}"));
     assert!(
-        snapshot_at < dispatch_at,
-        "the field-read snapshot must be bound BEFORE the hoisted dispatch runs. Got:\n{code}"
+        read_at < dispatch_at,
+        "the field-read temp must be bound BEFORE the dispatch runs. Got:\n{code}"
+    );
+    assert!(
+        code[read_at..dispatch_at].contains("call 'maps':'get'('count', State)"),
+        "the temp must hold the PRE-dispatch read (against `State`, not `State1`). Got:\n{code}"
+    );
+    assert!(
+        !code.contains("FieldSnap"),
+        "the Actor-body FieldAssignment arm no longer goes through the planner's snapshot. Got:\n{code}"
     );
     assert_eq!(
         code.matches("'safe_dispatch'('bumpCount'").count(),
         1,
-        "the hoisted self-send must be dispatched exactly once. Got:\n{code}"
+        "the sequenced self-send must be dispatched exactly once. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'put'('count', _Val"),
+        "the field write must still land as the real Put Bind. Got:\n{code}"
     );
     assert_compiles_through_erlc("bt3396_self_dispatch_in_field_assignment_rhs", &code);
 }
 
 #[test]
-fn bt3396_self_dispatch_after_order_unsafe_operand_is_still_not_hoisted() {
-    // BT-3396 keeps BT-3392's order-safety gate: a self-send that follows a
-    // non-self, non-effect-free operand (`printString` may raise) in
-    // evaluation order must NOT be hoisted ahead of it — `(x printString)
-    // ++ (self bumpCount) printString` leaves `bumpCount` in its natural
-    // (non-hoisted, BT-3399-tracked) position. No `FieldSnap`/hoisted
-    // `Bind` for it, and the code still compiles.
+fn bt3396_self_dispatch_after_order_unsafe_operand_is_sequenced_behind_a_temp() {
+    // BT-3392/BT-3396 refused to hoist a self-send past a non-self,
+    // non-effect-free operand (`printString` may raise) and left
+    // `bumpCount` in its natural, state-dropping position (BT-3399).
+    //
+    // ADR 0118 phase 1a (BT-3415), §Decision 3: in method-body position the
+    // sequencing rule binds the earlier operand to a `_TmpN` temp FIRST,
+    // then runs the dispatch + real `State` `Bind`, then the `++` on the
+    // temp and the dispatch result — evaluation order preserved by
+    // construction (`printString` still raises before `bumpCount` runs)
+    // AND the mutation threaded. `HoistAction::Dropped` is unreachable
+    // from this position now.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly: x =>\n    (x printString) ++ (self bumpCount) printString.\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
+    let generated = generate_module_with_warnings(
         &module,
-        CodegenOptions::new("bt3396_order_unsafe_operand_not_hoisted").with_workspace_mode(true),
-    );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+        CodegenOptions::new("bt3396_order_unsafe_operand_sequenced").with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = &generated.code;
+    let temp_at = code
+        .find("let _Tmp")
+        .unwrap_or_else(|| panic!("the earlier `x printString` must be temp-bound. Got:\n{code}"));
+    let dispatch_at = code
+        .find("'safe_dispatch'('bumpCount'")
+        .unwrap_or_else(|| panic!("the self-send must be dispatched. Got:\n{code}"));
+    let bind_at = code
+        .find("let State1 = call 'erlang':'element'(2, _SD")
+        .unwrap_or_else(|| panic!("the dispatch's NewState must be threaded. Got:\n{code}"));
     assert!(
-        !code.contains("erlang':'element'(2, _SD"),
-        "a self-send after an order-unsafe operand must not be hoisted. Got:\n{code}"
+        temp_at < dispatch_at && dispatch_at < bind_at,
+        "order must be: temp for `x printString`, then the dispatch, then its State Bind. Got:\n{code}"
     );
-    assert_compiles_through_erlc("bt3396_order_unsafe_operand_not_hoisted", &code);
+    assert!(
+        code[temp_at..dispatch_at].contains("'printString'"),
+        "the temp must hold the `x printString` send itself. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'reply', _Result, State1}"),
+        "the reply must carry the post-dispatch state. Got:\n{code}"
+    );
+    assert!(
+        !generated
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("silently dropped")),
+        "no BT-3399 drop warning in a sequenced position. Got: {:?}",
+        generated.warnings
+    );
+    assert_compiles_through_erlc("bt3396_order_unsafe_operand_sequenced", code);
+}
+
+#[test]
+fn bt3415_binary_operand_self_send_after_raising_operand_is_sequenced_in_method_body() {
+    // ADR 0118 phase 1a (BT-3415) acceptance shape: `(items at: idx) +
+    // (self bump)` as an Actor method-body statement compiles to
+    // `let _Tmp = <at:> in <dispatch> in let State1 = element(2, _SD) in
+    // _Tmp + element(1, _SD)` — `at:` raises first (it is bound before the
+    // dispatch runs), and when it does not raise `bump`'s state is
+    // threaded into the reply. The BT-3399 "Dropped" case is not
+    // reachable from method-body position any more.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = #(10, 20, 30)\n\n  pick: idx =>\n    (self.items at: idx) + (self bump)\n\n  internal bump =>\n    self.count := self.count + 1\n    self.count\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let generated = generate_module_with_warnings(
+        &module,
+        CodegenOptions::new("bt3415_binary_operand_sequenced").with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = &generated.code;
+    let temp_at = code
+        .find("let _Tmp")
+        .unwrap_or_else(|| panic!("`items at: idx` must be temp-bound. Got:\n{code}"));
+    let dispatch_at = code
+        .find("'safe_dispatch'('bump'")
+        .unwrap_or_else(|| panic!("`bump` must be dispatched. Got:\n{code}"));
+    let bind_at = code
+        .find("let State1 = call 'erlang':'element'(2, _SD")
+        .unwrap_or_else(|| panic!("`bump`'s NewState must be threaded. Got:\n{code}"));
+    assert!(
+        temp_at < dispatch_at && dispatch_at < bind_at,
+        "order must be: temp for `at:`, then the dispatch, then its State Bind. Got:\n{code}"
+    );
+    assert_eq!(
+        code.matches("'safe_dispatch'('bump'").count(),
+        1,
+        "the sequenced self-send is dispatched exactly once. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'reply', _Result, State1}"),
+        "the method must reply with the post-dispatch state. Got:\n{code}"
+    );
+    assert!(
+        !generated
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("silently dropped")),
+        "no BT-3399 drop warning: the sequencing rule makes `Dropped` unreachable here. Got: {:?}",
+        generated.warnings
+    );
+    assert_compiles_through_erlc("bt3415_binary_operand_sequenced", code);
+}
+
+#[test]
+fn bt3415_ffi_receiver_is_not_sequenced_but_its_self_send_argument_is() {
+    // Adversarial review finding on #3717: `Erlang lists reverse: (self
+    // bump)` — the FFI receiver is consumed STRUCTURALLY by
+    // `try_handle_erlang_interop` (`erlang_module_of_receiver` turns it into
+    // a module atom; it is never compiled through `generate_expression`), so
+    // the sequencing rule must leave it alone or `finish_precompiled_scope`
+    // reports the never-substituted registration as an internal error and
+    // the whole module fails to compile. The argument's self-send is still
+    // sequenced and its state threaded.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  go =>\n    Erlang lists reverse: (self bump)\n\n  goParens =>\n    (Erlang lists) reverse: (self bump)\n\n  goTwo =>\n    Erlang lists seq: 1 to: (self bump)\n\n  goNested =>\n    self record: (Erlang lists reverse: (self bump))\n\n  internal record: x => x\n\n  internal bump =>\n    self.count := self.count + 1\n    #(1, 2)\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt3415_ffi_receiver_not_sequenced").with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("an FFI send with a self-send argument must compile. Got: {e:?}"));
+    assert_eq!(
+        code.matches("'safe_dispatch'('bump'").count(),
+        4,
+        "each of the four methods dispatches `bump` exactly once. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'direct_call'('lists', 'reverse', [call 'erlang':'element'(1, _SD"),
+        "the direct FFI call must receive the sequenced dispatch result. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("let _Tmp"),
+        "an FFI receiver is never temp-bound. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3415_ffi_receiver_not_sequenced", &code);
+}
+
+#[test]
+fn bt3415_early_return_reply_state_is_the_post_prelude_state_not_the_values_inner_mint() {
+    // Adversarial review finding on #3717: `^ 1 + ((self flagTrue) ifTrue:
+    // [1] ifFalse: [2])` — the conditional receiver's dispatch chain mints
+    // `State1` INSIDE the conditional's own closed document
+    // (`compile_conditional_receiver`'s `HoistSink::OpenDocs`), so reading
+    // `current_state_var()` after the value's compile put an unbound
+    // `State1` in the reply. The `^` arm must reply with the state after
+    // the PRELUDE (here: none — `State`), exactly as the pre-ADR-0118 read
+    // order did.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  go: i =>\n    ^ 1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])\n    0\n\n  internal flagTrue =>\n    self.count := self.count + 1\n    true\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt3415_early_return_post_prelude_state").with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        code.contains("{'reply', _ReturnValue, State}"),
+        "the reply must use the state after the (empty) prelude, not the value's inner State1. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3415_early_return_post_prelude_state", &code);
+}
+
+#[test]
+fn bt3415_early_return_reply_state_follows_the_prelude_when_there_is_one() {
+    // The positive counterpart: `^ (self.items at: 1) + (self bump)` has a
+    // real prelude (the `bump` dispatch + `State1` Bind), and the reply
+    // must carry THAT version.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = #(10, 20)\n\n  go =>\n    ^ (self.items at: 1) + (self bump)\n    0\n\n  internal bump =>\n    self.count := self.count + 1\n    self.count\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt3415_early_return_prelude_state").with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        code.contains("{'reply', _ReturnValue, State1}"),
+        "the reply must carry the prelude's State1. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3415_early_return_prelude_state", &code);
+}
+
+#[test]
+fn bt3415_thread_ahead_keeps_the_bt3399_warning_for_a_dropped_only_plan() {
+    // Adversarial review finding on #3717: a `thread_ahead` consumer
+    // (here `FieldAssignment`) whose RHS is a non-send parent with only an
+    // order-unsafe self-send — `"{self.items size}-{self bump}"` — used to
+    // run the planner unconditionally and so emitted the BT-3399 warning;
+    // gating on "needs a prelude" alone silently lost it.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = #(1)\n  state: label = \"\"\n\n  go =>\n    self.label := \"{self.items size}-{self bump}\"\n    self.count\n\n  internal bump =>\n    self.count := self.count + 1\n    self.count\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let generated = generate_module_with_warnings(
+        &module,
+        CodegenOptions::new("bt3415_thread_ahead_dropped_warning").with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        generated
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("bump") && w.message.contains("silently dropped")),
+        "the BT-3399 warning must still fire from a FieldAssignment RHS. Got: {:?}",
+        generated.warnings
+    );
+    assert_compiles_through_erlc("bt3415_thread_ahead_dropped_warning", &generated.code);
+}
+
+#[test]
+fn bt3415_registering_the_same_subexpression_twice_is_never_silent() {
+    // Adversarial review finding on #3717: a second registration of one
+    // node would let the inner scope's finish remove the entry out from
+    // under the outer scope, whose consulted-exactly check then passes
+    // vacuously — a double dispatch with no error. Pinned as a hard
+    // internal error in every build profile (a `codegen_warnings`
+    // diagnostic would be discarded by the CLI's build path).
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  go => self bump\n\n  internal bump => self.count\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let class = module.classes.first().expect("one class");
+    let expr = &class.methods[0]
+        .body
+        .first()
+        .expect("one statement")
+        .expression;
+    let mut generator = CoreErlangGenerator::new("bt3415_double_registration");
+    let mut scope = super::super::PrecompiledScope::new();
+    generator
+        .register_precompiled_subexpr(&mut scope, expr, Document::Str("'a'"), false)
+        .expect("first registration succeeds");
+    let err = generator
+        .register_precompiled_subexpr(&mut scope, expr, Document::Str("'b'"), false)
+        .expect_err("second registration of the same node must fail");
+    assert!(
+        format!("{err:?}").contains("registered twice"),
+        "expected the duplicate-registration internal error, got {err:?}"
+    );
+    generator
+        .finish_precompiled_scope(scope)
+        .expect_err("the scope still holds the never-consulted first entry");
+}
+
+#[test]
+fn bt3415_self_send_argument_of_self_send_sequences_args_before_dispatch() {
+    // `self record: (self bumpCount)` — the producer sequences its own
+    // arguments (ADR 0118 §Decision 2): `bumpCount`'s dispatch + Bind
+    // precede `record:`'s, whose argument list references the pure
+    // `element(1, _SD)` result, and both states thread (`State1`,
+    // `State2`).
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: log = #()\n\n  go =>\n    self record: (self bumpCount)\n\n  internal record: n =>\n    self.log := self.log ++ #(n)\n    n\n\n  internal bumpCount =>\n    self.count := self.count + 1\n    self.count\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt3415_self_send_arg_sequenced").with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let bump_at = code
+        .find("'safe_dispatch'('bumpCount'")
+        .unwrap_or_else(|| panic!("`bumpCount` must be dispatched. Got:\n{code}"));
+    let record_at = code
+        .find("'safe_dispatch'('record:'")
+        .unwrap_or_else(|| panic!("`record:` must be dispatched. Got:\n{code}"));
+    assert!(
+        bump_at < record_at,
+        "the argument's dispatch must precede the outer dispatch. Got:\n{code}"
+    );
+    assert!(
+        code.contains("let State1 = call 'erlang':'element'(2, _SD")
+            && code.contains("let State2 = call 'erlang':'element'(2, _SD"),
+        "both dispatches must thread their NewState. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'reply', call 'erlang':'element'(1, _SD"),
+        "the reply reads the outer dispatch's pure result. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3415_self_send_arg_sequenced", &code);
 }
 
 #[test]

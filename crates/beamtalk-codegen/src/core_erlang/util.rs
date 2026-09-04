@@ -12,7 +12,11 @@
 
 use std::fmt::Write as _;
 
-use super::{CodeGenError, CoreErlangGenerator, Result};
+use super::control_flow::{HoistAction, HoistSink};
+use super::threaded_ir::{
+    FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, render_value,
+};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, PrecompiledScope, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::{atom, string_lit};
 use beamtalk_cerl_doc::{Document, join};
@@ -179,6 +183,25 @@ impl CoreErlangGenerator {
     ///
     /// ADR 0018: Simple forwarding to `generate_expression`.
     ///
+    /// ADR 0118 (BT-3415, phase 1a): in a state-threading context the
+    /// expression-level entry point is [`Self::threaded_expression`], which
+    /// returns the value together with the prelude of `ThreadedStmt`s
+    /// (real `Bind`s) its state-effecting sub-expressions need; the Actor
+    /// method body (`lower_body_exprs_with_reply`) splices that prelude. This
+    /// function stays a plain forwarder for now rather than becoming
+    /// `threaded_expression(expr)?.close(..)` (§Decision 5): every consumer
+    /// not yet migrated (branch arms, loop bodies, cascades, `match:`,
+    /// interpolation — ADR 0118 phases 1b–4) still reaches nested self-sends
+    /// through here, and each of those positions is a row of
+    /// `stdlib/test/actor_self_send_position_matrix_test.bt` that `BUnit`
+    /// compiles under the dev profile — a `close()` that reported
+    /// `StateEffectEscapesExpression` through `report_threaded_ir_verify_errors`
+    /// would `debug_assert!`-abort that whole fixture. The un-migrated
+    /// positions therefore keep the byte-identical discarding fallback
+    /// (`generate_discarding_self_dispatch`) until phase 2b removes the last
+    /// `Document`-only consumer, at which point this becomes the `close()`
+    /// site and the drop a verifier finding.
+    ///
     /// # Errors
     ///
     /// Returns [`CodeGenError`](super::CodeGenError) if generating `expr` fails.
@@ -189,6 +212,368 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> Result<beamtalk_cerl_doc::Document<'static>> {
         self.generate_expression(expr)
+    }
+
+    /// ADR 0118 §Decisions 1–3 (BT-3415): compiles `expr` in a
+    /// state-threading context, returning its value together with the
+    /// prelude of `ThreadedStmt`s that must run first — the expression-level
+    /// counterpart of [`Self::expression_doc`]. The caller either splices
+    /// the prelude into its own frame's IR and then uses the value
+    /// (§Decision 4), or closes it ([`ThreadedValue::close`], §Decision 5).
+    ///
+    /// Phase 1a scope — what produces a non-empty prelude:
+    /// - **An Actor self-send** (`self bump`): the producer
+    ///   [`Self::generate_self_dispatch`], after its own arguments have been
+    ///   sequenced by the rule below.
+    /// - **A message send** (unary, binary or keyword; not a conditional /
+    ///   `and:`/`or:` selector, which stay opaque here and are threaded by
+    ///   their own intrinsics) whose receiver or non-block arguments need
+    ///   a prelude: the **sequencing rule** (§Decision 3). Children are
+    ///   compiled in evaluation order; if child *k* has a non-empty
+    ///   prelude, every earlier child whose value is not a bare variable
+    ///   or literal is bound to a fresh `_TmpN` temp ahead of child *k*'s
+    ///   prelude, so `(items at: idx) + (self bump)` becomes `let _Tmp0 =
+    ///   <at:> in <bump dispatch + Bind> in _Tmp0 + element(1, _SD)` —
+    ///   `at:` still raises first, and `bump`'s state is threaded. The
+    ///   parent itself is then compiled through its ordinary AST-directed
+    ///   path, which substitutes each child's sequenced value via
+    ///   `precompiled_subexprs`. This is `hoist_subexpr_splits`'s "decide
+    ///   once, hoist all or none" rule (BT-3406) made universal; both use
+    ///   [`Self::bind_subexpr_to_temp`].
+    /// - **Any other parent** (literal elements, interpolation segments,
+    ///   a `^` value): the planner (`hoist_nested_self_sends`) as before —
+    ///   its order-safe hoists land in the prelude as real `Bind`s, its
+    ///   order-unsafe ones keep the BT-3399 warning. Phase 1b replaces
+    ///   this fallback with the sequencing rule for those parent kinds.
+    ///
+    /// Everything else is pure: one `generate_expression` call, empty
+    /// prelude. The decision is taken by a pure AST probe
+    /// ([`Self::subexpr_needs_prelude`]) before anything is compiled, so
+    /// no sub-expression is ever compiled twice.
+    ///
+    /// Frame: phase 1a's only consumer is the flat Actor method body
+    /// (`lower_body_exprs_with_reply`), so every `Bind` this produces is at
+    /// [`FrameId::ROOT`]; phase 2a threads the frame through when the
+    /// branch-arm consumers migrate.
+    pub(super) fn threaded_expression(&mut self, expr: &Expression) -> Result<ThreadedValue> {
+        // Phase 1a produces `State`-prefixed `Bind`s at `FrameId::ROOT` and
+        // renders values eagerly; a loop-body consumer (`StateAcc` prefix,
+        // its own frame) is phase 2b's to wire, not something to reach
+        // silently with a mismatched prefix.
+        if self.in_loop_body {
+            return Err(CodeGenError::Internal(
+                "threaded_expression called inside a loop body (ADR 0118 phase 2b consumer) \
+                 before that consumer is migrated"
+                    .to_string(),
+            ));
+        }
+        let inner = expr.unwrap_parens();
+        let span = inner.span();
+
+        if self.is_prelude_producer(inner) {
+            let Expression::MessageSend {
+                selector,
+                arguments,
+                ..
+            } = inner
+            else {
+                return Err(CodeGenError::Internal(
+                    "is_prelude_producer accepted a non-MessageSend expression".to_string(),
+                ));
+            };
+            let children: Vec<&Expression> = arguments.iter().collect();
+            let (mut prelude, scope) = self.sequence_children(&children)?;
+            let dispatch = self.generate_self_dispatch(selector, arguments, FrameId::ROOT, span)?;
+            self.finish_precompiled_scope(scope)?;
+            prelude.extend(dispatch.prelude);
+            return Ok(ThreadedValue {
+                prelude,
+                value: dispatch.value,
+            });
+        }
+
+        if let Some(children) = Self::sequenced_send_children(inner) {
+            let (prelude, scope) = self.sequence_children(&children)?;
+            let doc = self.generate_expression(expr)?;
+            self.finish_precompiled_scope(scope)?;
+            return Ok(ThreadedValue {
+                prelude,
+                value: ValueRef::Doc(doc),
+            });
+        }
+
+        // Non-send parents: the planner fallback (phase 1b migrates these).
+        let mut prelude = Vec::new();
+        if self.in_actor_instance_context() {
+            self.hoist_nested_self_sends(
+                expr,
+                &mut HoistSink::Threaded {
+                    stmts: &mut prelude,
+                    frame: FrameId::ROOT,
+                    span,
+                },
+            )?;
+        }
+        let doc = self.generate_expression(expr)?;
+        Ok(ThreadedValue {
+            prelude,
+            value: ValueRef::Doc(doc),
+        })
+    }
+
+    /// `true` inside an Actor *instance* method — the only context in
+    /// which a self-send threads `State` (a class method threads
+    /// `ClassVars`, never `State`; same exclusion as the planner's).
+    fn in_actor_instance_context(&self) -> bool {
+        self.context == CodeGenContext::Actor && !self.in_class_method()
+    }
+
+    /// `true` if `expr` (already paren-unwrapped) is a dispatching Actor
+    /// self-send [`Self::threaded_expression`] must compile through the
+    /// producer: not already dispatched-and-registered by an enclosing
+    /// planner pass (`hoisted_self_send_results`, consumed later by
+    /// `try_handle_self_dispatch`), and in an Actor instance context.
+    fn is_prelude_producer(&self, expr: &Expression) -> bool {
+        if !self.in_actor_instance_context() || !self.is_dispatching_actor_self_send(expr) {
+            return false;
+        }
+        match expr {
+            Expression::MessageSend { receiver, .. } => !self
+                .hoisted_self_send_results
+                .contains_key(&receiver.span()),
+            _ => false,
+        }
+    }
+
+    /// The children the sequencing rule applies to when `expr` (already
+    /// paren-unwrapped) is a message send it covers: the receiver, then
+    /// every non-block argument, in evaluation order. `None` for anything
+    /// that is not a message send, for a cast send, and for a conditional
+    /// / `and:` / `or:` send — those are opaque to the rule (their own
+    /// intrinsics thread their receiver and arms; ADR 0118 phase 4 makes
+    /// them producers). A block argument is a closure: whatever it
+    /// contains runs later, or never, so it is neither sequenced nor
+    /// temp-bound.
+    fn sequenced_send_children(expr: &Expression) -> Option<Vec<&Expression>> {
+        let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            is_cast,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        if *is_cast
+            || beamtalk_core::state_threading_selectors::is_conditional_selector(
+                selector.name().as_str(),
+            )
+        {
+            return None;
+        }
+        let mut children = Vec::with_capacity(arguments.len() + 1);
+        // An FFI receiver (`Erlang lists reverse: x`) is consumed
+        // STRUCTURALLY by `try_handle_erlang_interop` — the same
+        // `erlang_module_of_receiver` predicate turns it into a module-name
+        // atom and never compiles it — so it is never sequenced or
+        // temp-bound: a registered value it would never consult is an
+        // internal error in `finish_precompiled_scope`. Its arguments are
+        // compiled normally and are sequenced like any other send's.
+        if beamtalk_core::ffi_receiver::erlang_module_of_receiver(receiver).is_none() {
+            children.push(receiver.as_ref());
+        }
+        children.extend(
+            arguments
+                .iter()
+                .filter(|arg| !matches!(arg, Expression::Block(_))),
+        );
+        Some(children)
+    }
+
+    /// Pure AST probe: would [`Self::threaded_expression`] give `expr` a
+    /// non-empty prelude? Mirrors that function's three cases exactly —
+    /// a producer, a covered send with a child that needs one, or a
+    /// non-send parent the planner would hoist at least one dispatch out
+    /// of — so the decision to compile children individually can never
+    /// disagree with what compiling them would do.
+    fn subexpr_needs_prelude(&self, expr: &Expression) -> bool {
+        let inner = expr.unwrap_parens();
+        if Self::is_trivial_subexpr(inner) {
+            return false;
+        }
+        if self.is_prelude_producer(inner) {
+            return true;
+        }
+        if let Some(children) = Self::sequenced_send_children(inner) {
+            return children
+                .iter()
+                .any(|child| self.subexpr_needs_prelude(child));
+        }
+        self.in_actor_instance_context()
+            && self
+                .plan_self_send_hoists(std::slice::from_ref(inner))
+                .iter()
+                .any(|action| matches!(action, HoistAction::Dispatch(_)))
+    }
+
+    /// `true` if the planner fallback has anything to do for `expr` — a
+    /// dispatch to hoist OR an order-unsafe self-send to warn about
+    /// (`HoistAction::Dropped`, BT-3399). [`Self::subexpr_needs_prelude`]
+    /// counts only the former (a warning is not a prelude); this is the
+    /// wider gate [`Self::thread_ahead`] uses so no diagnostic the planner
+    /// used to emit at those call sites is lost.
+    fn planner_would_act_on(&self, expr: &Expression) -> bool {
+        self.in_actor_instance_context()
+            && !self
+                .plan_self_send_hoists(std::slice::from_ref(expr.unwrap_parens()))
+                .is_empty()
+    }
+
+    /// The `State` variable a consumer must continue from once it has
+    /// spliced `prelude` — the target of the prelude's last top-level
+    /// `State` `Bind`, or `version_before` (the counter as read BEFORE
+    /// `threaded_expression` ran) when the prelude has none. Read this
+    /// instead of `current_state_var()` after a `threaded_expression` call:
+    /// the value's own compile may have minted versions INSIDE its closed
+    /// document (a conditional receiver's `generate_self_dispatch_open`
+    /// chain, say), and those are not in scope where the consumer's reply
+    /// or next statement runs.
+    pub(super) fn state_var_after_prelude(
+        &self,
+        prelude: &[ThreadedStmt],
+        version_before: usize,
+    ) -> String {
+        let version = prelude
+            .iter()
+            .rev()
+            .find_map(|stmt| match stmt {
+                ThreadedStmt::Bind { target, .. }
+                    if target.prefix == VersionPrefix::State && target.frame == FrameId::ROOT =>
+                {
+                    Some(target.version)
+                }
+                _ => None,
+            })
+            .unwrap_or(version_before);
+        super::render_state_prefix(self.in_hybrid_loop, self.in_loop_body, version)
+    }
+
+    /// A child the sequencing rule never compiles ahead of its parent: a
+    /// literal, an identifier, a class reference, `super`, or a block —
+    /// each compiles to a value that cannot raise or observe threaded
+    /// state, so the parent may compile it in place after every prelude.
+    fn is_trivial_subexpr(expr: &Expression) -> bool {
+        matches!(
+            expr,
+            Expression::Literal(..)
+                | Expression::Identifier(_)
+                | Expression::ClassReference { .. }
+                | Expression::Super(_)
+                | Expression::Block(_)
+        )
+    }
+
+    /// The sequencing rule itself (ADR 0118 §Decision 3) over `children`,
+    /// in evaluation order. Let *k* be the last child that needs a prelude
+    /// (per [`Self::subexpr_needs_prelude`]); if there is none, nothing is
+    /// compiled here and the parent compiles every child in place, exactly
+    /// as before. Otherwise every non-trivial child up to and including
+    /// *k* is compiled exactly once via [`Self::threaded_expression`], in
+    /// order, and the parent's prelude is built from them: a child before
+    /// *k* whose value is not a bare variable or literal is bound to a
+    /// `_TmpN` temp ([`Self::bind_subexpr_to_temp`]) right after its own
+    /// prelude; child *k*'s value is used in place. Children after *k*
+    /// evaluate after every prelude anyway, so the parent compiles them in
+    /// place too (keeping their temps' mint order unchanged). Each
+    /// pre-compiled child is registered in `precompiled_subexprs` so the
+    /// parent's compile substitutes it; the caller hands the returned
+    /// scope back to [`Self::finish_precompiled_scope`] afterwards.
+    fn sequence_children(
+        &mut self,
+        children: &[&Expression],
+    ) -> Result<(Vec<ThreadedStmt>, PrecompiledScope)> {
+        let mut prelude: Vec<ThreadedStmt> = Vec::new();
+        let mut scope = PrecompiledScope::new();
+        let Some(k) = children
+            .iter()
+            .rposition(|child| self.subexpr_needs_prelude(child))
+        else {
+            return Ok((prelude, scope));
+        };
+
+        let mut compiled: Vec<(&Expression, bool, ThreadedValue)> = Vec::with_capacity(k + 1);
+        for child in &children[..=k] {
+            if Self::is_trivial_subexpr(child.unwrap_parens()) {
+                continue;
+            }
+            let is_producer = self.is_prelude_producer(child.unwrap_parens());
+            let tv = self.threaded_expression(child)?;
+            compiled.push((child, is_producer, tv));
+        }
+        let last = compiled.len().saturating_sub(1);
+
+        for (i, (child, is_producer, tv)) in compiled.into_iter().enumerate() {
+            let span = child.unwrap_parens().span();
+            let must_bind = i < last && !tv.value_is_trivial();
+            prelude.extend(tv.prelude);
+            let value_doc = self.threaded_value_doc(&tv.value);
+            if must_bind {
+                let (binding, var) = self.bind_subexpr_to_temp("Tmp", value_doc);
+                prelude.push(ThreadedStmt::Statement(binding, span));
+                self.register_precompiled_subexpr(
+                    &mut scope,
+                    child,
+                    beamtalk_cerl_doc::leaf::var(var),
+                    false,
+                )?;
+            } else {
+                self.register_precompiled_subexpr(&mut scope, child, value_doc, is_producer)?;
+            }
+        }
+        Ok((prelude, scope))
+    }
+
+    /// Renders a [`ThreadedValue`]'s value for use by a consumer that has
+    /// spliced (or is about to splice) its prelude — through the same
+    /// `render_value` every `Bind`/`Return` node renders its values with.
+    pub(super) fn threaded_value_doc(&mut self, value: &ValueRef) -> Document<'static> {
+        let ctx = RenderCtx::new(self);
+        render_value(value, &ctx)
+    }
+
+    /// ADR 0118 phase 1a (BT-3415): for a consumer whose existing lowering
+    /// compiles `expr` itself through a specialised path
+    /// (`generate_field_assignment_open`, `emit_actor_threaded_last_stmts`,
+    /// …) rather than via one `expression_doc` call it could replace with
+    /// [`Self::threaded_expression`]: if `expr` needs a prelude, compiles
+    /// it once through `threaded_expression`, splices the prelude into
+    /// `stmts`, and registers the value so that path's own compile of
+    /// `expr` substitutes it; otherwise does nothing. The returned scope
+    /// goes back to [`Self::finish_precompiled_scope`] once that compile
+    /// is done. The drop-in replacement for the planner's
+    /// `hoist_nested_self_sends(expr, HoistSink::Threaded { .. })` at the
+    /// Actor-body call sites, with the sequencing rule instead of the
+    /// order-safety drop.
+    pub(super) fn thread_ahead(
+        &mut self,
+        expr: &Expression,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<PrecompiledScope> {
+        let mut scope = PrecompiledScope::new();
+        // Also enter when the planner fallback would only WARN (an
+        // order-unsafe, BT-3399 `Dropped` self-send in a non-send parent):
+        // the pre-ADR-0118 call sites ran `hoist_nested_self_sends`
+        // unconditionally, so that diagnostic must keep firing here too.
+        if !self.subexpr_needs_prelude(expr) && !self.planner_would_act_on(expr) {
+            return Ok(scope);
+        }
+        let is_producer = self.is_prelude_producer(expr.unwrap_parens());
+        let tv = self.threaded_expression(expr)?;
+        stmts.extend(tv.prelude);
+        let doc = self.threaded_value_doc(&tv.value);
+        self.register_precompiled_subexpr(&mut scope, expr, doc, is_producer)?;
+        Ok(scope)
     }
 
     /// Generates an expression and returns any open-scope result variable that was produced.

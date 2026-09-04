@@ -403,7 +403,16 @@ impl CoreErlangGenerator {
     /// order-safety rules. Reads generator state (`in_class_method`, the
     /// Actor-context self-send test, the already-hoisted registry) but
     /// never writes it.
-    fn plan_self_send_hoists<'e>(&self, exprs: &'e [Expression]) -> Vec<HoistAction<'e>> {
+    ///
+    /// ADR 0118 phase 1a (BT-3415): also the probe behind
+    /// `threaded_expression`'s planner fallback for the parent kinds the
+    /// sequencing rule does not yet cover (literal elements, interpolation
+    /// segments, `^` values — phase 1b); `pub(in crate::core_erlang)` for
+    /// that one caller. Phase 2b deletes the planner and this with it.
+    pub(in crate::core_erlang) fn plan_self_send_hoists<'e>(
+        &self,
+        exprs: &'e [Expression],
+    ) -> Vec<HoistAction<'e>> {
         if self.in_class_method() {
             return Vec::new();
         }
@@ -652,7 +661,7 @@ pub(in crate::core_erlang) enum HoistSink<'a> {
 }
 
 /// One planned emission of [`CoreErlangGenerator::plan_self_send_hoists`].
-enum HoistAction<'e> {
+pub(in crate::core_erlang) enum HoistAction<'e> {
     /// Snapshot this `self.field` read (a `FieldAccess` node) into a temp
     /// before the dispatch that follows it.
     Snapshot(&'e Expression),
@@ -1264,6 +1273,13 @@ impl CoreErlangGenerator {
     /// arms below, both of which dispatch a self-send mid-branch and must
     /// thread its `NewState` forward instead of discarding it (mirroring C11
     /// `ControlFlowWithMutations`'s tuple-unpack `Bind`).
+    ///
+    /// ADR 0118 (BT-3415): a thin adapter over
+    /// `generate_self_dispatch_parts` (`dispatch_codegen.rs`), the
+    /// `Statement` + `Bind` producer `generate_self_dispatch` now owns —
+    /// kept for the planner's `HoistSink::Threaded` emission and the two
+    /// arms named above, which need the dispatch tuple's variable name
+    /// rather than a `ThreadedValue`.
     fn dispatch_self_send_as_bind(
         &mut self,
         expr: &Expression,
@@ -1271,21 +1287,19 @@ impl CoreErlangGenerator {
         span: Span,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<String> {
-        let source_version = self.state_version();
-        let (call_doc, dispatch_var) = self.generate_self_dispatch_call_doc(expr)?;
-        stmts.push(ThreadedStmt::Statement(call_doc, span));
-        let target_version = self.state_version();
-        stmts.push(ThreadedStmt::Bind {
-            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-            op: BindOp::Direct(ValueRef::Doc(docvec![
-                "call 'erlang':'element'(2, ",
-                leaf::var(dispatch_var.clone()),
-                ")",
-            ])),
-            shadow_write: false,
-            span,
-        });
+        let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = expr
+        else {
+            return Err(CodeGenError::Internal(
+                "dispatch_self_send_as_bind called on non-MessageSend expression".to_string(),
+            ));
+        };
+        let (prelude, dispatch_var) =
+            self.generate_self_dispatch_parts(selector, arguments, frame, span)?;
+        stmts.extend(prelude);
         Ok(dispatch_var)
     }
 

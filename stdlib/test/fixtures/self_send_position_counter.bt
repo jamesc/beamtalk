@@ -162,6 +162,27 @@ Actor subclass: SelfSendPositionCounter
     x := self bumpCount
     x
 
+  // BT-3415 review: FFI send whose ARGUMENT is a self-send — the
+  // `Erlang lists` receiver is consumed structurally by the interop
+  // intrinsic and must not be sequenced.
+  ffiArgSelfSend => Erlang lists reverse: (self bumpItems)
+
+  // BT-3415 review: `^` whose value nests a conditional with a self-send
+  // RECEIVER — the conditional's dispatch chain lives inside the value's
+  // own closed document; the reply must not reference it (compile-level
+  // pin). At runtime the conditional still leaks its `{Result, State}`
+  // tuple into `+` (ADR 0118 phase 4; gated in the test file). The `^` is
+  // deliberate (it is the method-body early-return lowering arm under
+  // test), and it is the sole statement so nothing follows it.
+  earlyReturnConditionalReceiverSelfSend =>
+    ^1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])
+
+  // BT-3415: the ADR 0118 acceptance shape — an operand that may RAISE
+  // precedes the self-send. `at:` runs first (temp-bound ahead of the
+  // dispatch): in range, `bumpCount`'s mutation threads; out of range,
+  // `at:` raises before `bumpCount` ever runs.
+  raisingOperandBeforeSelfSend: idx => (self.items at: idx) + (self bumpCount)
+
   // and:/or: receiver and block argument
   andReceiverSelfSend => (self flagTrue) and: [true]
 
@@ -258,8 +279,8 @@ Actor subclass: SelfSendPositionCounter
     self.items do: [:x | y := 1 + (self bumpCount)]
     y
 
-  // Silent drop, BT-3399 warning today — local-assignment RHS binary-op
-  // operand (ADR 0118 phase 1a/1b).
+  // Was a silent drop with a BT-3399 warning — local-assignment RHS
+  // binary-op operand; threaded since ADR 0118 phase 1a (BT-3415).
   assignRhsBinaryOpSelfSend =>
     total := self.items size + (self bumpCount)
     total

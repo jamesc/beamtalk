@@ -25,7 +25,7 @@
 //! - [`counted_loops`] — Counted loop constructs
 
 mod conditionals;
-pub(in crate::core_erlang) use conditionals::HoistSink;
+pub(in crate::core_erlang) use conditionals::{HoistAction, HoistSink};
 mod counted_loops;
 mod dict_ops;
 mod exception_handling;
