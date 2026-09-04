@@ -1339,18 +1339,21 @@ impl CoreErlangGenerator {
     }
 
     /// Dispatches a self-send (`expr`) and `Bind`s its returned `NewState` as
-    /// this branch's own next real `State` version — shared by the C12b
-    /// (`DispatchingSelfSend`) and C0b (BT-3374's nested `^self otherMethod`)
-    /// arms below, both of which dispatch a self-send mid-branch and must
-    /// thread its `NewState` forward instead of discarding it (mirroring C11
+    /// the current frame's next real `State` version (mirroring C11
     /// `ControlFlowWithMutations`'s tuple-unpack `Bind`).
     ///
     /// ADR 0118 (BT-3415): a thin adapter over
     /// `generate_self_dispatch_parts` (`dispatch_codegen.rs`), the
     /// `Statement` + `Bind` producer `generate_self_dispatch` now owns —
-    /// kept for the planner's `HoistSink::Threaded` emission and the two
-    /// arms named above, which need the dispatch tuple's variable name
-    /// rather than a `ThreadedValue`.
+    /// kept for the planner's `HoistSink::Threaded` emission
+    /// (`emit_hoist_plan`'s `HoistAction::Dispatch` arm), which needs the
+    /// dispatch tuple's variable name rather than a `ThreadedValue`. ADR
+    /// 0118 phase 2a (BT-3417) migrated its other two callers — C12b
+    /// (`DispatchingSelfSend`) and C0b (BT-3374's nested `^self
+    /// otherMethod`) — to `threaded_expression` directly (which also
+    /// sequences the self-send's own arguments, something this adapter
+    /// never did), so `emit_hoist_plan` is this function's only remaining
+    /// caller.
     fn dispatch_self_send_as_bind(
         &mut self,
         expr: &Expression,
