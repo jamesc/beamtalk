@@ -5085,11 +5085,11 @@ impl CoreErlangGenerator {
             // check — the two are independently-computed decisions that
             // must agree (see this file's own commentary on that class of
             // bug, e.g. BT-2356's "two decision points disagree" note).
-            // BT-3396: widened to any hoistable self-send in the receiver's
-            // sub-tree (`((self recordOnce: x) and: [y]) ifTrue: [...]`) —
-            // the same `Probe` walk `compile_conditional_receiver` emits
-            // with, so the two cannot disagree.
-            if self.contains_hoistable_self_send(receiver) {
+            // BT-3396: widened to any self-send needing threading in the
+            // receiver's sub-tree (`((self recordOnce: x) and: [y])
+            // ifTrue: [...]`) — the same probe `compile_conditional_receiver`
+            // threads ahead with, so the two cannot disagree.
+            if self.conditional_receiver_needs_threading(receiver) {
                 return true;
             }
             for arg in arguments {

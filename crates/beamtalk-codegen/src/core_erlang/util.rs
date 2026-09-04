@@ -12,7 +12,6 @@
 
 use std::fmt::Write as _;
 
-use super::control_flow::{HoistAction, HoistSink};
 use super::threaded_ir::{
     FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, render, render_value,
 };
@@ -264,10 +263,11 @@ impl CoreErlangGenerator {
     ///
     /// Frame: phase 1a/1b's only consumer was the flat Actor method body
     /// (`lower_body_exprs_with_reply`), always [`FrameId::ROOT`]. ADR 0118
-    /// phase 2a (BT-3417) widens this to any real frame — a conditional
+    /// phase 2a (BT-3417) widened this to any real frame — a conditional
     /// branch arm, an `on:do:`/`ensure:` body, a Tier 2 stateful-block body
-    /// — via the `frame` parameter: every `Bind` and `HoistSink::Threaded`
-    /// emission this call (and everything it recurses into — sequenced
+    /// — via the `frame` parameter; phase 2b (BT-3418) widens it once more
+    /// to a real loop body's own frame, the last remaining consumer, so
+    /// EVERY `Bind` this call (and everything it recurses into — sequenced
     /// children, cascade messages, interpolation segments) produces lands
     /// in the CALLER's own frame instead of always claiming `ROOT`. Pass
     /// [`CoreErlangGenerator::current_frame`] unless the call site already
@@ -278,24 +278,6 @@ impl CoreErlangGenerator {
         expr: &Expression,
         frame: FrameId,
     ) -> Result<ThreadedValue> {
-        // ADR 0118 phase 2a (BT-3417): every `HoistSink::Threaded` consumer
-        // EXCEPT the real loop body (`generate_threaded_loop_body_inner`,
-        // `emit_non_assign_expr`, `generate_local_var_assignment_in_loop`)
-        // has migrated to this function — phase 2b's own `StateAcc`-prefixed,
-        // loop-frame consumer. A loop body and a branch/exception/
-        // stateful-block arm BOTH run with `in_loop_body = true` (it only
-        // controls `StateAcc`-vs-`State` naming), so this guard reads the
-        // narrower `in_real_loop_body` flag instead — `true` only while
-        // literally inside `generate_threaded_loop_body_inner`'s own
-        // statement loop, `false` for an arm nested inside one
-        // (`enter_branch_context` resets it on every entry).
-        if self.in_real_loop_body {
-            return Err(CodeGenError::Internal(
-                "threaded_expression called inside a real loop body (ADR 0118 phase 2b consumer) \
-                 before that consumer is migrated"
-                    .to_string(),
-            ));
-        }
         let inner = expr.unwrap_parens();
         let span = inner.span();
 
@@ -387,37 +369,23 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Anything else: the planner fallback. Review finding on #3718:
-        // `sequenced_send_children` treats an `is_cast` send (`X!`) as
-        // opaque — it is a `MessageSend`, but neither a covered send nor
-        // one of the parent kinds above — yet `hoist_plan_walk` (still
-        // queried by `subexpr_needs_prelude`'s own tail fallback, just
-        // above) WALKS a cast send's receiver/arguments same as any other
-        // `MessageSend`, so a self-send nested in a cast's receiver
-        // (`(self next) process!`) can make `subexpr_needs_prelude`
-        // return `true` for it with no case above able to honour that.
-        // Running the planner here — exactly [`Self::threaded_expression`]'s
-        // pre-phase-1b fallback — keeps that walk and this probe unable to
-        // disagree, for a cast send and for anything else not given an
-        // explicit case above (a `Block` — a closure; its contents run
-        // later, or never — or a non-`self` / class-method `Cascade`).
-        // Phase 2b (BT-3418) deletes the planner once loop bodies are its
-        // last consumer; until then this stays the honest fallback rather
-        // than a silent empty prelude.
-        let mut prelude = Vec::new();
-        if self.in_actor_instance_context() {
-            self.hoist_nested_self_sends(
-                expr,
-                &mut HoistSink::Threaded {
-                    stmts: &mut prelude,
-                    frame,
-                    span,
-                },
-            )?;
-        }
+        // Anything else — a `Block` (a closure; its contents run later, or
+        // never) or a non-`self` / class-method `Cascade`: pure, empty
+        // prelude. ADR 0118 phase 2b (BT-3418) review finding on #3718
+        // (`sequenced_send_children` treating an `is_cast` send as opaque)
+        // is fixed at the source instead of patched here: cast sends are
+        // now a covered send like any other (see `sequenced_send_children`'s
+        // own doc comment), so a self-send nested in a cast's receiver
+        // (`(self next) process!`) is threaded by the covered-send branch
+        // above, not this fallback. A non-`self` `Cascade` was never walked
+        // by the old planner either (its walk only matched an explicit list
+        // of parent shapes and treated everything else — Cascade included —
+        // as a no-op leaf), so this fallback is a genuine no-op for every
+        // shape that still reaches it: byte-identical to the pre-ADR-0118
+        // planner's behaviour for those shapes, just without running it.
         let doc = self.generate_expression(expr)?;
         Ok(ThreadedValue {
-            prelude,
+            prelude: Vec::new(),
             value: ValueRef::Doc(doc),
         })
     }
@@ -577,46 +545,43 @@ impl CoreErlangGenerator {
 
     /// `true` if `expr` (already paren-unwrapped) is a dispatching Actor
     /// self-send [`Self::threaded_expression`] must compile through the
-    /// producer: not already dispatched-and-registered by an enclosing
-    /// planner pass (`hoisted_self_send_results`, consumed later by
-    /// `try_handle_self_dispatch`), and in an Actor instance context.
+    /// producer: in an Actor instance context.
     fn is_prelude_producer(&self, expr: &Expression) -> bool {
-        if !self.in_actor_instance_context() || !self.is_dispatching_actor_self_send(expr) {
-            return false;
-        }
-        match expr {
-            Expression::MessageSend { receiver, .. } => !self
-                .hoisted_self_send_results
-                .contains_key(&receiver.span()),
-            _ => false,
-        }
+        self.in_actor_instance_context() && self.is_dispatching_actor_self_send(expr)
     }
 
     /// The children the sequencing rule applies to when `expr` (already
     /// paren-unwrapped) is a message send it covers: the receiver, then
     /// every non-block argument, in evaluation order. `None` for anything
-    /// that is not a message send, for a cast send, and for a conditional
-    /// / `and:` / `or:` send — those are opaque to the rule (their own
-    /// intrinsics thread their receiver and arms; ADR 0118 phase 4 makes
-    /// them producers). A block argument is a closure: whatever it
-    /// contains runs later, or never, so it is neither sequenced nor
-    /// temp-bound.
+    /// that is not a message send, and for a conditional / `and:` / `or:`
+    /// send — those are opaque to the rule (their own intrinsics thread
+    /// their receiver and arms; ADR 0118 phase 4 makes them producers). A
+    /// block argument is a closure: whatever it contains runs later, or
+    /// never, so it is neither sequenced nor temp-bound.
+    ///
+    /// ADR 0118 phase 2b (BT-3418): a cast send (`X!`) is covered here too
+    /// — it is compiled through `generate_cast_send`/`generate_expression`
+    /// like any other send, consulting `precompiled_subexprs` for its
+    /// receiver and arguments the same way (`capture_argument_list_doc`/
+    /// `capture_subexpr_sequence`), so nothing about it needs opaque
+    /// treatment. Before this, a self-send nested in a cast's receiver
+    /// (`(self next) process!`) reached `threaded_expression`'s planner
+    /// fallback instead — the planner is gone, so this is now the ONLY
+    /// path that threads it (`bt3416_self_send_nested_in_a_cast_sends_
+    /// receiver_still_threads`, `tests/gen_server.rs`).
     fn sequenced_send_children(expr: &Expression) -> Option<Vec<&Expression>> {
         let Expression::MessageSend {
             receiver,
             selector,
             arguments,
-            is_cast,
             ..
         } = expr
         else {
             return None;
         };
-        if *is_cast
-            || beamtalk_core::state_threading_selectors::is_conditional_selector(
-                selector.name().as_str(),
-            )
-        {
+        if beamtalk_core::state_threading_selectors::is_conditional_selector(
+            selector.name().as_str(),
+        ) {
             return None;
         }
         let mut children = Vec::with_capacity(arguments.len() + 1);
@@ -639,11 +604,24 @@ impl CoreErlangGenerator {
     }
 
     /// Pure AST probe: would [`Self::threaded_expression`] give `expr` a
-    /// non-empty prelude? Mirrors that function's three cases exactly —
-    /// a producer, a covered send with a child that needs one, or a
-    /// non-send parent the planner would hoist at least one dispatch out
-    /// of — so the decision to compile children individually can never
-    /// disagree with what compiling them would do.
+    /// non-empty prelude? Mirrors that function's cases exactly — a
+    /// producer, a covered send (cast sends included, ADR 0118 phase 2b)
+    /// with a child that needs one, a literal container, a `^`/`:=`/
+    /// `match:` scrutinee, a string interpolation, or a self-cascade — so
+    /// the decision to compile children individually can never disagree
+    /// with what compiling them would do. Anything else (a `FieldAccess`,
+    /// which can never itself contain a nested self-send since its
+    /// receiver is always literally `self`; a conditional/`and:`/`or:`
+    /// send, opaque to this rule and threaded by its own intrinsics
+    /// instead; a `Block`, already excluded above as trivial) needs no
+    /// prelude — ADR 0118 phase 2b (BT-3418) removed the planner-based
+    /// fallback this used to fall through to here: every one of those
+    /// residual shapes was already a no-op under the old planner's own
+    /// walk (a `Block`/anything unmatched hit its catch-all without
+    /// recursing at all; a `FieldAccess` only ever produced a `Snapshot`,
+    /// never a `Dispatch`; a conditional selector returned immediately
+    /// without walking its receiver), so this is behaviourally identical,
+    /// just without running the planner to reach the same answer.
     pub(super) fn subexpr_needs_prelude(&self, expr: &Expression) -> bool {
         let inner = expr.unwrap_parens();
         if Self::is_trivial_subexpr(inner) {
@@ -683,24 +661,75 @@ impl CoreErlangGenerator {
                 .cascade_self_dispatch_messages(receiver, messages)
                 .is_some();
         }
-        self.in_actor_instance_context()
-            && self
-                .plan_self_send_hoists(std::slice::from_ref(inner))
-                .iter()
-                .any(|action| matches!(action, HoistAction::Dispatch(_)))
+        false
     }
 
-    /// `true` if the planner fallback has anything to do for `expr` — a
-    /// dispatch to hoist OR an order-unsafe self-send to warn about
-    /// (`HoistAction::Dropped`, BT-3399). [`Self::subexpr_needs_prelude`]
-    /// counts only the former (a warning is not a prelude); this is the
-    /// wider gate [`Self::thread_ahead`] uses so no diagnostic the planner
-    /// used to emit at those call sites is lost.
-    fn planner_would_act_on(&self, expr: &Expression) -> bool {
-        self.in_actor_instance_context()
-            && !self
-                .plan_self_send_hoists(std::slice::from_ref(expr.unwrap_parens()))
-                .is_empty()
+    /// BT-3396/BT-3414 (ADR 0118 phase 0): `true` if compiling `expr`
+    /// through [`Self::threaded_expression`] would give it a non-empty
+    /// prelude, INCLUDING the `and:`/`or:` mutation-threading carve-out
+    /// below — the decision predicate for "does this conditional need
+    /// inlining because of its receiver?"
+    /// (`conditional_needs_mutation_threading`,
+    /// `compile_conditional_receiver`'s own `and:`/`or:` special case).
+    ///
+    /// Formerly `contains_hoistable_self_send`
+    /// (`control_flow/conditionals.rs`), backed by the hoist planner's own
+    /// walk so a decision and its emission could never disagree. ADR 0118
+    /// phase 2b (BT-3418) deleted that walk; this predicate now shares
+    /// [`Self::subexpr_needs_prelude`] with the sequencing rule itself
+    /// instead — the same "would compiling this actually produce a
+    /// prelude?" question the rule already answers for every one of its
+    /// own children — so it still cannot disagree with what compiling
+    /// `expr` does, without sharing code with an emitting walk. Lives here
+    /// (not `control_flow/conditionals.rs`) because it is now a thin
+    /// wrapper over `subexpr_needs_prelude`. `until phase 6 replaces it`:
+    /// ADR 0118 phase 4 turns a mutation-threaded `and:`/`or:` into a real
+    /// producer, and phase 6 unifies the class-var/actor-state receiver
+    /// positions this predicate still special-cases below.
+    pub(in crate::core_erlang) fn conditional_receiver_needs_threading(
+        &self,
+        expr: &Expression,
+    ) -> bool {
+        // BT-3402/BT-3396 interaction: `and:`/`or:` is `is_conditional_selector`
+        // (widened by BT-3402), so `sequenced_send_children`/
+        // `subexpr_needs_prelude` treat it as opaque — never recursing into
+        // a bare self-send that is ITS OWN receiver (`(self recordOnce: x)
+        // and: [true]`). That opacity is correct for the sequencing rule
+        // (this exact shape is threaded by `compile_conditional_receiver`'s
+        // own `and:`/`or:` special case instead of the generic rule), but
+        // this predicate is also the decision this conditional's ENCLOSING
+        // caller (`conditional_needs_mutation_threading`) uses to decide
+        // whether ITS receiver needs the inline mutation-threading path at
+        // all. Losing this signal here left the outer conditional wrongly
+        // classified as not needing threading — falling through to plain
+        // generic dispatch, where `and:`/`or:`'s own
+        // `try_generate_boolean_protocol` interception still unconditionally
+        // fires and compiles to a `{Result, NewState}` *tuple* value with no
+        // caller positioned to unwrap it, corrupting the state-version
+        // numbering (`unbound variable 'State1'`). So: explicitly recognize
+        // this exact shape here too — same gate
+        // (`and_or_needs_mutation_threading`) `compile_conditional_receiver`
+        // uses to actually execute it — before falling back to
+        // `subexpr_needs_prelude` for every other shape.
+        if let Expression::MessageSend {
+            receiver: and_or_receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr.unwrap_parens()
+        {
+            if parts.len() == 1 && arguments.len() == 1 {
+                let kw = parts[0].keyword.as_str();
+                if kw == "and:" || kw == "or:" {
+                    if let Expression::Block(block) = &arguments[0] {
+                        if self.and_or_needs_mutation_threading(and_or_receiver, block) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        self.subexpr_needs_prelude(expr)
     }
 
     /// The `State` variable a consumer must continue from once it has
@@ -837,10 +866,10 @@ impl CoreErlangGenerator {
     /// `stmts`, and registers the value so that path's own compile of
     /// `expr` substitutes it; otherwise does nothing. The returned scope
     /// goes back to [`Self::finish_precompiled_scope`] once that compile
-    /// is done. The drop-in replacement for the planner's
-    /// `hoist_nested_self_sends(expr, HoistSink::Threaded { .. })` at the
-    /// Actor-body call sites, with the sequencing rule instead of the
-    /// order-safety drop.
+    /// is done. ADR 0118 phase 2b (BT-3418): the drop-in replacement for
+    /// every remaining `hoist_nested_self_sends(expr, HoistSink::Threaded {
+    /// .. })` call, now that the sequencing rule (not the order-safety
+    /// drop the deleted planner used) is the only mechanism.
     pub(super) fn thread_ahead(
         &mut self,
         expr: &Expression,
@@ -848,11 +877,7 @@ impl CoreErlangGenerator {
         frame: FrameId,
     ) -> Result<PrecompiledScope> {
         let mut scope = PrecompiledScope::new();
-        // Also enter when the planner fallback would only WARN (an
-        // order-unsafe, BT-3399 `Dropped` self-send in a non-send parent):
-        // the pre-ADR-0118 call sites ran `hoist_nested_self_sends`
-        // unconditionally, so that diagnostic must keep firing here too.
-        if !self.subexpr_needs_prelude(expr) && !self.planner_would_act_on(expr) {
+        if !self.subexpr_needs_prelude(expr) {
             return Ok(scope);
         }
         let is_producer = self.is_prelude_producer(expr.unwrap_parens());

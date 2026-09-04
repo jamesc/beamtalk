@@ -1515,15 +1515,14 @@ impl CoreErlangGenerator {
     ///
     /// Returns `Some(())` if the receiver is `self` in an Actor context, `None` otherwise.
     ///
-    /// BT-3392: if `receiver`'s own `Span` was already dispatched-and-Bound
-    /// by `hoist_self_sends_for_binary_op` (`control_flow/conditionals.rs`)
-    /// — a self-send nested as an operand of a binary-op chain within a
-    /// conditional block body statement — substitute a reference to the
-    /// already-computed result instead of dispatching (and thus re-running
-    /// the method, and re-mutating state) again. The entry is consumed
-    /// (`remove`) so every other self-send, including every other
-    /// occurrence of this exact selector elsewhere in the same method, is
-    /// completely unaffected.
+    /// ADR 0118 phase 2b (BT-3418): every position that threads a
+    /// dispatching self-send's `NewState` now compiles it through
+    /// [`Self::generate_self_dispatch`]'s producer directly (via
+    /// `threaded_expression`/`thread_ahead`), substituting the already-
+    /// sequenced value via `precompiled_subexprs` before `generate_message_send`
+    /// ever reaches this function — so a self-send that gets here always
+    /// falls through to [`Self::generate_discarding_self_dispatch`], the
+    /// same *discarding* dispatch every un-migrated position always used.
     fn try_handle_self_dispatch(
         &mut self,
         receiver: &Expression,
@@ -1533,13 +1532,6 @@ impl CoreErlangGenerator {
         if self.context == CodeGenContext::Actor {
             if let Expression::Identifier(id) = receiver {
                 if id.name == "self" {
-                    if let Some(dispatch_var) =
-                        self.hoisted_self_send_results.remove(&receiver.span())
-                    {
-                        let doc =
-                            docvec!["call 'erlang':'element'(1, ", leaf::var(dispatch_var), ")",];
-                        return Ok(Some(doc));
-                    }
                     let doc = self.generate_discarding_self_dispatch(selector, arguments)?;
                     return Ok(Some(doc));
                 }

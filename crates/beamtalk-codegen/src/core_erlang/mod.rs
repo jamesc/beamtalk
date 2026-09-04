@@ -1716,7 +1716,6 @@ enum OpenScopeResult {
 struct BranchContextGuard<'a> {
     generator: &'a mut CoreErlangGenerator,
     saved_in_loop: bool,
-    saved_in_real_loop_body: bool,
     saved_state_version: usize,
     saved_class_var_version: usize,
     saved_self_version: usize,
@@ -1726,7 +1725,6 @@ struct BranchContextGuard<'a> {
 impl Drop for BranchContextGuard<'_> {
     fn drop(&mut self) {
         self.generator.in_loop_body = self.saved_in_loop;
-        self.generator.in_real_loop_body = self.saved_in_real_loop_body;
         self.generator.set_state_version(self.saved_state_version);
         self.generator
             .set_class_var_version(self.saved_class_var_version);
@@ -1780,22 +1778,6 @@ pub struct CoreErlangGenerator {
     state_threading: VersionCounter,
     /// BT-153: Whether we're inside a loop body (use `StateAcc` instead of `State`)
     in_loop_body: bool,
-    /// ADR 0118 phase 2a (BT-3417): `true` only while literally inside
-    /// [`control_flow::mod::generate_threaded_loop_body_inner`]'s own
-    /// per-statement loop — the real-loop-body consumer `threaded_expression`
-    /// still refuses (phase 2b's to migrate). A conditional branch arm, an
-    /// `on:do:`/`ensure:` body, and a Tier 2 stateful-block body ALSO run
-    /// with `in_loop_body = true` (`enter_branch_context` sets it for
-    /// `StateAcc`-vs-`State` naming, shared by every `with_branch_context`
-    /// arm), so `in_loop_body` alone can't tell a real loop body apart from
-    /// one of those — this narrower flag is `threaded_expression`'s actual
-    /// guard. `enter_branch_context` resets it to `false` on every entry;
-    /// [`control_flow::CoreErlangGenerator::generate_threaded_loop_body`] is
-    /// the one caller that flips it back to `true`, so a branch arm nested
-    /// inside a loop body (or vice versa) always reflects the INNERMOST
-    /// construct, restored by [`BranchContextGuard`] on exit like every
-    /// other per-prefix flag it saves.
-    in_real_loop_body: bool,
     /// BT-3146 (ADR 0111 Addendum 5, §Branch-context version discipline):
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per
     /// [`Self::enter_branch_context`] call — every `with_branch_context` arm
@@ -1945,47 +1927,6 @@ pub struct CoreErlangGenerator {
     /// (`generate_field_assignment_open`, `generate_self_field_at_put_open`,
     /// `generate_local_var_assignment_in_loop`) return the result variable explicitly.
     last_open_scope_result: Option<OpenScopeResult>,
-    /// BT-3392: actor self-sends already dispatched-and-threaded (via a real
-    /// `ThreadedStmt::Bind`, per `dispatch_self_send_as_bind`) by a bounded
-    /// caller ahead of compiling the surrounding expression — keyed by the
-    /// self-send's receiver `self` token's own `Span` (unique per source
-    /// occurrence), valued by the Core Erlang variable already holding its
-    /// `{Result, NewState}` dispatch tuple. Consulted by
-    /// `try_handle_self_dispatch`, which substitutes
-    /// `element(1, <that var>)` — a plain, self-contained value reference —
-    /// instead of dispatching again (which would both re-run the method's
-    /// side effects and, since state was already threaded by the earlier
-    /// real `Bind`, verify-fail as an unbound version).
-    ///
-    /// Populated by `hoist_nested_self_sends`
-    /// (`control_flow/conditionals.rs`) immediately before a statement (or
-    /// a conditional's receiver, or an assignment's RHS) is compiled —
-    /// BT-3392 for self-sends nested as a binary-op operand (`1 + (self
-    /// recordOnce: x)`), BT-3396 widened to any order-safe position: a
-    /// message-send argument or receiver (`Array with: (self a)`, `(self
-    /// a) and: [..]`), a literal element, an assignment RHS sub-expression
-    /// (`self.log := self.log ++ #(self a)`). The alternative —
-    /// `generate_self_dispatch` threading state unconditionally — is the
-    /// shape its own doc comment identifies as unsafe (BT-3382's reverted
-    /// general fix broke `inheriting_counter.bt` by advancing the
-    /// state-version counter as a side effect of compiling a value
-    /// expression a caller elsewhere had already snapshotted the version
-    /// for). Gating this to explicitly pre-hoisted spans, each consumed
-    /// exactly once via `HashMap::remove`, keeps every other self-dispatch
-    /// call site's behavior — including the version-counter side effect —
-    /// completely unchanged.
-    hoisted_self_send_results:
-        std::collections::HashMap<beamtalk_core::source_analysis::Span, String>,
-    /// BT-3396: `self.field` reads already snapshotted into a temp by
-    /// `hoist_nested_self_sends` because a self-send that comes *after*
-    /// them in evaluation order was hoisted ahead of the whole expression —
-    /// keyed by the read's field-identifier `Span`, valued by the temp
-    /// holding the read's source-order (pre-dispatch) value. Consulted and
-    /// consumed by `generate_field_access`, so `self.count + (self
-    /// bumpCount)` reads the count from *before* the bump, as written,
-    /// rather than from the state var the hoisted dispatch's `Bind` just
-    /// advanced.
-    hoisted_field_reads: std::collections::HashMap<beamtalk_core::source_analysis::Span, String>,
     /// ADR 0118 phase 1a (BT-3415): sub-expressions `threaded_expression`'s
     /// sequencing rule (`util.rs`) has already compiled — each one's value
     /// (a sequencing temp, or a state-effecting producer's pure result
@@ -2001,10 +1942,12 @@ pub struct CoreErlangGenerator {
     /// for that child, so its prelude ran without its value being used
     /// (a double dispatch or a dropped operand, never silently).
     ///
-    /// This is the phase-1a substitution mechanism for the one parent
-    /// kind the sequencing rule covers (message sends, incl. binary
-    /// operators); `hoisted_self_send_results`/`hoisted_field_reads` stay
-    /// for the planner-driven consumers until phase 2b deletes all three.
+    /// This started as the phase-1a substitution mechanism for the one
+    /// parent kind the sequencing rule covered (message sends, incl. binary
+    /// operators); ADR 0118 phase 2b (BT-3418) deleted the planner-driven
+    /// consumers this used to run alongside (`hoisted_self_send_results`/
+    /// `hoisted_field_reads`), so this is now the ONLY substitution
+    /// mechanism a `threaded_expression`/`thread_ahead` caller relies on.
     precompiled_subexprs:
         std::collections::HashMap<beamtalk_core::source_analysis::Span, PrecompiledSubexpr>,
     /// BT-845/BT-860: Source file path to embed as `beamtalk_source` module attribute.
@@ -2149,7 +2092,6 @@ impl CoreErlangGenerator {
             var_context: VariableContext::new(),
             state_threading: VersionCounter::new(),
             in_loop_body: false,
-            in_real_loop_body: false,
             branch_frame_counter: 0,
             in_hybrid_loop: false,
             in_direct_params_loop: false,
@@ -2167,8 +2109,6 @@ impl CoreErlangGenerator {
             current_method_param_types: std::collections::HashMap::new(),
             current_class_field_types: std::collections::HashMap::new(),
             last_open_scope_result: None,
-            hoisted_self_send_results: std::collections::HashMap::new(),
-            hoisted_field_reads: std::collections::HashMap::new(),
             precompiled_subexprs: std::collections::HashMap::new(),
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
@@ -2791,13 +2731,10 @@ impl CoreErlangGenerator {
     /// `threaded_expression`/`thread_ahead` caller should splice a prelude's
     /// `Bind`s into RIGHT NOW — [`Self::current_branch_frame`] while inside
     /// any `with_branch_context` arm (a conditional branch, an
-    /// `on:do:`/`ensure:` body, a Tier 2 stateful-block body), [`FrameId::ROOT`](threaded_ir::FrameId::ROOT)
-    /// at the flat method body. Reads `in_loop_body` — the SAME flag every
-    /// `with_branch_context` arm sets, unlike the narrower
-    /// `in_real_loop_body` — because a real loop body's OWN nested
-    /// conditional/exception/stateful-block arm is exactly `current_branch_frame()`'s
-    /// case too; only `threaded_expression`'s own entry guard needs the
-    /// narrower flag.
+    /// `on:do:`/`ensure:` body, a Tier 2 stateful-block body, or — since
+    /// ADR 0118 phase 2b (BT-3418) — a real loop body itself, all of which
+    /// set `in_loop_body`), [`FrameId::ROOT`](threaded_ir::FrameId::ROOT)
+    /// at the flat method body.
     pub(in crate::core_erlang) fn current_frame(&self) -> threaded_ir::FrameId {
         if self.in_loop_body {
             self.current_branch_frame()
@@ -2812,21 +2749,11 @@ impl CoreErlangGenerator {
     fn enter_branch_context(&mut self) -> BranchContextGuard<'_> {
         let saved_state_version = self.state_version();
         let saved_in_loop = self.in_loop_body;
-        let saved_in_real_loop_body = self.in_real_loop_body;
         let saved_class_var_version = self.class_var_version();
         let saved_self_version = self.self_version();
         let saved_loop_threads_class_vars = self.loop_threads_class_vars;
         self.set_state_version(0);
         self.in_loop_body = true;
-        // ADR 0118 phase 2a (BT-3417): every `with_branch_context` arm is a
-        // valid `threaded_expression` consumer EXCEPT a real loop body — so
-        // reset to `false` on entry here; `generate_threaded_loop_body` (the
-        // one call site that IS a real loop body) flips it back to `true`
-        // right after entering, and `BranchContextGuard` restores whatever
-        // this saved on exit, so a branch arm nested inside a loop body (or
-        // a loop nested inside a branch arm) always reflects the innermost
-        // construct.
-        self.in_real_loop_body = false;
         // BT-3168: reset-on-entry, like `state_version` — see
         // `loop_threads_class_vars`'s own doc comment for why this must
         // never inherit an enclosing Letrec loop's `true` by default.
@@ -2850,7 +2777,6 @@ impl CoreErlangGenerator {
         BranchContextGuard {
             generator: self,
             saved_in_loop,
-            saved_in_real_loop_body,
             saved_state_version,
             saved_class_var_version,
             saved_self_version,

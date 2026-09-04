@@ -554,14 +554,6 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         field: &Identifier,
     ) -> Result<Document<'static>> {
-        // BT-3396: this exact read was snapshotted ahead of a hoisted
-        // self-send that follows it in evaluation order — substitute the
-        // snapshot so the read keeps its source-order value. See
-        // `hoisted_field_reads`'s doc comment (mod.rs). Consumed once: the
-        // key is the field identifier's own span, unique per occurrence.
-        if let Some(snap_var) = self.hoisted_field_reads.remove(&field.span) {
-            return Ok(leaf::var(snap_var));
-        }
         // BT-412: Class methods access class variables directly from ClassVars map
         if self.in_class_method() {
             if let Expression::Identifier(recv_id) = receiver {
