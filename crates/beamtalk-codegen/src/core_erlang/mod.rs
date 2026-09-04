@@ -1509,6 +1509,14 @@ struct PrecompiledSubexpr {
     /// went through `generate_expression`), so a sequenced self-send
     /// renders byte-identically to the planner's substitution; `false` for
     /// a sequencing temp or a value `generate_expression` already built.
+    ///
+    /// INVARIANT: an `annotate: true` doc must be a *closed* expression —
+    /// `( doc -| [line] )` around an open `let … in ` chain is invalid Core
+    /// Erlang (the hazard the `MessageSend` arm's open-scope guard exists
+    /// for). Today the only `true` registration is
+    /// `CoreErlangGenerator::self_dispatch_result_value`'s fixed
+    /// `call 'erlang':'element'(1, _SD)` shape; `take_precompiled_subexpr`
+    /// additionally re-applies that arm's guard as defence in depth.
     annotate: bool,
     /// Set on the first hit; a never-hit entry is an invariant violation
     /// reported by `finish_precompiled_scope`.
@@ -1536,6 +1544,9 @@ impl CoreErlangGenerator {
     /// span: `generate_expression`'s `Parenthesized` arm recurses, and
     /// every `unwrap_parens()`-first path reaches the inner node, so the
     /// inner span is the one every route converges on.
+    ///
+    /// `annotate` may be `true` only for a closed expression document —
+    /// see [`PrecompiledSubexpr::annotate`]'s invariant.
     pub(super) fn register_precompiled_subexpr(
         &mut self,
         scope: &mut PrecompiledScope,
@@ -1568,7 +1579,14 @@ impl CoreErlangGenerator {
             entry.used = true;
             (entry.doc.clone(), entry.annotate)
         };
-        if annotate {
+        // Same guard as `generate_expression`'s `MessageSend` arm (BT-940):
+        // never annotate while an open let-chain is in flight — an
+        // annotated open chain is invalid Core Erlang. Defence in depth
+        // over the closed-doc invariant on `PrecompiledSubexpr::annotate`.
+        if annotate
+            && self.last_open_scope_result.is_none()
+            && self.direct_params_list_op_result.is_none()
+        {
             if let Some(line_num) = self.span_to_line(span) {
                 return Some(self.annotate_with_line(doc, line_num));
             }
