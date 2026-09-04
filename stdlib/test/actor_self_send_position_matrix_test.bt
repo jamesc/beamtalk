@@ -150,6 +150,40 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
     self assert: self.c assignmentRhsSelfSend equals: 1
     self assert: self.c getCount equals: 1
 
+  testFfiArgSelfSend =>
+    self assert: self.c ffiArgSelfSend equals: #(1)
+    self assert: self.c getCount equals: 1
+
+  // BT-3415 review: `^ 1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])`.
+  // Compiles (the method-body `^` arm replies with the state after its
+  // PRELUDE, never a version minted inside the value's own closed
+  // document — the BT-3415 regression), but the mutation-threaded
+  // conditional in operand position still leaks its `{Result, State}`
+  // tuple into `+` at runtime — ADR 0118 phase 4 territory, same class
+  // as `conditionalArgToKeywordSendSelfSend`.
+  testEarlyReturnConditionalReceiverSelfSend =>
+    self adr0118Phase4Pending
+      ifTrue: [
+        self should: [
+          self.c earlyReturnConditionalReceiverSelfSend
+        ] raise: #does_not_understand
+        self assert: self.c getCount equals: 0
+      ]
+      ifFalse: [
+        self assert: self.c earlyReturnConditionalReceiverSelfSend equals: 2
+        self assert: self.c getCount equals: 1
+      ]
+
+  testRaisingOperandBeforeSelfSendInRange =>
+    self assert: (self.c raisingOperandBeforeSelfSend: 1) equals: 11
+    self assert: self.c getCount equals: 1
+
+  // Out of range: `at:` raises BEFORE `bumpCount` runs, so no mutation
+  // lands — the behavioural half of the evaluation-order guarantee.
+  testRaisingOperandBeforeSelfSendOutOfRange =>
+    self should: [self.c raisingOperandBeforeSelfSend: 99] raise: #index_out_of_bounds
+    self assert: self.c getCount equals: 0
+
   testAndReceiverSelfSend =>
     self assert: self.c andReceiverSelfSend equals: true
     self assert: self.c getCount equals: 1

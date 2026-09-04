@@ -1555,7 +1555,7 @@ impl CoreErlangGenerator {
         annotate: bool,
     ) {
         let span = expr.unwrap_parens().span();
-        self.precompiled_subexprs.insert(
+        let previous = self.precompiled_subexprs.insert(
             span,
             PrecompiledSubexpr {
                 doc,
@@ -1564,6 +1564,26 @@ impl CoreErlangGenerator {
             },
         );
         scope.0.push(span);
+        // Two live scopes registering the same node would let the inner
+        // `finish_precompiled_scope` remove the entry out from under the
+        // outer one, whose consulted-exactly check would then pass
+        // vacuously while the parent compiled the child afresh — a double
+        // dispatch with no error. Never a silent overwrite.
+        debug_assert!(
+            previous.is_none(),
+            "ADR 0118 sequencing: sub-expression at {span:?} registered twice"
+        );
+        if previous.is_some() {
+            self.add_codegen_warning(
+                Diagnostic::error(
+                    format!(
+                        "internal: ADR 0118 sequencing: sub-expression at {span:?} registered twice"
+                    ),
+                    span,
+                )
+                .with_category(DiagnosticCategory::Type),
+            );
+        }
     }
 
     /// The `generate_expression` entry hook for

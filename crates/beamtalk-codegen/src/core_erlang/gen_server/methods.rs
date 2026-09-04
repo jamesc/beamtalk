@@ -1305,9 +1305,17 @@ impl CoreErlangGenerator {
                             // body's IR as real `Bind`s (in source order, via
                             // the sequencing rule), then the reply carries the
                             // post-dispatch state.
+                            //
+                            // The reply's state is the one AFTER the prelude,
+                            // not `current_state_var()`: the value's own compile
+                            // may mint versions inside its closed document (a
+                            // conditional receiver's dispatch chain) that are
+                            // out of scope here — `state_var_after_prelude`.
+                            let version_before = self.state_version();
                             let tv = self.threaded_expression(value)?;
+                            let final_state =
+                                self.state_var_after_prelude(&tv.prelude, version_before);
                             stmts.extend(tv.prelude);
-                            let final_state = self.current_state_var();
                             let value_str = self.threaded_value_doc(&tv.value);
                             stmts.push(ThreadedStmt::Statement(
                                 docvec![

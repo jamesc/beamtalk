@@ -13,7 +13,9 @@
 use std::fmt::Write as _;
 
 use super::control_flow::{HoistAction, HoistSink};
-use super::threaded_ir::{FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, render_value};
+use super::threaded_ir::{
+    FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, render_value,
+};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, PrecompiledScope, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::{atom, string_lit};
@@ -254,6 +256,17 @@ impl CoreErlangGenerator {
     /// [`FrameId::ROOT`]; phase 2a threads the frame through when the
     /// branch-arm consumers migrate.
     pub(super) fn threaded_expression(&mut self, expr: &Expression) -> Result<ThreadedValue> {
+        // Phase 1a produces `State`-prefixed `Bind`s at `FrameId::ROOT` and
+        // renders values eagerly; a loop-body consumer (`StateAcc` prefix,
+        // its own frame) is phase 2b's to wire, not something to reach
+        // silently with a mismatched prefix.
+        if self.in_loop_body {
+            return Err(CodeGenError::Internal(
+                "threaded_expression called inside a loop body (ADR 0118 phase 2b consumer) \
+                 before that consumer is migrated"
+                    .to_string(),
+            ));
+        }
         let inner = expr.unwrap_parens();
         let span = inner.span();
 
@@ -360,7 +373,16 @@ impl CoreErlangGenerator {
             return None;
         }
         let mut children = Vec::with_capacity(arguments.len() + 1);
-        children.push(receiver.as_ref());
+        // An FFI receiver (`Erlang lists reverse: x`) is consumed
+        // STRUCTURALLY by `try_handle_erlang_interop` — the same
+        // `erlang_module_of_receiver` predicate turns it into a module-name
+        // atom and never compiles it — so it is never sequenced or
+        // temp-bound: a registered value it would never consult is an
+        // internal error in `finish_precompiled_scope`. Its arguments are
+        // compiled normally and are sequenced like any other send's.
+        if beamtalk_core::ffi_receiver::erlang_module_of_receiver(receiver).is_none() {
+            children.push(receiver.as_ref());
+        }
         children.extend(
             arguments
                 .iter()
@@ -393,6 +415,48 @@ impl CoreErlangGenerator {
                 .plan_self_send_hoists(std::slice::from_ref(inner))
                 .iter()
                 .any(|action| matches!(action, HoistAction::Dispatch(_)))
+    }
+
+    /// `true` if the planner fallback has anything to do for `expr` — a
+    /// dispatch to hoist OR an order-unsafe self-send to warn about
+    /// (`HoistAction::Dropped`, BT-3399). [`Self::subexpr_needs_prelude`]
+    /// counts only the former (a warning is not a prelude); this is the
+    /// wider gate [`Self::thread_ahead`] uses so no diagnostic the planner
+    /// used to emit at those call sites is lost.
+    fn planner_would_act_on(&self, expr: &Expression) -> bool {
+        self.in_actor_instance_context()
+            && !self
+                .plan_self_send_hoists(std::slice::from_ref(expr.unwrap_parens()))
+                .is_empty()
+    }
+
+    /// The `State` variable a consumer must continue from once it has
+    /// spliced `prelude` — the target of the prelude's last top-level
+    /// `State` `Bind`, or `version_before` (the counter as read BEFORE
+    /// `threaded_expression` ran) when the prelude has none. Read this
+    /// instead of `current_state_var()` after a `threaded_expression` call:
+    /// the value's own compile may have minted versions INSIDE its closed
+    /// document (a conditional receiver's `generate_self_dispatch_open`
+    /// chain, say), and those are not in scope where the consumer's reply
+    /// or next statement runs.
+    pub(super) fn state_var_after_prelude(
+        &self,
+        prelude: &[ThreadedStmt],
+        version_before: usize,
+    ) -> String {
+        let version = prelude
+            .iter()
+            .rev()
+            .find_map(|stmt| match stmt {
+                ThreadedStmt::Bind { target, .. }
+                    if target.prefix == VersionPrefix::State && target.frame == FrameId::ROOT =>
+                {
+                    Some(target.version)
+                }
+                _ => None,
+            })
+            .unwrap_or(version_before);
+        super::render_state_prefix(self.in_hybrid_loop, self.in_loop_body, version)
     }
 
     /// A child the sequencing rule never compiles ahead of its parent: a
@@ -497,7 +561,11 @@ impl CoreErlangGenerator {
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<PrecompiledScope> {
         let mut scope = PrecompiledScope::new();
-        if !self.subexpr_needs_prelude(expr) {
+        // Also enter when the planner fallback would only WARN (an
+        // order-unsafe, BT-3399 `Dropped` self-send in a non-send parent):
+        // the pre-ADR-0118 call sites ran `hoist_nested_self_sends`
+        // unconditionally, so that diagnostic must keep firing here too.
+        if !self.subexpr_needs_prelude(expr) && !self.planner_would_act_on(expr) {
             return Ok(scope);
         }
         let is_producer = self.is_prelude_producer(expr.unwrap_parens());
