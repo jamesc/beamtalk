@@ -1238,7 +1238,7 @@ impl CoreErlangGenerator {
                             // ADR 0118 phase 1a: `^self log: (self nextId)` — the
                             // producer sequences its own arguments; its prelude
                             // is this body's real `Statement` + `Bind` pair.
-                            let tv = self.threaded_expression(value)?;
+                            let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
                             stmts.extend(tv.prelude);
                             let reply = self.threaded_value_reply_doc(&tv.value);
                             stmts.push(ThreadedStmt::Statement(reply, span));
@@ -1314,7 +1314,7 @@ impl CoreErlangGenerator {
                             // conditional receiver's dispatch chain) that are
                             // out of scope here — `state_var_after_prelude`.
                             let version_before = self.state_version();
-                            let tv = self.threaded_expression(value)?;
+                            let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
                             let final_state =
                                 self.state_var_after_prelude(&tv.prelude, version_before);
                             stmts.extend(tv.prelude);
@@ -1369,7 +1369,7 @@ impl CoreErlangGenerator {
                     // already-sequenced value.
                     let rhs_scope = match expr {
                         Expression::Assignment { value, .. } => {
-                            self.thread_ahead(value, &mut stmts)?
+                            self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?
                         }
                         _ => PrecompiledScope::new(),
                     };
@@ -1444,7 +1444,8 @@ impl CoreErlangGenerator {
                             // ADR 0118 phase 1a: `self.f := 1 to: (self bump)
                             // do: [..]` — the construct's own state-effecting
                             // operands thread ahead of it.
-                            let rhs_scope = self.thread_ahead(value, &mut stmts)?;
+                            let rhs_scope =
+                                self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?;
                             // Evaluate the RHS (returns {Value, State} tuple)
                             let tuple_var = self.fresh_temp_var("CfTuple");
                             let val_var = self.fresh_temp_var("CfVal");
@@ -1770,7 +1771,8 @@ impl CoreErlangGenerator {
                             // ADR 0118 phase 1a: `x := 1 to: (self bump) do:
                             // [..]` — the construct's own state-effecting
                             // operands thread ahead of it.
-                            let rhs_scope = self.thread_ahead(value, &mut stmts)?;
+                            let rhs_scope =
+                                self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?;
                             self.emit_actor_threaded_assign_rhs_stmts(&id.name, value, &mut stmts)?;
                             self.finish_precompiled_scope(rhs_scope)?;
                         }
@@ -1792,7 +1794,7 @@ impl CoreErlangGenerator {
                             // — the producer's `Statement` + real `Bind`
                             // (its arguments sequenced first), then the
                             // local bound to its pure result reference.
-                            let tv = self.threaded_expression(value)?;
+                            let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
                             stmts.extend(tv.prelude);
                             let value_str = self.threaded_value_doc(&tv.value);
                             self.bind_var(var_name, &core_var);
@@ -1849,7 +1851,7 @@ impl CoreErlangGenerator {
                             // the RHS's state-effecting sub-expressions land
                             // in this body's IR as real `Bind`s, in source
                             // order, via the sequencing rule.
-                            let tv = self.threaded_expression(value)?;
+                            let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
                             stmts.extend(tv.prelude);
                             let value_str = self.threaded_value_doc(&tv.value);
                             self.bind_var(var_name, &core_var);
@@ -1873,7 +1875,8 @@ impl CoreErlangGenerator {
                         // `eval_rhs_to_temp_var` call (`expressions.rs`)
                         // compiles `value` via `expression_doc`, which
                         // substitutes the already-sequenced value.
-                        let rhs_scope = self.thread_ahead(value, &mut stmts)?;
+                        let rhs_scope =
+                            self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?;
                         let binding_docs = self.generate_destructure_bindings(pattern, value)?;
                         for d in binding_docs {
                             stmts.push(ThreadedStmt::Statement(d, span));
@@ -2021,13 +2024,15 @@ impl CoreErlangGenerator {
                         // state-effecting operands (bounds, receiver) thread
                         // ahead of it, so it starts from their post-dispatch
                         // state.
-                        let scope = self.thread_ahead(expr, &mut stmts)?;
+                        let scope =
+                            self.thread_ahead(expr, &mut stmts, threaded_ir::FrameId::ROOT)?;
                         self.emit_actor_threaded_last_stmts(expr, &mut stmts)?;
                         self.finish_precompiled_scope(scope)?;
                     } else {
                         // Real state Bind: element 2 of the construct's tuple IS the
                         // next `State` version (a computed map — Direct, not Put).
-                        let scope = self.thread_ahead(expr, &mut stmts)?;
+                        let scope =
+                            self.thread_ahead(expr, &mut stmts, threaded_ir::FrameId::ROOT)?;
                         let tuple_var = self.fresh_temp_var("Tuple");
                         let expr_str = self.expression_doc(expr)?;
                         self.finish_precompiled_scope(scope)?;
@@ -2093,7 +2098,7 @@ impl CoreErlangGenerator {
                     // producer (`generate_self_dispatch`) sequences its own
                     // arguments and yields the `Statement` + real `Bind` pair
                     // this body splices; the reply reads its pure result.
-                    let tv = self.threaded_expression(expr)?;
+                    let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
                     stmts.extend(tv.prelude);
                     if is_last {
                         let reply = self.threaded_value_reply_doc(&tv.value);
@@ -2123,7 +2128,7 @@ impl CoreErlangGenerator {
                 // `generate_expression` call, as before.
                 BodyExprKind::Pure => {
                     if is_last {
-                        let tv = self.threaded_expression(expr)?;
+                        let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
                         stmts.extend(tv.prelude);
                         let expr_str = self.threaded_value_doc(&tv.value);
                         let post_state = self.current_state_var();
@@ -2140,7 +2145,7 @@ impl CoreErlangGenerator {
                     } else {
                         // Mint order: `seq` before the expression, as before.
                         let tmp_var = self.fresh_temp_var("seq");
-                        let tv = self.threaded_expression(expr)?;
+                        let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
                         stmts.extend(tv.prelude);
                         let expr_str = self.threaded_value_doc(&tv.value);
                         stmts.push(ThreadedStmt::Statement(

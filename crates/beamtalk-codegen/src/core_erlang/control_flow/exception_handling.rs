@@ -53,7 +53,6 @@ use super::super::intrinsics::{
 };
 use super::super::threaded_ir::{BindOp, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result, block_analysis};
-use super::HoistSink;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{join, leaf};
@@ -1098,18 +1097,32 @@ impl CoreErlangGenerator {
                 // `generate_self_dispatch_call_doc` so the bump becomes a
                 // real Bind (Direct rebind, `element(2, _SD)`) instead of
                 // living inside an opaque Statement's text.
-                // BT-3396: `self log: (self nextId)` — thread the
-                // arguments' own self-sends ahead of this dispatch.
-                self.hoist_self_send_arguments(
-                    expr,
-                    &mut HoistSink::Threaded {
-                        stmts: &mut stmts,
-                        frame,
-                        span,
-                    },
-                )?;
+                //
+                // ADR 0118 phase 2a (BT-3417): `self log: (self nextId)` —
+                // thread the arguments' own self-sends ahead of this
+                // dispatch via [`Self::sequence_children`] (the sequencing
+                // rule) instead of the planner's `hoist_self_send_arguments`.
+                // `expr` itself stays on the dispatch call below, NOT
+                // `threaded_expression`'s producer path: `is_actor_self_send`
+                // (this arm's guard) is WIDER than `is_dispatching_actor_self_send`
+                // (the producer's gate) — it also matches a well-known
+                // selector (`self class`, `self hash`, …) that
+                // `generate_self_dispatch_call_doc` dispatches uniformly
+                // through `safe_dispatch` here (an `on:do:`/`ensure:` body's
+                // own long-standing behavior, unrelated to this migration),
+                // where the producer would instead intercept it specially —
+                // a real behavior change this call site must not make.
+                let arg_children: Vec<&Expression> =
+                    if let Expression::MessageSend { arguments, .. } = expr.unwrap_parens() {
+                        arguments.iter().collect()
+                    } else {
+                        Vec::new()
+                    };
+                let (arg_prelude, arg_scope) = self.sequence_children(&arg_children, frame)?;
+                stmts.extend(arg_prelude);
                 let source_version = self.state_version();
                 let (call_doc, dispatch_var) = self.generate_self_dispatch_call_doc(expr)?;
+                self.finish_precompiled_scope(arg_scope)?;
                 stmts.push(ThreadedStmt::Statement(call_doc, span));
                 let target_version = self.state_version();
                 stmts.push(ThreadedStmt::Bind {
@@ -1160,19 +1173,14 @@ impl CoreErlangGenerator {
                     // wrapping that directly as `let rv = <open-chain> in`
                     // leaves a dangling `in` — a `core_parse_error`, the
                     // exact failure mode this closes.
-                    // BT-3396: thread every order-safe nested self-send
-                    // (`1 + (self bump)`) as real `Bind`s ahead of the
-                    // compile — the E-side counterpart of C12.
-                    self.hoist_nested_self_sends(
-                        expr,
-                        &mut HoistSink::Threaded {
-                            stmts: &mut stmts,
-                            frame,
-                            span,
-                        },
-                    )?;
+                    // ADR 0118 phase 2a (BT-3417): thread every
+                    // state-effecting sub-expression (`1 + (self bump)`) as
+                    // real `Bind`s ahead of the compile, via `thread_ahead`
+                    // — the E-side counterpart of C12.
+                    let hoist_scope = self.thread_ahead(expr, &mut stmts, frame)?;
                     let rv = self.fresh_temp_var("ExResult");
                     let expr_doc = self.closed_expression_doc(expr)?;
+                    self.finish_precompiled_scope(hoist_scope)?;
                     stmts.push(ThreadedStmt::Statement(
                         docvec!["let ", leaf::var(rv.clone()), " = ", expr_doc, " in"],
                         span,
@@ -1234,17 +1242,12 @@ impl CoreErlangGenerator {
                         // why this must be `closed_expression_doc`, not
                         // plain `expression_doc` — same open-scope hazard,
                         // same fix (BT-2350).
-                        // BT-3396: see the E6 sub-branch above.
-                        self.hoist_nested_self_sends(
-                            expr,
-                            &mut HoistSink::Threaded {
-                                stmts: &mut stmts,
-                                frame,
-                                span,
-                            },
-                        )?;
+                        // ADR 0118 phase 2a (BT-3417): see the E6
+                        // sub-branch above.
+                        let hoist_scope = self.thread_ahead(expr, &mut stmts, frame)?;
                         let rv = self.fresh_temp_var("ExResult");
                         let expr_doc = self.closed_expression_doc(expr)?;
+                        self.finish_precompiled_scope(hoist_scope)?;
                         stmts.push(ThreadedStmt::Statement(
                             docvec!["let ", leaf::var(rv.clone()), " = ", expr_doc, " in"],
                             span,
@@ -1263,16 +1266,10 @@ impl CoreErlangGenerator {
                 // discard `let`, mirroring `push_discarded_stmt`'s
                 // established idiom (BT-2350), rather than
                 // `closed_expression_doc`'s scope-closing wrap.
-                // BT-3396: see the E6 sub-branch above.
-                self.hoist_nested_self_sends(
-                    expr,
-                    &mut HoistSink::Threaded {
-                        stmts: &mut stmts,
-                        frame,
-                        span,
-                    },
-                )?;
+                // ADR 0118 phase 2a (BT-3417): see the E6 sub-branch above.
+                let hoist_scope = self.thread_ahead(expr, &mut stmts, frame)?;
                 let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                self.finish_precompiled_scope(hoist_scope)?;
                 match open_scope {
                     Some(OpenScopeResult::Value(result_var)) => {
                         stmts.push(ThreadedStmt::Statement(expr_doc, span));

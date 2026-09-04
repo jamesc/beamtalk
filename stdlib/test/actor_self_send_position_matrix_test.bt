@@ -52,8 +52,25 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
   adr0118Phase1bPending => false
 
   // ADR 0118 phase 2a: conditional arms, exception arms, stateful-block
-  // bodies, conditional receiver consume ThreadedValue.
-  adr0118Phase2aPending => true
+  // bodies, conditional receiver consume ThreadedValue (BT-3417). No matrix
+  // row is gated on this phase — every position BT-3417 fixes (a self-send
+  // nested in a conditional branch or an `on:do:`/`ensure:` body, including
+  // the `Return`-value shapes `generate_conditional_branch_inline`'s C12
+  // catch-all now reaches) already ran through the PASSING-POSITIONS
+  // section above once landed, and
+  // `testSelfSendAsBinaryOpArgumentInBoundsThreadsMutation`
+  // (`actor_conditional_mutations_test.bt`) pins the BT-3399-order-unsafe
+  // shape phase 2a's universal sequencing rule newly fixes. The two rows
+  // that LOOKED phase-2a-shaped at a glance — a self-send nested in
+  // `ifNil:ifNotNil:`'s block or a `match:` arm's body — turned out, on
+  // inspection while implementing BT-3417, to route through codegen this
+  // phase does not touch (`ifNil:ifNotNil:` always compiles its blocks as
+  // genuine Tier 1 closures; `generate_match_arm_body`'s mutation-threading
+  // fallback compiles its arm via a plain `expression_doc` call, never
+  // `generate_conditional_branch_inline`/`thread_ahead`) — both are gated
+  // on `adr0118Phase4Pending` below instead (see
+  // `testIfNilIfNotNilBlockArgSelfSendNonNil`/`testMatchArmSelfSendMatchingArm`'s
+  // own comments).
 
   // ADR 0118 phase 2b: loop-body consumers; delete planner, HoistSink,
   // registries, BT-3399 warning.
@@ -345,12 +362,17 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
         self assert: self.c getCount equals: 1
       ]
 
-  // ADR 0118 phase 2a (conditional-arm-shaped consumers, ifNil:ifNotNil:):
-  // the block's own computed VALUE is correct today — only the nested
-  // self-send's actor-state mutation is silently lost.
+  // ADR 0118 phase 4 (BT-3417 correction: `ifNil:ifNotNil:` always compiles
+  // its blocks as genuine Tier 1 closures — `intrinsics.rs`'s
+  // `WellKnownSelector::IfNilIfNotNil` arm never reaches
+  // `generate_block_stateful`, so phase 2a's stateful-block-body migration
+  // does not touch this shape; it needs `ifNil:ifNotNil:` itself to become
+  // an inline-threaded producer first). The block's own computed VALUE is
+  // correct today — only the nested self-send's actor-state mutation is
+  // silently lost.
   testIfNilIfNotNilBlockArgSelfSendNonNil =>
     self assert: (self.c ifNilIfNotNilBlockArgSelfSend: 5) equals: 6
-    self adr0118Phase2aPending ifTrue: [
+    self adr0118Phase4Pending ifTrue: [
       self assert: self.c getCount equals: 0
     ] ifFalse: [self assert: self.c getCount equals: 1]
 
@@ -358,11 +380,15 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
     self assert: (self.c ifNilIfNotNilBlockArgSelfSend: nil) equals: 0
     self assert: self.c getCount equals: 0
 
-  // ADR 0118 phase 2a (match: arm consumes ThreadedValue): same shape —
-  // the arm's own value is correct, the nested mutation is dropped.
+  // ADR 0118 phase 4 (BT-3417 correction: a `match:` arm's mutation-
+  // threading fallback, `generate_match_arm_body`, compiles its body via a
+  // plain `expression_doc` call — never `generate_conditional_branch_inline`/
+  // `thread_ahead` — so phase 2a's conditional-arm migration does not reach
+  // this shape either). Same symptom — the arm's own value is correct, the
+  // nested mutation is dropped.
   testMatchArmSelfSendMatchingArm =>
     self assert: (self.c matchArmSelfSend: 1) equals: 2
-    self adr0118Phase2aPending ifTrue: [
+    self adr0118Phase4Pending ifTrue: [
       self assert: self.c getCount equals: 0
     ] ifFalse: [self assert: self.c getCount equals: 1]
 
