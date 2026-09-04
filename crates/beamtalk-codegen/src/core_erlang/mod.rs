@@ -1579,19 +1579,27 @@ impl CoreErlangGenerator {
             entry.used = true;
             (entry.doc.clone(), entry.annotate)
         };
-        // Same guard as `generate_expression`'s `MessageSend` arm (BT-940):
-        // never annotate while an open let-chain is in flight — an
-        // annotated open chain is invalid Core Erlang. Defence in depth
-        // over the closed-doc invariant on `PrecompiledSubexpr::annotate`.
-        if annotate
-            && self.last_open_scope_result.is_none()
-            && self.direct_params_list_op_result.is_none()
-        {
+        // Never annotate while an open let-chain is in flight — an
+        // annotated open chain is invalid Core Erlang (BT-940). Defence in
+        // depth over the closed-doc invariant on `PrecompiledSubexpr::annotate`.
+        if annotate && self.can_annotate_closed_expression() {
             if let Some(line_num) = self.span_to_line(span) {
                 return Some(self.annotate_with_line(doc, line_num));
             }
         }
         Some(doc)
+    }
+
+    /// BT-940: whether the expression just produced may be wrapped in a
+    /// source-line annotation — only a CLOSED expression can be; an open
+    /// let-chain (a class-method send, a class-var assignment, a
+    /// direct-params list op) ends in a dangling `in ` that `( expr -|
+    /// [annotation] )` would break. The single predicate behind
+    /// `generate_expression`'s `MessageSend` arm and
+    /// [`Self::take_precompiled_subexpr`], so a new open-scope side channel
+    /// only has to be added here.
+    fn can_annotate_closed_expression(&self) -> bool {
+        self.last_open_scope_result.is_none() && self.direct_params_list_op_result.is_none()
     }
 
     /// Removes every entry `scope` registered, once the parent compile
@@ -3699,12 +3707,8 @@ impl CoreErlangGenerator {
                     self.generate_message_send(receiver, selector, arguments)
                 }?;
                 // BT-940: Annotate message sends with source line for BEAM stacktraces.
-                // Only annotate CLOSED expressions — open let-chains (class method sends,
-                // direct-params list ops) cannot be annotated because the trailing `in`
-                // breaks Core Erlang syntax when wrapped in `( expr -| [annotation] )`.
-                if self.last_open_scope_result.is_none()
-                    && self.direct_params_list_op_result.is_none()
-                {
+                // Only annotate CLOSED expressions — see `can_annotate_closed_expression`.
+                if self.can_annotate_closed_expression() {
                     if let Some(line_num) = self.span_to_line(*span) {
                         return Ok(self.annotate_with_line(doc, line_num));
                     }
