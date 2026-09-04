@@ -72,9 +72,22 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
   // `testIfNilIfNotNilBlockArgSelfSendNonNil`/`testMatchArmSelfSendMatchingArm`'s
   // own comments).
 
-  // ADR 0118 phase 2b: loop-body consumers; delete planner, HoistSink,
-  // registries, BT-3399 warning.
-  adr0118Phase2bPending => true
+  // ADR 0118 phase 2b (BT-3418): loop-body consumers
+  // (`generate_threaded_loop_body_inner`'s field-assignment RHS path,
+  // `emit_non_assign_expr`, `generate_local_var_assignment_in_loop`)
+  // consume `ThreadedValue`; the self-send hoist planner, `HoistSink`, and
+  // the BT-3399 warning are deleted. Landed: `testDoLoopLocalAssignRhsSelfSend`
+  // (a local-assignment RHS binary-op operand inside a `do:` body) is the
+  // row this phase newly fixes — `testDoLoopFieldAssignRhsSelfSend` (a
+  // field-assignment RHS) was already correct before this phase (see its
+  // own comment). One row that LOOKED loop-body-shaped at a glance —
+  // `sort:`'s comparator block — turned out, on inspection while
+  // implementing BT-3418, to be a stored Tier 1 closure ARGUMENT rather
+  // than a statement `generate_threaded_loop_body_inner` itself walks, so
+  // none of this phase's three consumers ever reach it; re-scoped onto
+  // `adr0118Phase4Pending` instead (see `testSortBlockSelfSend`'s own
+  // comment) pending a dedicated follow-up.
+  adr0118Phase2bPending => false
 
   // ADR 0118 phase 3: ConditionalLoop condition as IR.
   adr0118Phase3Pending => true
@@ -403,12 +416,24 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
       self assert: self.c getCount equals: 0
     ] ifFalse: [self assert: self.c getCount equals: 1]
 
-  // ADR 0118 phase 2b (loop-body-shaped block-taking consumers): sort:'s
-  // own comparator never affects ordering here, so the sorted VALUE is
-  // already correct; only the comparator's self-send mutation is dropped.
+  // Re-scoped off `adr0118Phase2bPending` while implementing BT-3418: this
+  // LOOKED loop-body-shaped at a glance (like the two rows below, which
+  // phase 2b genuinely does fix), but `sort:`'s comparator is a stored
+  // Tier 1 closure ARGUMENT — never a statement inside
+  // `generate_threaded_loop_body_inner`'s own per-statement loop — so
+  // none of phase 2b's three consumers (`emit_non_assign_expr`,
+  // `generate_local_var_assignment_in_loop`, the field-assignment RHS
+  // path) ever reach it; confirmed empirically (flipping the gate off
+  // while implementing BT-3418 failed this test: `getCount` stayed `0`).
+  // `sort:`'s own comparator never affects ordering here, so the sorted
+  // VALUE is already correct either way; only the comparator's self-send
+  // mutation is dropped. Filed as a genuine gap outside ADR 0118's
+  // phase 1-4 consumer list (§Decision 4) rather than folded into any
+  // existing phase switch — gated on `adr0118Phase4Pending` for now as
+  // the nearest not-yet-landed phase, pending its own follow-up issue.
   testSortBlockSelfSend =>
     self assert: self.c sortBlockSelfSend equals: #(10, 30)
-    self adr0118Phase2bPending ifTrue: [
+    self adr0118Phase4Pending ifTrue: [
       self assert: self.c getCount equals: 0
     ] ifFalse: [self assert: self.c getCount equals: 1]
 
@@ -423,17 +448,16 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
   testDoLoopFieldAssignRhsSelfSend =>
     self assert: self.c doLoopFieldAssignRhsSelfSend equals: 7
 
-  // ADR 0118 phase 2b (loop-body local-assignment RHS; deletes the
-  // BT-3399 warning): the outer LOCAL `y` still threads correctly via the
-  // pre-existing loop-local mechanism; the nested self-send's actor-state
-  // mutation is what the BT-3399 warning already flags as dropped.
+  // ADR 0118 phase 2b (BT-3418): loop-body local-assignment RHS —
+  // `generate_local_var_assignment_in_loop` now threads a nested self-send
+  // ahead of the RHS's own compile via `thread_ahead`, deleting the
+  // BT-3399 warning this shape used to emit. The outer LOCAL `y` already
+  // threaded correctly via the pre-existing loop-local mechanism even
+  // before this phase; what was missing was `bumpCount`'s own actor-state
+  // mutation.
   testDoLoopLocalAssignRhsSelfSend =>
-    self adr0118Phase2bPending
-      ifTrue: [self assert: self.c getCount equals: 0]
-      ifFalse: [
-        self assert: self.c doLoopLocalAssignRhsSelfSend equals: 4
-        self assert: self.c getCount equals: 3
-      ]
+    self assert: self.c doLoopLocalAssignRhsSelfSend equals: 4
+    self assert: self.c getCount equals: 3
 
   // Landed in ADR 0118 phase 1a (BT-3415), not 1b as first expected: the
   // RHS's PARENT node is a binary-op send (`self.items size + (self

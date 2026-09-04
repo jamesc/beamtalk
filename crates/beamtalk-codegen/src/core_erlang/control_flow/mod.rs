@@ -25,14 +25,13 @@
 //! - [`counted_loops`] — Counted loop constructs
 
 mod conditionals;
-pub(in crate::core_erlang) use conditionals::{HoistAction, HoistSink};
 mod counted_loops;
 mod dict_ops;
 mod exception_handling;
 mod list_ops;
 mod while_loops;
 
-use super::threaded_ir;
+use super::threaded_ir::{self, ThreadedStmt};
 use super::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result, block_analysis,
 };
@@ -1904,16 +1903,6 @@ impl CoreErlangGenerator {
         let is_letrec = matches!(kind, BodyKind::Letrec);
         self.with_branch_context(|this| {
             this.loop_threads_class_vars = is_letrec && plan.threads_class_vars;
-            // ADR 0118 phase 2a (BT-3417): this IS the real loop body —
-            // `enter_branch_context` (inside `with_branch_context`) reset
-            // `in_real_loop_body` to `false` on entry (the default for every
-            // `with_branch_context` arm); flip it back to `true` for the
-            // duration of this call so `threaded_expression` keeps refusing
-            // here (a phase 2b consumer) while a nested conditional/
-            // exception/stateful-block arm inside this body — which enters
-            // its OWN `with_branch_context` and resets the flag again — is
-            // unaffected.
-            this.in_real_loop_body = true;
             let result = this.generate_threaded_loop_body_inner(body, plan, kind);
             if is_letrec && plan.threads_class_vars {
                 this.last_loop_class_var = Some(this.current_class_var());
@@ -2006,7 +1995,31 @@ impl CoreErlangGenerator {
 
             if Self::is_field_assignment(expr) {
                 has_mutations = true;
+                // ADR 0118 phase 2b (BT-3418): thread every state-effecting
+                // sub-expression nested in the RHS ahead of
+                // `generate_field_assignment_open`'s own compile of it —
+                // `self.count := self.count + (self bump)` no longer
+                // silently drops `bump`'s mutation. Mirrors
+                // `lower_field_assignment_bind`'s identical `thread_ahead`
+                // step (`conditionals.rs`), and is safe to run unconditionally
+                // ahead of every one of `generate_field_assignment_open`'s
+                // own three internal branches (plain, hybrid-full-extract,
+                // class-var) — all three eventually compile `value` via
+                // `expression_doc`, which is exactly the route
+                // `precompiled_subexprs` substitution reaches, so a `value`
+                // that needs no threading (the overwhelmingly common case)
+                // leaves this a no-op.
+                let Expression::Assignment { value, .. } = expr else {
+                    unreachable!("is_field_assignment guarantees an Assignment expr");
+                };
+                let frame = self.current_frame();
+                let mut prelude_stmts: Vec<ThreadedStmt> = Vec::new();
+                let thread_scope = self.thread_ahead(value, &mut prelude_stmts, frame)?;
+                if !prelude_stmts.is_empty() {
+                    docs.push(self.threaded_prelude_doc(&prelude_stmts));
+                }
                 let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
+                self.finish_precompiled_scope(thread_scope)?;
                 docs.push(doc);
                 if is_last {
                     self.emit_field_assign_last_expr(&mut docs, kind, pred_var.as_ref());
@@ -3219,29 +3232,31 @@ impl CoreErlangGenerator {
         pred_var: Option<&String>,
         plan: &ThreadingPlan,
     ) -> Result<()> {
-        // BT-3403: hoist any actor self-send nested as a sub-expression of
-        // `expr` (e.g. `1 + (self bumpCount)`) ahead of `expr`'s own compile,
-        // the same `HoistSink::OpenDocs` mechanism `compile_conditional_receiver`
-        // uses for a conditional's receiver. Each hoisted dispatch is a real
-        // `generate_self_dispatch_open` call that advances `state_version()`
-        // and registers its result in `hoisted_self_send_results`, so the
-        // `expression_doc`/`closed_expression_doc`/`bind_closed_expr_threading_class_vars`
-        // call below (which reach the same self-send only through the
-        // ordinary, mutation-discarding `generate_self_dispatch` path)
-        // substitutes the already-threaded result instead of re-dispatching
-        // and dropping the mutation. Must run before every arm below reads
-        // `state_version()`/`current_state_var()`/`*has_mutations` — a
-        // hoisted dispatch is exactly as state-advancing as any other
-        // mutation this function already detects, so `*has_mutations` is set
-        // here BEFORE any arm's own `current_state_var()` vs `"StateAcc"`
-        // choice reads it (both the ones inside this function and the
-        // caller's own post-loop `FoldlFilter`/`FoldlBoolPredicate`-family
-        // wrap, which reads the same accumulator after this call returns).
-        let mut hoisted: Vec<Document<'static>> = Vec::new();
-        self.hoist_nested_self_sends(expr, &mut HoistSink::OpenDocs(&mut hoisted))?;
-        let hoisted_anything = !hoisted.is_empty();
+        // ADR 0118 phase 2b (BT-3418): thread every state-effecting
+        // sub-expression nested in `expr` (e.g. `1 + (self bumpCount)`)
+        // ahead of `expr`'s own compile, via the sequencing rule
+        // (`Self::thread_ahead`) — the drop-in replacement for BT-3403's
+        // planner-based emission (now deleted). Every branch below compiles `expr` through
+        // `expression_doc`/`closed_expression_doc`/
+        // `bind_closed_expr_threading_class_vars`/`push_discarded_stmt` —
+        // all four route through `generate_expression`, so whichever one
+        // fires consults the registered substitution; `finish_precompiled_scope`
+        // is therefore called once, after the whole `match` below, rather
+        // than duplicated at every one of those call sites. Must run before
+        // every arm below reads `state_version()`/`current_state_var()`/
+        // `*has_mutations` — a threaded prelude is exactly as
+        // state-advancing as any other mutation this function already
+        // detects, so `*has_mutations` is set here BEFORE any arm's own
+        // `current_state_var()` vs `"StateAcc"` choice reads it (both the
+        // ones inside this function and the caller's own post-loop
+        // `FoldlFilter`/`FoldlBoolPredicate`-family wrap, which reads the
+        // same accumulator after this call returns).
+        let frame = self.current_frame();
+        let mut prelude_stmts: Vec<ThreadedStmt> = Vec::new();
+        let thread_scope = self.thread_ahead(expr, &mut prelude_stmts, frame)?;
+        let hoisted_anything = !prelude_stmts.is_empty();
         if hoisted_anything {
-            docs.push(Document::Vec(hoisted));
+            docs.push(self.threaded_prelude_doc(&prelude_stmts));
             *has_mutations = true;
         }
         let has_mutations = *has_mutations;
@@ -3270,13 +3285,13 @@ impl CoreErlangGenerator {
                     //
                     // BT-3403: that assumption does NOT hold when THIS
                     // statement's own mutation came entirely from a self-send
-                    // hoisted above (`hoisted_anything`) — `expr`'s own
-                    // compile is then just a plain value (the hoisted
-                    // dispatch's result was substituted in by
-                    // `try_handle_self_dispatch`), not a tuple, and wrapping
+                    // threaded ahead above (`hoisted_anything`) — `expr`'s own
+                    // compile is then just a plain value (the threaded
+                    // dispatch's result was substituted in via
+                    // `precompiled_subexprs`), not a tuple, and wrapping
                     // it in a phantom `element(2, ...)` unwrap crashes
                     // (`badarg`, confirmed empirically for `N timesRepeat: [1
-                    // + (self bumpCount)]`). The hoist's own let-chain already
+                    // + (self bumpCount)]`). The threaded prelude's own let-chain already
                     // rebound `current_state_var()` to the post-dispatch
                     // state, so just discard `expr`'s plain value and use it
                     // directly — the same pattern the `else` branch below
@@ -3470,6 +3485,7 @@ impl CoreErlangGenerator {
                 unreachable!("FoldlSort does not use generate_threaded_loop_body");
             }
         }
+        self.finish_precompiled_scope(thread_scope)?;
         Ok(())
     }
 
@@ -4256,7 +4272,6 @@ impl CoreErlangGenerator {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
                 let val_var = self.fresh_temp_var("Val");
-                let current_state = super::util::versioned_var("StateAcc", self.state_version());
 
                 // BT-790: In REPL mode, use the plain variable name as the key
                 // (no __local__ prefix) since there are no actor fields to collide with.
@@ -4322,10 +4337,35 @@ impl CoreErlangGenerator {
                     ));
                 }
 
+                // ADR 0118 phase 2b (BT-3418): thread every state-effecting
+                // sub-expression nested in the RHS (or the RHS itself, `v :=
+                // self bump`) ahead of `value`'s own compile — mirrors
+                // `lower_local_var_assignment_bind`'s identical `thread_ahead`
+                // step (`conditionals.rs`), the branch-arm sibling this
+                // loop-body function has always structurally paralleled.
+                // Scoped to the non-Tier2 path only, matching that sibling's
+                // own scope: a Tier2 value call already returned its own
+                // `{Result, NewStateAcc}` tuple above via a dedicated helper
+                // that never consults `precompiled_subexprs`, so
+                // pre-threading it there would double-compile (and
+                // double-dispatch) any self-send nested in its arguments.
+                let frame = self.current_frame();
+                let mut prelude_stmts: Vec<ThreadedStmt> = Vec::new();
+                let thread_scope = self.thread_ahead(value, &mut prelude_stmts, frame)?;
+                let prelude_doc = self.threaded_prelude_doc(&prelude_stmts);
+
                 // Capture value expression (ADR 0018 bridge)
                 // BT-1397: Detect open-scope results from class method self-sends
                 // in the value expression.
                 let (value_code, open_scope) = self.expression_doc_with_open_scope(value)?;
+                self.finish_precompiled_scope(thread_scope)?;
+
+                // BT-3418: read AFTER `thread_ahead` above, so a threaded
+                // prelude's own state-version bump (e.g. a nested self-send's
+                // dispatch `Bind`) is reflected in the `maps:put` source
+                // below — reading it any earlier would reference the
+                // pre-dispatch state.
+                let current_state = super::util::versioned_var("StateAcc", self.state_version());
 
                 // Increment state version for the new state
                 let _ = self.next_state_var();
@@ -4354,6 +4394,7 @@ impl CoreErlangGenerator {
                     self.bind_var(&id.name, &val_var);
                     return Ok((
                         docvec![
+                            prelude_doc,
                             value_code,
                             "let ",
                             leaf::var(val_var.clone()),
@@ -4383,6 +4424,7 @@ impl CoreErlangGenerator {
                 // can use it as the branch result.
                 return Ok((
                     docvec![
+                        prelude_doc,
                         "let ",
                         leaf::var(val_var.clone()),
                         " = ",

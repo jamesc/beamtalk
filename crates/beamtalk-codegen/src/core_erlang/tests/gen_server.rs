@@ -6871,10 +6871,10 @@ fn bt3396_self_dispatch_nested_in_conditional_receiver_and_threads_state_and_com
     // — the conditional's receiver is an `and:` send whose OWN receiver is
     // the self-send. Neither block mutates, and the receiver is not itself
     // a self-send (BT-3382's check), so only the widened
-    // `contains_hoistable_self_send` probe makes this conditional inline;
-    // `compile_conditional_receiver` then hoists the nested dispatch ahead
-    // of the `and:` send. The generated code must be real, erlc-valid Core
-    // Erlang.
+    // `conditional_receiver_needs_threading` probe makes this conditional
+    // inline; `compile_conditional_receiver` then threads the nested
+    // dispatch ahead of the `and:` send. The generated code must be real,
+    // erlc-valid Core Erlang.
     let src = "Actor subclass: MutProbe\n  state: timestamps = 0\n\n  triggerDirectly: which =>\n    ((self recordOnce: which) and: [true])\n      ifTrue: [1]\n      ifFalse: [2].\n    self.timestamps\n\n  internal recordOnce: which =>\n    self.timestamps := self.timestamps + 1.\n    which\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -7247,6 +7247,66 @@ fn bt3416_self_send_nested_in_a_cast_sends_receiver_still_threads() {
 }
 
 #[test]
+fn bt3418_field_assign_rhs_in_loop_body_threads_nested_self_send() {
+    // ADR 0118 phase 2b (BT-3418): `self.count := self.count + (self
+    // bump)` as a `do:` loop-body statement — the field-assignment RHS
+    // path inside `generate_threaded_loop_body_inner`. Before this phase
+    // the nested self-send's mutation was silently dropped (no hoist ran
+    // for this position at all); `thread_ahead` now sequences it ahead of
+    // `generate_field_assignment_open`'s own compile of the RHS. Per
+    // iteration: `count` reads BEFORE `bump` runs (evaluation order), so
+    // `1, 2` bumps `count` to `1, 2` while `self.count` is reassigned to
+    // `0+1=1`, then `1+2=3`.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = #(1, 2)\n\n  go =>\n    self.items do: [:x | self.count := self.count + (self bump)]\n    self.count\n\n  internal bump =>\n    self.count := self.count + 1\n    self.count\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt3418_field_assign_rhs_in_loop_body").with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        code.contains("'safe_dispatch'('bump'"),
+        "the nested self-send must dispatch. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3418_field_assign_rhs_in_loop_body", &code);
+}
+
+#[test]
+fn bt3418_local_assign_rhs_in_loop_body_threads_nested_self_send_with_no_warning() {
+    // ADR 0118 phase 2b (BT-3418): `y := 1 + (self bump)` as a `do:`
+    // loop-body statement — `generate_local_var_assignment_in_loop`'s own
+    // RHS. This is the exact shape the BT-3399 warning used to fire for
+    // (an order-unsafe self-send binary-op operand silently dropped);
+    // `thread_ahead` now sequences it ahead of the RHS's own compile via
+    // the universal sequencing rule, so the mutation threads and the
+    // warning is gone.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = #(1, 2)\n\n  go =>\n    y := 0.\n    self.items do: [:x | y := 1 + (self bump)].\n    y\n\n  internal bump =>\n    self.count := self.count + 1\n    self.count\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let generated = generate_module_with_warnings(
+        &module,
+        CodegenOptions::new("bt3418_local_assign_rhs_in_loop_body").with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        generated.code.contains("erlang':'element'(2, _SD"),
+        "bump's NewState must be extracted (threaded), not discarded. Got:\n{}",
+        generated.code
+    );
+    assert!(
+        !generated
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("bump") && w.message.contains("silently dropped")),
+        "the BT-3399 dropped-mutation warning must no longer fire for this shape \
+         now that it threads. Got: {:?}",
+        generated.warnings
+    );
+    assert_compiles_through_erlc("bt3418_local_assign_rhs_in_loop_body", &generated.code);
+}
+
+#[test]
 fn bt3415_registering_the_same_subexpression_twice_is_never_silent() {
     // Adversarial review finding on #3717: a second registration of one
     // node would let the inner scope's finish remove the entry out from
@@ -7432,8 +7492,10 @@ fn threading_gates_agree_on_fixture_set() {
     // answered by several overlapping predicates — `control_flow_has_mutations`
     // (gen_server/methods.rs, used by the statement-level C11/C12 dispatch
     // to decide whether a `Match`/conditional send needs threaded lowering),
-    // `contains_hoistable_self_send` (control_flow/conditionals.rs, one
-    // disjunct of the same question), and the gate behind `ifTrue:`,
+    // `conditional_receiver_needs_threading` (util.rs, one disjunct of the
+    // same question — renamed from `contains_hoistable_self_send` by ADR
+    // 0118 phase 2b/BT-3418, which also moved it out of
+    // `control_flow/conditionals.rs`), and the gate behind `ifTrue:`,
     // `ifFalse:`, `ifTrue:ifFalse:`, `ifNotNil:`, and `and:`/`or:`
     // (intrinsics.rs, collapsed by this same issue into
     // `conditional_needs_mutation_threading` /
@@ -7532,11 +7594,12 @@ fn threading_gates_agree_on_fixture_set() {
             case.name
         );
 
-        let hoistable = generator.contains_hoistable_self_send(receiver);
+        let needs_threading = generator.conditional_receiver_needs_threading(receiver);
         assert!(
-            !hoistable || case.expect_needs_threading,
-            "case {:?}: contains_hoistable_self_send(receiver) was true but the case did not \
-             expect threading — a hoistable self-send in the receiver must always force threading",
+            !needs_threading || case.expect_needs_threading,
+            "case {:?}: conditional_receiver_needs_threading(receiver) was true but the case did \
+             not expect threading — a self-send needing threading in the receiver must always \
+             force threading",
             case.name
         );
 
@@ -7599,8 +7662,12 @@ fn bt3414_bare_and_inside_if_true_branch_inside_do_body_panics_verifier() {
     // `ifTrue:` branch, itself inside a `do:` loop body. The conditional
     // branch's own ThreadedIr frame and the enclosing loop body's frame both
     // end up producing a Bind for the same version: `NonLinearVersion`.
-    // ADR 0118 phase 2a (conditional arms/receiver consume ThreadedValue)
-    // and phase 2b (loop-body consumers) together close this row.
+    // Confirmed still panicking after ADR 0118 phase 2b (BT-3418, loop-body
+    // consumers): this statement routes through
+    // `generate_threaded_loop_body_inner`'s separate `control_flow_has_mutations`
+    // branch (an inline conditional with mutations, not any of phase 2b's
+    // three consumers), so neither phase touches it. Left open for a later
+    // phase.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    #(1) do: [:x |\n      x > 0\n        ifTrue: [(self flagTrue) and: [true]]\n        ifFalse: [nil]\n    ]\n    self.count\n\n  internal flagTrue =>\n    self.count := self.count + 1\n    true\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);

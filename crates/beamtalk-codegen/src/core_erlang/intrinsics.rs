@@ -2816,7 +2816,7 @@ impl CoreErlangGenerator {
             self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(block)
                 || (self.in_loop_body && !analysis.local_writes.is_empty())
-        }) || self.contains_hoistable_self_send(receiver)
+        }) || self.conditional_receiver_needs_threading(receiver)
     }
 
     /// BT-1435: Tries to generate inline `logger:log/3` calls for Logger class sends.
