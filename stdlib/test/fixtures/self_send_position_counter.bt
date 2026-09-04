@@ -175,7 +175,7 @@ Actor subclass: SelfSendPositionCounter
   // deliberate (it is the method-body early-return lowering arm under
   // test), and it is the sole statement so nothing follows it.
   earlyReturnConditionalReceiverSelfSend =>
-    ^ 1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])
+    ^1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])
 
   // BT-3415: the ADR 0118 acceptance shape — an operand that may RAISE
   // precedes the self-send. `at:` runs first (temp-bound ahead of the

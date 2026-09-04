@@ -181,7 +181,9 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
   // Out of range: `at:` raises BEFORE `bumpCount` runs, so no mutation
   // lands — the behavioural half of the evaluation-order guarantee.
   testRaisingOperandBeforeSelfSendOutOfRange =>
-    self should: [self.c raisingOperandBeforeSelfSend: 99] raise: #index_out_of_bounds
+    self should: [
+      self.c raisingOperandBeforeSelfSend: 99
+    ] raise: #index_out_of_bounds
     self assert: self.c getCount equals: 0
 
   testAndReceiverSelfSend =>
