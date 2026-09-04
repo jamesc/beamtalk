@@ -1866,10 +1866,19 @@ impl CoreErlangGenerator {
                 }
                 BodyExprKind::DestructureAssignment => {
                     if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                        // ADR 0118 phase 1b: `{a, b} := #(1, self bump)` —
+                        // the RHS's state-effecting sub-expressions land in
+                        // this body's IR as real `Bind`s before
+                        // `generate_destructure_bindings`'s own
+                        // `eval_rhs_to_temp_var` call (`expressions.rs`)
+                        // compiles `value` via `expression_doc`, which
+                        // substitutes the already-sequenced value.
+                        let rhs_scope = self.thread_ahead(value, &mut stmts)?;
                         let binding_docs = self.generate_destructure_bindings(pattern, value)?;
                         for d in binding_docs {
                             stmts.push(ThreadedStmt::Statement(d, span));
                         }
+                        self.finish_precompiled_scope(rhs_scope)?;
                     }
                     if is_last {
                         let post_state = self.current_state_var();
