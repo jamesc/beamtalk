@@ -1716,6 +1716,7 @@ enum OpenScopeResult {
 struct BranchContextGuard<'a> {
     generator: &'a mut CoreErlangGenerator,
     saved_in_loop: bool,
+    saved_in_real_loop_body: bool,
     saved_state_version: usize,
     saved_class_var_version: usize,
     saved_self_version: usize,
@@ -1725,6 +1726,7 @@ struct BranchContextGuard<'a> {
 impl Drop for BranchContextGuard<'_> {
     fn drop(&mut self) {
         self.generator.in_loop_body = self.saved_in_loop;
+        self.generator.in_real_loop_body = self.saved_in_real_loop_body;
         self.generator.set_state_version(self.saved_state_version);
         self.generator
             .set_class_var_version(self.saved_class_var_version);
@@ -1778,6 +1780,22 @@ pub struct CoreErlangGenerator {
     state_threading: VersionCounter,
     /// BT-153: Whether we're inside a loop body (use `StateAcc` instead of `State`)
     in_loop_body: bool,
+    /// ADR 0118 phase 2a (BT-3417): `true` only while literally inside
+    /// [`control_flow::mod::generate_threaded_loop_body_inner`]'s own
+    /// per-statement loop — the real-loop-body consumer `threaded_expression`
+    /// still refuses (phase 2b's to migrate). A conditional branch arm, an
+    /// `on:do:`/`ensure:` body, and a Tier 2 stateful-block body ALSO run
+    /// with `in_loop_body = true` (`enter_branch_context` sets it for
+    /// `StateAcc`-vs-`State` naming, shared by every `with_branch_context`
+    /// arm), so `in_loop_body` alone can't tell a real loop body apart from
+    /// one of those — this narrower flag is `threaded_expression`'s actual
+    /// guard. `enter_branch_context` resets it to `false` on every entry;
+    /// [`control_flow::CoreErlangGenerator::generate_threaded_loop_body`] is
+    /// the one caller that flips it back to `true`, so a branch arm nested
+    /// inside a loop body (or vice versa) always reflects the INNERMOST
+    /// construct, restored by [`BranchContextGuard`] on exit like every
+    /// other per-prefix flag it saves.
+    in_real_loop_body: bool,
     /// BT-3146 (ADR 0111 Addendum 5, §Branch-context version discipline):
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per
     /// [`Self::enter_branch_context`] call — every `with_branch_context` arm
@@ -2131,6 +2149,7 @@ impl CoreErlangGenerator {
             var_context: VariableContext::new(),
             state_threading: VersionCounter::new(),
             in_loop_body: false,
+            in_real_loop_body: false,
             branch_frame_counter: 0,
             in_hybrid_loop: false,
             in_direct_params_loop: false,
@@ -2768,17 +2787,46 @@ impl CoreErlangGenerator {
         threaded_ir::FrameId::new(self.branch_frame_counter)
     }
 
+    /// ADR 0118 phase 2a (BT-3417): the [`threaded_ir::FrameId`] a
+    /// `threaded_expression`/`thread_ahead` caller should splice a prelude's
+    /// `Bind`s into RIGHT NOW — [`Self::current_branch_frame`] while inside
+    /// any `with_branch_context` arm (a conditional branch, an
+    /// `on:do:`/`ensure:` body, a Tier 2 stateful-block body), [`FrameId::ROOT`](threaded_ir::FrameId::ROOT)
+    /// at the flat method body. Reads `in_loop_body` — the SAME flag every
+    /// `with_branch_context` arm sets, unlike the narrower
+    /// `in_real_loop_body` — because a real loop body's OWN nested
+    /// conditional/exception/stateful-block arm is exactly `current_branch_frame()`'s
+    /// case too; only `threaded_expression`'s own entry guard needs the
+    /// narrower flag.
+    pub(in crate::core_erlang) fn current_frame(&self) -> threaded_ir::FrameId {
+        if self.in_loop_body {
+            self.current_branch_frame()
+        } else {
+            threaded_ir::FrameId::ROOT
+        }
+    }
+
     /// BT-3131: Enters a branch context, applying the per-prefix reset policy
     /// documented on [`BranchContextGuard`] and returning a guard that
     /// restores everything (per that same policy) when dropped.
     fn enter_branch_context(&mut self) -> BranchContextGuard<'_> {
         let saved_state_version = self.state_version();
         let saved_in_loop = self.in_loop_body;
+        let saved_in_real_loop_body = self.in_real_loop_body;
         let saved_class_var_version = self.class_var_version();
         let saved_self_version = self.self_version();
         let saved_loop_threads_class_vars = self.loop_threads_class_vars;
         self.set_state_version(0);
         self.in_loop_body = true;
+        // ADR 0118 phase 2a (BT-3417): every `with_branch_context` arm is a
+        // valid `threaded_expression` consumer EXCEPT a real loop body — so
+        // reset to `false` on entry here; `generate_threaded_loop_body` (the
+        // one call site that IS a real loop body) flips it back to `true`
+        // right after entering, and `BranchContextGuard` restores whatever
+        // this saved on exit, so a branch arm nested inside a loop body (or
+        // a loop nested inside a branch arm) always reflects the innermost
+        // construct.
+        self.in_real_loop_body = false;
         // BT-3168: reset-on-entry, like `state_version` — see
         // `loop_threads_class_vars`'s own doc comment for why this must
         // never inherit an enclosing Letrec loop's `true` by default.
@@ -2802,6 +2850,7 @@ impl CoreErlangGenerator {
         BranchContextGuard {
             generator: self,
             saved_in_loop,
+            saved_in_real_loop_body,
             saved_state_version,
             saved_class_var_version,
             saved_self_version,
@@ -3813,10 +3862,41 @@ impl CoreErlangGenerator {
                     // phase 5), so a class-method self-send nested in `value`
                     // keeps the pre-existing `else` behavior instead, exactly
                     // as before this fix.
-                    let (val_preamble, open_scope) = if self.in_actor_instance_context()
+                    // ADR 0118 phase 2a (BT-3417): when THIS `Return` node
+                    // is itself the sole child `threaded_expression`'s own
+                    // `single_sequenced_child` branch is sequencing (e.g.
+                    // `thread_ahead`'s C12-catch-all reaching `^self.items
+                    // at: (self bump)` nested in a conditional branch —
+                    // `single_sequenced_child` already ran
+                    // `sequence_children` on `value` and is about to compile
+                    // THIS WHOLE node via `generate_expression`), `value`'s
+                    // span already carries a live `precompiled_subexprs`
+                    // registration from that outer call. Re-threading it
+                    // here via `threaded_expression` would dispatch any
+                    // nested self-send a SECOND time and leave the outer
+                    // registration's `finish_precompiled_scope` check
+                    // failing with "never substituted" (confirmed by a
+                    // `just test-bunit` failure on this exact shape during
+                    // this migration) — so the "already sequenced" case
+                    // must fall through to the `else` branch below, whose
+                    // `expression_doc_with_open_scope` → `generate_expression`
+                    // call is what actually consults (and consumes) that
+                    // registration.
+                    let value_already_sequenced = self
+                        .precompiled_subexprs
+                        .contains_key(&value.unwrap_parens().span());
+                    let (val_preamble, open_scope) = if !value_already_sequenced
+                        && self.in_actor_instance_context()
                         && self.subexpr_needs_prelude(value)
                     {
-                        let tv = self.threaded_expression(value)?;
+                        // ADR 0118 phase 2a (BT-3417): `current_frame()` —
+                        // this generic `Return` handler fires for a `^`
+                        // reached from any nesting, not only the flat
+                        // method body, now that branch/exception/
+                        // stateful-block arms have their own `threaded_expression`
+                        // consumers too.
+                        let frame = self.current_frame();
+                        let tv = self.threaded_expression(value, frame)?;
                         let dispatch_doc = self.threaded_prelude_doc(&tv.prelude);
                         let result_doc = self.threaded_value_doc(&tv.value);
                         (dispatch_doc, Some(result_doc))

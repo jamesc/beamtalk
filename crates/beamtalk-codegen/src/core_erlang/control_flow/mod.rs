@@ -1904,6 +1904,16 @@ impl CoreErlangGenerator {
         let is_letrec = matches!(kind, BodyKind::Letrec);
         self.with_branch_context(|this| {
             this.loop_threads_class_vars = is_letrec && plan.threads_class_vars;
+            // ADR 0118 phase 2a (BT-3417): this IS the real loop body —
+            // `enter_branch_context` (inside `with_branch_context`) reset
+            // `in_real_loop_body` to `false` on entry (the default for every
+            // `with_branch_context` arm); flip it back to `true` for the
+            // duration of this call so `threaded_expression` keeps refusing
+            // here (a phase 2b consumer) while a nested conditional/
+            // exception/stateful-block arm inside this body — which enters
+            // its OWN `with_branch_context` and resets the flag again — is
+            // unaffected.
+            this.in_real_loop_body = true;
             let result = this.generate_threaded_loop_body_inner(body, plan, kind);
             if is_letrec && plan.threads_class_vars {
                 this.last_loop_class_var = Some(this.current_class_var());

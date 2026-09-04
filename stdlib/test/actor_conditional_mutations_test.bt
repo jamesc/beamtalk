@@ -142,22 +142,24 @@ TestCase subclass: ActorConditionalMutationsTest
     ] raise: #index_out_of_bounds
     self assert: self.c getCount equals: 0
 
-  testSelfSendAsBinaryOpArgumentInBoundsStillDropsMutationSilently =>
-    // BT-3399: same `(self.items at: idx) + (self bumpCount: true)` shape as
-    // above, but with `idx` IN BOUNDS this time — so `at:` succeeds and
-    // `bumpCount:` runs. BT-3392's own fallback (leaving an order-unsafe
-    // self-send un-hoisted, since `at:` could have raised) routes
-    // `bumpCount:` through the ordinary, still-discarding
-    // `generate_self_dispatch` path, so its mutation is silently lost —
-    // `getCount` stays 0 even though `bumpCount:` demonstrably ran (its
-    // return value, 1, is added to `at:`'s result and thrown away since
-    // this is the block's only, non-last statement). This is a known,
-    // documented limitation (see `hoist_self_sends_for_binary_op`'s doc
-    // comment) now surfaced via a compile-time codegen warning rather than
-    // fixed outright — pinned here as a regression guard on the observable
-    // (still-dropped) behavior, not a claim that it's correct.
-    self assert: (self.c orderSensitiveBinaryOp: 1 flag: true) equals: 0
-    self assert: self.c getCount equals: 0
+  testSelfSendAsBinaryOpArgumentInBoundsThreadsMutation =>
+    // ADR 0118 (BT-3417): same `(self.items at: idx) + (self bumpCount:
+    // true)` shape as above, but with `idx` IN BOUNDS this time — so `at:`
+    // succeeds and `bumpCount:` runs. BT-3392/BT-3399's old planner
+    // mechanism left an order-unsafe self-send un-hoisted (since `at:`
+    // could have raised) and routed `bumpCount:` through the ordinary,
+    // discarding `generate_self_dispatch` path, silently dropping its
+    // mutation — this test used to pin that as a known limitation (BT-3399)
+    // (`testSelfSendAsBinaryOpArgumentInBoundsStillDropsMutationSilently`).
+    // ADR 0118's universal sequencing rule (`sequence_children`) fixes it:
+    // `at:`'s value is bound to a temp AHEAD of `bumpCount:`'s dispatch —
+    // preserving `at:`'s evaluation-order guarantee (still raises first out
+    // of bounds, see the paired test above) while threading `bumpCount:`'s
+    // mutation via a real `Bind` instead of dropping it. `getCount` and the
+    // method's own return value (`self.count`, the block's mutation) both
+    // now reflect the bump.
+    self assert: (self.c orderSensitiveBinaryOp: 1 flag: true) equals: 1
+    self assert: self.c getCount equals: 1
 
   testSelfSendInsideOnDoProtectedBlockAlreadyThreadsMutation =>
     // BT-3392: verifies the shape confirmed against the actual

@@ -262,18 +262,36 @@ impl CoreErlangGenerator {
     /// ([`Self::subexpr_needs_prelude`]) before anything is compiled, so
     /// no sub-expression is ever compiled twice.
     ///
-    /// Frame: phase 1a's only consumer is the flat Actor method body
-    /// (`lower_body_exprs_with_reply`), so every `Bind` this produces is at
-    /// [`FrameId::ROOT`]; phase 2a threads the frame through when the
-    /// branch-arm consumers migrate.
-    pub(super) fn threaded_expression(&mut self, expr: &Expression) -> Result<ThreadedValue> {
-        // Phase 1a produces `State`-prefixed `Bind`s at `FrameId::ROOT` and
-        // renders values eagerly; a loop-body consumer (`StateAcc` prefix,
-        // its own frame) is phase 2b's to wire, not something to reach
-        // silently with a mismatched prefix.
-        if self.in_loop_body {
+    /// Frame: phase 1a/1b's only consumer was the flat Actor method body
+    /// (`lower_body_exprs_with_reply`), always [`FrameId::ROOT`]. ADR 0118
+    /// phase 2a (BT-3417) widens this to any real frame — a conditional
+    /// branch arm, an `on:do:`/`ensure:` body, a Tier 2 stateful-block body
+    /// — via the `frame` parameter: every `Bind` and `HoistSink::Threaded`
+    /// emission this call (and everything it recurses into — sequenced
+    /// children, cascade messages, interpolation segments) produces lands
+    /// in the CALLER's own frame instead of always claiming `ROOT`. Pass
+    /// [`CoreErlangGenerator::current_frame`] unless the call site already
+    /// has its own branch frame in hand (a conditional/exception arm, which
+    /// minted it via `current_branch_frame()` on entry).
+    pub(super) fn threaded_expression(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+    ) -> Result<ThreadedValue> {
+        // ADR 0118 phase 2a (BT-3417): every `HoistSink::Threaded` consumer
+        // EXCEPT the real loop body (`generate_threaded_loop_body_inner`,
+        // `emit_non_assign_expr`, `generate_local_var_assignment_in_loop`)
+        // has migrated to this function — phase 2b's own `StateAcc`-prefixed,
+        // loop-frame consumer. A loop body and a branch/exception/
+        // stateful-block arm BOTH run with `in_loop_body = true` (it only
+        // controls `StateAcc`-vs-`State` naming), so this guard reads the
+        // narrower `in_real_loop_body` flag instead — `true` only while
+        // literally inside `generate_threaded_loop_body_inner`'s own
+        // statement loop, `false` for an arm nested inside one
+        // (`enter_branch_context` resets it on every entry).
+        if self.in_real_loop_body {
             return Err(CodeGenError::Internal(
-                "threaded_expression called inside a loop body (ADR 0118 phase 2b consumer) \
+                "threaded_expression called inside a real loop body (ADR 0118 phase 2b consumer) \
                  before that consumer is migrated"
                     .to_string(),
             ));
@@ -293,8 +311,8 @@ impl CoreErlangGenerator {
                 ));
             };
             let children: Vec<&Expression> = arguments.iter().collect();
-            let (mut prelude, scope) = self.sequence_children(&children)?;
-            let dispatch = self.generate_self_dispatch(selector, arguments, FrameId::ROOT, span)?;
+            let (mut prelude, scope) = self.sequence_children(&children, frame)?;
+            let dispatch = self.generate_self_dispatch(selector, arguments, frame, span)?;
             self.finish_precompiled_scope(scope)?;
             prelude.extend(dispatch.prelude);
             return Ok(ThreadedValue {
@@ -304,7 +322,7 @@ impl CoreErlangGenerator {
         }
 
         if let Some(children) = Self::sequenced_send_children(inner) {
-            let (prelude, scope) = self.sequence_children(&children)?;
+            let (prelude, scope) = self.sequence_children(&children, frame)?;
             let doc = self.generate_expression(expr)?;
             self.finish_precompiled_scope(scope)?;
             return Ok(ThreadedValue {
@@ -321,7 +339,7 @@ impl CoreErlangGenerator {
         // children, then let the parent's own (unaffected) codegen
         // substitute them via `precompiled_subexprs`.
         if let Some(children) = Self::literal_container_children(inner) {
-            let (prelude, scope) = self.sequence_children(&children)?;
+            let (prelude, scope) = self.sequence_children(&children, frame)?;
             let doc = self.generate_expression(expr)?;
             self.finish_precompiled_scope(scope)?;
             return Ok(ThreadedValue {
@@ -336,7 +354,7 @@ impl CoreErlangGenerator {
         // finish before the parent's own effect (the NLR throw, the
         // assignment's mutation, the `case`) runs.
         if let Some(value) = Self::single_sequenced_child(inner) {
-            let (prelude, scope) = self.sequence_children(std::slice::from_ref(&value))?;
+            let (prelude, scope) = self.sequence_children(std::slice::from_ref(&value), frame)?;
             let doc = self.generate_expression(expr)?;
             self.finish_precompiled_scope(scope)?;
             return Ok(ThreadedValue {
@@ -351,7 +369,7 @@ impl CoreErlangGenerator {
         // this gets its own sequencing, not the generic children pattern
         // above.
         if let Expression::StringInterpolation { segments, .. } = inner {
-            return self.threaded_string_interpolation(segments, span);
+            return self.threaded_string_interpolation(segments, span, frame);
         }
 
         // ADR 0118 phase 1b: a cascade on `self` in Actor instance
@@ -364,7 +382,7 @@ impl CoreErlangGenerator {
             receiver, messages, ..
         } = inner
         {
-            if let Some(tv) = self.threaded_cascade_on_self(receiver, messages)? {
+            if let Some(tv) = self.threaded_cascade_on_self(receiver, messages, frame)? {
                 return Ok(tv);
             }
         }
@@ -392,7 +410,7 @@ impl CoreErlangGenerator {
                 expr,
                 &mut HoistSink::Threaded {
                     stmts: &mut prelude,
-                    frame: FrameId::ROOT,
+                    frame,
                     span,
                 },
             )?;
@@ -526,6 +544,7 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         messages: &[CascadeMessage],
+        frame: FrameId,
     ) -> Result<Option<ThreadedValue>> {
         let Some(all_messages) = self.cascade_self_dispatch_messages(receiver, messages) else {
             return Ok(None);
@@ -539,9 +558,8 @@ impl CoreErlangGenerator {
         let mut value = ValueRef::Literal("'nil'");
         for (selector, arguments, msg_span) in all_messages {
             let children: Vec<&Expression> = arguments.iter().collect();
-            let (mut msg_prelude, scope) = self.sequence_children(&children)?;
-            let dispatch =
-                self.generate_self_dispatch(selector, arguments, FrameId::ROOT, msg_span)?;
+            let (mut msg_prelude, scope) = self.sequence_children(&children, frame)?;
+            let dispatch = self.generate_self_dispatch(selector, arguments, frame, msg_span)?;
             self.finish_precompiled_scope(scope)?;
             msg_prelude.extend(dispatch.prelude);
             prelude.extend(msg_prelude);
@@ -744,9 +762,10 @@ impl CoreErlangGenerator {
     /// pre-compiled child is registered in `precompiled_subexprs` so the
     /// parent's compile substitutes it; the caller hands the returned
     /// scope back to [`Self::finish_precompiled_scope`] afterwards.
-    fn sequence_children(
+    pub(super) fn sequence_children(
         &mut self,
         children: &[&Expression],
+        frame: FrameId,
     ) -> Result<(Vec<ThreadedStmt>, PrecompiledScope)> {
         let mut prelude: Vec<ThreadedStmt> = Vec::new();
         let mut scope = PrecompiledScope::new();
@@ -763,7 +782,7 @@ impl CoreErlangGenerator {
                 continue;
             }
             let is_producer = self.is_prelude_producer(child.unwrap_parens());
-            let tv = self.threaded_expression(child)?;
+            let tv = self.threaded_expression(child, frame)?;
             compiled.push((child, is_producer, tv));
         }
         let last = compiled.len().saturating_sub(1);
@@ -826,6 +845,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
         stmts: &mut Vec<ThreadedStmt>,
+        frame: FrameId,
     ) -> Result<PrecompiledScope> {
         let mut scope = PrecompiledScope::new();
         // Also enter when the planner fallback would only WARN (an
@@ -836,7 +856,7 @@ impl CoreErlangGenerator {
             return Ok(scope);
         }
         let is_producer = self.is_prelude_producer(expr.unwrap_parens());
-        let tv = self.threaded_expression(expr)?;
+        let tv = self.threaded_expression(expr, frame)?;
         stmts.extend(tv.prelude);
         let doc = self.threaded_value_doc(&tv.value);
         self.register_precompiled_subexpr(&mut scope, expr, doc, is_producer)?;

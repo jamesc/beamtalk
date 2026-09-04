@@ -19,7 +19,6 @@
 
 use std::collections::HashSet;
 
-use super::control_flow::HoistSink;
 use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
 use beamtalk_cerl_doc::Document;
@@ -225,6 +224,7 @@ impl CoreErlangGenerator {
         &mut self,
         segments: &[StringSegment],
         span: Span,
+        frame: threaded_ir::FrameId,
     ) -> Result<threaded_ir::ThreadedValue> {
         let Some(k) = segments.iter().rposition(
             |seg| matches!(seg, StringSegment::Interpolation(e) if self.subexpr_needs_prelude(e)),
@@ -249,7 +249,7 @@ impl CoreErlangGenerator {
                 }
                 StringSegment::Interpolation(expr) => {
                     let value_doc = if i <= k {
-                        let tv = self.threaded_expression(expr)?;
+                        let tv = self.threaded_expression(expr, frame)?;
                         prelude.extend(tv.prelude);
                         self.threaded_value_doc(&tv.value)
                     } else {
@@ -1587,15 +1587,14 @@ impl CoreErlangGenerator {
                 }
             } else {
                 // Non-assignment expression
-                // BT-3396: thread every order-safe nested self-send (`1 +
-                // (self bump)`) as real `Bind`s ahead of the compile — the
-                // Tier 2 counterpart of `conditionals.rs`'s C12 catch-all.
-                self.hoist_nested_self_sends(
-                    expr,
-                    &mut HoistSink::Threaded { stmts, frame, span },
-                )?;
+                // ADR 0118 phase 2a (BT-3417): thread every state-effecting
+                // sub-expression (`1 + (self bump)`) as real `Bind`s ahead
+                // of the compile, via `thread_ahead` — the Tier 2
+                // counterpart of `conditionals.rs`'s C12 catch-all.
+                let hoist_scope = self.thread_ahead(expr, stmts, frame)?;
                 // BT-1397: Detect open-scope results from class method self-sends.
                 let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                self.finish_precompiled_scope(hoist_scope)?;
                 if is_last {
                     // Wrap result in {Result, StateAcc} tuple
                     let final_version = self.state_version();

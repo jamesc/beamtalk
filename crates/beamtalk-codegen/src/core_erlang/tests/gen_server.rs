@@ -6818,33 +6818,48 @@ fn bt3392_binary_op_hoist_does_not_reorder_past_a_non_self_send_operand() {
 }
 
 #[test]
-fn bt3399_order_unsafe_self_send_in_binary_op_emits_warning_and_still_compiles() {
-    // BT-3399: same order-unsafe shape as the test above — `(self.items at:
-    // idx) + (self bumpCount)` — but this time asserting the *fallback's*
-    // own behavior rather than just that it compiles: the un-hoisted
-    // self-send's mutation is silently dropped (no `element(2, ...)`
-    // extraction for it — only the field-write path via `bumpCount`'s own
-    // body, which never runs here through the C12 catch-all), and a
-    // compile-time warning is emitted naming the dropped self-send so this
-    // silent-drop case is at least visible. Regression coverage for the
-    // in-bounds/non-raising case BT-3392's own regression test
-    // (`bt3392_binary_op_hoist_does_not_reorder_past_a_non_self_send_operand`)
-    // left uncovered.
+fn adr0118_order_unsafe_self_send_in_binary_op_now_threads_with_no_warning() {
+    // BT-3399/ADR 0118 phase 2a (BT-3417): same order-unsafe shape as the
+    // test above — `(self.items at: idx) + (self bumpCount)`, non-last
+    // inside an `ifTrue:` block reached through `generate_conditional_branch_inline`'s
+    // C12 catch-all — but this test used to be named
+    // `bt3399_order_unsafe_self_send_in_binary_op_emits_warning_and_still_compiles`
+    // and asserted the *fallback's* old behavior: the un-hoisted self-send's
+    // mutation silently dropped, with a compile-time warning naming it. ADR
+    // 0118's universal sequencing rule (`sequence_children`, reached here
+    // via C12's `thread_ahead`) makes that drop unrepresentable: the
+    // non-self-send `(self.items at: 1)` operand is bound to a temp AHEAD
+    // of `bumpCount`'s dispatch (preserving `at:`'s own evaluation-order
+    // guarantee), and `bumpCount`'s mutation threads through a real `Bind`
+    // instead. So `bumpCount`'s `NewState` is now genuinely extracted via
+    // `element(2, ...)`, and the BT-3399 warning no longer fires for this
+    // shape. Mirrors the stdlib regression coverage at
+    // `stdlib/test/actor_conditional_mutations_test.bt`'s
+    // `testSelfSendAsBinaryOpArgumentInBoundsThreadsMutation`.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = 0\n\n  triggerDirectly: flag =>\n    flag ifTrue: [\n      (self.items at: 1) + (self bumpCount)\n    ] ifFalse: [\n      0\n    ].\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let generated = generate_module_with_warnings(
         &module,
-        CodegenOptions::new("bt3399_order_unsafe_self_send_warning").with_workspace_mode(true),
+        CodegenOptions::new("adr0118_order_unsafe_self_send_now_threads").with_workspace_mode(true),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
-    assert_compiles_through_erlc("bt3399_order_unsafe_self_send_warning", &generated.code);
+    assert_compiles_through_erlc(
+        "adr0118_order_unsafe_self_send_now_threads",
+        &generated.code,
+    );
     assert!(
-        generated
+        generated.code.contains("erlang':'element'(2, "),
+        "bumpCount's new state must now be extracted (threaded), not discarded. Got:\n{}",
+        generated.code
+    );
+    assert!(
+        !generated
             .warnings
             .iter()
             .any(|w| w.message.contains("bumpCount") && w.message.contains("silently dropped")),
-        "expected a warning naming the dropped `bumpCount` self-send. Got: {:?}",
+        "the BT-3399 dropped-mutation warning must no longer fire for this shape \
+         now that it threads. Got: {:?}",
         generated.warnings
     );
 }

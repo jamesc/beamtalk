@@ -52,7 +52,8 @@
 
 use super::super::gen_server::BodyExprKind;
 use super::super::threaded_ir::{
-    self, BindOp, FrameId, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    self, BindOp, FrameId, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef, VersionPrefix,
+    VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
 use super::StateAccFallbackReason;
@@ -118,39 +119,68 @@ impl CoreErlangGenerator {
         (seed_doc, seeded_state)
     }
 
-    /// BT-1942/BT-3382/BT-3396: compiles a conditional/`ifNotNil:` receiver,
-    /// returning `(preamble, value_doc)` — `preamble` is any open let-chain
-    /// that must be emitted BEFORE the `case`'s condition binding (so a
-    /// mutated binding like `ClassVarsN` or an actor self-send's new
-    /// `State`/`StateAcc` stays in scope inside the `case`), and `value_doc`
-    /// is the receiver's own boolean/nil value to test. Shared by all four
-    /// `generate_if_*_with_mutations` generators below (previously each
-    /// hand-duplicated this exact match — CLAUDE.md's
-    /// no-duplicate-implementations rule).
+    /// BT-1942/BT-3382/BT-3396/ADR 0118 phase 2a (BT-3417): compiles a
+    /// conditional/`ifNotNil:` receiver, returning a [`ThreadedValue`] —
+    /// `prelude` is any real `Bind`/`Statement` sequence that must run
+    /// BEFORE the `case`'s condition binding (so a mutated binding like
+    /// `ClassVarsN` or an actor self-send's new `State`/`StateAcc` stays in
+    /// scope inside the `case`), and `value` is the receiver's own
+    /// boolean/nil value to test. Shared by all six `generate_*_with_mutations`
+    /// generators below (previously each hand-duplicated this exact match —
+    /// CLAUDE.md's no-duplicate-implementations rule). `frame` is the
+    /// caller's own current frame ([`CoreErlangGenerator::current_frame`]),
+    /// tagging every real `Bind` this prelude carries with the SAME frame
+    /// identity the caller's own `case` construct uses.
+    ///
+    /// The six callers render `prelude` via
+    /// [`CoreErlangGenerator::threaded_prelude_doc`] rather than
+    /// `verify_and_render_branch_arm`'s own wrap-and-`verify()`: unlike a
+    /// branch arm (whose `state_version` `enter_branch_context` always
+    /// resets to 0 before it runs), a conditional's receiver compiles at
+    /// the CALLER's current, possibly non-zero state version — its
+    /// hoisted `Bind`'s own SOURCE routinely references a version some
+    /// earlier, unrelated statement already produced, which
+    /// [`threaded_ir::verify`] run on `prelude` alone (with no visibility
+    /// into that earlier statement) reports as a false `UnboundVersion`/
+    /// `NonLinearVersion` — confirmed by a `just test-bunit` panic on
+    /// `generate_if_true_if_false_with_mutations` during this migration.
+    /// `prelude`'s `Bind`s still render through the exact same
+    /// `render`/`render_value` production every SPLICED prelude uses
+    /// (`threaded_prelude_doc` and `verify_and_render_branch_arm` share
+    /// that renderer), so this is a real, correctly-shaped `ThreadedIr`
+    /// prelude — just one this phase cannot re-verify in isolation; full
+    /// verification arrives with ADR 0118 phase 4, when a mutation-threaded
+    /// conditional becomes a producer with a real enclosing frame to splice
+    /// into instead of the six callers' own opaque `Document` return.
     ///
     /// Two receiver shapes thread state through this position:
     /// - BT-1942: a class-method self-send (or sub-expression containing one)
     ///   emits its class-var mutation as an open let-chain, surfaced
-    ///   generically via `expression_doc_with_open_scope`.
+    ///   generically via `expression_doc_with_open_scope` — ADR 0118's
+    ///   `ClassVars` unification (phase 5) hasn't reached this yet, so the
+    ///   chain still lands in the prelude as one opaque `Statement` rather
+    ///   than a real `ClassVars` `Bind`.
     /// - BT-3382/BT-3396: an ACTOR-INSTANCE self-send anywhere in the
     ///   receiver's hoistable sub-tree — the receiver itself (`(self
     ///   recordOnce: which) ifTrue:ifFalse:`, BT-3382) or nested inside it,
     ///   e.g. as the receiver of an `and:`/`or:` (`((self recordOnce: which)
     ///   and: [x]) ifTrue:`, BT-3396) — is dispatched ahead of the receiver
     ///   expression by [`Self::hoist_nested_self_sends`] with a
-    ///   [`HoistSink::OpenDocs`] sink (each dispatch is
-    ///   `generate_self_dispatch_open`'s open let-chain, which also advances
-    ///   the state version), so the receiver expression itself compiles to a
-    ///   plain reference to the already-threaded result. Nothing in a
-    ///   conditional evaluates before its receiver, so this position is
-    ///   always order-safe to hoist into. The inlining decision that gets us
-    ///   here (`try_generate_boolean_protocol`, and `classify_body_expr`'s
-    ///   `control_flow_has_mutations`) uses the same walker's planning pass
-    ///   ([`Self::contains_hoistable_self_send`]) so the two can never disagree.
+    ///   [`HoistSink::Threaded`] sink into real `Bind`s (ADR 0118 phase 2a:
+    ///   no more `HoistSink::OpenDocs` here), so the receiver expression
+    ///   itself compiles to a plain reference to the already-threaded
+    ///   result. Nothing in a conditional evaluates before its receiver, so
+    ///   this position is always order-safe to hoist into. The inlining
+    ///   decision that gets us here (`try_generate_boolean_protocol`, and
+    ///   `classify_body_expr`'s `control_flow_has_mutations`) uses the same
+    ///   walker's planning pass ([`Self::contains_hoistable_self_send`]) so
+    ///   the two can never disagree.
     fn compile_conditional_receiver(
         &mut self,
         receiver: &Expression,
-    ) -> Result<(Document<'static>, Document<'static>)> {
+        frame: FrameId,
+    ) -> Result<ThreadedValue> {
+        let span = receiver.unwrap_parens().span();
         // BT-3402/BT-3396 interaction: when `receiver` is ITSELF an `and:`/
         // `or:` send that needs the inline mutation-threading path (the same
         // gate `try_generate_boolean_protocol` uses — see
@@ -170,6 +200,11 @@ impl CoreErlangGenerator {
         // unwrap, corrupting the enclosing conditional's state-version
         // numbering (`unbound variable 'State1'` from `core_lint` — e.g.
         // BT-3396's `((self recordOnce: x) and: [true]) ifTrue:ifFalse:`).
+        //
+        // ADR 0118 phase 4 turns this inline-threaded `and:`/`or:` into a
+        // producer in its own right; until then it stays this special case,
+        // emitting its tuple-unpack `Statement` + real `State` `Bind` into
+        // the prelude here instead of the old open let-chain `Document`.
         if let Expression::MessageSend {
             receiver: and_or_receiver,
             selector: MessageSelector::Keyword(parts),
@@ -188,42 +223,75 @@ impl CoreErlangGenerator {
                                 self.generate_or_with_mutations(and_or_receiver, block)?
                             };
                             let tuple_var = self.fresh_temp_var("CondRecvTuple");
-                            let new_state = self.next_state_var();
-                            let preamble = docvec![
-                                "let ",
-                                leaf::var(tuple_var.clone()),
-                                " = ",
-                                tuple_doc,
-                                " in let ",
-                                leaf::var(new_state),
-                                " = call 'erlang':'element'(2, ",
-                                leaf::var(tuple_var.clone()),
-                                ") in ",
-                            ];
-                            let value_doc =
-                                docvec!["call 'erlang':'element'(1, ", leaf::var(tuple_var), ")",];
-                            return Ok((preamble, value_doc));
+                            let source_version = self.state_version();
+                            let mut prelude = vec![ThreadedStmt::Statement(
+                                docvec![
+                                    "let ",
+                                    leaf::var(tuple_var.clone()),
+                                    " = ",
+                                    tuple_doc,
+                                    " in ",
+                                ],
+                                span,
+                            )];
+                            let _ = self.next_state_var();
+                            let target_version = self.state_version();
+                            prelude.push(ThreadedStmt::Bind {
+                                target: VersionedVar::new(
+                                    VersionPrefix::State,
+                                    target_version,
+                                    frame,
+                                ),
+                                source: VersionedVar::new(
+                                    VersionPrefix::State,
+                                    source_version,
+                                    frame,
+                                ),
+                                op: BindOp::Direct(ValueRef::Doc(docvec![
+                                    "call 'erlang':'element'(2, ",
+                                    leaf::var(tuple_var.clone()),
+                                    ")",
+                                ])),
+                                shadow_write: false,
+                                span,
+                            });
+                            let value = ValueRef::Doc(docvec![
+                                "call 'erlang':'element'(1, ",
+                                leaf::var(tuple_var),
+                                ")",
+                            ]);
+                            return Ok(ThreadedValue { prelude, value });
                         }
                     }
                 }
             }
         }
 
-        let mut hoisted: Vec<Document<'static>> = Vec::new();
-        self.hoist_nested_self_sends(receiver, &mut HoistSink::OpenDocs(&mut hoisted))?;
+        let mut prelude: Vec<ThreadedStmt> = Vec::new();
+        if self.in_actor_instance_context() {
+            self.hoist_nested_self_sends(
+                receiver,
+                &mut HoistSink::Threaded {
+                    stmts: &mut prelude,
+                    frame,
+                    span,
+                },
+            )?;
+        }
         let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        let (chain_preamble, value_doc) = match cond_open_scope {
-            Some(OpenScopeResult::Value(result_var)) => (cond_chain, leaf::var(result_var)),
+        let value = match cond_open_scope {
+            Some(OpenScopeResult::Value(result_var)) => {
+                prelude.push(ThreadedStmt::Statement(cond_chain, span));
+                ValueRef::Var(result_var)
+            }
             // BT-3053: no single value — substitute do:'s own `nil` contract.
-            Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
-            None => (Document::Nil, cond_chain),
+            Some(OpenScopeResult::NoValue) => {
+                prelude.push(ThreadedStmt::Statement(cond_chain, span));
+                ValueRef::Literal("'nil'")
+            }
+            None => ValueRef::Doc(cond_chain),
         };
-        let preamble = if hoisted.is_empty() {
-            chain_preamble
-        } else {
-            docvec![Document::Vec(hoisted), chain_preamble]
-        };
-        Ok((preamble, value_doc))
+        Ok(ThreadedValue { prelude, value })
     }
 
     /// BT-3392/BT-3396: dispatches every actor self-send nested inside
@@ -324,24 +392,6 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         let plan = self.plan_self_send_hoists(std::slice::from_ref(expr));
         self.emit_hoist_plan(plan, sink)
-    }
-
-    /// BT-3396: [`Self::hoist_nested_self_sends`] restricted to the
-    /// *arguments* of `expr` (a self-send the caller is about to dispatch
-    /// itself via `dispatch_self_send_as_bind`/`generate_self_dispatch_open`,
-    /// e.g. C12b/`DispatchingSelfSend`): `self log: (self nextId)` must
-    /// thread `nextId`'s mutation too. The caller's own dispatch then
-    /// compiles the arguments and consumes the registrations.
-    pub(in crate::core_erlang) fn hoist_self_send_arguments(
-        &mut self,
-        expr: &Expression,
-        sink: &mut HoistSink<'_>,
-    ) -> Result<()> {
-        if let Expression::MessageSend { arguments, .. } = expr.unwrap_parens() {
-            let plan = self.plan_self_send_hoists(arguments);
-            self.emit_hoist_plan(plan, sink)?;
-        }
-        Ok(())
     }
 
     /// BT-3396: `true` if [`Self::hoist_nested_self_sends`] would hoist at
@@ -703,7 +753,10 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
     ) -> Result<Document<'static>> {
-        let (cond_preamble, cond_val_doc) = self.compile_conditional_receiver(receiver)?;
+        let recv_frame = self.current_frame();
+        let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
+        let cond_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
+        let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
         // BT-2355: seed threaded outer-locals so the non-taken (false) branch and
@@ -754,7 +807,10 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
     ) -> Result<Document<'static>> {
-        let (cond_preamble, cond_val_doc) = self.compile_conditional_receiver(receiver)?;
+        let recv_frame = self.current_frame();
+        let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
+        let cond_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
+        let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
         // BT-2355: seed threaded outer-locals so the non-taken (true) branch and
@@ -809,7 +865,10 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
     ) -> Result<Document<'static>> {
-        let (cond_preamble, cond_val_doc) = self.compile_conditional_receiver(receiver)?;
+        let recv_frame = self.current_frame();
+        let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
+        let cond_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
+        let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
         // BT-2355: seed threaded outer-locals so the non-taken (false) branch and
@@ -860,7 +919,10 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
     ) -> Result<Document<'static>> {
-        let (cond_preamble, cond_val_doc) = self.compile_conditional_receiver(receiver)?;
+        let recv_frame = self.current_frame();
+        let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
+        let cond_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
+        let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
         // BT-2355: seed threaded outer-locals so the non-taken (true) branch and
@@ -903,7 +965,10 @@ impl CoreErlangGenerator {
         true_block: &Block,
         false_block: &Block,
     ) -> Result<Document<'static>> {
-        let (cond_preamble, cond_val_doc) = self.compile_conditional_receiver(receiver)?;
+        let recv_frame = self.current_frame();
+        let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
+        let cond_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
+        let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
         // BT-2355: seed threaded outer-locals so a branch that does not itself
@@ -970,7 +1035,10 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
     ) -> Result<Document<'static>> {
-        let (recv_preamble, recv_val_doc) = self.compile_conditional_receiver(receiver)?;
+        let recv_frame = self.current_frame();
+        let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
+        let recv_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
+        let recv_val_doc = self.threaded_value_doc(&recv_tv.value);
         let obj_var = self.fresh_temp_var("Obj");
         let outer_state = self.current_state_var();
         // BT-2355: seed threaded outer-locals so the non-taken (nil) branch and the
@@ -1055,16 +1123,18 @@ impl CoreErlangGenerator {
             return Ok(val_var);
         }
 
-        // BT-3396: `self.log := self.log ++ #(self getValue)` — dispatch
-        // every order-safe self-send nested in the RHS as real `Bind`s
-        // *before* `source_version` is read below, so this assignment's own
-        // `Bind` chains from the post-dispatch state and the RHS compile
-        // that follows is pure (the exact call site BT-3382's reverted
-        // version-bump-on-compile prototype desynced).
-        self.hoist_nested_self_sends(value, &mut HoistSink::Threaded { stmts, frame, span })?;
+        // BT-3396/ADR 0118 phase 2a (BT-3417): `self.log := self.log ++
+        // #(self getValue)` — thread every order-safe self-send nested in
+        // the RHS as real `Bind`s *before* `source_version` is read below,
+        // so this assignment's own `Bind` chains from the post-dispatch
+        // state and the RHS compile that follows is pure (the exact call
+        // site BT-3382's reverted version-bump-on-compile prototype
+        // desynced).
+        let hoist_scope = self.thread_ahead(value, stmts, frame)?;
         let val_var = self.fresh_temp_var("Val");
         let source_version = self.state_version();
         let value_str = self.generate_field_assignment_value_doc(value)?;
+        self.finish_precompiled_scope(hoist_scope)?;
         stmts.push(ThreadedStmt::Statement(
             docvec!["let ", leaf::var(val_var.clone()), " = ", value_str, " in ",],
             span,
@@ -1183,12 +1253,13 @@ impl CoreErlangGenerator {
             return Ok(val_var);
         }
 
-        // BT-3396: as in `lower_field_assignment_bind` — thread every
-        // order-safe self-send nested in the RHS (or the RHS itself, `v :=
-        // self bump`) as real `Bind`s before the RHS compiles and before
-        // either `source_version` below is read.
-        self.hoist_nested_self_sends(value, &mut HoistSink::Threaded { stmts, frame, span })?;
+        // BT-3396/ADR 0118 phase 2a (BT-3417): as in `lower_field_assignment_bind`
+        // — thread every order-safe self-send nested in the RHS (or the RHS
+        // itself, `v := self bump`) as real `Bind`s before the RHS compiles
+        // and before either `source_version` below is read.
+        let hoist_scope = self.thread_ahead(value, stmts, frame)?;
         let (value_code, open_scope) = self.expression_doc_with_open_scope(value)?;
+        self.finish_precompiled_scope(hoist_scope)?;
 
         if let Some(open_scope_result) = open_scope {
             // C4 (BT-1397) — ADR 0111 Addendum 5 found no compilable repro
@@ -1268,18 +1339,21 @@ impl CoreErlangGenerator {
     }
 
     /// Dispatches a self-send (`expr`) and `Bind`s its returned `NewState` as
-    /// this branch's own next real `State` version — shared by the C12b
-    /// (`DispatchingSelfSend`) and C0b (BT-3374's nested `^self otherMethod`)
-    /// arms below, both of which dispatch a self-send mid-branch and must
-    /// thread its `NewState` forward instead of discarding it (mirroring C11
+    /// the current frame's next real `State` version (mirroring C11
     /// `ControlFlowWithMutations`'s tuple-unpack `Bind`).
     ///
     /// ADR 0118 (BT-3415): a thin adapter over
     /// `generate_self_dispatch_parts` (`dispatch_codegen.rs`), the
     /// `Statement` + `Bind` producer `generate_self_dispatch` now owns —
-    /// kept for the planner's `HoistSink::Threaded` emission and the two
-    /// arms named above, which need the dispatch tuple's variable name
-    /// rather than a `ThreadedValue`.
+    /// kept for the planner's `HoistSink::Threaded` emission
+    /// (`emit_hoist_plan`'s `HoistAction::Dispatch` arm), which needs the
+    /// dispatch tuple's variable name rather than a `ThreadedValue`. ADR
+    /// 0118 phase 2a (BT-3417) migrated its other two callers — C12b
+    /// (`DispatchingSelfSend`) and C0b (BT-3374's nested `^self
+    /// otherMethod`) — to `threaded_expression` directly (which also
+    /// sequences the self-send's own arguments, something this adapter
+    /// never did), so `emit_hoist_plan` is this function's only remaining
+    /// caller.
     fn dispatch_self_send_as_bind(
         &mut self,
         expr: &Expression,
@@ -1409,8 +1483,18 @@ impl CoreErlangGenerator {
                             BodyExprKind::DispatchingSelfSend
                         )
                     {
-                        let dispatch_var =
-                            self.dispatch_self_send_as_bind(value, frame, span, &mut stmts)?;
+                        // ADR 0118 phase 2a (BT-3417): `threaded_expression`'s
+                        // producer path (`is_prelude_producer`, matching this
+                        // arm's own `is_dispatching_actor_self_send`
+                        // classification exactly, per C12b's identical swap
+                        // above) replaces `dispatch_self_send_as_bind` —
+                        // same `Statement`+`Bind` pair, plus (a genuine fix)
+                        // `value`'s own arguments are now sequenced too
+                        // (`^self log: (self nextId)`), which the old direct
+                        // call never threaded.
+                        let tv = self.threaded_expression(value, frame)?;
+                        stmts.extend(tv.prelude);
+                        let dispatch_value_doc = self.threaded_value_doc(&tv.value);
                         let nlr_token = self.current_nlr_token().cloned().ok_or_else(|| {
                             CodeGenError::Internal(
                                 "BT-3374: EarlyReturn classification implies an active NLR \
@@ -1426,9 +1510,9 @@ impl CoreErlangGenerator {
                                 leaf::var(throw_var.clone()),
                                 " = call 'erlang':'throw'({'$bt_nlr', ",
                                 leaf::var(nlr_token),
-                                ", call 'erlang':'element'(1, ",
-                                leaf::var(dispatch_var),
-                                "), ",
+                                ", ",
+                                dispatch_value_doc,
+                                ", ",
                                 leaf::var(new_state),
                                 "}) in ",
                             ],
@@ -1867,27 +1951,27 @@ impl CoreErlangGenerator {
                 // opposed to a direct `self.field := value`) is silently
                 // dropped once the branch closes.
                 BodyExprKind::DispatchingSelfSend => {
-                    // BT-3396: `self log: (self nextId)` — thread the
-                    // arguments' own self-sends ahead of this dispatch.
-                    self.hoist_self_send_arguments(
-                        expr,
-                        &mut HoistSink::Threaded {
-                            stmts: &mut stmts,
-                            frame,
-                            span,
-                        },
-                    )?;
-                    let dispatch_var =
-                        self.dispatch_self_send_as_bind(expr, frame, span, &mut stmts)?;
+                    // ADR 0118 phase 2a (BT-3417): `self log: (self
+                    // nextId)` — `threaded_expression`'s producer path
+                    // (`is_prelude_producer`, matching this arm's own
+                    // `is_dispatching_actor_self_send` classification
+                    // exactly) sequences the arguments' own self-sends
+                    // ahead of this dispatch and builds the
+                    // `Statement`+`Bind` pair — the same shape
+                    // `hoist_self_send_arguments` +
+                    // `dispatch_self_send_as_bind` built by hand.
+                    let tv = self.threaded_expression(expr, frame)?;
+                    stmts.extend(tv.prelude);
                     if is_last {
                         let result_var = self.fresh_temp_var("SDResultVal");
+                        let value_doc = self.threaded_value_doc(&tv.value);
                         stmts.push(ThreadedStmt::Statement(
                             docvec![
                                 "let ",
                                 leaf::var(result_var.clone()),
-                                " = call 'erlang':'element'(1, ",
-                                leaf::var(dispatch_var),
-                                ") in ",
+                                " = ",
+                                value_doc,
+                                " in "
                             ],
                             span,
                         ));
@@ -1897,31 +1981,25 @@ impl CoreErlangGenerator {
                 // C12 — catch-all pure statements (EarlyReturn, SuperSend,
                 // ErrorSend, Tier2SelfSend, Pure).
                 //
-                // BT-3392/BT-3396: before compiling, hoist (as real `Bind`s
-                // pushed into `stmts`) every order-safe self-send nested
-                // anywhere inside this statement, so
-                // `try_handle_self_dispatch` reuses the already-threaded
-                // result instead of discarding its mutation — see
-                // `hoist_nested_self_sends`'s doc comment. When nothing
-                // needed hoisting (the overwhelmingly common case), this is
-                // a no-op and `expression_doc` below behaves exactly as
-                // before. BT-3399: a self-send left un-hoisted because an
-                // earlier operand made hoisting order-unsafe still silently
-                // drops its mutation through `expression_doc` below —
-                // `hoist_nested_self_sends` emits a compile-time warning for
-                // that case so it's at least visible.
+                // ADR 0118 phase 2a (BT-3417): before compiling, thread
+                // ahead (as real `Bind`s pushed into `stmts`) every
+                // state-effecting sub-expression nested anywhere inside
+                // this statement, via `thread_ahead` — the drop-in
+                // replacement for `hoist_nested_self_sends`'s
+                // `HoistSink::Threaded` call (see that function's own doc
+                // comment): a producer or a covered send gets the
+                // sequencing rule (BT-3406's "decide once, hoist all or
+                // none" made universal), anything else keeps the planner
+                // fallback and its BT-3399 order-unsafe warning. When
+                // nothing needed threading (the overwhelmingly common
+                // case), this is a no-op and `expression_doc` below behaves
+                // exactly as before.
                 _ => {
-                    self.hoist_nested_self_sends(
-                        expr,
-                        &mut HoistSink::Threaded {
-                            stmts: &mut stmts,
-                            frame,
-                            span,
-                        },
-                    )?;
+                    let hoist_scope = self.thread_ahead(expr, &mut stmts, frame)?;
                     if is_last {
                         let result_var = self.fresh_temp_var("BranchResult");
                         let expr_doc = self.expression_doc(expr)?;
+                        self.finish_precompiled_scope(hoist_scope)?;
                         stmts.push(ThreadedStmt::Statement(
                             docvec![
                                 "let ",
@@ -1936,6 +2014,7 @@ impl CoreErlangGenerator {
                     } else {
                         let seq_var = self.fresh_temp_var("seq");
                         let expr_doc = self.expression_doc(expr)?;
+                        self.finish_precompiled_scope(hoist_scope)?;
                         stmts.push(ThreadedStmt::Statement(
                             docvec!["let ", leaf::var(seq_var), " = ", expr_doc, " in "],
                             span,
