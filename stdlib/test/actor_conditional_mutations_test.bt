@@ -149,7 +149,7 @@ TestCase subclass: ActorConditionalMutationsTest
     // mechanism left an order-unsafe self-send un-hoisted (since `at:`
     // could have raised) and routed `bumpCount:` through the ordinary,
     // discarding `generate_self_dispatch` path, silently dropping its
-    // mutation — this test used to pin that as a known limitation
+    // mutation — this test used to pin that as a known limitation (BT-3399)
     // (`testSelfSendAsBinaryOpArgumentInBoundsStillDropsMutationSilently`).
     // ADR 0118's universal sequencing rule (`sequence_children`) fixes it:
     // `at:`'s value is bound to a temp AHEAD of `bumpCount:`'s dispatch —
