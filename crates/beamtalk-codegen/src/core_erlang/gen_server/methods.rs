@@ -30,6 +30,11 @@ use beamtalk_core::source_analysis::Span;
 use beamtalk_core::unparse::{unparse_method_display_signature, unparse_type_annotation_display};
 use ecow::EcoString;
 
+/// Erlang's hard cap on atom size (ERTS source: `MAX_ATOM_CHARACTERS` / UTF-8
+/// bytes).  Selectors or class names that exceed this limit cannot be emitted
+/// as legal Core Erlang atoms and are dropped from xref / dispatch tables.
+const MAX_ATOM_BYTES: usize = 255;
+
 /// ADR 0098 Phase 3: producing-toolchain identity baked into a module's
 /// `__beamtalk_meta/0` map so a *loaded* module is self-describing — consumers
 /// (workspace attach, tooling) can detect staleness without re-reading the
@@ -132,7 +137,6 @@ fn project_recv_type(ty: &InferredType) -> RecvType {
 /// coarsens the *entire* composed type to `dynamic`, exactly like a
 /// single-name receiver that doesn't resolve.
 fn project_composed(members: &[InferredType], make: fn(Vec<EcoString>) -> RecvType) -> RecvType {
-    const MAX_ATOM_BYTES: usize = 255;
     let mut names: Vec<EcoString> = Vec::with_capacity(members.len());
     for member in members {
         let resolved = match project_recv_type(member) {
@@ -157,13 +161,11 @@ fn project_composed(members: &[InferredType], make: fn(Vec<EcoString>) -> RecvTy
 /// `method_xref` send entry's `recv_type` field: a bare atom for
 /// `Name`/`ClassObject`/`Dynamic`, or a `{'union' | 'intersection',
 /// [Atom, ...]}` tuple for a composed type (BT-3215). Falls back to
-/// `'dynamic'` for a name that would exceed Erlang's 255-byte atom cap
-/// (mirrors the `MAX_ATOM_BYTES` guard `build_method_xref_entry` already
-/// applies to selectors and class references) — `project_composed` already
+/// `'dynamic'` for a name that would exceed the `MAX_ATOM_BYTES` cap —
+/// `project_composed` already
 /// enforces this per member, so `Union`/`Intersection` never reach here with
 /// an oversized member atom.
 fn recv_type_atom(recv_type: &RecvType) -> Document<'static> {
-    const MAX_ATOM_BYTES: usize = 255;
     match recv_type {
         RecvType::Name(name) if name.len() <= MAX_ATOM_BYTES => leaf::atom(name.to_string()),
         RecvType::ClassObject(name) if name.len() + " class".len() <= MAX_ATOM_BYTES => {
@@ -2939,8 +2941,6 @@ impl CoreErlangGenerator {
         slot: &StateDeclaration,
         class: &ClassDefinition,
     ) -> Document<'static> {
-        const MAX_ATOM_BYTES: usize = 255;
-
         // Derived location: the 1-based line of the generating slot declaration,
         // falling back to the class-header line when the slot span cannot be
         // resolved to a source line.
@@ -3002,7 +3002,6 @@ impl CoreErlangGenerator {
         // a runtime dispatch atom, so a send / reference to it would never match
         // an xref query. Drop such entries rather than emitting an illegal atom
         // that fails `core_scan` at BEAM-compile time.
-        const MAX_ATOM_BYTES: usize = 255;
 
         // Unlike `extract_method_source` (used for the *browsable* `methodSource`/
         // `classMethodSource` maps, BT-3249), this xref walk deliberately keeps any

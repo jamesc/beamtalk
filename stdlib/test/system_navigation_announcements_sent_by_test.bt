@@ -96,13 +96,15 @@ TestCase subclass: SystemNavigationAnnouncementsSentByTest
   // Even with the compiler port absent, a valid class argument is accepted (no
   // argument-error raised) and returns a List (empty here because
   // `announceSitesIn:` falls back to `[]` when the port is down). The contract
-  // under test is the shape: class input -> List output.
+  // under test is the shape: class input -> empty List output.
   testValidArgumentReturnsListOfClasses =>
     nav := SystemNavigation default
     result := nav announcementsSentBy: SystemNavigation
     self assert: (result isKindOf: List)
+    self assert: result isEmpty
 
   testValidArgumentSitesReturnsList =>
     nav := SystemNavigation default
     result := nav announcementSitesSentBy: SystemNavigation
     self assert: (result isKindOf: List)
+    self assert: result isEmpty
