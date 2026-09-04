@@ -240,6 +240,45 @@ impl CoreErlangGenerator {
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
         let span = expr.span();
+
+        // ADR 0118 phase 4 (BT-3420): when `expr` is itself an inline-
+        // threaded control-flow construct (`ifTrue:`/`ifFalse:`/
+        // `ifTrue:ifFalse:`, `and:`/`or:`, the nil-conditional family, or
+        // `match:`) needing mutation threading, this function's OWN caller
+        // (`gen_server/methods.rs`'s `ControlFlowWithMutations` arm) already
+        // called `thread_ahead(expr, ..)` immediately before this — which,
+        // now that `subexpr_needs_prelude` recognizes this shape (via
+        // `inline_control_flow_needs_threading`), already spliced the
+        // construct's real prelude into `stmts` and registered its
+        // ALREADY-UNWRAPPED value for substitution. `expression_doc` below
+        // then returns that value directly (not a `{Result, NewState}`
+        // tuple) via `take_precompiled_subexpr` — no further `element/2`
+        // unwrap needed, and no `{Result, State}` tuple crosses this
+        // boundary. The `tuple_var`/manual-`Bind` dance below remains the
+        // path for every other `ControlFlowWithMutations` shape (loops,
+        // list-ops, exception handlers) that still returns a raw tuple
+        // `Document` from `expression_doc`.
+        if self.inline_control_flow_needs_threading(expr.unwrap_parens()) {
+            let result_var = self.fresh_temp_var("Result");
+            let result_doc = self.expression_doc(expr)?;
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(result_var.clone()),
+                    " = ",
+                    result_doc,
+                    " in "
+                ],
+                span,
+            ));
+            let new_state = self.current_state_var();
+            stmts.push(ThreadedStmt::Statement(
+                self.threading_result_tail(&result_var, Some(&new_state), ThreadingBoundary::Actor),
+                span,
+            ));
+            return Ok(());
+        }
+
         let tuple_var = self.fresh_temp_var("Tuple");
         let result_var = self.fresh_temp_var("Result");
         let source_version = self.state_version();
@@ -383,6 +422,32 @@ impl CoreErlangGenerator {
         let core_var = self
             .lookup_var(var_name)
             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+
+        // ADR 0118 phase 4 (BT-3420): see `emit_actor_threaded_last_stmts`'s
+        // matching check — this function's own caller
+        // (`gen_server/methods.rs`'s `LocalAssignControlFlow` arm) already
+        // called `thread_ahead(value, ..)` immediately before this, which
+        // now splices an inline-threaded control-flow RHS's real prelude
+        // and registers its already-unwrapped value. `expression_doc` below
+        // then returns that value directly — no `element/2` unwrap needed.
+        if self.inline_control_flow_needs_threading(value.unwrap_parens()) {
+            let value_doc = self.expression_doc(value)?;
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(core_var.clone()),
+                    " = ",
+                    value_doc,
+                    " in "
+                ],
+                span,
+            ));
+            self.bind_var(var_name, &core_var);
+            let new_state = self.current_state_var();
+            self.push_threaded_var_rebinds(value, var_name, &new_state, span, stmts);
+            return Ok(());
+        }
+
         let tuple_var = self.fresh_temp_var("Tuple");
         let source_version = self.state_version();
         let new_state = self.peek_next_state_var();
@@ -415,7 +480,25 @@ impl CoreErlangGenerator {
             span,
         });
         self.bind_var(var_name, &core_var);
+        self.push_threaded_var_rebinds(value, var_name, &new_state, span, stmts);
+        Ok(())
+    }
 
+    /// Rebinds every outer local `value`'s construct threads (via
+    /// [`CoreErlangGenerator::get_control_flow_threaded_vars`]) from
+    /// `new_state`, except `var_name` itself (the assignment target — see
+    /// the inline comment at the call site for why). Shared by
+    /// [`Self::emit_actor_threaded_assign_rhs_stmts`]'s two paths (already-
+    /// spliced inline-control-flow producer, and the raw-tuple fallback for
+    /// loops/list-ops) so the rebind logic is written once.
+    fn push_threaded_var_rebinds(
+        &mut self,
+        value: &Expression,
+        var_name: &str,
+        new_state: &str,
+        span: beamtalk_core::source_analysis::Span,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) {
         let mut rebind_parts: Vec<Document<'static>> = Vec::new();
         if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
             for var in &threaded_vars {
@@ -438,7 +521,7 @@ impl CoreErlangGenerator {
                     " = call 'maps':'get'(",
                     leaf::atom(Self::local_state_key(var)),
                     ", ",
-                    leaf::var(new_state.clone()),
+                    leaf::var(new_state.to_string()),
                     ") in ",
                 ]);
             }
@@ -446,7 +529,6 @@ impl CoreErlangGenerator {
         if !rebind_parts.is_empty() {
             stmts.push(ThreadedStmt::Statement(Document::Vec(rebind_parts), span));
         }
-        Ok(())
     }
 
     /// Builds the Document that returns/stores an already-bound threaded result var for

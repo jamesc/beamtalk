@@ -50,7 +50,14 @@ pub fn is_state_threading_keyword_selector(sel: &str) -> bool {
                 | WellKnownSelector::IfTrue
                 | WellKnownSelector::IfFalse
                 | WellKnownSelector::IfTrueIfFalse
-                | WellKnownSelector::IfNotNil,
+                | WellKnownSelector::IfNotNil
+                // BT-3420 (ADR 0118 phase 4): `ifNil:`/`ifNil:ifNotNil:`/
+                // `ifNotNil:ifNil:` get the same `_with_mutations` inline-case
+                // treatment as `ifNotNil:` — their block argument(s) are
+                // analysed for field mutations the same way.
+                | WellKnownSelector::IfNil
+                | WellKnownSelector::IfNilIfNotNil
+                | WellKnownSelector::IfNotNilIfNil,
         )
     ) {
         return true;
@@ -117,6 +124,12 @@ pub fn is_exception_selector(sel: &str) -> bool {
 /// BT-3402: `and:`/`or:` are not `WellKnownSelector`s (see module doc
 /// comment) so they're matched by string, the same way `is_exception_selector`
 /// folds in `ensure:` alongside the well-known `on:do:`.
+///
+/// BT-3420 (ADR 0118 phase 4): `ifNil:`/`ifNil:ifNotNil:`/`ifNotNil:ifNil:`
+/// join `ifNotNil:` here — each has its own `_with_mutations` inline-case
+/// generator (`generate_nil_conditional_with_mutations` in
+/// `beamtalk-codegen`), so a mutation in any of their block(s) threads the
+/// same way `ifTrue:`/`ifFalse:` does.
 #[must_use]
 pub fn is_conditional_selector(sel: &str) -> bool {
     matches!(
@@ -125,7 +138,10 @@ pub fn is_conditional_selector(sel: &str) -> bool {
             WellKnownSelector::IfTrue
                 | WellKnownSelector::IfFalse
                 | WellKnownSelector::IfTrueIfFalse
-                | WellKnownSelector::IfNotNil,
+                | WellKnownSelector::IfNotNil
+                | WellKnownSelector::IfNil
+                | WellKnownSelector::IfNilIfNotNil
+                | WellKnownSelector::IfNotNilIfNil,
         )
     ) || matches!(sel, "and:" | "or:")
 }
@@ -160,6 +176,11 @@ mod tests {
         // BT-3402: `and:`/`or:` block arguments compile inline the same way.
         assert!(is_state_threading_keyword_selector("and:"));
         assert!(is_state_threading_keyword_selector("or:"));
+        // BT-3420: ifNil:/ifNil:ifNotNil:/ifNotNil:ifNil: block(s) compile
+        // inline the same way as ifTrue:/ifNotNil:.
+        assert!(is_state_threading_keyword_selector("ifNil:"));
+        assert!(is_state_threading_keyword_selector("ifNil:ifNotNil:"));
+        assert!(is_state_threading_keyword_selector("ifNotNil:ifNil:"));
     }
 
     #[test]
@@ -189,5 +210,9 @@ mod tests {
         // BT-3402
         assert!(is_conditional_selector("and:"));
         assert!(is_conditional_selector("or:"));
+        // BT-3420 (ADR 0118 phase 4)
+        assert!(is_conditional_selector("ifNil:"));
+        assert!(is_conditional_selector("ifNil:ifNotNil:"));
+        assert!(is_conditional_selector("ifNotNil:ifNil:"));
     }
 }

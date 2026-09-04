@@ -2033,41 +2033,65 @@ impl CoreErlangGenerator {
                         // next `State` version (a computed map — Direct, not Put).
                         let scope =
                             self.thread_ahead(expr, &mut stmts, threaded_ir::FrameId::ROOT)?;
-                        let tuple_var = self.fresh_temp_var("Tuple");
-                        let expr_str = self.expression_doc(expr)?;
-                        self.finish_precompiled_scope(scope)?;
-                        let source_version = self.state_version();
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let ",
-                                leaf::var(tuple_var.clone()),
-                                " = ",
-                                expr_str,
-                                " in "
-                            ],
-                            span,
-                        ));
-                        let _ = self.next_state_var();
-                        let target_version = self.state_version();
-                        stmts.push(ThreadedStmt::Bind {
-                            target: threaded_ir::VersionedVar::new(
-                                threaded_ir::VersionPrefix::State,
-                                target_version,
-                                threaded_ir::FrameId::ROOT,
-                            ),
-                            source: threaded_ir::VersionedVar::new(
-                                threaded_ir::VersionPrefix::State,
-                                source_version,
-                                threaded_ir::FrameId::ROOT,
-                            ),
-                            op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                                "call 'erlang':'element'(2, ",
-                                leaf::var(tuple_var),
-                                ")",
-                            ])),
-                            shadow_write: false,
-                            span,
-                        });
+                        // ADR 0118 phase 4 (BT-3420): when `expr` is itself an
+                        // inline-threaded control-flow construct, the
+                        // `thread_ahead` call just above (now that
+                        // `subexpr_needs_prelude` recognizes this shape) already
+                        // spliced its real prelude into `stmts` and registered
+                        // its already-unwrapped value — see
+                        // `emit_actor_threaded_last_stmts`'s matching comment.
+                        // `expression_doc` below then returns that value
+                        // directly, so no further `element/2` unwrap runs.
+                        // Every other `ControlFlowWithMutations` shape (loops,
+                        // list-ops) still returns a raw tuple `Document` here,
+                        // unpacked by the manual `Tuple`/`Bind` pair below.
+                        if self.inline_control_flow_needs_threading(expr.unwrap_parens()) {
+                            let expr_str = self.expression_doc(expr)?;
+                            self.finish_precompiled_scope(scope)?;
+                            let seq_var = self.fresh_temp_var("seq");
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec!["let ", leaf::var(seq_var), " = ", expr_str, " in "],
+                                span,
+                            ));
+                        } else {
+                            let tuple_var = self.fresh_temp_var("Tuple");
+                            let expr_str = self.expression_doc(expr)?;
+                            self.finish_precompiled_scope(scope)?;
+                            let source_version = self.state_version();
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec![
+                                    "let ",
+                                    leaf::var(tuple_var.clone()),
+                                    " = ",
+                                    expr_str,
+                                    " in "
+                                ],
+                                span,
+                            ));
+                            let _ = self.next_state_var();
+                            let target_version = self.state_version();
+                            stmts.push(ThreadedStmt::Bind {
+                                target: threaded_ir::VersionedVar::new(
+                                    threaded_ir::VersionPrefix::State,
+                                    target_version,
+                                    threaded_ir::FrameId::ROOT,
+                                ),
+                                source: threaded_ir::VersionedVar::new(
+                                    threaded_ir::VersionPrefix::State,
+                                    source_version,
+                                    threaded_ir::FrameId::ROOT,
+                                ),
+                                op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(
+                                    docvec![
+                                        "call 'erlang':'element'(2, ",
+                                        leaf::var(tuple_var),
+                                        ")",
+                                    ],
+                                )),
+                                shadow_write: false,
+                                span,
+                            });
+                        }
                         let new_state = self.current_state_var();
 
                         // Extract threaded locals from the updated state
@@ -4750,7 +4774,18 @@ impl CoreErlangGenerator {
     ) -> bool {
         self.context == super::super::CodeGenContext::Actor
             && arms.iter().any(|arm| {
-                self.is_tier2_value_call(&arm.body) || self.control_flow_has_mutations(&arm.body)
+                self.is_tier2_value_call(&arm.body)
+                    || self.control_flow_has_mutations(&arm.body)
+                    // BT-3420 (ADR 0118 phase 4): an arm body that is
+                    // neither a Tier 2 block-value call nor itself a nested
+                    // control-flow-with-mutations construct, but DOES
+                    // contain a (possibly nested, hoistable) actor
+                    // self-send — `1 -> 1 + (self bumpCount)` — still needs
+                    // this `match:` threaded, so `generate_match_arm_body`'s
+                    // plain-wrap arm gets a chance to hoist it instead of
+                    // silently dropping the mutation via a bare
+                    // `expression_doc` compile.
+                    || self.conditional_receiver_needs_threading(&arm.body)
             })
     }
 

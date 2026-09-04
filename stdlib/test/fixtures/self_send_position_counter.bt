@@ -224,6 +224,15 @@ Actor subclass: SelfSendPositionCounter
   conditionalArgToAtColonSelfSend: flag =>
     self.items at: (flag ifTrue: [self bumpCount] ifFalse: [2])
 
+  // BT-3420: the same argument-position tuple leak, but the outer
+  // conditional argument (`self record: (...)`) is itself nested INSIDE
+  // another conditional's branch body rather than at the method's own
+  // top level.
+  conditionalArgInsideBranchSelfSend: flag =>
+    flag ifTrue: [
+      self record: (flag ifTrue: [self bumpCount] ifFalse: [0])
+    ] ifFalse: [0]
+
   // Runtime crash: invalid argument — ADR 0118 phase 4.
   detectIfNoneSelfSend =>
     self.items detect: [:x | x > 100] ifNone: [self bumpCount]
@@ -241,6 +250,10 @@ Actor subclass: SelfSendPositionCounter
   // phase 2).
   ifNilIfNotNilBlockArgSelfSend: v =>
     v ifNil: [0] ifNotNil: [:x | x + (self bumpCount)]
+
+  // BT-3420: self-send in the ifNil: (nil) block specifically, rather than
+  // the ifNotNil: block above.
+  ifNilBlockArgSelfSend: v => v ifNil: [self bumpCount] ifNotNil: [:x | 0]
 
   // Silent drop, no warning — match: scrutinee and arm (ADR 0118 phase 2).
   matchArmSelfSend: v =>

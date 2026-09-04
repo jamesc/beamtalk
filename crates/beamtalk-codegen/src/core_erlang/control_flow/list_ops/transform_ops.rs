@@ -5,6 +5,7 @@
 //! `takeWhile:`, `dropWhile:`, `partition:`, `groupBy:`, and `sort:`.
 
 use super::super::super::intrinsics::validate_block_arity_exact;
+use super::super::super::threaded_ir::ThreadedStmt;
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use beamtalk_cerl_doc::Document;
@@ -2095,7 +2096,31 @@ impl CoreErlangGenerator {
                     leaf::var(pred_result),
                 ]);
             } else {
+                // BT-3420 (ADR 0118 phase 4): a non-last, non-assignment
+                // statement in the comparator body — e.g. a bare `self
+                // bumpCount` before the trailing `a < b` — has no state
+                // threading of its own here; thread any nested (or bare)
+                // actor self-send ahead via `thread_ahead` and put the
+                // result back into the process-dict key so it survives past
+                // this comparator invocation, the same way the field/local
+                // assignment arms above do via their own `current`/`put`
+                // pair.
+                let frame = self.current_frame();
+                let mut prelude: Vec<ThreadedStmt> = Vec::new();
+                let scope = self.thread_ahead(expr, &mut prelude, frame)?;
                 let doc = self.generate_expression(expr)?;
+                self.finish_precompiled_scope(scope)?;
+                if !prelude.is_empty() {
+                    docs.push(self.threaded_prelude_doc(&prelude));
+                    let current = self.current_state_var();
+                    docs.push(docvec![
+                        "let _ = call 'erlang':'put'(",
+                        state_key_doc.clone(),
+                        ", ",
+                        leaf::var(current),
+                        ") in ",
+                    ]);
+                }
                 docs.push(docvec!["let _ = ", doc, " in "]);
             }
         }

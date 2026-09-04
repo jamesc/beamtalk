@@ -160,19 +160,23 @@ impl CoreErlangGenerator {
     ///   `ClassVars` unification (phase 5) hasn't reached this yet, so the
     ///   chain still lands in the prelude as one opaque `Statement` rather
     ///   than a real `ClassVars` `Bind`.
-    /// - BT-3382/BT-3396: an ACTOR-INSTANCE self-send anywhere in the
-    ///   receiver's sequenceable sub-tree — the receiver itself (`(self
-    ///   recordOnce: which) ifTrue:ifFalse:`, BT-3382) or nested inside it,
-    ///   e.g. as the receiver of an `and:`/`or:` (`((self recordOnce: which)
-    ///   and: [x]) ifTrue:`, BT-3396) — is dispatched ahead of the receiver
-    ///   expression by [`Self::thread_ahead`] into real `Bind`s (ADR 0118
-    ///   phase 2b: the sequencing rule, no more planner-based emission), so
-    ///   the receiver expression itself compiles to a plain reference to
-    ///   the already-threaded result. Nothing in a conditional evaluates
-    ///   before its receiver, so this position is always order-safe to
-    ///   thread ahead into. The inlining decision that gets us here
-    ///   (`try_generate_boolean_protocol`, and `classify_body_expr`'s
-    ///   `control_flow_has_mutations`) uses the same underlying probe
+    /// - BT-3382/BT-3396/ADR 0118 phase 4 (BT-3420): an ACTOR-INSTANCE
+    ///   self-send anywhere in the receiver's sequenceable sub-tree — the
+    ///   receiver itself (`(self recordOnce: which) ifTrue:ifFalse:`,
+    ///   BT-3382), nested inside it (as the receiver of an `and:`/`or:`,
+    ///   BT-3396), OR the receiver being itself a nested inline-threaded
+    ///   construct (`((self recordOnce: which) and: [x]) ifTrue:`; BT-3420
+    ///   made `and:`/`or:`/the nil-conditional family/`match:` producers
+    ///   [`CoreErlangGenerator::threaded_expression`] recognizes directly,
+    ///   so this no longer needs its own `and:`/`or:` special case) — is
+    ///   threaded ahead of the receiver expression by [`Self::thread_ahead`]
+    ///   into real `Bind`s (the sequencing rule), so the receiver expression
+    ///   itself compiles to a plain reference to the already-threaded
+    ///   result. Nothing in a conditional evaluates before its receiver, so
+    ///   this position is always order-safe to thread ahead into. The
+    ///   inlining decision that gets us here (`try_generate_boolean_protocol`,
+    ///   and `classify_body_expr`'s `control_flow_has_mutations`) uses the
+    ///   same underlying probe
     ///   ([`CoreErlangGenerator::conditional_receiver_needs_threading`]) so
     ///   the two can never disagree.
     fn compile_conditional_receiver(
@@ -181,92 +185,6 @@ impl CoreErlangGenerator {
         frame: FrameId,
     ) -> Result<ThreadedValue> {
         let span = receiver.unwrap_parens().span();
-        // BT-3402/BT-3396 interaction: when `receiver` is ITSELF an `and:`/
-        // `or:` send that needs the inline mutation-threading path (the same
-        // gate `try_generate_boolean_protocol` uses — see
-        // `and_or_needs_mutation_threading`'s doc comment), compile it
-        // through `generate_and_with_mutations`/`generate_or_with_mutations`
-        // directly and unwrap its `{Result, NewState}` tuple here, instead of
-        // falling into the generic sequencing rule below. That rule
-        // treats `and:`/`or:` as opaque (`is_conditional_selector`,
-        // `sequenced_send_children`'s own exclusion) precisely because compiling
-        // the receiver afterward as a plain expression is what is supposed to
-        // thread it — but a mutation-threaded `and:`/`or:` compiles to a
-        // *tuple*-valued document (`generate_and_with_mutations`'s own `{Result,
-        // NewState}` contract), not the plain boolean/nil value this
-        // function's callers require. Left unhandled, the receiver's own
-        // re-entrant compile (`expression_doc_with_open_scope` below, via
-        // `try_generate_boolean_protocol`) still produces that tuple with no
-        // unwrap, corrupting the enclosing conditional's state-version
-        // numbering (`unbound variable 'State1'` from `core_lint` — e.g.
-        // BT-3396's `((self recordOnce: x) and: [true]) ifTrue:ifFalse:`).
-        //
-        // ADR 0118 phase 4 turns this inline-threaded `and:`/`or:` into a
-        // producer in its own right; until then it stays this special case,
-        // emitting its tuple-unpack `Statement` + real `State` `Bind` into
-        // the prelude here instead of the old open let-chain `Document`.
-        if let Expression::MessageSend {
-            receiver: and_or_receiver,
-            selector: MessageSelector::Keyword(parts),
-            arguments,
-            ..
-        } = receiver.unwrap_parens()
-        {
-            if parts.len() == 1 && arguments.len() == 1 {
-                let kw = parts[0].keyword.as_str();
-                if kw == "and:" || kw == "or:" {
-                    if let Expression::Block(block) = &arguments[0] {
-                        if self.and_or_needs_mutation_threading(and_or_receiver, block) {
-                            let tuple_doc = if kw == "and:" {
-                                self.generate_and_with_mutations(and_or_receiver, block)?
-                            } else {
-                                self.generate_or_with_mutations(and_or_receiver, block)?
-                            };
-                            let tuple_var = self.fresh_temp_var("CondRecvTuple");
-                            let source_version = self.state_version();
-                            let mut prelude = vec![ThreadedStmt::Statement(
-                                docvec![
-                                    "let ",
-                                    leaf::var(tuple_var.clone()),
-                                    " = ",
-                                    tuple_doc,
-                                    " in ",
-                                ],
-                                span,
-                            )];
-                            let _ = self.next_state_var();
-                            let target_version = self.state_version();
-                            prelude.push(ThreadedStmt::Bind {
-                                target: VersionedVar::new(
-                                    VersionPrefix::State,
-                                    target_version,
-                                    frame,
-                                ),
-                                source: VersionedVar::new(
-                                    VersionPrefix::State,
-                                    source_version,
-                                    frame,
-                                ),
-                                op: BindOp::Direct(ValueRef::Doc(docvec![
-                                    "call 'erlang':'element'(2, ",
-                                    leaf::var(tuple_var.clone()),
-                                    ")",
-                                ])),
-                                shadow_write: false,
-                                span,
-                            });
-                            let value = ValueRef::Doc(docvec![
-                                "call 'erlang':'element'(1, ",
-                                leaf::var(tuple_var),
-                                ")",
-                            ]);
-                            return Ok(ThreadedValue { prelude, value });
-                        }
-                    }
-                }
-            }
-        }
-
         let mut prelude: Vec<ThreadedStmt> = Vec::new();
         // ADR 0118 phase 2b (BT-3418): threads every state-effecting
         // sub-expression nested in the receiver ahead of its own compile
@@ -289,16 +207,95 @@ impl CoreErlangGenerator {
         };
         Ok(ThreadedValue { prelude, value })
     }
+
+    /// ADR 0118 phase 4 (BT-3420): wraps a `_tuple` builder's raw
+    /// `{Value, NewState}` case-expression `Document` — the shape every
+    /// `generate_*_with_mutations_tuple` builder below still produces
+    /// internally — as a [`ThreadedValue`] per §Decision 2: prelude
+    /// `[Statement(let CF = <case…> in), Bind(State_{n+1} ← element(2,
+    /// CF))]`, value `element(1, CF)`.
+    ///
+    /// `frame` MUST be captured by the caller via
+    /// [`CoreErlangGenerator::current_frame`] BEFORE building `tuple_doc` —
+    /// never recomputed here. Building `tuple_doc` calls
+    /// `generate_conditional_branch_inline` for the construct's own
+    /// branch(es), each via `with_branch_context`, which mints a fresh
+    /// `branch_frame_counter` value and never decrements it on exit (frame
+    /// identity is globally unique per module, by design); recomputing
+    /// `current_frame()` AFTER that would read the LAST inner branch's
+    /// frame instead of this call's own enclosing frame, misattributing
+    /// this wrapper's `Bind` and tripping the verifier
+    /// (`NonLinearVersion`/`UnboundVersion` on a frame nothing else
+    /// references).
+    fn control_flow_tuple_to_threaded_value(
+        &mut self,
+        tuple_doc: Document<'static>,
+        frame: FrameId,
+        span: Span,
+    ) -> ThreadedValue {
+        let tuple_var = self.fresh_temp_var("CF");
+        let source_version = self.state_version();
+        let mut prelude = vec![ThreadedStmt::Statement(
+            docvec![
+                "let ",
+                leaf::var(tuple_var.clone()),
+                " = ",
+                tuple_doc,
+                " in "
+            ],
+            span,
+        )];
+        let _ = self.next_state_var();
+        let target_version = self.state_version();
+        prelude.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+            op: BindOp::Direct(ValueRef::Doc(docvec![
+                "call 'erlang':'element'(2, ",
+                leaf::var(tuple_var.clone()),
+                ")",
+            ])),
+            shadow_write: false,
+            span,
+        });
+        let value = ValueRef::Doc(docvec![
+            "call 'erlang':'element'(1, ",
+            leaf::var(tuple_var),
+            ")",
+        ]);
+        ThreadedValue { prelude, value }
+    }
 }
 
 impl CoreErlangGenerator {
+    /// ADR 0118 phase 4 (BT-3420): the [`ThreadedValue`] producer for `flag
+    /// ifTrue: [block]` — the expression-position counterpart of
+    /// [`Self::generate_if_true_with_mutations_tuple`], whose raw tuple
+    /// `Document` this wraps via
+    /// [`Self::control_flow_tuple_to_threaded_value`]. Called by
+    /// [`CoreErlangGenerator::threaded_expression`]'s inline-control-flow
+    /// producer branch and by [`super::super::threaded_expr`]'s Actor-body
+    /// consumers — never by [`super::super::intrinsics::CoreErlangGenerator::try_generate_boolean_protocol`],
+    /// which keeps calling the `_tuple` builder directly for its own
+    /// Document-returning contract.
+    pub(in crate::core_erlang) fn generate_if_true_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+    ) -> Result<ThreadedValue> {
+        let span = block.span;
+        let frame = self.current_frame();
+        let tuple_doc = self.generate_if_true_with_mutations_tuple(receiver, block)?;
+        Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
+    }
+
     /// Generates inline code for `flag ifTrue: [block]` in actor context
     /// when the block contains field mutations.
     ///
     /// Returns `{Result, NewState}`:
     /// - True branch: `{block_result, mutated_state}`
     /// - False branch: `{'nil', unchanged_state}`
-    pub(in crate::core_erlang) fn generate_if_true_with_mutations(
+    pub(in crate::core_erlang) fn generate_if_true_with_mutations_tuple(
         &mut self,
         receiver: &Expression,
         block: &Block,
@@ -346,13 +343,27 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// ADR 0118 phase 4 (BT-3420): the [`ThreadedValue`] producer for `flag
+    /// ifFalse: [block]` — see [`Self::generate_if_true_with_mutations`]'s
+    /// doc comment for the shape every one of these producers shares.
+    pub(in crate::core_erlang) fn generate_if_false_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+    ) -> Result<ThreadedValue> {
+        let span = block.span;
+        let frame = self.current_frame();
+        let tuple_doc = self.generate_if_false_with_mutations_tuple(receiver, block)?;
+        Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
+    }
+
     /// Generates inline code for `flag ifFalse: [block]` in actor context
     /// when the block contains field mutations.
     ///
     /// Returns `{Result, NewState}`:
     /// - True branch: `{'nil', unchanged_state}`
     /// - False branch: `{block_result, mutated_state}`
-    pub(in crate::core_erlang) fn generate_if_false_with_mutations(
+    pub(in crate::core_erlang) fn generate_if_false_with_mutations_tuple(
         &mut self,
         receiver: &Expression,
         block: &Block,
@@ -396,6 +407,20 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// ADR 0118 phase 4 (BT-3420): the [`ThreadedValue`] producer for `flag
+    /// and: [block]` — see [`Self::generate_if_true_with_mutations`]'s doc
+    /// comment for the shape every one of these producers shares.
+    pub(in crate::core_erlang) fn generate_and_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+    ) -> Result<ThreadedValue> {
+        let span = block.span;
+        let frame = self.current_frame();
+        let tuple_doc = self.generate_and_with_mutations_tuple(receiver, block)?;
+        Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
+    }
+
     /// BT-3402: generates inline code for `flag and: [block]` in actor
     /// context when the block contains field mutations (or the receiver is
     /// itself an actor self-send needing threading — see
@@ -411,7 +436,7 @@ impl CoreErlangGenerator {
     /// Returns `{Result, NewState}`:
     /// - True branch: `{block_result, mutated_state}`
     /// - False branch: `{'false', unchanged_state}`
-    pub(in crate::core_erlang) fn generate_and_with_mutations(
+    pub(in crate::core_erlang) fn generate_and_with_mutations_tuple(
         &mut self,
         receiver: &Expression,
         block: &Block,
@@ -453,6 +478,20 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// ADR 0118 phase 4 (BT-3420): the [`ThreadedValue`] producer for `flag
+    /// or: [block]` — see [`Self::generate_if_true_with_mutations`]'s doc
+    /// comment for the shape every one of these producers shares.
+    pub(in crate::core_erlang) fn generate_or_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+    ) -> Result<ThreadedValue> {
+        let span = block.span;
+        let frame = self.current_frame();
+        let tuple_doc = self.generate_or_with_mutations_tuple(receiver, block)?;
+        Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
+    }
+
     /// BT-3402: generates inline code for `flag or: [block]` in actor
     /// context when the block contains field mutations (or the receiver is
     /// itself an actor self-send needing threading).
@@ -465,7 +504,7 @@ impl CoreErlangGenerator {
     /// Returns `{Result, NewState}`:
     /// - True branch: `{'true', unchanged_state}`
     /// - False branch: `{block_result, mutated_state}`
-    pub(in crate::core_erlang) fn generate_or_with_mutations(
+    pub(in crate::core_erlang) fn generate_or_with_mutations_tuple(
         &mut self,
         receiver: &Expression,
         block: &Block,
@@ -506,11 +545,28 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// ADR 0118 phase 4 (BT-3420): the [`ThreadedValue`] producer for `flag
+    /// ifTrue: [t_block] ifFalse: [f_block]` — see
+    /// [`Self::generate_if_true_with_mutations`]'s doc comment for the
+    /// shape every one of these producers shares.
+    pub(in crate::core_erlang) fn generate_if_true_if_false_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        true_block: &Block,
+        false_block: &Block,
+    ) -> Result<ThreadedValue> {
+        let span = false_block.span;
+        let frame = self.current_frame();
+        let tuple_doc =
+            self.generate_if_true_if_false_with_mutations_tuple(receiver, true_block, false_block)?;
+        Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
+    }
+
     /// Generates inline code for `flag ifTrue: [t_block] ifFalse: [f_block]` in actor context
     /// when at least one block contains field mutations.
     ///
     /// Returns `{Result, NewState}` from whichever branch is taken.
-    pub(in crate::core_erlang) fn generate_if_true_if_false_with_mutations(
+    pub(in crate::core_erlang) fn generate_if_true_if_false_with_mutations_tuple(
         &mut self,
         receiver: &Expression,
         true_block: &Block,
@@ -572,19 +628,53 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// Generates inline code for `obj ifNotNil: [block]` or `obj ifNotNil: [:v | block]`
-    /// in actor context when the block contains field mutations.
-    ///
-    /// Returns `{Result, NewState}`:
-    /// - Nil branch: `{'nil', unchanged_state}`
-    /// - Non-nil branch: `{block_result, mutated_state}`
-    ///
-    /// If the block has a parameter (`:v`), it is bound to the receiver object value
-    /// inside the branch body.
-    pub(in crate::core_erlang) fn generate_if_not_nil_with_mutations(
+    /// ADR 0118 phase 4 (BT-3420): the [`ThreadedValue`] producer for the
+    /// nil-testing conditional family — `ifNil:` (`nil_block: Some`,
+    /// `not_nil_block: None`), `ifNotNil:` (`nil_block: None`,
+    /// `not_nil_block: Some`), and `ifNil:ifNotNil:`/`ifNotNil:ifNil:`
+    /// (both `Some` — the caller passes them by MEANING, not by source
+    /// keyword order, so this generator itself doesn't need to know which
+    /// selector produced the call). Generalizes the single-block
+    /// `ifNotNil:`-only generator this replaces (see
+    /// [`Self::generate_if_true_with_mutations`]'s doc comment for the
+    /// producer shape every one of these shares) so `ifNil:` and the
+    /// two-block forms get the same inline-case treatment instead of
+    /// falling through to a plain Tier 1 closure that discards a nested
+    /// self-send's mutation.
+    pub(in crate::core_erlang) fn generate_nil_conditional_with_mutations(
         &mut self,
         receiver: &Expression,
-        block: &Block,
+        nil_block: Option<&Block>,
+        not_nil_block: Option<&Block>,
+    ) -> Result<ThreadedValue> {
+        let span = not_nil_block
+            .or(nil_block)
+            .map_or_else(|| receiver.unwrap_parens().span(), |b| b.span);
+        let frame = self.current_frame();
+        let tuple_doc =
+            self.generate_nil_conditional_with_mutations_tuple(receiver, nil_block, not_nil_block)?;
+        Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
+    }
+
+    /// Generates inline code for the nil-testing conditional family in
+    /// actor context when a block contains field mutations. See
+    /// [`Self::generate_nil_conditional_with_mutations`]'s doc comment for
+    /// what `nil_block`/`not_nil_block` mean.
+    ///
+    /// Returns `{Result, NewState}`:
+    /// - Nil branch: `nil_block`'s own `{value, state}` when present,
+    ///   else `{'nil', unchanged_state}` (bare `ifNotNil:`).
+    /// - Non-nil branch: `not_nil_block`'s own `{value, state}` when
+    ///   present, else `{receiver_value, unchanged_state}` (bare `ifNil:`
+    ///   — Smalltalk's "answers self when not nil" contract).
+    ///
+    /// If `not_nil_block` has a parameter (`:v`), it is bound to the
+    /// receiver object value inside its branch body.
+    pub(in crate::core_erlang) fn generate_nil_conditional_with_mutations_tuple(
+        &mut self,
+        receiver: &Expression,
+        nil_block: Option<&Block>,
+        not_nil_block: Option<&Block>,
     ) -> Result<Document<'static>> {
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
@@ -592,24 +682,57 @@ impl CoreErlangGenerator {
         let recv_val_doc = self.threaded_value_doc(&recv_tv.value);
         let obj_var = self.fresh_temp_var("Obj");
         let outer_state = self.current_state_var();
-        // BT-2355: seed threaded outer-locals so the non-taken (nil) branch and the
-        // post-conditional extraction always see the `__local__` keys.
-        let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
+        // BT-2355: seed threaded outer-locals so a branch that does not
+        // itself write a given local (and the post-conditional extraction)
+        // still sees the `__local__` key.
+        let mut seed_blocks: Vec<&Block> = Vec::new();
+        seed_blocks.extend(nil_block);
+        seed_blocks.extend(not_nil_block);
+        let (seed_doc, base_state) = self.seed_conditional_locals(&seed_blocks, &outer_state);
 
         // ADR 0111 Addendum 5 (BT-3146): see generate_if_true_with_mutations'
         // matching comment — real per-frame verify() now runs inside
         // generate_conditional_branch_inline itself.
-        let (branch_doc, _branch_final) = self.with_branch_context(|this| {
-            // Push a scope so the block-parameter binding is cleaned up after generation
-            this.push_scope();
-            if let Some(param) = block.parameters.first() {
-                // Bind the block parameter to the receiver value (already bound to obj_var)
-                this.bind_var(&param.name, &obj_var);
-            }
-            let result = this.generate_conditional_branch_inline(block);
-            this.pop_scope();
-            result
-        })?;
+        let nil_arm = if let Some(block) = nil_block {
+            let (branch_doc, _branch_final) =
+                self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+            docvec![
+                "let StateAcc = ",
+                leaf::var(base_state.clone()),
+                " in ",
+                branch_doc,
+            ]
+        } else {
+            docvec!["{'nil', ", leaf::var(base_state.clone()), "}"]
+        };
+
+        let not_nil_arm = if let Some(block) = not_nil_block {
+            let (branch_doc, _branch_final) = self.with_branch_context(|this| {
+                // Push a scope so the block-parameter binding is cleaned up after generation
+                this.push_scope();
+                if let Some(param) = block.parameters.first() {
+                    // Bind the block parameter to the receiver value (already bound to obj_var)
+                    this.bind_var(&param.name, &obj_var);
+                }
+                let result = this.generate_conditional_branch_inline(block);
+                this.pop_scope();
+                result
+            })?;
+            docvec![
+                "let StateAcc = ",
+                leaf::var(base_state.clone()),
+                " in ",
+                branch_doc,
+            ]
+        } else {
+            docvec![
+                "{",
+                leaf::var(obj_var.clone()),
+                ", ",
+                leaf::var(base_state.clone()),
+                "}",
+            ]
+        };
 
         Ok(docvec![
             recv_preamble,
@@ -620,14 +743,156 @@ impl CoreErlangGenerator {
             recv_val_doc,
             " in case ",
             leaf::var(obj_var),
-            " of <'nil'> when 'true' -> {'nil', ",
-            leaf::var(base_state.clone()),
-            "} <_> when 'true' -> let StateAcc = ",
-            leaf::var(base_state),
-            " in ",
-            branch_doc,
+            " of <'nil'> when 'true' -> ",
+            nil_arm,
+            " <_> when 'true' -> ",
+            not_nil_arm,
             " end",
         ])
+    }
+
+    /// ADR 0118 phase 4 (BT-3420): `true` if `expr` (already paren-unwrapped)
+    /// is an inline-threaded control-flow construct — `ifTrue:`/`ifFalse:`/
+    /// `ifTrue:ifFalse:`, `and:`/`or:`, the nil-conditional family, or
+    /// `match:` — that needs mutation threading. The pure gate behind
+    /// [`Self::inline_control_flow_producer`], reusing the exact same
+    /// per-family predicates that producer dispatches on, so the two can
+    /// never disagree. Called by
+    /// [`CoreErlangGenerator::subexpr_needs_prelude`] (`util.rs`) to decide
+    /// whether compiling `expr` — receiver, argument, or any other
+    /// sequenced position — would give it a non-empty prelude.
+    pub(in crate::core_erlang) fn inline_control_flow_needs_threading(
+        &self,
+        expr: &Expression,
+    ) -> bool {
+        let expr = expr.unwrap_parens();
+        if let Expression::Match { arms, .. } = expr {
+            return self.match_needs_mutation_threading(arms);
+        }
+        let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        else {
+            return false;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        match (sel.as_str(), arguments.as_slice()) {
+            ("and:" | "or:", [Expression::Block(block)]) => {
+                self.and_or_needs_mutation_threading(receiver, block)
+            }
+            ("ifTrue:" | "ifFalse:" | "ifNotNil:" | "ifNil:", [Expression::Block(block)]) => {
+                self.conditional_needs_mutation_threading(receiver, &[block])
+            }
+            (
+                "ifTrue:ifFalse:" | "ifNil:ifNotNil:" | "ifNotNil:ifNil:",
+                [Expression::Block(b0), Expression::Block(b1)],
+            ) => self.conditional_needs_mutation_threading(receiver, &[b0, b1]),
+            _ => false,
+        }
+    }
+
+    /// ADR 0118 phase 4 (BT-3420, ADR 0118 §Decision 2): the [`ThreadedValue`]
+    /// producer for every inline-threaded control-flow construct that can
+    /// sit anywhere in expression position — `ifTrue:`/`ifFalse:`/
+    /// `ifTrue:ifFalse:`, `and:`/`or:`, the nil-conditional family, and
+    /// `match:`. `Ok(None)` when `expr` (already paren-unwrapped) is not one
+    /// of these, or is but [`Self::inline_control_flow_needs_threading`]
+    /// says it doesn't need threading — the caller then falls through to
+    /// its ordinary (unthreaded) compile.
+    ///
+    /// The single recognizer both
+    /// [`CoreErlangGenerator::threaded_expression`]'s inline-control-flow
+    /// branch (nested/argument expression position — the row that used to
+    /// leak a `{Result, State}` tuple into an argument) and
+    /// [`super::super::threaded_expr`]'s Actor-body
+    /// `emit_actor_threaded_last_stmts`/`emit_actor_threaded_assign_rhs_stmts`
+    /// (an already-classified top-level `ControlFlowWithMutations`
+    /// statement) call, so a decision to inline can never disagree with
+    /// what inlines — and the one place any of these six-plus-`match:`
+    /// producers' preludes are built (via
+    /// [`Self::control_flow_tuple_to_threaded_value`]), so no
+    /// `{Result, State}` tuple `Document` crosses an expression boundary
+    /// through this path.
+    pub(in crate::core_erlang) fn inline_control_flow_producer(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Option<ThreadedValue>> {
+        let expr = expr.unwrap_parens();
+        if !self.inline_control_flow_needs_threading(expr) {
+            return Ok(None);
+        }
+        if let Expression::Match { value, arms, .. } = expr {
+            let span = expr.span();
+            let frame = self.current_frame();
+            let tuple_doc = self.generate_match(value, arms)?;
+            return Ok(Some(
+                self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span),
+            ));
+        }
+        let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        else {
+            // Unreachable: `inline_control_flow_needs_threading` only
+            // returns `true` for a `Match` or a keyword `MessageSend`.
+            return Ok(None);
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        let tv = match (sel.as_str(), arguments.as_slice()) {
+            ("and:", [Expression::Block(block)]) => {
+                self.generate_and_with_mutations(receiver, block)?
+            }
+            ("or:", [Expression::Block(block)]) => {
+                self.generate_or_with_mutations(receiver, block)?
+            }
+            ("ifTrue:", [Expression::Block(block)]) => {
+                self.generate_if_true_with_mutations(receiver, block)?
+            }
+            ("ifFalse:", [Expression::Block(block)]) => {
+                self.generate_if_false_with_mutations(receiver, block)?
+            }
+            (
+                "ifTrue:ifFalse:",
+                [
+                    Expression::Block(true_block),
+                    Expression::Block(false_block),
+                ],
+            ) => {
+                self.generate_if_true_if_false_with_mutations(receiver, true_block, false_block)?
+            }
+            ("ifNotNil:", [Expression::Block(block)]) => {
+                self.generate_nil_conditional_with_mutations(receiver, None, Some(block))?
+            }
+            ("ifNil:", [Expression::Block(block)]) => {
+                self.generate_nil_conditional_with_mutations(receiver, Some(block), None)?
+            }
+            (
+                "ifNil:ifNotNil:",
+                [
+                    Expression::Block(nil_block),
+                    Expression::Block(not_nil_block),
+                ],
+            )
+            | (
+                "ifNotNil:ifNil:",
+                [
+                    Expression::Block(not_nil_block),
+                    Expression::Block(nil_block),
+                ],
+            ) => self.generate_nil_conditional_with_mutations(
+                receiver,
+                Some(nil_block),
+                Some(not_nil_block),
+            )?,
+            _ => return Ok(None),
+        };
+        Ok(Some(tv))
     }
 
     /// ADR 0111 Addendum 5 §C1: lowers a `self.field := value`

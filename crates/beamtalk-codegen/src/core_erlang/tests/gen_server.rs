@@ -7122,15 +7122,25 @@ fn bt3415_ffi_receiver_is_not_sequenced_but_its_self_send_argument_is() {
 }
 
 #[test]
-fn bt3415_early_return_reply_state_is_the_post_prelude_state_not_the_values_inner_mint() {
-    // Adversarial review finding on #3717: `^ 1 + ((self flagTrue) ifTrue:
-    // [1] ifFalse: [2])` — the conditional receiver's dispatch chain mints
-    // `State1` INSIDE the conditional's own closed document
-    // (`compile_conditional_receiver`'s `HoistSink::OpenDocs`), so reading
-    // `current_state_var()` after the value's compile put an unbound
-    // `State1` in the reply. The `^` arm must reply with the state after
-    // the PRELUDE (here: none — `State`), exactly as the pre-ADR-0118 read
-    // order did.
+fn bt3415_early_return_reply_state_threads_the_conditionals_own_mutation() {
+    // Adversarial review finding on #3717, superseded by ADR 0118 phase 4
+    // (BT-3420): `^ 1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])` — before
+    // BT-3420, the conditional receiver's dispatch chain minted `State1`
+    // INSIDE the conditional's own closed document
+    // (`compile_conditional_receiver`'s open let-chain), invisible to the
+    // `^` arm's `current_state_var()` read, so the reply fell back to the
+    // stale pre-conditional `State` — `flagTrue`'s mutation compiled and
+    // ran, but the method's own reply (and any state read afterward)
+    // couldn't see it. BT-3420 makes the mutation-threaded `ifTrue:ifFalse:`
+    // a real `ThreadedValue` producer whose prelude — including the
+    // receiver's own hoisted `flagTrue` dispatch — splices into the `^`
+    // arm's `single_sequenced_child` sequencing, so the reply now correctly
+    // carries the prelude's own final version: `State1` from the
+    // receiver's hoisted `flagTrue` dispatch, then `State2` from
+    // `control_flow_tuple_to_threaded_value`'s own wrap of the
+    // `ifTrue:ifFalse:` construct's `{Value, NewState}` tuple (matching
+    // `bt3415_early_return_reply_state_follows_the_prelude_when_there_is_one`'s
+    // shape) — instead of the discarding `State`.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  go: i =>\n    ^ 1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])\n    0\n\n  internal flagTrue =>\n    self.count := self.count + 1\n    true\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -7140,8 +7150,10 @@ fn bt3415_early_return_reply_state_is_the_post_prelude_state_not_the_values_inne
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
-        code.contains("{'reply', _ReturnValue, State}"),
-        "the reply must use the state after the (empty) prelude, not the value's inner State1. Got:\n{code}"
+        code.contains("{'reply', _ReturnValue, State2}"),
+        "the reply must carry the prelude's final State2 (flagTrue's own \
+         mutation, threaded through the conditional receiver, then the \
+         conditional's own wrap), not the stale pre-conditional State. Got:\n{code}"
     );
     assert_compiles_through_erlc("bt3415_early_return_post_prelude_state", &code);
 }
