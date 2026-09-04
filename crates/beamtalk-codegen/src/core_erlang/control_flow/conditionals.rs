@@ -865,6 +865,7 @@ impl CoreErlangGenerator {
                 span,
             });
             self.bind_var(&id.name, &val_var);
+            self.push_control_flow_threaded_var_rereads(value, span, stmts);
             return Ok(val_var);
         }
 
