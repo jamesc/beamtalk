@@ -57,3 +57,15 @@ Actor subclass: ActorCollectCounter
   doubleAllAssignThenClass: items =>
     result := items collect: [:item | self processItem: item]
     result class
+
+  // BT-3425: same self-send collect: shape as doubleAllAssignThenClass:
+  // above, but computed INSIDE an ifTrue:/ifFalse: branch (bound to a local
+  // first) rather than at the method's top level — narrower variant that
+  // BT-3383's fix and regression test did not cover.
+  doubleAllInsideBranchAssignThenClass: items when: flag =>
+    (flag
+      ifTrue: [
+        result := items collect: [:item | self processItem: item]
+        result class
+      ]
+      ifFalse: [nil])
