@@ -69,8 +69,21 @@ impl CoreErlangGenerator {
             // BT-153: Include local_writes only in REPL mode
             // BT-1329: Also check for nested list ops with cross-scope mutations
             let analysis = block_analysis::analyze_block(body_block);
+            // ADR 0118 phase 3 (BT-3419): a condition-only self-send/field
+            // write (`whileTrue: [nil]` with a mutating CONDITION) must also
+            // route here — `needs_mutation_threading`/
+            // `body_has_list_op_cross_scope_mutations` only look at the BODY,
+            // so a trivial body previously fell through to
+            // `generate_while_true_simple`, which compiles the condition via
+            // `generate_expression` → `generate_block` → `generate_block_stateful`
+            // (a real closure boundary that must CLOSE its own state chain
+            // into a `{Result, State}` tuple) instead of the loop's own
+            // frame — the exact shape that panics the verifier or crashes at
+            // runtime (see the `bt3414_*_inside_while_true_condition_panics_verifier`
+            // tests, `tests/gen_server.rs`).
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
+                || super::condition_has_state_effects(condition)
             {
                 return self.generate_while_true_with_mutations(condition, body_block);
             }
@@ -116,8 +129,11 @@ impl CoreErlangGenerator {
             // BT-153: Include local_writes only in REPL mode
             // BT-1329: Also check for nested list ops with cross-scope mutations
             let analysis = block_analysis::analyze_block(body_block);
+            // ADR 0118 phase 3 (BT-3419): see the analogous comment in
+            // `generate_while_true`.
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
+                || super::condition_has_state_effects(condition)
             {
                 return self.generate_while_false_with_mutations(condition, body_block);
             }
@@ -211,6 +227,7 @@ impl CoreErlangGenerator {
     ///
     /// In direct-params mode (BT-1275, no field mutations) the fun signature is
     /// `(Var1, ..., VarN)` instead of `(StateAcc)`.
+    #[allow(clippy::too_many_lines)] // state-threading while-loop codegen, ADR 0118 phase 3 (BT-3419) added the condition-effects branch
     fn generate_while_loop_with_mutations(
         &mut self,
         condition: &Expression,
@@ -228,6 +245,11 @@ impl CoreErlangGenerator {
         }
 
         let cond_var = self.fresh_temp_var("CondFun");
+        // ADR 0118 phase 3 (BT-3419): whether the condition itself has state
+        // effects (a self-send, or an `and:`/`or:`/`ifTrue:ifFalse:` that
+        // carries one) — decides whether `CondFun` must return a
+        // `{Bool, FinalStateAcc}` pair instead of a bare boolean, below.
+        let cond_effects = super::condition_has_state_effects(condition);
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
@@ -271,11 +293,18 @@ impl CoreErlangGenerator {
         let cond_doc = self.with_branch_context(|this| {
             if let Expression::Block(cond_block) = condition {
                 // BT-3151: this condition block bypasses `generate_block`'s own
-                // self-send check by calling `generate_block_body` directly —
-                // see `check_no_unsafe_class_method_self_sends`'s doc comment.
+                // self-send check by calling `generate_block_body`/
+                // `generate_stateful_while_condition` directly — see
+                // `check_no_unsafe_class_method_self_sends`'s doc comment.
                 let analysis = crate::core_erlang::block_analysis::analyze_block(cond_block);
                 this.check_no_unsafe_class_method_self_sends(&analysis, cond_block.span)?;
-                this.generate_block_body(cond_block)
+                if cond_effects {
+                    this.generate_stateful_while_condition(cond_block)
+                } else {
+                    this.generate_block_body(cond_block)
+                }
+            } else if cond_effects {
+                this.generate_stateful_while_condition_tail(condition)
             } else {
                 this.generate_expression(condition)
             }
@@ -288,12 +317,43 @@ impl CoreErlangGenerator {
         } else {
             "<'true'> when 'true' -> "
         };
-        docs.push(docvec![
-            " in case apply ",
-            leaf::var(cond_var),
-            " (StateAcc) of ",
-            cond_apply_arm,
-        ]);
+        if cond_effects {
+            // ADR 0118 phase 3 (BT-3419): `CondFun` evaluates to
+            // `{Bool, FinalStateAcc}` (see `generate_stateful_while_condition`),
+            // never a bare boolean — unpack it and REBIND the literal name
+            // `StateAcc` (shadowing the fun's own incoming parameter, the
+            // same idiom `generate_while_loop_with_mutations`'s own
+            // `and:`-with-mutations codegen already uses for
+            // `let StateAcc = StateAcc in`) so the body compile below, the
+            // recursive tail call, and the exit arm all transparently see
+            // the condition's own state-effecting mutation under the SAME
+            // name they already reference, with no further plumbing.
+            let cond_pair_var = self.fresh_temp_var("CondPair");
+            let cond_bool_var = self.fresh_temp_var("CondBool");
+            docs.push(docvec![
+                " in let ",
+                leaf::var(cond_pair_var.clone()),
+                " = apply ",
+                leaf::var(cond_var),
+                " (StateAcc) in let ",
+                leaf::var(cond_bool_var.clone()),
+                " = call 'erlang':'element'(1, ",
+                leaf::var(cond_pair_var.clone()),
+                ") in let StateAcc = call 'erlang':'element'(2, ",
+                leaf::var(cond_pair_var),
+                ") in case ",
+                leaf::var(cond_bool_var),
+                " of ",
+                cond_apply_arm,
+            ]);
+        } else {
+            docs.push(docvec![
+                " in case apply ",
+                leaf::var(cond_var),
+                " (StateAcc) of ",
+                cond_apply_arm,
+            ]);
+        }
 
         let (body_doc, final_state_version) =
             self.generate_threaded_loop_body(body, &plan, &BodyKind::Letrec)?;
@@ -347,6 +407,105 @@ impl CoreErlangGenerator {
         ]);
 
         Ok(Document::Vec(docs))
+    }
+
+    /// ADR 0118 phase 3 (BT-3419): compiles a `whileTrue:`/`whileFalse:`
+    /// condition BLOCK whose tail has state effects (`condition_has_state_effects`)
+    /// into a document that evaluates to `{BoolResult, FinalStateAcc}` —
+    /// the shape `generate_while_loop_with_mutations`'s condition-application
+    /// site can unpack uniformly, whether the state effect is a bare
+    /// self-send nested in an ordinary expression (needs the ADR 0118
+    /// sequencing rule via `threaded_expression` — see
+    /// `generate_stateful_while_condition_tail`) or an `and:`/`or:`/
+    /// `ifTrue:ifFalse:` construct the pre-existing mutation-threaded
+    /// intrinsic path already compiles to its own `{Value, State}` pair.
+    ///
+    /// Non-tail statements (e.g. a plain local-var assignment ahead of the
+    /// boolean, `[i := i + 1. <bool>]`) reuse the SAME per-statement
+    /// dispatch every other block body already gets
+    /// (`CoreErlangGenerator::classify_block_expr`/`generate_block_expr`,
+    /// `generate_block_body_slice`'s own machinery) — the condition's own
+    /// local writes thread exactly as before this phase; only the TAIL
+    /// boolean gets the new `{Bool, State}` contract.
+    fn generate_stateful_while_condition(
+        &mut self,
+        cond_block: &Block,
+    ) -> Result<Document<'static>> {
+        let filtered = super::super::util::collect_body_exprs(&cond_block.body);
+        let Some((tail, rest)) = filtered.split_last() else {
+            // Unreachable in practice — the parser requires at least a
+            // boolean tail for a condition block — but mirrors
+            // `generate_block_body_slice`'s own empty-body fallback rather
+            // than panicking on a hand-built fixture.
+            return Ok(Document::Str("{'true', StateAcc}"));
+        };
+        let mut docs: Vec<Document<'static>> = Vec::with_capacity(filtered.len());
+        for expr in rest {
+            if CoreErlangGenerator::is_local_var_assignment(expr) {
+                // Mirrors `generate_threaded_loop_body_inner`'s own dispatch
+                // for this exact statement shape: in base `StateAcc` mode
+                // (the only mode a state-effecting condition ever runs
+                // under — `condition_has_state_effects`'s two call sites
+                // both force it), a local write must pack its new value
+                // into `StateAcc` the same way a loop BODY statement's own
+                // local write does — NOT the plain, unthreaded block-local
+                // rebind `classify_block_expr`/`generate_block_expr` give a
+                // genuine Tier 1 closure, which leaves the write invisible
+                // to the next iteration's `maps:get` read (confirmed
+                // empirically: `i` silently reset to its pre-loop value
+                // every iteration, so the loop's own exit condition never
+                // advances).
+                let (doc, _val_var) = self.generate_local_var_assignment_in_loop(expr)?;
+                docs.push(doc);
+            } else {
+                let kind = CoreErlangGenerator::classify_block_expr(self, expr, false);
+                docs.push(self.generate_block_expr(expr, &kind)?);
+            }
+        }
+        docs.push(self.generate_stateful_while_condition_tail(tail)?);
+        Ok(Document::Vec(docs))
+    }
+
+    /// The tail (boolean) statement of a state-effecting while condition —
+    /// see [`Self::generate_stateful_while_condition`]'s doc comment. Always
+    /// produces `{BoolValue, FinalStateAcc}`.
+    fn generate_stateful_while_condition_tail(
+        &mut self,
+        tail: &Expression,
+    ) -> Result<Document<'static>> {
+        if self.control_flow_has_mutations(tail) {
+            // `and:`/`or:`/`ifTrue:ifFalse:` with a nested state effect:
+            // the pre-existing mutation-threaded intrinsic path already
+            // compiles this to a `{Value, FinalStateAcc}` case-expression
+            // (confirmed against real compiled output — the loop's own
+            // only threaded var in tail position is `StateAcc` itself, so
+            // that pair IS already exactly the contract this function
+            // promises). No further wrapping needed.
+            return self.generate_expression(tail);
+        }
+        // A bare self-send (or one nested in an ordinary binary/keyword
+        // send) NOT wrapped by `and:`/`or:`/`ifTrue:ifFalse:`: thread it
+        // via the ADR 0118 sequencing rule so its mutation isn't silently
+        // dropped (`threaded_expression`'s producer/sequencing rule — the
+        // SAME mechanism an Actor method body statement already gets),
+        // then wrap the result explicitly. The pure case (no state effects
+        // at all — `condition_has_state_effects` looks at the whole block,
+        // so a pure tail can still reach here when an EARLIER statement is
+        // the effecting one) costs one no-op prelude and an unchanged
+        // `StateAcc` reference.
+        let frame = self.current_frame();
+        let tv = self.threaded_expression(tail, frame)?;
+        let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+        let value_doc = self.threaded_value_doc(&tv.value);
+        let final_state_var = self.current_state_var();
+        Ok(docvec![
+            prelude_doc,
+            "{",
+            value_doc,
+            ", ",
+            leaf::var(final_state_var),
+            "}"
+        ])
     }
 
     /// The loop's condition body is ordinary AST-directed expression codegen
@@ -1345,5 +1504,113 @@ mod tests {
             code.contains("element'(1,"),
             "last-expr whileTrue: should unwrap element 1 (nil). Got:\n{code}"
         );
+    }
+}
+
+#[cfg(test)]
+mod bt3419_stateful_condition_tests {
+    use crate::core_erlang::tests::{assert_compiles_through_erlc, codegen};
+
+    // ADR 0118 phase 3 (BT-3419): `whileTrue:`/`whileFalse:` conditions with
+    // a state effect (a self-send, or an `and:`/`or:` that carries one) now
+    // compile and thread state correctly instead of panicking the verifier
+    // or crashing at runtime — see the matching `#[should_panic]`→pass
+    // inversions in `tests/gen_server.rs` for the exact two shapes these
+    // mirror, and `stdlib/test/actor_self_send_position_matrix_test.bt`'s
+    // `testWhileTrueCondition*` rows for the end-to-end runtime proof.
+
+    #[test]
+    fn condition_binary_op_self_send_threads_state_and_compiles() {
+        // A bare self-send nested in an ordinary binary-op chain, itself the
+        // condition's tail: `(self bumpCount) + i < 5`. Before this phase,
+        // `generate_while_true`'s selection only looked at the BODY's own
+        // mutations (trivially none here — `[nil]`), so this fell to the
+        // simple (non-threading) codegen path and crashed. Now routes
+        // through the mutation-threading path and correctly repacks `i` and
+        // `count` into `StateAcc` every iteration.
+        let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    i := 0\n    [\n      i := i + 1\n      (self bumpCount) + i < 5\n    ] whileTrue: [nil]\n    i\n\n  internal bumpCount =>\n    self.count := self.count + 1\n    self.count\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("'while'/1"),
+            "a condition-only mutation must route through the mutation-threading \
+             ('while'/1) codegen, not the simple letrec. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'get'('__local__i'") && code.contains("maps':'put'('__local__i'"),
+            "the condition's own local write (`i := i + 1`) must pack into \
+             StateAcc like a loop body statement, not a plain unthreaded \
+             block-local rebind. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'bumpCount'"),
+            "the condition's self-send must dispatch via safe_dispatch. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn condition_and_block_self_send_threads_state_and_compiles() {
+        // A self-send inside an `and:`'s block argument, the condition's
+        // tail: `(i < 3) and: [(self bumpCount) > 0]`. The existing
+        // mutation-threaded `and:` intrinsic already compiles this to a
+        // `{Bool, State}` pair; before this phase the loop's own condition-
+        // application site treated it as a bare boolean, mismatching the
+        // pair it actually got (a runtime crash) or (with a trivial body)
+        // never reached this codegen at all (verifier panic — see
+        // `tests/gen_server.rs`).
+        let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    i := 0\n    [\n      i := i + 1\n      (i < 3) and: [(self bumpCount) > 0]\n    ] whileTrue: [nil]\n    i\n\n  internal bumpCount =>\n    self.count := self.count + 1\n    self.count\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("'while'/1"),
+            "a condition-only mutation must route through the mutation-threading \
+             ('while'/1) codegen, not the simple letrec. Got:\n{code}"
+        );
+        assert!(
+            code.contains("CondPair") && code.contains("CondBool"),
+            "the condition's `{{Bool, State}}` pair must be unpacked at the \
+             application site. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn whilefalse_condition_binary_op_self_send_threads_state_and_compiles() {
+        // Review finding: every test above exercises `whileTrue:` only, but
+        // `generate_while_loop_with_mutations`/`generate_while_false` share
+        // the SAME `cond_effects`-branching code via the `negate` bool — an
+        // atom mismatch (continuing on `'false'` instead of `'true'`, say)
+        // would silently break only `whileFalse:` while every `whileTrue:`
+        // test here still passes. `(self bumpCount) + i >= 5` — continues
+        // while FALSE, the negated counterpart of the binary-op test above.
+        let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    i := 0\n    [\n      i := i + 1\n      (self bumpCount) + i >= 5\n    ] whileFalse: [nil]\n    i\n\n  internal bumpCount =>\n    self.count := self.count + 1\n    self.count\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("'while'/1"),
+            "a condition-only mutation must route through the mutation-threading \
+             ('while'/1) codegen, not the simple letrec. Got:\n{code}"
+        );
+        assert!(
+            code.contains("<'false'> when 'true' -> ")
+                && code.contains("<'true'> when 'true' -> {'nil',"),
+            "whileFalse: must continue on 'false' and exit on 'true' — got the \
+             wrong atom on one of the two case arms. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn condition_self_send_exit_on_first_check_still_threads_mutation() {
+        // Review finding: every runtime-verified case (BUnit matrix,
+        // scratch-project manual runs during review) continues the loop at
+        // least once. The EXIT arm rebinds `StateAcc` from the SAME
+        // `CondPair` unpack as the continue arm (see
+        // `generate_while_loop_with_mutations`'s doc comment on the
+        // `cond_effects` branch) — confirm that holds even when the
+        // condition is FALSE on the very first check, so a self-send's
+        // mutation is not lost when the loop body never runs at all.
+        let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    [(self bumpCount) > 100] whileTrue: [nil]\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1\n    self.count\n";
+        let code = codegen(src);
+        // `codegen()` always names the generated module 'test' (workspace-mode
+        // default) — `assert_compiles_through_erlc`'s own `module_name` param
+        // must match that for `erlc` to accept the file (it checks the
+        // `-module` attribute against the source filename).
+        assert_compiles_through_erlc("test", &code);
     }
 }

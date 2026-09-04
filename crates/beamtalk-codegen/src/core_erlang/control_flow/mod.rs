@@ -293,6 +293,22 @@ struct BodyEffects {
     last_is_destructure: bool,
 }
 
+/// Whether a `whileTrue:`/`whileFalse:` `condition` expression has state
+/// effects (a field write or self-send) that need to thread through the
+/// loop. Factored out of [`BodyEffects::analyze`]'s own `cond_has_state_effects`
+/// so `while_loops.rs`'s mode-SELECTION check (ADR 0118 phase 3, BT-3419:
+/// a condition-only mutation must route a trivially-pure body to the
+/// mutation-threading path too — see `generate_while_true`/
+/// `generate_while_false`) shares one implementation with `ThreadingPlan`'s
+/// own gate, per CLAUDE.md's no-duplicate-implementations rule.
+pub(super) fn condition_has_state_effects(condition: &Expression) -> bool {
+    if let Expression::Block(cond_block) = condition {
+        block_analysis::analyze_block(cond_block).has_state_effects()
+    } else {
+        false
+    }
+}
+
 impl BodyEffects {
     /// Analyze the loop body and condition to compute all effect predicates.
     fn analyze(
@@ -301,13 +317,7 @@ impl BodyEffects {
         condition: Option<&Expression>,
         threaded_locals: &[String],
     ) -> Self {
-        let cond_has_state_effects = condition.is_some_and(|c| {
-            if let Expression::Block(cb) = c {
-                block_analysis::analyze_block(cb).has_state_effects()
-            } else {
-                false
-            }
-        });
+        let cond_has_state_effects = condition.is_some_and(condition_has_state_effects);
 
         // Guard: if any threaded-local assignment's RHS is a Tier-2 block call,
         // fall back to StateAcc mode so `generate_local_var_assignment_in_loop`
@@ -1438,6 +1448,19 @@ enum NestedLoopShape {
 ///
 /// Each `generate_*_with_mutations` for counted loops becomes a thin wrapper
 /// that builds a `CountedLoopFrame` and calls `generate_counted_stateful_loop`.
+///
+/// ADR 0118 phase 3 (BT-3419) scope note: this is a plain `Document`-level
+/// struct, unrelated to [`threaded_ir::ThreadedStmt::ConditionalLoop`]'s own
+/// `condition`/`condition_value` fields, despite the field-name overlap
+/// (`continue_header` here vs. that node's own, now-split `continue_arm`) —
+/// `counted_loops.rs` never constructs a `ConditionalLoop` node (no counted
+/// loop does; see that variant's own `#[allow(dead_code)]` status). A
+/// counted loop's `continue_header` is always a pure counter compare (e.g.
+/// `Counter =&lt; N`) built once from the receiver/limit/step, captured
+/// before the letrec — never itself state-effecting — so had this frame
+/// been unified onto `ConditionalLoop`, its `condition` would always be
+/// empty and `condition_value` the bare compare, exactly the "pure counter
+/// compare" case that variant's own field docs already name.
 pub(super) struct CountedLoopFrame {
     /// Variable bindings emitted before the `letrec` (e.g. `let N = recv in`).
     pub preamble: Document<'static>,
@@ -3296,10 +3319,26 @@ impl CoreErlangGenerator {
                     // state, so just discard `expr`'s plain value and use it
                     // directly — the same pattern the `else` branch below
                     // uses for a non-last statement.
-                    if hoisted_anything {
-                        let expr_code = self.expression_doc(expr)?;
-                        docs.push(docvec!["let _ = ", expr_code, " in"]);
-                    } else {
+                    //
+                    // ADR 0118 phase 3 (BT-3419): that assumption ALSO does
+                    // not hold for a genuinely PURE last statement (e.g.
+                    // bare `nil`) — before this phase, this Letrec-mode
+                    // fallback was only ever reached because SOMETHING in
+                    // the body itself (a nested loop/fold, or an inline
+                    // `ifTrue:`/`and:`/`or:` with mutations) forced
+                    // StateAcc mode, so `expr` was always one of those two
+                    // tuple-producing shapes. Now a `whileTrue: [nil]`
+                    // whose CONDITION alone needs threading also compiles
+                    // its (otherwise-pure) body here — `expr`'s own compile
+                    // is then just `'nil'`, not a tuple, and the same
+                    // phantom unwrap crashes (`badarg`, confirmed
+                    // empirically for `[i := i + 1. (self bumpCount) + i <
+                    // 5] whileTrue: [nil]`). Verify `expr` actually IS one
+                    // of the two tuple-producing shapes before unwrapping.
+                    let produces_tuple = !hoisted_anything
+                        && (self.get_control_flow_threaded_vars(expr).is_some()
+                            || self.control_flow_has_mutations(expr));
+                    if produces_tuple {
                         let next_var = self.peek_next_state_var();
                         let tuple_var = format!("_NestTuple{}", self.state_version() + 1);
                         let expr_code = self.expression_doc(expr)?;
@@ -3315,6 +3354,9 @@ impl CoreErlangGenerator {
                             leaf::var(tuple_var),
                             ") in",
                         ]);
+                    } else {
+                        let expr_code = self.expression_doc(expr)?;
+                        docs.push(docvec!["let _ = ", expr_code, " in"]);
                     }
                 } else {
                     let expr_code = self.expression_doc(expr)?;

@@ -33,8 +33,10 @@ use beamtalk_core::source_analysis::Span;
 
 /// Classification of how a block body expression should be handled.
 /// Produced by [`CoreErlangGenerator::classify_block_expr`] and consumed
-/// by [`CoreErlangGenerator::generate_block_expr`].
-enum BlockExprKind {
+/// by [`CoreErlangGenerator::generate_block_expr`]. `pub(super)`: both are
+/// also called from `while_loops.rs` (ADR 0118 phase 3, BT-3419) — see
+/// their own doc comments.
+pub(super) enum BlockExprKind {
     /// `{a, b} := expr` or `#[a, b] := expr` — destructure assignment.
     /// Carries `is_last` so the handler can append `'nil'` when the destructure
     /// is the final expression in the block.
@@ -1988,7 +1990,13 @@ impl CoreErlangGenerator {
     ///
     /// The order of checks matters: more specific patterns (e.g. destructuring,
     /// field assignment) must come before general ones (e.g. pure expression).
-    fn classify_block_expr(&self, expr: &Expression, is_last: bool) -> BlockExprKind {
+    ///
+    /// `pub(super)` (ADR 0118 phase 3, BT-3419): `while_loops.rs`'s stateful
+    /// while-condition compile reuses this dispatch for a condition block's
+    /// own NON-TAIL statements (its local writes thread exactly as this
+    /// already gives every other block body) rather than re-deriving the
+    /// same classification — see `generate_stateful_while_condition`.
+    pub(super) fn classify_block_expr(&self, expr: &Expression, is_last: bool) -> BlockExprKind {
         if matches!(expr, Expression::DestructureAssignment { .. }) {
             return BlockExprKind::Destructure { is_last };
         }
@@ -2021,7 +2029,10 @@ impl CoreErlangGenerator {
     }
 
     /// Generate code for a single block body expression, dispatching by kind.
-    fn generate_block_expr(
+    ///
+    /// `pub(super)` (ADR 0118 phase 3, BT-3419): see
+    /// [`Self::classify_block_expr`]'s doc comment.
+    pub(super) fn generate_block_expr(
         &mut self,
         expr: &Expression,
         kind: &BlockExprKind,
