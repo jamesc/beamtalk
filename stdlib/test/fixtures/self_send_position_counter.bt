@@ -258,8 +258,8 @@ Actor subclass: SelfSendPositionCounter
     self.items do: [:x | y := 1 + (self bumpCount)]
     y
 
-  // Silent drop, BT-3399 warning today — local-assignment RHS binary-op
-  // operand (ADR 0118 phase 1a/1b).
+  // Was a silent drop with a BT-3399 warning — local-assignment RHS
+  // binary-op operand; threaded since ADR 0118 phase 1a (BT-3415).
   assignRhsBinaryOpSelfSend =>
     total := self.items size + (self bumpCount)
     total

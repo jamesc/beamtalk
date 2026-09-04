@@ -39,14 +39,13 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
 
   tearDown => self.c isNil ifFalse: [self.c stop]
 
-  // ADR 0118 phase 1a: ThreadedValue, self-dispatch producer, Actor body
-  // consumer, sequencing rule for sends/binary operands. `to:do:`/
-  // `timesRepeat:` route their bound/receiver argument through a
-  // dedicated loop-construct codegen path rather than the general
-  // self-send-hoisting machinery BT-3396 wired for ordinary message
-  // arguments, so a self-send there is dropped today exactly like an
-  // un-migrated ordinary argument would have been before BT-3396.
-  adr0118Phase1aPending => true
+  // ADR 0118 phase 1a (BT-3415): ThreadedValue, self-dispatch producer,
+  // Actor body consumer, sequencing rule for sends/binary operands. Landed:
+  // a `to:do:` bound / `timesRepeat:` receiver that is (or contains) a
+  // self-send now threads ahead of the loop construct through the Actor
+  // method body's own IR, so the affected cells run their ground-truth
+  // asserts. Kept as a switch for documentation/bisection.
+  adr0118Phase1aPending => false
 
   // ADR 0118 phase 1b: sequencing rule for literals, interpolation,
   // return, assignment, cascade, match: scrutinee.
@@ -172,9 +171,9 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
   // ════════════════════════════════════════════════════════════════════
 
   // ADR 0118 phase 1a: `to:do:`'s upper-bound argument is a self-send.
-  // The sum still computes correctly (the bound literally is 3, so
-  // `bumpCount`'s return value fed through), but the mutation to the
-  // actor's own `count` field never lands.
+  // Before BT-3415 the sum still computed correctly (the bound literally
+  // is 3, so `bumpCount`'s return value fed through) but the mutation to
+  // the actor's own `count` field never landed.
   testToDoBoundsSelfSend =>
     self assert: self.c toDoBoundsSelfSend equals: 6
     self adr0118Phase1aPending ifTrue: [
@@ -182,9 +181,9 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
     ] ifFalse: [self assert: self.c getCount equals: 1]
 
   // `timesRepeat:`'s receiver is a self-send: the block runs the correct
-  // number of times (`n` = 1, matching `bumpCount`'s return value), but
-  // the mutation to the actor's own `count` field is dropped (ADR 0118
-  // phase 1a).
+  // number of times (`n` = 1, matching `bumpCount`'s return value); before
+  // BT-3415 the mutation to the actor's own `count` field was dropped
+  // (ADR 0118 phase 1a).
   testTimesRepeatReceiverSelfSend =>
     self assert: self.c timesRepeatReceiverSelfSend equals: 1
     self adr0118Phase1aPending ifTrue: [
@@ -374,12 +373,16 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
         self assert: self.c getCount equals: 3
       ]
 
-  // ADR 0118 phase 1b (assignment-RHS binary-op sequencing; deletes the
-  // BT-3399 warning for this shape): `total` computes correctly from
-  // `bumpCount`'s return value; the actor-state mutation is dropped.
+  // Landed in ADR 0118 phase 1a (BT-3415), not 1b as first expected: the
+  // RHS's PARENT node is a binary-op send (`self.items size + (self
+  // bumpCount)`), and a method-body local assignment is a phase-1a
+  // consumer — the sequencing rule temp-binds `self.items size` ahead of
+  // `bumpCount`'s dispatch and the BT-3399 warning is gone for this
+  // shape. Phase 1b's "assignment values" scope is an assignment nested
+  // INSIDE another expression, which this row is not.
   testAssignRhsBinaryOpSelfSend =>
     self assert: self.c assignRhsBinaryOpSelfSend equals: 4
-    self adr0118Phase1bPending ifTrue: [
+    self adr0118Phase1aPending ifTrue: [
       self assert: self.c getCount equals: 0
     ] ifFalse: [self assert: self.c getCount equals: 1]
 

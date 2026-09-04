@@ -8,7 +8,7 @@
 //! Generates method dispatch case clauses, method body with state threading
 //! and reply tuples, and the `register_class/0` on-load function.
 
-use super::super::control_flow::HoistSink;
+use super::super::PrecompiledScope;
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::spec_codegen;
 use super::super::value_type_codegen::has_opaque_native_representation;
@@ -1233,18 +1233,12 @@ impl CoreErlangGenerator {
                             stmts.push(ThreadedStmt::Statement(reply, span));
                         }
                         BodyExprKind::DispatchingSelfSend => {
-                            // BT-3396: `^self log: (self nextId)`.
-                            self.hoist_self_send_arguments(
-                                value,
-                                &mut HoistSink::Threaded {
-                                    stmts: &mut stmts,
-                                    frame: threaded_ir::FrameId::ROOT,
-                                    span,
-                                },
-                            )?;
-                            let (doc, dispatch_var) = self.generate_self_dispatch_open(value)?;
-                            stmts.push(ThreadedStmt::Statement(doc, span));
-                            let reply = self.dispatch_reply_doc(&dispatch_var);
+                            // ADR 0118 phase 1a: `^self log: (self nextId)` — the
+                            // producer sequences its own arguments; its prelude
+                            // is this body's real `Statement` + `Bind` pair.
+                            let tv = self.threaded_expression(value)?;
+                            stmts.extend(tv.prelude);
+                            let reply = self.threaded_value_reply_doc(&tv.value);
                             stmts.push(ThreadedStmt::Statement(reply, span));
                         }
                         BodyExprKind::Tier2SelfSend(ref tier2_args) => {
@@ -1305,20 +1299,16 @@ impl CoreErlangGenerator {
                             }
                         }
                         _ => {
-                            // BT-3396: `^ Array with: (self bump)` — thread
-                            // every order-safe nested self-send as real
-                            // `Bind`s ahead of the value's compile, then
-                            // reply with the post-dispatch state.
-                            self.hoist_nested_self_sends(
-                                value,
-                                &mut HoistSink::Threaded {
-                                    stmts: &mut stmts,
-                                    frame: threaded_ir::FrameId::ROOT,
-                                    span,
-                                },
-                            )?;
+                            // ADR 0118 phase 1a: `^ Array with: (self bump)`,
+                            // `^ (items at: i) + (self bump)` — the value's
+                            // state-effecting sub-expressions land in this
+                            // body's IR as real `Bind`s (in source order, via
+                            // the sequencing rule), then the reply carries the
+                            // post-dispatch state.
+                            let tv = self.threaded_expression(value)?;
+                            stmts.extend(tv.prelude);
                             let final_state = self.current_state_var();
-                            let value_str = self.expression_doc(value)?;
+                            let value_str = self.threaded_value_doc(&tv.value);
                             stmts.push(ThreadedStmt::Statement(
                                 docvec![
                                     "let _ReturnValue = ",
@@ -1359,21 +1349,20 @@ impl CoreErlangGenerator {
                     }
                 }
                 BodyExprKind::FieldAssignment => {
-                    // BT-3396: `self.log := self.log ++ #(self getValue)` —
-                    // thread every order-safe self-send nested in the RHS
-                    // as real `Bind`s BEFORE `source_version` is read (the
-                    // exact snapshot BT-3382's reverted prototype desynced)
-                    // and before the shared open helper mints its own step.
-                    if let Expression::Assignment { value, .. } = expr {
-                        self.hoist_nested_self_sends(
-                            value,
-                            &mut HoistSink::Threaded {
-                                stmts: &mut stmts,
-                                frame: threaded_ir::FrameId::ROOT,
-                                span,
-                            },
-                        )?;
-                    }
+                    // ADR 0118 phase 1a: `self.log := self.log ++ #(self
+                    // getValue)`, `self.count := self.count + (self bump)` —
+                    // the RHS's state-effecting sub-expressions land in this
+                    // body's IR as real `Bind`s BEFORE `source_version` is
+                    // read (the exact snapshot BT-3382's reverted prototype
+                    // desynced) and before the shared open helper mints its
+                    // own step; the RHS compile below substitutes the
+                    // already-sequenced value.
+                    let rhs_scope = match expr {
+                        Expression::Assignment { value, .. } => {
+                            self.thread_ahead(value, &mut stmts)?
+                        }
+                        _ => PrecompiledScope::new(),
+                    };
                     if is_last {
                         if let Expression::Assignment { target, value, .. } = expr {
                             if let Expression::FieldAccess { field, .. } = target.as_ref() {
@@ -1436,15 +1425,21 @@ impl CoreErlangGenerator {
                         let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
                         stmts.push(ThreadedStmt::Statement(doc, span));
                     }
+                    self.finish_precompiled_scope(rhs_scope)?;
                 }
                 // BT-1477: self.field := expr where RHS is control flow returning {Value, State}
                 BodyExprKind::FieldAssignmentControlFlow => {
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                            // ADR 0118 phase 1a: `self.f := 1 to: (self bump)
+                            // do: [..]` — the construct's own state-effecting
+                            // operands thread ahead of it.
+                            let rhs_scope = self.thread_ahead(value, &mut stmts)?;
                             // Evaluate the RHS (returns {Value, State} tuple)
                             let tuple_var = self.fresh_temp_var("CfTuple");
                             let val_var = self.fresh_temp_var("CfVal");
                             let value_str = self.expression_doc(value)?;
+                            self.finish_precompiled_scope(rhs_scope)?;
                             // Unpack the tuple: element(1) is the value, element(2) is the state
                             let rhs_state = self.fresh_temp_var("CfState");
                             self.lower_cf_field_assignment_binds(
@@ -1762,7 +1757,12 @@ impl CoreErlangGenerator {
                     // with, and `verify_routing_invariant`/`RoutingMismatch` are deleted.
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::Identifier(id) = target.as_ref() {
+                            // ADR 0118 phase 1a: `x := 1 to: (self bump) do:
+                            // [..]` — the construct's own state-effecting
+                            // operands thread ahead of it.
+                            let rhs_scope = self.thread_ahead(value, &mut stmts)?;
                             self.emit_actor_threaded_assign_rhs_stmts(&id.name, value, &mut stmts)?;
+                            self.finish_precompiled_scope(rhs_scope)?;
                         }
                     }
                     if is_last {
@@ -1778,28 +1778,16 @@ impl CoreErlangGenerator {
                             let core_var = self
                                 .lookup_var(var_name)
                                 .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                            // BT-3396: `v := self log: (self nextId)`.
-                            self.hoist_self_send_arguments(
-                                value,
-                                &mut HoistSink::Threaded {
-                                    stmts: &mut stmts,
-                                    frame: threaded_ir::FrameId::ROOT,
-                                    span,
-                                },
-                            )?;
-                            // Dispatch the self-send (threads state, returns dispatch var)
-                            let (dispatch_doc, dispatch_var) =
-                                self.generate_self_dispatch_open(value)?;
-                            stmts.push(ThreadedStmt::Statement(dispatch_doc, span));
+                            // ADR 0118 phase 1a: `v := self log: (self nextId)`
+                            // — the producer's `Statement` + real `Bind`
+                            // (its arguments sequenced first), then the
+                            // local bound to its pure result reference.
+                            let tv = self.threaded_expression(value)?;
+                            stmts.extend(tv.prelude);
+                            let value_str = self.threaded_value_doc(&tv.value);
                             self.bind_var(var_name, &core_var);
                             stmts.push(ThreadedStmt::Statement(
-                                docvec![
-                                    "let ",
-                                    leaf::var(core_var),
-                                    " = call 'erlang':'element'(1, ",
-                                    leaf::var(dispatch_var),
-                                    ") in ",
-                                ],
+                                docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
                                 span,
                             ));
                         }
@@ -1846,16 +1834,14 @@ impl CoreErlangGenerator {
                             let core_var = self
                                 .lookup_var(var_name)
                                 .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                            // BT-3396: `ok := (self recordOnce: x) and: [y]`.
-                            self.hoist_nested_self_sends(
-                                value,
-                                &mut HoistSink::Threaded {
-                                    stmts: &mut stmts,
-                                    frame: threaded_ir::FrameId::ROOT,
-                                    span,
-                                },
-                            )?;
-                            let value_str = self.expression_doc(value)?;
+                            // ADR 0118 phase 1a: `ok := (self recordOnce: x)
+                            // and: [y]`, `total := items size + (self bump)` —
+                            // the RHS's state-effecting sub-expressions land
+                            // in this body's IR as real `Bind`s, in source
+                            // order, via the sequencing rule.
+                            let tv = self.threaded_expression(value)?;
+                            stmts.extend(tv.prelude);
+                            let value_str = self.threaded_value_doc(&tv.value);
                             self.bind_var(var_name, &core_var);
                             stmts.push(ThreadedStmt::Statement(
                                 docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
@@ -2010,12 +1996,22 @@ impl CoreErlangGenerator {
                         // `emit_actor_threaded_last_stmts` never declines, so
                         // `verify_routing_invariant`/`RoutingMismatch` are deleted (no
                         // second computation left to disagree with).
+                        //
+                        // ADR 0118 phase 1a: `1 to: (self bump) do: [..]`,
+                        // `(self bump) timesRepeat: [..]` — the construct's own
+                        // state-effecting operands (bounds, receiver) thread
+                        // ahead of it, so it starts from their post-dispatch
+                        // state.
+                        let scope = self.thread_ahead(expr, &mut stmts)?;
                         self.emit_actor_threaded_last_stmts(expr, &mut stmts)?;
+                        self.finish_precompiled_scope(scope)?;
                     } else {
                         // Real state Bind: element 2 of the construct's tuple IS the
                         // next `State` version (a computed map — Direct, not Put).
+                        let scope = self.thread_ahead(expr, &mut stmts)?;
                         let tuple_var = self.fresh_temp_var("Tuple");
                         let expr_str = self.expression_doc(expr)?;
+                        self.finish_precompiled_scope(scope)?;
                         let source_version = self.state_version();
                         stmts.push(ThreadedStmt::Statement(
                             docvec![
@@ -2074,19 +2070,14 @@ impl CoreErlangGenerator {
                     }
                 }
                 BodyExprKind::DispatchingSelfSend => {
-                    // BT-3396: `self log: (self nextId)`.
-                    self.hoist_self_send_arguments(
-                        expr,
-                        &mut HoistSink::Threaded {
-                            stmts: &mut stmts,
-                            frame: threaded_ir::FrameId::ROOT,
-                            span,
-                        },
-                    )?;
-                    let (doc, dispatch_var) = self.generate_self_dispatch_open(expr)?;
-                    stmts.push(ThreadedStmt::Statement(doc, span));
+                    // ADR 0118 phase 1a: `self log: (self nextId)` — the
+                    // producer (`generate_self_dispatch`) sequences its own
+                    // arguments and yields the `Statement` + real `Bind` pair
+                    // this body splices; the reply reads its pure result.
+                    let tv = self.threaded_expression(expr)?;
+                    stmts.extend(tv.prelude);
                     if is_last {
-                        let reply = self.dispatch_reply_doc(&dispatch_var);
+                        let reply = self.threaded_value_reply_doc(&tv.value);
                         stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
@@ -2103,17 +2094,19 @@ impl CoreErlangGenerator {
                 // `post_state` read after it (and the next statement) see
                 // the dispatch's `NewState`. No-op when there is nothing to
                 // hoist.
+                //
+                // ADR 0118 phase 1a: `threaded_expression` replaces the planner
+                // here — the statement's state-effecting sub-expressions land
+                // in this body's IR as real `Bind`s in source order (the
+                // sequencing rule temp-binds whatever precedes them), and the
+                // `post_state` read after them (and the next statement) see
+                // the dispatch's `NewState`. A pure statement costs one
+                // `generate_expression` call, as before.
                 BodyExprKind::Pure => {
-                    self.hoist_nested_self_sends(
-                        expr,
-                        &mut HoistSink::Threaded {
-                            stmts: &mut stmts,
-                            frame: threaded_ir::FrameId::ROOT,
-                            span,
-                        },
-                    )?;
                     if is_last {
-                        let expr_str = self.expression_doc(expr)?;
+                        let tv = self.threaded_expression(expr)?;
+                        stmts.extend(tv.prelude);
+                        let expr_str = self.threaded_value_doc(&tv.value);
                         let post_state = self.current_state_var();
                         stmts.push(ThreadedStmt::Statement(
                             docvec![
@@ -2126,8 +2119,11 @@ impl CoreErlangGenerator {
                             span,
                         ));
                     } else {
+                        // Mint order: `seq` before the expression, as before.
                         let tmp_var = self.fresh_temp_var("seq");
-                        let expr_str = self.expression_doc(expr)?;
+                        let tv = self.threaded_expression(expr)?;
+                        stmts.extend(tv.prelude);
+                        let expr_str = self.threaded_value_doc(&tv.value);
                         stmts.push(ThreadedStmt::Statement(
                             docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "],
                             span,
@@ -2160,6 +2156,17 @@ impl CoreErlangGenerator {
             leaf::var(final_state),
             "}",
         ]
+    }
+
+    /// ADR 0118 phase 1a: the last-position reply for a spliced
+    /// [`threaded_ir::ThreadedValue`] — `{'reply', <value>, StateN}` where
+    /// `StateN` is the state after the value's prelude. Byte-identical to
+    /// [`Self::dispatch_reply_doc`] for a self-send (whose value IS
+    /// `element(1, _SD)`), which stays for the Tier 2 self-send arm.
+    fn threaded_value_reply_doc(&mut self, value: &threaded_ir::ValueRef) -> Document<'static> {
+        let value_doc = self.threaded_value_doc(value);
+        let final_state = self.current_state_var();
+        docvec!["{'reply', ", value_doc, ", ", leaf::var(final_state), "}"]
     }
 
     /// Emit the last-position reply for an expression that returns a

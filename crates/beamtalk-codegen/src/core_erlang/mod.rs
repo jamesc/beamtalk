@@ -1498,6 +1498,110 @@ impl ValueTypeContext {
     }
 }
 
+/// One entry of [`CoreErlangGenerator::precompiled_subexprs`] — see that
+/// field's doc comment.
+struct PrecompiledSubexpr {
+    /// The already-compiled value to substitute for the node.
+    doc: Document<'static>,
+    /// Whether a hit should wrap `doc` in the BT-940 source-line
+    /// annotation `generate_expression` gives every closed message send —
+    /// `true` only for a producer's own result reference (which never
+    /// went through `generate_expression`), so a sequenced self-send
+    /// renders byte-identically to the planner's substitution; `false` for
+    /// a sequencing temp or a value `generate_expression` already built.
+    annotate: bool,
+    /// Set on the first hit; a never-hit entry is an invariant violation
+    /// reported by `finish_precompiled_scope`.
+    used: bool,
+}
+
+/// The set of [`CoreErlangGenerator::precompiled_subexprs`] entries one
+/// sequencing pass registered — returned by the pass, handed back to
+/// [`CoreErlangGenerator::finish_precompiled_scope`] once the parent has
+/// been compiled. `#[must_use]`: dropping it leaks entries into the next
+/// statement and skips the consulted-exactly check.
+#[must_use = "hand this back to finish_precompiled_scope once the parent is compiled"]
+pub(super) struct PrecompiledScope(Vec<Span>);
+
+impl PrecompiledScope {
+    pub(super) fn new() -> Self {
+        Self(Vec::new())
+    }
+}
+
+impl CoreErlangGenerator {
+    /// ADR 0118 phase 1a (BT-3415): records `expr`'s already-sequenced
+    /// value so the enclosing parent's ordinary compile substitutes it —
+    /// see [`Self::precompiled_subexprs`]. Keyed by the paren-unwrapped
+    /// span: `generate_expression`'s `Parenthesized` arm recurses, and
+    /// every `unwrap_parens()`-first path reaches the inner node, so the
+    /// inner span is the one every route converges on.
+    pub(super) fn register_precompiled_subexpr(
+        &mut self,
+        scope: &mut PrecompiledScope,
+        expr: &Expression,
+        doc: Document<'static>,
+        annotate: bool,
+    ) {
+        let span = expr.unwrap_parens().span();
+        self.precompiled_subexprs.insert(
+            span,
+            PrecompiledSubexpr {
+                doc,
+                annotate,
+                used: false,
+            },
+        );
+        scope.0.push(span);
+    }
+
+    /// The `generate_expression` entry hook for
+    /// [`Self::precompiled_subexprs`]: `Some(doc)` if `expr` was
+    /// pre-sequenced, marking the entry consulted.
+    fn take_precompiled_subexpr(&mut self, expr: &Expression) -> Option<Document<'static>> {
+        if self.precompiled_subexprs.is_empty() {
+            return None;
+        }
+        let span = expr.span();
+        let (doc, annotate) = {
+            let entry = self.precompiled_subexprs.get_mut(&span)?;
+            entry.used = true;
+            (entry.doc.clone(), entry.annotate)
+        };
+        if annotate {
+            if let Some(line_num) = self.span_to_line(span) {
+                return Some(self.annotate_with_line(doc, line_num));
+            }
+        }
+        Some(doc)
+    }
+
+    /// Removes every entry `scope` registered, once the parent compile
+    /// that was meant to consult them is done. An entry that was never
+    /// consulted means that compile bypassed `generate_expression` for the
+    /// child — its prelude already ran (or its temp is already bound) but
+    /// the parent compiled the child afresh, so a state-effecting child
+    /// would dispatch twice: an internal error, never a silent drop.
+    pub(super) fn finish_precompiled_scope(&mut self, scope: PrecompiledScope) -> Result<()> {
+        let mut unused = Vec::new();
+        for span in scope.0 {
+            if let Some(entry) = self.precompiled_subexprs.remove(&span) {
+                if !entry.used {
+                    unused.push(span);
+                }
+            }
+        }
+        if let Some(span) = unused.first() {
+            return Err(CodeGenError::Internal(format!(
+                "ADR 0118 sequencing: a pre-sequenced sub-expression at {span:?} was never \
+                 substituted by its parent's compile (the parent's codegen path bypasses \
+                 generate_expression for that child)"
+            )));
+        }
+        Ok(())
+    }
+}
+
 /// Core Erlang code generator.
 ///
 /// This is the main code generator that coordinates compilation of Beamtalk
@@ -1822,6 +1926,27 @@ pub struct CoreErlangGenerator {
     /// rather than from the state var the hoisted dispatch's `Bind` just
     /// advanced.
     hoisted_field_reads: std::collections::HashMap<beamtalk_core::source_analysis::Span, String>,
+    /// ADR 0118 phase 1a (BT-3415): sub-expressions `threaded_expression`'s
+    /// sequencing rule (`util.rs`) has already compiled — each one's value
+    /// (a sequencing temp, or a state-effecting producer's pure result
+    /// reference) keyed by the sub-expression's paren-unwrapped `Span`.
+    /// `generate_expression` consults this FIRST, for every node, so when
+    /// the enclosing parent is compiled through its ordinary AST-directed
+    /// path it substitutes the already-sequenced value instead of
+    /// compiling (and, for a self-send, dispatching) the child a second
+    /// time. Entries are scoped by [`PrecompiledScope`]: registered by the
+    /// sequencing helper, removed by `finish_precompiled_scope` right after
+    /// the parent's compile, which also fails loudly if any entry was never
+    /// consulted — the parent's compile path bypassed `generate_expression`
+    /// for that child, so its prelude ran without its value being used
+    /// (a double dispatch or a dropped operand, never silently).
+    ///
+    /// This is the phase-1a substitution mechanism for the one parent
+    /// kind the sequencing rule covers (message sends, incl. binary
+    /// operators); `hoisted_self_send_results`/`hoisted_field_reads` stay
+    /// for the planner-driven consumers until phase 2b deletes all three.
+    precompiled_subexprs:
+        std::collections::HashMap<beamtalk_core::source_analysis::Span, PrecompiledSubexpr>,
     /// BT-845/BT-860: Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     source_path: Option<String>,
@@ -1983,6 +2108,7 @@ impl CoreErlangGenerator {
             last_open_scope_result: None,
             hoisted_self_send_results: std::collections::HashMap::new(),
             hoisted_field_reads: std::collections::HashMap::new(),
+            precompiled_subexprs: std::collections::HashMap::new(),
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
             tier2_local_vars: std::collections::HashSet::new(),
@@ -3520,6 +3646,12 @@ impl CoreErlangGenerator {
     /// code generation without string buffer intermediaries.
     #[allow(clippy::too_many_lines)]
     fn generate_expression(&mut self, expr: &Expression) -> Result<Document<'static>> {
+        // ADR 0118 phase 1a (BT-3415): a sub-expression the sequencing rule
+        // already compiled ahead of this parent substitutes its value here
+        // — see `precompiled_subexprs`.
+        if let Some(doc) = self.take_precompiled_subexpr(expr) {
+            return Ok(doc);
+        }
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),

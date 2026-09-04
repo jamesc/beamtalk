@@ -36,11 +36,15 @@
 //! - **Await messages**: `future await` → Blocking future resolution
 //! - **Super sends**: `super methodName:` → Parent class dispatch
 
+use super::threaded_ir::{
+    BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
+};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, Literal, MessageSelector, WellKnownSelector};
+use beamtalk_core::source_analysis::Span;
 
 /// Strips any number of `Parenthesized` wrappers to expose the syntactic
 /// shape underneath — `(expr)`, `((expr))`, etc. all see through to `expr`.
@@ -365,14 +369,8 @@ impl CoreErlangGenerator {
         let mut var_docs: Vec<Document<'static>> = Vec::with_capacity(splits.len());
         for (expr_preamble, expr_doc) in splits {
             if matches!(expr_preamble, Document::Nil) {
-                let var = self.fresh_temp_var(prefix);
-                preamble_parts.push(docvec![
-                    "let ",
-                    leaf::var(var.clone()),
-                    " = ",
-                    expr_doc,
-                    " in ",
-                ]);
+                let (binding, var) = self.bind_subexpr_to_temp(prefix, expr_doc);
+                preamble_parts.push(binding);
                 var_docs.push(leaf::var(var));
             } else {
                 preamble_parts.push(expr_preamble);
@@ -381,6 +379,23 @@ impl CoreErlangGenerator {
         }
 
         (true, preamble_parts, var_docs)
+    }
+
+    /// The one temp-binding step behind every "hoist an earlier
+    /// sub-expression so a later one's effects can run ahead of it" rule:
+    /// mints a fresh `<prefix>N` temp and returns the `let <temp> = <doc>
+    /// in ` binding plus the temp's name. Shared by
+    /// [`Self::hoist_subexpr_splits`] (the class-method open-scope
+    /// protocol, BT-3406) and `threaded_expression`'s sequencing rule
+    /// (ADR 0118 §Decision 3, BT-3415) so the two cannot drift.
+    pub(super) fn bind_subexpr_to_temp(
+        &mut self,
+        prefix: &str,
+        doc: Document<'static>,
+    ) -> (Document<'static>, String) {
+        let var = self.fresh_temp_var(prefix);
+        let binding = docvec!["let ", leaf::var(var.clone()), " = ", doc, " in "];
+        (binding, var)
     }
 
     /// BT-1937: Captures an argument list using
@@ -1525,7 +1540,7 @@ impl CoreErlangGenerator {
                             docvec!["call 'erlang':'element'(1, ", leaf::var(dispatch_var), ")",];
                         return Ok(Some(doc));
                     }
-                    let doc = self.generate_self_dispatch(selector, arguments)?;
+                    let doc = self.generate_discarding_self_dispatch(selector, arguments)?;
                     return Ok(Some(doc));
                 }
             }
@@ -1937,6 +1952,93 @@ impl CoreErlangGenerator {
     ///
     /// # Sealed Class Optimization (BT-403)
     ///
+    /// ADR 0118 §Decision 2 (BT-3415): the state-effecting *producer* for
+    /// an Actor self-send — the one place a dispatching self-send is
+    /// compiled in a state-threading context. Returns a [`ThreadedValue`]
+    /// whose prelude is
+    ///
+    /// ```text
+    /// Statement(let _SDn = case call 'm':'safe_dispatch'('sel', [Args], StateK) of … end in)
+    /// Bind(State{K+1} <- call 'erlang':'element'(2, _SDn))
+    /// ```
+    ///
+    /// and whose value is `call 'erlang':'element'(1, _SDn)` — exactly the
+    /// `Statement` + real `Bind` pair `dispatch_self_send_as_bind`
+    /// (`control_flow/conditionals.rs`) built for the planner, now owned
+    /// here; that function is a thin adapter over
+    /// [`Self::generate_self_dispatch_parts`] since BT-3415.
+    ///
+    /// `arguments` are compiled by
+    /// [`Self::generate_self_dispatch_call_doc_for`] exactly as before; a
+    /// caller that must sequence state-effecting *arguments* ahead of the
+    /// dispatch (the ADR §Decision 3 rule) does so before calling this —
+    /// see `threaded_expression` (`util.rs`).
+    ///
+    /// `frame` is the [`FrameId`] the `Bind` belongs to — `FrameId::ROOT`
+    /// for the flat Actor method body, a branch arm's own frame otherwise;
+    /// `span` is the source span both prelude nodes are attributed to.
+    pub(super) fn generate_self_dispatch(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        frame: FrameId,
+        span: Span,
+    ) -> Result<ThreadedValue> {
+        let (prelude, dispatch_var) =
+            self.generate_self_dispatch_parts(selector, arguments, frame, span)?;
+        Ok(ThreadedValue {
+            prelude,
+            value: Self::self_dispatch_result_value(&dispatch_var),
+        })
+    }
+
+    /// The pure `element(1, _SDn)` reference to a self-dispatch's reply —
+    /// the single spelling shared by [`Self::generate_self_dispatch`]'s
+    /// value and [`Self::try_handle_self_dispatch`]'s planner substitution.
+    pub(super) fn self_dispatch_result_value(dispatch_var: &str) -> ValueRef {
+        ValueRef::Doc(docvec![
+            "call 'erlang':'element'(1, ",
+            leaf::var(dispatch_var.to_string()),
+            ")",
+        ])
+    }
+
+    /// The `Statement` + `Bind` pair behind [`Self::generate_self_dispatch`],
+    /// plus the dispatch tuple's variable name for callers that register
+    /// it (the planner's `hoisted_self_send_results`). Mint order is
+    /// unchanged from `dispatch_self_send_as_bind`: the dispatch temps and
+    /// the `next_state_var` bump all happen inside
+    /// [`Self::generate_self_dispatch_call_doc_for`], and the `Bind`'s
+    /// source/target versions are read off the live counter either side
+    /// of it.
+    pub(super) fn generate_self_dispatch_parts(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        frame: FrameId,
+        span: Span,
+    ) -> Result<(Vec<ThreadedStmt>, String)> {
+        let source_version = self.state_version();
+        let (call_doc, dispatch_var) =
+            self.generate_self_dispatch_call_doc_for(selector, arguments)?;
+        let target_version = self.state_version();
+        let prelude = vec![
+            ThreadedStmt::Statement(call_doc, span),
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                op: BindOp::Direct(ValueRef::Doc(docvec![
+                    "call 'erlang':'element'(2, ",
+                    leaf::var(dispatch_var.clone()),
+                    ")",
+                ])),
+                shadow_write: false,
+                span,
+            },
+        ];
+        Ok((prelude, dispatch_var))
+    }
+
     /// For sealed classes, we skip the `safe_dispatch/3` try/catch overhead and
     /// call `dispatch/4` directly. Since sealed classes have all methods known at
     /// compile time, the error isolation overhead is unnecessary.
@@ -1963,7 +2065,23 @@ impl CoreErlangGenerator {
     ///   <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// end
     /// ```
-    fn generate_self_dispatch(
+    ///
+    /// ADR 0118 (BT-3415): this is the *discarding* form — the `NewState`
+    /// the dispatch returns is dropped. It is reached only from
+    /// [`Self::try_handle_self_dispatch`]'s fallback, i.e. for a self-send
+    /// in a position no consumer has yet migrated to
+    /// [`Self::generate_self_dispatch`]'s prelude form (a cascade message,
+    /// a `match:` scrutinee, a `sort:` comparator, an interpolation
+    /// segment after an effectful one, …) and that no planner pre-hoisted.
+    /// Every such position is a row of
+    /// `stdlib/test/actor_self_send_position_matrix_test.bt` gated on the
+    /// ADR 0118 phase that migrates it; once phase 2b removes the last
+    /// `Document`-only consumer this fallback becomes
+    /// `generate_self_dispatch(..).close(.., CloseContext::Opaque)` and the
+    /// drop a [`super::threaded_ir::VerifyError::StateEffectEscapesExpression`]
+    /// (§Decision 5). Byte-identical to the pre-ADR-0118 output by
+    /// construction, so un-migrated positions are untouched.
+    fn generate_discarding_self_dispatch(
         &mut self,
         selector: &MessageSelector,
         arguments: &[Expression],

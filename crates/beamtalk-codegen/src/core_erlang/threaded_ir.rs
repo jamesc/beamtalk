@@ -1178,6 +1178,148 @@ pub(super) enum ThreadedStmt {
     Statement(Document<'static>, Span),
 }
 
+// ─── ThreadedValue (ADR 0118, Decision 1 / BT-3415) ────────────────────────
+
+/// The result of compiling one expression in a state-threading context
+/// (ADR 0118 §Decision 1). `prelude` runs first, in source evaluation
+/// order, and may advance a versioned prefix (`State` today; `ClassVars`/
+/// `Self` in later phases); `value` is then a pure reference to the
+/// expression's result — a temp, a literal, or an opaque `Document` that
+/// reads only from variables the prelude (or the enclosing frame) already
+/// bound.
+///
+/// A pure expression is `ThreadedValue { prelude: vec![], value }` — the
+/// common case costs nothing beyond the wrapper.
+///
+/// There are exactly two things a holder may do with one:
+/// - **splice** it: `stmts.extend(tv.prelude)` into the enclosing frame's
+///   own `ThreadedIr`, then use `tv.value` — the prelude's `Bind`s become
+///   real, verified nodes of that frame (ADR 0118 §Decision 4);
+/// - **close** it via [`ThreadedValue::close`], which renders the prelude as
+///   nested `let`s around the value and reports every versioned `Bind`
+///   the enclosing context cannot thread as
+///   [`VerifyError::StateEffectEscapesExpression`] (§Decision 5).
+///
+/// `#[must_use]` turns "forgot to do either" from a silent state drop into
+/// a compiler warning (denied in CI via `clippy` with warnings as errors).
+#[must_use = "a ThreadedValue's prelude carries state Binds; splice it or close it"]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ThreadedValue {
+    /// Statements that must run before `value` is read, in order. Each
+    /// state-effecting sub-expression contributes a `Statement` (its
+    /// computation) followed by a real `Bind` (the version step it
+    /// performs); a sequencing temp is a lone `Statement`.
+    pub prelude: Vec<ThreadedStmt>,
+    /// The expression's own result, pure with respect to `prelude`.
+    pub value: ValueRef,
+}
+
+/// What the context that closes a [`ThreadedValue`] can do with the
+/// versioned `Bind`s in its prelude — the single input to
+/// [`ThreadedValue::close`]'s escape check (ADR 0118 §Decision 5).
+///
+/// ADR 0118 phase 1a (BT-3415): constructed only by [`ThreadedValue::close`]'s
+/// unit tests so far — every phase-1a consumer *splices*; the production
+/// `close()` call sites arrive with the consumers that must produce a
+/// self-contained `Document` (`expression_doc` in Actor context, phase 2b —
+/// see that function's doc comment for why not sooner). Same status as
+/// [`ValueRef::Version`]'s constructor.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CloseContext {
+    /// Nothing outside the closed `Document` can observe a version the
+    /// prelude binds: a Tier 1 closure body, an Erlang FFI argument, a
+    /// block passed to a class method, spec/doc codegen, or any consumer
+    /// not yet migrated to splicing. Every versioned `Bind` in the prelude
+    /// is an escape and is reported.
+    Opaque,
+    /// The enclosing frame threads the prelude's prefixes itself and the
+    /// closed value carries the final versions out (e.g. the closed
+    /// `Document` is the `{Value, State}` tail of a threaded arm whose
+    /// state operand is the prelude's last `State` version). Closing is
+    /// then a pure rendering choice, not a drop — nothing is reported.
+    ThreadsState,
+}
+
+impl ThreadedValue {
+    /// A pure expression: no prelude, just its value.
+    ///
+    /// ADR 0118 phase 1a: `threaded_expression` builds its pure results
+    /// inline (it always has a prelude `Vec` in hand); used by `close()`'s
+    /// unit tests. Same status as [`CloseContext`].
+    #[allow(dead_code)]
+    pub(super) fn pure(value: ValueRef) -> Self {
+        Self {
+            prelude: Vec::new(),
+            value,
+        }
+    }
+
+    /// `true` if `value` is a bare variable or literal — reading it can
+    /// neither raise nor observe state, so a later sibling's prelude may
+    /// be spliced ahead of it without binding it to a sequencing temp
+    /// first (ADR 0118 §Decision 3's "not a literal or plain variable"
+    /// exemption).
+    pub(super) fn value_is_trivial(&self) -> bool {
+        matches!(
+            self.value,
+            ValueRef::Var(_) | ValueRef::Literal(_) | ValueRef::Version(_)
+        )
+    }
+
+    /// Renders the prelude as nested `let`s around the value, producing one
+    /// self-contained `Document` — the ONLY way to discard a prelude (ADR
+    /// 0118 §Decision 5). Reports one
+    /// [`VerifyError::StateEffectEscapesExpression`] per versioned `Bind`
+    /// in the prelude when `context` is [`CloseContext::Opaque`]; reports
+    /// nothing when the context threads the prelude's prefixes itself
+    /// ([`CloseContext::ThreadsState`]). Callers route the errors through
+    /// `report_threaded_ir_verify_errors` (debug/CI hard failure, release
+    /// `internal:` diagnostic), never drop them.
+    ///
+    /// `Bind`s nested inside a `Threaded`/`ConditionalLoop`/`NlrCatch` node
+    /// of the prelude are that node's own frame's business (it threads them
+    /// to its own `{Value, State}` result) and are not reported — only the
+    /// prelude's top-level `Bind`s escape the closed document.
+    ///
+    /// Renders through the same [`render`]/[`render_value`] production every
+    /// spliced prelude goes through, so a closed and a spliced prelude can
+    /// never differ in bytes for the statements they share.
+    ///
+    /// ADR 0118 phase 1a: no production caller yet — see [`CloseContext`].
+    #[allow(dead_code)]
+    pub(super) fn close(
+        self,
+        ctx: &mut RenderCtx<'_>,
+        context: CloseContext,
+    ) -> (Document<'static>, Vec<VerifyError>) {
+        let errors = match context {
+            CloseContext::ThreadsState => Vec::new(),
+            CloseContext::Opaque => self
+                .prelude
+                .iter()
+                .filter_map(|stmt| match stmt {
+                    ThreadedStmt::Bind { target, span, .. } => {
+                        Some(VerifyError::StateEffectEscapesExpression {
+                            prefix: target.prefix.clone(),
+                            at: *span,
+                        })
+                    }
+                    _ => None,
+                })
+                .collect(),
+        };
+        let prelude_doc = render(&self.prelude, ctx);
+        let value_doc = render_value(&self.value, ctx);
+        let doc = if self.prelude.is_empty() {
+            value_doc
+        } else {
+            docvec![prelude_doc, value_doc]
+        };
+        (doc, errors)
+    }
+}
+
 // ─── Verifier ───────────────────────────────────────────────────────────────
 
 /// A violated invariant, found by [`verify`].
@@ -1277,6 +1419,24 @@ pub(super) enum VerifyError {
     /// it structurally.
     #[cfg(test)]
     NestedStateAccFallbackUnderDirectParams { at: Span },
+
+    /// ADR 0118 §Decision 5 (BT-3415): a [`ThreadedValue`] whose prelude
+    /// carries a versioned `Bind` for `prefix` was [`ThreadedValue::close`]d
+    /// in a context that cannot thread that prefix
+    /// ([`CloseContext::Opaque`]) — the closed `Document` scopes the new
+    /// version away, so the state effect the expression performed is lost
+    /// to everything after it. This is the "silent drop" class of bug
+    /// (a nested actor self-send whose `NewState` is discarded) made into
+    /// a verifier finding: the fix is for the enclosing consumer to
+    /// *splice* the prelude into its own frame (`stmts.extend(tv.prelude)`)
+    /// instead of closing it, or — at a genuine boundary such as a Tier 1
+    /// closure body — to surface a user-facing diagnostic built from this
+    /// error rather than from a second predicate.
+    ///
+    /// ADR 0118 phase 1a: constructed by [`ThreadedValue::close`], which has
+    /// no production caller yet — see [`CloseContext`].
+    #[allow(dead_code)]
+    StateEffectEscapesExpression { prefix: VersionPrefix, at: Span },
 }
 
 /// Checks `ir` against the invariants documented on each [`VerifyError`]
@@ -2139,7 +2299,7 @@ fn render_tuple_acc_unpack(
     Document::Vec(docs)
 }
 
-fn render_value(value: &ValueRef, ctx: &RenderCtx) -> Document<'static> {
+pub(super) fn render_value(value: &ValueRef, ctx: &RenderCtx) -> Document<'static> {
     match value {
         ValueRef::Version(v) => leaf::var(ctx.resolve_prefix(v)),
         ValueRef::Var(name) => leaf::var(name.clone()),
@@ -4962,5 +5122,133 @@ mod tests {
         let rendered_doc = render(&ir, &mut ctx).to_pretty_string();
 
         assert_eq!(rendered_doc, legacy_doc);
+    }
+
+    // ── ThreadedValue::close (ADR 0118 §Decision 5, BT-3415) ─────────────
+
+    fn self_send_prelude(dispatch_var: &str) -> Vec<ThreadedStmt> {
+        vec![
+            ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(dispatch_var.to_string()),
+                    " = call 'm':'safe_dispatch'('bump', [], State) in ",
+                ],
+                span(),
+            ),
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT),
+                source: VersionedVar::new(VersionPrefix::State, 0, FrameId::ROOT),
+                op: BindOp::Direct(ValueRef::Doc(docvec![
+                    "call 'erlang':'element'(2, ",
+                    leaf::var(dispatch_var.to_string()),
+                    ")",
+                ])),
+                shadow_write: false,
+                span: span(),
+            },
+        ]
+    }
+
+    #[test]
+    fn close_with_empty_prelude_is_the_bare_value() {
+        let mut generator = CoreErlangGenerator::new("close_empty_prelude");
+        let tv = ThreadedValue::pure(ValueRef::Var("_Val0".to_string()));
+        let mut ctx = RenderCtx::new(&mut generator);
+        let (doc, errors) = tv.close(&mut ctx, CloseContext::Opaque);
+        assert_eq!(doc.to_pretty_string(), "_Val0");
+        assert!(
+            errors.is_empty(),
+            "a pure value has nothing to escape: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn close_reports_a_state_bind_the_context_cannot_thread() {
+        let mut generator = CoreErlangGenerator::new("close_opaque_reports");
+        let tv = ThreadedValue {
+            prelude: self_send_prelude("_SD0"),
+            value: ValueRef::Doc(docvec!["call 'erlang':'element'(1, _SD0)"]),
+        };
+        let mut ctx = RenderCtx::new(&mut generator);
+        let (doc, errors) = tv.close(&mut ctx, CloseContext::Opaque);
+        assert_eq!(
+            doc.to_pretty_string(),
+            "let _SD0 = call 'm':'safe_dispatch'('bump', [], State) in \
+             let State1 = call 'erlang':'element'(2, _SD0) in \
+             call 'erlang':'element'(1, _SD0)",
+            "close() must render the prelude as nested lets around the value"
+        );
+        assert_eq!(
+            errors,
+            vec![VerifyError::StateEffectEscapesExpression {
+                prefix: VersionPrefix::State,
+                at: span(),
+            }],
+            "the State Bind is scoped away by the closed let — an escape"
+        );
+    }
+
+    #[test]
+    fn close_is_silent_when_the_context_threads_state() {
+        let mut generator = CoreErlangGenerator::new("close_threads_state_silent");
+        let tv = ThreadedValue {
+            prelude: self_send_prelude("_SD0"),
+            value: ValueRef::Doc(docvec!["{call 'erlang':'element'(1, _SD0), State1}"]),
+        };
+        let mut ctx = RenderCtx::new(&mut generator);
+        let (doc, errors) = tv.close(&mut ctx, CloseContext::ThreadsState);
+        assert!(
+            doc.to_pretty_string()
+                .ends_with("{call 'erlang':'element'(1, _SD0), State1}"),
+            "same rendering as the Opaque close: {}",
+            doc.to_pretty_string()
+        );
+        assert!(
+            errors.is_empty(),
+            "a context that threads State itself has nothing escaping: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn close_does_not_report_binds_nested_inside_a_threaded_node() {
+        // A `Threaded` node in the prelude threads its own Binds to its own
+        // `{Value, State}` result; only top-level Binds escape the close.
+        let mut generator = CoreErlangGenerator::new("close_nested_threaded_silent");
+        let frame = FrameId::new(1);
+        let tv = ThreadedValue {
+            prelude: vec![ThreadedStmt::Threaded {
+                mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
+                frame,
+                shadow_write_eligible: true,
+                body: vec![ThreadedStmt::Bind {
+                    target: VersionedVar::new(VersionPrefix::State, 1, frame),
+                    source: VersionedVar::new(VersionPrefix::State, 0, frame),
+                    op: BindOp::Direct(ValueRef::Literal("'_'")),
+                    shadow_write: false,
+                    span: span(),
+                }],
+                produces: vec![],
+                span: span(),
+            }],
+            value: ValueRef::Literal("'nil'"),
+        };
+        let mut ctx = RenderCtx::new(&mut generator);
+        let (_doc, errors) = tv.close(&mut ctx, CloseContext::Opaque);
+        assert!(
+            errors.is_empty(),
+            "nested-frame Binds are not escapes: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn value_is_trivial_only_for_bare_vars_and_literals() {
+        assert!(ThreadedValue::pure(ValueRef::Var("_Tmp0".to_string())).value_is_trivial());
+        assert!(ThreadedValue::pure(ValueRef::Literal("'nil'")).value_is_trivial());
+        assert!(
+            !ThreadedValue::pure(ValueRef::Doc(docvec!["call 'lists':'nth'(1, L)"]))
+                .value_is_trivial(),
+            "an opaque computation may raise: it must be temp-bound before a later prelude"
+        );
     }
 }
