@@ -12,7 +12,7 @@
 
 use std::fmt::Write as _;
 
-use super::control_flow::HoistAction;
+use super::control_flow::{HoistAction, HoistSink};
 use super::threaded_ir::{
     FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, render, render_value,
 };
@@ -369,12 +369,37 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Pure default: nothing at this level needs to run ahead of
-        // anything else — a `Block` (a closure; its contents run later,
-        // or never), a non-`self` / class-method `Cascade`, or a leaf.
+        // Anything else: the planner fallback. Review finding on #3718:
+        // `sequenced_send_children` treats an `is_cast` send (`X!`) as
+        // opaque — it is a `MessageSend`, but neither a covered send nor
+        // one of the parent kinds above — yet `hoist_plan_walk` (still
+        // queried by `subexpr_needs_prelude`'s own tail fallback, just
+        // above) WALKS a cast send's receiver/arguments same as any other
+        // `MessageSend`, so a self-send nested in a cast's receiver
+        // (`(self next) process!`) can make `subexpr_needs_prelude`
+        // return `true` for it with no case above able to honour that.
+        // Running the planner here — exactly [`Self::threaded_expression`]'s
+        // pre-phase-1b fallback — keeps that walk and this probe unable to
+        // disagree, for a cast send and for anything else not given an
+        // explicit case above (a `Block` — a closure; its contents run
+        // later, or never — or a non-`self` / class-method `Cascade`).
+        // Phase 2b (BT-3418) deletes the planner once loop bodies are its
+        // last consumer; until then this stays the honest fallback rather
+        // than a silent empty prelude.
+        let mut prelude = Vec::new();
+        if self.in_actor_instance_context() {
+            self.hoist_nested_self_sends(
+                expr,
+                &mut HoistSink::Threaded {
+                    stmts: &mut prelude,
+                    frame: FrameId::ROOT,
+                    span,
+                },
+            )?;
+        }
         let doc = self.generate_expression(expr)?;
         Ok(ThreadedValue {
-            prelude: Vec::new(),
+            prelude,
             value: ValueRef::Doc(doc),
         })
     }

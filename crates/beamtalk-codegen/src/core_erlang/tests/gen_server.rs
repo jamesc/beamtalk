@@ -7191,6 +7191,47 @@ fn bt3416_thread_ahead_no_longer_warns_once_the_interpolation_segment_threads() 
 }
 
 #[test]
+fn bt3416_self_send_nested_in_a_cast_sends_receiver_still_threads() {
+    // Review finding on #3718: `sequenced_send_children` treats an
+    // `is_cast` send (`X!`) as opaque (never a "covered send", per its own
+    // doc comment) since it isn't compiled through `try_handle_self_dispatch`
+    // like an ordinary send — but `threaded_expression`'s "Pure default"
+    // fallback (after this ADR's phase-1b cases were added) no longer ran
+    // the planner there, so a self-send nested in a CAST send's receiver
+    // — `(self next) process!` — silently lost its mutation: `subexpr_
+    // needs_prelude`'s own tail probe still finds it via `hoist_plan_walk`
+    // (which, unlike `sequenced_send_children`, does NOT special-case
+    // `is_cast` and walks into the receiver regardless), but nothing
+    // produced a prelude for it. `threaded_expression` restores the
+    // planner as the explicit last-resort fallback, so this shape is
+    // exactly what `hoist_nested_self_sends` already handled before ADR
+    // 0118 phase 1b and continues to.
+    //
+    // `!` only ever terminates a whole body statement (the parser marks
+    // `body.last_mut()`'s expression `is_cast`), never a nested
+    // sub-expression, so the shape is pinned as its own top-level
+    // statement rather than nested inside a literal.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  go =>\n    (self next) process!\n    self.count\n\n  internal next =>\n    self.count := self.count + 1\n    self.count\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt3416_cast_send_receiver_self_send_threads")
+            .with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        code.contains("'safe_dispatch'('next'"),
+        "the cast's receiver self-send must still dispatch. Got:\n{code}"
+    );
+    assert!(
+        code.contains("erlang':'element'(2, _SD"),
+        "the nested self-send's NewState must thread into the method body. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3416_cast_send_receiver_self_send_threads", &code);
+}
+
+#[test]
 fn bt3415_registering_the_same_subexpression_twice_is_never_silent() {
     // Adversarial review finding on #3717: a second registration of one
     // node would let the inner scope's finish remove the entry out from
