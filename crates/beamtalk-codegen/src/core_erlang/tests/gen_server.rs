@@ -7178,13 +7178,13 @@ fn bt3415_thread_ahead_keeps_the_bt3399_warning_for_a_dropped_only_plan() {
 }
 
 #[test]
-#[cfg(debug_assertions)]
-#[should_panic(expected = "registered twice")]
 fn bt3415_registering_the_same_subexpression_twice_is_never_silent() {
     // Adversarial review finding on #3717: a second registration of one
     // node would let the inner scope's finish remove the entry out from
     // under the outer scope, whose consulted-exactly check then passes
-    // vacuously — a double dispatch with no error. Pinned as loud.
+    // vacuously — a double dispatch with no error. Pinned as a hard
+    // internal error in every build profile (a `codegen_warnings`
+    // diagnostic would be discarded by the CLI's build path).
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  go => self bump\n\n  internal bump => self.count\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -7196,8 +7196,19 @@ fn bt3415_registering_the_same_subexpression_twice_is_never_silent() {
         .expression;
     let mut generator = CoreErlangGenerator::new("bt3415_double_registration");
     let mut scope = super::super::PrecompiledScope::new();
-    generator.register_precompiled_subexpr(&mut scope, expr, Document::Str("'a'"), false);
-    generator.register_precompiled_subexpr(&mut scope, expr, Document::Str("'b'"), false);
+    generator
+        .register_precompiled_subexpr(&mut scope, expr, Document::Str("'a'"), false)
+        .expect("first registration succeeds");
+    let err = generator
+        .register_precompiled_subexpr(&mut scope, expr, Document::Str("'b'"), false)
+        .expect_err("second registration of the same node must fail");
+    assert!(
+        format!("{err:?}").contains("registered twice"),
+        "expected the duplicate-registration internal error, got {err:?}"
+    );
+    generator
+        .finish_precompiled_scope(scope)
+        .expect_err("the scope still holds the never-consulted first entry");
 }
 
 #[test]

@@ -526,9 +526,9 @@ impl CoreErlangGenerator {
                     child,
                     beamtalk_cerl_doc::leaf::var(var),
                     false,
-                );
+                )?;
             } else {
-                self.register_precompiled_subexpr(&mut scope, child, value_doc, is_producer);
+                self.register_precompiled_subexpr(&mut scope, child, value_doc, is_producer)?;
             }
         }
         Ok((prelude, scope))
@@ -572,7 +572,7 @@ impl CoreErlangGenerator {
         let tv = self.threaded_expression(expr)?;
         stmts.extend(tv.prelude);
         let doc = self.threaded_value_doc(&tv.value);
-        self.register_precompiled_subexpr(&mut scope, expr, doc, is_producer);
+        self.register_precompiled_subexpr(&mut scope, expr, doc, is_producer)?;
         Ok(scope)
     }
 
