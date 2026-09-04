@@ -103,3 +103,89 @@ impl fmt::Display for DependencySpec {
 ///
 /// Uses `BTreeMap` for deterministic iteration order (alphabetical by name).
 pub type DependencyMap = BTreeMap<String, DependencySpec>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    // DependencySource::fmt — Path variant
+    #[test]
+    fn display_path_source() {
+        let source = DependencySource::Path {
+            path: PathBuf::from("../my-utils"),
+        };
+        assert_eq!(source.to_string(), "path: ../my-utils");
+    }
+
+    // DependencySource::fmt — Git + Tag variant
+    #[test]
+    fn display_git_tag_source() {
+        let source = DependencySource::Git {
+            url: "https://github.com/jamesc/beamtalk-json".to_string(),
+            reference: GitReference::Tag("v1.0.0".to_string()),
+        };
+        assert_eq!(
+            source.to_string(),
+            "git: https://github.com/jamesc/beamtalk-json (tag: v1.0.0)"
+        );
+    }
+
+    // DependencySource::fmt — Git + Branch variant (was uncovered)
+    #[test]
+    fn display_git_branch_source() {
+        let source = DependencySource::Git {
+            url: "https://github.com/jamesc/beamtalk-json".to_string(),
+            reference: GitReference::Branch("main".to_string()),
+        };
+        assert_eq!(
+            source.to_string(),
+            "git: https://github.com/jamesc/beamtalk-json (branch: main)"
+        );
+    }
+
+    // DependencySource::fmt — Git + Rev variant (was uncovered)
+    #[test]
+    fn display_git_rev_source() {
+        let source = DependencySource::Git {
+            url: "https://github.com/jamesc/beamtalk-json".to_string(),
+            reference: GitReference::Rev("abc1234".to_string()),
+        };
+        assert_eq!(
+            source.to_string(),
+            "git: https://github.com/jamesc/beamtalk-json (rev: abc1234)"
+        );
+    }
+
+    // DependencySource::fmt — Registry variant
+    #[test]
+    fn display_registry_source() {
+        let source = DependencySource::Registry {
+            version: "0.2.1".to_string(),
+        };
+        assert_eq!(source.to_string(), "registry: 0.2.1");
+    }
+
+    // DependencySpec::fmt (was entirely uncovered)
+    #[test]
+    fn display_dependency_spec_with_path() {
+        let spec = DependencySpec {
+            name: "my-utils".to_string(),
+            source: DependencySource::Path {
+                path: PathBuf::from("../my-utils"),
+            },
+        };
+        assert_eq!(spec.to_string(), "my-utils (path: ../my-utils)");
+    }
+
+    #[test]
+    fn display_dependency_spec_with_registry() {
+        let spec = DependencySpec {
+            name: "yaml".to_string(),
+            source: DependencySource::Registry {
+                version: "1.0.0".to_string(),
+            },
+        };
+        assert_eq!(spec.to_string(), "yaml (registry: 1.0.0)");
+    }
+}
