@@ -49,7 +49,7 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
 
   // ADR 0118 phase 1b: sequencing rule for literals, interpolation,
   // return, assignment, cascade, match: scrutinee.
-  adr0118Phase1bPending => true
+  adr0118Phase1bPending => false
 
   // ADR 0118 phase 2a: conditional arms, exception arms, stateful-block
   // bodies, conditional receiver consume ThreadedValue.

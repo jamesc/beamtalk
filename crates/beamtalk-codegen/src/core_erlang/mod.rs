@@ -3784,10 +3784,13 @@ impl CoreErlangGenerator {
                         },
                         *span,
                     );
-                    // BT-3374: `value` may itself be a plain (non-cast) actor
+                    // BT-3374, generalized by ADR 0118 phase 1b (BT-3416):
+                    // `value` may itself be a plain (non-cast) actor
                     // self-send that dispatches through `safe_dispatch`/`dispatch`
                     // and returns a *new* actor state (e.g. `^self configureVictim`
-                    // nested inside an `ifTrue:` block). The generic open-scope
+                    // nested inside an `ifTrue:` block) — or may have a state-
+                    // effecting self-send NESTED somewhere inside it (`^
+                    // self.items at: (self bump)`). The generic open-scope
                     // path below never threads that new state anywhere — actor
                     // self-sends don't populate `last_open_scope_result` (only
                     // class-method self-sends and class-var assignments do, per
@@ -3798,30 +3801,24 @@ impl CoreErlangGenerator {
                     // version from BEFORE this call, so the NLR throw's 4-tuple
                     // silently discards every mutation the self-send just made —
                     // the call still runs, but its effects vanish the moment this
-                    // `^` unwinds. Route this shape through
-                    // `generate_self_dispatch_open` instead — the same helper the
-                    // top-level `^self foo` (unnested) early-return path already
-                    // uses (`gen_server/methods.rs`'s `DispatchingSelfSend` arm) —
-                    // which bumps `current_state_var()` to the self-send's own new
-                    // state before `state` below is computed.
-                    // BT-3374: excludes class methods (`in_class_method()`) —
-                    // `generate_self_dispatch_open`/`generate_self_dispatch_call_doc`
-                    // unconditionally thread `current_state_var()` (Actor
-                    // instance state), never `current_class_var()` (ADR
-                    // 0110's ClassVars mechanism a class method actually
-                    // needs), so routing a class-method self-send through
-                    // this branch mints a `State*` version nothing downstream
-                    // consumes while the throw below still (correctly) reads
-                    // `current_class_var()` for its state — a class method
-                    // reaching this shape keeps the pre-existing `else`
-                    // behavior instead, exactly as before this fix.
-                    let (val_preamble, open_scope) = if self.is_dispatching_actor_self_send(value)
-                        && !self.in_class_method()
+                    // `^` unwinds. Route this shape through `threaded_expression`
+                    // instead — the same sequencing rule every other Actor-
+                    // instance consumer uses — which bumps `current_state_var()`
+                    // to the post-dispatch state (whichever self-send inside
+                    // `value` ran last) before `state` below is computed.
+                    // Excludes class methods (matching `in_actor_instance_context`):
+                    // `threaded_expression` threads only `State` (Actor instance),
+                    // never `current_class_var()` (ADR 0110's ClassVars
+                    // mechanism a class method actually needs — ADR 0118
+                    // phase 5), so a class-method self-send nested in `value`
+                    // keeps the pre-existing `else` behavior instead, exactly
+                    // as before this fix.
+                    let (val_preamble, open_scope) = if self.in_actor_instance_context()
+                        && self.subexpr_needs_prelude(value)
                     {
-                        let (dispatch_doc, dispatch_var) =
-                            self.generate_self_dispatch_open(value)?;
-                        let result_doc =
-                            docvec!["call 'erlang':'element'(1, ", leaf::var(dispatch_var), ")"];
+                        let tv = self.threaded_expression(value)?;
+                        let dispatch_doc = self.threaded_prelude_doc(&tv.prelude);
+                        let result_doc = self.threaded_value_doc(&tv.value);
                         (dispatch_doc, Some(result_doc))
                     } else {
                         // BT-3051: `value` may be a self-send that goes through the

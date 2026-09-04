@@ -620,7 +620,7 @@ TestCase subclass: ValueTypeMutationMatrixTest
     self assert: self actorCorpus assignRhsSubExprSelfSendReadWrite equals: 101
 
   // ADR 0118 phase 1b: cascade on self.
-  adr0118Phase1bCascadeOnSelfPending => true
+  adr0118Phase1bCascadeOnSelfPending => false
 
   testCascadeOnSelfReadWriteActor =>
     self adr0118Phase1bCascadeOnSelfPending ifTrue: [

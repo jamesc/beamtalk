@@ -7152,29 +7152,42 @@ fn bt3415_early_return_reply_state_follows_the_prelude_when_there_is_one() {
 }
 
 #[test]
-fn bt3415_thread_ahead_keeps_the_bt3399_warning_for_a_dropped_only_plan() {
-    // Adversarial review finding on #3717: a `thread_ahead` consumer
-    // (here `FieldAssignment`) whose RHS is a non-send parent with only an
-    // order-unsafe self-send — `"{self.items size}-{self bump}"` — used to
-    // run the planner unconditionally and so emitted the BT-3399 warning;
-    // gating on "needs a prelude" alone silently lost it.
+fn bt3416_thread_ahead_no_longer_warns_once_the_interpolation_segment_threads() {
+    // ADR 0118 phase 1b (BT-3416) superseded the BT-3415-era pin below
+    // (`bt3415_thread_ahead_keeps_the_bt3399_warning_for_a_dropped_only_plan`):
+    // a `thread_ahead` consumer (here `FieldAssignment`) whose RHS is a
+    // `StringInterpolation` with an order-unsafe self-send in a LATER
+    // segment — `"{self.items size}-{self bump}"` — used to run the
+    // planner, which could not safely hoist `bump` ahead of the first
+    // segment's `displayString` dispatch and so dropped the mutation with
+    // the BT-3399 warning. `threaded_string_interpolation` now moves
+    // BOTH segments' `let`-chains into the RHS's prelude, in order, so
+    // `bump` dispatches (after the first segment's `displayString` call,
+    // preserving evaluation order) and the warning is gone — the same fix
+    // as the BUnit matrix's `interpolationBinaryOpSelfSend` row, exercised
+    // here from a `FieldAssignment` RHS instead of a bare statement.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = #(1)\n  state: label = \"\"\n\n  go =>\n    self.label := \"{self.items size}-{self bump}\"\n    self.count\n\n  internal bump =>\n    self.count := self.count + 1\n    self.count\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let generated = generate_module_with_warnings(
         &module,
-        CodegenOptions::new("bt3415_thread_ahead_dropped_warning").with_workspace_mode(true),
+        CodegenOptions::new("bt3416_thread_ahead_no_longer_warns").with_workspace_mode(true),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
-        generated
+        !generated
             .warnings
             .iter()
             .any(|w| w.message.contains("bump") && w.message.contains("silently dropped")),
-        "the BT-3399 warning must still fire from a FieldAssignment RHS. Got: {:?}",
+        "bump's mutation now threads — the BT-3399 warning must be gone. Got: {:?}",
         generated.warnings
     );
-    assert_compiles_through_erlc("bt3415_thread_ahead_dropped_warning", &generated.code);
+    assert!(
+        generated.code.contains("erlang':'element'(2, _SD"),
+        "bump's dispatch must thread its NewState. Got:\n{}",
+        generated.code
+    );
+    assert_compiles_through_erlc("bt3416_thread_ahead_no_longer_warns", &generated.code);
 }
 
 #[test]
@@ -7249,29 +7262,46 @@ fn bt3415_self_send_argument_of_self_send_sequences_args_before_dispatch() {
 }
 
 #[test]
-fn bt3396_self_dispatch_in_later_interpolation_segment_is_not_hoisted_past_earlier_segment() {
-    // BT-3396 review finding: `generate_string_interpolation` dispatches
+fn bt3416_self_dispatch_in_later_interpolation_segment_now_threads_after_earlier_segment() {
+    // BT-3396 found that `generate_string_interpolation` dispatches
     // `displayString` on each segment's value right after evaluating it,
-    // before the next segment runs — a message send that may raise. So in
-    // `"{x}-{self bumpCount}"` the self-send must NOT be hoisted ahead of
-    // `x`'s `displayString` dispatch: it stays in its natural (non-hoisted)
-    // position, exactly like a self-send after any other order-unsafe
-    // operand. A self-send in the FIRST segment (`"n={self bumpCount}"`)
-    // has nothing before it and is still hoisted.
+    // before the next segment runs — a message send that may raise — so
+    // hoisting a LATER segment's self-send ahead of an EARLIER segment's
+    // `displayString` dispatch would reorder evaluation; the then-current
+    // planner's fix was to leave it un-hoisted (dropping the mutation,
+    // with a warning). ADR 0118 phase 1b (BT-3416) replaces that with the
+    // sequencing rule: `threaded_string_interpolation` moves every
+    // segment's `let`-chain up to and including the LAST one that needs
+    // threading into the prelude, in order — so in `"{x}-{self
+    // bumpCount}"` the mutation now threads AND `x`'s `displayString`
+    // dispatch still runs first (see `threaded_string_interpolation`'s
+    // doc comment). A self-send in the FIRST segment
+    // (`"n={self bumpCount}"`) has nothing before it and was already
+    // threaded before this phase.
     let later = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly: x =>\n    \"{x}-{self bumpCount}\".\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(later);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3396_later_interpolation_segment_not_hoisted")
+        CodegenOptions::new("bt3416_later_interpolation_segment_threaded")
             .with_workspace_mode(true),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
-        !code.contains("erlang':'element'(2, _SD"),
-        "a self-send in a later interpolation segment must not be hoisted past an earlier segment's displayString dispatch. Got:\n{code}"
+        code.contains("erlang':'element'(2, _SD"),
+        "a self-send in a later interpolation segment must now thread its NewState. Got:\n{code}"
     );
-    assert_compiles_through_erlc("bt3396_later_interpolation_segment_not_hoisted", &code);
+    let x_display_at = code
+        .find("'displayString'")
+        .unwrap_or_else(|| panic!("`x`'s displayString dispatch must appear. Got:\n{code}"));
+    let bump_dispatch_at = code
+        .find("'safe_dispatch'('bumpCount'")
+        .unwrap_or_else(|| panic!("`bumpCount` must be dispatched. Got:\n{code}"));
+    assert!(
+        x_display_at < bump_dispatch_at,
+        "the first segment's displayString dispatch must still precede the later segment's self-send dispatch. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3416_later_interpolation_segment_threaded", &code);
 
     let first = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    \"n={self bumpCount}\".\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(first);

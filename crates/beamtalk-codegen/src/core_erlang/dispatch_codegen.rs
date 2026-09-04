@@ -2592,71 +2592,95 @@ impl CoreErlangGenerator {
             return false;
         }
         if let Expression::MessageSend { selector, .. } = expr {
-            // Binary operators are always intercepted by generate_binary_op
-            if matches!(selector, MessageSelector::Binary(_)) {
-                return false;
-            }
-            // BT-2065/BT-2071/BT-2073: Well-known selectors that the intrinsics
-            // layer **unconditionally** handles before `try_handle_self_dispatch`.
-            // Covers ProtoObject (`class`, `perform:`/`perform:withArguments:`/
-            // `performLocally:withArguments:`), Object reflection (`respondsTo:`,
-            // `fieldAt:`, `fieldAt:put:`, `fieldNames`), Nil protocol
-            // (`isNil`/`notNil`/`ifNil:`/`ifNotNil:`/`ifNil:ifNotNil:`/
-            // `ifNotNil:ifNil:`), exception handling (`on:do:`, `ensure:`),
-            // block application (`value`/`value:`/`value:value:`/
-            // `value:value:value:`), block loops (`repeat`/`whileTrue:`/
-            // `whileFalse:`), object identity (`hash`) and error signaling
-            // (`error:`).
-            //
-            // NOTE: Boolean conditionals (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`)
-            // are NOT included here — `try_generate_boolean_protocol` returns
-            // `Ok(None)` (falls through) when no mutation-threading is needed,
-            // allowing the send to reach self-dispatch.
-            if let Some(wk) = selector.well_known() {
-                if matches!(
-                    wk,
-                    WellKnownSelector::Class
-                        | WellKnownSelector::RespondsTo
-                        | WellKnownSelector::IsNil
-                        | WellKnownSelector::NotNil
-                        | WellKnownSelector::IfNil
-                        | WellKnownSelector::IfNotNil
-                        | WellKnownSelector::IfNilIfNotNil
-                        | WellKnownSelector::IfNotNilIfNil
-                        | WellKnownSelector::OnDo
-                        | WellKnownSelector::Value
-                        | WellKnownSelector::ValueColon
-                        | WellKnownSelector::ValueValue
-                        | WellKnownSelector::ValueValueValue
-                        | WellKnownSelector::WhileTrue
-                        | WellKnownSelector::WhileFalse
-                        | WellKnownSelector::Repeat
-                        | WellKnownSelector::Ensure
-                        | WellKnownSelector::Hash
-                        | WellKnownSelector::Error
-                        | WellKnownSelector::FieldAt
-                        | WellKnownSelector::FieldAtPut
-                        | WellKnownSelector::FieldNames
-                        | WellKnownSelector::Perform
-                        | WellKnownSelector::PerformWithArgs
-                        | WellKnownSelector::PerformLocallyWithArgs
-                ) {
-                    return false;
-                }
-            }
-            // Remaining intrinsics not modelled as `WellKnownSelector` variants
-            // — these are class-specific or compile-time-only constructs that
-            // do not warrant universal selector classification.
-            let name = selector.name();
+            return Self::selector_dispatches_via_self(selector);
+        }
+        true
+    }
+
+    /// The selector half of [`Self::is_dispatching_actor_self_send`]'s
+    /// check — extracted (ADR 0118 phase 1b, BT-3416) so a caller that
+    /// already knows the receiver is a bare `self` without owning an
+    /// `Expression::MessageSend` node to hand back (a cascade message,
+    /// whose selector/arguments come from `CascadeMessage` — see
+    /// `util.rs`'s `cascade_self_dispatch_messages`) can reuse the exact
+    /// same rule instead of copying it (CLAUDE.md: no duplicate
+    /// implementations).
+    ///
+    /// Excludes selectors that are intercepted by handlers before
+    /// `try_handle_self_dispatch` in `generate_message_send`:
+    /// - Binary operators (`+`, `-`, `*`, etc.)
+    /// - `asType:` (compile-time erasure)
+    /// - `ProtoObject` messages (`class`, `perform:`, `perform:withArguments:`)
+    /// - Object reflection (`fieldAt:`, `fieldAt:put:`, `fieldNames`, `respondsTo:`)
+    /// - Nil protocol (`isNil`, `notNil`, `ifNil:`, etc.)
+    /// - Identity (`yourself`, `hash`)
+    /// - Error signaling (`error:`)
+    /// - Block evaluation (`value`, `value:`, `repeat`, `whileTrue:`, etc.)
+    pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
+        // Binary operators are always intercepted by generate_binary_op
+        if matches!(selector, MessageSelector::Binary(_)) {
+            return false;
+        }
+        // BT-2065/BT-2071/BT-2073: Well-known selectors that the intrinsics
+        // layer **unconditionally** handles before `try_handle_self_dispatch`.
+        // Covers ProtoObject (`class`, `perform:`/`perform:withArguments:`/
+        // `performLocally:withArguments:`), Object reflection (`respondsTo:`,
+        // `fieldAt:`, `fieldAt:put:`, `fieldNames`), Nil protocol
+        // (`isNil`/`notNil`/`ifNil:`/`ifNotNil:`/`ifNil:ifNotNil:`/
+        // `ifNotNil:ifNil:`), exception handling (`on:do:`, `ensure:`),
+        // block application (`value`/`value:`/`value:value:`/
+        // `value:value:value:`), block loops (`repeat`/`whileTrue:`/
+        // `whileFalse:`), object identity (`hash`) and error signaling
+        // (`error:`).
+        //
+        // NOTE: Boolean conditionals (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`)
+        // are NOT included here — `try_generate_boolean_protocol` returns
+        // `Ok(None)` (falls through) when no mutation-threading is needed,
+        // allowing the send to reach self-dispatch.
+        if let Some(wk) = selector.well_known() {
             if matches!(
-                name.as_str(),
-                // asType: (compile-time erasure)
-                "asType:"
-                // Identity
-                | "yourself"
+                wk,
+                WellKnownSelector::Class
+                    | WellKnownSelector::RespondsTo
+                    | WellKnownSelector::IsNil
+                    | WellKnownSelector::NotNil
+                    | WellKnownSelector::IfNil
+                    | WellKnownSelector::IfNotNil
+                    | WellKnownSelector::IfNilIfNotNil
+                    | WellKnownSelector::IfNotNilIfNil
+                    | WellKnownSelector::OnDo
+                    | WellKnownSelector::Value
+                    | WellKnownSelector::ValueColon
+                    | WellKnownSelector::ValueValue
+                    | WellKnownSelector::ValueValueValue
+                    | WellKnownSelector::WhileTrue
+                    | WellKnownSelector::WhileFalse
+                    | WellKnownSelector::Repeat
+                    | WellKnownSelector::Ensure
+                    | WellKnownSelector::Hash
+                    | WellKnownSelector::Error
+                    | WellKnownSelector::FieldAt
+                    | WellKnownSelector::FieldAtPut
+                    | WellKnownSelector::FieldNames
+                    | WellKnownSelector::Perform
+                    | WellKnownSelector::PerformWithArgs
+                    | WellKnownSelector::PerformLocallyWithArgs
             ) {
                 return false;
             }
+        }
+        // Remaining intrinsics not modelled as `WellKnownSelector` variants
+        // — these are class-specific or compile-time-only constructs that
+        // do not warrant universal selector classification.
+        let name = selector.name();
+        if matches!(
+            name.as_str(),
+            // asType: (compile-time erasure)
+            "asType:"
+            // Identity
+            | "yourself"
+        ) {
+            return false;
         }
         true
     }

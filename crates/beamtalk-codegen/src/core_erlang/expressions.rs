@@ -30,6 +30,7 @@ use beamtalk_core::ast::{
     Expression, Identifier, Literal, MapPair, MapPatternKey, MatchArm, MessageSelector, Pattern,
     StringSegment,
 };
+use beamtalk_core::source_analysis::Span;
 
 /// Classification of how a block body expression should be handled.
 /// Produced by [`CoreErlangGenerator::classify_block_expr`] and consumed
@@ -121,46 +122,9 @@ impl CoreErlangGenerator {
                 }
                 StringSegment::Interpolation(expr) => {
                     let expr_doc = self.expression_doc(expr)?;
-                    let interp_var = self.fresh_temp_var("interpExpr");
-                    let raw_str_var = self.fresh_temp_var("interpRaw");
-                    let str_var = self.fresh_temp_var("interpStr");
-
-                    // Evaluate the expression
-                    let_bindings.push(docvec![
-                        "let ",
-                        leaf::var(interp_var.clone()),
-                        " = ",
-                        expr_doc,
-                        " in ",
-                    ]);
-
-                    // Dispatch displayString to convert to binary string (user-facing representation)
-                    let_bindings.push(docvec![
-                        "let ",
-                        leaf::var(raw_str_var.clone()),
-                        " = call 'beamtalk_message_dispatch':'send'(",
-                        leaf::var(interp_var.clone()),
-                        ", 'displayString', []) in ",
-                    ]);
-
-                    // Convert to binary string via display_string, which recursively awaits futures.
-                    // This handles both direct futures (actor displayString returns future) and
-                    // double-futures (Object.displayString delegates to self printString which is
-                    // itself async for actors, returning a nested future).
-                    let_bindings.push(docvec![
-                        "let ",
-                        leaf::var(str_var.clone()),
-                        " = call 'beamtalk_primitive':'display_string'(",
-                        leaf::var(raw_str_var.clone()),
-                        ") in "
-                    ]);
-
-                    // Add as binary segment: #<Var>('all',8,'binary',['unsigned'|['big']])
-                    binary_parts.push(docvec![
-                        "#<",
-                        leaf::var(str_var),
-                        ">('all',8,'binary',['unsigned'|['big']])",
-                    ]);
+                    let (chain_prefix, reference) = self.interpolation_segment_chain(expr_doc);
+                    let_bindings.push(chain_prefix);
+                    binary_parts.push(reference);
                 }
             }
         }
@@ -184,6 +148,140 @@ impl CoreErlangGenerator {
         doc = docvec![doc, binary_doc];
 
         Ok(doc)
+    }
+
+    /// One interpolation segment's `let`-chain prefix (value →
+    /// `displayString` dispatch → `display_string`) and its binary-part
+    /// reference — the two pieces every consumer needs, kept in one place
+    /// per CLAUDE.md's no-duplicate-implementations rule:
+    /// [`Self::generate_string_interpolation`]'s all-inline compile
+    /// (`value_doc` from a fresh `self.expression_doc(expr)`) and
+    /// [`Self::threaded_string_interpolation`]'s threaded one (`value_doc`
+    /// from an already-sequenced [`threaded_ir::ThreadedValue`]'s rendered
+    /// value). The prefix ends in `in ` (an open Core Erlang `let` chain,
+    /// like every other opaque `Statement`/preamble fragment this
+    /// generator builds) so callers concatenate it directly ahead of
+    /// whatever comes next.
+    fn interpolation_segment_chain(
+        &mut self,
+        value_doc: Document<'static>,
+    ) -> (Document<'static>, Document<'static>) {
+        let interp_var = self.fresh_temp_var("interpExpr");
+        let raw_str_var = self.fresh_temp_var("interpRaw");
+        let str_var = self.fresh_temp_var("interpStr");
+
+        // Evaluate the expression
+        let prefix = docvec![
+            "let ",
+            leaf::var(interp_var.clone()),
+            " = ",
+            value_doc,
+            " in ",
+            // Dispatch displayString to convert to binary string
+            // (user-facing representation).
+            "let ",
+            leaf::var(raw_str_var.clone()),
+            " = call 'beamtalk_message_dispatch':'send'(",
+            leaf::var(interp_var),
+            ", 'displayString', []) in ",
+            // Convert to binary string via display_string, which
+            // recursively awaits futures. This handles both direct
+            // futures (actor displayString returns future) and
+            // double-futures (Object.displayString delegates to self
+            // printString which is itself async for actors, returning a
+            // nested future).
+            "let ",
+            leaf::var(str_var.clone()),
+            " = call 'beamtalk_primitive':'display_string'(",
+            leaf::var(raw_str_var),
+            ") in ",
+        ];
+        // Add as binary segment: #<Var>('all',8,'binary',['unsigned'|['big']])
+        let reference = docvec![
+            "#<",
+            leaf::var(str_var),
+            ">('all',8,'binary',['unsigned'|['big']])",
+        ];
+        (prefix, reference)
+    }
+
+    /// ADR 0118 phase 1b (BT-3416): [`Self::generate_string_interpolation`],
+    /// through the sequencing rule. Each segment's own `displayString`
+    /// dispatch is itself an effect that always runs immediately after
+    /// that segment's value (its own per-segment `let`-chain,
+    /// [`Self::interpolation_segment_chain`]) — so, unlike an ordinary
+    /// operand, a segment cannot be compiled in place once a LATER
+    /// segment needs a prelude: its dispatch would then run AFTER that
+    /// later prelude despite being textually first (`"{a}-{self bump}"`:
+    /// `a`'s `displayString` must run before `bump` dispatches). Once any
+    /// segment — at index `k`, the LAST one that does — needs threading,
+    /// every interpolation segment up to and including `k` moves its
+    /// whole `let`-chain into the returned prelude, in order; segments
+    /// after `k` stay in the returned value's own document, compiled
+    /// normally. When no segment needs threading this costs nothing
+    /// beyond the existing `generate_string_interpolation` call — one
+    /// document, no prelude.
+    pub(super) fn threaded_string_interpolation(
+        &mut self,
+        segments: &[StringSegment],
+        span: Span,
+    ) -> Result<threaded_ir::ThreadedValue> {
+        let Some(k) = segments.iter().rposition(
+            |seg| matches!(seg, StringSegment::Interpolation(e) if self.subexpr_needs_prelude(e)),
+        ) else {
+            let doc = self.generate_string_interpolation(segments)?;
+            return Ok(threaded_ir::ThreadedValue {
+                prelude: Vec::new(),
+                value: ValueRef::Doc(doc),
+            });
+        };
+
+        let mut prelude: Vec<ThreadedStmt> = Vec::new();
+        let mut inline_prefixes: Vec<Document<'static>> = Vec::new();
+        let mut binary_parts: Vec<Document<'static>> = Vec::new();
+
+        for (i, seg) in segments.iter().enumerate() {
+            match seg {
+                StringSegment::Literal(s) => {
+                    if !s.is_empty() {
+                        binary_parts.push(leaf::binary_segments(s));
+                    }
+                }
+                StringSegment::Interpolation(expr) => {
+                    let value_doc = if i <= k {
+                        let tv = self.threaded_expression(expr)?;
+                        prelude.extend(tv.prelude);
+                        self.threaded_value_doc(&tv.value)
+                    } else {
+                        self.expression_doc(expr)?
+                    };
+                    let (chain_prefix, reference) = self.interpolation_segment_chain(value_doc);
+                    if i <= k {
+                        prelude.push(ThreadedStmt::Statement(chain_prefix, span));
+                    } else {
+                        inline_prefixes.push(chain_prefix);
+                    }
+                    binary_parts.push(reference);
+                }
+            }
+        }
+
+        let mut binary_doc_parts: Vec<Document<'static>> = vec![Document::Str("#{")];
+        for (i, part) in binary_parts.into_iter().enumerate() {
+            if i > 0 {
+                binary_doc_parts.push(Document::Str(","));
+            }
+            binary_doc_parts.push(part);
+        }
+        binary_doc_parts.push(Document::Str("}#"));
+
+        let mut value_doc = Document::Vec(inline_prefixes);
+        value_doc = docvec![value_doc, Document::Vec(binary_doc_parts)];
+
+        Ok(threaded_ir::ThreadedValue {
+            prelude,
+            value: ValueRef::Doc(value_doc),
+        })
     }
 
     /// Generates code for an identifier reference.

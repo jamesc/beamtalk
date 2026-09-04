@@ -12,15 +12,26 @@
 
 use std::fmt::Write as _;
 
-use super::control_flow::{HoistAction, HoistSink};
+use super::control_flow::HoistAction;
 use super::threaded_ir::{
-    FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, render_value,
+    FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, render, render_value,
 };
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, PrecompiledScope, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::{atom, string_lit};
 use beamtalk_cerl_doc::{Document, join};
-use beamtalk_core::ast::{ClassDefinition, Expression, ExpressionStatement, Identifier};
+use beamtalk_core::ast::{
+    CascadeMessage, ClassDefinition, Expression, ExpressionStatement, Identifier, MessageSelector,
+    StringSegment,
+};
+use beamtalk_core::source_analysis::Span;
+
+/// One cascade message's decomposed shape — selector, arguments, and the
+/// message's own span — as [`CoreErlangGenerator::cascade_self_dispatch_messages`]
+/// and [`CoreErlangGenerator::threaded_cascade_on_self`] pass it around.
+/// Named so the type isn't repeated (and so clippy's `type_complexity`
+/// lint stays quiet about the tuple).
+type CascadeSelfMessage<'e> = (&'e MessageSelector, &'e [Expression], Span);
 
 /// Builds a versioned Core Erlang variable name.
 ///
@@ -302,29 +313,222 @@ impl CoreErlangGenerator {
             });
         }
 
-        // Non-send parents: the planner fallback (phase 1b migrates these).
-        let mut prelude = Vec::new();
-        if self.in_actor_instance_context() {
-            self.hoist_nested_self_sends(
-                expr,
-                &mut HoistSink::Threaded {
-                    stmts: &mut prelude,
-                    frame: FrameId::ROOT,
-                    span,
-                },
-            )?;
+        // ADR 0118 phase 1b: literal-container parents (`ListLiteral`
+        // elements + tail, `ArrayLiteral` elements, `MapLiteral` keys/
+        // values) — no effect happens between compiling one child and the
+        // next (unlike `Cascade`/`StringInterpolation` below), so the
+        // ordinary sequencing rule applies unchanged: sequence the
+        // children, then let the parent's own (unaffected) codegen
+        // substitute them via `precompiled_subexprs`.
+        if let Some(children) = Self::literal_container_children(inner) {
+            let (prelude, scope) = self.sequence_children(&children)?;
+            let doc = self.generate_expression(expr)?;
+            self.finish_precompiled_scope(scope)?;
+            return Ok(ThreadedValue {
+                prelude,
+                value: ValueRef::Doc(doc),
+            });
         }
+
+        // ADR 0118 phase 1b: `^ value`, `target := value`, `{a, b} :=
+        // value`, and a `match:`'s scrutinee (arms are phase 4) — the
+        // sequencing rule applied to the sole child whose evaluation must
+        // finish before the parent's own effect (the NLR throw, the
+        // assignment's mutation, the `case`) runs.
+        if let Some(value) = Self::single_sequenced_child(inner) {
+            let (prelude, scope) = self.sequence_children(std::slice::from_ref(&value))?;
+            let doc = self.generate_expression(expr)?;
+            self.finish_precompiled_scope(scope)?;
+            return Ok(ThreadedValue {
+                prelude,
+                value: ValueRef::Doc(doc),
+            });
+        }
+
+        // ADR 0118 phase 1b: each interpolation segment performs its own
+        // `displayString` dispatch immediately after its value — a real
+        // effect a later segment's prelude must not run ahead of — so
+        // this gets its own sequencing, not the generic children pattern
+        // above.
+        if let Expression::StringInterpolation { segments, .. } = inner {
+            return self.threaded_string_interpolation(segments, span);
+        }
+
+        // ADR 0118 phase 1b: a cascade on `self` in Actor instance
+        // context threads every message's own dispatch, in order — see
+        // `threaded_cascade_on_self`. Anything else (a remote receiver, a
+        // class-method cascade, a message an intrinsic intercepts before
+        // self-dispatch) falls through to the unmigrated `generate_cascade`
+        // path below, unchanged from before this ADR.
+        if let Expression::Cascade {
+            receiver, messages, ..
+        } = inner
+        {
+            if let Some(tv) = self.threaded_cascade_on_self(receiver, messages)? {
+                return Ok(tv);
+            }
+        }
+
+        // Pure default: nothing at this level needs to run ahead of
+        // anything else — a `Block` (a closure; its contents run later,
+        // or never), a non-`self` / class-method `Cascade`, or a leaf.
         let doc = self.generate_expression(expr)?;
         Ok(ThreadedValue {
-            prelude,
+            prelude: Vec::new(),
             value: ValueRef::Doc(doc),
         })
+    }
+
+    /// The children of a literal-container parent the sequencing rule
+    /// applies to, in evaluation order: `ListLiteral` elements then an
+    /// optional tail, `ArrayLiteral` elements, `MapLiteral` keys and
+    /// values (key before value, pair by pair). `None` for anything else.
+    /// Safe to treat like [`Self::sequenced_send_children`]'s children
+    /// (no interleaved effect between compiling one and the next): each
+    /// of these parents' own codegen
+    /// ([`Self::generate_list_literal`]/[`Self::generate_array_literal`]/
+    /// [`Self::generate_map_literal`]) compiles every element through
+    /// `capture_subexpr_sequence` → `expression_doc`, which is exactly
+    /// the route [`Self::register_precompiled_subexpr`]'s substitution
+    /// reaches.
+    fn literal_container_children(expr: &Expression) -> Option<Vec<&Expression>> {
+        match expr {
+            Expression::ListLiteral { elements, tail, .. } => {
+                let mut children: Vec<&Expression> = elements.iter().collect();
+                if let Some(tail) = tail {
+                    children.push(tail.as_ref());
+                }
+                Some(children)
+            }
+            Expression::ArrayLiteral { elements, .. } => Some(elements.iter().collect()),
+            Expression::MapLiteral { pairs, .. } => {
+                let mut children = Vec::with_capacity(pairs.len() * 2);
+                for pair in pairs {
+                    children.push(&pair.key);
+                    children.push(&pair.value);
+                }
+                Some(children)
+            }
+            _ => None,
+        }
+    }
+
+    /// The single child the sequencing rule applies to for a "value-
+    /// carrying" parent whose own effect (an NLR throw, an assignment's
+    /// mutation, a `match:`'s `case`) runs only after that child is fully
+    /// evaluated: `^ value`, `target := value`, `{a, b} := value`, and a
+    /// `match:`'s scrutinee (its arms are phase 4 — untouched here).
+    /// `None` for every other kind.
+    fn single_sequenced_child(expr: &Expression) -> Option<&Expression> {
+        match expr {
+            Expression::Return { value, .. }
+            | Expression::Assignment { value, .. }
+            | Expression::DestructureAssignment { value, .. }
+            | Expression::Match { value, .. } => Some(value.as_ref()),
+            _ => None,
+        }
+    }
+
+    /// For a cascade whose underlying receiver is a bare `self` in Actor
+    /// instance context, the list of `(selector, arguments, span)` for
+    /// every message — the first message folded out of `receiver` per
+    /// the parser's own cascade shape (`generate_cascade`'s doc comment),
+    /// then `messages` in order — when EVERY message would dispatch
+    /// through [`Self::generate_self_dispatch`] were it a standalone
+    /// self-send. `None` when the cascade doesn't qualify: a non-`self`
+    /// receiver (an ordinary remote/class-method send — unaffected, same
+    /// as before this ADR), or any message whose selector is intercepted
+    /// before `try_handle_self_dispatch` (binary — already rejected by
+    /// `generate_cascade` itself for cascades — or a well-known
+    /// intrinsic).
+    fn cascade_self_dispatch_messages<'e>(
+        &self,
+        receiver: &'e Expression,
+        messages: &'e [CascadeMessage],
+    ) -> Option<Vec<CascadeSelfMessage<'e>>> {
+        if !self.in_actor_instance_context() {
+            return None;
+        }
+        let (underlying_receiver, first): (&Expression, Option<CascadeSelfMessage<'e>>) =
+            match receiver {
+                Expression::MessageSend {
+                    receiver: inner,
+                    selector,
+                    arguments,
+                    span,
+                    is_cast: false,
+                    ..
+                } => (
+                    inner.as_ref(),
+                    Some((selector, arguments.as_slice(), *span)),
+                ),
+                _ => (receiver, None),
+            };
+        if !matches!(underlying_receiver, Expression::Identifier(id) if id.name == "self") {
+            return None;
+        }
+        let mut all: Vec<CascadeSelfMessage<'e>> = Vec::with_capacity(messages.len() + 1);
+        all.extend(first);
+        for msg in messages {
+            all.push((&msg.selector, msg.arguments.as_slice(), msg.span));
+        }
+        if all.is_empty()
+            || !all
+                .iter()
+                .all(|(selector, ..)| Self::selector_dispatches_via_self(selector))
+        {
+            return None;
+        }
+        Some(all)
+    }
+
+    /// ADR 0118 phase 1b: a cascade on `self` in Actor instance context —
+    /// `self record: 1; record: 2` — threads through
+    /// [`Self::generate_self_dispatch`] one message at a time, in order,
+    /// exactly like an ordinary self-send statement: each message's own
+    /// (non-block) arguments are sequenced first, so a self-send nested
+    /// in an EARLIER message's argument list (`self record: (self
+    /// bumpCount); record: 1`) dispatches before the next message runs.
+    /// Each message's dispatch reads `current_state_var()` as it starts
+    /// building its call — the same generator-global counter the
+    /// previous message's `Bind` just advanced — so `State` threads
+    /// across messages the same way it threads across ordinary
+    /// statements. `Ok(None)` when the cascade doesn't qualify (see
+    /// [`Self::cascade_self_dispatch_messages`]); the caller falls
+    /// through to the unmigrated `generate_cascade` path, unchanged from
+    /// before this ADR.
+    fn threaded_cascade_on_self(
+        &mut self,
+        receiver: &Expression,
+        messages: &[CascadeMessage],
+    ) -> Result<Option<ThreadedValue>> {
+        let Some(all_messages) = self.cascade_self_dispatch_messages(receiver, messages) else {
+            return Ok(None);
+        };
+        let mut prelude: Vec<ThreadedStmt> = Vec::new();
+        // Overwritten by the loop below on every iteration: `all_messages`
+        // is non-empty (`cascade_self_dispatch_messages` rejects the
+        // empty case), so the cascade's own value is always the LAST
+        // message's — matching `generate_cascade`'s "the cascade returns
+        // the result of the final message" contract.
+        let mut value = ValueRef::Literal("'nil'");
+        for (selector, arguments, msg_span) in all_messages {
+            let children: Vec<&Expression> = arguments.iter().collect();
+            let (mut msg_prelude, scope) = self.sequence_children(&children)?;
+            let dispatch =
+                self.generate_self_dispatch(selector, arguments, FrameId::ROOT, msg_span)?;
+            self.finish_precompiled_scope(scope)?;
+            msg_prelude.extend(dispatch.prelude);
+            prelude.extend(msg_prelude);
+            value = dispatch.value;
+        }
+        Ok(Some(ThreadedValue { prelude, value }))
     }
 
     /// `true` inside an Actor *instance* method — the only context in
     /// which a self-send threads `State` (a class method threads
     /// `ClassVars`, never `State`; same exclusion as the planner's).
-    fn in_actor_instance_context(&self) -> bool {
+    pub(super) fn in_actor_instance_context(&self) -> bool {
         self.context == CodeGenContext::Actor && !self.in_class_method()
     }
 
@@ -397,7 +601,7 @@ impl CoreErlangGenerator {
     /// non-send parent the planner would hoist at least one dispatch out
     /// of — so the decision to compile children individually can never
     /// disagree with what compiling them would do.
-    fn subexpr_needs_prelude(&self, expr: &Expression) -> bool {
+    pub(super) fn subexpr_needs_prelude(&self, expr: &Expression) -> bool {
         let inner = expr.unwrap_parens();
         if Self::is_trivial_subexpr(inner) {
             return false;
@@ -409,6 +613,32 @@ impl CoreErlangGenerator {
             return children
                 .iter()
                 .any(|child| self.subexpr_needs_prelude(child));
+        }
+        // ADR 0118 phase 1b: mirrors `threaded_expression`'s own cases
+        // exactly, for the same reason phase 1a's version of this
+        // function mirrored ITS cases — the probe must never disagree
+        // with what compiling would do.
+        if let Some(children) = Self::literal_container_children(inner) {
+            return children
+                .iter()
+                .any(|child| self.subexpr_needs_prelude(child));
+        }
+        if let Some(value) = Self::single_sequenced_child(inner) {
+            return self.subexpr_needs_prelude(value);
+        }
+        if let Expression::StringInterpolation { segments, .. } = inner {
+            return segments.iter().any(|seg| match seg {
+                StringSegment::Interpolation(e) => self.subexpr_needs_prelude(e),
+                StringSegment::Literal(_) => false,
+            });
+        }
+        if let Expression::Cascade {
+            receiver, messages, ..
+        } = inner
+        {
+            return self
+                .cascade_self_dispatch_messages(receiver, messages)
+                .is_some();
         }
         self.in_actor_instance_context()
             && self
@@ -540,6 +770,18 @@ impl CoreErlangGenerator {
     pub(super) fn threaded_value_doc(&mut self, value: &ValueRef) -> Document<'static> {
         let ctx = RenderCtx::new(self);
         render_value(value, &ctx)
+    }
+
+    /// The prelude counterpart of [`Self::threaded_value_doc`]: renders a
+    /// [`ThreadedValue`]'s `prelude` — a `Vec<ThreadedStmt>` from a
+    /// consumer that has not (yet, or ever) spliced it into a real
+    /// `ThreadedIr` frame — through the same `render` every spliced
+    /// prelude goes through, so a rendered-standalone and a spliced
+    /// prelude never differ in bytes. `Document::Nil`-equivalent (empty)
+    /// when `prelude` is empty.
+    pub(super) fn threaded_prelude_doc(&mut self, prelude: &[ThreadedStmt]) -> Document<'static> {
+        let mut ctx = RenderCtx::new(self);
+        render(prelude, &mut ctx)
     }
 
     /// ADR 0118 phase 1a (BT-3415): for a consumer whose existing lowering
