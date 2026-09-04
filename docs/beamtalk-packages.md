@@ -87,6 +87,19 @@ cowboy = "2.12.0"
 
 Native dependencies are resolved via rebar3 and included on the BEAM code path. See [ADR 0072](ADR/0072-user-erlang-sources-in-packages.md) for details on Erlang interop within packages.
 
+### `[stubs]` Section
+
+Declares where a package's own FFI type stub files live, relative to the package root ([ADR 0075](ADR/0075-erlang-ffi-type-definitions.md)). A package declares stubs only for its own native Erlang code — not for its dependencies.
+
+```toml
+[stubs]
+path = "stubs/"
+```
+
+Stubs are `.bt` files containing `declare native: <module>` forms — type-only declarations for Erlang module functions. When a package with a `[stubs]` section is used as a dependency, its stubs are automatically available to consumers.
+
+`beamtalk build` and `beamtalk lint` resolve stubs in precedence order: project-local (`stubs/`) > package-bundled (dependencies' `[stubs]` paths) > distribution (`share/beamtalk/stubs/`, overridden by `BEAMTALK_STUBS_DIR` env var) > auto-extracted from `.beam` files. A stub for a specific function/arity overrides only that function at its layer; all other functions in the module keep their lower-layer types.
+
 ### `[diagnostics]` Section
 
 Per-category diagnostic severity overrides (ADR 0100 Rule 3). Every key and the section itself are optional — an absent `[diagnostics]` section (the default for new packages) preserves the compiler's built-in completeness-ladder severities (ADR 0100 Rule 1: e.g. an unresolved selector on a fully-known class is a `Hint`, silent when the receiver's method surface can't be proven complete).
