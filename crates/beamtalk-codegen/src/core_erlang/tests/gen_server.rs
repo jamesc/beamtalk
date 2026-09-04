@@ -7303,10 +7303,7 @@ fn bt3418_local_assign_rhs_in_loop_body_threads_nested_self_send_with_no_warning
          now that it threads. Got: {:?}",
         generated.warnings
     );
-    assert_compiles_through_erlc(
-        "bt3418_local_assign_rhs_in_loop_body",
-        &generated.code,
-    );
+    assert_compiles_through_erlc("bt3418_local_assign_rhs_in_loop_body", &generated.code);
 }
 
 #[test]
