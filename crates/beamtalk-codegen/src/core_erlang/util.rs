@@ -15,7 +15,9 @@ use std::fmt::Write as _;
 use super::threaded_ir::{
     FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, render, render_value,
 };
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, PrecompiledScope, Result};
+use super::{
+    CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, PrecompiledScope, Result,
+};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::{atom, string_lit};
 use beamtalk_cerl_doc::{Document, join};
@@ -295,6 +297,24 @@ impl CoreErlangGenerator {
             return Ok(tv);
         }
 
+        // ADR 0118 phase 5a (BT-3421): a same-class class-method self-send
+        // or a direct class-var assignment at the top level of `expr` —
+        // the class-method-context counterpart of the Actor `is_prelude_producer`
+        // check below. Gated to `frame == FrameId::ROOT`: both underlying
+        // producers (`generate_class_method_self_send`/
+        // `generate_class_var_field_assignment`) still derive their `Bind`'s
+        // frame internally (`self.in_loop_body` / a hardcoded `FrameId::ROOT`,
+        // unchanged by this issue), so this only engages where that
+        // derivation is already known-correct — a class method's own flat
+        // top-level body (`lower_class_method_body`). A class-var self-send
+        // reached from a nested branch frame keeps falling through to the
+        // generic paths below, unchanged from before this issue.
+        if self.in_class_method() && frame == FrameId::ROOT {
+            if let Some(tv) = self.class_method_prelude_producer(inner)? {
+                return Ok(tv);
+            }
+        }
+
         if self.is_prelude_producer(inner) {
             let Expression::MessageSend {
                 selector,
@@ -562,6 +582,66 @@ impl CoreErlangGenerator {
     /// producer: in an Actor instance context.
     fn is_prelude_producer(&self, expr: &Expression) -> bool {
         self.in_actor_instance_context() && self.is_dispatching_actor_self_send(expr)
+    }
+
+    /// ADR 0118 phase 5a (BT-3421): compiles `expr` (already paren-unwrapped)
+    /// through the class-method-context producers when it is, at its own
+    /// top level, a direct class-var assignment (`self.classVar := value`)
+    /// or a same-class class-method self-send (`self someSelector`) —
+    /// `None` for anything else. Two callers: [`Self::threaded_expression`]
+    /// (falls through to its generic paths on `None`), gated to
+    /// `self.in_class_method()` and `frame == FrameId::ROOT`; and the
+    /// [`Self::expression_doc_with_open_scope`] shim directly (falls
+    /// through to `generate_expression` on `None`), gated to
+    /// `self.in_class_method()` alone — always a real top-frame call there
+    /// too, since class methods have no other frame-carrying context this
+    /// function's two producers reach through that entry point.
+    ///
+    /// A same-class self-send is checked with [`Self::is_class_method_self_send`]
+    /// — selectors in `class_method_selectors()` only — DELIBERATELY
+    /// narrower than [`Self::try_handle_class_method_self_send`]'s own
+    /// condition (any `self` receiver): `generate_message_send`'s real
+    /// dispatch order runs ProtoObject/Object/Block/Dict/List/Boolean/
+    /// spawn-await/Erlang-interop/Logger/class-reference checks BEFORE
+    /// `try_handle_class_method_self_send` ever runs, so `self class` or
+    /// `self isNil` must still reach THOSE handlers, never
+    /// `generate_class_method_self_send` directly — this function has no
+    /// way to replicate that whole priority chain, but a selector the class
+    /// itself declares as a class method can never collide with one of
+    /// those reserved well-known names (the same assumption
+    /// `generate_class_method_last_expr_with_class_vars`/
+    /// `generate_class_method_non_last_expr` already made for this exact
+    /// predicate, pre-dating this issue).
+    fn class_method_prelude_producer(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Option<ThreadedValue>> {
+        if self.is_class_var_assignment(expr) {
+            let Expression::Assignment { target, value, .. } = expr else {
+                unreachable!("is_class_var_assignment guarantees an Assignment");
+            };
+            let Expression::FieldAccess { field, .. } = target.as_ref() else {
+                unreachable!("is_class_var_assignment guarantees a FieldAccess target");
+            };
+            let field_name = field.name.to_string();
+            return Ok(Some(
+                self.generate_class_var_field_assignment(&field_name, value)?,
+            ));
+        }
+        if self.is_class_method_self_send(expr) {
+            let Expression::MessageSend {
+                selector,
+                arguments,
+                ..
+            } = expr
+            else {
+                unreachable!("is_class_method_self_send guarantees a MessageSend");
+            };
+            return Ok(Some(
+                self.generate_class_method_self_send(selector, arguments)?,
+            ));
+        }
+        Ok(None)
     }
 
     /// The children the sequencing rule applies to when `expr` (already
@@ -842,6 +922,72 @@ impl CoreErlangGenerator {
         render(prelude, &mut ctx)
     }
 
+    /// ADR 0118 phase 5a (BT-3421): converts a producer's [`ThreadedValue`]
+    /// back into the legacy "open let-chain `Document` + `last_open_scope_result`"
+    /// contract the open-scope shims (and the handful of `generate_message_send`-
+    /// reached call sites not yet migrated to them) still expose to the ~80
+    /// open-scope consumers (ADR 0118 phase 5b's to delete). The "open, not
+    /// closed" sibling of [`super::threaded_ir::ThreadedValue::close`]: the
+    /// prelude is rendered through the SAME [`render`] every spliced prelude
+    /// goes through (so a spliced and an open-scope-converted prelude can
+    /// never differ in bytes), and the value — always a bare temp var for
+    /// the producers that call this — becomes the referenceable
+    /// `OpenScopeResult` the continuation uses, exactly matching the
+    /// pre-ADR-0118 `_ResultVar`/`_Unwrapped` contract. Sets
+    /// `last_open_scope_result` itself.
+    pub(super) fn threaded_value_to_open_scope_doc(
+        &mut self,
+        tv: ThreadedValue,
+    ) -> Document<'static> {
+        if tv.prelude.is_empty() {
+            self.last_open_scope_result = None;
+            return self.threaded_value_doc(&tv.value);
+        }
+        let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+        match tv.value {
+            ValueRef::Var(var) => {
+                self.last_open_scope_result = Some(OpenScopeResult::Value(var));
+                prelude_doc
+            }
+            other => {
+                // Not a plain var — none of this issue's producers build
+                // one, but stay correct rather than leak an unreferenceable
+                // open scope: close inline instead.
+                let value_doc = self.threaded_value_doc(&other);
+                self.last_open_scope_result = None;
+                docvec![prelude_doc, value_doc]
+            }
+        }
+    }
+
+    /// ADR 0118 phase 5a (BT-3421): the inverse conversion, for a
+    /// `Document`-returning helper this issue does not migrate
+    /// (`finalize_dispatch_with_preamble` and its callers within
+    /// `generate_class_method_self_send` — the slot-constructor,
+    /// reflective-primitive, auto-export, and instantiation-intrinsic
+    /// branches) whose own open scope, if any, is entirely due to a NESTED
+    /// sub-expression argument's class-var producer (never this call's own
+    /// class-var Bind — none of these branches build one). Reads whatever
+    /// `last_open_scope_result` that nested call already left, converting
+    /// the pair back into a `ThreadedValue` so `generate_class_method_self_send`
+    /// has one uniform return type across every branch.
+    pub(super) fn legacy_doc_to_threaded_value(&mut self, doc: Document<'static>) -> ThreadedValue {
+        match self.last_open_scope_result.take() {
+            Some(OpenScopeResult::Value(var)) => ThreadedValue {
+                prelude: vec![ThreadedStmt::Statement(doc, Span::default())],
+                value: ValueRef::Var(var),
+            },
+            Some(OpenScopeResult::NoValue) => ThreadedValue {
+                prelude: vec![ThreadedStmt::Statement(doc, Span::default())],
+                value: ValueRef::Literal("'nil'"),
+            },
+            None => ThreadedValue {
+                prelude: Vec::new(),
+                value: ValueRef::Doc(doc),
+            },
+        }
+    }
+
     /// ADR 0118 phase 1a (BT-3415): for a consumer whose existing lowering
     /// compiles `expr` itself through a specialised path
     /// (`generate_field_assignment_open`, `emit_actor_threaded_last_stmts`,
@@ -879,6 +1025,21 @@ impl CoreErlangGenerator {
     /// Some expressions (class method self-sends, class var assignments) produce an open let-chain
     /// ending with `in ` and set a result variable that the caller must use to close the scope.
     /// This method encapsulates that side-channel into an explicit return value.
+    ///
+    /// ADR 0118 phase 5a (BT-3421): a thin shim over
+    /// [`Self::class_method_prelude_producer`] — `expr`'s own top-level
+    /// class-var producer (if any) now returns a real prelude, converted
+    /// back to the legacy `(doc, OpenScopeResult)` shape via
+    /// [`Self::threaded_value_to_open_scope_doc`] so every existing
+    /// consumer of this function keeps compiling unchanged (ADR 0118 phase
+    /// 5b deletes the shim and those consumers together). Calls
+    /// `class_method_prelude_producer` directly rather than the full
+    /// [`Self::threaded_expression`] — see that producer's own doc comment
+    /// for why. When `expr` isn't itself a class-var producer (the common
+    /// case), the legacy side channel is read back exactly as before — a
+    /// NESTED sub-expression's own open scope (e.g. an argument that is
+    /// itself a class-var self-send, hoisted by
+    /// `finalize_dispatch_with_preamble`) is still visible there.
     pub(super) fn expression_doc_with_open_scope(
         &mut self,
         expr: &Expression,
@@ -887,6 +1048,34 @@ impl CoreErlangGenerator {
         Option<super::OpenScopeResult>,
     )> {
         self.last_open_scope_result = None;
+        // ADR 0118 phase 5a: `expr`'s own top-level class-var producer (a
+        // same-class self-send or a direct class-var assignment), if any,
+        // now returns a real prelude — converted back to the legacy
+        // `(doc, OpenScopeResult)` shape via `threaded_value_to_open_scope_doc`
+        // so every existing consumer of this function keeps compiling
+        // unchanged. Deliberately calls `class_method_prelude_producer`
+        // directly rather than the full `threaded_expression` — the latter
+        // also carries the Actor-context sequencing machinery (ADR 0118
+        // phases 1-4), already reached from its OWN call sites
+        // (`thread_ahead`/`sequence_children`); routing this shim through
+        // it too would recompile an Actor self-send a second time along a
+        // path those phases never designed it to run through.
+        //
+        // `!self.in_loop_body` mirrors `threaded_expression`'s own
+        // `frame == FrameId::ROOT` gate (this function is ALSO reached from
+        // inside a class-method loop/fold body via `push_discarded_stmt` —
+        // e.g. `items do: [:x | self.total := self.total + 1]`):
+        // `generate_class_var_field_assignment` hardcodes `FrameId::ROOT`
+        // for its Bind regardless of caller, so engaging it here while
+        // actually inside a loop body would mistag the Bind's frame as
+        // `ROOT` instead of the loop's real, already-minted branch frame.
+        if self.in_class_method() && !self.in_loop_body {
+            let inner = expr.unwrap_parens();
+            if let Some(tv) = self.class_method_prelude_producer(inner)? {
+                let doc = self.threaded_value_to_open_scope_doc(tv);
+                return Ok((doc, self.last_open_scope_result.take()));
+            }
+        }
         let doc = self.generate_expression(expr)?;
         Ok((doc, self.last_open_scope_result.take()))
     }

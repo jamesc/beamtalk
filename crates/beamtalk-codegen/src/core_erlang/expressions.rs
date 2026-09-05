@@ -19,7 +19,9 @@
 
 use std::collections::HashSet;
 
-use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
+use super::threaded_ir::{
+    self, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
+};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -644,8 +646,13 @@ impl CoreErlangGenerator {
         value: &Expression,
     ) -> Result<Document<'static>> {
         // BT-412: Class methods assign to class variables via ClassVars map threading.
+        // ADR 0118 phase 5a: the producer now returns a `ThreadedValue`;
+        // convert it back to the legacy open-Document + `last_open_scope_result`
+        // contract this function's own callers (~80 open-scope consumers,
+        // ADR 0118 phase 5b's to migrate) still expect.
         if self.in_class_method() {
-            return self.generate_class_var_field_assignment(field_name, value);
+            let tv = self.generate_class_var_field_assignment(field_name, value)?;
+            return Ok(self.threaded_value_to_open_scope_doc(tv));
         }
         // BT-833: Value type field assignment — Self-threading (immutable update).
         //
@@ -737,35 +744,40 @@ impl CoreErlangGenerator {
     /// instrumentation to those two, growing the combined function past the
     /// limit).
     ///
-    /// The generated code leaves `let ClassVarsN = ...` open — the caller
-    /// (sequential expression handler) must provide the continuation.
+    /// ADR 0118 phase 5a (BT-3421): the prelude's trailing `Bind` leaves
+    /// `ClassVarsN` bound with no consuming body of its own — callers
+    /// splice the prelude into their own frame (§Decision 4) or
+    /// open-scope-convert it via
+    /// [`Self::threaded_value_to_open_scope_doc`] (the "open, not closed"
+    /// sibling of `close()` — see that helper's doc comment) so
+    /// `ClassVarsN` stays visible to the continuation, matching the
+    /// pre-ADR-0118 open-let-chain contract exactly.
     ///
     /// BT-3164: delegates the actual `Bind` construction (mint/
     /// version-capture/shadow-write/isolated-verify) to the shared
     /// [`Self::lower_class_var_field_assignment_bind`] — see its own doc
-    /// comment for the full ADR 0110 shadow-write rationale — and renders
-    /// the returned `Bind` immediately here (unlike
+    /// comment for the full ADR 0110 shadow-write rationale — and returns
+    /// it as a real, un-rendered [`ThreadedStmt::Bind`] in the prelude
+    /// (previously rendered immediately into an opaque `Document` and
+    /// exposed only via the `last_open_scope_result` side channel; unlike
     /// `gen_server::methods`'s `lower_class_method_last_class_var_bind`,
-    /// the one case BT-3164 promotes to a real top-level `ThreadedStmt::Bind`
-    /// instead of an immediately-rendered `Document`).
-    fn generate_class_var_field_assignment(
+    /// which already promoted its own copy of this exact sequence to a
+    /// real top-level `Bind` before this issue).
+    pub(super) fn generate_class_var_field_assignment(
         &mut self,
         field_name: &str,
         value: &Expression,
-    ) -> Result<Document<'static>> {
+    ) -> Result<ThreadedValue> {
+        let span = value.span();
         let (preamble_doc, bind, val_var) = self.lower_class_var_field_assignment_bind(
             field_name,
             value,
             super::threaded_ir::FrameId::ROOT,
         )?;
-        let bind_doc = {
-            let mut ctx = super::threaded_ir::RenderCtx::new(self);
-            super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
-        };
-        let doc = docvec![preamble_doc, bind_doc];
-        // Store result var name for callers that need to reference it
-        self.last_open_scope_result = Some(OpenScopeResult::Value(val_var));
-        Ok(doc)
+        Ok(ThreadedValue {
+            prelude: vec![ThreadedStmt::Statement(preamble_doc, span), bind],
+            value: ValueRef::Var(val_var),
+        })
     }
 
     /// BT-412/BT-3164: shared class-var assignment `Bind` construction —
