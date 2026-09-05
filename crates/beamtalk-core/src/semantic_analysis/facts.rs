@@ -60,6 +60,27 @@ pub enum DispatchKind {
 /// := …`) means "this needs an Actor `State` thread" inside an instance
 /// method but "this needs a `ClassVars` thread" inside a class method, and a
 /// context-aware consumer reads only the pair matching its current context.
+///
+/// **Not the same question as [`crate::state_threading_selectors::state_threaded_block_arg_indices`].**
+/// That table answers "which block-argument *position* has its outer-local
+/// variable reassignments packed into the `StateAcc` map codegen extracts
+/// after the call" — a narrower, per-*position* question that some
+/// selectors answer differently per argument (e.g. `detect:ifNone:`'s
+/// `ifNone:` handler, arg index 1, is excluded from that table because its
+/// local-variable writes aren't part of the fold). The closure-boundary
+/// question here is coarser and per-*selector*: "is this block compiled as
+/// ordinary inline code in the same activation (so a self-send/field-write
+/// inside it threads), or as a real Erlang closure (`fun` value) that
+/// discards one". For `detect:ifNone:` specifically, codegen's own
+/// `generate_if_none_branch_tuple` compiles the `ifNone:` handler as a
+/// branch arm once ANY mutation is detected in either block (documented
+/// there as "a branch arm, not a closure"), so a self-send in that handler
+/// *does* thread — confirmed by inspecting the compiled Core Erlang (see
+/// `state_effects_detect_if_none_handler_self_send_is_not_a_closure_boundary`
+/// below) — even though that same handler is invisible to the local-var
+/// table. Do not "fix" this fact by consulting the arg-index table per
+/// block position; that would incorrectly reintroduce a closure boundary
+/// where codegen has none.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 // Four fields, each a distinct effect kind named directly in ADR 0118 §7
 // (`actor_self_send`/`field_write`/`class_var_write`/`class_self_send`) —
@@ -1510,6 +1531,54 @@ mod tests {
         assert!(
             out.get(&block_span).is_some_and(|e| e.actor_self_send),
             "the block's own span must still record its self-send"
+        );
+    }
+
+    #[test]
+    fn state_effects_detect_if_none_handler_self_send_is_not_a_closure_boundary() {
+        // `items detect: [:item | item > 0] ifNone: [self bump]` — `detect:ifNone:`
+        // IS a state-threading keyword selector (`is_state_threading_keyword_selector`
+        // matches it directly, not per argument position), so BOTH block
+        // arguments are inline, including the `ifNone:` handler at index 1.
+        //
+        // This deliberately differs from `state_threaded_block_arg_indices`,
+        // which excludes index 1 for this selector — but that table answers
+        // a narrower question (which position's outer-LOCAL-VARIABLE writes
+        // get packed into the StateAcc map), not "is this a closure
+        // boundary". Confirmed against real codegen: compiling this exact
+        // shape produces a `safe_dispatch('bump', …)` call inside the
+        // `ifNone:` branch whose `{Result, NewState}` is unpacked and
+        // threaded into the method's own reply state — see
+        // `StateEffects`'s doc comment for the full cross-reference. If this
+        // test starts failing because someone "fixed" the closure-boundary
+        // check to consult `state_threaded_block_arg_indices` per position,
+        // that change is the regression, not this test.
+        let handler_span = Span::new(10, 20);
+        let handler = block_with(vec![bare(self_send("bump", ts()))], handler_span);
+        let predicate = Expression::Block(block_with(
+            vec![bare(Expression::MessageSend {
+                receiver: Box::new(ident("item")),
+                selector: MessageSelector::Binary(">".into()),
+                arguments: vec![lit(0)],
+                is_cast: false,
+                span: ts(),
+            })],
+            ts(),
+        ));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(ident("items")),
+            selector: MessageSelector::Keyword(vec![
+                KeywordPart::new("detect:", ts()),
+                KeywordPart::new("ifNone:", ts()),
+            ]),
+            arguments: vec![predicate, Expression::Block(handler)],
+            is_cast: false,
+            span: ts(),
+        };
+        assert!(
+            compute_state_effects_for_expr(&expr, false).actor_self_send,
+            "a self-send in detect:ifNone:'s ifNone: handler (arg index 1) must \
+             propagate to the enclosing send's own fact — it is not a closure"
         );
     }
 

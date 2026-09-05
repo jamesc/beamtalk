@@ -155,18 +155,27 @@ pub fn is_conditional_selector(sel: &str) -> bool {
 /// this issue closes).
 ///
 /// Returns the 0-based argument indices of `sel` whose block-literal
-/// argument is compiled inline (its body's outer-local mutations are
-/// threaded back to the caller, not silently lost) rather than as an
-/// isolated closure. An empty slice means either `sel` isn't a
-/// state-threading selector at all, or its threading is context-dependent
-/// (`eachWithIndex:`/`do:separatedBy:` only thread inside an Actor's own
-/// fold, not always — see `CoreErlangGenerator::enumeration_threads_actor_state`
-/// in `beamtalk-codegen`) or the threaded block is the *receiver*, not an
-/// argument (`whileTrue:`/`whileFalse:`'s condition block,
-/// `on:do:`/`ensure:`'s try/protected block) — receiver-position threading
-/// is decided separately by each caller (codegen already special-cases the
+/// argument's outer-local mutations are threaded back to the caller via the
+/// `StateAcc` map (not silently lost). An empty slice at a given index does
+/// **not** mean that argument is compiled as an isolated closure — see the
+/// caveat below for the one selector where that distinction bites
+/// (`detect:ifNone:`). An index can be excluded from this table because:
+/// `sel` isn't a state-threading selector at all; its threading is
+/// context-dependent (`eachWithIndex:`/`do:separatedBy:` only thread inside
+/// an Actor's own fold, not always — see
+/// `CoreErlangGenerator::enumeration_threads_actor_state` in
+/// `beamtalk-codegen`); the threaded block is the *receiver*, not an
+/// argument (`whileTrue:`/`whileFalse:`'s condition block, `on:do:`/
+/// `ensure:`'s try/protected block) — receiver-position threading is
+/// decided separately by each caller (codegen already special-cases the
 /// receiver for these selectors; the lint never inspects a receiver block
-/// at all).
+/// at all); or (`detect:ifNone:`'s `ifNone:` handler, index 1) the
+/// argument's own local-variable writes simply aren't part of the fold this
+/// table tracks, even though the block itself is still compiled inline
+/// (not a closure) once codegen detects a mutation in *either* argument —
+/// see [`crate::semantic_analysis::facts::StateEffects`]'s doc comment,
+/// which answers the "is this a closure boundary" question this table does
+/// NOT answer, and deliberately does not derive its answer from this one.
 ///
 /// Gated on [`is_state_threading_keyword_selector`] so this table can never
 /// claim an argument index for a selector that isn't classified as
