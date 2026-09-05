@@ -1251,6 +1251,46 @@ typed Object subclass: MyTyped
         );
     }
 
+    #[test]
+    fn expect_with_no_category_on_declaration_does_not_truncate_class_body() {
+        // BT-3387 review follow-up: a category-less `@expect` (not even an
+        // invalid category name) followed by a stray token, e.g. a reason
+        // string with nothing to attach to, must not derail parsing of the
+        // rest of the class body. `parse_expect_tail`'s reason-string
+        // lookahead deliberately runs even when no category was found, so
+        // the stray string is consumed as a (discarded) reason rather than
+        // left for `parse_class_body`'s caller to trip over as "not a valid
+        // declaration" — which would otherwise silently end the class body
+        // right there.
+        let source = "\
+Object subclass: Foo
+  @expect \"oops\"
+  state: x = 0
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags.iter().any(|d| d
+                .message
+                .contains("@expect must be followed by a category name")),
+            "expected a parse error for the missing category, got: {parse_diags:?}"
+        );
+        assert!(
+            !parse_diags.iter().any(|d| d
+                .message
+                .contains("must precede a state/field or method declaration")),
+            "the class body must not be treated as truncated, got: {parse_diags:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "got: {:?}", module.classes);
+        assert_eq!(
+            module.classes[0].state.len(),
+            1,
+            "the state: x declaration after the bad @expect must still parse, got: {:?}",
+            module.classes[0].state
+        );
+    }
+
     // ── BT-1476: Dead block assignment warning + @expect dead_assignment ──
 
     // ── BT-1476: @expect dead_assignment parsing and stale detection ──

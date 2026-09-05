@@ -1069,6 +1069,17 @@ impl Parser {
         }
 
         // BT-1918: Parse optional reason string after the category list (same line only).
+        //
+        // Deliberately unconditional — even when nothing valid was found
+        // (`categories` is empty) — matching every pre-BT-3387 `@expect`
+        // parse-error path, all of which attempted this same lookahead
+        // regardless of whether a category identifier was present at all.
+        // Skipping it in the "no identifier" case might look more
+        // conservative, but it isn't: at the declaration level, leaving a
+        // stray trailing token unconsumed there makes `parse_class_body`'s
+        // caller treat it as "not a valid declaration", which silently
+        // truncates the rest of the class body instead of just discarding
+        // one bad reason string — a strictly worse failure mode.
         let reason = if matches!(self.current_kind(), TokenKind::String(_))
             && !self.current_token().has_leading_newline()
         {
