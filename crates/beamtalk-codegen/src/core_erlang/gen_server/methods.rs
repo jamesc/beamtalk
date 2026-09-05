@@ -1446,32 +1446,86 @@ impl CoreErlangGenerator {
                             // operands thread ahead of it.
                             let rhs_scope =
                                 self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?;
-                            // Evaluate the RHS (returns {Value, State} tuple)
-                            let tuple_var = self.fresh_temp_var("CfTuple");
+                            // ADR 0118 phase 4 (BT-3420): when the RHS is
+                            // itself an inline-threaded control-flow
+                            // construct, `thread_ahead` above already
+                            // spliced its real prelude into `stmts` (via
+                            // `subexpr_needs_prelude`/
+                            // `inline_control_flow_needs_threading`
+                            // recognizing this shape) and registered its
+                            // ALREADY-UNWRAPPED value for substitution —
+                            // `expression_doc` below returns that value
+                            // directly, not a `{Value, State}` tuple, so no
+                            // further `element/1` unwrap runs. Only the
+                            // field's own `maps:put` version-bump remains.
+                            // See `emit_actor_threaded_last_stmts`'s matching
+                            // comment. Every other `FieldAssignmentControlFlow`
+                            // shape (loops, list-ops) still returns a raw
+                            // tuple `Document`, unpacked by the `tuple_var`/
+                            // `lower_cf_field_assignment_binds` path below.
                             let val_var = self.fresh_temp_var("CfVal");
-                            let value_str = self.expression_doc(value)?;
-                            self.finish_precompiled_scope(rhs_scope)?;
-                            // Unpack the tuple: element(1) is the value, element(2) is the state
-                            let rhs_state = self.fresh_temp_var("CfState");
-                            self.lower_cf_field_assignment_binds(
-                                &mut stmts,
-                                docvec![
-                                    "let ",
-                                    leaf::var(tuple_var.clone()),
-                                    " = ",
-                                    value_str,
-                                    " in let ",
-                                    leaf::var(val_var.clone()),
-                                    " = call 'erlang':'element'(1, ",
-                                    leaf::var(tuple_var.clone()),
-                                    ") in ",
-                                ],
-                                &tuple_var,
-                                &rhs_state,
-                                field.name.as_str(),
-                                &val_var,
-                                span,
-                            );
+                            if self.inline_control_flow_needs_threading(value.unwrap_parens()) {
+                                let value_str = self.expression_doc(value)?;
+                                self.finish_precompiled_scope(rhs_scope)?;
+                                let source_version = self.state_version();
+                                stmts.push(ThreadedStmt::Statement(
+                                    docvec![
+                                        "let ",
+                                        leaf::var(val_var.clone()),
+                                        " = ",
+                                        value_str,
+                                        " in "
+                                    ],
+                                    span,
+                                ));
+                                let _ = self.next_state_var();
+                                let target_version = self.state_version();
+                                stmts.push(ThreadedStmt::Bind {
+                                    target: threaded_ir::VersionedVar::new(
+                                        threaded_ir::VersionPrefix::State,
+                                        target_version,
+                                        threaded_ir::FrameId::ROOT,
+                                    ),
+                                    source: threaded_ir::VersionedVar::new(
+                                        threaded_ir::VersionPrefix::State,
+                                        source_version,
+                                        threaded_ir::FrameId::ROOT,
+                                    ),
+                                    op: threaded_ir::BindOp::Put {
+                                        field: field.name.to_string(),
+                                        value: threaded_ir::ValueRef::Var(val_var.clone()),
+                                        class_tag: threaded_ir::ValueRef::Literal("'nil'"),
+                                    },
+                                    shadow_write: false,
+                                    span,
+                                });
+                            } else {
+                                // Evaluate the RHS (returns {Value, State} tuple)
+                                let tuple_var = self.fresh_temp_var("CfTuple");
+                                let value_str = self.expression_doc(value)?;
+                                self.finish_precompiled_scope(rhs_scope)?;
+                                // Unpack the tuple: element(1) is the value, element(2) is the state
+                                let rhs_state = self.fresh_temp_var("CfState");
+                                self.lower_cf_field_assignment_binds(
+                                    &mut stmts,
+                                    docvec![
+                                        "let ",
+                                        leaf::var(tuple_var.clone()),
+                                        " = ",
+                                        value_str,
+                                        " in let ",
+                                        leaf::var(val_var.clone()),
+                                        " = call 'erlang':'element'(1, ",
+                                        leaf::var(tuple_var.clone()),
+                                        ") in ",
+                                    ],
+                                    &tuple_var,
+                                    &rhs_state,
+                                    field.name.as_str(),
+                                    &val_var,
+                                    span,
+                                );
+                            }
                             let field_state = self.current_state_var();
                             // Extract threaded locals from the control flow state
                             // (e.g. ifTrue: [y := 1. y + 1] threads y via __local__ keys)
