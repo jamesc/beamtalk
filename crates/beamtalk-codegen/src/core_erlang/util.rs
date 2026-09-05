@@ -1035,6 +1035,23 @@ impl CoreErlangGenerator {
     /// through ordinary `generate_expression`, which returns a bare
     /// `Document` with no prelude side-channel, so the prelude is always
     /// closed here rather than left open for a caller to propagate.
+    ///
+    /// Deliberately does NOT call `ThreadedValue::close` — it renders
+    /// prelude-then-value unconditionally, the same for a self-send at a
+    /// class method's own safe top level and one inside a bare, unthreaded
+    /// block `check_no_unsafe_class_method_self_sends` (`expressions.rs`)
+    /// would reject before this ever runs. BT-3430 investigated making this
+    /// call `close(ctx, CloseContext::Opaque)` for the latter case (its
+    /// intended production use — see `CloseContext::Opaque`'s own doc
+    /// comment) and reporting `VerifyError::StateEffectEscapesExpression`
+    /// as a backstop on top of that predicate: blocked on this function
+    /// having no reliable way to tell the two cases apart post hoc, after
+    /// arbitrary `generate_expression` recursion has already discarded which
+    /// message send (if any) the innermost enclosing block literal is an
+    /// argument to — see that predicate's own doc comment for the full
+    /// finding. Revisit only alongside a redesign that carries real
+    /// block-literal context through this call, not as a follow-up scoped
+    /// to this function alone.
     // `tv` is taken by value deliberately, matching `ThreadedValue::close`'s
     // own consuming signature — the `#[must_use]` linear-discipline design
     // (see `ThreadedValue`'s doc comment) wants "closed" to mean consumed,

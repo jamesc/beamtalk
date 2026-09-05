@@ -1270,6 +1270,18 @@ pub(super) struct ThreadedValue {
 /// self-contained `Document` (`expression_doc` in Actor context, phase 2b —
 /// see that function's doc comment for why not sooner). Same status as
 /// [`ValueRef::Version`]'s constructor.
+///
+/// BT-3430 investigated `Opaque` for exactly the class-method self-send case
+/// this variant's own doc names ("a block passed to a class method"):
+/// `close_threaded_value_doc` (`util.rs`) is the real, already-shipping
+/// choke point every ambient (non-`threaded_expression`) class-method
+/// self-send's `ThreadedValue` closes through, and it renders prelude-then-
+/// value unconditionally rather than calling `close()` — see its own doc
+/// comment for why threading a correct `Opaque`-vs-not signal into it is
+/// blocked on the same receiver-class-identity ambiguity
+/// `check_no_unsafe_class_method_self_sends`'s doc comment (`expressions.rs`)
+/// describes for its own call sites, not on anything specific to `close()`
+/// or this enum.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CloseContext {
@@ -1481,6 +1493,16 @@ pub(super) enum VerifyError {
     ///
     /// ADR 0118 phase 1a: constructed by [`ThreadedValue::close`], which has
     /// no production caller yet — see [`CloseContext`].
+    ///
+    /// BT-3430: the "genuine boundary such as a Tier 1 closure body" case
+    /// above is exactly the class-method self-send-in-a-bare-block scenario
+    /// `check_no_unsafe_class_method_self_sends` (`expressions.rs`) already
+    /// diagnoses from a separate, pre-flight static predicate — investigated
+    /// replacing that diagnostic with this variant (surfaced via `close()`
+    /// at `close_threaded_value_doc`, `util.rs`) and found it blocked on a
+    /// real signal-propagation gap, not a small wiring change. See that
+    /// predicate's own doc comment for the full finding; still no
+    /// production caller.
     #[allow(dead_code)]
     StateEffectEscapesExpression { prefix: VersionPrefix, at: Span },
 }
