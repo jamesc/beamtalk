@@ -36693,7 +36693,6 @@
         "assign",
         "assignment",
         "async",
-        "binaryOperandSelfSend",
         "branch",
         "bumpCount",
         "cascadeOnSelf",
@@ -36717,6 +36716,7 @@
         "mutate",
         "mutation",
         "negation",
+        "orderSensitiveBinaryOperandSelfSend:",
         "process",
         "property",
         "record:",
@@ -36727,7 +36727,7 @@
         "unless",
         "whileTrueConditionSelfSend"
       ],
-      "source": "// Actor fixture for tests/repl-protocol/cases/actor_self_send_positions.btscript\n// (ADR 0118 / BT-3424) — a small, self-contained sample of the self-send\n// syntactic positions stdlib/test/actor_self_send_position_matrix_test.bt\n// covers exhaustively via BUnit, driven here end-to-end through the REPL\n// instead. See that matrix test's own fixture,\n// stdlib/test/fixtures/self_send_position_counter.bt, for the full probe\n// this is a small REPL-specific sample of.\n\nActor subclass: SelfSendPositionsReplActor\n  state: count = 0\n  state: log = #()\n\n  internal bumpCount =>\n    self.count := self.count + 1\n    self.count\n\n  internal record: n =>\n    self.log := self.log ++ #(n)\n    n\n\n  getCount => self.count\n\n  getLog => self.log\n\n  // Cascade on self: every cascaded send shares `self` as its receiver, so\n  // each one's own actor-state mutation must thread through in order.\n  cascadeOnSelf =>\n    self record: 1; record: 2\n    self.log\n\n  // Conditional as a self-send argument: the conditional's own VALUE\n  // (whichever branch runs) becomes the argument to `record:`.\n  conditionalArgSelfSend: flag =>\n    self record: (flag ifTrue: [self bumpCount] ifFalse: [0])\n\n  // Self-send as a binary-op operand inside a whileTrue: CONDITION block.\n  whileTrueConditionSelfSend =>\n    i := 0\n    [(self bumpCount) < 3] whileTrue: [i := i + 1]\n    i\n\n  // Order-sensitive binary operand: the self-send is the RIGHT operand, so\n  // the left operand's own read must still happen (and be sequenced)\n  // ahead of the self-send's mutation.\n  binaryOperandSelfSend => self.log size + (self bumpCount)",
+      "source": "// Actor fixture for tests/repl-protocol/cases/actor_self_send_positions.btscript\n// (ADR 0118 / BT-3424) — a small, self-contained sample of the self-send\n// syntactic positions stdlib/test/actor_self_send_position_matrix_test.bt\n// covers exhaustively via BUnit, driven here end-to-end through the REPL\n// instead. See that matrix test's own fixture,\n// stdlib/test/fixtures/self_send_position_counter.bt, for the full probe\n// this is a small REPL-specific sample of.\n\nActor subclass: SelfSendPositionsReplActor\n  state: count = 0\n  state: log = #()\n  state: items :: List(Integer) = #(10, 20, 30)\n\n  internal bumpCount =>\n    self.count := self.count + 1\n    self.count\n\n  internal record: n =>\n    self.log := self.log ++ #(n)\n    n\n\n  getCount => self.count\n\n  getLog => self.log\n\n  // Cascade on self: every cascaded send shares `self` as its receiver, so\n  // each one's own actor-state mutation must thread through in order.\n  cascadeOnSelf =>\n    self record: 1; record: 2\n    self.log\n\n  // Conditional as a self-send argument: the conditional's own VALUE\n  // (whichever branch runs) becomes the argument to `record:`.\n  conditionalArgSelfSend: flag =>\n    self record: (flag ifTrue: [self bumpCount] ifFalse: [0])\n\n  // Self-send as a binary-op operand inside a whileTrue: CONDITION block.\n  whileTrueConditionSelfSend =>\n    i := 0\n    [(self bumpCount) < 3] whileTrue: [i := i + 1]\n    i\n\n  // Order-sensitive binary operand: the LEFT operand may raise. Evaluating\n  // it before the self-send (the correct order) means an out-of-range\n  // index raises before `bumpCount` ever runs, so no mutation lands — the\n  // behavioural half of the evaluation-order guarantee, not just the\n  // arithmetic half.\n  orderSensitiveBinaryOperandSelfSend: idx =>\n    (self.items at: idx) + (self bumpCount)",
       "explanation": "Actor fixture for tests/repl-protocol/cases/actor_self_send_positions.btscript (ADR 0118 / BT-3424) — a small, self-contained sample of the self-send syntactic positions stdlib/test/actor_self_send_position_matrix_test.bt covers exhaustively via BUnit, driven here end-to-end through the REPL instead. See that matrix test's own fixture, stdlib/test/fixtures/self_send_position_counter.bt, for the full probe this is a small REPL-specific sample of."
     },
     {

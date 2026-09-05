@@ -96,14 +96,27 @@ c4 getCount
 // A self-send as the right operand of a binary send used to drop its own
 // mutation while still computing the correct arithmetic result (the return
 // value fed through even before this phase; only the actor's own state
-// mutation was lost). Left operand (`self.log size`, evaluated first) is 0
-// against a fresh actor, `self bumpCount` advances `count` to 1 and
-// contributes 1, so the send's own result is `0 + 1`.
+// mutation was lost) — but the LEFT operand deciding whether the self-send
+// runs at ALL is the behavioural half of the evaluation-order guarantee,
+// not just the arithmetic half. In range: `at:` returns 20 first, then
+// `bumpCount` runs, so the result is `20 + 1` and the mutation lands.
 c5 := SelfSendPositionsReplActor spawn
 // => Actor(SelfSendPositionsReplActor, _)
 
-c5 binaryOperandSelfSend
-// => 1
+c5 orderSensitiveBinaryOperandSelfSend: 2
+// => 21
 
 c5 getCount
 // => 1
+
+// Out of range: `at:` raises BEFORE `bumpCount` ever runs, so no mutation
+// lands — reversing the evaluation order would let the self-send's
+// mutation through even on the error path, which this pins against.
+c6 := SelfSendPositionsReplActor spawn
+// => Actor(SelfSendPositionsReplActor, _)
+
+c6 orderSensitiveBinaryOperandSelfSend: 99
+// => ERROR: out of bounds
+
+c6 getCount
+// => 0

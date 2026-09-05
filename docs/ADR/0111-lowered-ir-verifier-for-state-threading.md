@@ -4261,10 +4261,10 @@ migrated consumer's `verify()` call covered its OWN construct's `Bind`
 sequence, but a self-send sitting as a binary-op operand, a keyword-send
 argument, or a `whileTrue:` condition was invisible to all of them, because
 nothing represented "an expression, compiled for its value, that also needs
-to advance `State`." Ten narrow fixes (BT-3392, BT-3396, BT-3399, BT-3402,
-BT-3403, BT-3405, BT-3406, BT-3385) chased instances of this one shape
-before [ADR 0118](0118-expression-level-state-threading-preludes.md) named
-it as a single missing abstraction rather than an open-ended list of
+to advance `State`." Ten narrow fixes (BT-3374, BT-3382, BT-3392, BT-3396,
+BT-3399, BT-3402, BT-3403, BT-3405, BT-3406, BT-3385) chased instances of
+this one shape before [ADR 0118](0118-expression-level-state-threading-preludes.md)
+named it as a single missing abstraction rather than an open-ended list of
 positions.
 
 **Superseded, not contradicted.** Addendum 7's own reasoning already named

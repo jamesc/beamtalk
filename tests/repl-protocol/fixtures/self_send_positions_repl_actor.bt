@@ -12,6 +12,7 @@
 Actor subclass: SelfSendPositionsReplActor
   state: count = 0
   state: log = #()
+  state: items :: List(Integer) = #(10, 20, 30)
 
   internal bumpCount =>
     self.count := self.count + 1
@@ -42,7 +43,10 @@ Actor subclass: SelfSendPositionsReplActor
     [(self bumpCount) < 3] whileTrue: [i := i + 1]
     i
 
-  // Order-sensitive binary operand: the self-send is the RIGHT operand, so
-  // the left operand's own read must still happen (and be sequenced)
-  // ahead of the self-send's mutation.
-  binaryOperandSelfSend => self.log size + (self bumpCount)
+  // Order-sensitive binary operand: the LEFT operand may raise. Evaluating
+  // it before the self-send (the correct order) means an out-of-range
+  // index raises before `bumpCount` ever runs, so no mutation lands — the
+  // behavioural half of the evaluation-order guarantee, not just the
+  // arithmetic half.
+  orderSensitiveBinaryOperandSelfSend: idx =>
+    (self.items at: idx) + (self bumpCount)
