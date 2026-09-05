@@ -64,7 +64,9 @@ Module {
                 blank_line_after_comments: false,
             },
             expression: ExpectDirective {
-                category: Dnu,
+                categories: [
+                    Dnu,
+                ],
                 reason: None,
                 span: Span {
                     start: 243,
@@ -120,7 +122,9 @@ Module {
                 blank_line_after_comments: false,
             },
             expression: ExpectDirective {
-                category: Type,
+                categories: [
+                    Type,
+                ],
                 reason: None,
                 span: Span {
                     start: 326,
@@ -186,7 +190,9 @@ Module {
                 blank_line_after_comments: false,
             },
             expression: ExpectDirective {
-                category: Unused,
+                categories: [
+                    Unused,
+                ],
                 reason: None,
                 span: Span {
                     start: 409,
@@ -247,7 +253,9 @@ Module {
                 blank_line_after_comments: false,
             },
             expression: ExpectDirective {
-                category: All,
+                categories: [
+                    All,
+                ],
                 reason: None,
                 span: Span {
                     start: 482,
@@ -292,7 +300,9 @@ Module {
                 blank_line_after_comments: false,
             },
             expression: ExpectDirective {
-                category: Dnu,
+                categories: [
+                    Dnu,
+                ],
                 reason: None,
                 span: Span {
                     start: 587,
@@ -309,7 +319,9 @@ Module {
                 blank_line_after_comments: false,
             },
             expression: ExpectDirective {
-                category: Type,
+                categories: [
+                    Type,
+                ],
                 reason: None,
                 span: Span {
                     start: 599,
@@ -347,10 +359,78 @@ Module {
             },
             preceding_blank_line: false,
         },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "BT-3387: a single @expect can list multiple categories, suppressing all",
+                        span: Span {
+                            start: 750,
+                            end: 757,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "of them on the same following expression",
+                        span: Span {
+                            start: 750,
+                            end: 757,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+                leading_blank_line: true,
+                blank_line_after_comments: false,
+            },
+            expression: ExpectDirective {
+                categories: [
+                    Dnu,
+                    Type,
+                ],
+                reason: None,
+                span: Span {
+                    start: 750,
+                    end: 767,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
+            },
+            expression: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        42,
+                    ),
+                    Span {
+                        start: 768,
+                        end: 770,
+                    },
+                ),
+                selector: Unary(
+                    "unknownMessage",
+                ),
+                arguments: [],
+                is_cast: false,
+                span: Span {
+                    start: 768,
+                    end: 785,
+                },
+            },
+            preceding_blank_line: false,
+        },
     ],
     span: Span {
         start: 243,
-        end: 629,
+        end: 785,
     },
     file_leading_comments: [],
     file_trailing_comments: [],
