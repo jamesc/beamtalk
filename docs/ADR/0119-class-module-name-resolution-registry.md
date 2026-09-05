@@ -1,7 +1,7 @@
 # ADR 0119: Class-Name↔Module-Name Resolution Registry
 
 ## Status
-Proposed
+Accepted (2026-09-05)
 
 ## Context
 
