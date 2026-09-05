@@ -201,14 +201,17 @@ pub struct SimpleLanguageService {
     /// populated (e.g. a sibling class not yet indexed), producing a false
     /// `Unresolved class` warning. `preload_workspace_source_files`'s own
     /// startup-sequence caller sets this `true` before preload starts and
-    /// `false` only after the project index is fully populated, and the
-    /// shared `publish_diagnostics_impl` skips sending (without losing the
-    /// update: the file's path is already tracked in the LSP's open-file
-    /// map by the time this is checked) whenever it's `true` — the
-    /// self-healing `republish_open_diagnostics` pass that follows is then
-    /// the only publish for that file during the race window, so at most
-    /// one, correctly-computed notification ever reaches the client instead
-    /// of two racing to be last. Both flips happen under the same lock this
+    /// `false` only after the project index is fully populated, and
+    /// `Backend::publish_diagnostics` (used by `did_open`/`did_change`/
+    /// `did_save`/`republish_open_diagnostics` — every caller that records
+    /// the file's path into the LSP's open-file map before publishing, not
+    /// the shared `publish_diagnostics_impl` those all funnel into, whose
+    /// other two callers target URIs that need not be open at all) skips
+    /// sending whenever it's `true` — the self-healing
+    /// `republish_open_diagnostics` pass that follows is then the only
+    /// publish for that file during the race window, so at most one,
+    /// correctly-computed notification ever reaches the client instead of
+    /// two racing to be last. Both flips happen under the same lock this
     /// flag itself lives behind (`Backend::service`), so a concurrent
     /// `didOpen`'s read of this flag is never reordered relative to the
     /// startup sequence's own flip.
@@ -312,7 +315,7 @@ impl SimpleLanguageService {
 
     /// Declare whether the LSP server's startup workspace preload is
     /// currently in-flight (BT-3433). See the `preload_in_progress` field
-    /// doc for why `publish_diagnostics_impl` consults this.
+    /// doc for why `Backend::publish_diagnostics` consults this.
     pub fn set_preload_in_progress(&mut self, in_progress: bool) {
         self.preload_in_progress = in_progress;
     }
