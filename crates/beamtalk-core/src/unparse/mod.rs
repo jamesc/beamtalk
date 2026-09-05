@@ -3458,7 +3458,7 @@ mod tests {
     #[test]
     fn identity_protoobject_proxy_bt() {
         assert_identity(include_str!(
-            "../../../../examples/getting-started/src/protoobject_proxy.bt"
+            "../../../../examples/getting-started/src/transparent_proxy.bt"
         ));
     }
 

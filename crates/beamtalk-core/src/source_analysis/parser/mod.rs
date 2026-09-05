@@ -582,6 +582,9 @@ pub enum DiagnosticCategory {
     /// Misplaced `declare native:` block (BT-3404) — an Erlang FFI type
     /// declaration outside a `stubs/` directory.
     NativeDeclarationLocation,
+    /// File name doesn't agree with its declared class name under Erlang
+    /// module-name case-folding (BT-3431) — breaks self-dispatch codegen.
+    FileClassNameMismatch,
 }
 
 /// A secondary note attached to a diagnostic (BT-1588).

@@ -895,6 +895,12 @@ pub(crate) fn compile_source_with_bindings(
             // stub declarations are parsed separately by
             // `load_project_stub_registry`, never through here.
             is_stub_file: false,
+            // BT-3431: file basename (without extension), so the shared
+            // pipeline can validate it agrees with the class declared here —
+            // see `ProjectDiagnosticContext::source_file_stem`'s doc.
+            source_file_stem: source_path
+                .file_stem()
+                .map(std::string::ToString::to_string),
         };
     // BT-3123: capture the `AnalysisResult` this pipeline's `analyse_full`
     // call already produced, so it can be handed to codegen below instead of

@@ -2028,7 +2028,7 @@ mod tests {
         // Tier2ValueCall statement, discarding the `{Result, NewState}`
         // tuple's second element — silently dropping the field mutation
         // performed inside the stored block. Structural check only (see
-        // stdlib/test/tier2_subexpr_and_conditional_block_test.bt for the
+        // stdlib/test/tier2subexpr_and_conditional_block_test.bt for the
         // runtime end-to-end check).
         let src = "Actor subclass: Ctr\n  state: total = 0\n  state: calls = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  tickIfPositive: x =>\n    x > 0 ifTrue: [self.calls := self.calls + 1. self.onTick value: x].\n    self.total\n";
         let code = codegen(src);

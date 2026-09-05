@@ -20,7 +20,7 @@
 //! reassignment DOES escape the block. `is_state_threaded_block_arg` below
 //! is the exemption list for exactly these shapes; see its doc comment for
 //! the codegen cross-reference and how BT-3385 verified it (`BUnit` runtime
-//! tests, `stdlib/test/bt_3385_dead_assignment_test.bt`).
+//! tests, `stdlib/test/bt3385dead_assignment_test.bt`).
 //!
 //! ```text
 //! // Fine — do: is a recognized selector, the mutation is threaded through
@@ -409,7 +409,7 @@ fn enter_block(
 /// conformance story for each half of it).
 ///
 /// BT-3385 confirmed empirically (`BUnit` runtime tests, see
-/// `stdlib/test/bt_3385_dead_assignment_test.bt`) that mutating ANY captured
+/// `stdlib/test/bt3385dead_assignment_test.bt`) that mutating ANY captured
 /// outer local inside these shapes persists after the call returns — not
 /// just an `inject:into:` accumulator parameter, which is why this replaces
 /// (rather than extends) the old accumulator-only exemption.
@@ -857,7 +857,7 @@ Object subclass: Foo
     // selectors — confirmed at runtime by the existing `mutation_corpus_value.bt`
     // / `mutation_corpus_class_method.bt` / `counted_loop_mutation_test.bt` BUnit
     // corpora (BT-1053/BT-2308/BT-2360) and, for this issue's own reported
-    // shape, by `stdlib/test/bt_3385_dead_assignment_test.bt`.
+    // shape, by `stdlib/test/bt3385dead_assignment_test.bt`.
 
     /// The issue's exact reproduction: a `sealed typed Value subclass` class
     /// method accumulating into a `Dictionary` via a `to:do:` loop. No longer

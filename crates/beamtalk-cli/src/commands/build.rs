@@ -4752,13 +4752,13 @@ mod tests {
         fs::create_dir_all(&src_path).unwrap();
 
         write_test_file(
-            &src_path.join("a.bt"),
+            &src_path.join("policy.bt"),
             "type RestartStrategy = #permanent | #transient | #temporary\n\
              typed Value subclass: Policy\n  \
              default -> RestartStrategy => #temporary\n",
         );
         write_test_file(
-            &src_path.join("b.bt"),
+            &src_path.join("spec.bt"),
             "typed Value subclass: Spec\n  \
              field: restart :: RestartStrategy = #temporary\n",
         );
@@ -4766,16 +4766,16 @@ mod tests {
         let build_dir = project_path.join("_build/dev/ebin");
         fs::create_dir_all(&build_dir).unwrap();
 
-        let source_files = vec![src_path.join("a.bt"), src_path.join("b.bt")];
+        let source_files = vec![src_path.join("policy.bt"), src_path.join("spec.bt")];
         let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached) =
             build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
         let all_alias_infos = collect_project_alias_infos(&source_files, "test_pkg");
 
         let options = default_options();
         let diagnostics = compile_file(
-            &src_path.join("b.bt"),
-            "bt@test_pkg@b",
-            &build_dir.join("bt@test_pkg@b.core"),
+            &src_path.join("spec.bt"),
+            "bt@test_pkg@spec",
+            &build_dir.join("bt@test_pkg@spec.core"),
             &options,
             &CompileContext {
                 hierarchy: ClassHierarchyContext {
@@ -4801,9 +4801,9 @@ mod tests {
         // Negative control: without `pre_loaded_aliases`, `RestartStrategy`
         // stays an opaque name and the original false positive returns.
         let diagnostics_unfixed = compile_file(
-            &src_path.join("b.bt"),
-            "bt@test_pkg@b_unfixed",
-            &build_dir.join("bt@test_pkg@b_unfixed.core"),
+            &src_path.join("spec.bt"),
+            "bt@test_pkg@spec_unfixed",
+            &build_dir.join("bt@test_pkg@spec_unfixed.core"),
             &options,
             &CompileContext {
                 hierarchy: ClassHierarchyContext {
