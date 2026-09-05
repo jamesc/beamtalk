@@ -1385,6 +1385,36 @@ impl Backend {
     }
 
     async fn publish_diagnostics(&self, uri: &Url) {
+        // BT-3433: a didOpen/didChange/didSave racing the LSP's startup
+        // workspace preload can compute diagnostics against a partially-
+        // populated `ProjectIndex` (e.g. a sibling class not yet indexed),
+        // producing a false `Unresolved class` warning. Sending it would
+        // race `republish_open_diagnostics` — the self-healing pass the
+        // startup sequence runs once preload completes — to be the last
+        // `publishDiagnostics` notification the client sees for this URI,
+        // and that race is not guaranteed to resolve in the correct
+        // notification's favor. Skip the send entirely: every caller of
+        // this method (`did_open`/`did_change`/`did_save`, plus
+        // `republish_open_diagnostics` itself) has already recorded this
+        // path as open (in `Backend::versions`) before calling here, so
+        // `republish_open_diagnostics` is guaranteed to (re)publish it
+        // once, correctly, after preload finishes — see
+        // `is_preload_in_progress`'s doc for why this check and that
+        // recording never race each other.
+        //
+        // This check lives here, not in the shared `publish_diagnostics_impl`
+        // below, precisely because that invariant does *not* hold for its
+        // other two callers, `reload_check_listener` and
+        // `seed_reload_diagnostics` — both explicitly target URIs that need
+        // not be open in the editor (see their own comments), so gating
+        // their sends here would silently and permanently drop a
+        // reload-induced diagnostic with nothing left to resend it.
+        {
+            let svc = self.service.lock().expect("service lock poisoned");
+            if svc.is_preload_in_progress() {
+                return;
+            }
+        }
         let version = self.file_version_for_uri(uri);
         publish_diagnostics_impl(
             &self.client,
@@ -1424,22 +1454,6 @@ async fn publish_diagnostics_impl(
     };
     let mut diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = {
         let svc = service.lock().expect("service lock poisoned");
-        // BT-3433: a didOpen/didChange racing the LSP's startup workspace
-        // preload can compute diagnostics against a partially-populated
-        // `ProjectIndex` (e.g. a sibling class not yet indexed), producing a
-        // false `Unresolved class` warning. Sending it would race
-        // `republish_open_diagnostics` — the self-healing pass the startup
-        // sequence runs once preload completes — to be the last
-        // `publishDiagnostics` notification the client sees for this URI, and
-        // that race is not guaranteed to resolve in the correct notification's
-        // favor. Skip the send entirely: the caller has already recorded this
-        // path as open (in `Backend::versions`) before calling here, so
-        // `republish_open_diagnostics` is guaranteed to (re)publish it once,
-        // correctly, after preload finishes — see `is_preload_in_progress`'s
-        // doc for why this check and that recording never race each other.
-        if svc.is_preload_in_progress() {
-            return;
-        }
         let source = svc.file_source(&path);
         svc.diagnostics(&path)
             .into_iter()
