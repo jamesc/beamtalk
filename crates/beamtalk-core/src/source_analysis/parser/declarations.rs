@@ -54,6 +54,36 @@ fn is_type_name_token(kind: Option<&TokenKind>) -> bool {
     matches!(kind, Some(TokenKind::Identifier(_) | TokenKind::Symbol(_)))
 }
 
+/// Returns `true` if the token kind is the `state:` or `field:` keyword that
+/// starts a state/field declaration (see [`Parser::parse_state_declaration`]).
+fn is_state_or_field_keyword(kind: &TokenKind) -> bool {
+    matches!(kind, TokenKind::Keyword(k) if k == "state:" || k == "field:")
+}
+
+/// Returns `true` if the token kind is the `classState:` keyword that starts
+/// a class-variable declaration (see [`Parser::parse_classvar_declaration`]).
+fn is_class_state_keyword(kind: &TokenKind) -> bool {
+    matches!(kind, TokenKind::Keyword(k) if k == "classState:")
+}
+
+/// Returns `true` if the token kind is the `handleScope:` keyword (ADR 0103).
+/// Only ever valid as a class-header clause, parsed before the class body
+/// loop runs (see [`Parser::parse_optional_handle_scope`]); a `handleScope:`
+/// reached *inside* the body loop is a misplaced-clause error.
+fn is_handle_scope_keyword(kind: &TokenKind) -> bool {
+    matches!(kind, TokenKind::Keyword(k) if k == "handleScope:")
+}
+
+/// Returns `true` for a `state:`/`field:`/`classState:` keyword — the set of
+/// declaration-start keywords that (unlike `handleScope:`) can appear
+/// anywhere in a class body, not just its header. BT-3429: single source for
+/// this three-keyword set so [`Parser::is_at_member_boundary`] and
+/// [`Parser::parse_method_body`]'s exit condition can't silently drift apart
+/// from each other or from [`Parser::current_token_could_start_a_declaration`].
+fn is_state_like_declaration_keyword(kind: &TokenKind) -> bool {
+    is_state_or_field_keyword(kind) || is_class_state_keyword(kind)
+}
+
 /// BT-1856 / BT-2829: a consumed declaration-level `@expect category`,
 /// bundled with the doc comment and plain leading comments that sat in its
 /// own leading trivia (see [`Parser::parse_pending_declaration_expect`]).
@@ -253,10 +283,8 @@ impl Parser {
         // trailing trivia instead of the header line's, silently dropping a
         // header-line comment (BT-2942).
         let header_line_end = self.current.saturating_sub(1);
-        let handle_scope_on_new_line = matches!(
-            self.current_kind(),
-            TokenKind::Keyword(k) if k == "handleScope:"
-        ) && self.current_token().has_leading_newline();
+        let handle_scope_on_new_line = is_handle_scope_keyword(self.current_kind())
+            && self.current_token().has_leading_newline();
 
         // Parse optional `handleScope: #symbol` clause (ADR 0103). Appears at
         // the head of the class body, like `native:` is a header clause.
@@ -346,7 +374,7 @@ impl Parser {
     /// Returns the bare symbol as an [`Identifier`] (name without the leading
     /// `#`), or `None` when no clause is present.
     fn parse_optional_handle_scope(&mut self) -> Option<Identifier> {
-        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "handleScope:") {
+        if !is_handle_scope_keyword(self.current_kind()) {
             return None;
         }
         self.advance(); // consume `handleScope:`
@@ -522,8 +550,7 @@ impl Parser {
             let pending = self.parse_pending_declaration_expect();
 
             // Check for state/field declaration: `state: fieldName ...` or `field: fieldName ...`
-            if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:")
-            {
+            if is_state_or_field_keyword(self.current_kind()) {
                 if let Some(mut state_decl) = self.parse_state_declaration() {
                     pending.apply_to(
                         &mut state_decl.expect,
@@ -534,7 +561,7 @@ impl Parser {
                 }
             }
             // Check for class variable declaration: `classState: varName ...`
-            else if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classState:") {
+            else if is_class_state_keyword(self.current_kind()) {
                 if let Some(mut classvar_decl) = self.parse_classvar_declaration() {
                     pending.apply_to(
                         &mut classvar_decl.expect,
@@ -586,7 +613,7 @@ impl Parser {
                         methods.push(method);
                     }
                 }
-            } else if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "handleScope:") {
+            } else if is_handle_scope_keyword(self.current_kind()) {
                 // ADR 0103: `handleScope:` is a header clause parsed *before* the
                 // body (see `parse_optional_handle_scope`). Reaching it here means
                 // it was misplaced after state/method declarations — emit a
@@ -1013,10 +1040,9 @@ impl Parser {
     /// avoid ever swallowing a real declaration while discarding garbage
     /// left over from a malformed `@expect` (BT-3387 review follow-up).
     fn current_token_could_start_a_declaration(&self) -> bool {
-        matches!(
-            self.current_kind(),
-            TokenKind::Keyword(k) if matches!(k.as_str(), "state:" | "field:" | "classState:" | "handleScope:")
-        ) || self.is_at_method_definition()
+        is_state_like_declaration_keyword(self.current_kind())
+            || is_handle_scope_keyword(self.current_kind())
+            || self.is_at_method_definition()
     }
 
     /// Parses the comma-separated category list and optional reason string
@@ -1252,7 +1278,7 @@ impl Parser {
         let mut comments = self.collect_comment_attachment();
 
         // Consume `classState:`
-        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classState:") {
+        if !is_class_state_keyword(self.current_kind()) {
             return None;
         }
         self.advance();
@@ -1773,7 +1799,7 @@ impl Parser {
             || self.is_at_native_declaration_boundary()
             || self.is_at_method_definition()
             || self.is_at_standalone_method_definition()
-            || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
+            || is_state_like_declaration_keyword(self.current_kind())
     }
 
     /// `is_at_type_alias_definition()`, gated by the same indentation guard
@@ -1864,7 +1890,7 @@ impl Parser {
             // does — see `is_at_declaration_level_expect`'s doc comment.
             && !self.is_at_declaration_level_expect()
             && !self.is_at_standalone_method_definition()
-            && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
+            && !is_state_like_declaration_keyword(self.current_kind())
             && !(self.in_class_body && self.current_token().indentation_after_newline() == Some(0))
         {
             let pos_before = self.current;
