@@ -10,7 +10,7 @@
 //! `maps:to_list` (for `doWithKey:`) using `lists:foldl` with state threading.
 
 use super::super::intrinsics::validate_block_arity_exact;
-use super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result, block_analysis};
+use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use super::{BodyKind, ListOpKind, ThreadingPlan};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -101,7 +101,7 @@ impl CoreErlangGenerator {
                 // `control_flow/list_ops/basic_ops.rs`'s `do:` — same shape here for a
                 // dictionary iteration: multiple rebound accumulator vars, no single
                 // "result" value, so signal open-with-no-value rather than naming one.
-                self.last_open_scope_result = Some(OpenScopeResult::NoValue);
+                self.direct_params_do_open_chain = true;
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -313,7 +313,7 @@ impl CoreErlangGenerator {
                 // `control_flow/list_ops/basic_ops.rs`'s `do:` — same shape here for a
                 // dictionary iteration: multiple rebound accumulator vars, no single
                 // "result" value, so signal open-with-no-value rather than naming one.
-                self.last_open_scope_result = Some(OpenScopeResult::NoValue);
+                self.direct_params_do_open_chain = true;
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -510,8 +510,8 @@ mod tests {
         // BT-3053: same shape as
         // control_flow::list_ops::tests::test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return,
         // but for the dictionary `do:` producer (dict_ops.rs:104) rather than
-        // list `do:` (basic_ops.rs:104) — both hit the identical
-        // `OpenScopeResult::NoValue` branch, but only the list-ops path had a
+        // list `do:` (basic_ops.rs:104) — both set the identical
+        // `direct_params_do_open_chain` flag, but only the list-ops path had a
         // regression test pinning the fix (flagged by the Claude review bot
         // on the original PR). `^` (Expression::Return, via the NLR-throw
         // path) fed the direct result of a mutation-threaded dictionary

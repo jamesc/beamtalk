@@ -1582,6 +1582,17 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// ADR 0118 phase 5b (BT-3422): `true` if `expr` (any nesting of
+    /// parens) was already registered by an enclosing `sequence_children`
+    /// call — a pure, non-consuming check for a caller deciding whether to
+    /// re-thread `expr` itself (wrong: double-dispatch) or read the
+    /// substitution back via the ordinary `expression_doc`/
+    /// `take_precompiled_subexpr` path.
+    pub(super) fn precompiled_subexprs_contains(&self, expr: &Expression) -> bool {
+        self.precompiled_subexprs
+            .contains_key(&expr.unwrap_parens().span())
+    }
+
     /// The `generate_expression` entry hook for
     /// [`Self::precompiled_subexprs`]: `Some(doc)` if `expr` was
     /// pre-sequenced, marking the entry consulted.
@@ -1615,7 +1626,7 @@ impl CoreErlangGenerator {
     /// [`Self::take_precompiled_subexpr`], so a new open-scope side channel
     /// only has to be added here.
     fn can_annotate_closed_expression(&self) -> bool {
-        self.last_open_scope_result.is_none() && self.direct_params_list_op_result.is_none()
+        !self.direct_params_do_open_chain && self.direct_params_list_op_result.is_none()
     }
 
     /// Removes every entry `scope` registered, once the parent compile
@@ -1644,40 +1655,28 @@ impl CoreErlangGenerator {
     }
 }
 
-/// Core Erlang code generator.
-///
-/// This is the main code generator that coordinates compilation of Beamtalk
-/// AST nodes to Core Erlang. It maintains:
-///
-/// - **Module name**: The Erlang module being generated
-/// - **Output buffer**: Accumulated Core Erlang code
-/// - **Variable context**: Scope management and variable generation
-/// - **State threading**: Simulated mutation via State, State1, State2...
-///
-/// BT-3053: what an open let-chain produced via `last_open_scope_result`
-/// stands for, once the chain is closed.
-///
-/// Before this type existed, the field was `Option<String>` and `"_"` did
-/// double duty as a pure "still open" boolean sentinel alongside genuine
-/// bound variable names — any consumer that pattern-matched `Some(var) =>
-/// leaf::var(var)` without checking for the literal string `"_"` risked
-/// emitting a *reference* to a variable that was never bound (a mutation-
-/// threaded `do:`/dict-`do:` nested in a direct-params loop has several
-/// rebound accumulator vars, not one meaningful "result", so its producer
-/// could only signal "stay open," not name a value). This enum makes the
-/// two cases distinct types instead of one type with a magic string, so a
-/// consumer that needs a value is forced to decide what `NoValue` means at
-/// its own call site rather than silently referencing an unbound `_`.
-enum OpenScopeResult {
-    /// A real, referenceable result variable bound by the open let-chain.
-    Value(String),
-    /// The chain stays open — more statements may follow directly after it
-    /// — but there is no single value to reference by name. Matches the
-    /// producing construct's own return-value contract when substituted
-    /// (e.g. `do:` always answers `nil`, so a consumer needing a value here
-    /// substitutes the `'nil'` atom rather than a variable reference).
-    NoValue,
-}
+// Core Erlang code generator.
+//
+// This is the main code generator that coordinates compilation of Beamtalk
+// AST nodes to Core Erlang. It maintains:
+//
+// - Module name: The Erlang module being generated
+// - Output buffer: Accumulated Core Erlang code
+// - Variable context: Scope management and variable generation
+// - State threading: Simulated mutation via State, State1, State2...
+//
+// ADR 0118 phase 5b (BT-3422): the ClassVars "open let-chain" protocol
+// (a `Document`-side channel every consumer had to know to keep open) is
+// deleted — a class-var producer's `Bind` is now a real
+// `threaded_ir::ThreadedValue` prelude entry, spliced or closed at each
+// consumer directly. The one remaining signal that old side channel used
+// to carry that ISN'T a class-var Bind: a mutation-threaded `do:`/dict-`do:`
+// nested in a direct-params loop (`in_direct_params_loop`) has several
+// rebound accumulator vars, not one meaningful result, so it can only
+// signal "the chain I return stays open, and answers `nil`" — never a
+// value to reference by name (BT-3053).
+// `CoreErlangGenerator::direct_params_do_open_chain` carries just that
+// narrower signal; see its own doc comment.
 
 /// BT-3131/BT-1449: RAII guard for [`CoreErlangGenerator::with_branch_context`]'s
 /// per-prefix save/reset/restore discipline (ADR 0111 §Phase A2). Replaces the
@@ -1915,18 +1914,20 @@ pub struct CoreErlangGenerator {
     /// at value-type / actor class entry; cleared in extension bodies (which
     /// don't carry the target class's field types).
     current_class_field_types: std::collections::HashMap<String, String>,
-    /// BT-412/BT-1448: Internal side-channel for open-scope expression results.
-    ///
-    /// Set deep inside `generate_expression` when a class var assignment, class method
-    /// self-send, or direct-params list-op produces an open let-chain. Read by:
-    /// - `expression_doc_with_open_scope()` — the public API for callers to detect open scopes
-    /// - The annotation guard in `generate_expression` — to skip line annotations on open chains
-    ///
-    /// External callers should use `expression_doc_with_open_scope()` instead of reading
-    /// this field directly. Functions that produce their own open let-chains
-    /// (`generate_field_assignment_open`, `generate_self_field_at_put_open`,
-    /// `generate_local_var_assignment_in_loop`) return the result variable explicitly.
-    last_open_scope_result: Option<OpenScopeResult>,
+    /// ADR 0118 phase 5b (BT-3422): narrow side-channel — set deep inside
+    /// `generate_expression` (`generate_list_do_with_mutations`/
+    /// `generate_dict_do_with_mutations`) exactly when a mutation-threaded
+    /// `do:`/dict-`do:` nested in a direct-params loop (`in_direct_params_loop`)
+    /// leaves its returned `Document` as an open, dangling let-chain that
+    /// answers `do:`'s own `nil` contract rather than a single value
+    /// (BT-3053 — see the doc comment above [`CoreErlangGenerator`]). Read
+    /// by [`Self::threaded_expression`]'s generic fallback, which converts
+    /// it into the `ThreadedValue` shape every other producer already
+    /// returns (`value: ValueRef::Literal("'nil'")`), and by the annotation
+    /// guard in `generate_expression` to skip line annotations on the open
+    /// chain. Reset to `false` by [`Self::threaded_expression`] before each
+    /// compile it wraps this way; never read or written anywhere else.
+    direct_params_do_open_chain: bool,
     /// ADR 0118 phase 1a (BT-3415): sub-expressions `threaded_expression`'s
     /// sequencing rule (`util.rs`) has already compiled — each one's value
     /// (a sequencing temp, or a state-effecting producer's pure result
@@ -2108,7 +2109,7 @@ impl CoreErlangGenerator {
             current_method_params: Vec::new(),
             current_method_param_types: std::collections::HashMap::new(),
             current_class_field_types: std::collections::HashMap::new(),
-            last_open_scope_result: None,
+            direct_params_do_open_chain: false,
             precompiled_subexprs: std::collections::HashMap::new(),
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
@@ -2854,9 +2855,9 @@ impl CoreErlangGenerator {
     /// expression whose caller is about to bind the WHOLE returned
     /// `Document` opaquely (`let X = <expr> in ...`, e.g.
     /// `emit_vt_threaded_local_assignment`'s `{Value, StateAcc}`-tuple
-    /// binding, or `generate_class_method_local_var_binding`'s generic
-    /// `expression_doc_with_open_scope` fallback when the callee sets no
-    /// open scope).
+    /// binding), catching up to a class-var mutation the ADR 0110 shadow
+    /// write recorded but that opaque compile never surfaced as its own
+    /// `ThreadedValue` prelude.
     ///
     /// The gap this closes: a class-method self-send inside a `Foldl*` body
     /// (`do:`/`collect:`/`select:`/`inject:into:`) correctly threads its own
@@ -3759,35 +3760,18 @@ impl CoreErlangGenerator {
                         },
                         *span,
                     );
-                    // BT-3374, generalized by ADR 0118 phase 1b (BT-3416):
-                    // `value` may itself be a plain (non-cast) actor
-                    // self-send that dispatches through `safe_dispatch`/`dispatch`
-                    // and returns a *new* actor state (e.g. `^self configureVictim`
-                    // nested inside an `ifTrue:` block) — or may have a state-
-                    // effecting self-send NESTED somewhere inside it (`^
-                    // self.items at: (self bump)`). The generic open-scope
-                    // path below never threads that new state anywhere — actor
-                    // self-sends don't populate `last_open_scope_result` (only
-                    // class-method self-sends and class-var assignments do, per
-                    // that helper's own doc comment) — so `generate_message_send`
-                    // instead reaches `generate_self_dispatch`'s *closed* form,
-                    // which computes the call's `Result` but drops its `NewState`
-                    // on the floor. `state` below then falls back to the state
-                    // version from BEFORE this call, so the NLR throw's 4-tuple
-                    // silently discards every mutation the self-send just made —
-                    // the call still runs, but its effects vanish the moment this
-                    // `^` unwinds. Route this shape through `threaded_expression`
-                    // instead — the same sequencing rule every other Actor-
-                    // instance consumer uses — which bumps `current_state_var()`
-                    // to the post-dispatch state (whichever self-send inside
-                    // `value` ran last) before `state` below is computed.
-                    // Excludes class methods (matching `in_actor_instance_context`):
-                    // `threaded_expression` threads only `State` (Actor instance),
-                    // never `current_class_var()` (ADR 0110's ClassVars
-                    // mechanism a class method actually needs — ADR 0118
-                    // phase 5), so a class-method self-send nested in `value`
-                    // keeps the pre-existing `else` behavior instead, exactly
-                    // as before this fix.
+                    // BT-3374, generalized by ADR 0118 phase 1b (BT-3416)
+                    // and phase 5b (BT-3422): `value` may itself dispatch a
+                    // self-send that threads new state (Actor `State` or,
+                    // since phase 5b, class-method `ClassVars`) — nested
+                    // anywhere inside it (`^ self.items at: (self bump)`),
+                    // not just at its own top level. `state` below must be
+                    // computed AFTER `value` threads, so it reflects
+                    // whatever `Bind` that dispatch just produced —
+                    // `threaded_expression` is the one mechanism that
+                    // threads BOTH prefixes correctly for whichever context
+                    // this `^` runs in.
+                    //
                     // ADR 0118 phase 2a (BT-3417): when THIS `Return` node
                     // is itself the sole child `threaded_expression`'s own
                     // `single_sequenced_child` branch is sequencing (e.g.
@@ -3804,17 +3788,42 @@ impl CoreErlangGenerator {
                     // failing with "never substituted" (confirmed by a
                     // `just test-bunit` failure on this exact shape during
                     // this migration) — so the "already sequenced" case
-                    // must fall through to the `else` branch below, whose
-                    // `expression_doc_with_open_scope` → `generate_expression`
-                    // call is what actually consults (and consumes) that
-                    // registration.
+                    // instead just reads that registration back via the
+                    // ordinary `expression_doc` (`generate_expression`'s
+                    // `take_precompiled_subexpr` entry), with no prelude of
+                    // its own to add here (it already ran in the outer
+                    // frame).
                     let value_already_sequenced = self
                         .precompiled_subexprs
                         .contains_key(&value.unwrap_parens().span());
-                    let (val_preamble, open_scope) = if !value_already_sequenced
-                        && self.in_actor_instance_context()
-                        && self.subexpr_needs_prelude(value)
+                    let (val_preamble, value_doc) = if value_already_sequenced {
+                        (Document::Nil, self.expression_doc(value)?)
+                    } else if self.in_class_method()
+                        && !(self.is_class_var_assignment(value.unwrap_parens())
+                            || self.is_class_method_self_send(value.unwrap_parens()))
                     {
+                        // ADR 0118 phase 5b (BT-3422): `value` is not ITSELF
+                        // a recognized producer at its own top level (e.g.
+                        // `^self foo` where `foo` is BT-2007 inherited, so
+                        // `is_class_method_self_send`'s `class_method_selectors()`
+                        // check excludes it) — `threaded_expression` would
+                        // still dispatch it, but through the opaque
+                        // `sequenced_send_children` fallback, which closes
+                        // over any `ClassVarsN` it rebinds internally: the
+                        // compiler's OWN `current_class_var()` bookkeeping
+                        // advances to track that rebind regardless, so
+                        // reading it below (`state`) would reference a name
+                        // never bound in THIS scope.
+                        // `refresh_class_var_after_opaque_scope` recovers
+                        // the live value via the ADR 0110 shadow write and
+                        // re-binds it to a name that IS in scope here.
+                        let cv_version_before = self.class_var_version();
+                        let result_doc = self.expression_doc(value)?;
+                        let refresh = self
+                            .refresh_class_var_after_opaque_scope(cv_version_before)
+                            .unwrap_or(Document::Nil);
+                        (refresh, result_doc)
+                    } else {
                         // ADR 0118 phase 2a (BT-3417): `current_frame()` —
                         // this generic `Return` handler fires for a `^`
                         // reached from any nesting, not only the flat
@@ -3825,35 +3834,7 @@ impl CoreErlangGenerator {
                         let tv = self.threaded_expression(value, frame)?;
                         let dispatch_doc = self.threaded_prelude_doc(&tv.prelude);
                         let result_doc = self.threaded_value_doc(&tv.value);
-                        (dispatch_doc, Some(result_doc))
-                    } else {
-                        // BT-3051: `value` may be a self-send that goes through the
-                        // open-scope pattern (`emit_class_var_result_unwrap`/
-                        // `finalize_dispatch_with_preamble`), returning a dangling
-                        // `let ... in ` chain via `last_open_scope_result` rather
-                        // than a closed expression — and critically, the chain also
-                        // rebinds the class-var snapshot (e.g. `ClassVars1`) that
-                        // `state` below must reference. Wrapping the chain into its
-                        // own closed sub-expression (as at other open-scope call
-                        // sites) would scope that rebind away before `state` could
-                        // see it — the class-var version `state` needs is exactly
-                        // the one this chain just produced. So instead of closing
-                        // the chain, thread it as a preamble ahead of the `throw`
-                        // call and reference `last_open_scope_result`'s variable
-                        // directly at the tuple's Value position, keeping both it
-                        // and the rebound class-var snapshot in scope for `state`.
-                        let (val_preamble, open_scope) =
-                            self.expression_doc_with_open_scope(value)?;
-                        let value_doc = match open_scope {
-                            Some(OpenScopeResult::Value(result_var)) => Some(leaf::var(result_var)),
-                            // BT-3053: e.g. `^(items do: [...])` inside a
-                            // direct-params loop — no single value was bound, so
-                            // substitute do:'s own `nil` return-value contract
-                            // rather than referencing a nonexistent variable.
-                            Some(OpenScopeResult::NoValue) => Some(Document::Str("'nil'")),
-                            None => None,
-                        };
-                        (val_preamble, value_doc)
+                        (dispatch_doc, result_doc)
                     };
                     // BT-761/BT-854: All NLR throws carry state as a 4-tuple.
                     // Actor methods use the current gen_server state; value type
@@ -3869,10 +3850,6 @@ impl CoreErlangGenerator {
                     } else {
                         self.current_self_var()
                     };
-                    let (preamble, value_doc) = match open_scope {
-                        Some(value_doc) => (Some(val_preamble), value_doc),
-                        None => (None, val_preamble),
-                    };
                     let throw_doc = docvec![
                         "call 'erlang':'throw'({'$bt_nlr', ",
                         leaf::var(nlr_token),
@@ -3882,10 +3859,7 @@ impl CoreErlangGenerator {
                         leaf::var(state),
                         "})"
                     ];
-                    Ok(match preamble {
-                        Some(p) => docvec![p, throw_doc],
-                        None => throw_doc,
-                    })
+                    Ok(docvec![val_preamble, throw_doc])
                 } else {
                     // Return in Core Erlang is just the value
                     self.generate_expression(value)

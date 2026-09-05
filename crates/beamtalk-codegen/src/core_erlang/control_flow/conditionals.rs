@@ -55,7 +55,7 @@ use super::super::threaded_ir::{
     self, BindOp, FrameId, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef, VersionPrefix,
     VersionedVar,
 };
-use super::super::{CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
+use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::StateAccFallbackReason;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -154,12 +154,11 @@ impl CoreErlangGenerator {
     /// into instead of the six callers' own opaque `Document` return.
     ///
     /// Two receiver shapes thread state through this position:
-    /// - BT-1942: a class-method self-send (or sub-expression containing one)
-    ///   emits its class-var mutation as an open let-chain, surfaced
-    ///   generically via `expression_doc_with_open_scope` — ADR 0118's
-    ///   `ClassVars` unification (phase 5) hasn't reached this yet, so the
-    ///   chain still lands in the prelude as one opaque `Statement` rather
-    ///   than a real `ClassVars` `Bind`.
+    /// - BT-1942/ADR 0118 phase 5b (BT-3422): a class-method self-send (or
+    ///   sub-expression containing one) is now recognized by
+    ///   `threaded_expression` itself (`compile_conditional_receiver`
+    ///   delegates to it directly), so its `ClassVars` mutation is a real
+    ///   `Bind`, not an opaque `Statement`.
     /// - BT-3382/BT-3396/ADR 0118 phase 4 (BT-3420): an ACTOR-INSTANCE
     ///   self-send anywhere in the receiver's sequenceable sub-tree — the
     ///   receiver itself (`(self recordOnce: which) ifTrue:ifFalse:`,
@@ -184,28 +183,17 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         frame: FrameId,
     ) -> Result<ThreadedValue> {
-        let span = receiver.unwrap_parens().span();
-        let mut prelude: Vec<ThreadedStmt> = Vec::new();
-        // ADR 0118 phase 2b (BT-3418): threads every state-effecting
-        // sub-expression nested in the receiver ahead of its own compile
-        // via the sequencing rule, exactly like every other `thread_ahead`
-        // call site below.
-        let thread_scope = self.thread_ahead(receiver, &mut prelude, frame)?;
-        let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        self.finish_precompiled_scope(thread_scope)?;
-        let value = match cond_open_scope {
-            Some(OpenScopeResult::Value(result_var)) => {
-                prelude.push(ThreadedStmt::Statement(cond_chain, span));
-                ValueRef::Var(result_var)
-            }
-            // BT-3053: no single value — substitute do:'s own `nil` contract.
-            Some(OpenScopeResult::NoValue) => {
-                prelude.push(ThreadedStmt::Statement(cond_chain, span));
-                ValueRef::Literal("'nil'")
-            }
-            None => ValueRef::Doc(cond_chain),
-        };
-        Ok(ThreadedValue { prelude, value })
+        // ADR 0118 phase 5b (BT-3422): `threaded_expression` now recognizes
+        // every producer this function used to handle by hand (an Actor
+        // self-send via the sequencing rule, AND — since `subexpr_needs_prelude`
+        // gained the class-var-producer check this issue adds — a
+        // same-class self-send/class-var assignment too), so this is a
+        // plain delegation. The two-call dance this replaced
+        // (`thread_ahead` then a second `generate_expression`-reaching
+        // compile) would otherwise double-dispatch a class-var receiver:
+        // `thread_ahead` now threads it, so a second compile must not
+        // re-run its producer a second time.
+        self.threaded_expression(receiver, frame)
     }
 
     /// ADR 0118 phase 4 (BT-3420): wraps a `_tuple` builder's raw
@@ -1137,58 +1125,18 @@ impl CoreErlangGenerator {
         // BT-3396/ADR 0118 phase 2a (BT-3417): as in `lower_field_assignment_bind`
         // — thread every order-safe self-send nested in the RHS (or the RHS
         // itself, `v := self bump`) as real `Bind`s before the RHS compiles
-        // and before either `source_version` below is read.
+        // and before either `source_version` below is read. ADR 0118 phase
+        // 5b (BT-3422): `thread_ahead`'s `subexpr_needs_prelude` now
+        // recognizes a class-var producer too (a same-class self-send or
+        // class-var assignment), so the former open-scope branch here (C4,
+        // BT-1397 — already dead in practice per ADR 0111 Addendum 5, no
+        // live program reached it) is now structurally unreachable: any
+        // such producer is threaded ahead of this point, and the plain
+        // compile below reads it back via `precompiled_subexprs`
+        // substitution, exactly like the C3b branch above.
         let thread_scope = self.thread_ahead(value, stmts, frame)?;
-        let (value_code, open_scope) = self.expression_doc_with_open_scope(value)?;
+        let value_code = self.expression_doc(value)?;
         self.finish_precompiled_scope(thread_scope)?;
-
-        if let Some(open_scope_result) = open_scope {
-            // C4 (BT-1397) — ADR 0111 Addendum 5 found no compilable repro
-            // reaching this sub-branch through this body loop: a
-            // class-method self-send routes through
-            // `value_type_codegen.rs`'s vt-conditional path instead
-            // (§Scope, §C4). The shape decomposes with the exact same
-            // idiom as the plain case below (a value-temp Statement, then
-            // a real mutation Bind) — modeled here for completeness rather
-            // than left opaque, even though no live program exercises it
-            // today.
-            let open_scope_value_doc = match open_scope_result {
-                OpenScopeResult::Value(v) => leaf::var(v),
-                OpenScopeResult::NoValue => Document::Str("'nil'"),
-            };
-            stmts.push(ThreadedStmt::Statement(value_code, span));
-            stmts.push(ThreadedStmt::Statement(
-                docvec![
-                    "let ",
-                    leaf::var(val_var.clone()),
-                    " = ",
-                    open_scope_value_doc,
-                    " in ",
-                ],
-                span,
-            ));
-            let source_version = self.state_version();
-            let current_state_name = self.current_state_var();
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'maps':'put'(",
-                    leaf::atom(state_key),
-                    ", ",
-                    leaf::var(val_var.clone()),
-                    ", ",
-                    leaf::var(current_state_name),
-                    ")",
-                ])),
-                shadow_write: false,
-                span,
-            });
-            self.bind_var(&id.name, &val_var);
-            return Ok(val_var);
-        }
 
         // C2 — the common case (plain / REPL-mode key).
         let source_version = self.state_version();
@@ -1284,12 +1232,11 @@ impl CoreErlangGenerator {
             // self-send), so without this check the statement below falls to
             // the C12 catch-all, which renders the whole `Return` as one
             // opaque `expression_doc` blob via the generic AST-directed
-            // `Expression::Return` handler. That handler reaches
-            // `generate_self_dispatch`'s *closed* form for a plain self-send
-            // value (`last_open_scope_result` is only populated by
-            // class-method self-sends/class-var assignments, per its own doc
-            // comment) — which computes the call's `Result` but drops its
-            // `NewState`, so the NLR throw's 4-tuple carries this branch's
+            // `Expression::Return` handler. That handler (pre-ADR-0118-phase-5b)
+            // reached `generate_self_dispatch`'s *closed* form for a plain
+            // self-send value — which computed the call's `Result` but
+            // dropped its `NewState`, so the NLR throw's 4-tuple carried
+            // this branch's
             // pre-call `StateAcc` instead of the mutation the self-send just
             // made. The call still runs; its effects vanish the instant this
             // `^` unwinds. Confirmed by `ThreadedIr::verify()` itself: the

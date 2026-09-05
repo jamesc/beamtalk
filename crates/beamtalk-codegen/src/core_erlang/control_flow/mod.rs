@@ -32,9 +32,7 @@ mod list_ops;
 mod while_loops;
 
 use super::threaded_ir::{self, ThreadedStmt};
-use super::{
-    CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result, block_analysis,
-};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::Expression;
@@ -2082,10 +2080,30 @@ impl CoreErlangGenerator {
                 // the loop-entry `ClassVars` value needs no extra plumbing
                 // here (Question 5: ordinary Core Erlang closure scoping —
                 // both are free variables at this `letrec` nesting depth).
+                //
+                // ADR 0118 phase 5b (BT-3422): `generate_expression(expr)`
+                // used to reach this same producer through
+                // `try_handle_class_method_self_send`/`try_handle_class_reference`,
+                // which left its `ThreadedValue` open (the pre-migration
+                // open-scope protocol this whole phase deletes). Both call
+                // sites now CLOSE it via `close_threaded_value_doc` (a
+                // self-contained `let ... in Value` expression, no longer
+                // ending in an open `in `) — appending that closed
+                // `Document` here and then appending MORE statements after
+                // it left a dangling, disconnected `Document` with no `in`
+                // joining them (`erlc`'s "syntax error before: 'let'").
+                // `threaded_expression` reaches the identical producer
+                // ([`Self::class_method_prelude_producer`]) but returns its
+                // prelude un-rendered — splicing `tv.prelude` here restores
+                // the open chain this branch has always required, and the
+                // producer's own result (`tv.value`) is intentionally never
+                // referenced, matching "Letrec's own body value is *always*
+                // discarded" below.
                 if self.loop_threads_class_vars {
                     has_mutations = true;
-                    let doc = self.generate_expression(expr)?;
-                    docs.push(doc);
+                    let frame = self.current_frame();
+                    let tv = self.threaded_expression(expr, frame)?;
+                    docs.push(self.threaded_prelude_doc(&tv.prelude));
                     // `Letrec`'s own body value is *always* discarded
                     // regardless of the last statement (a `whileTrue:`/
                     // `timesRepeat:` unconditionally evaluates to `nil`,
@@ -3148,92 +3166,46 @@ impl CoreErlangGenerator {
     }
 
     /// BT-3169 (ADR 0111 Addendum 9, Question 6): builds `"let <result_var> =
-    /// <expr's closed value> in "` — the exact prelude every `is_last`
-    /// `Foldl*` exit arm below builds by hand around
-    /// [`Self::closed_expression_doc`] — except, when `plan.threads_class_vars`,
-    /// it ALSO threads the (possibly self-send-advanced) class-var name
-    /// forward past `expr`'s own closed-scope boundary.
+    /// <expr's value> in "` — the exact prelude every `is_last` `Foldl*`
+    /// exit arm below builds by hand.
     ///
-    /// Why this is needed (confirmed empirically, not by inspection):
-    /// [`Self::closed_expression_doc`] does not itself introduce a new scope
-    /// boundary — it just appends a bare tail value to an already-open
-    /// let-chain (e.g. a self-send's own `ClassVarsN` rebind,
-    /// `emit_class_var_result_unwrap`). The boundary is introduced by EVERY
-    /// caller's own `"let <result_var> = ", expr_code, " in "` wrapper —
-    /// Core Erlang confines any name that closed chain binds (including
-    /// `ClassVarsN`) to that wrapper's own RHS, unreachable once its `in`
-    /// closes. `erlc` rejects the naive version with "unbound variable", not
-    /// a scoping warning — confirmed against a real `select:`-predicate
-    /// self-send repro. `push_discarded_stmt` (used for every NON-last
-    /// statement) does not have this problem — it deliberately keeps the
-    /// chain open at the current level instead of closing it inside a new
-    /// `let`; only the `is_last` position (where the exit arm's own
-    /// `"let <result_var> = ", ..., " in "` pattern is unavoidable) needs
-    /// this.
-    ///
-    /// The fix: when threading, don't let `expr`'s own closed value stand
-    /// alone — pair it with the live class-var name (still reachable at
-    /// this exact textual point, since we haven't left `expr`'s own open
-    /// chain yet) as a 2-tuple, unpack THAT within the SAME enclosing
-    /// `let`/`let`/`let` chain the caller already builds around
-    /// `result_var`, and re-mint a fresh class-var name (`next_class_var`)
-    /// for the unpacked copy — visible to every subsequent statement,
-    /// including this function's own final `{ClassVars, tail}` wrap.
+    /// ADR 0118 phase 5b (BT-3422): `expr`'s own top-level class-var
+    /// producer (a same-class self-send or a class-var assignment) is now
+    /// threaded ahead of this call by the caller's own `thread_ahead`
+    /// (`emit_non_assign_expr`'s first statement), which splices a real
+    /// `Bind` into the fold body's own frame — visible to every subsequent
+    /// statement (including this function's own final `{ClassVars, tail}`
+    /// wrap) without needing a scope to be kept open and re-paired here.
+    /// The 2-tuple-pairing dance this replaced was the pre-ADR-0118
+    /// mechanism for keeping a self-send's `ClassVarsN` rebind visible past
+    /// its own closed-expression boundary — `plan.threads_class_vars`
+    /// itself no longer changes what this function builds, since there is
+    /// no separate scope left to pair.
     fn bind_closed_expr_threading_class_vars(
         &mut self,
         expr: &Expression,
         result_var: &str,
-        plan: &ThreadingPlan,
+        _plan: &ThreadingPlan,
     ) -> Result<Document<'static>> {
-        if !plan.threads_class_vars {
-            let expr_code = self.closed_expression_doc(expr)?;
-            return Ok(docvec![
-                "let ",
-                leaf::var(result_var.to_string()),
-                " = ",
-                expr_code,
-                " in ",
-            ]);
-        }
-        let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-        let value_doc = match open_scope {
-            Some(OpenScopeResult::Value(v)) => leaf::var(v),
-            Some(OpenScopeResult::NoValue) => Document::Str("'nil'"),
-            None => {
-                // `expr` itself didn't open a new class-var-rebinding scope —
-                // any earlier statement's rebind (via `push_discarded_stmt`,
-                // which never confines it) is already visible normally at
-                // the outer level, so no extra unpack is needed here.
-                return Ok(docvec![
-                    "let ",
-                    leaf::var(result_var.to_string()),
-                    " = ",
-                    doc,
-                    " in ",
-                ]);
-            }
-        };
-        let cv = self.current_class_var();
-        let raw = self.fresh_temp_var("ClosedCV");
-        let cv_new = self.next_class_var();
+        // `expr` may dispatch a class-method self-send (locally declared or,
+        // per BT-2007, inherited) that rebinds `ClassVarsN` opaquely, closed
+        // by the time this call returns — `refresh_class_var_after_opaque_scope`
+        // recovers the live value via the ADR 0110 shadow write (rather than
+        // relying on lexical scope) so the fold's own `{ClassVars, tail}`
+        // wrap, built from `current_class_var()` after this call, sees it
+        // regardless of nesting depth.
+        let cv_version_before = self.class_var_version();
+        let expr_code = self.expression_doc(expr)?;
+        let refresh = self
+            .refresh_class_var_after_opaque_scope(cv_version_before)
+            .unwrap_or(Document::Nil);
         Ok(docvec![
             "let ",
-            leaf::var(raw.clone()),
-            " = ",
-            doc,
-            "{",
-            value_doc,
-            ", ",
-            leaf::var(cv),
-            "} in let ",
             leaf::var(result_var.to_string()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(raw.clone()),
-            ") in let ",
-            leaf::var(cv_new),
-            " = call 'erlang':'element'(2, ",
-            leaf::var(raw),
-            ") in ",
+            " = ",
+            expr_code,
+            " in ",
+            refresh,
         ])
     }
 
@@ -3395,7 +3367,7 @@ impl CoreErlangGenerator {
                     if threads_here {
                         docs.push(self.bind_closed_expr_threading_class_vars(expr, "_", plan)?);
                     } else {
-                        let doc = self.closed_expression_doc(expr)?;
+                        let doc = self.expression_doc(expr)?;
                         docs.push(doc);
                     }
                     if threads_here {
@@ -3415,7 +3387,7 @@ impl CoreErlangGenerator {
                     // BT-2350: ClassVars-visible discard for non-last statements
                     // (a class self-send leaves an open let-chain whose ClassVarsN
                     // must stay visible to following statements).
-                    self.push_discarded_stmt(docs, expr)?;
+                    docs.push(docvec!["let _ = ", self.expression_doc(expr)?, " in "]);
                 }
             }
             BodyKind::FoldlCollect => {
@@ -3469,7 +3441,7 @@ impl CoreErlangGenerator {
                     // BT-2350: a non-last statement may be a class self-send that
                     // emits an open let-chain; close it (keeping ClassVarsN visible)
                     // so the surrounding sequencing does not dangle a second `in`.
-                    self.push_discarded_stmt(docs, expr)?;
+                    docs.push(docvec!["let _ = ", self.expression_doc(expr)?, " in "]);
                 }
             }
             BodyKind::FoldlFilter { .. }
@@ -3493,7 +3465,7 @@ impl CoreErlangGenerator {
                 } else {
                     // BT-2350: see FoldlCollect — close a non-last open scope while
                     // keeping ClassVarsN visible for following statements.
-                    self.push_discarded_stmt(docs, expr)?;
+                    docs.push(docvec!["let _ = ", self.expression_doc(expr)?, " in "]);
                 }
             }
             BodyKind::FoldlInject => {
@@ -3520,7 +3492,7 @@ impl CoreErlangGenerator {
                 } else {
                     // BT-2350: see FoldlCollect — close a non-last open scope while
                     // keeping ClassVarsN visible for following statements.
-                    self.push_discarded_stmt(docs, expr)?;
+                    docs.push(docvec!["let _ = ", self.expression_doc(expr)?, " in "]);
                 }
             }
             BodyKind::FoldlSort => {
@@ -4211,33 +4183,25 @@ impl CoreErlangGenerator {
         let core_var = self
             .lookup_var(&id.name)
             .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-        // BT-3150 review follow-up: a class-method self-send on the RHS
-        // (`x := self bump`) produces an *open* let-chain via
-        // `emit_class_var_result_unwrap` (ending in `... in `, result value
-        // carried out-of-band). Using the plain `expression_doc` here and
-        // wrapping it in `let core_var = <val_doc> in` doubled the trailing
-        // `in` — the exact `core_parse_error` shape BT-3150 fixes for a bare
-        // self-send statement, just reached via assignment instead. Mirrors
-        // `generate_local_var_assignment_in_loop`'s BT-1397 fix: keep the
-        // open chain (and its `ClassVarsN` rebind) at this level, then bind
-        // `core_var` to the carried-out result as a separate, still-open
-        // `let`.
-        let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
+        // ADR 0118 phase 5b (BT-3422): a class-method self-send on the RHS
+        // (`x := self bump`), at any nesting depth, threads as a real
+        // prelude via `threaded_expression` — spliced ahead of this
+        // `let core_var = ... in` (mirrors
+        // `generate_local_var_assignment_in_loop`'s BT-1397 fix, now built
+        // on `ThreadedValue` rather than an open-chain side channel).
+        let frame = self.current_frame();
+        let tv = self.threaded_expression(value, frame)?;
+        let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+        let value_doc = self.threaded_value_doc(&tv.value);
         self.bind_var(&id.name, &core_var);
-        let doc = match open_scope {
-            Some(OpenScopeResult::Value(result_var)) => docvec![
-                val_doc,
-                "let ",
-                leaf::var(core_var),
-                " = ",
-                leaf::var(result_var),
-                " in ",
-            ],
-            Some(OpenScopeResult::NoValue) => {
-                docvec![val_doc, "let ", leaf::var(core_var), " = 'nil' in ",]
-            }
-            None => docvec!["let ", leaf::var(core_var), " = ", val_doc, " in ",],
-        };
+        let doc = docvec![
+            prelude_doc,
+            "let ",
+            leaf::var(core_var),
+            " = ",
+            value_doc,
+            " in ",
+        ];
         Ok(Some(doc))
     }
 
@@ -4505,10 +4469,13 @@ impl CoreErlangGenerator {
                 let thread_scope = self.thread_ahead(value, &mut prelude_stmts, frame)?;
                 let prelude_doc = self.threaded_prelude_doc(&prelude_stmts);
 
-                // Capture value expression (ADR 0018 bridge)
-                // BT-1397: Detect open-scope results from class method self-sends
-                // in the value expression.
-                let (value_code, open_scope) = self.expression_doc_with_open_scope(value)?;
+                // Capture value expression (ADR 0018 bridge). ADR 0118 phase
+                // 5b (BT-3422): `thread_ahead` above already threads any
+                // class-var producer nested in `value` (at any depth) as a
+                // real prelude, so the plain compile here reads the
+                // substituted value back via `precompiled_subexprs` — no
+                // open scope reaches this point any more.
+                let value_code = self.expression_doc(value)?;
                 self.finish_precompiled_scope(thread_scope)?;
 
                 // BT-3418: read AFTER `thread_ahead` above, so a threaded
@@ -4525,45 +4492,6 @@ impl CoreErlangGenerator {
                 } else {
                     format!("State{}", self.state_version())
                 };
-
-                // BT-1397: If the RHS produced an open scope (class method self-send),
-                // emit the open scope first, then bind the variable to the result.
-                // BT-3053: a `NoValue` scope (no single value — e.g. the RHS is a
-                // mutation-threaded `do:` nested in a direct-params loop) substitutes
-                // do:'s own `nil` contract rather than referencing a variable that
-                // doesn't exist.
-                let open_scope_value_doc = match open_scope {
-                    Some(OpenScopeResult::Value(open_scope_result)) => {
-                        Some(leaf::var(open_scope_result))
-                    }
-                    Some(OpenScopeResult::NoValue) => Some(Document::Str("'nil'")),
-                    None => None,
-                };
-                if let Some(open_scope_value_doc) = open_scope_value_doc {
-                    // BT-2703: see note below — rebind so later same-iteration reads
-                    // observe the freshly-written value.
-                    self.bind_var(&id.name, &val_var);
-                    return Ok((
-                        docvec![
-                            prelude_doc,
-                            value_code,
-                            "let ",
-                            leaf::var(val_var.clone()),
-                            " = ",
-                            open_scope_value_doc,
-                            " in let ",
-                            leaf::var(new_state),
-                            " = call 'maps':'put'(",
-                            leaf::atom(state_key.to_string()),
-                            ", ",
-                            leaf::var(val_var.clone()),
-                            ", ",
-                            leaf::var(current_state),
-                            ") in ",
-                        ],
-                        val_var,
-                    ));
-                }
 
                 // BT-2703: Rebind the local to the freshly-written value so a later read
                 // *within the same iteration* sees the new value rather than the stale

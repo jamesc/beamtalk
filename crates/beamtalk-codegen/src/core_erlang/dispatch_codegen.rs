@@ -39,7 +39,7 @@
 use super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
 };
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -245,149 +245,100 @@ impl CoreErlangGenerator {
     /// over arguments with comma separation found throughout dispatch codegen.
     /// Captures a comma-separated argument list as a `Document` (ADR 0018 bridge).
     ///
-    /// BT-1935: Uses `expression_doc_with_open_scope` to detect and close any
-    /// open let-chains produced by class method self-sends used as arguments.
-    /// Without this, an argument like `(self classMethod: x)` embeds an open
-    /// `let ... in ` chain inside the argument list, producing invalid Core Erlang.
-    ///
-    /// **WARNING (BT-1937):** This helper closes open let-chains inline and
-    /// rolls back `class_var_version`, which causes class-var mutations
-    /// performed by sub-expression class method self-sends to be silently
-    /// dropped. Use this only for actor-context dispatch sites that never
-    /// observe such open scopes (their args cannot mutate class vars). For
-    /// class-method-context dispatch sites, use
-    /// [`capture_args_with_preamble`](Self::capture_args_with_preamble) and
-    /// emit the returned preamble before the dispatch call so the
-    /// `ClassVarsN` bindings remain in scope at the outer level.
+    /// ADR 0118 phase 5b (BT-3422): each argument is compiled via
+    /// [`Self::threaded_expression_doc`], which closes any `ClassVars`
+    /// prelude inline (a same-class self-send/class-var-assignment
+    /// argument, e.g. `self classMethod: x`, no longer needs a dedicated
+    /// open/close dance — `close`-style rendering always produces a valid,
+    /// self-contained `Document`). `class_var_version` is rolled back
+    /// after each argument, matching this helper's pre-existing contract:
+    /// safe only where a class-var mutation performed by a sub-expression
+    /// argument does not need to stay visible afterward (actor-context
+    /// dispatch sites). For class-method-context dispatch sites where the
+    /// mutation must stay visible, use [`Self::thread_args`] instead and
+    /// splice the returned prelude.
     fn capture_argument_list_doc(&mut self, arguments: &[Expression]) -> Result<Document<'static>> {
+        let frame = self.current_frame();
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
             let saved_cv = self.class_var_version();
-            let (doc, open_scope) = self.expression_doc_with_open_scope(arg)?;
-            match open_scope {
-                Some(OpenScopeResult::Value(result_var)) => {
-                    // Close the open scope inline: the let-chain + result_var forms
-                    // a valid closed expression (e.g., `let X = ... in X`).
-                    // Roll back class var version since the ClassVarsN binding is
-                    // scoped inside the closed expression and not visible to
-                    // subsequent code.
-                    self.set_class_var_version(saved_cv);
-                    parts.push(docvec![doc, leaf::var(result_var)]);
-                }
-                // BT-3053: e.g. a message argument that's itself `items do:
-                // [...]` nested in a direct-params loop — no single value,
-                // substitute do:'s own `nil` contract.
-                Some(OpenScopeResult::NoValue) => {
-                    self.set_class_var_version(saved_cv);
-                    parts.push(docvec![doc, "'nil'"]);
-                }
-                None => {
-                    parts.push(doc);
-                }
-            }
+            // ADR 0118 phase 5b (BT-3422): see `subexpr_needs_prelude`'s doc
+            // comment — an already-precompiled arg is read back via
+            // `expression_doc`, never re-threaded.
+            let doc = if self.precompiled_subexprs_contains(arg) {
+                self.expression_doc(arg)?
+            } else {
+                self.threaded_expression_doc(arg, frame)?
+            };
+            self.set_class_var_version(saved_cv);
+            parts.push(doc);
         }
         Ok(Document::Vec(parts))
     }
 
-    /// BT-1937: Captures a sequence of sub-expressions, preserving left-to-right
-    /// evaluation order **even when only some sub-expressions produce open scopes**
-    /// from class method self-sends.
+    /// ADR 0118 phase 5b (BT-3422): the `ThreadedValue`-based replacement
+    /// for the deleted `capture_subexpr_sequence`/`hoist_subexpr_splits`/
+    /// `split_subexpr_for_preamble` — same "decide once, hoist all or
+    /// none" rule [`Self::sequence_children`] applies to a `MessageSend`'s
+    /// own re-compiled children, adapted to a caller that builds its own
+    /// `Document` directly rather than re-entering `generate_expression`.
     ///
-    /// Returns `(preamble, docs)` where `docs` is one document per input
-    /// expression in the same order. If no sub-expression produces an open
-    /// scope, the preamble is `Document::Nil` and each `doc` is the inline
-    /// expression document — there is no hoisting overhead in the common case.
-    ///
-    /// If at least one sub-expression produces an open scope, **every**
-    /// sub-expression is hoisted into the preamble in order:
-    /// - Sub-expressions with their own open scope contribute their existing
-    ///   let-chain (no rebinding — `result_var` is already in scope after the
-    ///   chain).
-    /// - Plain sub-expressions get a fresh `let _Var<i> = ... in ` binding.
-    ///
-    /// This is the key to preserving evaluation order: without the unconditional
-    /// hoist, a hoisted later sub-expression would execute its preamble before
-    /// the inline earlier sub-expression in the call site — reversing the
-    /// observable order of side effects (BT-1937 review feedback).
-    ///
-    /// `class_var_version` is NOT rolled back. Subsequent code (the call,
-    /// later sub-expressions, following statements) will see the advanced
-    /// version, so references to `ClassVars` pick up earlier mutations.
-    pub(super) fn capture_subexpr_sequence(
+    /// Returns `(prelude, docs)`: `docs` is one document per input
+    /// expression, in order. `prelude` is empty in the common (no
+    /// sub-expression needs one) case; otherwise every sub-expression up
+    /// to and including the last one that needs a prelude is hoisted, in
+    /// order, into `prelude` (a plain one via a fresh `let <prefix>N = ...
+    /// in`), preserving left-to-right evaluation order exactly as
+    /// `hoist_subexpr_splits` did (BT-1937).
+    pub(super) fn thread_subexprs(
         &mut self,
         exprs: &[&Expression],
         prefix: &str,
-    ) -> Result<(Document<'static>, Vec<Document<'static>>)> {
-        // First pass: split each sub-expression into (its_preamble, its_doc).
-        let mut splits: Vec<(Document<'static>, Document<'static>)> =
-            Vec::with_capacity(exprs.len());
-        for expr in exprs {
-            splits.push(self.split_subexpr_for_preamble(expr)?);
-        }
-
-        let (any_hoisted, preamble_parts, docs) = self.hoist_subexpr_splits(splits, prefix);
-        if any_hoisted {
-            Ok((Document::Vec(preamble_parts), docs))
-        } else {
-            Ok((Document::Nil, docs))
-        }
-    }
-
-    /// BT-3406 review follow-up: shared "decide once, hoist all or none" step
-    /// behind both [`capture_subexpr_sequence`](Self::capture_subexpr_sequence)
-    /// and `generate_cascade_args` (`expressions.rs`) — see the doc on
-    /// `capture_subexpr_sequence` for the evaluation-order invariant this
-    /// preserves.
-    ///
-    /// Given per-sub-expression `(preamble, value_doc)` splits (as produced by
-    /// [`split_subexpr_for_preamble`](Self::split_subexpr_for_preamble) or
-    /// `generate_field_assignment_open`), returns:
-    /// - `(false, vec![], value_docs)` if no sub-expression needs hoisting —
-    ///   `value_docs` are the original docs, safe to inline as-is.
-    /// - `(true, preamble_parts, value_docs)` if at least one sub-expression
-    ///   opened a scope — every sub-expression has been hoisted in order (a
-    ///   plain one via a fresh `let <prefix>N = ... in`, an already-open one
-    ///   by forwarding its existing preamble), and `value_docs` reference the
-    ///   hoisted results. The caller is responsible for splicing
-    ///   `preamble_parts` into its own preamble in order.
-    pub(super) fn hoist_subexpr_splits(
-        &mut self,
-        splits: Vec<(Document<'static>, Document<'static>)>,
-        prefix: &str,
-    ) -> (bool, Vec<Document<'static>>, Vec<Document<'static>>) {
-        let any_hoisted = splits.iter().any(|(p, _)| !matches!(p, Document::Nil));
-
-        if !any_hoisted {
-            let docs: Vec<_> = splits.into_iter().map(|(_, d)| d).collect();
-            return (false, Vec::new(), docs);
-        }
-
-        let mut preamble_parts: Vec<Document<'static>> = Vec::with_capacity(splits.len());
-        let mut var_docs: Vec<Document<'static>> = Vec::with_capacity(splits.len());
-        for (expr_preamble, expr_doc) in splits {
-            if matches!(expr_preamble, Document::Nil) {
-                let (binding, var) = self.bind_subexpr_to_temp(prefix, expr_doc);
-                preamble_parts.push(binding);
-                var_docs.push(leaf::var(var));
+    ) -> Result<(Vec<ThreadedStmt>, Vec<Document<'static>>)> {
+        let frame = self.current_frame();
+        let mut prelude: Vec<ThreadedStmt> = Vec::new();
+        let Some(k) = exprs.iter().rposition(|e| self.subexpr_needs_prelude(e)) else {
+            let mut docs = Vec::with_capacity(exprs.len());
+            for e in exprs {
+                docs.push(self.expression_doc(e)?);
+            }
+            return Ok((prelude, docs));
+        };
+        let mut docs: Vec<Document<'static>> = Vec::with_capacity(exprs.len());
+        for (i, e) in exprs.iter().enumerate() {
+            // ADR 0118 phase 5b (BT-3422): a child an ENCLOSING
+            // `sequence_children` call already registered is read back via
+            // the ordinary `expression_doc` (`take_precompiled_subexpr`)
+            // instead of re-threading it — see `subexpr_needs_prelude`'s
+            // doc comment for the double-dispatch this avoids.
+            if i > k || self.precompiled_subexprs_contains(e) {
+                docs.push(self.expression_doc(e)?);
+                continue;
+            }
+            let tv = self.threaded_expression(e, frame)?;
+            let must_bind = i < k && !tv.value_is_trivial();
+            prelude.extend(tv.prelude);
+            let value_doc = self.threaded_value_doc(&tv.value);
+            if must_bind {
+                let (binding, var) = self.bind_subexpr_to_temp(prefix, value_doc);
+                prelude.push(ThreadedStmt::Statement(binding, e.unwrap_parens().span()));
+                docs.push(leaf::var(var));
             } else {
-                preamble_parts.push(expr_preamble);
-                var_docs.push(expr_doc);
+                docs.push(value_doc);
             }
         }
-
-        (true, preamble_parts, var_docs)
+        Ok((prelude, docs))
     }
 
     /// The one temp-binding step behind every "hoist an earlier
     /// sub-expression so a later one's effects can run ahead of it" rule:
     /// mints a fresh `<prefix>N` temp and returns the `let <temp> = <doc>
-    /// in ` binding plus the temp's name. Shared by
-    /// [`Self::hoist_subexpr_splits`] (the class-method open-scope
-    /// protocol, BT-3406) and `threaded_expression`'s sequencing rule
-    /// (ADR 0118 §Decision 3, BT-3415) so the two cannot drift.
+    /// in ` binding plus the temp's name. Shared by [`Self::thread_subexprs`]
+    /// and `threaded_expression`'s sequencing rule (ADR 0118 §Decision 3,
+    /// BT-3415) so the two cannot drift.
     pub(super) fn bind_subexpr_to_temp(
         &mut self,
         prefix: &str,
@@ -398,88 +349,60 @@ impl CoreErlangGenerator {
         (binding, var)
     }
 
-    /// BT-1937: Captures an argument list using
-    /// [`capture_subexpr_sequence`](Self::capture_subexpr_sequence) and joins
-    /// the resulting docs with commas. Convenience wrapper for the common
-    /// "no receiver, just args" pattern.
+    /// ADR 0118 phase 5b (BT-3422): the `ThreadedValue`-based replacement
+    /// for the deleted `capture_args_with_preamble` — threads every
+    /// argument via [`Self::thread_subexprs`] and joins the resulting docs
+    /// with commas. Convenience wrapper for the common "no receiver, just
+    /// args" pattern.
     ///
-    /// Returns `(preamble, args_doc)` where `args_doc` is comma-separated.
-    pub(super) fn capture_args_with_preamble(
+    /// Returns `(prelude, args_doc)` where `args_doc` is comma-separated.
+    pub(super) fn thread_args(
         &mut self,
         arguments: &[Expression],
-    ) -> Result<(Document<'static>, Document<'static>)> {
+    ) -> Result<(Vec<ThreadedStmt>, Document<'static>)> {
         let exprs: Vec<&Expression> = arguments.iter().collect();
-        let (preamble, var_docs) = self.capture_subexpr_sequence(&exprs, "Arg")?;
-        Ok((preamble, Self::join_docs_with_commas(var_docs)))
+        let (prelude, var_docs) = self.thread_subexprs(&exprs, "Arg")?;
+        Ok((prelude, Self::join_docs_with_commas(var_docs)))
     }
 
-    /// BT-1942: Binds every argument expression to a fresh temp var via a
-    /// preamble, returning `(preamble, arg_refs, any_open_scope)`.
+    /// ADR 0118 phase 5b (BT-3422): the `ThreadedValue`-based replacement
+    /// for the deleted `bind_args_to_temps` — binds every argument
+    /// expression to a fresh temp var via a prelude, returning `(prelude,
+    /// arg_refs)`.
     ///
     /// Use this when an argument list is referenced multiple times in the
-    /// generated code (e.g., both branches of an inline `case ... of`),
-    /// to avoid double-evaluating side-effecting arguments and to hoist any
-    /// open let-chain produced by class method self-sends.
+    /// generated code (e.g., both branches of an inline `case ... of`), to
+    /// avoid double-evaluating side-effecting arguments.
     ///
-    /// Unlike [`capture_args_with_preamble`](Self::capture_args_with_preamble),
-    /// this always emits let-bindings in the preamble (even in the fast path
-    /// with no open scopes) so the returned `arg_refs` are pure variable
-    /// references with no side effects.
-    ///
-    /// `any_open_scope` is `true` if any argument produced an open let-chain
-    /// from a class method self-send — the caller should then propagate the
-    /// scope upward via `last_open_scope_result`.
-    pub(super) fn bind_args_to_temps(
+    /// Unlike [`Self::thread_args`], this always emits let-bindings in the
+    /// prelude (even in the fast path with no state effects) so the
+    /// returned `arg_refs` are pure variable references with no side
+    /// effects.
+    pub(super) fn thread_args_bound(
         &mut self,
         arguments: &[Expression],
         prefix: &str,
-    ) -> Result<(Document<'static>, Vec<Document<'static>>, bool)> {
-        let mut preamble_parts: Vec<Document<'static>> = Vec::new();
+    ) -> Result<(Vec<ThreadedStmt>, Vec<Document<'static>>)> {
+        let frame = self.current_frame();
+        let mut prelude: Vec<ThreadedStmt> = Vec::new();
         let mut arg_refs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
-        let mut any_open_scope = false;
         for arg in arguments {
-            let (arg_doc, open_scope) = self.expression_doc_with_open_scope(arg)?;
-            let arg_var = self.fresh_temp_var(prefix);
-            match open_scope {
-                Some(OpenScopeResult::Value(result_var)) => {
-                    any_open_scope = true;
-                    preamble_parts.push(arg_doc);
-                    preamble_parts.push(docvec![
-                        "let ",
-                        leaf::var(arg_var.clone()),
-                        " = ",
-                        leaf::var(result_var),
-                        " in ",
-                    ]);
-                }
-                // BT-3053: no single value — substitute do:'s own `nil` contract.
-                Some(OpenScopeResult::NoValue) => {
-                    any_open_scope = true;
-                    preamble_parts.push(arg_doc);
-                    preamble_parts.push(docvec![
-                        "let ",
-                        leaf::var(arg_var.clone()),
-                        " = 'nil' in ",
-                    ]);
-                }
-                None => {
-                    preamble_parts.push(docvec![
-                        "let ",
-                        leaf::var(arg_var.clone()),
-                        " = ",
-                        arg_doc,
-                        " in ",
-                    ]);
-                }
-            }
-            arg_refs.push(leaf::var(arg_var));
+            let span = arg.unwrap_parens().span();
+            // ADR 0118 phase 5b (BT-3422): see `subexpr_needs_prelude`'s doc
+            // comment — an already-precompiled arg is read back via
+            // `expression_doc`, never re-threaded.
+            let value_doc = if self.precompiled_subexprs_contains(arg) {
+                self.expression_doc(arg)?
+            } else {
+                let tv = self.threaded_expression(arg, frame)?;
+                prelude.extend(tv.prelude);
+                self.threaded_value_doc(&tv.value)
+            };
+            let (binding, var) = self.bind_subexpr_to_temp(prefix, value_doc);
+            prelude.push(ThreadedStmt::Statement(binding, span));
+            arg_refs.push(leaf::var(var));
         }
-        let preamble = if preamble_parts.is_empty() {
-            Document::Nil
-        } else {
-            Document::Vec(preamble_parts)
-        };
-        Ok((preamble, arg_refs, any_open_scope))
+        Ok((prelude, arg_refs))
     }
 
     /// BT-1937: Joins a list of documents into a comma-separated `Document::Vec`.
@@ -494,63 +417,40 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
-    /// BT-1937: Splits a sub-expression into a hoisted preamble and the
-    /// document used in its enclosing call/literal/operator.
+    /// ADR 0118 phase 5b (BT-3422): the `ThreadedValue`-based replacement
+    /// for the deleted `finalize_dispatch_with_preamble` — wraps a closed
+    /// dispatch `call_doc` with an optional threaded `prelude` from
+    /// [`Self::thread_args`]/[`Self::thread_subexprs`] or a receiver's own
+    /// prelude.
     ///
-    /// If the sub-expression produces an open let-chain (e.g., a class method
-    /// self-send that mutates class vars), the chain becomes the preamble and
-    /// the value used at the use site is just the result variable. Otherwise
-    /// the preamble is `Document::Nil` and the original doc is used directly.
-    /// `class_var_version` is NOT rolled back when a preamble is produced —
-    /// the `ClassVarsN` binding remains in scope at the outer level so
-    /// subsequent code (later args, the enclosing call, following statements)
-    /// can reference the new version.
-    pub(super) fn split_subexpr_for_preamble(
+    /// If `prelude` is empty, returns `call_doc` unchanged (the original
+    /// closed-expression behavior). Otherwise renders `prelude` through the
+    /// same [`render`](super::threaded_ir::render) every spliced prelude
+    /// goes through, followed by `let _ResultVar = call_doc in _ResultVar`
+    /// — always a self-contained, closed `Document` (no side channel: the
+    /// caller's own caller cannot observe a version this prelude bound,
+    /// matching every other `Document`-returning consumer this issue
+    /// migrates).
+    pub(super) fn close_prelude(
         &mut self,
-        expr: &Expression,
-    ) -> Result<(Document<'static>, Document<'static>)> {
-        let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-        match open_scope {
-            Some(OpenScopeResult::Value(result_var)) => Ok((expr_doc, leaf::var(result_var))),
-            // BT-3053: no single value — substitute do:'s own `nil` contract.
-            Some(OpenScopeResult::NoValue) => Ok((expr_doc, Document::Str("'nil'"))),
-            None => Ok((Document::Nil, expr_doc)),
-        }
-    }
-
-    /// BT-1937: Wraps a closed dispatch `call_doc` with an optional hoisted
-    /// preamble from [`capture_args_with_preamble`](Self::capture_args_with_preamble)
-    /// or from a receiver's open scope.
-    ///
-    /// If `preamble` is `Document::Nil`, returns `call_doc` unchanged (the
-    /// original closed-expression behavior).
-    ///
-    /// If `preamble` is non-empty, returns
-    /// `preamble + let _ResultVar = call_doc in ` (an open let-chain) and
-    /// stores `_ResultVar` in `last_open_scope_result`. The enclosing
-    /// expression context (statement, local-var binding, outer message send)
-    /// must close or further propagate the open scope so that the `ClassVarsN`
-    /// bindings stay visible to subsequent code.
-    pub(super) fn finalize_dispatch_with_preamble(
-        &mut self,
-        preamble: Document<'static>,
+        prelude: &[ThreadedStmt],
         call_doc: Document<'static>,
         result_prefix: &str,
     ) -> Document<'static> {
-        if matches!(preamble, Document::Nil) {
+        if prelude.is_empty() {
             return call_doc;
         }
+        let prelude_doc = self.threaded_prelude_doc(prelude);
         let result_var = self.fresh_temp_var(result_prefix);
-        let doc = docvec![
-            preamble,
+        docvec![
+            prelude_doc,
             "let ",
             leaf::var(result_var.clone()),
             " = ",
             call_doc,
             " in ",
-        ];
-        self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
-        doc
+            leaf::var(result_var),
+        ]
     }
 
     /// BT-412/BT-2007: Wrap a class-method call that may return either a
@@ -571,18 +471,17 @@ impl CoreErlangGenerator {
     ///                  end in
     /// ```
     ///
-    /// ADR 0118 phase 5a (BT-3421): returns a [`ThreadedValue`] whose
-    /// prelude carries the real `ClassVars` `Bind` this call rebinds —
-    /// `_Unwrapped` is the value, with no consuming body of its own.
-    /// Callers splice the prelude into their own frame or open-scope-convert
-    /// it via [`Self::threaded_value_to_open_scope_doc`] so `ClassVarsN`
-    /// stays visible to the continuation (the pre-ADR-0118 open-let-chain
-    /// contract, preserved byte-for-byte). Shared by the local-class-method
-    /// branch (branch 1) and the BT-2007 inherited-dispatch branch in
+    /// ADR 0118 phase 5a/5b (BT-3421/BT-3422): returns a [`ThreadedValue`]
+    /// whose prelude carries the real `ClassVars` `Bind` this call rebinds —
+    /// `_Unwrapped` is the value, with no consuming body of its own. Callers
+    /// splice the prelude into their own frame, or close it
+    /// ([`Self::close_threaded_value_doc`]) so `ClassVarsN` stays visible to
+    /// the continuation. Shared by the local-class-method branch (branch 1)
+    /// and the BT-2007 inherited-dispatch branch in
     /// [`generate_class_method_self_send`](Self::generate_class_method_self_send).
     pub(super) fn emit_class_var_result_unwrap(
         &mut self,
-        args_preamble: Document<'static>,
+        args_prelude: Vec<ThreadedStmt>,
         call_doc: Document<'static>,
     ) -> ThreadedValue {
         let call_result = self.fresh_temp_var("CMR");
@@ -687,7 +586,6 @@ impl CoreErlangGenerator {
         // not just to this producer's own isolated `construct_and_verify_class_var_bind`
         // check above.
         let call_stmt_doc = docvec![
-            args_preamble,
             "let ",
             leaf::var(call_result.clone()),
             " = ",
@@ -710,12 +608,12 @@ impl CoreErlangGenerator {
             " end in ",
         ];
         let span = beamtalk_core::source_analysis::Span::default();
+        let mut prelude = args_prelude;
+        prelude.push(ThreadedStmt::Statement(call_stmt_doc, span));
+        prelude.push(bind);
+        prelude.push(ThreadedStmt::Statement(unwrap_stmt_doc, span));
         ThreadedValue {
-            prelude: vec![
-                ThreadedStmt::Statement(call_stmt_doc, span),
-                bind,
-                ThreadedStmt::Statement(unwrap_stmt_doc, span),
-            ],
+            prelude,
             value: ValueRef::Var(result),
         }
     }
@@ -829,7 +727,7 @@ impl CoreErlangGenerator {
                 Some(WellKnownSelector::Class) => {
                     // BT-1937: Hoist any side effects in the receiver expression
                     // (none for a literal, but capture preserves the contract).
-                    let (preamble, _) = self.capture_subexpr_sequence(&[receiver], "CharCls")?;
+                    let (preamble, _) = self.thread_subexprs(&[receiver], "CharCls")?;
                     // Resolve to the Character class object so equality with
                     // the `Character` class reference holds — `class_of_object`
                     // for raw integer 65 would otherwise return Integer's
@@ -837,24 +735,16 @@ impl CoreErlangGenerator {
                     let call_doc = Document::Str(
                         "call 'beamtalk_primitive':'class_of_object_by_name'('Character')",
                     );
-                    return Ok(self.finalize_dispatch_with_preamble(
-                        preamble,
-                        call_doc,
-                        "CharClsRes",
-                    ));
+                    return Ok(self.close_prelude(&preamble, call_doc, "CharClsRes"));
                 }
                 Some(WellKnownSelector::RespondsTo) => {
                     let exprs: [&Expression; 2] = [receiver, &arguments[0]];
-                    let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "CharResp")?;
+                    let (preamble, mut docs) = self.thread_subexprs(&exprs, "CharResp")?;
                     let _recv = docs.remove(0);
                     let sel_doc = docs.remove(0);
                     let call_doc =
                         docvec!["call 'bt@stdlib@character':'has_method'(", sel_doc, ")"];
-                    return Ok(self.finalize_dispatch_with_preamble(
-                        preamble,
-                        call_doc,
-                        "CharRespRes",
-                    ));
+                    return Ok(self.close_prelude(&preamble, call_doc, "CharRespRes"));
                 }
                 Some(
                     WellKnownSelector::Perform
@@ -975,7 +865,7 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "CharDisp")?;
+        let (preamble, mut docs) = self.thread_subexprs(&all_exprs, "CharDisp")?;
         let actual_receiver = docs.remove(0);
         let args_doc = Self::join_docs_with_commas(docs);
 
@@ -989,7 +879,7 @@ impl CoreErlangGenerator {
             ")"
         ];
 
-        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "CharDispRes"))
+        Ok(self.close_prelude(&preamble, call_doc, "CharDispRes"))
     }
 
     /// Generates a cast (fire-and-forget) message send (BT-920).
@@ -1090,7 +980,7 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "Cast")?;
+        let (preamble, mut docs) = self.thread_subexprs(&all_exprs, "Cast")?;
         let actual_receiver = docs.remove(0);
         let args_doc = Self::join_docs_with_commas(docs);
 
@@ -1104,7 +994,7 @@ impl CoreErlangGenerator {
             "])",
         ];
 
-        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "CastRes"))
+        Ok(self.close_prelude(&preamble, call_doc, "CastRes"))
     }
 
     /// Generates unified runtime dispatch via `beamtalk_message_dispatch:send/3` (BT-430).
@@ -1147,7 +1037,7 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "Disp")?;
+        let (preamble, mut docs) = self.thread_subexprs(&all_exprs, "Disp")?;
         let actual_receiver = docs.remove(0);
         let args_doc = Self::join_docs_with_commas(docs);
 
@@ -1161,7 +1051,7 @@ impl CoreErlangGenerator {
             "])"
         ];
 
-        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "DispRes"))
+        Ok(self.close_prelude(&preamble, call_doc, "DispRes"))
     }
 
     /// Handles spawn, spawnWith:, await, awaitForever, and await: intrinsics.
@@ -1503,12 +1393,13 @@ impl CoreErlangGenerator {
             // deadlock. The class actor is already processing the outer call, so
             // routing through class_send would deadlock on gen_server:call.
             if self.in_class_method() && name.name == self.class_name() && pkg.is_none() {
-                // ADR 0118 phase 5a: the producer now returns a `ThreadedValue`;
-                // convert back to the legacy open-Document + `last_open_scope_result`
-                // contract this function's own caller (`generate_message_send`)
-                // still expects.
+                // ADR 0118 phase 5b (BT-3422): reached through ordinary
+                // `generate_expression`/`generate_message_send` (not
+                // `threaded_expression`'s own producer recognition), so the
+                // producer's prelude is closed inline into a self-contained
+                // `Document` here rather than left open.
                 let tv = self.generate_class_method_self_send(selector, arguments)?;
-                return Ok(Some(self.threaded_value_to_open_scope_doc(tv)));
+                return Ok(Some(self.close_threaded_value_doc(tv)));
             }
             if self.workspace_mode() && self.context == CodeGenContext::Repl {
                 // REPL top-level: check session bindings first
@@ -1580,14 +1471,11 @@ impl CoreErlangGenerator {
         }
         if let Expression::Identifier(id) = receiver {
             if id.name == "self" {
-                // ADR 0118 phase 5a (BT-3421): the producer now returns a
-                // `ThreadedValue`; convert it back to the legacy open-Document
-                // + `last_open_scope_result` contract this function's own
-                // caller (`generate_message_send`) still expects — the ~80
-                // open-scope consumers reached that way are ADR 0118 phase
-                // 5b's to migrate, not this issue's.
+                // ADR 0118 phase 5b (BT-3422): reached through ordinary
+                // `generate_expression`, not `threaded_expression`'s own
+                // producer recognition — close the prelude inline.
                 let tv = self.generate_class_method_self_send(selector, arguments)?;
-                return Ok(Some(self.threaded_value_to_open_scope_doc(tv)));
+                return Ok(Some(self.close_threaded_value_doc(tv)));
             }
         }
         Ok(None)
@@ -1599,17 +1487,15 @@ impl CoreErlangGenerator {
     /// class methods. Generates direct module function calls to avoid deadlock
     /// since class methods execute inside a `gen_server:call` handler.
     ///
-    /// ADR 0118 phase 5a (BT-3421): returns a [`ThreadedValue`] rather than
-    /// an open `Document` + `last_open_scope_result` side write. Every
-    /// branch's own class-var Bind (via [`Self::emit_class_var_result_unwrap`])
-    /// is now a real prelude entry; branches with no class-var Bind of their
-    /// own (instantiation intrinsics, reflective primitives, auto-exports,
-    /// the slot constructor) still route through [`Self::finalize_dispatch_with_preamble`]
-    /// (unmigrated — ADR 0118 phase 5b's to convert) and are adapted back
-    /// via [`Self::legacy_doc_to_threaded_value`], which reads whatever that
-    /// call left in `last_open_scope_result` (set when a NESTED sub-expression
-    /// argument's own class-var producer opened a scope — this branch's own
-    /// call never does).
+    /// ADR 0118 phase 5b (BT-3422): returns a [`ThreadedValue`] whose
+    /// prelude is real `ThreadedStmt`s throughout — every branch threads
+    /// its arguments via [`Self::thread_args`] and either folds the
+    /// resulting prelude into its own class-var `Bind`
+    /// ([`Self::emit_class_var_result_unwrap`]) or, for a branch with no
+    /// class-var `Bind` of its own (instantiation intrinsics, reflective
+    /// primitives, auto-exports, the slot constructor), closes the
+    /// argument prelude into a self-contained call `Document`
+    /// ([`Self::close_prelude`]) and wraps it as a pure `ThreadedValue`.
     #[allow(clippy::too_many_lines)] // Multiple dispatch branches (BT-773/BT-893/BT-996/BT-2003/BT-2007) share args-capture scaffolding.
     pub(super) fn generate_class_method_self_send(
         &mut self,
@@ -1626,9 +1512,12 @@ impl CoreErlangGenerator {
         // spawn) still use the process-dict-backed helpers (no export needed).
         if let Some(builder_class) = self.builder_class_method_class() {
             if let Some(doc) = self.try_instantiation_intrinsic(&selector_atom, arguments)? {
-                return Ok(self.legacy_doc_to_threaded_value(doc));
+                return Ok(ThreadedValue {
+                    prelude: Vec::new(),
+                    value: ValueRef::Doc(doc),
+                });
             }
-            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
             let call_doc = docvec![
                 "call 'beamtalk_class_dispatch':'class_self_dispatch_local'(",
@@ -1654,7 +1543,7 @@ impl CoreErlangGenerator {
             // does NOT roll back class_var_version, so the snapshot we take
             // afterwards (`cv`) reflects the post-args version — that is the
             // ClassVars binding to thread into the callee.
-            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
             let comma = if arguments.is_empty() { "" } else { ", " };
 
@@ -1690,7 +1579,7 @@ impl CoreErlangGenerator {
             // BT-1937: Hoist preambles from sub-expression class var mutations
             // in the args. cv is read AFTER capture_args_with_preamble so it
             // reflects the post-args ClassVars version.
-            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
             let comma = if arguments.is_empty() { "" } else { ", " };
             // BT-1408: Hash long keyword constructor atoms to stay within
@@ -1707,15 +1596,21 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
-            let doc = self.finalize_dispatch_with_preamble(args_preamble, call_doc, "Slot");
-            return Ok(self.legacy_doc_to_threaded_value(doc));
+            let doc = self.close_prelude(&args_preamble, call_doc, "Slot");
+            return Ok(ThreadedValue {
+                prelude: Vec::new(),
+                value: ValueRef::Doc(doc),
+            });
         }
         // BT-893: Instantiation selectors (new, new:, spawn, spawnWith:) must bypass
         // gen_server to avoid deadlock — route through class_self_new/class_self_spawn
         // (and BT-2004's class_self_spawn_as/class_self_spawn_with for the named-
         // registration variants).
         if let Some(doc) = self.try_instantiation_intrinsic(&selector_atom, arguments)? {
-            return Ok(self.legacy_doc_to_threaded_value(doc));
+            return Ok(ThreadedValue {
+                prelude: Vec::new(),
+                value: ValueRef::Doc(doc),
+            });
         }
 
         // BT-3057: Behaviour-protocol reflective primitives (`superclass`,
@@ -1741,7 +1636,7 @@ impl CoreErlangGenerator {
         if let Some(fun_name) =
             class_self_send_reflective_primitive(&selector_atom, arguments.len())
         {
-            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let comma = if arguments.is_empty() { "" } else { ", " };
             let call_doc = docvec![
                 "call 'beamtalk_behaviour_intrinsics':",
@@ -1752,12 +1647,11 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
-            let doc = self.finalize_dispatch_with_preamble(
-                args_preamble,
-                call_doc,
-                "ReflectivePrimitive",
-            );
-            return Ok(self.legacy_doc_to_threaded_value(doc));
+            let doc = self.close_prelude(&args_preamble, call_doc, "ReflectivePrimitive");
+            return Ok(ThreadedValue {
+                prelude: Vec::new(),
+                value: ValueRef::Doc(doc),
+            });
         }
 
         // BT-2007: Inherited class method — walk the hierarchy at runtime and
@@ -1781,7 +1675,7 @@ impl CoreErlangGenerator {
             // BT-1937: Hoist preambles from sub-expression class var mutations.
             let module = self.module_name.clone();
             let fun_name = selector_atom.replace(':', "");
-            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
 
             let call_doc = docvec![
                 "call ",
@@ -1792,11 +1686,14 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
-            let doc = self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassFn");
-            return Ok(self.legacy_doc_to_threaded_value(doc));
+            let doc = self.close_prelude(&args_preamble, call_doc, "ClassFn");
+            return Ok(ThreadedValue {
+                prelude: Vec::new(),
+                value: ValueRef::Doc(doc),
+            });
         }
 
-        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+        let (args_preamble, args_doc) = self.thread_args(arguments)?;
         let cv = self.current_class_var();
         // BT-3047 / ADR 0109 amendment: derive the target class from `ClassSelf`
         // (closure-captured, so correct even when this self-send executes inside a
@@ -1816,20 +1713,21 @@ impl CoreErlangGenerator {
             args_doc,
             "])"
         ];
-        // NOTE: prelude is OPEN — caller splices or open-scope-converts it
-        // (matches the local-class-method branch above).
+        // NOTE: prelude stays real `ThreadedStmt`s here — the caller splices
+        // it into its own frame or closes it (matches the local-class-method
+        // branch above).
         Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc))
     }
 
     /// BT-3047 / ADR 0109 amendment: the class-name expression derived from
     /// `ClassSelf` (closure-captured, so correct even inside a block executing in
     /// a foreign class's process), for inlining at instantiation-intrinsic call
-    /// sites. Deliberately inlined rather than let-bound: `finalize_dispatch_with_preamble`
-    /// treats *any* non-`Nil` preamble as an open let-chain the caller must
-    /// continue (setting `last_open_scope_result`), which only the argument-hoisting
-    /// preamble from `capture_args_with_preamble` is guaranteed to be consumed
-    /// correctly for — a zero-argument call (e.g. bare `self new`) produces a
-    /// `Nil` args preamble and must stay a *closed* expression. Recomputing this
+    /// sites. Deliberately inlined rather than let-bound: `close_prelude`
+    /// treats *any* non-empty prelude as needing a closing `let` the caller
+    /// must produce, which only the argument-hoisting prelude from
+    /// `thread_args` is guaranteed to be consumed correctly for — a
+    /// zero-argument call (e.g. bare `self new`) produces an empty args
+    /// prelude and must stay a *closed* expression. Recomputing this
     /// cheap expression (a suffix check + `binary_to_existing_atom`) inline at
     /// each use — up to three times per call site for the `spawn`/`spawnAs:`/
     /// `spawnWith:as:` intrinsics, which also resolve `is_abstract` — is
@@ -1887,7 +1785,7 @@ impl CoreErlangGenerator {
         match selector_atom {
             "new" | "new:" => {
                 // BT-1937: Hoist preambles from sub-expression class var mutations.
-                let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+                let (args_preamble, args_doc) = self.thread_args(arguments)?;
                 let call_doc = docvec![
                     "call 'beamtalk_class_instantiation':'class_self_new'(",
                     Self::class_self_name_doc(),
@@ -1897,14 +1795,10 @@ impl CoreErlangGenerator {
                     args_doc,
                     "])"
                 ];
-                Ok(Some(self.finalize_dispatch_with_preamble(
-                    args_preamble,
-                    call_doc,
-                    "NewRes",
-                )))
+                Ok(Some(self.close_prelude(&args_preamble, call_doc, "NewRes")))
             }
             "spawn" | "spawnWith:" => {
-                let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+                let (args_preamble, args_doc) = self.thread_args(arguments)?;
                 let call_doc = docvec![
                     "call 'beamtalk_class_instantiation':'class_self_spawn'(",
                     Self::class_self_name_doc(),
@@ -1918,8 +1812,8 @@ impl CoreErlangGenerator {
                     args_doc,
                     "])"
                 ];
-                Ok(Some(self.finalize_dispatch_with_preamble(
-                    args_preamble,
+                Ok(Some(self.close_prelude(
+                    &args_preamble,
                     call_doc,
                     "SpawnRes",
                 )))
@@ -1956,7 +1850,7 @@ impl CoreErlangGenerator {
         selector_atom: &'static str,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+        let (args_preamble, args_doc) = self.thread_args(arguments)?;
         let call_doc = docvec![
             "call 'beamtalk_class_instantiation':'",
             Document::Str(helper),
@@ -1972,7 +1866,7 @@ impl CoreErlangGenerator {
             args_doc,
             ")"
         ];
-        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, result_prefix))
+        Ok(self.close_prelude(&args_preamble, call_doc, result_prefix))
     }
 
     /// Generates synchronous self-dispatch for actor self-sends (BT-330).
@@ -2545,25 +2439,43 @@ impl CoreErlangGenerator {
         false
     }
 
-    /// Checks if an expression is a self-send to a class method (BT-412).
-    /// These need special scoping in class method bodies because they may
-    /// update `ClassVars` via `let ClassVarsN = ... in` which must not be wrapped.
+    /// Checks if an expression is a self-send to a class method (BT-412),
+    /// including an explicit same-class-name receiver (BT-773: `ClassName
+    /// foo` from inside `ClassName`'s own class method dispatches exactly
+    /// like `self foo` — `try_handle_class_reference` routes both through
+    /// [`Self::generate_class_method_self_send`] identically). These need
+    /// special scoping in class method bodies because they may update
+    /// `ClassVars` via `let ClassVarsN = ... in` which must not be wrapped.
+    ///
+    /// ADR 0118 phase 5b (BT-3422): missing the `ClassReference` shape here
+    /// left `subexpr_needs_prelude` blind to it — a locally-declared
+    /// same-class-name self-send nested as a cascade/message argument
+    /// (`w add: … value: (CascadeNestedKeywordArg noop: 1)`) was compiled
+    /// as an opaque, self-contained value instead of a real prelude, so the
+    /// `ClassVarsN` it introduced never became visible to a LATER sibling
+    /// argument that also needed it (`bt3406_cascade_nested_keyword_arg`).
     pub(super) fn is_class_method_self_send(&self, expr: &Expression) -> bool {
         if !self.in_class_method() || self.class_method_selectors().is_empty() {
             return false;
         }
-        if let Expression::MessageSend {
+        let Expression::MessageSend {
             receiver, selector, ..
         } = expr
-        {
-            if let Expression::Identifier(id) = receiver.as_ref() {
-                if id.name == "self" {
-                    let sel_atom = selector.name().to_string();
-                    return self.class_method_selectors().contains(&sel_atom);
-                }
-            }
+        else {
+            return false;
+        };
+        let is_self_receiver =
+            matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self");
+        let is_own_class_reference = matches!(
+            receiver.as_ref(),
+            Expression::ClassReference { name, package, .. }
+                if package.is_none() && name.name == self.class_name()
+        );
+        if !(is_self_receiver || is_own_class_reference) {
+            return false;
         }
-        false
+        let sel_atom = selector.name().to_string();
+        self.class_method_selectors().contains(&sel_atom)
     }
 
     /// Checks if an expression is a local variable assignment (`identifier := value`).
@@ -3034,7 +2946,7 @@ impl CoreErlangGenerator {
         // export, so this must not use the compiled `beamtalk_dispatch:super/5`
         // instance path below.
         if let Some(builder_class) = self.builder_class_method_class() {
-            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
             let call_doc = docvec![
                 "call 'beamtalk_class_dispatch':'class_self_dispatch'(",
@@ -3047,12 +2959,10 @@ impl CoreErlangGenerator {
                 args_doc,
                 "])"
             ];
-            // ADR 0118 phase 5a: the producer now returns a `ThreadedValue`;
-            // convert it back to the legacy open-Document +
-            // `last_open_scope_result` contract this function's own callers
-            // still expect.
+            // ADR 0118 phase 5b (BT-3422): reached through ordinary
+            // `generate_expression` — close the producer's prelude inline.
             let tv = self.emit_class_var_result_unwrap(args_preamble, call_doc);
-            return Ok(self.threaded_value_to_open_scope_doc(tv));
+            return Ok(self.close_threaded_value_doc(tv));
         }
 
         let class_name = self.class_name();
@@ -3225,7 +3135,7 @@ impl CoreErlangGenerator {
         // BT-1937: Capture receiver + arg as one ordered sequence so
         // left-to-right evaluation order is preserved.
         let exprs: [&Expression; 2] = [receiver, &arguments[0]];
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "Lookup")?;
+        let (preamble, mut docs) = self.thread_subexprs(&exprs, "Lookup")?;
         let arg_doc = docs.pop().expect("arg");
         let actual_receiver = docs.pop().expect("receiver");
 
@@ -3236,7 +3146,7 @@ impl CoreErlangGenerator {
             arg_doc,
             ")"
         ];
-        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "MethodLookup"))
+        Ok(self.close_prelude(&preamble, call_doc, "MethodLookup"))
     }
 
     /// Generates a binding-aware class method call (ADR 0019 Phase 3).
@@ -3280,8 +3190,7 @@ impl CoreErlangGenerator {
         // once (fixing a pre-existing double-compilation of `args_doc` in both
         // `case` branches) and so open let-chains from class method self-sends
         // propagate to the surrounding scope.
-        let (arg_preamble, arg_refs, any_open_scope) =
-            self.bind_args_to_temps(arguments, "BindArg")?;
+        let (arg_prelude, arg_refs) = self.thread_args_bound(arguments, "BindArg")?;
         let args_doc = Self::join_docs_with_commas(arg_refs);
 
         // BT-1639: Build the class-side fallback: direct call or gen_server
@@ -3368,23 +3277,16 @@ impl CoreErlangGenerator {
             " end"
         ];
 
-        // BT-1942: Propagate open scope upward if any arg mutated class vars.
-        if any_open_scope {
-            let result_var = self.fresh_temp_var("BindClassRes");
-            let doc = docvec![
-                lookup_binding,
-                arg_preamble,
-                "let ",
-                leaf::var(result_var.clone()),
-                " = ",
-                case_doc,
-                " in ",
-            ];
-            self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
-            Ok(doc)
-        } else {
-            Ok(docvec![lookup_binding, arg_preamble, case_doc])
-        }
+        // ADR 0118 phase 5b: thread the lookup binding ahead of the arg
+        // prelude (same order the pre-migration code built by hand), then
+        // close — this function returns a bare `Document`, so any `ClassVars`
+        // mutation an argument performed cannot stay visible beyond it.
+        let mut prelude = vec![ThreadedStmt::Statement(
+            lookup_binding,
+            beamtalk_core::source_analysis::Span::default(),
+        )];
+        prelude.extend(arg_prelude);
+        Ok(self.close_prelude(&prelude, case_doc, "BindClassRes"))
     }
 
     /// Generates workspace-mode class send for actor/value-type methods.
@@ -3421,8 +3323,7 @@ impl CoreErlangGenerator {
         // args, preserving "receiver first, then args" message-send semantics.
         // Then bind args to temp vars so they are evaluated once and their open
         // let-chains propagate upward.
-        let (arg_preamble, arg_refs, any_open_scope) =
-            self.bind_args_to_temps(arguments, "WsArg")?;
+        let (arg_prelude, arg_refs) = self.thread_args_bound(arguments, "WsArg")?;
         let args_doc = Self::join_docs_with_commas(arg_refs);
 
         let lookup_binding = docvec![
@@ -3449,22 +3350,14 @@ impl CoreErlangGenerator {
             "]) end"
         ];
 
-        if any_open_scope {
-            let result_var = self.fresh_temp_var("WsClassRes");
-            let doc = docvec![
-                lookup_binding,
-                arg_preamble,
-                "let ",
-                leaf::var(result_var.clone()),
-                " = ",
-                case_doc,
-                " in ",
-            ];
-            self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
-            Ok(doc)
-        } else {
-            Ok(docvec![lookup_binding, arg_preamble, case_doc])
-        }
+        // ADR 0118 phase 5b: see the analogous binding-send helper above —
+        // this function also returns a bare `Document`, so close.
+        let mut prelude = vec![ThreadedStmt::Statement(
+            lookup_binding,
+            beamtalk_core::source_analysis::Span::default(),
+        )];
+        prelude.extend(arg_prelude);
+        Ok(self.close_prelude(&prelude, case_doc, "WsClassRes"))
     }
 
     /// Generates a class-level method call (BT-215).
@@ -3513,7 +3406,7 @@ impl CoreErlangGenerator {
         // BT-1937: Hoist preambles from sub-expression class var mutations.
         let selector_atom = super::selector_mangler::safe_class_method_selector(&raw_selector);
         let class_pid_var = self.fresh_var("ClassPid");
-        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+        let (args_preamble, args_doc) = self.thread_args(arguments)?;
 
         let call_doc = docvec![
             "let ",
@@ -3530,7 +3423,7 @@ impl CoreErlangGenerator {
             "])"
         ];
 
-        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassCall"))
+        Ok(self.close_prelude(&args_preamble, call_doc, "ClassCall"))
     }
 
     /// BT-1639: Generates a direct function call to a sealed class method.
@@ -3550,7 +3443,7 @@ impl CoreErlangGenerator {
         // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
         // BT-1937: Hoist preambles from sub-expression class var mutations.
         let safe_fn = super::selector_mangler::safe_class_method_fn_name(selector);
-        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+        let (args_preamble, args_doc) = self.thread_args(arguments)?;
         let comma = if arguments.is_empty() { "" } else { ", " };
 
         // Core Erlang empty map is ~{}~ (not #{} which is Erlang source syntax)
@@ -3565,7 +3458,7 @@ impl CoreErlangGenerator {
             ")"
         ];
 
-        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "DirectCall"))
+        Ok(self.close_prelude(&args_preamble, call_doc, "DirectCall"))
     }
 
     /// BT-1639: Generates the `gen_server` `class_send` fallback for binding-aware dispatch.

@@ -22,7 +22,7 @@ use std::collections::HashSet;
 use super::threaded_ir::{
     self, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
 };
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -459,7 +459,7 @@ impl CoreErlangGenerator {
             all_exprs.push(&pair.key);
             all_exprs.push(&pair.value);
         }
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "MapLit")?;
+        let (preamble, mut docs) = self.thread_subexprs(&all_exprs, "MapLit")?;
 
         let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
         let mut docs_iter = docs.drain(..);
@@ -475,7 +475,7 @@ impl CoreErlangGenerator {
         }
         parts.push(Document::Str(" }~"));
         let literal_doc = Document::Vec(parts);
-        Ok(self.finalize_dispatch_with_preamble(preamble, literal_doc, "MapLit"))
+        Ok(self.close_prelude(&preamble, literal_doc, "MapLit"))
     }
 
     /// Generates code for a list literal: `#(1, 2, 3)` → `[1, 2, 3]`
@@ -496,7 +496,7 @@ impl CoreErlangGenerator {
         if let Some(t) = tail {
             all_exprs.push(t);
         }
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "ListLit")?;
+        let (preamble, mut docs) = self.thread_subexprs(&all_exprs, "ListLit")?;
 
         let mut parts: Vec<Document<'static>> = vec![Document::Str("[")];
         let mut docs_iter = docs.drain(..);
@@ -514,7 +514,7 @@ impl CoreErlangGenerator {
         }
         parts.push(Document::Str("]"));
         let literal_doc = Document::Vec(parts);
-        Ok(self.finalize_dispatch_with_preamble(preamble, literal_doc, "ListLit"))
+        Ok(self.close_prelude(&preamble, literal_doc, "ListLit"))
     }
 
     /// Generates code for an array literal: `#[1, 2, 3]`
@@ -530,7 +530,7 @@ impl CoreErlangGenerator {
         // BT-1937: Capture all elements as one ordered sequence so evaluation
         // order is preserved when sub-expressions have open scopes.
         let exprs: Vec<&Expression> = elements.iter().collect();
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "ArrLit")?;
+        let (preamble, mut docs) = self.thread_subexprs(&exprs, "ArrLit")?;
 
         let mut parts: Vec<Document<'static>> =
             vec![Document::Str("call 'beamtalk_array':'from_list'([")];
@@ -543,7 +543,7 @@ impl CoreErlangGenerator {
         }
         parts.push(Document::Str("])"));
         let literal_doc = Document::Vec(parts);
-        Ok(self.finalize_dispatch_with_preamble(preamble, literal_doc, "ArrLit"))
+        Ok(self.close_prelude(&preamble, literal_doc, "ArrLit"))
     }
 
     /// Generates code for field access (e.g., `self.value`).
@@ -646,13 +646,13 @@ impl CoreErlangGenerator {
         value: &Expression,
     ) -> Result<Document<'static>> {
         // BT-412: Class methods assign to class variables via ClassVars map threading.
-        // ADR 0118 phase 5a: the producer now returns a `ThreadedValue`;
-        // convert it back to the legacy open-Document + `last_open_scope_result`
-        // contract this function's own callers (~80 open-scope consumers,
-        // ADR 0118 phase 5b's to migrate) still expect.
         if self.in_class_method() {
-            let tv = self.generate_class_var_field_assignment(field_name, value)?;
-            return Ok(self.threaded_value_to_open_scope_doc(tv));
+            // ADR 0118 phase 5b (BT-3422): reached through ordinary
+            // `generate_expression`, not `threaded_expression`'s own
+            // producer recognition — close the prelude inline.
+            let frame = self.current_frame();
+            let tv = self.generate_class_var_field_assignment(field_name, value, frame)?;
+            return Ok(self.close_threaded_value_doc(tv));
         }
         // BT-833: Value type field assignment — Self-threading (immutable update).
         //
@@ -746,34 +746,27 @@ impl CoreErlangGenerator {
     ///
     /// ADR 0118 phase 5a (BT-3421): the prelude's trailing `Bind` leaves
     /// `ClassVarsN` bound with no consuming body of its own — callers
-    /// splice the prelude into their own frame (§Decision 4) or
-    /// open-scope-convert it via
-    /// [`Self::threaded_value_to_open_scope_doc`] (the "open, not closed"
-    /// sibling of `close()` — see that helper's doc comment) so
-    /// `ClassVarsN` stays visible to the continuation, matching the
-    /// pre-ADR-0118 open-let-chain contract exactly.
+    /// splice the prelude into their own frame (§Decision 4) or close it
+    /// ([`Self::close_threaded_value_doc`]) so `ClassVarsN` stays visible to
+    /// the continuation.
     ///
     /// BT-3164: delegates the actual `Bind` construction (mint/
     /// version-capture/shadow-write/isolated-verify) to the shared
     /// [`Self::lower_class_var_field_assignment_bind`] — see its own doc
     /// comment for the full ADR 0110 shadow-write rationale — and returns
-    /// it as a real, un-rendered [`ThreadedStmt::Bind`] in the prelude
-    /// (previously rendered immediately into an opaque `Document` and
-    /// exposed only via the `last_open_scope_result` side channel; unlike
-    /// `gen_server::methods`'s `lower_class_method_last_class_var_bind`,
+    /// it as a real, un-rendered [`ThreadedStmt::Bind`] in the prelude;
+    /// unlike `gen_server::methods`'s `lower_class_method_last_class_var_bind`,
     /// which already promoted its own copy of this exact sequence to a
-    /// real top-level `Bind` before this issue).
+    /// real top-level `Bind` before this issue.
     pub(super) fn generate_class_var_field_assignment(
         &mut self,
         field_name: &str,
         value: &Expression,
+        frame: super::threaded_ir::FrameId,
     ) -> Result<ThreadedValue> {
         let span = value.span();
-        let (preamble_doc, bind, val_var) = self.lower_class_var_field_assignment_bind(
-            field_name,
-            value,
-            super::threaded_ir::FrameId::ROOT,
-        )?;
+        let (preamble_doc, bind, val_var) =
+            self.lower_class_var_field_assignment_bind(field_name, value, frame)?;
         Ok(ThreadedValue {
             prelude: vec![ThreadedStmt::Statement(preamble_doc, span), bind],
             value: ValueRef::Var(val_var),
@@ -1188,7 +1181,7 @@ impl CoreErlangGenerator {
         // handlers and scoped inside the fun, so the block as a whole MUST
         // NOT propagate an open scope to its outer context. Clear the
         // side-channel in case the body's last statement left it set.
-        self.last_open_scope_result = None;
+        self.direct_params_do_open_chain = false;
         Ok(docvec![header, body_result?])
     }
 
@@ -1307,7 +1300,7 @@ impl CoreErlangGenerator {
         // BT-1937: Stateful blocks are also closed `fun (...) -> {Result, NewStateAcc}`
         // expressions and must not propagate an open scope from their body to
         // the outer context.
-        self.last_open_scope_result = None;
+        self.direct_params_do_open_chain = false;
 
         let (body_doc, _branch_final) = result?;
 
@@ -1598,67 +1591,32 @@ impl CoreErlangGenerator {
                 // of the compile, via `thread_ahead` — the Tier 2
                 // counterpart of `conditionals.rs`'s C12 catch-all.
                 let hoist_scope = self.thread_ahead(expr, stmts, frame)?;
-                // BT-1397: Detect open-scope results from class method self-sends.
-                let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                // ADR 0118 phase 5b (BT-3422): `thread_ahead` already
+                // threads any class-var producer nested in `expr` (at any
+                // depth) as a real `Bind` in `stmts` above — the plain
+                // compile below reads the substituted value back via
+                // `precompiled_subexprs`, so no open scope reaches this
+                // point any more.
+                let doc = self.expression_doc(expr)?;
                 self.finish_precompiled_scope(hoist_scope)?;
                 if is_last {
                     // Wrap result in {Result, StateAcc} tuple
                     let final_version = self.state_version();
-                    // BT-1397: If the expression left an open scope, close it with
-                    // the result variable then wrap in the Tier 2 tuple.
-                    match open_scope {
-                        Some(OpenScopeResult::Value(result_var)) => {
-                            stmts.push(ThreadedStmt::Statement(doc, span));
-                            stmts.push(ThreadedStmt::Return(
-                                ValueRef::Var(result_var),
-                                VersionedVar::new(VersionPrefix::State, final_version, frame),
-                                span,
-                            ));
-                        }
-                        // BT-3053: no single value — substitute do:'s own `nil` contract.
-                        Some(OpenScopeResult::NoValue) => {
-                            stmts.push(ThreadedStmt::Statement(doc, span));
-                            stmts.push(ThreadedStmt::Return(
-                                ValueRef::Literal("'nil'"),
-                                VersionedVar::new(VersionPrefix::State, final_version, frame),
-                                span,
-                            ));
-                        }
-                        None => {
-                            let result_var = self.fresh_temp_var("T2Res");
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec!["let ", leaf::var(result_var.clone()), " = ", doc, " in "],
-                                span,
-                            ));
-                            stmts.push(ThreadedStmt::Return(
-                                ValueRef::Var(result_var),
-                                VersionedVar::new(VersionPrefix::State, final_version, frame),
-                                span,
-                            ));
-                        }
-                    }
+                    let result_var = self.fresh_temp_var("T2Res");
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec!["let ", leaf::var(result_var.clone()), " = ", doc, " in "],
+                        span,
+                    ));
+                    stmts.push(ThreadedStmt::Return(
+                        ValueRef::Var(result_var),
+                        VersionedVar::new(VersionPrefix::State, final_version, frame),
+                        span,
+                    ));
                 } else {
-                    match open_scope {
-                        Some(OpenScopeResult::Value(result_var)) => {
-                            // BT-1397: Open scope from class method self-send — emit chain
-                            // then discard the result.
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![doc, "let _ = ", leaf::var(result_var), " in "],
-                                span,
-                            ));
-                        }
-                        // BT-3053: no single value to discard — its own rebindings
-                        // are already visible; nothing to bind here.
-                        Some(OpenScopeResult::NoValue) => {
-                            stmts.push(ThreadedStmt::Statement(doc, span));
-                        }
-                        None => {
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![Document::Str("let _ = "), doc, Document::Str(" in ")],
-                                span,
-                            ));
-                        }
-                    }
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![Document::Str("let _ = "), doc, Document::Str(" in ")],
+                        span,
+                    ));
                 }
             }
         }
@@ -1834,11 +1792,12 @@ impl CoreErlangGenerator {
         // visible at the same nesting level as everything else in `docs` —
         // and is caught by the `class_var_version_before_cascade` snapshot
         // above, taken before this call runs.
-        let (receiver_preamble, receiver_value_doc) =
-            self.split_subexpr_for_preamble(underlying_receiver)?;
+        let (receiver_prelude, mut receiver_docs) =
+            self.thread_subexprs(std::slice::from_ref(&underlying_receiver), "Recv")?;
+        let receiver_value_doc = receiver_docs.remove(0);
         let mut docs: Vec<Document<'static>> = Vec::new();
-        if !matches!(receiver_preamble, Document::Nil) {
-            docs.push(receiver_preamble);
+        if !receiver_prelude.is_empty() {
+            docs.push(self.threaded_prelude_doc(&receiver_prelude));
         }
         docs.push(docvec![
             "let ",
@@ -1898,12 +1857,15 @@ impl CoreErlangGenerator {
                 _ => self.generate_cascade_args(arguments, &mut docs)?,
             };
 
-            // BT-3412: once the last message's own (possibly hoisting) args
-            // are generated, `class_var_version` reflects every rebind the
-            // whole cascade produced. If it advanced, this last send must
-            // stay open too (`let _CascadeResult = ... in `) instead of being
-            // left as the cascade's bare tail value, so the rebind escapes
-            // into the caller's own let-chain via `last_open_scope_result`.
+            // BT-3412 / ADR 0118 phase 5b (BT-3422): once the last message's
+            // own (possibly hoisting) args are generated, `class_var_version`
+            // reflects every rebind the whole cascade produced. If it
+            // advanced, this last send is bound to a named result
+            // (`let _CascadeResult = ... in _CascadeResult`) rather than
+            // left as the cascade's bare tail value — `generate_cascade` is
+            // reached through ordinary `generate_expression`, with no open
+            // scope left to propagate, so the rebind is closed inline here
+            // instead of escaping via a side channel.
             let last_rebind_result_var =
                 if is_last && self.class_var_version() != class_var_version_before_cascade {
                     let result_var = self.fresh_temp_var("CascadeResult");
@@ -1938,7 +1900,7 @@ impl CoreErlangGenerator {
             }
 
             if let Some(result_var) = last_rebind_result_var {
-                self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
+                docs.push(leaf::var(result_var));
             }
         }
 
@@ -2053,40 +2015,18 @@ impl CoreErlangGenerator {
             BlockExprKind::Destructure { is_last } => {
                 self.generate_block_destructure(expr, is_last)
             }
-            BlockExprKind::LastClassMethodSelfSend => {
-                // BT-1397: Class method self-send as last expression in a block body.
-                // The generated code leaves an open scope ending with `in ` — close it
-                // with the unwrapped result variable (same pattern as
-                // lower_class_method_body, BT-3164; formerly generate_class_method_body).
-                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-                match open_scope {
-                    Some(OpenScopeResult::Value(result_var)) => {
-                        Ok(docvec![expr_doc, leaf::var(result_var)])
-                    }
-                    // BT-3053: no single value — substitute do:'s own `nil` contract.
-                    Some(OpenScopeResult::NoValue) => Ok(docvec![expr_doc, "'nil'"]),
-                    None => Ok(expr_doc),
-                }
-            }
-            BlockExprKind::LastExpr => {
-                // Last expression: its value is the block's result. BT-1937: a
-                // message send whose receiver/args contain a class method
-                // self-send may produce an open let-chain that we must close
-                // here so the block body is a complete closed expression. The
-                // ClassVarsN bindings inside the chain stay scoped inside the
-                // block's `fun () -> ... end` and do not leak to the outer
-                // method body — that is handled in generate_block by
-                // saving/restoring class_var_version and clearing
-                // last_open_scope_result.
-                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-                match open_scope {
-                    Some(OpenScopeResult::Value(result_var)) => {
-                        Ok(docvec![expr_doc, leaf::var(result_var)])
-                    }
-                    // BT-3053: no single value — substitute do:'s own `nil` contract.
-                    Some(OpenScopeResult::NoValue) => Ok(docvec![expr_doc, "'nil'"]),
-                    None => Ok(expr_doc),
-                }
+            BlockExprKind::LastClassMethodSelfSend | BlockExprKind::LastExpr => {
+                // Last expression: its value is the block's result. ADR 0118
+                // phase 5b (BT-3422): `threaded_expression` closes any
+                // `ClassVars` prelude (a class-method self-send, or one
+                // nested in a message's receiver/args) into a self-contained
+                // `Document` so the block body is a complete closed
+                // expression. The ClassVarsN bindings inside stay scoped
+                // inside the block's `fun () -> ... end` and do not leak to
+                // the outer method body — that is handled in generate_block
+                // by saving/restoring class_var_version.
+                let frame = self.current_frame();
+                self.threaded_expression_doc(expr, frame)
             }
             BlockExprKind::FieldAssignment => {
                 // Field assignment not at end: generate WITHOUT closing the value.
@@ -2098,41 +2038,19 @@ impl CoreErlangGenerator {
             BlockExprKind::ControlFlowWithThreadedVars => {
                 self.generate_block_control_flow_threaded(expr)
             }
-            BlockExprKind::ClassMethodSelfSend => {
-                // BT-1397: Class method self-send as non-last expression in a block body.
-                // The generated code leaves an open scope — emit it and discard the result.
-                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-                match open_scope {
-                    Some(OpenScopeResult::Value(result_var)) => Ok(docvec![
-                        expr_doc,
-                        "let _Unit = ",
-                        leaf::var(result_var),
-                        " in "
-                    ]),
-                    // BT-3053: no single value to discard — its own rebindings
-                    // are already visible; nothing to bind here.
-                    Some(OpenScopeResult::NoValue) => Ok(expr_doc),
-                    None => Ok(docvec!["let _Unit = ", expr_doc, " in "]),
-                }
-            }
-            BlockExprKind::SideEffect => {
-                // Not an assignment or loop - generate and discard result.
-                // BT-1937: handle open scopes from message sends whose
-                // receiver/args contain class method self-sends, by closing
-                // the chain here and binding the result var.
-                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-                match open_scope {
-                    Some(OpenScopeResult::Value(result_var)) => Ok(docvec![
-                        expr_doc,
-                        "let _Unit = ",
-                        leaf::var(result_var),
-                        " in "
-                    ]),
-                    // BT-3053: no single value to discard — its own rebindings
-                    // are already visible; nothing to bind here.
-                    Some(OpenScopeResult::NoValue) => Ok(expr_doc),
-                    None => Ok(docvec!["let _Unit = ", expr_doc, " in "]),
-                }
+            BlockExprKind::ClassMethodSelfSend | BlockExprKind::SideEffect => {
+                // Not an assignment or loop — generate and discard the
+                // result. ADR 0118 phase 5b (BT-3422): `threaded_expression`
+                // threads a class-method self-send (or one nested in a
+                // message's receiver/args) as a real prelude, closed here
+                // into a self-contained `Document` since a Tier 1 block body
+                // is a flat statement sequence with no `ThreadedIr` frame of
+                // its own to splice into.
+                let frame = self.current_frame();
+                let tv = self.threaded_expression(expr, frame)?;
+                let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+                let value_doc = self.threaded_value_doc(&tv.value);
+                Ok(docvec![prelude_doc, "let _Unit = ", value_doc, " in "])
             }
         }
     }
@@ -2294,37 +2212,56 @@ impl CoreErlangGenerator {
         // Capture the value expression (preserves side effects)
         // Important: capture BEFORE updating the mapping,
         // so that any uses of the variable in the RHS see the previous binding.
-        // BT-1397: Detect open-scope results from class method self-sends
-        // in the value expression.
-        let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
+        //
+        // ADR 0118 phase 5b (BT-3422): a class method's own top-level body
+        // splices a class-var producer's prelude directly (`lower_class_method_body`),
+        // but a block nested inside a class method (this function) still
+        // reaches this assignment for `result := self foo`-shaped RHSes. When
+        // `value` is ITSELF a recognized producer (`is_class_var_assignment`/
+        // `is_class_method_self_send`), `threaded_expression` gives it a real
+        // prelude whose rebound `ClassVarsN` stays lexically visible here.
+        // Otherwise `value` may still dispatch one that the compile below
+        // reaches opaquely and closes (e.g. BT-2007 inherited dispatch) —
+        // closing loses the mutated name's LEXICAL visibility, but not the
+        // mutation itself: the compiler's OWN `current_class_var()`
+        // bookkeeping advances to track it regardless, so a later statement
+        // in this same block body (e.g. `^result`, which reads
+        // `current_class_var()`) would otherwise reference a name never
+        // bound in its own scope. `refresh_class_var_after_opaque_scope`
+        // recovers the live value via the ADR 0110 shadow write and re-binds
+        // it to a name that IS in scope here.
+        if self.in_class_method()
+            && !(self.is_class_var_assignment(value) || self.is_class_method_self_send(value))
+        {
+            let cv_version_before = self.class_var_version();
+            let val_doc = self.expression_doc(value)?;
+            self.bind_var(var_name, &core_var);
+            let refresh = self
+                .refresh_class_var_after_opaque_scope(cv_version_before)
+                .unwrap_or(Document::Nil);
+            return Ok(docvec![
+                "let ",
+                leaf::var(core_var),
+                " = ",
+                val_doc,
+                " in ",
+                refresh,
+            ]);
+        }
+        let frame = self.current_frame();
+        let tv = self.threaded_expression(value, frame)?;
+        let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+        let value_doc = self.threaded_value_doc(&tv.value);
         // Now update the mapping so subsequent expressions see this binding.
         self.bind_var(var_name, &core_var);
-        // BT-1397: If the RHS produced an open scope (class method self-send),
-        // emit the open scope then bind the variable to its result.
-        match open_scope {
-            Some(OpenScopeResult::Value(open_scope_result)) => Ok(docvec![
-                val_doc,
-                "let ",
-                leaf::var(core_var),
-                " = ",
-                leaf::var(open_scope_result),
-                " in "
-            ]),
-            // BT-3053: no single value — substitute do:'s own `nil` contract.
-            Some(OpenScopeResult::NoValue) => Ok(docvec![
-                val_doc,
-                "let ",
-                leaf::var(core_var),
-                " = 'nil' in "
-            ]),
-            None => Ok(docvec![
-                "let ",
-                leaf::var(core_var.clone()),
-                " = ",
-                val_doc,
-                " in "
-            ]),
-        }
+        Ok(docvec![
+            prelude_doc,
+            "let ",
+            leaf::var(core_var),
+            " = ",
+            value_doc,
+            " in "
+        ])
     }
 
     /// Handle a non-last block-body statement that is a mutating control-flow
@@ -2753,21 +2690,36 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         docs: &mut Vec<Document<'static>>,
     ) -> Result<Vec<Document<'static>>> {
-        let mut splits: Vec<(Document<'static>, Document<'static>)> =
+        let mut splits: Vec<(Vec<ThreadedStmt>, Document<'static>)> =
             Vec::with_capacity(arguments.len());
         for arg in arguments {
             if Self::is_field_assignment(arg) {
                 let (doc, val_var) = self.generate_field_assignment_open(arg)?;
-                splits.push((doc, leaf::var(val_var)));
+                splits.push((
+                    vec![ThreadedStmt::Statement(doc, arg.unwrap_parens().span())],
+                    leaf::var(val_var),
+                ));
             } else {
-                splits.push(self.split_subexpr_for_preamble(arg)?);
+                let (prelude, mut arg_docs) =
+                    self.thread_subexprs(std::slice::from_ref(&arg), "CascadeArg")?;
+                splits.push((prelude, arg_docs.remove(0)));
             }
         }
 
-        let (any_hoisted, preamble_parts, arg_docs) =
-            self.hoist_subexpr_splits(splits, "CascadeArg");
-        if any_hoisted {
-            docs.extend(preamble_parts);
+        let any_hoisted = splits.iter().any(|(prelude, _)| !prelude.is_empty());
+        if !any_hoisted {
+            return Ok(splits.into_iter().map(|(_, doc)| doc).collect());
+        }
+        let mut arg_docs = Vec::with_capacity(splits.len());
+        for (prelude, doc) in splits {
+            if prelude.is_empty() {
+                let (binding, var) = self.bind_subexpr_to_temp("CascadeArg", doc);
+                docs.push(binding);
+                arg_docs.push(leaf::var(var));
+            } else {
+                docs.push(self.threaded_prelude_doc(&prelude));
+                arg_docs.push(doc);
+            }
         }
         Ok(arg_docs)
     }
