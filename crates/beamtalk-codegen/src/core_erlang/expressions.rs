@@ -1159,6 +1159,19 @@ impl CoreErlangGenerator {
         // is a separate Core Erlang `fun`, so any let-bindings inside it are not
         // visible to the outer method body.
         let saved_class_var_version = self.class_var_version();
+        // BT-3433: Save state_version too. A pure block's body can still
+        // contain a conditional/field-mutation whose own state threading
+        // bumps `state_version` (deliberately visible to later statements
+        // *within this same block* — see `generate_block_body_slice`'s doc
+        // comment), but the closure is a separate Core Erlang `fun`: any
+        // `StateN` it binds is scoped to that `fun` and unreachable once it
+        // returns. Without restoring here, the bumped counter leaked into
+        // the enclosing method, which went on referencing a `StateN` that
+        // was never bound in its own scope — an unbound-variable `core_lint`
+        // failure at a call site with two sibling block arguments (e.g.
+        // `ifOk:ifError:`), where the second block, or the code following
+        // the whole call, read the leaked version.
+        let saved_state_version = self.state_version();
 
         let mut param_parts: Vec<Document<'static>> = Vec::new();
         for (i, param) in block.parameters.iter().enumerate() {
@@ -1175,6 +1188,7 @@ impl CoreErlangGenerator {
         let body_result = self.generate_block_body(block);
         self.block_depth -= 1;
         self.set_class_var_version(saved_class_var_version);
+        self.set_state_version(saved_state_version);
         self.pop_scope();
         // BT-1937: The block is a closed `fun () -> ... end` expression. Any
         // open let-chain produced inside the body is closed by the body

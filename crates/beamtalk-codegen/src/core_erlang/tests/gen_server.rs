@@ -6799,6 +6799,38 @@ fn bt3392_self_dispatch_nested_in_binary_op_operand_threads_state_and_compiles_t
 }
 
 #[test]
+fn bt3433_pure_block_arg_state_mutation_does_not_leak_state_version_and_compiles_through_erlc() {
+    // BT-3433: a generic keyword message (not a recognized control-flow
+    // intrinsic) taking two block-literal arguments, where the FIRST block
+    // has no direct field write and no *captured local* mutation (so
+    // `generate_block` picks the plain/Tier-1 path, not
+    // `generate_block_stateful`, and `validate_stored_closure`'s
+    // `field_writes` guard never fires) but its own last statement is a
+    // conditional whose true-branch invokes a Block *stored in a field*
+    // (`self.callback value: v`) — the same shape `WorkflowWatcher>>doReload`'s
+    // `ifOk:ifError:` block compiles to (`self.onReload value:value:`
+    // inside a nested `ifFalse:`). Invoking a stored Block is conservatively
+    // treated as possibly Tier 2 (it might itself thread new actor state
+    // back), so the conditional's own state threading bumps `state_version`
+    // — deliberately visible to later statements *inside that same block*
+    // — but the block is a separate Core Erlang `fun`, so the bump must not
+    // survive once `generate_block` returns. Before the fix, it did: the
+    // method's own final `{reply, _, StateN}` (and the sibling `ifError:`
+    // block, if it read state) referenced a `StateN` never bound outside
+    // the first block's closure — an unbound variable `erlc` failure
+    // discovered compiling a real actor.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: callback = nil\n\n  trigger: x =>\n    x\n      ifOk: [:v |\n        true\n          ifTrue: [self.callback value: v]\n          ifFalse: [nil]\n      ]\n      ifError: [:e |\n        nil\n      ]\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3433_pure_block_arg_state_mutation").with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert_compiles_through_erlc("bt3433_pure_block_arg_state_mutation", &code);
+}
+
+#[test]
 fn bt3392_binary_op_hoist_does_not_reorder_past_a_non_self_send_operand() {
     // BT-3392 code review finding: `(self.items at: idx) + (self
     // bumpCount)` — the left operand is a message send but NOT a self-send,
