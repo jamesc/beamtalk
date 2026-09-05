@@ -4174,6 +4174,20 @@ impl CoreErlangGenerator {
             } else if is_last {
                 let doc = self.generate_class_method_last_expr(expr, has_class_vars)?;
                 stmts.push(ThreadedStmt::Statement(doc, span));
+            } else if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
+                // ADR 0118 phase 5a (BT-3421): splice the real `ClassVars`
+                // prelude instead of wrapping one opaque `Statement` around
+                // an already-rendered open-Document (`generate_class_method_non_last_expr`'s
+                // old branch for this same condition) — every non-last
+                // class-var mutation is now a genuine, verified `Bind` in
+                // this body's own IR, closing the ADR 0111 Addendum 6 gap
+                // `verify_body_with_opaque_version_gaps`'s `ClassVars`
+                // backfill used to paper over for class methods. The
+                // statement's own value is discarded (matching the old
+                // behaviour: nothing here ever referenced it), so only the
+                // prelude is spliced.
+                let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
+                stmts.extend(tv.prelude);
             } else {
                 let doc = self.generate_class_method_non_last_expr(expr)?;
                 stmts.push(ThreadedStmt::Statement(doc, span));
@@ -4505,15 +4519,17 @@ impl CoreErlangGenerator {
     }
 
     /// Generates code for a non-last expression in a class method body.
+    ///
+    /// ADR 0118 phase 5a (BT-3421): a class-var assignment or class-method
+    /// self-send is intercepted one level up, in `lower_class_method_body`,
+    /// which splices its real `ClassVars` prelude directly instead of
+    /// calling this function — so this function's own callers never reach
+    /// it with either of those shapes any more.
     fn generate_class_method_non_last_expr(
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
-            // Class var assignment or class method self-send: the generated code
-            // ends with `in ` (open scope) so ClassVarsN stays visible.
-            self.generate_expression(expr)
-        } else if Self::is_local_var_assignment(expr) {
+        if Self::is_local_var_assignment(expr) {
             self.generate_class_method_local_var_binding(expr)
         } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
             let binding_docs = self.generate_destructure_bindings(pattern, value)?;

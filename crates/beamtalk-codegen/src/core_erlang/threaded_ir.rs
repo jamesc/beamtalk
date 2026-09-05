@@ -1689,7 +1689,31 @@ impl VerifyWalk<'_> {
                         }
                     }
                 }
+                // ADR 0118 phase 5a (BT-3421): `BindOp::Put` only — a
+                // `BindOp::Direct` rebind (`emit_class_var_result_unwrap`'s
+                // inherited-self-dispatch/loop-construct rebind,
+                // `rebind_class_vars_from_doc`) is never itself a
+                // shadow-write producer regardless of `shadow_write`'s
+                // value (its own doc comments: the underlying mutation was
+                // already shadow-written by the callee's own `Put` under
+                // the identical `ClassSelf`-tagged key) — `render_bind`'s
+                // `BindOp::Put` arm is the only place the ADR 0110 shadow
+                // write is even constructed, so `shadow_write` is inert for
+                // `Direct`. Before this issue every `Direct`-rebind call
+                // site passed `shadow_write_eligible: false` to
+                // `construct_and_verify_class_var_bind`'s OWN isolated
+                // check and was never spliced into a real, jointly-verified
+                // body (always rendered eagerly into an opaque `Document`
+                // instead) — so this distinction was never exercised here.
+                // Splicing a same-class self-send's real `Bind` directly
+                // (ADR 0118 phase 5a) exercises it for the first time: the
+                // isolated check's `shadow_write_eligible` exemption has no
+                // way to reach this joint walk (it is a fixture-only
+                // wrapping trick, never part of the returned `Bind` node —
+                // see `construct_and_verify_class_var_bind`'s `needs_wrap`),
+                // so the joint check must know the same invariant directly.
                 if matches!(target.prefix, VersionPrefix::ClassVars)
+                    && matches!(op, BindOp::Put { .. })
                     && *self.shadow_write_eligible_stack.last().unwrap()
                     && !*shadow_write
                     && self.has_class_vars_nlr
@@ -4846,6 +4870,83 @@ mod tests {
             Vec::new(),
             "ClassVars gap-backfill's own synthetic Bind must not spuriously trigger \
              ShadowWriteMissing, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn verify_a_spliced_direct_rebind_never_spuriously_fires_shadow_write_missing() {
+        // ADR 0118 phase 5a (BT-3421): `class doStuff => self bump.
+        // self.total := self.total + 1` where `bump` is one of this
+        // class's own `class_method_selectors()` — `lower_class_method_body`
+        // now splices the non-last self-send's REAL prelude (produced by
+        // `emit_class_var_result_unwrap` via `class_method_prelude_producer`)
+        // instead of wrapping one opaque `Statement` around it, so its
+        // `BindOp::Direct` rebind (`shadow_write: false` always — see
+        // `emit_class_var_result_unwrap`'s own doc comment: a rebind is
+        // never itself a shadow-write producer) is now a real node THIS
+        // body's own joint `verify()` sees directly, sharing the body with
+        // the last statement's genuine, correctly shadow-written
+        // `BindOp::Put`. This is the regression this issue's own review
+        // caught: before the `BindOp::Put`-only gate on `ShadowWriteMissing`
+        // (this same commit), a spliced `Direct` rebind's `shadow_write:
+        // false` fired the check spuriously, because the isolated
+        // `construct_and_verify_class_var_bind` check's `shadow_write_eligible`
+        // exemption is a fixture-only wrapping trick that never reaches the
+        // returned `Bind` node itself.
+        let span = span();
+        let ir = vec![
+            ThreadedStmt::NlrCatch {
+                boundary: NlrBoundary::ClassMethod {
+                    has_class_vars: true,
+                },
+                token: TokenId::new("_NlrToken0".to_string()),
+                frame: FrameId::ROOT,
+                span,
+            },
+            // Non-last statement: `self bump` — `emit_class_var_result_unwrap`'s
+            // real three-`ThreadedStmt` prelude, spliced directly.
+            ThreadedStmt::Statement(
+                docvec!["let _CMR1 = call 'module':'class_bump'(ClassSelf, ClassVars) in "],
+                span,
+            ),
+            ThreadedStmt::Bind {
+                target: class_var(1, FrameId::ROOT),
+                source: class_var(0, FrameId::ROOT),
+                op: BindOp::Direct(ValueRef::Doc(Document::Str(
+                    "case _CMR1 of <{'class_var_result', _MR2, _CV3}> when 'true' -> _CV3 \
+                     <_PCV4> when 'true' -> ClassVars end",
+                ))),
+                shadow_write: false,
+                span,
+            },
+            ThreadedStmt::Statement(docvec!["let _Unwrapped5 = case _CMR1 of ... end in "], span),
+            // Last statement: `self.total := self.total + 1` — a genuine,
+            // correctly shadow-written mutation.
+            ThreadedStmt::Statement(
+                docvec![
+                    "let _Val6 = call 'erlang':'+'(call 'maps':'get'('total', ClassVars1), 1) in "
+                ],
+                span,
+            ),
+            ThreadedStmt::Bind {
+                target: class_var(2, FrameId::ROOT),
+                source: class_var(1, FrameId::ROOT),
+                op: BindOp::Put {
+                    field: "total".to_string(),
+                    value: ValueRef::Var("_Val6".to_string()),
+                    class_tag: ValueRef::Var("ClassSelf".to_string()),
+                },
+                shadow_write: true,
+                span,
+            },
+            ThreadedStmt::Statement(docvec!["{'class_var_result', _Val6, ClassVars2}"], span),
+        ];
+        let errors = verify(&ir);
+        assert_eq!(
+            errors,
+            Vec::new(),
+            "a spliced Direct rebind's shadow_write: false must not spuriously trigger \
+             ShadowWriteMissing when jointly verified with a real NlrCatch, got: {errors:?}"
         );
     }
 

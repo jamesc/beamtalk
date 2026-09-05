@@ -571,16 +571,20 @@ impl CoreErlangGenerator {
     ///                  end in
     /// ```
     ///
-    /// Leaves the let-scope open (caller provides the continuation expression)
-    /// and records `_Unwrapped` as `last_open_scope_result` so enclosing
-    /// contexts can reference it. Shared by the local-class-method branch
-    /// (branch 1) and the BT-2007 inherited-dispatch branch in
+    /// ADR 0118 phase 5a (BT-3421): returns a [`ThreadedValue`] whose
+    /// prelude carries the real `ClassVars` `Bind` this call rebinds —
+    /// `_Unwrapped` is the value, with no consuming body of its own.
+    /// Callers splice the prelude into their own frame or open-scope-convert
+    /// it via [`Self::threaded_value_to_open_scope_doc`] so `ClassVarsN`
+    /// stays visible to the continuation (the pre-ADR-0118 open-let-chain
+    /// contract, preserved byte-for-byte). Shared by the local-class-method
+    /// branch (branch 1) and the BT-2007 inherited-dispatch branch in
     /// [`generate_class_method_self_send`](Self::generate_class_method_self_send).
     pub(super) fn emit_class_var_result_unwrap(
         &mut self,
         args_preamble: Document<'static>,
         call_doc: Document<'static>,
-    ) -> Document<'static> {
+    ) -> ThreadedValue {
         let call_result = self.fresh_temp_var("CMR");
         let cv = self.current_class_var();
         // BT-3148: the version numbers driving both verify() and the real
@@ -668,23 +672,29 @@ impl CoreErlangGenerator {
             "class-var rebind from inherited self-dispatch result",
             beamtalk_core::source_analysis::Span::default(),
         );
-        let bind_doc = {
-            let mut ctx = super::threaded_ir::RenderCtx::new(self);
-            super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
-        };
 
         let result = self.fresh_temp_var("Unwrapped");
         let wrapped_res = self.fresh_temp_var("WR");
         let plain_res = self.fresh_temp_var("PR");
 
-        let doc = docvec![
+        // ADR 0118 phase 5a: the call-setup and unwrap steps stay opaque
+        // `Statement`s (the SAME `Document` text this function always built,
+        // byte-for-byte); `bind` is no longer rendered eagerly into the
+        // middle of one big `Document` — it is a real, un-rendered
+        // `ThreadedStmt::Bind` in the returned prelude, so the class-var
+        // mutation this call rebinds is visible to whichever `ThreadedIr`
+        // frame the caller splices the prelude into (ADR 0118 §Decision 4),
+        // not just to this producer's own isolated `construct_and_verify_class_var_bind`
+        // check above.
+        let call_stmt_doc = docvec![
             args_preamble,
             "let ",
             leaf::var(call_result.clone()),
             " = ",
             call_doc,
             " in ",
-            bind_doc,
+        ];
+        let unwrap_stmt_doc = docvec![
             "let ",
             leaf::var(result.clone()),
             " = case ",
@@ -699,8 +709,15 @@ impl CoreErlangGenerator {
             leaf::var(plain_res),
             " end in ",
         ];
-        self.last_open_scope_result = Some(OpenScopeResult::Value(result));
-        doc
+        let span = beamtalk_core::source_analysis::Span::default();
+        ThreadedValue {
+            prelude: vec![
+                ThreadedStmt::Statement(call_stmt_doc, span),
+                bind,
+                ThreadedStmt::Statement(unwrap_stmt_doc, span),
+            ],
+            value: ValueRef::Var(result),
+        }
     }
 
     /// BT-3168 (ADR 0111 Addendum 9, Questions 2/3): rebinds `ClassVarsN`
@@ -1486,8 +1503,12 @@ impl CoreErlangGenerator {
             // deadlock. The class actor is already processing the outer call, so
             // routing through class_send would deadlock on gen_server:call.
             if self.in_class_method() && name.name == self.class_name() && pkg.is_none() {
-                let doc = self.generate_class_method_self_send(selector, arguments)?;
-                return Ok(Some(doc));
+                // ADR 0118 phase 5a: the producer now returns a `ThreadedValue`;
+                // convert back to the legacy open-Document + `last_open_scope_result`
+                // contract this function's own caller (`generate_message_send`)
+                // still expects.
+                let tv = self.generate_class_method_self_send(selector, arguments)?;
+                return Ok(Some(self.threaded_value_to_open_scope_doc(tv)));
             }
             if self.workspace_mode() && self.context == CodeGenContext::Repl {
                 // REPL top-level: check session bindings first
@@ -1559,8 +1580,14 @@ impl CoreErlangGenerator {
         }
         if let Expression::Identifier(id) = receiver {
             if id.name == "self" {
-                let doc = self.generate_class_method_self_send(selector, arguments)?;
-                return Ok(Some(doc));
+                // ADR 0118 phase 5a (BT-3421): the producer now returns a
+                // `ThreadedValue`; convert it back to the legacy open-Document
+                // + `last_open_scope_result` contract this function's own
+                // caller (`generate_message_send`) still expects — the ~80
+                // open-scope consumers reached that way are ADR 0118 phase
+                // 5b's to migrate, not this issue's.
+                let tv = self.generate_class_method_self_send(selector, arguments)?;
+                return Ok(Some(self.threaded_value_to_open_scope_doc(tv)));
             }
         }
         Ok(None)
@@ -1571,12 +1598,24 @@ impl CoreErlangGenerator {
     /// Used by both `self` sends and explicit class name sends (BT-773) within
     /// class methods. Generates direct module function calls to avoid deadlock
     /// since class methods execute inside a `gen_server:call` handler.
+    ///
+    /// ADR 0118 phase 5a (BT-3421): returns a [`ThreadedValue`] rather than
+    /// an open `Document` + `last_open_scope_result` side write. Every
+    /// branch's own class-var Bind (via [`Self::emit_class_var_result_unwrap`])
+    /// is now a real prelude entry; branches with no class-var Bind of their
+    /// own (instantiation intrinsics, reflective primitives, auto-exports,
+    /// the slot constructor) still route through [`Self::finalize_dispatch_with_preamble`]
+    /// (unmigrated — ADR 0118 phase 5b's to convert) and are adapted back
+    /// via [`Self::legacy_doc_to_threaded_value`], which reads whatever that
+    /// call left in `last_open_scope_result` (set when a NESTED sub-expression
+    /// argument's own class-var producer opened a scope — this branch's own
+    /// call never does).
     #[allow(clippy::too_many_lines)] // Multiple dispatch branches (BT-773/BT-893/BT-996/BT-2003/BT-2007) share args-capture scaffolding.
-    fn generate_class_method_self_send(
+    pub(super) fn generate_class_method_self_send(
         &mut self,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Document<'static>> {
+    ) -> Result<ThreadedValue> {
         let selector_atom = selector.name().to_string();
 
         // ADR 0084 / BT-2267: inside a programmatic ClassBuilder class-method fun
@@ -1587,7 +1626,7 @@ impl CoreErlangGenerator {
         // spawn) still use the process-dict-backed helpers (no export needed).
         if let Some(builder_class) = self.builder_class_method_class() {
             if let Some(doc) = self.try_instantiation_intrinsic(&selector_atom, arguments)? {
-                return Ok(doc);
+                return Ok(self.legacy_doc_to_threaded_value(doc));
             }
             let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
             let cv = self.current_class_var();
@@ -1634,9 +1673,8 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
-            let doc = self.emit_class_var_result_unwrap(args_preamble, call_doc);
-            // NOTE: scope is OPEN — caller provides continuation
-            return Ok(doc);
+            // NOTE: prelude is OPEN — caller splices or open-scope-converts it.
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
         }
         // BT-996: Auto-generated keyword constructor for Value subclass: classes.
         // `ClassName slot: value` inside a class method routes here when the selector
@@ -1669,14 +1707,15 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
-            return Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "Slot"));
+            let doc = self.finalize_dispatch_with_preamble(args_preamble, call_doc, "Slot");
+            return Ok(self.legacy_doc_to_threaded_value(doc));
         }
         // BT-893: Instantiation selectors (new, new:, spawn, spawnWith:) must bypass
         // gen_server to avoid deadlock — route through class_self_new/class_self_spawn
         // (and BT-2004's class_self_spawn_as/class_self_spawn_with for the named-
         // registration variants).
         if let Some(doc) = self.try_instantiation_intrinsic(&selector_atom, arguments)? {
-            return Ok(doc);
+            return Ok(self.legacy_doc_to_threaded_value(doc));
         }
 
         // BT-3057: Behaviour-protocol reflective primitives (`superclass`,
@@ -1713,11 +1752,12 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
-            return Ok(self.finalize_dispatch_with_preamble(
+            let doc = self.finalize_dispatch_with_preamble(
                 args_preamble,
                 call_doc,
                 "ReflectivePrimitive",
-            ));
+            );
+            return Ok(self.legacy_doc_to_threaded_value(doc));
         }
 
         // BT-2007: Inherited class method — walk the hierarchy at runtime and
@@ -1752,7 +1792,8 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
-            return Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassFn"));
+            let doc = self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassFn");
+            return Ok(self.legacy_doc_to_threaded_value(doc));
         }
 
         let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
@@ -1775,10 +1816,9 @@ impl CoreErlangGenerator {
             args_doc,
             "])"
         ];
-        let doc = self.emit_class_var_result_unwrap(args_preamble, call_doc);
-        // NOTE: scope is OPEN — caller provides continuation (matches the
-        // local-class-method branch above; `last_open_scope_result` is set).
-        Ok(doc)
+        // NOTE: prelude is OPEN — caller splices or open-scope-converts it
+        // (matches the local-class-method branch above).
+        Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc))
     }
 
     /// BT-3047 / ADR 0109 amendment: the class-name expression derived from
@@ -3007,7 +3047,12 @@ impl CoreErlangGenerator {
                 args_doc,
                 "])"
             ];
-            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
+            // ADR 0118 phase 5a: the producer now returns a `ThreadedValue`;
+            // convert it back to the legacy open-Document +
+            // `last_open_scope_result` contract this function's own callers
+            // still expect.
+            let tv = self.emit_class_var_result_unwrap(args_preamble, call_doc);
+            return Ok(self.threaded_value_to_open_scope_doc(tv));
         }
 
         let class_name = self.class_name();

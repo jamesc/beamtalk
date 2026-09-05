@@ -220,3 +220,16 @@ TestCase subclass: ClassVarSubExprTest
   testTickThenSumPersistsClassVar =>
     ClassVarSubExpr tickThenSum: #(1, 2, 3)
     self assert: ClassVarSubExpr currentCounter equals: 1
+
+  // ADR 0118 phase 5a (BT-3421): a bare self-send as the non-last statement
+  // of a class method's own flat body (not nested in a loop/conditional/
+  // assignment-RHS, and not a sub-expression of another send) — the shape
+  // `lower_class_method_body` now splices as a real `Bind` instead of an
+  // opaque `Document`. Must both mutate the class var AND leave it visible
+  // to the following (last) statement's read.
+  testTickThenReadCounterReturnsMutatedValue =>
+    self assert: ClassVarSubExpr tickThenReadCounter equals: 1
+
+  testTickThenReadCounterMutatesClassVar =>
+    ClassVarSubExpr tickThenReadCounter
+    self assert: ClassVarSubExpr currentCounter equals: 1
