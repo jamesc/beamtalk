@@ -18,7 +18,7 @@
 // with class-side methods, files containing extension methods (`String >>`,
 // `Array >>`, self-extensions), hot-reloadable Actors, and module-name
 // edge-case files (CamelCase filename `HotSwap.bt`, deeply nested
-// `deep/nested/path/widget.bt`, sibling files in the same subdirectory).
+// `deep/nested/path/deep_widget.bt`, sibling files in the same subdirectory).
 
 // The expected class set covers the concrete classes AND protocol classes
 // defined by the fixture. `MixedPrintable` (a `Protocol define:`) must
