@@ -804,6 +804,71 @@ impl CoreErlangGenerator {
             return Ok(val_var);
         }
 
+        // C3b — BT-3425: RHS is itself control-flow-with-mutations (a
+        // mutating list-op like `collect:`/`do:`/`select:` whose block —
+        // or whose own receiver — needs state threading, or a nested
+        // `ifTrue:ifFalse:`/`match:`/`on:do:` with field mutations).
+        // Codegen for such an RHS (`expression_doc`) returns a closed
+        // `{Value, StateAcc}` 2-tuple — the same shape C3's Tier 2 call
+        // returns — which must be unwrapped exactly like C3, instead of
+        // falling into C2 below (which assumes a single, non-tuple value
+        // and would bind `val_var` to the raw tuple itself). Mirrors
+        // `emit_actor_threaded_assign_rhs_stmts`, the top-level flat-body
+        // counterpart of this same `LocalAssignControlFlow` RHS shape —
+        // this body loop's C2 fallback previously had no equivalent,
+        // silently leaking the tuple as the assigned value and the
+        // branch's own result.
+        if self.control_flow_has_mutations(value) {
+            let cf_tuple = self.fresh_temp_var("CfTuple");
+            let cf_state = self.fresh_temp_var("CfSt");
+            let thread_scope = self.thread_ahead(value, stmts, frame)?;
+            let value_code = self.expression_doc(value)?;
+            self.finish_precompiled_scope(thread_scope)?;
+            let source_version = self.state_version();
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(cf_tuple.clone()),
+                    " = ",
+                    value_code,
+                    " in let ",
+                    leaf::var(val_var.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(cf_tuple.clone()),
+                    ") in ",
+                ],
+                span,
+            ));
+            let gensym_state = VersionedVar::new(VersionPrefix::Gensym(cf_state.clone()), 1, frame);
+            stmts.push(ThreadedStmt::Bind {
+                target: gensym_state.clone(),
+                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                op: BindOp::Direct(ValueRef::Doc(docvec![
+                    "call 'erlang':'element'(2, ",
+                    leaf::var(cf_tuple),
+                    ")",
+                ])),
+                shadow_write: false,
+                span,
+            });
+            let _ = self.next_state_var();
+            let target_version = self.state_version();
+            stmts.push(ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                source: gensym_state,
+                op: BindOp::Put {
+                    field: state_key,
+                    value: ValueRef::Var(val_var.clone()),
+                    class_tag: ValueRef::Literal("'nil'"),
+                },
+                shadow_write: false,
+                span,
+            });
+            self.bind_var(&id.name, &val_var);
+            self.push_control_flow_threaded_var_rereads(value, span, stmts);
+            return Ok(val_var);
+        }
+
         // BT-3396/ADR 0118 phase 2a (BT-3417): as in `lower_field_assignment_bind`
         // — thread every order-safe self-send nested in the RHS (or the RHS
         // itself, `v := self bump`) as real `Bind`s before the RHS compiles
