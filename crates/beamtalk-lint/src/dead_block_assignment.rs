@@ -931,10 +931,10 @@ sealed typed Value subclass: Foo
     }
 
     /// The whole family of loop / list-op selectors that codegen's
-    /// `block_arg_for_selector` (`crates/beamtalk-codegen/src/core_erlang/
-    /// control_flow/mod.rs`) recognizes for captured-local threading — none
-    /// of these should warn on a mutation of an outer local at the
-    /// recognized block-argument position, whatever the accumulator's name.
+    /// `get_control_flow_threaded_vars` (`crates/beamtalk-codegen/src/core_erlang/
+    /// mod.rs`) recognizes for captured-local threading — none of these
+    /// should warn on a mutation of an outer local at the recognized
+    /// block-argument position, whatever the accumulator's name.
     #[test]
     fn loop_and_list_op_family_no_longer_warns() {
         let cases = [
