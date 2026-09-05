@@ -26,7 +26,22 @@ Dependency order: 3414 → 3415 → 3416 → 3417 → 3418 → {3419, 3420, 3421
 
 **Follow-up filed separately, not part of this epic's close-out:** [BT-3430](https://linear.app/beamtalk/issue/BT-3430) — wiring `ThreadedValue::close`'s `StateEffectEscapesExpression` into `check_no_unsafe_class_method_self_sends`'s user-facing diagnostic (phase 5b's own acceptance criteria named this and it was deliberately not completed in BT-3422).
 
-**Final measurement** — see this ADR's own addendum below for the whole-epic ≤3% gate result against the pre-epic baseline commit.
+**Final measurement (BT-3424 close-out), whole epic against the pre-epic baseline** — same methodology ADR 0111 Addendum 7/10 established (two separate release binaries, `beamtalk build-stdlib` over the real stdlib corpus, cold `ebin/` each run, mean of 5 runs per side): baseline commit [`ff099d4ff`](https://github.com/jamesc/beamtalk/commit/ff099d4ff) (the last commit before this epic's phase 0, BT-3414, landed) vs. this issue's `HEAD` (every phase 0-7 landed):
+
+| | wall-clock (s) | user CPU (s) |
+|---|---|---|
+| baseline (mean of 5, `ff099d4ff`) | 6.30 (range 5.84–7.95) | 10.47 (range 10.16–10.67) |
+| this epic (mean of 5, HEAD) | 6.46 (range 5.92–7.71) | 10.72 (range 10.49–11.22) |
+| Δ | +2.5% | +2.4% |
+
+Inside the ≤3% gate. Consistent with every per-phase measurement across this
+epic (each phase's own PR measured its own incremental delta and stayed
+inside the gate): `ThreadedValue` costs one small heap-allocated
+`Vec<ThreadedStmt>` per state-effecting expression, in place of the deleted
+hoist-registry/open-scope-protocol bookkeeping those expressions used to
+cost anyway — not a new class of work, a reshaped one.
+
+Read on user CPU per ADR 0111's own established precedent (wall-clock is noisy on this shared/virtualized environment; user CPU is the more stable signal — see ADR 0111 Addendum 3/7).
 
 ## Context
 
