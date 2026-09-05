@@ -1287,6 +1287,72 @@ Object subclass: Foo
     }
 
     #[test]
+    fn expect_declaration_no_category_garbage_does_not_truncate_class_body() {
+        // Review follow-up: `@expect` immediately followed by a non-identifier,
+        // non-string, same-line token (e.g. a stray `,`) with zero valid
+        // categories parsed must not be left dangling either — same
+        // class-body-truncation risk the dangling-comma-in-a-list fix
+        // addresses, but for the "no identifier at all" branch.
+        let source = "\
+Object subclass: Foo
+  @expect ,
+  state: x = 0
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags.iter().any(|d| d
+                .message
+                .contains("@expect must be followed by a category name")),
+            "expected a parse error for the missing category, got: {parse_diags:?}"
+        );
+        assert!(
+            !parse_diags.iter().any(|d| d
+                .message
+                .contains("must precede a state/field or method declaration")),
+            "the class body must not be treated as truncated, got: {parse_diags:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "got: {:?}", module.classes);
+        assert_eq!(
+            module.classes[0].state.len(),
+            1,
+            "the state: x declaration after the bad @expect must still parse, got: {:?}",
+            module.classes[0].state
+        );
+    }
+
+    #[test]
+    fn expect_declaration_no_category_on_own_line_preserves_next_line_declaration() {
+        // Companion to the test above: when `@expect` has nothing at all
+        // after it on its own line, the real next declaration on the
+        // *following* line must be left completely alone (not consumed as
+        // if it were garbage) — it's the legitimate next declaration, e.g.
+        // a category name simply forgotten.
+        let source = "\
+Object subclass: Foo
+  @expect
+  state: x = 0
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags.iter().any(|d| d
+                .message
+                .contains("@expect must be followed by a category name")),
+            "expected a parse error for the missing category, got: {parse_diags:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "got: {:?}", module.classes);
+        assert_eq!(
+            module.classes[0].state.len(),
+            1,
+            "the state: x declaration on the next line must still parse, got: {:?}",
+            module.classes[0].state
+        );
+    }
+
+    #[test]
     fn expect_combined_categories_round_trips_through_unparse() {
         // @expect unresolved_ffi, type should round-trip through unparse.
         let source = "@expect unresolved_ffi, type\n42 unknownMethod";

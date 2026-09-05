@@ -1057,6 +1057,18 @@ impl Parser {
                 self.diagnostics
                     .push(Diagnostic::error(message.clone(), span));
                 last_error = Some(message);
+                // Consume one same-line offending token (e.g. `@expect ,` or
+                // `@expect 42`) so it isn't left dangling for the caller —
+                // same class-body-truncation risk the dangling-comma fix
+                // above addresses. A token on the *next* line is left
+                // alone: that's very plausibly the real next
+                // declaration/statement (e.g. `@expect` with the category
+                // simply forgotten, followed by a normal `state:` on its
+                // own line), not garbage to discard.
+                if !self.is_at_end() && !self.current_token().has_leading_newline() {
+                    let bad_token = self.advance();
+                    span = start.merge(bad_token.span());
+                }
                 break;
             }
 
