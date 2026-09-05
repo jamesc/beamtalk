@@ -5044,6 +5044,25 @@ impl CoreErlangGenerator {
             return false;
         }
 
+        // ADR 0118 phase 3 (BT-3419): `whileTrue:`/`whileFalse:`'s RECEIVER
+        // is the condition block — like `ensure:`/`on:do:`'s try-body
+        // receiver just below, and the conditional-selector receiver
+        // further down, it may itself have state effects (a self-send, or
+        // an `and:`/`or:` that carries one) even when the BODY argument has
+        // none, and neither `is_exception_selector` nor
+        // `is_conditional_selector` cover it — the "standard check" below
+        // only ever walks `arguments` (the body), never `receiver`. Shares
+        // `while_loops.rs`'s own gate (`condition_has_state_effects`)
+        // rather than re-deriving it, so the two decisions — "does this
+        // statement need `ControlFlowWithMutations` classification" here,
+        // "does this loop's own condition need threading" there — cannot
+        // disagree.
+        if matches!(sel_str.as_str(), "whileTrue:" | "whileFalse:")
+            && super::super::control_flow::condition_has_state_effects(receiver)
+        {
+            return true;
+        }
+
         // BT-410: For on:do: and ensure:, the receiver (try body) is also
         // a block that may contain field mutations.
         if beamtalk_core::state_threading_selectors::is_exception_selector(sel_str.as_str()) {

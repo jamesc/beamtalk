@@ -501,6 +501,34 @@
 //! later" CLAUDE.md's no-speculative-code rule targets. If a counted-loop
 //! migration is never attempted, revisit deleting these too.
 //!
+//! ## Status (as of BT-3419 — ADR 0118 phase 3: the condition as IR)
+//!
+//! [`ThreadedStmt::ConditionalLoop`] no longer treats its condition as an
+//! opaque, outside-the-frame `Document` — the pre-BT-3419 `continue_header`
+//! field (BT-3145/Addendum 2's own "sound opacity: the condition body is
+//! ordinary AST-directed expression codegen with no state-threading content
+//! of its own" claim, falsified once a self-send or inline-threaded
+//! `and:`/`or:` sat inside the condition) is replaced by `condition:
+//! Vec<ThreadedStmt>` (the condition block's own prelude) and
+//! `condition_value: ValueRef` (its pure final boolean), verified in the
+//! SAME frame as `body`. `render_conditional_loop` emits `condition`'s
+//! prelude inside the loop's own `fun`, directly ahead of the `case` —
+//! dropping the `let CondFun = fun (Params) -> … in case apply CondFun
+//! (Params) of …` closure/`apply` indirection the opaque field's real
+//! producer (`while_loops.rs`) still used, in favor of inlining the
+//! condition's `Bind`s and value directly, the same shape a Bind already
+//! gets inside `body`. Still `#[allow(dead_code)]`: this node's own
+//! production constructor remains unbuilt (BT-3182 deleted the one pilot
+//! call site that ever constructed it — see the BT-3182 status entry
+//! above) — `while_loops.rs`'s own fix for a state-effecting
+//! `whileTrue:`/`whileFalse:` condition (closing the two `#[should_panic]`
+//! regressions BT-3414 pinned) is a parallel, `Document`-level change to
+//! `generate_while_loop_with_mutations`'s condition-application site
+//! (`generate_stateful_while_condition`/`_tail`), not a switch onto this
+//! IR node — this file's `ConditionalLoop` stays the verification-only
+//! side channel BT-3144/BT-3145 established, now with the condition
+//! honestly modeled rather than opaque.
+//!
 //! ## Scope
 //!
 //! Covers state-version bindings (with frame identity), threading-mode
@@ -937,7 +965,7 @@ pub(super) enum ValueRef {
     /// An opaque, pre-rendered `Document` — ordinary AST-directed
     /// expression codegen with no state-threading content of its own,
     /// exactly the class of embed [`ThreadedStmt::ConditionalLoop`]'s
-    /// `continue_header`/`exit_arm` already use (the `NlrCatch` precedent,
+    /// `continue_arm`/`exit_arm` already use (the `NlrCatch` precedent,
     /// ADR 0111 Addendum 2 §Gap 1). Needed because a real loop-local rebind's
     /// RHS is an arbitrary computed expression (e.g. `call
     /// 'erlang':'+'(Sum, 1)` for `sum := sum + 1`), not merely a reference to
@@ -1067,9 +1095,11 @@ pub(super) enum ThreadedStmt {
     },
 
     /// A while/counted loop's condition/case-split skeleton (ADR 0111
-    /// Addendum 2, Gap 1): `letrec 'fn_name'/N = fun (Params) ->
-    /// <continue_header> <body> apply 'fn_name'/N (<final_args>) <exit_arm>
-    /// in apply 'fn_name'/N (<outer_args>)`. Unlike bare [`Threaded`](Self::Threaded)
+    /// Addendum 2, Gap 1; condition fields per ADR 0118 phase 3, BT-3419):
+    /// `letrec 'fn_name'/N = fun (Params) -> <condition> case
+    /// <condition_value> of <continue_arm> <body> apply 'fn_name'/N
+    /// (<final_args>) <exit_arm> in apply 'fn_name'/N (<outer_args>)`.
+    /// Unlike bare [`Threaded`](Self::Threaded)
     /// (which has no slot for a condition or exit arm — the unconditional
     /// tail-recursion skeleton [`Threaded`](Self::Threaded)'s `DirectParams`/`Hybrid`
     /// modes render), this variant is the REAL shape every while/counted
@@ -1120,15 +1150,31 @@ pub(super) enum ThreadedStmt {
         /// `timesRepeat:`/`repeat`) — `None` for while/`whileFalse:`. See
         /// [`LoopCounter`]'s doc comment.
         counter: Option<LoopCounter>,
-        /// Opaque, AST-directed condition scrutinee + the case's chosen
-        /// continue-arm pattern, up to and including `"-> "` — e.g. `"let
-        /// CondFun = <cond> in case apply CondFun (Params) of <'true'> when
-        /// 'true' -> "`. Built by the SAME condition-codegen call production
-        /// already runs — the IR does not re-derive condition semantics.
-        /// Sound opacity: the condition body is ordinary AST-directed
-        /// expression codegen with no state-threading content of its own
-        /// (the `NlrCatch` precedent — see the ADR's §Verifier honesty).
-        continue_header: Document<'static>,
+        /// ADR 0118 phase 3 (BT-3419): the condition block's own prelude,
+        /// verified in the SAME frame as `body` (unlike the pre-BT-3419
+        /// `continue_header`, an opaque `Document` compiled OUTSIDE the
+        /// loop's frame — the exact shape that panicked the verifier or
+        /// miscompiled whenever the condition contained a self-send or an
+        /// inline-threaded `and:`/`or:`). Each statement of the condition
+        /// block except its tail is a real `ThreadedStmt` here (typically
+        /// `Bind`s from a self-send producer, or a plain local-var rebind);
+        /// empty for a pure counter compare (a counted loop's own
+        /// `continue_arm`/`condition_value` pair, e.g. `Counter =&lt; N`,
+        /// needs no prelude — see the sibling `counter` field, above,
+        /// unaffected by this phase).
+        condition: Vec<ThreadedStmt>,
+        /// The condition's own final boolean value — pure with respect to
+        /// `condition`, exactly like [`ThreadedValue::value`] is pure with
+        /// respect to its `prelude`. The case's scrutinee.
+        condition_value: ValueRef,
+        /// Opaque continue-arm pattern, e.g. `"<'true'> when 'true' -> "` —
+        /// the counterpart of `exit_arm`, naming which case branch
+        /// continues looping. Split out of the pre-BT-3419 `continue_header`
+        /// now that the scrutinee itself (`condition`/`condition_value`) is
+        /// real IR; this remaining fragment carries no state-threading
+        /// content of its own (a bare case-clause pattern), the same
+        /// accepted opacity class as `exit_arm`'s own pattern half.
+        continue_arm: Document<'static>,
         body: Vec<ThreadedStmt>,
         produces: Vec<VersionedVar>,
         /// Opaque exit arm: pattern + exit value + `"end "` — e.g.
@@ -1137,7 +1183,7 @@ pub(super) enum ThreadedStmt {
         /// byte-identity): must be constructed AFTER `body` is lowered — its
         /// `ExitSA` temps share the SAME module-wide `fresh_temp_var`
         /// counter as `body`'s rebind temps, and legacy mints body temps
-        /// first. This opacity is NOT sound on `continue_header`'s grounds —
+        /// first. This opacity is NOT sound on `continue_arm`'s grounds —
         /// `exit_arm` genuinely hides state-threading content (the loop
         /// exit's `StateAcc` repack). Deliberate, named
         /// §Verifier-honesty-class limitation for this pilot: the loop exit
@@ -1172,9 +1218,9 @@ pub(super) enum ThreadedStmt {
     /// [`ValueRef::Doc`] is one inside a `Bind`'s own `op`. This is a
     /// type-level rule enforced by convention and code review, not by
     /// `verify()` (the `Document` is opaque by definition) — the same
-    /// distinction `ConditionalLoop` draws between `continue_header` (sound
+    /// distinction `ConditionalLoop` draws between `continue_arm` (sound
     /// opacity) and `exit_arm` (a named, deliberate limitation); a
-    /// `Statement` is only ever the `continue_header` kind.
+    /// `Statement` is only ever the `continue_arm` kind.
     Statement(Document<'static>, Span),
 }
 
@@ -1510,9 +1556,14 @@ fn contains_class_var_nlr_catch(ir: &[ThreadedStmt]) -> bool {
                 }
             )
         }
-        ThreadedStmt::Threaded { body, .. } | ThreadedStmt::ConditionalLoop { body, .. } => {
-            contains_class_var_nlr_catch(body)
-        }
+        ThreadedStmt::Threaded { body, .. } => contains_class_var_nlr_catch(body),
+        // ADR 0118 phase 3 (BT-3419): `condition` scans too — a class-var
+        // NLR catch nested there is exactly as relevant to `ShadowWriteMissing`
+        // as one nested in `body`, even though no real lowering produces one
+        // (a while condition has no NLR boundary of its own).
+        ThreadedStmt::ConditionalLoop {
+            condition, body, ..
+        } => contains_class_var_nlr_catch(condition) || contains_class_var_nlr_catch(body),
         ThreadedStmt::Bind { .. }
         | ThreadedStmt::Return(..)
         | ThreadedStmt::TupleAccUnpack { .. }
@@ -1535,7 +1586,17 @@ fn collect_producer_consumer_counts(
                 *producers.entry(target.clone()).or_insert(0) += 1;
                 *consumers.entry(source.clone()).or_insert(0) += 1;
             }
-            ThreadedStmt::Threaded { body, .. } | ThreadedStmt::ConditionalLoop { body, .. } => {
+            ThreadedStmt::Threaded { body, .. } => {
+                collect_producer_consumer_counts(body, producers, consumers);
+            }
+            // ADR 0118 phase 3 (BT-3419): `condition`'s own Binds are
+            // real IR now too — collected in the SAME pass as `body`'s
+            // (order doesn't matter here: both just accumulate into the
+            // same producer/consumer maps).
+            ThreadedStmt::ConditionalLoop {
+                condition, body, ..
+            } => {
+                collect_producer_consumer_counts(condition, producers, consumers);
                 collect_producer_consumer_counts(body, producers, consumers);
             }
             ThreadedStmt::TupleAccUnpack { targets, .. } => {
@@ -1600,6 +1661,7 @@ impl VerifyWalk<'_> {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // ADR 0118 phase 3 (BT-3419) split the Threaded/ConditionalLoop arm in two
     fn walk_stmt(&mut self, stmt: &ThreadedStmt) {
         match stmt {
             ThreadedStmt::Bind {
@@ -1645,22 +1707,44 @@ impl VerifyWalk<'_> {
                 body,
                 produces,
                 span: _,
+            } => {
+                // ADR 0111 Addendum 9, Question 1: `shadow_write_eligible`
+                // pushes/pops in lockstep with `frame`/`mode`, AND-combined
+                // with the parent's current top.
+                self.frame_stack.push(*frame);
+                self.mode_stack.push(mode.clone());
+                self.shadow_write_eligible_stack.push(
+                    *self.shadow_write_eligible_stack.last().unwrap() && *shadow_write_eligible,
+                );
+                self.walk(body);
+                for v in produces {
+                    self.check_use(v, Span::default());
+                }
+                self.shadow_write_eligible_stack.pop();
+                self.mode_stack.pop();
+                self.frame_stack.pop();
             }
-            | ThreadedStmt::ConditionalLoop {
+            ThreadedStmt::ConditionalLoop {
                 mode,
                 frame,
                 shadow_write_eligible,
+                condition,
+                condition_value,
                 body,
                 produces,
                 span: _,
                 ..
             } => {
-                // ADR 0111 Addendum 2, Gap 1: `ConditionalLoop` verifies
-                // exactly like `Threaded` — push frame/mode, walk body,
-                // check_use each `produces` entry, pop. `continue_header`/
-                // `exit_arm`/`fn_name`/`counter` are opaque (or caller-
-                // supplied, non-threading) fields `verify()` does not, and
-                // is not meant to, inspect — see the variant's doc comment.
+                // ADR 0111 Addendum 2, Gap 1 / ADR 0118 phase 3 (BT-3419):
+                // `ConditionalLoop` verifies almost exactly like `Threaded`
+                // — push frame/mode once, walk `condition` THEN `body` (both
+                // in the SAME frame — the condition's own `Bind`s are now
+                // real IR the loop's later references can see), check_use
+                // `condition_value` and each `produces` entry, pop.
+                // `continue_arm`/`exit_arm`/`fn_name`/`counter` are opaque
+                // (or caller-supplied, non-threading) fields `verify()` does
+                // not, and is not meant to, inspect — see the variant's doc
+                // comment.
                 //
                 // ADR 0111 Addendum 9, Question 1: `shadow_write_eligible`
                 // pushes/pops in lockstep with `frame`/`mode`, AND-combined
@@ -1670,6 +1754,10 @@ impl VerifyWalk<'_> {
                 self.shadow_write_eligible_stack.push(
                     *self.shadow_write_eligible_stack.last().unwrap() && *shadow_write_eligible,
                 );
+                self.walk(condition);
+                if let ValueRef::Version(v) = condition_value {
+                    self.check_use(v, Span::default());
+                }
                 self.walk(body);
                 for v in produces {
                     self.check_use(v, Span::default());
@@ -1917,7 +2005,9 @@ pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'stat
                 frame,
                 shadow_write_eligible: _, // rendering-irrelevant: verify()-only, see the field's doc comment
                 counter: _counter, // counted-loop rendering: a later migration wires a real counted-loop call site (BT-3182: the while-direct pilot that used `ConditionalLoop` for its own `mode`/`counter: None` shape was deleted — see ADR 0111 Addendum 13)
-                continue_header,
+                condition,
+                condition_value,
+                continue_arm,
                 body,
                 produces,
                 exit_arm,
@@ -1926,9 +2016,11 @@ pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'stat
                 fn_name,
                 mode,
                 *frame,
+                condition,
+                condition_value,
+                continue_arm,
                 body,
                 produces,
-                continue_header,
                 exit_arm,
                 ctx,
             )),
@@ -1994,6 +2086,25 @@ fn render_threaded(
     }
 }
 
+/// Bundles the pieces [`ThreadedStmt::ConditionalLoop`]'s real condition/
+/// case-split shape needs, so [`render_loop_skeleton`] can share its
+/// `param_list`/`body_doc`/`final_args` plumbing with the bare unconditional
+/// [`Threaded`](ThreadedStmt::Threaded) skeleton via one `Option`. ADR 0118
+/// phase 3 (BT-3419): `condition`/`condition_value` replace the pre-BT-3419
+/// opaque `continue_header` — the condition must render INSIDE this
+/// function's own loop-context closure (alongside `body_doc`), never
+/// outside it, because a self-send in the condition references the SAME
+/// per-iteration params `body_doc` does (see the variant's own doc
+/// comment). `Copy`: every field is a borrow, mirroring the pre-BT-3419
+/// `header_and_exit: Option<(&Document, &Document)>` tuple this replaces.
+#[derive(Clone, Copy)]
+struct ConditionalLoopHeader<'a> {
+    condition: &'a [ThreadedStmt],
+    condition_value: &'a ValueRef,
+    continue_arm: &'a Document<'static>,
+    exit_arm: &'a Document<'static>,
+}
+
 /// Builds `letrec 'FnName'/arity = fun (Param1, .., ParamN) -> <body> apply
 /// 'FnName'/arity (<produces>) in apply 'FnName'/arity (<OuterArg1, ..,
 /// OuterArgN>)` — the shared skeleton behind [`ThreadingMode::DirectParams`]
@@ -2024,11 +2135,11 @@ fn render_threaded(
 ///
 /// ADR 0111 Addendum 2, Gap 1: factored out of the pre-existing
 /// `render_loop_letrec` so the bare unconditional [`Threaded`](ThreadedStmt::Threaded)
-/// skeleton (`header_and_exit: None`) and [`ConditionalLoop`](ThreadedStmt::ConditionalLoop)'s
-/// real condition/case-split skeleton (`header_and_exit: Some((continue_header,
-/// exit_arm))`) share one implementation instead of two near-duplicates
-/// (CLAUDE.md's no-duplicate-implementations rule applies within this file,
-/// not just across the Rust/Erlang boundary).
+/// skeleton (`header: None`) and [`ConditionalLoop`](ThreadedStmt::ConditionalLoop)'s
+/// real condition/case-split skeleton (`header: Some(ConditionalLoopHeader { .. })`,
+/// ADR 0118 phase 3/BT-3419) share one implementation instead of two
+/// near-duplicates (CLAUDE.md's no-duplicate-implementations rule applies
+/// within this file, not just across the Rust/Erlang boundary).
 ///
 /// `fn_name` is already resolved by the caller — the bare shape mints it via
 /// `ctx.fresh_temp_var("Loop")` (`render_threaded`, unchanged behavior);
@@ -2054,7 +2165,7 @@ fn render_threaded(
 /// names — a `fun`'s parameter name never has to match its caller's
 /// argument expression).
 ///
-/// For `ConditionalLoop` (`header_and_exit: Some(..)`), the recursive
+/// For `ConditionalLoop` (`header: Some(..)`), the recursive
 /// self-call's arguments are NOT `produces` verbatim — they are
 /// [`final_loop_arg_identities`]'s reconstruction of each local's REAL final
 /// `Bind` target (a [`VersionPrefix::Gensym`] identity production actually
@@ -2075,7 +2186,7 @@ fn render_loop_skeleton(
     produces: &[VersionedVar],
     ctx: &mut RenderCtx,
     loop_context: Option<LoopContextFlags>,
-    header_and_exit: Option<(&Document<'static>, &Document<'static>)>,
+    header: Option<ConditionalLoopHeader<'_>>,
 ) -> Document<'static> {
     let arity = produces.len();
 
@@ -2110,12 +2221,26 @@ fn render_loop_skeleton(
             }),
             &Document::Str(", "),
         );
-        let body_doc = if header_and_exit.is_some() {
+        // ADR 0118 phase 3 (BT-3419): the condition prelude renders INSIDE
+        // this closure, under the identical loop-context flags as
+        // `body_doc` — a self-send's `Bind` in `condition` must resolve
+        // `State`/`StateAcc` the same way the body's own Binds do (the
+        // same reasoning `param_list`/`final_args` already document above).
+        let condition_doc = header.map(|h| {
+            docvec![
+                render(h.condition, ctx),
+                "case ",
+                render_value(h.condition_value, ctx),
+                " of ",
+                h.continue_arm.clone(),
+            ]
+        });
+        let body_doc = if header.is_some() {
             render_loop_body_statements(body, ctx)
         } else {
             render(body, ctx)
         };
-        let final_args = if header_and_exit.is_some() {
+        let final_args = if header.is_some() {
             join(
                 final_loop_arg_identities(body, produces)
                     .iter()
@@ -2128,14 +2253,14 @@ fn render_loop_skeleton(
                 &Document::Str(", "),
             )
         };
-        (param_list, body_doc, final_args)
+        (param_list, condition_doc, body_doc, final_args)
     };
-    let (param_list, body_doc, final_args) = match loop_context {
+    let (param_list, condition_doc, body_doc, final_args) = match loop_context {
         Some(flags) => ctx.with_loop_context(flags, render_in_loop_body),
         None => render_in_loop_body(ctx),
     };
 
-    match header_and_exit {
+    match header {
         None => docvec![
             "letrec ",
             leaf::fname(fn_name.clone(), arity),
@@ -2154,20 +2279,20 @@ fn render_loop_skeleton(
             outer_args,
             ")",
         ],
-        Some((continue_header, exit_arm)) => docvec![
+        Some(h) => docvec![
             "letrec ",
             leaf::fname(fn_name.clone(), arity),
             " = fun (",
             param_list,
             ") -> ",
-            continue_header.clone(),
+            condition_doc.expect("condition_doc is always Some when header is Some"),
             body_doc,
             " apply ",
             leaf::fname(fn_name.clone(), arity),
             " (",
             final_args,
             ") ",
-            exit_arm.clone(),
+            h.exit_arm.clone(),
             // NOTE: no leading space here (unlike the bare-shape arm above) —
             // `exit_arm` (e.g. `"<'false'> ... end "`) already ends with a
             // trailing space, matching production's own `" end ",` +
@@ -2237,17 +2362,20 @@ fn final_loop_arg_identities(
 }
 
 /// Full-fidelity rendering of a [`ThreadedStmt::ConditionalLoop`] node (ADR
-/// 0111 Addendum 2, Gap 1): delegates to [`render_loop_skeleton`] with the
-/// real `continue_header`/`exit_arm` pair, reusing the exact same
-/// `param_list`/`outer_args` plumbing the bare loop shape uses.
+/// 0111 Addendum 2, Gap 1; condition fields per ADR 0118 phase 3, BT-3419):
+/// delegates to [`render_loop_skeleton`] with the real `condition`/
+/// `condition_value`/`continue_arm`/`exit_arm` bundle, reusing the exact
+/// same `param_list`/`outer_args` plumbing the bare loop shape uses.
 #[allow(clippy::too_many_arguments)]
 fn render_conditional_loop(
     fn_name: &str,
     mode: &ThreadingMode,
     frame: FrameId,
+    condition: &[ThreadedStmt],
+    condition_value: &ValueRef,
+    continue_arm: &Document<'static>,
     body: &[ThreadedStmt],
     produces: &[VersionedVar],
-    continue_header: &Document<'static>,
     exit_arm: &Document<'static>,
     ctx: &mut RenderCtx,
 ) -> Document<'static> {
@@ -2267,7 +2395,12 @@ fn render_conditional_loop(
         produces,
         ctx,
         loop_context,
-        Some((continue_header, exit_arm)),
+        Some(ConditionalLoopHeader {
+            condition,
+            condition_value,
+            continue_arm,
+            exit_arm,
+        }),
     )
 }
 
@@ -3066,12 +3199,17 @@ mod tests {
 
     #[test]
     fn verify_silent_on_well_formed_conditional_loop_fixture() {
-        // ADR 0111 Addendum 2, Gap 1: `verify()` treats `ConditionalLoop`
-        // exactly like `Threaded` — push frame/mode, walk body, check_use
-        // each `produces` entry, pop — no new `VerifyError` variant. Opaque
-        // fields (`continue_header`/`exit_arm`) and caller-supplied,
-        // non-threading fields (`fn_name`/`counter`) are not, and cannot be,
-        // inspected — see the variant's doc comment.
+        // ADR 0111 Addendum 2, Gap 1 / ADR 0118 phase 3 (BT-3419):
+        // `verify()` treats `ConditionalLoop` almost exactly like `Threaded`
+        // — push frame/mode once, walk `condition` then `body`, check_use
+        // `condition_value` and each `produces` entry, pop — no new
+        // `VerifyError` variant. Opaque fields (`continue_arm`/`exit_arm`)
+        // and caller-supplied, non-threading fields (`fn_name`/`counter`)
+        // are not, and cannot be, inspected — see the variant's doc comment.
+        // `condition` empty + `condition_value` a literal here (a pure
+        // condition, e.g. a counted loop's counter compare) — see
+        // `verify_silent_on_conditional_loop_with_condition_prelude` below
+        // for a condition with a real `Bind` in its own prelude.
         let frame = FrameId::new(1);
         let sum_v0 = local("sum", 0, frame);
         let sum_v1 = VersionedVar::new(VersionPrefix::Gensym("_Sum7".to_string()), 1, frame);
@@ -3081,7 +3219,9 @@ mod tests {
             frame,
             shadow_write_eligible: true,
             counter: None,
-            continue_header: Document::Str("<opaque condition>"),
+            condition: Vec::new(),
+            condition_value: ValueRef::Literal("'true'"),
+            continue_arm: Document::Str("<opaque condition>"),
             body: vec![ThreadedStmt::Bind {
                 target: sum_v1,
                 source: sum_v0.clone(),
@@ -3097,6 +3237,79 @@ mod tests {
     }
 
     #[test]
+    fn verify_silent_on_conditional_loop_with_condition_prelude() {
+        // ADR 0118 phase 3 (BT-3419): a condition with a real `Bind` in its
+        // own prelude (e.g. a self-send's `State` advance) — verified in
+        // the SAME frame as `body`, and `condition_value` referencing the
+        // version that `Bind` just produced resolves cleanly. This is the
+        // exact shape phase 3 makes possible: before it, the condition's
+        // Binds were never real IR at all.
+        let frame = FrameId::new(1);
+        let state_v0 = VersionedVar::new(VersionPrefix::State, 0, frame);
+        let state_v1 = VersionedVar::new(VersionPrefix::State, 1, frame);
+        let sum_v0 = local("sum", 0, frame);
+        let sum_v1 = VersionedVar::new(VersionPrefix::Gensym("_Sum7".to_string()), 1, frame);
+        let ir = vec![ThreadedStmt::ConditionalLoop {
+            fn_name: "while".to_string(),
+            mode: ThreadingMode::DirectParams,
+            frame,
+            shadow_write_eligible: true,
+            counter: None,
+            condition: vec![ThreadedStmt::Bind {
+                target: state_v1,
+                source: state_v0,
+                op: BindOp::Direct(ValueRef::Doc(Document::Str("<opaque self-send reply>"))),
+                shadow_write: false,
+                span: span(),
+            }],
+            condition_value: ValueRef::Doc(Document::Str("<opaque bool expr>")),
+            continue_arm: Document::Str("<opaque continue arm>"),
+            body: vec![ThreadedStmt::Bind {
+                target: sum_v1,
+                source: sum_v0.clone(),
+                op: BindOp::Direct(ValueRef::Doc(Document::Str("<opaque rhs>"))),
+                shadow_write: false,
+                span: span(),
+            }],
+            produces: vec![sum_v0],
+            exit_arm: Document::Str("<opaque exit>"),
+            span: span(),
+        }];
+        assert_eq!(verify(&ir), Vec::new());
+    }
+
+    #[test]
+    fn verify_unbound_version_conditional_loop_condition_references_unbound_version() {
+        // ADR 0118 phase 3 (BT-3419): a `condition_value` referencing a
+        // version nothing in `condition` (or an ancestor frame) produced is
+        // caught, exactly like any other `check_use` site.
+        let frame = FrameId::new(1);
+        let ir = vec![ThreadedStmt::ConditionalLoop {
+            fn_name: "while".to_string(),
+            mode: ThreadingMode::DirectParams,
+            frame,
+            shadow_write_eligible: true,
+            counter: None,
+            condition: Vec::new(),
+            condition_value: ValueRef::Version(VersionedVar::new(VersionPrefix::State, 1, frame)),
+            continue_arm: Document::Str("<opaque continue arm>"),
+            body: Vec::new(),
+            produces: Vec::new(),
+            exit_arm: Document::Str("<opaque exit>"),
+            span: span(),
+        }];
+        let errors = verify(&ir);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                VerifyError::UnboundVersion { var, .. }
+                    if *var == VersionedVar::new(VersionPrefix::State, 1, frame)
+            )),
+            "expected UnboundVersion for the condition_value's unbound State1, got: {errors:?}"
+        );
+    }
+
+    #[test]
     fn verify_unbound_version_conditional_loop_frame_flow_matches_threaded() {
         // ConditionalLoop's frame is pushed/popped exactly like Threaded's —
         // a Bind referencing a version from a frame never entered is still
@@ -3109,7 +3322,9 @@ mod tests {
             frame,
             shadow_write_eligible: true,
             counter: None,
-            continue_header: Document::Str("<opaque condition>"),
+            condition: Vec::new(),
+            condition_value: ValueRef::Literal("'true'"),
+            continue_arm: Document::Str("<opaque condition>"),
             body: vec![ThreadedStmt::Bind {
                 target: local("sum", 1, frame),
                 source: class_var(1, stray_frame),
@@ -4657,32 +4872,35 @@ mod tests {
     // legacy call site.
 
     #[test]
-    #[allow(clippy::too_many_lines)] // hand-authored dual-run fixture mirroring generate_while_loop_direct's real shape, ADR 0111 Addendum 2
+    #[allow(clippy::too_many_lines)] // hand-authored dual-run fixture, ADR 0111 Addendum 2 / ADR 0118 phase 3
     fn dual_run_conditional_loop_direct_params_byte_parity() {
-        // ADR 0111 Addendum 2, Gap 1's own closing instruction: hand-author
-        // the REAL condition/case-split shape `generate_while_loop_direct`
-        // actually emits (`while_loops.rs:287-406`) — not the condition-free
-        // skeleton this test checked pre-Addendum-2 — proving `render()`'s
-        // `ConditionalLoop` arm reproduces production's real output
-        // byte-for-byte, closing the exact honesty gap this module's own
-        // §Status doc names ("no single production function today emits
-        // only the letrec skeleton these tests check").
+        // ADR 0111 Addendum 2, Gap 1's own closing instruction, updated for
+        // ADR 0118 phase 3 (BT-3419): hand-author the condition/case-split
+        // shape `render()`'s `ConditionalLoop` arm now produces for a PURE
+        // condition (`condition: []`) — the case's scrutinee is
+        // `condition_value` inlined directly, no `CondFun` closure/`apply`
+        // indirection (the pre-BT-3419 shape `while_loops.rs`'s
+        // `generate_while_loop_direct` still emits today, since that
+        // production call site is not itself migrated to this IR by this
+        // phase — see the module's own §Status doc). This proves `render()`
+        // reproduces the shape ADR 0118 §Decision 6 specifies byte-for-byte;
+        // `dual_run_conditional_loop_direct_params_condition_with_prelude`
+        // below is the counterpart for a condition that itself has state
+        // effects.
         //
         // Condition/RHS bodies are deliberately trivial, mint-free fragments
         // (not real binop codegen, which mints its own internal temps and is
         // separately tested elsewhere) — this test's job is proving the
         // SKELETON and the GENSYM'D NAMING match, not re-verifying
-        // expression codegen. Both concerns (Gap 1's shape, Gap 2's naming)
-        // are exercised together: `CondFun`/`Sum`-rebind/`ExitSA` are all
-        // minted via the SAME `fresh_temp_var` calls production makes, IN
-        // THE SAME ORDER (condition first, then the body's rebind, then the
-        // exit arm's `ExitSA` chain LAST) — an inverted order would still
-        // pass this assertion by accident only if both sides inverted
-        // identically, which is exactly why `legacy_gen`/`render_gen` mint
-        // independently, on separately-seeded generators, rather than
-        // sharing one generator's counter.
+        // expression codegen. `Sum`-rebind/`ExitSA` are minted via the SAME
+        // `fresh_temp_var` calls production makes, IN THE SAME ORDER (body
+        // rebind, then the exit arm's `ExitSA` chain LAST) — an inverted
+        // order would still pass this assertion by accident only if both
+        // sides inverted identically, which is exactly why
+        // `legacy_gen`/`render_gen` mint independently, on
+        // separately-seeded generators, rather than sharing one generator's
+        // counter.
         let mut legacy_gen = CoreErlangGenerator::new("dual_run_conditional_loop_direct");
-        let cond_var = legacy_gen.fresh_temp_var("CondFun"); // mint #1: CondFun, matching `while_loops.rs:310`
         let cond_doc = docvec![
             "call 'erlang':'<'(",
             leaf::var("Sum"),
@@ -4690,21 +4908,8 @@ mod tests {
             leaf::int_lit(10),
             ")",
         ];
-        let continue_header = docvec![
-            "let ",
-            leaf::var(cond_var.clone()),
-            " = fun (",
-            leaf::var("Sum"),
-            ") -> ",
-            cond_doc,
-            " in case apply ",
-            leaf::var(cond_var),
-            " (",
-            leaf::var("Sum"),
-            ") of ",
-            "<'true'> when 'true' -> ",
-        ];
-        let sum_rebind = legacy_gen.fresh_temp_var("Sum"); // mint #2: body rebind, matching `generate_direct_var_update_in_loop`
+        let continue_header = docvec!["case ", cond_doc, " of ", "<'true'> when 'true' -> "];
+        let sum_rebind = legacy_gen.fresh_temp_var("Sum"); // mint #1: body rebind, matching `generate_direct_var_update_in_loop`
         let body = docvec![
             "let ",
             leaf::var(sum_rebind.clone()),
@@ -4714,7 +4919,7 @@ mod tests {
             leaf::int_lit(1),
             ") in ",
         ];
-        let exit_sa = legacy_gen.fresh_temp_var("ExitSA"); // mint #3: exit arm, LAST — matching `generate_exit_stateacc`
+        let exit_sa = legacy_gen.fresh_temp_var("ExitSA"); // mint #2: exit arm, LAST — matching `generate_exit_stateacc`
         let exit_arm = docvec![
             "<'false'> when 'true' -> let ",
             leaf::var(exit_sa.clone()),
@@ -4750,13 +4955,12 @@ mod tests {
 
         // `render(..)` side: a real `ConditionalLoop` node, built on a
         // separately-constructed but identically-seeded generator — the
-        // opaque `continue_header`/`exit_arm` fields and the body's `Bind`
+        // opaque `continue_arm`/`exit_arm` fields and the body's `Bind`
         // are minted via the SAME calls, in the SAME order, mirroring
         // exactly how the lowering pass would build them (Addendum 2's
-        // ordering contract: condition, then body rebinds, then exit_arm
-        // LAST).
+        // ordering contract: body rebinds, then exit_arm LAST — condition
+        // is empty here, so it mints nothing).
         let mut render_gen = CoreErlangGenerator::new("dual_run_conditional_loop_direct");
-        let ir_cond_var = render_gen.fresh_temp_var("CondFun");
         let ir_cond_doc = docvec![
             "call 'erlang':'<'(",
             leaf::var("Sum"),
@@ -4764,20 +4968,7 @@ mod tests {
             leaf::int_lit(10),
             ")",
         ];
-        let ir_continue_header = docvec![
-            "let ",
-            leaf::var(ir_cond_var.clone()),
-            " = fun (",
-            leaf::var("Sum"),
-            ") -> ",
-            ir_cond_doc,
-            " in case apply ",
-            leaf::var(ir_cond_var),
-            " (",
-            leaf::var("Sum"),
-            ") of ",
-            "<'true'> when 'true' -> ",
-        ];
+        let ir_continue_arm = Document::Str("<'true'> when 'true' -> ");
         let frame = FrameId::new(1);
         let sum_v0 = local("sum", 0, frame);
         let ir_sum_rebind = render_gen.fresh_temp_var("Sum");
@@ -4814,7 +5005,9 @@ mod tests {
             frame,
             shadow_write_eligible: true,
             counter: None,
-            continue_header: ir_continue_header,
+            condition: Vec::new(),
+            condition_value: ValueRef::Doc(ir_cond_doc),
+            continue_arm: ir_continue_arm,
             body: ir_body,
             produces: vec![sum_v0],
             exit_arm: ir_exit_arm,
@@ -4825,28 +5018,120 @@ mod tests {
 
         assert_eq!(
             rendered_doc, legacy_doc,
-            "render(..)'s ConditionalLoop arm must reproduce the real \
-             direct-params while-loop condition/case-split shape byte-for-byte"
+            "render(..)'s ConditionalLoop arm must reproduce the ADR 0118 \
+             phase 3 direct-params while-loop condition/case-split shape \
+             byte-for-byte"
         );
     }
 
     #[test]
-    #[allow(clippy::too_many_lines)] // hand-authored dual-run fixture mirroring generate_while_loop_hybrid's real shape, ADR 0111 Addendum 2
+    #[allow(clippy::too_many_lines)] // hand-authored dual-run fixture, ADR 0118 phase 3 (BT-3419)
+    fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
+        // ADR 0118 phase 3 (BT-3419): the counterpart of the byte-parity
+        // test above for a condition that itself has a prelude (e.g. a
+        // self-send's own `State` advance, `while_loops.rs`'s
+        // `generate_stateful_while_condition_tail`'s bare-self-send arm) —
+        // `render()` must emit that prelude INSIDE the loop's own `fun`,
+        // ahead of the `case`, in the SAME frame `body` uses, so a `Bind`
+        // in `condition` and one in `body` can both reference the loop's
+        // own per-iteration params.
+        let mut generator = CoreErlangGenerator::new("dual_run_conditional_loop_direct_prelude");
+        let frame = FrameId::new(1);
+        let sum_v0 = local("sum", 0, frame);
+        let state_v0 = VersionedVar::new(VersionPrefix::State, 0, frame);
+        let state_v1 = VersionedVar::new(VersionPrefix::State, 1, frame);
+        let sd_var = generator.fresh_temp_var("SD"); // mint #1: condition's self-send dispatch temp
+        let condition = vec![
+            ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(sd_var.clone()),
+                    " = call 'test':'safe_dispatch'('bumpCount', [], ",
+                    leaf::var("Sum"),
+                    ") in ",
+                ],
+                span(),
+            ),
+            ThreadedStmt::Bind {
+                target: state_v1.clone(),
+                source: state_v0,
+                op: BindOp::Direct(ValueRef::Doc(docvec![
+                    "call 'erlang':'element'(2, ",
+                    leaf::var(sd_var.clone()),
+                    ")",
+                ])),
+                shadow_write: false,
+                span: span(),
+            },
+        ];
+        let condition_value = ValueRef::Doc(docvec![
+            "call 'erlang':'>'(call 'erlang':'element'(1, ",
+            leaf::var(sd_var),
+            "), 0)",
+        ]);
+        let sum_rebind = generator.fresh_temp_var("Sum"); // mint #2: body rebind
+        let body = vec![ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::Gensym(sum_rebind.clone()), 1, frame),
+            source: sum_v0.clone(),
+            op: BindOp::Direct(ValueRef::Doc(docvec![
+                "call 'erlang':'+'(",
+                leaf::var("Sum"),
+                ", 1)",
+            ])),
+            shadow_write: false,
+            span: span(),
+        }];
+        let exit_arm = Document::Str("<'false'> when 'true' -> {'nil', Sum} end ");
+        let ir = vec![ThreadedStmt::ConditionalLoop {
+            fn_name: "while".to_string(),
+            mode: ThreadingMode::DirectParams,
+            frame,
+            shadow_write_eligible: true,
+            counter: None,
+            condition,
+            condition_value,
+            continue_arm: Document::Str("<'true'> when 'true' -> "),
+            body,
+            produces: vec![sum_v0],
+            exit_arm,
+            span: span(),
+        }];
+        let mut ctx = RenderCtx::new(&mut generator);
+        let rendered_doc = render(&ir, &mut ctx).to_pretty_string();
+
+        assert!(
+            rendered_doc.starts_with("letrec 'while'/1 = fun (Sum) -> let _SD1"),
+            "the condition's own prelude must render INSIDE the loop's fun, \
+             before the case. Got:\n{rendered_doc}"
+        );
+        assert!(
+            rendered_doc.contains("let State1 = call 'erlang':'element'(2, _SD1"),
+            "the condition's self-send Bind must be real, rendered IR. Got:\n{rendered_doc}"
+        );
+        assert!(
+            rendered_doc.contains("case call 'erlang':'>'(call 'erlang':'element'(1, _SD1"),
+            "the case scrutinee must be condition_value, inlined directly \
+             (no CondFun closure). Got:\n{rendered_doc}"
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // hand-authored dual-run fixture, ADR 0111 Addendum 2 / ADR 0118 phase 3
     fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
         // Hybrid-mode counterpart of the direct-params test above: proves
-        // BOTH that `ConditionalLoop`'s real condition/case-split shape
-        // renders correctly under Hybrid loop context, AND (mirroring the
-        // pre-Addendum-2 test this replaces) that a `State`-prefixed `Bind`
-        // nested in the body (e.g. a nested construct's field mutation
-        // running inside the hybrid loop body) resolves through the REAL
-        // production accessors `current_state_var`/`next_state_var` under
-        // hybrid loop context — not a hand-copy of their logic — so
-        // `RenderCtx::resolve_prefix` (via the shared `render_state_prefix`
-        // helper both paths call) matches live generator behavior
-        // bit-for-bit even when interleaved with the new condition/exit
-        // scaffolding.
+        // BOTH that `ConditionalLoop`'s condition/case-split shape (ADR 0118
+        // phase 3, BT-3419: `condition_value` inlined directly, no `CondFun`
+        // closure) renders correctly under Hybrid loop context, AND
+        // (mirroring the pre-Addendum-2 test this replaces) that a
+        // `State`-prefixed `Bind` nested in the body (e.g. a nested
+        // construct's field mutation running inside the hybrid loop body)
+        // resolves through the REAL production accessors
+        // `current_state_var`/`next_state_var` under hybrid loop context —
+        // not a hand-copy of their logic — so `RenderCtx::resolve_prefix`
+        // (via the shared `render_state_prefix` helper both paths call)
+        // matches live generator behavior bit-for-bit even when interleaved
+        // with the condition/exit scaffolding.
         let mut legacy_gen = CoreErlangGenerator::new("dual_run_conditional_loop_hybrid");
-        let cond_var = legacy_gen.fresh_temp_var("CondFun");
         legacy_gen.in_hybrid_loop = true;
         legacy_gen.in_loop_body = true;
         let cond_doc = docvec![
@@ -4856,20 +5141,7 @@ mod tests {
             leaf::int_lit(10),
             ")"
         ];
-        let continue_header = docvec![
-            "let ",
-            leaf::var(cond_var.clone()),
-            " = fun (",
-            leaf::var("Sum"),
-            ") -> ",
-            cond_doc,
-            " in case apply ",
-            leaf::var(cond_var),
-            " (",
-            leaf::var("Sum"),
-            ") of ",
-            "<'true'> when 'true' -> ",
-        ];
+        let continue_header = docvec!["case ", cond_doc, " of ", "<'true'> when 'true' -> "];
         let sum_rebind = legacy_gen.fresh_temp_var("Sum");
         let state_source_name = legacy_gen.current_state_var();
         let state_target_name = legacy_gen.next_state_var();
@@ -4925,7 +5197,6 @@ mod tests {
         .to_pretty_string();
 
         let mut render_gen = CoreErlangGenerator::new("dual_run_conditional_loop_hybrid");
-        let ir_cond_var = render_gen.fresh_temp_var("CondFun");
         let ir_cond_doc = docvec![
             "call 'erlang':'<'(",
             leaf::var("Sum"),
@@ -4933,20 +5204,7 @@ mod tests {
             leaf::int_lit(10),
             ")"
         ];
-        let ir_continue_header = docvec![
-            "let ",
-            leaf::var(ir_cond_var.clone()),
-            " = fun (",
-            leaf::var("Sum"),
-            ") -> ",
-            ir_cond_doc,
-            " in case apply ",
-            leaf::var(ir_cond_var),
-            " (",
-            leaf::var("Sum"),
-            ") of ",
-            "<'true'> when 'true' -> ",
-        ];
+        let ir_continue_arm = Document::Str("<'true'> when 'true' -> ");
         let frame = FrameId::new(1);
         let sum_v0 = local("sum", 0, frame);
         let ir_sum_rebind = render_gen.fresh_temp_var("Sum");
@@ -4996,7 +5254,9 @@ mod tests {
             frame,
             shadow_write_eligible: true,
             counter: None,
-            continue_header: ir_continue_header,
+            condition: Vec::new(),
+            condition_value: ValueRef::Doc(ir_cond_doc),
+            continue_arm: ir_continue_arm,
             body: ir_body,
             produces: vec![sum_v0],
             exit_arm: ir_exit_arm,

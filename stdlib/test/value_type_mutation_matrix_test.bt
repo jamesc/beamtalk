@@ -628,7 +628,7 @@ TestCase subclass: ValueTypeMutationMatrixTest
     ] ifFalse: [self assert: self actorCorpus cascadeOnSelfReadWrite equals: 2]
 
   // ADR 0118 phase 3: self-send as a whileTrue: CONDITION binary-op operand.
-  adr0118Phase3WhileTrueConditionSelfSendPending => true
+  adr0118Phase3WhileTrueConditionSelfSendPending => false
 
   testWhileTrueConditionSelfSendReadWriteActor =>
     self adr0118Phase3WhileTrueConditionSelfSendPending
