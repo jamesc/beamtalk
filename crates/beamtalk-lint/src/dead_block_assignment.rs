@@ -423,6 +423,15 @@ fn enter_block(
 /// `eachWithIndex:`/`do:separatedBy:`, whose threading is context-dependent
 /// (see the shared table's doc comment) and so conservatively excluded from
 /// it entirely.
+///
+/// BT-3423 correction: the pre-unification version of this lint's own table
+/// additionally excluded `on:do:`'s handler and `ensure:`'s cleanup block
+/// ("BT-3385 did not verify these shapes"). The shared canonical table has
+/// no such carve-out — codegen threads both the same way as the loop/
+/// conditional family (BT-3160, `generate_on_do_with_mutations`/
+/// `generate_ensure_with_mutations`) — so unifying onto it also stops this
+/// lint over-warning on those two shapes; see
+/// `on_do_and_ensure_handler_no_longer_warn` below.
 fn is_state_threaded_block_arg(msg_ctx: Option<&BlockMessageContext>) -> bool {
     let Some(ctx) = msg_ctx else {
         return false;
@@ -921,6 +930,27 @@ sealed typed Value subclass: Foo
         for src in [
             "x := 1.\nflag and: [x := 2. true]",
             "x := 1.\nflag or: [x := 2. false]",
+        ] {
+            let diags = lint(src);
+            assert!(
+                diags.is_empty(),
+                "Expected no lints for {src:?}, got: {diags:?}"
+            );
+        }
+    }
+
+    /// BT-3423: unifying onto the shared canonical table (rather than the
+    /// pre-unification version of this lint's own, narrower one) also picks
+    /// up `on:do:`'s handler block and `ensure:`'s cleanup block, neither of
+    /// which was in the old table ("BT-3385 did not verify these shapes").
+    /// Codegen threads both the same way as the loop/conditional family
+    /// (BT-3160) — see `is_state_threaded_block_arg`'s doc comment — so
+    /// these are no longer false positives.
+    #[test]
+    fn on_do_and_ensure_handler_no_longer_warn() {
+        for src in [
+            "x := 1.\n[nil] on: Error do: [:e | x := 2]",
+            "x := 1.\n[nil] ensure: [x := 2]",
         ] {
             let diags = lint(src);
             assert!(
