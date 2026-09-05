@@ -583,7 +583,7 @@ so lowering `open:mode:` would seem to make that auto-close "free". But the
 REPL spawns a fresh worker per evaluated statement (`spawn_monitor` in
 `beamtalk_repl_shell:handle_call({eval, ...})`), so a handle opened on one
 turn would die the instant that turn's statement finished — breaking the
-documented multi-turn `File.bt` workflow (`handle := (File open: … mode: …)
+documented multi-turn `file.bt` workflow (`handle := (File open: … mode: …)
 unwrap` on one line, `handle writeLine: …` on the next). Handles survive turns
 today only because they're opened in the long-lived File class process
 instead. See `resolve_owner/0` for how ownership is resolved without lowering.

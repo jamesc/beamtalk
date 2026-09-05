@@ -15,7 +15,7 @@
 /// methods) was chosen because these combinators operate over a *collection
 /// of blocks*, not a single block or a single collection of data — `Parallel`
 /// names that operation the way `OS`/`Random`/`System` name other class-side
-/// utility namespaces. `Collection>>parallelCollect:` (see `Collection.bt`)
+/// utility namespaces. `Collection>>parallelCollect:` (see `collection.bt`)
 /// is the ergonomic "map my elements in parallel" convenience built on top
 /// of `Parallel all:`.
 ///

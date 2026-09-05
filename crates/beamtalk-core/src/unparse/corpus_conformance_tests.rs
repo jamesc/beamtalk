@@ -301,7 +301,7 @@ fn corpus_method_definitions(module: &Module) -> Vec<(String, &crate::ast::Metho
 /// stdlib + `examples/` corpus, not just an asserted invariant in a comment
 /// (this project's no-"keep-in-sync"-comment-without-a-test rule).
 ///
-/// Was non-empty for two `SystemNavigation.bt` methods until BT-3223 fixed
+/// Was non-empty for two `system_navigation.bt` methods until BT-3223 fixed
 /// the underlying parser bug (`is_at_declaration_level_expect` misclassified
 /// a body-level `@expect` as declaration-level when the enclosing method was
 /// rendered at column 0 — exactly `find_all_sends_in_source`'s synthetic-wrap

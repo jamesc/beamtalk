@@ -40,11 +40,11 @@ A mechanism to make `stdlib/src/*.bt` files compilable while:
 
 ### Experimental Validation
 
-We tested the current compiler against `stdlib/src/Integer.bt` to understand the real gaps. Three distinct problems emerged:
+We tested the current compiler against `stdlib/src/integer.bt` to understand the real gaps. Three distinct problems emerged:
 
 #### Problem 1: Class declaration syntax
 
-`Integer.bt` starts with a bare `Integer` identifier on line 78. The parser requires `Superclass subclass: ClassName` syntax, so `Integer` is parsed as a top-level expression, not a class definition. All subsequent method definitions fail to parse because they're outside a class context.
+`integer.bt` starts with a bare `Integer` identifier on line 78. The parser requires `Superclass subclass: ClassName` syntax, so `Integer` is parsed as a top-level expression, not a class definition. All subsequent method definitions fail to parse because they're outside a class context.
 
 **Fix:** Use `Object subclass: Integer` (the `sealed` modifier is future work — see below).
 
@@ -451,9 +451,9 @@ Structural intrinsics use unquoted descriptive names. These are the ~20 cases wh
 
 The compiler validates intrinsic names at compile time — an unknown name is a compile error. This catches typos in stdlib definitions early.
 
-#### Concrete Example: Integer.bt
+#### Concrete Example: integer.bt
 
-Based on experimental validation, here is what a compilable `Integer.bt` would look like. Note that binary method definitions must appear before unary methods due to the parser ordering constraint (Problem 2 above).
+Based on experimental validation, here is what a compilable `integer.bt` would look like. Note that binary method definitions must appear before unary methods due to the parser ordering constraint (Problem 2 above).
 
 **Before (API-only, not compilable):**
 ```beamtalk
@@ -524,7 +524,7 @@ Beamtalk has the same pattern with `new`, `spawn`, `class`, and `doesNotUndersta
 **The full class hierarchy with pragmas:**
 
 ```beamtalk
-// ── ProtoObject.bt ── (root of everything)
+// ── proto_object.bt ── (root of everything)
 ProtoObject
   // Structural equality — selector-based, routes through runtime dispatch
   == other => @primitive '=='
@@ -545,7 +545,7 @@ ProtoObject
   error: message => @primitive 'error:'
 
 
-// ── Object.bt ── (value types — inherits ProtoObject)
+// ── object.bt ── (value types — inherits ProtoObject)
 ProtoObject subclass: Object
   // Instantiation — structural intrinsic, compiler generates map with __class__ + defaults
   // Equivalent to Smalltalk's Behavior>>basicNew (<primitive: 70>)
@@ -571,7 +571,7 @@ ProtoObject subclass: Object
   inspect => Transcript show: self describe
 
 
-// ── Actor.bt ── (process-based — inherits Object)
+// ── actor.bt ── (process-based — inherits Object)
 Object subclass: Actor
   // Spawn — structural intrinsics, compiler generates gen_server wrapping
   spawn => @primitive actorSpawn
@@ -774,7 +774,7 @@ Adding a new method that delegates to Erlang/runtime code (e.g., `Integer>>facto
 |------|------|-------|----------|
 | 1. Implement | Add `factorial` clause to dispatch function | `runtime/src/beamtalk_integer.erl` | Erlang |
 | 2. Register | Add `intFactorial` → dispatch mapping | Compiler intrinsic registry (one line) | Rust |
-| 3. Declare | `factorial => @primitive intFactorial` | `stdlib/src/Integer.bt` | Beamtalk |
+| 3. Declare | `factorial => @primitive intFactorial` | `stdlib/src/integer.bt` | Beamtalk |
 | 4. Test | Add E2E test, run `just test-repl-protocol` | `tests/repl-protocol/cases/` | Beamtalk |
 
 **No Rust compiler recompilation needed** — the intrinsic registry is a static lookup table. In practice, step 2 is adding one entry to a match arm. The runtime dispatch module provides type checking, error handling, and extension registry support automatically.
@@ -842,13 +842,13 @@ This is **not primarily a line-count reduction.** The codegen machinery (state t
 |--------------------|-------|-----------------------|
 | `builtins.rs`: 60+ selector→Erlang mappings per type | ~400 | Moves to `stdlib/src/*.bt` as pragma declarations |
 | `dispatch_codegen.rs`: special-cased selectors | ~60 | Moves to `stdlib/src/*.bt` as pragma declarations |
-| `gen_server.rs`: auto-generated `spawn`/`new`/error methods | ~150 | Moves to `stdlib/src/Actor.bt` and `stdlib/src/Object.bt` |
+| `gen_server.rs`: auto-generated `spawn`/`new`/error methods | ~150 | Moves to `stdlib/src/actor.bt` and `stdlib/src/object.bt` |
 | `mod.rs`: `is_actor_class()` heuristic | ~20 | Replaced by three-kind routing from class metadata |
 | **Total knowledge lines that move** | **~630** | **Into `stdlib/src/*.bt` files** |
 
 The real simplification is **architectural, not volumetric:**
 
-1. **Stdlib changes don't require recompiling the Rust compiler.** Today, adding `Integer>>factorial` means editing `builtins.rs` in Rust. With pragmas, it's just editing `stdlib/src/Integer.bt` — a Beamtalk file.
+1. **Stdlib changes don't require recompiling the Rust compiler.** Today, adding `Integer>>factorial` means editing `builtins.rs` in Rust. With pragmas, it's just editing `stdlib/src/integer.bt` — a Beamtalk file.
 2. **The compiler becomes generic.** It doesn't need to know what methods Integer has. It reads the pragma, looks up the intrinsic registry, and generates code. New types can be added without touching the compiler.
 3. **Dispatch tables become declarative.** The 60+ match arms in `builtins.rs` (`try_generate_integer_message`, `try_generate_string_message`, etc.) become declarations in `.bt` files that the compiler processes uniformly.
 4. **Class kind routing becomes data-driven.** Instead of `is_actor_class()` guessing from superclass name, the three-kind distinction (Actor/Value Type/Primitive) is driven by the compiled stdlib's class metadata.
@@ -955,8 +955,8 @@ Compiling the stdlib introduces a strict build ordering dependency:
 └──────────────┬───────────────────────┘
                │ dispatch modules must exist for @primitive to route to
 ┌──────────────▼───────────────────────┐
-│  3. Stdlib (beamtalk build lib/)     │  Integer.bt → integer.beam
-│     runtime/_build/.../              │  String.bt → string.beam
+│  3. Stdlib (beamtalk build lib/)     │  integer.bt → integer.beam
+│     runtime/_build/.../              │  string.bt → string.beam
 │     beamtalk_stdlib/ebin/            │  etc.
 └──────────────┬───────────────────────┘
                │ must be on code path
@@ -994,8 +994,8 @@ runtime/                                  # Rebar3 umbrella project
 │       │   └── beamtalk_stdlib.app.src   # Generated by build-stdlib
 │       └── ebin/
 │           ├── beamtalk_stdlib.app       # Generated
-│           ├── integer.beam              # Compiled from stdlib/src/Integer.bt
-│           ├── string.beam               # Compiled from stdlib/src/String.bt
+│           ├── integer.beam              # Compiled from stdlib/src/integer.bt
+│           ├── string.beam               # Compiled from stdlib/src/string.bt
 │           └── ...
 └── _build/default/lib/
     ├── beamtalk_runtime/ebin/            # rebar3-compiled runtime
@@ -1003,9 +1003,9 @@ runtime/                                  # Rebar3 umbrella project
     └── jsx/ebin/
 
 lib/                                      # Stdlib SOURCE (Beamtalk, not Erlang)
-├── Integer.bt
-├── String.bt
-├── Object.bt
+├── integer.bt
+├── string.bt
+├── object.bt
 └── ...
 ```
 
@@ -1302,7 +1302,7 @@ If this ADR is accepted, the following documents need updating:
 
    **Result:** The intrinsic registry shrinks from ~50 entries to ~20 structural intrinsics. All runtime-dispatch primitives use the selector itself — self-documenting, no naming convention to learn. Structural intrinsic names are unquoted identifiers; selector-based names are quoted atoms. The compiler distinguishes the two cases automatically by checking quotes: `'+'` = selector (runtime dispatch), `basicNew` = structural intrinsic.
 
-5. ~~**Where's `yourself`?**~~ **RESOLVED: Add it.** `yourself => self` belongs in `stdlib/src/Object.bt`. It's pure Beamtalk (no pragma needed) and is the canonical Smalltalk "this is a real class library" signal. It also has practical use in message cascades. Will be included in the Phase 2 stdlib conversion.
+5. ~~**Where's `yourself`?**~~ **RESOLVED: Add it.** `yourself => self` belongs in `stdlib/src/object.bt`. It's pure Beamtalk (no pragma needed) and is the canonical Smalltalk "this is a real class library" signal. It also has practical use in message cascades. Will be included in the Phase 2 stdlib conversion.
 
 ---
 

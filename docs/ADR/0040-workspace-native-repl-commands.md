@@ -87,7 +87,7 @@ The system facade. Classes, version, documentation. Read-only for user code.
 | Documentation | `help: aClass`, `help: aClass selector: aSelector` |
 | Dictionary | `globals` → `Dictionary` (system namespace: classes, system singletons) |
 
-`allClasses` and `classNamed:` are typed convenience methods that query the class registry directly (for liveness). `globals` returns an immutable snapshot of the system namespace for inspection. Both views contain the same classes, but `allClasses` is always up-to-date while `globals` is a point-in-time snapshot. (`Class >> isClass` already exists at `stdlib/src/Class.bt:44`.)
+`allClasses` and `classNamed:` are typed convenience methods that query the class registry directly (for liveness). `globals` returns an immutable snapshot of the system namespace for inspection. Both views contain the same classes, but `allClasses` is always up-to-date while `globals` is a point-in-time snapshot. (`Class >> isClass` already exists at `stdlib/src/class.bt:44`.)
 
 **`Workspace`** (class: `WorkspaceInterface`) — *"What is my working context?"*
 
@@ -112,7 +112,7 @@ Removed from current API:
 
 **Reload is a class operation, not a workspace operation.** When `Workspace load: "examples/counter.bt"` compiles a class, the runtime records the source file association on the class metadata (alongside doc comments per ADR 0033). The class then knows how to reload itself.
 
-New methods on **`Behaviour`** (`stdlib/src/Behaviour.bt`):
+New methods on **`Behaviour`** (`stdlib/src/behaviour.bt`):
 
 | Method | Return | Description |
 |--------|--------|-------------|
@@ -504,7 +504,7 @@ Workspace reload: Counter            // reload the file Counter came from
 Rename the class from `SystemDictionary` to `BeamtalkInterface`. Change `globals` to return a plain `Dictionary` populated from the class registry. Existing methods (`allClasses`, `classNamed:`, `version`) stay but are now understood as facade convenience methods.
 
 **Affected files:**
-- `stdlib/src/SystemDictionary.bt` → rename to `stdlib/src/BeamtalkInterface.bt`
+- `stdlib/src/SystemDictionary.bt` → rename to `stdlib/src/beamtalk_interface.bt`
 - `runtime/apps/beamtalk_runtime/src/beamtalk_system_dictionary.erl` → rename to `beamtalk_interface.erl`
 - `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_config.erl` — update singleton registration
 - `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_bootstrap.erl` — update bootstrap binding
@@ -514,7 +514,7 @@ Rename the class from `SystemDictionary` to `BeamtalkInterface`. Change `globals
 Add `sourceFile` and `reload` methods to `Behaviour`. Implement backing primitives that record source paths at compile time and trigger recompilation + hot code swap.
 
 **Affected files:**
-- `stdlib/src/Behaviour.bt` — add `sourceFile`, `reload`
+- `stdlib/src/behaviour.bt` — add `sourceFile`, `reload`
 - `runtime/apps/beamtalk_runtime/src/beamtalk_behaviour_intrinsics.erl` — add primitive handlers
 - `runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl` — store source file in class metadata
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` — record source file on class after compilation
@@ -526,7 +526,7 @@ Rename `WorkspaceEnvironment` to `WorkspaceInterface` (matching `BeamtalkInterfa
 Implement backing primitives in `beamtalk_workspace_environment.erl` (rename to `beamtalk_workspace_interface.erl`), extracting logic from existing `beamtalk_repl_ops_load.erl` and `beamtalk_repl_ops_eval.erl`.
 
 **Affected files:**
-- `stdlib/src/WorkspaceInterface.bt` — add/remove method declarations
+- `stdlib/src/workspace_interface.bt` — add/remove method declarations
 - `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_environment.erl` — add primitive handlers
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` — extract shared logic
 
@@ -535,7 +535,7 @@ Implement backing primitives in `beamtalk_workspace_environment.erl` (rename to 
 Add `help:` and `help:selector:` to `BeamtalkInterface`.
 
 **Affected files:**
-- `stdlib/src/BeamtalkInterface.bt` — add `help:`, `help:selector:`
+- `stdlib/src/beamtalk_interface.bt` — add `help:`, `help:selector:`
 - `runtime/apps/beamtalk_runtime/src/beamtalk_interface.erl` — add primitive handlers
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_dev.erl` — extract shared doc logic
 
@@ -566,9 +566,9 @@ Add BUnit tests for all new facade and Behaviour methods. Add e2e tests exercisi
 
 | Component | Change |
 |-----------|--------|
-| `stdlib/src/SystemDictionary.bt` | Rename to `BeamtalkInterface.bt` |
-| `stdlib/src/WorkspaceInterface.bt` | Add `classes`, `testClasses`, `globals`, `load:`, `test`, `test:`; remove `sessions`; `clear` dropped |
-| `stdlib/src/Behaviour.bt` | Add `sourceFile`, `reload` |
+| `stdlib/src/SystemDictionary.bt` | Rename to `beamtalk_interface.bt` |
+| `stdlib/src/workspace_interface.bt` | Add `classes`, `testClasses`, `globals`, `load:`, `test`, `test:`; remove `sessions`; `clear` dropped |
+| `stdlib/src/behaviour.bt` | Add `sourceFile`, `reload` |
 | `beamtalk_system_dictionary.erl` | Rename to `beamtalk_interface.erl`; add `help:`, `help:selector:` |
 | `beamtalk_workspace_environment.erl` | New primitive handlers for project ops + `globals` |
 | `beamtalk_behaviour_intrinsics.erl` | New primitives for `sourceFile`, `reload` |
@@ -677,7 +677,7 @@ Session locals override workspace user bindings, which override workspace global
 
 - `beamtalk_workspace_interface_primitives.erl`: Implements `bind:as:` and `unbind:` with conflict checking; user bindings stored in ETS table `beamtalk_wi_user_bindings` (Phase 1 gen_server `beamtalk_workspace_interface.erl` removed in BT-1111)
 - `beamtalk_repl_eval.erl`: Merges workspace user bindings into session bindings before each eval; strips them from result to prevent session state accumulation
-- `WorkspaceInterface.bt`: Added `bind:as:` and `unbind:` as `@primitive` methods
+- `workspace_interface.bt`: Added `bind:as:` and `unbind:` as `@primitive` methods
 - `handle_globals/2`: Updated to include user bindings in the snapshot
 
 - Prior art: Pharo `SmalltalkImage` facade + `Smalltalk globals` (SystemDictionary) — facade/dictionary split

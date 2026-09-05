@@ -2364,7 +2364,7 @@ impl CoreErlangGenerator {
     /// One case it deliberately does not mirror: a declared `new` whose body is
     /// `@intrinsic basicNew` routes back to the auto-generated constructor, so
     /// on a `native:` class it would raise despite being "declared". Only
-    /// `Value.bt`/`Object.bt` write that body and neither is `native:`; if one
+    /// `value.bt`/`object.bt` write that body and neither is `native:`; if one
     /// ever were, the only cost is an omitted `isConstructible` key, which the
     /// runtime recomputes lazily from `new/0` anyway.
     fn declares_own_new(class: &ClassDefinition) -> bool {
@@ -2962,7 +2962,7 @@ impl CoreErlangGenerator {
         // BT-3073: actor class-side `new`/`new:`/`spawn`/`spawnWith:` no longer
         // get synthetic per-subclass rows here — BT-3071/BT-3072 lifted their
         // bodies into real, source-backed class methods on `Actor` itself
-        // (`stdlib/src/Actor.bt`), so a subclass genuinely *inherits* them
+        // (`stdlib/src/actor.bt`), so a subclass genuinely *inherits* them
         // rather than *defining* them. `Actor`'s own compilation indexes them
         // through the normal `build_method_xref_entry` path above (real
         // `MethodDefinition`s, `source_status => indexed`); subclasses simply

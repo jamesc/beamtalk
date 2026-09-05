@@ -157,7 +157,7 @@ impl TypeChecker {
             //    (`infer_constructor_type` keeps the result Dynamic for them).
             //  * Actor subclasses — they are spawned (`spawn` / `spawnWith:`),
             //    not `new`'d. In the common case this exclusion is now moot for
-            //    `new`/`new:` specifically: Actor.bt declares real `class sealed
+            //    `new`/`new:` specifically: actor.bt declares real `class sealed
             //    new` / `new:` (BT-3071), so `has_class_method` above is already
             //    `true` and this whole block is skipped before reaching here. It
             //    stays as defense-in-depth for a partially-unresolved hierarchy

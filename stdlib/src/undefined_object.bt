@@ -48,7 +48,7 @@ sealed Object subclass: UndefinedObject
   /// `notNilBlock value: self`), but it is never evaluated on this
   /// `UndefinedObject` branch. `Block(R)` would misrepresent it as
   /// zero-arg, and the type checker doesn't consult this declared
-  /// signature for `ifNotNil:` anyway (see `Object.bt`).
+  /// signature for `ifNotNil:` anyway (see `object.bt`).
   ///
   /// ## Examples
   /// ```beamtalk

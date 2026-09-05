@@ -79,7 +79,7 @@ remain in the log for audit.
 
 This module implements the gen_server, the append API, the two-part persistence,
 restart epoch/orphan tagging, and the bounded ring with archive rotation. The
-install hook that *emits* entries, `Workspace flush`, and the `ChangeLog.bt`
+install hook that *emits* entries, `Workspace flush`, and the `change_log.bt`
 stdlib facade are later phases (BT-2280 epic). In run mode (no workspace, no
 `workspace_id`) the gen_server keeps state in ETS only and never touches disk —
 release nodes do not start a workspace, so this code is a no-op there.
@@ -107,11 +107,11 @@ release nodes do not start a workspace, so this code is a no-op there.
 ]).
 
 %% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284). These build the data the
-%% `ChangeLog.bt` / `ChangeEntry.bt` value objects wrap: each entry becomes a
+%% `change_log.bt` / `change_entry.bt` value objects wrap: each entry becomes a
 %% `$beamtalk_class`-tagged map and `dirtyMethods/0` returns the per-class set
 %% of dirty selectors. The FFI dispatches on the Beamtalk selector verbatim, so
 %% these entry points are named in camelCase (`changeLog`, `dirtyMethods`) to
-%% match the selectors used in `ChangeLog.bt` / `WorkspaceInterface.bt`. Called
+%% match the selectors used in `change_log.bt` / `workspace_interface.bt`. Called
 %% via `(Erlang beamtalk_workspace_changelog) ...` from the compiled stdlib.
 -export([
     changeLog/0,
@@ -773,7 +773,7 @@ revert_selector_binary(Sel) when is_atom(Sel) -> atom_to_binary(Sel, utf8).
 %%% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284)
 %%% ----------------------------------------------------------------------------
 %%% These functions translate the opaque `#entry{}` records into the
-%%% `$beamtalk_class`-tagged maps that the `ChangeLog.bt` / `ChangeEntry.bt`
+%%% `$beamtalk_class`-tagged maps that the `change_log.bt` / `change_entry.bt`
 %%% value objects wrap. `change_entries/0` returns *every* entry (the
 %%% `ChangeLog` object holds the full set so `select:` can still reach
 %%% prior-epoch / orphan entries); the active/dirty filtering lives on the
@@ -787,7 +787,7 @@ revert_selector_binary(Sel) when is_atom(Sel) -> atom_to_binary(Sel, utf8).
 Return the workspace ChangeLog as a `ChangeLog` value-object map.
 
 The map is tagged `'$beamtalk_class' => 'ChangeLog'` and carries the full set
-of entries (as `ChangeEntry` maps) under `entries`, so the `ChangeLog.bt`
+of entries (as `ChangeEntry` maps) under `entries`, so the `change_log.bt`
 object can apply the active-vs-full filtering in Beamtalk. This is what
 `Workspace changes` returns. Called via
 `(Erlang beamtalk_workspace_changelog) changeLog`.
@@ -807,11 +807,11 @@ changeLog() ->
 Return every ChangeLog entry as a `ChangeEntry` value-object map, oldest first.
 
 Each map is tagged `'$beamtalk_class' => 'ChangeEntry'` so the runtime
-dispatches the instance methods defined in `ChangeEntry.bt`. The full set is
+dispatches the instance methods defined in `change_entry.bt`. The full set is
 returned (including prior-epoch and orphan entries) so `ChangeLog select:` can
 still reach them; the default collection views filter on the per-entry `active`
 flag in Beamtalk. Internal helper for `changeLog/0`; not used by the stdlib API
-(`ChangeLog.bt` only ever calls `changeLog`) — exported for tests/helpers.
+(`change_log.bt` only ever calls `changeLog`) — exported for tests/helpers.
 """.
 -spec change_entries() -> [map()].
 change_entries() ->
@@ -1021,7 +1021,7 @@ dirty_selector(#entry{selector = undefined}) -> 'new-class';
 dirty_selector(#entry{selector = Sel}) -> binary_to_atom(Sel, utf8).
 
 %% Build a `ChangeEntry` value-object map from an `#entry{}` record. Field keys
-%% match the `field:` declarations in `ChangeEntry.bt`; `self.field` reads them.
+%% match the `field:` declarations in `change_entry.bt`; `self.field` reads them.
 %% Atoms (selector, kind, intent, authorKind) are surfaced as Beamtalk Symbols;
 %% the derived `active` flag is `true` iff the entry is current-epoch, not an
 %% orphan, and not flushed (the default dirty view). The derived `shadowed` flag

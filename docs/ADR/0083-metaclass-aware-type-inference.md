@@ -46,13 +46,13 @@ What is missing — entirely in the type checker's *type representation*:
   but that annotation resolves to `Dynamic` today.)
 - A method that *returns* a class value yields `Dynamic` downstream — and a method
   that returns a class value via a *plain* type loses even more: `Collection>>species`
-  is declared `-> Object => self class` (Collection.bt:57), so `self species` infers
+  is declared `-> Object => self class` (collection.bt:57), so `self species` infers
   as `Object`, not even a class.
 - Sends on a metaclass-typed receiver are not routed through `find_class_method`.
 
 This is the structural reason behind several `@expect` overrides found in the
 stdlib audit (see BT-2254 / the ADR 0075 amendment for the FFI-element-type
-sibling): for example `self species withAll:` in `Collection.bt` carries
+sibling): for example `self species withAll:` in `collection.bt` carries
 `@expect dnu` because `species` is typed `-> Object`, so `withAll:` cannot be
 resolved as a class-side send. Note this override is **not removable by metatype
 typing alone** — it additionally requires re-declaring `species -> Self class`
@@ -317,7 +317,7 @@ the Smalltalk model needs.
    precision for concrete-class-literal receivers.
 
 Affected components: type checker (`type_resolver`, `inference`, `validation`,
-`types`) plus one stdlib annotation (`Collection.bt`). No parser/codegen/runtime
+`types`) plus one stdlib annotation (`collection.bt`). No parser/codegen/runtime
 changes.
 
 ## Resolved Questions

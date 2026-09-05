@@ -397,7 +397,7 @@ If a future proposal seeks a third coercion, it must satisfy all five criteria a
 ### Phase 1: Runtime Conversion (core change)
 - **beamtalk_erlang_proxy.erl:** Add `coerce_result/1` after `coerce_charlist_result/1` in the `direct_call/3` pipeline
 - **beamtalk_result.erl:** Add clauses for bare `ok`/`error` atoms in `from_tagged_tuple/1`
-- **Result.bt:** Add `Result fromTuple:` class method (explicit conversion for ok/error tuples received via messages)
+- **result.bt:** Add `Result fromTuple:` class method (explicit conversion for ok/error tuples received via messages)
 - **Tests:** EUnit tests for all conversion rules (2-element, bare atom, 3+ element passthrough, non-tuple passthrough); BUnit tests for `Result fromTuple:`; e2e btscript tests for FFI calls returning Result
 - **Affected components:** Runtime only (no parser/codegen changes)
 - **Effort:** S

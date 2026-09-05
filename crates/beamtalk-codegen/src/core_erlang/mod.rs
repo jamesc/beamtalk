@@ -4553,7 +4553,7 @@ impl CoreErlangGenerator {
         // `Args..., StateAcc` shape (extra state args, different position)
         // would silently fall through to the unfixed placeholder below rather
         // than fail to compile — there's no static check tying this arm list
-        // to `STRUCTURAL_INTRINSICS` or to the Block.bt method declarations.
+        // to `STRUCTURAL_INTRINSICS` or to the block.bt method declarations.
         if !is_quoted {
             let block_value_info = match name {
                 "blockValue" => Some((0usize, "value")),
@@ -4668,7 +4668,7 @@ impl CoreErlangGenerator {
         }
 
         // BT-1478: Logger intrinsics — generate inline logger:log/3 calls.
-        // These are the method bodies for Logger.bt's @intrinsic declarations.
+        // These are the method bodies for logger.bt's @intrinsic declarations.
         // Direct `Logger warn:` calls are intercepted at the call site by
         // try_generate_logger_intrinsic (which injects the caller's class/selector
         // as metadata). This body path is reached only via indirect dispatch
@@ -4693,7 +4693,7 @@ impl CoreErlangGenerator {
                 // BT-2913: `doWithKey:` (2-arg-block convention, same shape as
                 // `inject:into:`'s block) has the identical gap — extend the
                 // same guard. `keysAndValuesDo:` is self-hosted as `self
-                // doWithKey: block` (Dictionary.bt), so it inherits the fix
+                // doWithKey: block` (dictionary.bt), so it inherits the fix
                 // once `doWithKey:` itself is guarded.
                 let stateful_guard_block_param = match name {
                     "do:" | "collect:" | "select:" | "reject:" | "doWithKey:" => params.first(),

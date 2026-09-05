@@ -46,18 +46,18 @@ Beamtalk's opportunity: implement this idea with modern (closure-based lazy) mec
 
 ### Current State
 
-**File I/O** (`stdlib/src/File.bt`):
+**File I/O** (`stdlib/src/file.bt`):
 - Three class methods: `exists:`, `readAll:`, `writeAll:contents:`
 - Synchronous, whole-file operations via Erlang's `file` module
 - Security: relies on OS-level permissions (ADR 0063)
 - Structured error handling via `#beamtalk_error{}`
 
-**TranscriptStream** (`stdlib/src/TranscriptStream.bt`):
+**TranscriptStream** (`stdlib/src/transcript_stream.bt`):
 - Actor (gen_server) with pub/sub semantics
 - Methods: `show:`, `cr`, `subscribe`, `unsubscribe`, `recent`, `clear`
 - Workspace singleton (ADR 0019)
 
-**Collections** (`stdlib/src/List.bt`, `stdlib/src/Set.bt`, etc.):
+**Collections** (`stdlib/src/list.bt`, `stdlib/src/set.bt`, etc.):
 - List has full eager iteration: `do:`, `collect:`, `select:`, `reject:`, `inject:into:`, `detect:`, `anySatisfy:`, `allSatisfy:`, plus `take:`, `drop:`
 - String has partial iteration: `each:`, `collect:`, `select:`
 - Set has only `do:`; Dictionary has only `keysAndValuesDo:`
@@ -448,7 +448,7 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 ## Implementation
 
 ### Phase 1: Stream Core
-- Create `stdlib/src/Stream.bt` as sealed Object subclass
+- Create `stdlib/src/stream.bt` as sealed Object subclass
 - Implement closure-based generator in `beamtalk_stream.erl`
 - Core protocol: `select:`, `collect:`, `reject:`, `take:`, `drop:`, `do:`, `inject:into:`, `detect:`, `asList`, `anySatisfy:`, `allSatisfy:`
 - Constructors: `Stream from:` (successor), `Stream from:by:` (step function), `Stream on:` (from collection)
@@ -463,7 +463,7 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 - Stream generator calls `file:read_line/1` lazily
 - Path validation via existing `beamtalk_file.erl` security checks
 - Add tests in `stdlib/bootstrap-test/file_stream.bt`
-- **Components:** stdlib (File.bt update), runtime (file line generator)
+- **Components:** stdlib (file.bt update), runtime (file line generator)
 
 ### Phase 3: Collection Integration
 - Add `stream` method to List, String, Set, Dictionary
@@ -504,7 +504,7 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 ## References
 - Related ADRs: ADR 0005 (sealed classes — Stream follows this pattern), ADR 0006 (unified dispatch), ADR 0007 (compilable stdlib), ADR 0009 (OTP structure), ADR 0014 (test framework — Stream tests use terminal ops in `// =>` assertions), ADR 0016 (module naming — Stream becomes `bt@stdlib@stream`), ADR 0019 (singleton access), ADR 0043 (sync-by-default — limits Stream to value-side), ADR 0051 (subprocess execution — proves readLine pattern over cross-process Streams)
 - Related issues: BT-506 (pipeline chaining syntax research), BT-507 (Future class ADR)
-- Existing I/O: `stdlib/src/File.bt`, `stdlib/src/TranscriptStream.bt`
+- Existing I/O: `stdlib/src/file.bt`, `stdlib/src/transcript_stream.bt`
 - Elixir Stream module: https://hexdocs.pm/elixir/Stream.html (primary inspiration)
 - Rust Iterator: https://doc.rust-lang.org/std/iter/trait.Iterator.html
 - Kotlin Sequence: https://kotlinlang.org/docs/sequences.html

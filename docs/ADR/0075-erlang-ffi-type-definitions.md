@@ -859,7 +859,7 @@ type/DNU warnings.
 
 An audit of `stdlib/src` found 37 `@expect` suppression directives, ~32 of which
 exist solely to silence these false positives (concentrated in
-`SystemNavigation.bt`, which iterates FFI-returned lists of tuples), plus a large
+`system_navigation.bt`, which iterates FFI-returned lists of tuples), plus a large
 share of the `@expect` directives in `stdlib/test`. This is the concrete instance
 of the "Richer type mapping" item already listed under **Future Work** above.
 

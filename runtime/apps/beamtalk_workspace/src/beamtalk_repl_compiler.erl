@@ -446,7 +446,7 @@ compile_method_reload(ClassSource, MethodSource, Options) ->
                             %% originating file's other top-level
                             %% declarations. A `type Name = ...` alias
                             %% declared as a *sibling* of this class in the
-                            %% same source file (the exact `stdlib/src/Ets.bt`
+                            %% same source file (the exact `stdlib/src/ets.bt`
                             %% shape BT-2955 fixed for the other REPL-inline
                             %% paths) is therefore just as invisible to this
                             %% compile as it is to `compile_class_definition_result/2`
@@ -574,7 +574,7 @@ the REPL session*.
 ## File-local aliases (BT-2955): the `Mode` parameter
 
 "Trustworthy" above does not extend to an alias declared inside the SAME
-file as the protocol/class (e.g. `stdlib/src/Ets.bt`'s `type EtsTableType =
+file as the protocol/class (e.g. `stdlib/src/ets.bt`'s `type EtsTableType =
 ...` alongside `Ets`'s own method signatures) — a REPL-inline redefinition
 of that protocol/class has no way to see a file-local alias it didn't also
 declare in-session, so its `referenced_aliases` silently omits it, and an

@@ -5911,30 +5911,30 @@ Both forms are semantically equivalent at the compiler level (they produce the s
 
 **`@primitive` (bare or quoted)** — runtime-dispatched method implementations. A bare `@primitive` infers its selector from the method, so the explicit string is only needed for genuine renames:
 ```beamtalk
-// In stdlib/src/Integer.bt — bare form, selector inferred ('+' and 'asString')
+// In stdlib/src/integer.bt — bare form, selector inferred ('+' and 'asString')
 + other => @primitive
 asString => @primitive
 
-// In stdlib/src/Exception.bt — explicit override (method 'signal' → runtime 'classSignal')
+// In stdlib/src/exception.bt — explicit override (method 'signal' → runtime 'classSignal')
 class signal => @primitive 'classSignal'
 ```
 
 **`@intrinsic` (unquoted)** — compiler structural intrinsics:
 ```beamtalk
-// In stdlib/src/Block.bt
+// In stdlib/src/block.bt
 value => @intrinsic blockValue
 whileTrue: bodyBlock => @intrinsic whileTrue
 
-// In stdlib/src/Object.bt
+// In stdlib/src/object.bt
 new => @intrinsic basicNew
 hash => @intrinsic hash
 ```
 
 The full list of structural intrinsics: `blockValue`, `blockValue1`–`blockValue3`, `whileTrue`, `whileFalse`, `repeat`, `onDo`, `ensure`, `timesRepeat`, `toDo`, `toByDo`, `basicNew`, `basicNewWith`, `hash`, `respondsTo`, `fieldNames`, `fieldAt`, `fieldAtPut`, `dynamicSend`, `dynamicSendWithArgs`, `error`.
 
-**`Actor>>spawn`/`spawnWith:` (BT-3072).** Unlike the intrinsics above, `spawn`/`spawnWith:` are *not* `@intrinsic` — `Actor.bt` declares real FFI bodies (`(Erlang beamtalk_actor) doSpawn: self`). The compiler's static `Counter spawn` / `self spawn` call sites still lower directly to `beamtalk_actor:safe_spawn`/`class_self_spawn` (unchanged, to avoid serializing every spawn through the class `gen_server`) — the declared body is the documented source of behaviour for the dynamic dispatch path, mirroring `spawnAs:`/`spawnWith:as:`'s existing FFI-body shape. See `stdlib/src/Actor.bt`.
+**`Actor>>spawn`/`spawnWith:` (BT-3072).** Unlike the intrinsics above, `spawn`/`spawnWith:` are *not* `@intrinsic` — `actor.bt` declares real FFI bodies (`(Erlang beamtalk_actor) doSpawn: self`). The compiler's static `Counter spawn` / `self spawn` call sites still lower directly to `beamtalk_actor:safe_spawn`/`class_self_spawn` (unchanged, to avoid serializing every spawn through the class `gen_server`) — the declared body is the documented source of behaviour for the dynamic dispatch path, mirroring `spawnAs:`/`spawnWith:as:`'s existing FFI-body shape. See `stdlib/src/actor.bt`.
 
-**`Actor>>new`/`new:` (BT-3074).** Also not `@intrinsic` — `Actor.bt` declares real bodies that send `Exception signalKind:class:selector:hint:` (BT-3042), the general-purpose pure-Beamtalk way to raise a named error kind with a hint. `class_send` intercepts `new`/`new:` before class-method dispatch ever reaches these declarations (routing instead to the compiled per-actor-module `new/0`/`new/1` stub the runtime's `{new, Args}` fast path requires), so this is purely the documented, xref-visible source for the selector — never the code path an actual send executes. The type checker correctly proves these bodies diverge via the class-side keyword send to `Exception signalKind:class:selector:hint:` (BT-3075 unified the type-string resolver).
+**`Actor>>new`/`new:` (BT-3074).** Also not `@intrinsic` — `actor.bt` declares real bodies that send `Exception signalKind:class:selector:hint:` (BT-3042), the general-purpose pure-Beamtalk way to raise a named error kind with a hint. `class_send` intercepts `new`/`new:` before class-method dispatch ever reaches these declarations (routing instead to the compiled per-actor-module `new/0`/`new/1` stub the runtime's `{new, Args}` fast path requires), so this is purely the documented, xref-visible source for the selector — never the code path an actual send executes. The type checker correctly proves these bodies diverge via the class-side keyword send to `Exception signalKind:class:selector:hint:` (BT-3075 unified the type-string resolver).
 
 **Relationship to `native:` (ADR 0101).** `@primitive` and `@intrinsic` cover native BEAM *value types* and compiler *substrate*. A third mechanism, the class-level `native:` declaration with `=> self delegate` bodies, covers whole-class **delegation** to a single Erlang module (a stateless `Object` such as `Stream`, or an `Actor` gen_server). Pick by what the method needs: guarded dispatch + the open-world extension registry → `@primitive`; the dispatch act itself (`==`, `class`, `perform:`, actor lifecycle) → `@intrinsic`; pure pass-through to one module → `native:`. See [`native:` for stateless Objects](beamtalk-native-erlang.md#native-stateless-objects--native-for-object).
 

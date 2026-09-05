@@ -65,7 +65,7 @@ itself declares, but not for a REPL-inline class/protocol redefinition
 declared *at the REPL*, so a file-local alias (declared in the same file the
 class originally came from, not the REPL session) is invisible to them.
 Calling `register_class/2` from there would silently clobber a real edge a
-prior file `:load` registered (BT-2955's concrete `stdlib/src/Ets.bt` +
+prior file `:load` registered (BT-2955's concrete `stdlib/src/ets.bt` +
 `EtsTableType` repro). `register_class_additive/2` exists for exactly those
 two call sites: additive-only (never removes an edge), trading "a class's
 dependency set can only grow across a session, never accurately shrink from
@@ -156,7 +156,7 @@ Why this exists: a REPL-inline redefinition (`beamtalk_repl_compiler:
 compile_class_definition_result/2`, `compile_protocol_definition_result/2`)
 only ever sees aliases declared *at the REPL* — a `type Name = ...` alias
 declared in the *same source file* as the class/protocol being redefined
-(e.g. `stdlib/src/Ets.bt`'s `EtsTableType`, referenced by `Ets`'s own class
+(e.g. `stdlib/src/ets.bt`'s `EtsTableType`, referenced by `Ets`'s own class
 method signature in that same file) is invisible to that compile's
 `AliasRegistry`, so its `referenced_aliases` response silently omits it —
 not because the class stopped using it, but because this compile had no way

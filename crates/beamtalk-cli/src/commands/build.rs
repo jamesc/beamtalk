@@ -625,8 +625,8 @@ fn build_class_index(
     // `beamtalk build --stdlib-mode <dir>` — what `just dialyzer-specs` runs,
     // over a flat copy of `stdlib/src/*.bt` in a bare temp dir — has no
     // manifest but *is* one coherent package. Without it, `field: restart ::
-    // RestartStrategy = #temporary` in `SupervisionSpec.bt` couldn't see
-    // `type RestartStrategy = ...` declared over in `Actor.bt`, and
+    // RestartStrategy = #temporary` in `supervision_spec.bt` couldn't see
+    // `type RestartStrategy = ...` declared over in `actor.bt`, and
     // `check_state_defaults` reported a false "declared as RestartStrategy,
     // default is #temporary" mismatch against the unexpanded alias name.
     // `just build-stdlib` never hit this: `build_stdlib.rs` seeds its own
@@ -4200,20 +4200,20 @@ mod tests {
     // Linux CI.
     #[test]
     fn test_to_forward_slash_normalizes_backslashes() {
-        let path = Utf8PathBuf::from("stdlib/src\\Ets.bt");
-        assert_eq!(to_forward_slash(&path), "stdlib/src/Ets.bt");
+        let path = Utf8PathBuf::from("stdlib/src\\ets.bt");
+        assert_eq!(to_forward_slash(&path), "stdlib/src/ets.bt");
     }
 
     #[test]
     fn test_to_forward_slash_normalizes_all_backslash_components() {
-        let path = Utf8PathBuf::from("stdlib\\src\\Ets.bt");
-        assert_eq!(to_forward_slash(&path), "stdlib/src/Ets.bt");
+        let path = Utf8PathBuf::from("stdlib\\src\\ets.bt");
+        assert_eq!(to_forward_slash(&path), "stdlib/src/ets.bt");
     }
 
     #[test]
     fn test_to_forward_slash_leaves_forward_slash_paths_unchanged() {
-        let path = Utf8PathBuf::from("stdlib/src/Ets.bt");
-        assert_eq!(to_forward_slash(&path), "stdlib/src/Ets.bt");
+        let path = Utf8PathBuf::from("stdlib/src/ets.bt");
+        assert_eq!(to_forward_slash(&path), "stdlib/src/ets.bt");
     }
 
     #[test]
@@ -4461,7 +4461,7 @@ mod tests {
     /// File A declares `type Direction = ...` and a method returning it;
     /// file B calls that method and passes the result as an argument to a
     /// parameter typed with the *same* union spelled out directly (mirroring
-    /// the real `stdlib/src/Actor.bt` / `stdlib/src/SupervisionSpec.bt`
+    /// the real `stdlib/src/actor.bt` / `stdlib/src/supervision_spec.bt`
     /// `RestartStrategy` bug this issue fixes: the declared parameter side
     /// already resolved correctly same-file, but the cross-file argument's
     /// inferred type — read back from `A`'s `ClassInfo`/`MethodInfo` as an
@@ -4678,8 +4678,8 @@ mod tests {
     /// aliases. This is exactly what `just dialyzer-specs` does — it copies
     /// `stdlib/src/*.bt` flat into a temp dir and builds it — and before the
     /// fix `build_class_index` returned an empty `all_alias_infos` for every
-    /// manifest-less build, so `SupervisionSpec.bt`'s `field: restart ::
-    /// RestartStrategy = #temporary` never saw `Actor.bt`'s `type
+    /// manifest-less build, so `supervision_spec.bt`'s `field: restart ::
+    /// RestartStrategy = #temporary` never saw `actor.bt`'s `type
     /// RestartStrategy = ...` and drew a false state-default type mismatch.
     #[test]
     fn stdlib_mode_manifest_less_build_collects_cross_file_aliases() {
@@ -4689,13 +4689,13 @@ mod tests {
         // Flat layout with no `beamtalk.toml` and no `src/`, mirroring
         // `dialyzer-specs`' temp dir.
         write_test_file(
-            &project_path.join("Actor.bt"),
+            &project_path.join("actor.bt"),
             "type RestartStrategy = #permanent | #transient | #temporary\n\
              typed Value subclass: Policy\n  \
              default -> RestartStrategy => #temporary\n",
         );
         write_test_file(
-            &project_path.join("SupervisionSpec.bt"),
+            &project_path.join("supervision_spec.bt"),
             "typed Value subclass: Spec\n  \
              field: restart :: RestartStrategy = #temporary\n",
         );

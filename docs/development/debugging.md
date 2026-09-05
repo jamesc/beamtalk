@@ -50,7 +50,7 @@ erl -pa build
 
 Stack traces from compiled `.bt` code (both raw Erlang `erlang:get_stacktrace/0`-style
 frames and Beamtalk's `StackFrame` objects, see `e stackTrace` in
-`stdlib/src/StackFrame.bt`) report the original `.bt` file and line number for
+`stdlib/src/stack_frame.bt`) report the original `.bt` file and line number for
 function heads and message-send call sites — not the compiled module's own
 name or line 1 — as long as the compilation unit had a source path (any
 `.bt` file built via `beamtalk build`/`beamtalk test`; REPL-evaluated code

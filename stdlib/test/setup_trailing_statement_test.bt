@@ -6,7 +6,7 @@
 // an unrelated statement following the last field assignment.
 //
 // The `self.field := x` idiom (rather than `self withX:`) is what nearly
-// every test file actually uses for setUp (see stdlib/src/TestCase.bt's
+// every test file actually uses for setUp (see stdlib/src/test_case.bt's
 // updated class doc comment). Adding any statement after the last field
 // assignment silently drops that field UNLESS setUp ends in a bare `self`
 // (or another `self.field := x` assignment) — see BT-3391's

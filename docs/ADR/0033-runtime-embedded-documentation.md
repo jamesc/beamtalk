@@ -113,10 +113,10 @@ Doc reading walks the hierarchy via `>>`; doc writing is local-only via `setDocF
 - `(Counter >> #class) doc` — returns ProtoObject's doc for `#class` (inherited)
 - `Counter setDocForMethod: #class to: 'text'` — **error**: `#class` is not defined locally on Counter
 
-### Behaviour.bt Additions
+### behaviour.bt Additions
 
 ```beamtalk
-// In lib/Behaviour.bt — documentation protocol
+// In lib/behaviour.bt — documentation protocol
 
 /// Return the documentation string for this class, or nil if none.
 ///
@@ -356,7 +356,7 @@ Counter doc: "new docs"          // => Error: does not understand #doc:
    - `classDoc/1` — read `doc` from `class_state`
    - `classSetDoc/2` — write `doc` to `class_state`
 8. Add `setDocForMethod:to:` as a gen_server call handler in `beamtalk_object_class.erl` — writes `doc` into `method_info()` for a given selector (error if selector not in local methods)
-9. Add `doc`, `doc:`, `setDocForMethod:to:` methods to `lib/Behaviour.bt`
+9. Add `doc`, `doc:`, `setDocForMethod:to:` methods to `lib/behaviour.bt`
 10. Register intrinsics in the compiler's intrinsic table
 11. Add tests: `>>` walks hierarchy, CompiledMethod `doc` access, roundtrip via setters, error on non-local method
 
@@ -426,7 +426,7 @@ The MCP `info` tool also benefits — its `documentation` field in the response 
 
 | Phase | Issue | Title | Size |
 |-------|-------|-------|------|
-| 1 | BT-769 | Add doc storage, intrinsics, and Behaviour.bt methods | M |
+| 1 | BT-769 | Add doc storage, intrinsics, and behaviour.bt methods | M |
 | 2 | BT-770 | Fix >> to walk the class hierarchy | S |
 | 3 | BT-771 | Emit doc fields in ClassInfo codegen | M |
 | 4 | BT-772 | Remove EEP-48 and simplify REPL/MCP docs | M |

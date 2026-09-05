@@ -387,7 +387,7 @@ not both.)
   ADR; its silent-wrong-order behavior is tracked separately.
 - **No central protocol declaration.** Reflected methods are opt-in per
   type, discovered the same way any other message is — via
-  `does_not_understand` when absent. `Number.bt` is not modified.
+  `does_not_understand` when absent. `number.bt` is not modified.
 
 ## Prior Art
 
@@ -865,7 +865,7 @@ benchmark claim. Safe to proceed to the codegen wiring below.
     classification, not a `…FromNumber:` `does_not_understand` — the
     regression case that motivated the `is_number(Right)` re-raise check.
 
-No `Number.bt` changes — reflected methods are declared only on the types
+No `number.bt` changes — reflected methods are declared only on the types
 that opt in, not as an abstract protocol entry, since there is no receiver
 to declare `subclassResponsibility` against (the hook is looked up
 dynamically on whatever the right operand turns out to be).

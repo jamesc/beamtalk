@@ -11,8 +11,8 @@ Today the stdlib has **67 `.bt` files** (~5,140 lines) backed by **57 Erlang mod
 
 | Category | Example | Lines |
 |----------|---------|-------|
-| Already pure Beamtalk | `True.bt`, `Boolean.bt`, `Number.bt`, error subclasses | ~430 |
-| Thin `@primitive` stubs over Erlang | `Collection.bt`, `Dictionary.bt`, `TestCase.bt` | ~4,700 |
+| Already pure Beamtalk | `true.bt`, `boolean.bt`, `number.bt`, error subclasses | ~430 |
+| Thin `@primitive` stubs over Erlang | `collection.bt`, `dictionary.bt`, `test_case.bt` | ~4,700 |
 | Erlang-only (no `.bt` file at all) | `Future`, `FileHandle` | ~500 |
 | Runtime infrastructure (must stay Erlang) | dispatch, actor, bootstrap, class registry | ~8,000 |
 
@@ -38,7 +38,7 @@ We adopt a **phased self-hosting strategy** that progressively moves stdlib logi
 
 ### Phase 1: Add Missing `.bt` Files (Future, FileHandle)
 
-Add `Future.bt` and `FileHandle.bt` as `@primitive`-stub classes, making them visible to the compiler, type checker, LSP, and documentation.
+Add `Future.bt` and `file_handle.bt` as `@primitive`-stub classes, making them visible to the compiler, type checker, LSP, and documentation.
 
 ```beamtalk
 /// A future represents an asynchronous computation result.
@@ -99,10 +99,10 @@ sealed Object subclass: FileHandle
 
 #### Prerequisite: `addFirst:` — O(1) List Cons
 
-Before self-hosting collection operations, add `addFirst:` to `List.bt` as a new `@primitive` that compiles to O(1) list cons:
+Before self-hosting collection operations, add `addFirst:` to `list.bt` as a new `@primitive` that compiles to O(1) list cons:
 
 ```beamtalk
-// List.bt — new method
+// list.bt — new method
 /// Prepend item to the front of the list. O(1).
 ///
 /// ## Examples
@@ -126,7 +126,7 @@ The codegen addition in `primitives/list.rs` is trivial:
 
 #### Self-host Collection protocol
 
-Move the abstract `Collection` operations from `beamtalk_collection_ops.erl` into pure Beamtalk on `Collection.bt`. With `addFirst:` available, `do:` is the true primitive boundary — all higher-order operations compose on it, exactly as in Pharo.
+Move the abstract `Collection` operations from `beamtalk_collection_ops.erl` into pure Beamtalk on `collection.bt`. With `addFirst:` available, `do:` is the true primitive boundary — all higher-order operations compose on it, exactly as in Pharo.
 
 **Primitive surface** — two methods per concrete collection:
 
@@ -149,7 +149,7 @@ Everything above `do:` and `size` becomes pure Beamtalk.
 
 **Before** (current — every method delegates to Erlang):
 ```beamtalk
-// Collection.bt today
+// collection.bt today
 collect: block: Block => @primitive "collect:"
 select: block: Block => @primitive "select:"
 reject: block: Block => @primitive "reject:"
@@ -158,7 +158,7 @@ inject: initial into: block: Block => @primitive "inject:into:"
 
 **After** (pure Beamtalk on the abstract class):
 ```beamtalk
-// Collection.bt — self-hosted
+// collection.bt — self-hosted
 // Accumulator-based operations (addFirst: + reversed for O(n) total)
 
 /// Fold collection from left with an accumulator.
@@ -213,13 +213,13 @@ includes: anObject -> Boolean =>
 - `inject:into:`: O(n) — single pass via `do:`.
 - `detect:`, `anySatisfy:`, `allSatisfy:`, `includes:`: Use `^` (non-local return) inside `do:` blocks for early termination. On BEAM, non-local returns compile to throw/catch, which has measurable allocation cost compared to Erlang's tail-recursive early termination. If benchmarks show unacceptable overhead, these four methods should remain `@primitive` while the accumulator-based operations still move to pure BT.
 
-**Concrete collections keep their optimized overrides.** `List.bt`, `Set.bt`, and `Dictionary.bt` all retain their `@primitive` overrides for `collect:`, `select:`, `reject:`, `detect:`, `inject:into:`, `includes:`, `anySatisfy:`, `allSatisfy:` — these are backed by BIF fast-paths (`lists:map`, `lists:filter`, `lists:foldl`, `lists:any`, etc.). The pure-BT versions on `Collection` serve as the **default for user-defined collections** that subclass `Collection` without overriding these methods.
+**Concrete collections keep their optimized overrides.** `list.bt`, `set.bt`, and `dictionary.bt` all retain their `@primitive` overrides for `collect:`, `select:`, `reject:`, `detect:`, `inject:into:`, `includes:`, `anySatisfy:`, `allSatisfy:` — these are backed by BIF fast-paths (`lists:map`, `lists:filter`, `lists:foldl`, `lists:any`, etc.). The pure-BT versions on `Collection` serve as the **default for user-defined collections** that subclass `Collection` without overriding these methods.
 
 ### Phase 3: Self-Host Algorithmic List/Tuple/Dictionary Operations
 
 Move pure-logic operations from Erlang `*_ops.erl` modules into Beamtalk:
 
-**List.bt** — algorithmic methods become pure BT:
+**list.bt** — algorithmic methods become pure BT:
 ```beamtalk
 /// Return the index of the first occurrence of anObject, or -1.
 indexOf: anObject -> Integer =>
@@ -239,7 +239,7 @@ eachWithIndex: block: Block -> Nil =>
   ]
 ```
 
-**Tuple.bt** — unwrap operations become pure BT:
+**tuple.bt** — unwrap operations become pure BT:
 ```beamtalk
 /// Unwrap an {ok, Value} tuple. Raises on {error, _} or non-ok/error tuples.
 unwrap =>
@@ -260,7 +260,7 @@ unwrapOrElse: block: Block =>
 
 > **Note:** The Erlang `unwrap` has three clauses: `{ok, Value}`, `{error, Reason}`, and any other tuple. The BT version preserves all three cases using `isOk` and `isError` checks, raising distinct errors for error-tuples vs non-ok/error tuples; implementations MUST preserve the original error details (for example, include the `Reason` or rethrow the original error) when handling `{error, Reason}` so debugging fidelity is not lost compared to the Erlang implementation.
 
-**Dictionary.bt** — iteration-based methods become pure BT:
+**dictionary.bt** — iteration-based methods become pure BT:
 ```beamtalk
 /// Evaluate block for each key-value pair, passing an Association.
 do: block: Block -> Nil => @primitive "do:"
@@ -272,7 +272,7 @@ keysAndValuesDo: block: Block -> Nil =>
 
 ### Phase 4: Self-Host Test Assertions
 
-Move assertion logic from `beamtalk_test_case.erl` into `TestCase.bt`:
+Move assertion logic from `beamtalk_test_case.erl` into `test_case.bt`:
 
 ```beamtalk
 /// Assert that condition is true.
@@ -296,7 +296,7 @@ deny: condition: Object -> Nil =>
 
 `should:raise:`, `fail:`, `runAll`, `run:`, and test lifecycle (`setUp`/`tearDown` orchestration, test discovery) remain as `@primitive` — they require process spawning, try/catch infrastructure, and class reflection that the runtime provides.
 
-**Bootstrapping trust:** Self-hosted assertions depend on `ifFalse:`, `ifTrue:`, string interpolation, and `fail:` all working correctly. Since `fail:` remains `@primitive` (Erlang-backed), the error-raising path is stable. The `ifTrue:`/`ifFalse:` methods on `True.bt`/`False.bt` are already pure Beamtalk and have been exercised since the earliest stdlib work. String interpolation (ADR 0023) is compiler-generated and tested independently. The risk of a silent assertion failure is low, but as a safeguard: existing Erlang-backed bootstrap tests (`stdlib/bootstrap-test/*.btscript`) continue to validate core primitives independently.
+**Bootstrapping trust:** Self-hosted assertions depend on `ifFalse:`, `ifTrue:`, string interpolation, and `fail:` all working correctly. Since `fail:` remains `@primitive` (Erlang-backed), the error-raising path is stable. The `ifTrue:`/`ifFalse:` methods on `true.bt`/`false.bt` are already pure Beamtalk and have been exercised since the earliest stdlib work. String interpolation (ADR 0023) is compiler-generated and tested independently. The risk of a silent assertion failure is low, but as a safeguard: existing Erlang-backed bootstrap tests (`stdlib/bootstrap-test/*.btscript`) continue to validate core primitives independently.
 
 ### What Stays in Erlang
 
@@ -353,7 +353,7 @@ Ruby 3.4 moved `Array#each`, `Array#map`, `Array#select` from C to pure Ruby (un
 
 ## User Impact
 
-**Newcomer:** No change to the API. Collection operations work exactly as before. The benefit is indirect: `Future.bt` and `FileHandle.bt` become visible in docs, LSP completion, and `class` reflection.
+**Newcomer:** No change to the API. Collection operations work exactly as before. The benefit is indirect: `Future.bt` and `file_handle.bt` become visible in docs, LSP completion, and `class` reflection.
 
 **Smalltalk developer:** The stdlib structure now matches Pharo: abstract `Collection` defines higher-order operations in terms of `do:`/`inject:into:`, concrete classes override where performance demands. This is the canonical Smalltalk pattern and will feel immediately familiar.
 
@@ -361,7 +361,7 @@ Ruby 3.4 moved `Array#each`, `Array#map`, `Array#select` from C to pure Ruby (un
 
 **Production operator:** No change to runtime behavior for existing code. The dispatch path is identical for primitive-backed methods. Pure-BT methods on the abstract class add one message-send layer vs direct BIF call, but only for non-List/Set/Dictionary collections.
 
-**Tooling developer:** `Future.bt` and `FileHandle.bt` enable LSP completion, go-to-definition, type inference, and documentation generation for two previously invisible classes.
+**Tooling developer:** `Future.bt` and `file_handle.bt` enable LSP completion, go-to-definition, type inference, and documentation generation for two previously invisible classes.
 
 ## Steelman Analysis
 
@@ -396,7 +396,7 @@ Rejected because:
 
 ### Alternative B: Only Add Missing `.bt` Files, No Self-Hosting
 
-Add `Future.bt` and `FileHandle.bt` but don't move any logic from Erlang to Beamtalk.
+Add `Future.bt` and `file_handle.bt` but don't move any logic from Erlang to Beamtalk.
 
 Rejected because:
 - It leaves pure-algorithmic logic in Erlang where Beamtalk can express it. This misses the opportunity to validate the language's expressiveness and to provide readable stdlib source.
@@ -427,7 +427,7 @@ Rejected because:
 
 ### Phase 1: Missing `.bt` Files (Small)
 - Add `stdlib/src/Future.bt` with `@primitive` stubs
-- Add `stdlib/src/FileHandle.bt` with `@primitive` stubs
+- Add `stdlib/src/file_handle.bt` with `@primitive` stubs
 - Wire Future dispatch through `beamtalk_primitive.erl` (FileHandle already dispatches via `send_file_handle/3`)
 - Update `beamtalk_stdlib.erl` loader to include new modules
 - **Affected components:** stdlib, runtime dispatch tables
@@ -435,30 +435,30 @@ Rejected because:
 - **Estimated size:** S
 
 ### Phase 2: `addFirst:` + Collection Self-Hosting (Medium)
-- Add `addFirst:` primitive to `List.bt` — codegen: `[Item|Self]` (O(1) cons)
+- Add `addFirst:` primitive to `list.bt` — codegen: `[Item|Self]` (O(1) cons)
 - Add codegen entry in `primitives/list.rs` for `"addFirst:"`
-- Move `inject:into:`, `collect:`, `select:`, `reject:` from `@primitive` to pure Beamtalk on `Collection.bt` using `do:` + `addFirst:` + `reversed`
+- Move `inject:into:`, `collect:`, `select:`, `reject:` from `@primitive` to pure Beamtalk on `collection.bt` using `do:` + `addFirst:` + `reversed`
 - Move `detect:`, `detect:ifNone:`, `includes:`, `anySatisfy:`, `allSatisfy:` from `@primitive` to pure BT using `do:` with non-local returns — **gated on benchmarks showing acceptable throw/catch overhead**
 - Keep `do:`, `size` as the primitive boundary on `Collection`
 - Keep all concrete class overrides (`List`/`Set`/`Dictionary` retain BIF-backed `@primitive` for every method)
 - Remove corresponding functions from `beamtalk_collection_ops.erl`
-- **Affected components:** stdlib (`Collection.bt`, `List.bt`), runtime (`beamtalk_collection_ops.erl`), codegen (`primitives/list.rs`)
+- **Affected components:** stdlib (`collection.bt`, `list.bt`), runtime (`beamtalk_collection_ops.erl`), codegen (`primitives/list.rs`)
 - **Tests:** Add tests for `addFirst:`; add tests for a user-defined Collection subclass to verify default implementations; benchmark pure-BT vs BIF-backed paths
 - **Estimated size:** M
 
 ### Phase 3: Algorithmic Operations (Medium)
-- Move `indexOf:`, `eachWithIndex:` from `beamtalk_list_ops.erl` to `List.bt`
-- Move `unwrap`, `unwrapOr:`, `unwrapOrElse:` from `beamtalk_tuple_ops.erl` to `Tuple.bt` — preserving all three clauses (ok, error, other)
-- Move `keysAndValuesDo:`, `at:ifAbsent:` from `beamtalk_map_ops.erl` to `Dictionary.bt`
+- Move `indexOf:`, `eachWithIndex:` from `beamtalk_list_ops.erl` to `list.bt`
+- Move `unwrap`, `unwrapOr:`, `unwrapOrElse:` from `beamtalk_tuple_ops.erl` to `tuple.bt` — preserving all three clauses (ok, error, other)
+- Move `keysAndValuesDo:`, `at:ifAbsent:` from `beamtalk_map_ops.erl` to `dictionary.bt`
 - Move `format_string` from `beamtalk_association.erl` to `Association.bt`
 - **Affected components:** stdlib (`.bt` files), runtime (`*_ops.erl` files), codegen (primitive dispatch tables)
 - **Tests:** Existing stdlib/test/*.bt tests validate behavioral equivalence; add edge-case tests for three-clause `unwrap`
 - **Estimated size:** M
 
 ### Phase 4: Test Assertions (Small)
-- Move `assert:`, `deny:`, `assert:equals:` from `beamtalk_test_case.erl` to `TestCase.bt`
+- Move `assert:`, `deny:`, `assert:equals:` from `beamtalk_test_case.erl` to `test_case.bt`
 - Keep `should:raise:`, `fail:`, `runAll`, `run:`, lifecycle as `@primitive`
-- **Affected components:** stdlib (`TestCase.bt`), runtime (`beamtalk_test_case.erl`)
+- **Affected components:** stdlib (`test_case.bt`), runtime (`beamtalk_test_case.erl`)
 - **Tests:** Existing test suites exercise assertions; bootstrap tests (`stdlib/bootstrap-test/`) provide independent Erlang-backed validation of core primitives
 - **Estimated size:** S
 
@@ -487,8 +487,8 @@ Testing strategy:
 
 | Issue | Phase | Title | Size | Deps |
 |-------|-------|-------|------|------|
-| [BT-813](https://linear.app/beamtalk/issue/BT-813) | 1 | Add Future.bt and FileHandle.bt as @primitive stubs | S | — |
-| [BT-814](https://linear.app/beamtalk/issue/BT-814) | 2a | Add addFirst: O(1) list cons primitive to List.bt | S | — |
+| [BT-813](https://linear.app/beamtalk/issue/BT-813) | 1 | Add Future.bt and file_handle.bt as @primitive stubs | S | — |
+| [BT-814](https://linear.app/beamtalk/issue/BT-814) | 2a | Add addFirst: O(1) list cons primitive to list.bt | S | — |
 | [BT-815](https://linear.app/beamtalk/issue/BT-815) | 2b | Self-host abstract Collection protocol in pure Beamtalk | M | BT-814 |
 | [BT-816](https://linear.app/beamtalk/issue/BT-816) | 3 | Self-host List algorithmic operations (indexOf:, eachWithIndex:) | S | BT-815 |
 | [BT-817](https://linear.app/beamtalk/issue/BT-817) | 3 | Self-host Tuple unwrap operations (unwrap, unwrapOr:, unwrapOrElse:) | S | BT-815 |

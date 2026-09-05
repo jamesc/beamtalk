@@ -86,7 +86,7 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
 %% explicit clauses because they must route to the gen_server's {new, _} / {spawn, _}
 %% handlers, not to class_method_call. Moving them to the Behaviour/Class chain
 %% is future work (ADR 0032 Phase 4+). BT-3071/BT-3072 lifted real class-method
-%% bodies for all four onto Actor.bt (`class sealed new`/`new:`/`spawn`/
+%% bodies for all four onto actor.bt (`class sealed new`/`new:`/`spawn`/
 %% `spawnWith:`), but deliberately left this routing untouched — those bodies
 %% are the documented, xref-visible definition of dynamic-dispatch behaviour,
 %% not the code path an external `Counter spawn` actually runs today.
@@ -1456,7 +1456,7 @@ when a class method sends new/spawn to itself, we bypass gen_server and call
 beamtalk_class_instantiation directly. Class name and module are read from the
 process dictionary (set during beamtalk_object_class:init/1).
 
-BT-3072: `Actor.bt` now declares real `class sealed spawn`/`spawnWith:`
+BT-3072: `actor.bt` now declares real `class sealed spawn`/`spawnWith:`
 bodies (`beamtalk_actor:doSpawn/1`, `doSpawnWith/2`), matching the treatment
 BT-3071 gave `new`/`new:`. This function — and `class_send/3`'s explicit
 `spawn`/`spawnWith:` clauses above, and `handle_metaclass_self_call/2` below

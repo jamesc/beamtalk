@@ -264,7 +264,7 @@ stdlib_alias_seeded_into_fresh_session_test() ->
                 name => 'SupervisionStrategy',
                 expansion => "#oneForOne | #oneForAll | #restForOne",
                 doc => "Restart strategy for a supervised child.",
-                source_file => "stdlib/src/Supervisor.bt",
+                source_file => "stdlib/src/supervisor.bt",
                 internal => false
             }
         ],
@@ -292,7 +292,7 @@ stdlib_alias_seeded_reaches_known_type_alias_sources_test() ->
                 name => 'SupervisionStrategy',
                 expansion => "#oneForOne | #oneForAll | #restForOne",
                 doc => undefined,
-                source_file => "stdlib/src/Supervisor.bt",
+                source_file => "stdlib/src/supervisor.bt",
                 internal => false
             }
         ],
@@ -312,7 +312,7 @@ stdlib_alias_without_doc_comment_test() ->
                 name => 'LogFormat',
                 expansion => "#text | #json",
                 doc => undefined,
-                source_file => "stdlib/src/BeamtalkInterface.bt",
+                source_file => "stdlib/src/beamtalk_interface.bt",
                 internal => false
             }
         ],
@@ -443,7 +443,7 @@ session_declared_alias_shadows_stdlib_entry_test() ->
                 name => 'SupervisionStrategy',
                 expansion => "#oneForOne | #oneForAll | #restForOne",
                 doc => undefined,
-                source_file => "stdlib/src/Supervisor.bt",
+                source_file => "stdlib/src/supervisor.bt",
                 internal => false
             }
         ],

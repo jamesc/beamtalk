@@ -118,7 +118,7 @@ struct PreloadConfig {
 /// Both levels of keying are load-bearing, not cosmetic:
 ///
 /// * **Owner**: Beamtalk supports multiple classes defined in one `.bt` file
-///   (e.g. `Behaviour.bt`, `WorkspaceInterface.bt`), so two different caller
+///   (e.g. `behaviour.bt`, `workspace_interface.bt`), so two different caller
 ///   classes' reload-induced diagnostics can legitimately share a URI. A
 ///   flat `HashMap<Url, Vec<Diagnostic>>` would have one owner's `put`/clear
 ///   silently clobber a sibling owner's diagnostics in the same file.
@@ -5522,18 +5522,18 @@ mod tests {
 
     #[test]
     fn path_to_stdlib_uri_produces_beamtalk_stdlib_scheme() {
-        let path = Utf8PathBuf::from("/usr/share/beamtalk/stdlib/src/Integer.bt");
+        let path = Utf8PathBuf::from("/usr/share/beamtalk/stdlib/src/integer.bt");
         let uri = path_to_stdlib_uri(&path).expect("should produce URI");
         assert_eq!(uri.scheme(), "beamtalk-stdlib");
-        assert_eq!(uri.path(), "/Integer.bt");
+        assert_eq!(uri.path(), "/integer.bt");
     }
 
     #[test]
     fn path_to_stdlib_uri_handles_nested_path() {
-        let path = Utf8PathBuf::from("/some/deep/path/to/Collection.bt");
+        let path = Utf8PathBuf::from("/some/deep/path/to/collection.bt");
         let uri = path_to_stdlib_uri(&path).expect("should produce URI");
         assert_eq!(uri.scheme(), "beamtalk-stdlib");
-        assert_eq!(uri.path(), "/Collection.bt");
+        assert_eq!(uri.path(), "/collection.bt");
     }
 
     /// BT-2859: `load_type_cache` extracts live from OTP `.beam` files for a
@@ -5607,7 +5607,7 @@ mod tests {
 
         for bad_uri in &[
             "beamtalk-stdlib:///",
-            "beamtalk-stdlib:///sub/Integer.bt",
+            "beamtalk-stdlib:///sub/integer.bt",
             "beamtalk-stdlib:///Integer.erl",
         ] {
             let result: tower_lsp::jsonrpc::Result<FetchContentResult> = backend
@@ -5631,7 +5631,7 @@ mod tests {
         let backend: &Backend = service.inner();
         let result: tower_lsp::jsonrpc::Result<FetchContentResult> = backend
             .fetch_content(FetchContentParams {
-                uri: "beamtalk-stdlib://host/Integer.bt".to_string(),
+                uri: "beamtalk-stdlib://host/integer.bt".to_string(),
             })
             .await;
         assert!(result.is_err());
@@ -5649,8 +5649,8 @@ mod tests {
         let backend: &Backend = service.inner();
 
         for bad_uri in &[
-            "beamtalk-stdlib:///Integer.bt?x=1",
-            "beamtalk-stdlib:///Integer.bt#section",
+            "beamtalk-stdlib:///integer.bt?x=1",
+            "beamtalk-stdlib:///integer.bt#section",
         ] {
             let result: tower_lsp::jsonrpc::Result<FetchContentResult> = backend
                 .fetch_content(FetchContentParams {
@@ -5672,8 +5672,8 @@ mod tests {
         let (service, _socket) = tower_lsp::LspService::new(Backend::new);
         let backend: &Backend = service.inner();
 
-        let path1 = Utf8PathBuf::from("/fake/stdlib/a/Integer.bt");
-        let path2 = Utf8PathBuf::from("/fake/stdlib/b/Integer.bt");
+        let path1 = Utf8PathBuf::from("/fake/stdlib/a/integer.bt");
+        let path2 = Utf8PathBuf::from("/fake/stdlib/b/integer.bt");
         let content = "Object subclass: Integer".to_string();
 
         {
@@ -5692,7 +5692,7 @@ mod tests {
 
         let result: tower_lsp::jsonrpc::Result<FetchContentResult> = backend
             .fetch_content(FetchContentParams {
-                uri: "beamtalk-stdlib:///Integer.bt".to_string(),
+                uri: "beamtalk-stdlib:///integer.bt".to_string(),
             })
             .await;
         assert!(result.is_err());
@@ -5709,7 +5709,7 @@ mod tests {
         let (service, _socket) = tower_lsp::LspService::new(Backend::new);
         let backend: &Backend = service.inner();
 
-        let stdlib_path = Utf8PathBuf::from("/fake/stdlib/Integer.bt");
+        let stdlib_path = Utf8PathBuf::from("/fake/stdlib/integer.bt");
         let content = "Object subclass: Integer\n  + other => 0".to_string();
 
         {
@@ -5726,7 +5726,7 @@ mod tests {
 
         let result: FetchContentResult = backend
             .fetch_content(FetchContentParams {
-                uri: "beamtalk-stdlib:///Integer.bt".to_string(),
+                uri: "beamtalk-stdlib:///integer.bt".to_string(),
             })
             .await
             .expect("should return content");
@@ -6052,9 +6052,9 @@ mod tests {
         // path via the stdlib_dir pointing into the src dir is not realistic;
         // instead, create the same filename in both so we can test the set logic.
         // The realistic case is a symlinked or canonicalized path appearing twice.
-        let shared_path = src_dir.join("Integer.bt");
+        let shared_path = src_dir.join("integer.bt");
         fs::write(&shared_path, "Object subclass: Integer").expect("write Integer");
-        let stdlib_integer = stdlib_dir.join("Integer.bt");
+        let stdlib_integer = stdlib_dir.join("integer.bt");
         fs::write(&stdlib_integer, "Object subclass: Integer").expect("write stdlib Integer");
 
         // The paths are different files with the same name — test that the stdlib
@@ -6069,8 +6069,8 @@ mod tests {
         // appear in their respective buckets.
         assert_eq!(loaded.user_files.len(), 1);
         assert_eq!(loaded.stdlib_files.len(), 1);
-        assert!(loaded.user_files[0].0.ends_with("Integer.bt"));
-        assert!(loaded.stdlib_files[0].0.ends_with("Integer.bt"));
+        assert!(loaded.user_files[0].0.ends_with("integer.bt"));
+        assert!(loaded.stdlib_files[0].0.ends_with("integer.bt"));
         // The user file must NOT be the stdlib path.
         assert_ne!(loaded.user_files[0].0, stdlib_integer);
         assert_eq!(loaded.stdlib_files[0].0, stdlib_integer);
@@ -6089,7 +6089,7 @@ mod tests {
         fs::create_dir_all(&stdlib_dir).expect("create stdlib dir");
 
         fs::write(src_dir.join("User.bt"), "Object subclass: User").expect("write user file");
-        fs::write(stdlib_dir.join("Integer.bt"), "Object subclass: Integer")
+        fs::write(stdlib_dir.join("integer.bt"), "Object subclass: Integer")
             .expect("write stdlib file");
 
         let config = PreloadConfig {
@@ -6101,7 +6101,7 @@ mod tests {
         assert_eq!(loaded.user_files.len(), 1);
         assert_eq!(loaded.stdlib_files.len(), 1);
         assert!(loaded.user_files[0].0.ends_with("User.bt"));
-        assert!(loaded.stdlib_files[0].0.ends_with("Integer.bt"));
+        assert!(loaded.stdlib_files[0].0.ends_with("integer.bt"));
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -6370,7 +6370,7 @@ mod tests {
         let (service, _socket) = tower_lsp::LspService::new(Backend::new);
         let backend: &Backend = service.inner();
 
-        let real_path = Utf8PathBuf::from("/fake/stdlib/Integer.bt");
+        let real_path = Utf8PathBuf::from("/fake/stdlib/integer.bt");
         {
             let mut stdlib_paths = backend
                 .stdlib_paths
@@ -6379,7 +6379,7 @@ mod tests {
             stdlib_paths.insert(real_path.clone());
         }
 
-        let uri = Url::parse("beamtalk-stdlib:///Integer.bt").expect("valid URI");
+        let uri = Url::parse("beamtalk-stdlib:///integer.bt").expect("valid URI");
         let result = backend.resolve_path_for_uri(&uri);
         assert_eq!(result, Some(real_path));
     }
@@ -6399,7 +6399,7 @@ mod tests {
         let (service, _socket) = tower_lsp::LspService::new(Backend::new);
         let backend: &Backend = service.inner();
 
-        let real_path = Utf8PathBuf::from("/fake/stdlib/Integer.bt");
+        let real_path = Utf8PathBuf::from("/fake/stdlib/integer.bt");
         {
             let mut stdlib_paths = backend
                 .stdlib_paths
@@ -6410,11 +6410,11 @@ mod tests {
 
         for bad_uri in &[
             "beamtalk-stdlib:///",
-            "beamtalk-stdlib:///sub/Integer.bt",
+            "beamtalk-stdlib:///sub/integer.bt",
             "beamtalk-stdlib:///Integer.erl",
-            "beamtalk-stdlib://host/Integer.bt",
-            "beamtalk-stdlib:///Integer.bt?x=1",
-            "beamtalk-stdlib:///Integer.bt#section",
+            "beamtalk-stdlib://host/integer.bt",
+            "beamtalk-stdlib:///integer.bt?x=1",
+            "beamtalk-stdlib:///integer.bt#section",
         ] {
             let uri = Url::parse(bad_uri).expect("parseable URI");
             let result = backend.resolve_path_for_uri(&uri);
@@ -6432,11 +6432,11 @@ mod tests {
                 .stdlib_paths
                 .lock()
                 .expect("stdlib_paths lock poisoned");
-            stdlib_paths.insert(Utf8PathBuf::from("/fake/stdlib/a/Integer.bt"));
-            stdlib_paths.insert(Utf8PathBuf::from("/fake/stdlib/b/Integer.bt"));
+            stdlib_paths.insert(Utf8PathBuf::from("/fake/stdlib/a/integer.bt"));
+            stdlib_paths.insert(Utf8PathBuf::from("/fake/stdlib/b/integer.bt"));
         }
 
-        let uri = Url::parse("beamtalk-stdlib:///Integer.bt").expect("valid URI");
+        let uri = Url::parse("beamtalk-stdlib:///integer.bt").expect("valid URI");
         let result = backend.resolve_path_for_uri(&uri);
         assert!(result.is_none(), "ambiguous filename must return None");
     }
@@ -8692,8 +8692,8 @@ mod tests {
         // cold-file fallback (which only sees user files).
         let tmp = beamtalk_core::test_helpers::unique_temp_dir("bt-2244-stdlib-filter");
         std::fs::create_dir_all(&tmp).expect("create temp dir");
-        let stdlib_path = tmp.join("Integer.bt");
-        std::fs::write(&stdlib_path, "").expect("write Integer.bt");
+        let stdlib_path = tmp.join("integer.bt");
+        std::fs::write(&stdlib_path, "").expect("write integer.bt");
         let utf8 = Utf8PathBuf::from_path_buf(stdlib_path.clone()).expect("utf8");
         let stdlib_paths: HashSet<Utf8PathBuf> = std::iter::once(utf8).collect();
         let class = NSClass::new(

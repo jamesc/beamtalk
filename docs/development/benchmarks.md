@@ -386,7 +386,7 @@ Two parts:
   sweeps a from-scratch bulk load of this workspace already fires today.
   Also checks finding #2 directly: does any stdlib source file declare more
   than one class (real declarations only — `///` doc-comment examples like
-  `Actor.bt`'s `/// Actor subclass: Counter` are filtered out, since they
+  `actor.bt`'s `/// Actor subclass: Counter` are filtered out, since they
   are not real class definitions)?
 - **Part B (sweep cost vs. live-class count)** — drives the real
   `beamtalk_recheck:trigger_leaf_change/1` orchestration (real compiler
@@ -795,8 +795,8 @@ expected.
 
 **Implemented approach 1/2 from the issue** (selector-aware skip, backed by a
 build-time-checked selector set rather than a purely hand-maintained one):
-`beamtalk_primitive:is_string_binary_shared_selector/1` lists the `Binary.bt`
-instance selectors `String.bt` does not redefine, and
+`beamtalk_primitive:is_string_binary_shared_selector/1` lists the `binary.bt`
+instance selectors `string.bt` does not redefine, and
 `crates/beamtalk-cli/src/commands/build_stdlib.rs`'s
 `test_binary_string_shared_selectors_stay_in_sync` recomputes that same set
 from the real `.bt` sources on every `cargo test` run, failing if either file
@@ -809,7 +809,7 @@ as consistent with `class` as BT-2999 made it.
 ### Follow-up: route straight to `bt@stdlib@binary` (BT-3049)
 
 BT-3033's initial fast path routed to `'bt@stdlib@string'` for the 9 shared
-selectors. Since none of them are locally defined in `String.bt`, that
+selectors. Since none of them are locally defined in `string.bt`, that
 module's compiled `dispatch/3` re-checks `beamtalk_extensions:lookup/2` for
 a `String` extension and then delegates to `'bt@stdlib@binary'` anyway — a
 redundant hop the fast path pays on every shared-selector send. Since all 9

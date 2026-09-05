@@ -1825,7 +1825,7 @@ impl TypeChecker {
 
         // BT-2868: set when a `Known`-receiver's solo `ifTrue:`/`ifFalse:`
         // resolves to a method with no declared return type by design (e.g.
-        // `Boolean>>ifTrue:` — see `stdlib/src/Boolean.bt`). Distinguishes
+        // `Boolean>>ifTrue:` — see `stdlib/src/boolean.bt`). Distinguishes
         // the terminal Dynamic fallback below from a genuinely
         // Dynamic/unresolved receiver so the reported reason is honest
         // instead of always `DynamicReceiver`. Deliberately narrow to this
@@ -2094,7 +2094,7 @@ impl TypeChecker {
 
                 // BT-2868: `ret_ty` is None — the method exists but declares
                 // no return type. For `Boolean>>ifTrue:`/`ifFalse:` this is
-                // by design (see `Boolean.bt`): a solo `ifTrue:`/`ifFalse:`
+                // by design (see `boolean.bt`): a solo `ifTrue:`/`ifFalse:`
                 // on an unnarrowed `Boolean` receiver can't soundly promise
                 // `R` (the sibling branch — e.g. `False>>ifTrue:` — returns
                 // `self` without invoking the block), but collapsing all the
@@ -4180,7 +4180,7 @@ impl TypeChecker {
     /// The "self branch" semantics (`Object>>ifNil: -> Self`,
     /// `UndefinedObject>>ifNotNil: -> Nil`) are verified against the actual
     /// resolved stdlib signature rather than assumed, so a future edit to
-    /// either method's declared return type in `Object.bt` / `UndefinedObject.bt`
+    /// either method's declared return type in `object.bt` / `undefined_object.bt`
     /// falls back to the generic dispatch path instead of silently going stale.
     ///
     /// Returns `None` when the block argument isn't a well-formed `Block(...)`
@@ -4266,7 +4266,7 @@ impl TypeChecker {
     /// [`Self::if_nil_solo_union_ret_ty`]'s fix for `ifNil:`/`ifNotNil:`.
     ///
     /// `Boolean>>ifTrue:`/`ifFalse:` deliberately declare no `-> R` (see
-    /// `stdlib/src/Boolean.bt`): on an unnarrowed `Boolean` receiver the
+    /// `stdlib/src/boolean.bt`): on an unnarrowed `Boolean` receiver the
     /// checker can't statically prove whether `True` or `False` handles the
     /// send, and the sibling override (e.g. `False>>ifTrue:`) never invokes
     /// the block — it returns `self`. Only fires for `class_name ==
@@ -4294,7 +4294,7 @@ impl TypeChecker {
     /// `Boolean`" reasoning above valid — if a third subclass existed and
     /// overrode `ifTrue:`/`ifFalse:` to return something outside `True |
     /// False | R`, the inferred union here would be unsound for it. This is
-    /// enforced by `Boolean` being declared `sealed` in `stdlib/src/Boolean.bt`
+    /// enforced by `Boolean` being declared `sealed` in `stdlib/src/boolean.bt`
     /// (BT-2886), which closes it to exactly its two existing `sealed`
     /// subclasses, `True` and `False`. Unlike the `ifNil:`/`ifNotNil:`
     /// self-branch check above, there's no `hierarchy.find_method(...)` guard

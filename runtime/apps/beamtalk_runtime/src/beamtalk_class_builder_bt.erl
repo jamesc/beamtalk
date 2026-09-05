@@ -25,7 +25,7 @@ Bootstrap sequence after this change:
 
 ## Phase 2 (Future)
 
-This stub will be replaced by a compiled ClassBuilder.bt stdlib module once
+This stub will be replaced by a compiled class_builder.bt stdlib module once
 the full builder protocol (name:, superclass:, fields:, methods:, register)
 is implemented. The stub exposes no instance methods; all dispatch returns
 `does_not_understand` and falls through to the Actor → Object chain.
@@ -57,10 +57,10 @@ Dispatch instance messages on ClassBuilder objects.
 
 Phase 1 stub: all selectors return `does_not_understand`. The full
 ClassBuilder protocol (name:, superclass:, fields:, methods:, register) is
-implemented in Phase 2 (ClassBuilder.bt stdlib module).
+implemented in Phase 2 (class_builder.bt stdlib module).
 
 ADR 0038 Phase 1 (BT-835): Stub only. Phase 2 replaces this with compiled
-ClassBuilder.bt exports.
+class_builder.bt exports.
 """.
 -spec dispatch(atom(), list(), term(), map()) ->
     {reply, term(), map()} | {error, #beamtalk_error{}, map()}.
@@ -71,9 +71,9 @@ dispatch(Selector, _Args, _Self, State) ->
 Check if ClassBuilder has an instance method.
 
 Phase 1 stub: returns false for all selectors. The full builder protocol
-is implemented in Phase 2 (ClassBuilder.bt stdlib module).
+is implemented in Phase 2 (class_builder.bt stdlib module).
 
-ADR 0038 Phase 2: Will be replaced by compiled ClassBuilder.bt exports.
+ADR 0038 Phase 2: Will be replaced by compiled class_builder.bt exports.
 """.
 -spec has_method(atom()) -> boolean().
 has_method(_) -> false.
@@ -95,7 +95,7 @@ before 'Actor' loads from stdlib. The 'ClassBuilder' class:
 Bootstrap order: ProtoObject → Object → Behaviour → Class → Metaclass →
                  ClassBuilder → Actor → user modules
 
-ADR 0038 Phase 1: Bootstrap stub. Full protocol in Phase 2 (ClassBuilder.bt).
+ADR 0038 Phase 1: Bootstrap stub. Full protocol in Phase 2 (class_builder.bt).
 """.
 -spec register_class() -> ok.
 register_class() ->

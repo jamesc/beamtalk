@@ -417,7 +417,7 @@ closures) — rejected, reproduces BT-873.
 | `beamtalk_class_builder.erl` | Run `classMethods:` through `build_method_map/1` in `build_compiled_class_info/8`, and seed the retrieval store + metadata discoverability for the funs (register-time). |
 | `beamtalk_class_dispatch.erl` | In `apply_class_method_in_context/6`, look up a `#{block, arity}` entry and `apply(Fun, [ClassSelf, ClassVars \| Args])` before the compiled `erlang:apply` fallback. Gate the lookup so compile-time-only classes pay no extra cost and no per-send `gen_server` hop is added (BT-2008). |
 | `crates/beamtalk-core/src/codegen/` | Lower class-method block bodies (builder `classMethods:`, `ClassName class >> sel`) to **self-contained** funs: class-var threading via `{class_var_result, …}`, `ClassSelf`-based self-sends, and `super` lowered to compile-time class-name-keyed superclass dispatch (no reliance on the defining module — see Decision §4). |
-| `stdlib/src/ClassBuilder.bt` | `classMethods:` and `classVars:` setters (`classVars:` rather than the reserved `classState:` declaration keyword; it writes the `classState` field / runtime key already read by `register/1`). |
+| `stdlib/src/class_builder.bt` | `classMethods:` and `classVars:` setters (`classVars:` rather than the reserved `classState:` declaration keyword; it writes the `classState` field / runtime key already read by `register/1`). |
 | tests | `stdlib/test/` + runtime EUnit — the three §4 contract tests (class-var threading, `super`, self) for the fun path; subclass *inheritance* of a runtime-installed class method; `update_class`/reload precedence; live `class >>` patch round-trip. |
 
 Phasing: (1) runtime fun-path + `put_class_method` (incl. metadata update) +

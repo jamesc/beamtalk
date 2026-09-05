@@ -12,7 +12,7 @@ An `Inspector` is an immutable cursor over one object. This module mints the
 cursor handle, classifies the subject `kind`, derives its drillable
 `InspectorField` records, drills (`at:`), and re-captures snapshots (`refresh`).
 It is the runtime half of the design; the navigation API and rendering live in
-`stdlib/src/Inspector.bt`.
+`stdlib/src/inspector.bt`.
 
 ## The cursor handle
 

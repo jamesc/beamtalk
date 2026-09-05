@@ -518,9 +518,9 @@ EUnit tests for each primitive, including: cross-session **read** via `withId/1`
 
 ### Phase 4: Stdlib `Session` and `BindingsView` classes; upgrade `Workspace globals` (M)
 
-Add `stdlib/src/Session.bt` with the two factory class-methods (`current`, `withId:`) and the instance-side operation methods defined in the API (`bindings`, `resolve:`, `clear`, `id`) — no class-side operation mirror, **no `globals` method** (globals are workspace-owned). Add `stdlib/src/BindingsView.bt` implementing the Dictionary protocol subset (`at:`, `at:put:`, `removeKey:`, `includesKey:`, `keys`, `values`, `size`, `do:`, `printOn:`); `printOn:` renders like a `Dictionary` so REPL output stays familiar.
+Add `stdlib/src/session.bt` with the two factory class-methods (`current`, `withId:`) and the instance-side operation methods defined in the API (`bindings`, `resolve:`, `clear`, `id`) — no class-side operation mirror, **no `globals` method** (globals are workspace-owned). Add `stdlib/src/bindings_view.bt` implementing the Dictionary protocol subset (`at:`, `at:put:`, `removeKey:`, `includesKey:`, `keys`, `values`, `size`, `do:`, `printOn:`); `printOn:` renders like a `Dictionary` so REPL output stays familiar.
 
-**Upgrade `Workspace globals`** in `WorkspaceInterface.bt` from `-> Dictionary` to `-> BindingsView` (the same view type), backed by `globalsView/0` (Phase 3). This is a pre-1.0 breaking change to an interactive-only method; update its doc-comment, the REPL display expectation, and the `tests/repl-protocol/cases/*.btscript` cases that read `Workspace globals` (they use `at:` / `includesKey:` / `keys`, which `BindingsView` supports). `Beamtalk globals` (class registry) stays `-> Dictionary`.
+**Upgrade `Workspace globals`** in `workspace_interface.bt` from `-> Dictionary` to `-> BindingsView` (the same view type), backed by `globalsView/0` (Phase 3). This is a pre-1.0 breaking change to an interactive-only method; update its doc-comment, the REPL display expectation, and the `tests/repl-protocol/cases/*.btscript` cases that read `Workspace globals` (they use `at:` / `includesKey:` / `keys`, which `BindingsView` supports). `Beamtalk globals` (class registry) stays `-> Dictionary`.
 
 No binding injection: `Session` is reachable as a class name through the class registry, no special-case handling, no protected-name additions.
 

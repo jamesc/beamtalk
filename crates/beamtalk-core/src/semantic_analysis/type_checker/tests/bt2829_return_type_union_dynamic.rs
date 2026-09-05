@@ -426,7 +426,7 @@ fn bt2840_known_body_unparameterized_against_union_member_no_diagnostic() {
 
 // ── Declaration-level `@expect type` suppression, end to end ────────────
 
-/// Regression test mirroring the real `BeamtalkInterface.bt` shape that
+/// Regression test mirroring the real `beamtalk_interface.bt` shape that
 /// exposed a parser bug while implementing this issue: several methods in a
 /// row, each preceded by a declaration-level `@expect type` directive
 /// suppressing the new Part B `Dynamic` hint this issue adds. Before the

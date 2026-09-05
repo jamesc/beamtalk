@@ -322,7 +322,7 @@ impl CoreErlangGenerator {
         self.set_class_field_types(&class.state);
 
         // Check if the class explicitly defines new/new: methods
-        // (e.g., Object.bt defines `new => @primitive basicNew`)
+        // (e.g., object.bt defines `new => @primitive basicNew`)
         // If so, skip auto-generating constructors to avoid duplicate definitions
         // Only check Primary methods — check both instance and class methods
         let cf = self.semantic_facts.class_facts(&class.name.name);
@@ -4704,9 +4704,10 @@ mod tests {
     }
 
     /// BT-3085: `STDLIB_CLASS_NAMES` (this module's `build.rs`-generated
-    /// constant, a raw scan of every `stdlib/src/*.bt` file stem — including
-    /// protocol-only files like `Printable.bt`/`JsonRepresentable.bt` that
-    /// declare no class) must be a superset of every real built-in class
+    /// constant, parsed from every `stdlib/src/*.bt` file's declared class or
+    /// protocol name (BT-3432) — including protocol-only files like
+    /// `printable.bt`/`json_representable.bt` that declare no class) must be
+    /// a superset of every real built-in class
     /// (`ClassHierarchy::with_builtins()`, built from
     /// `generated_builtins.rs::is_generated_builtin_class` — the richer,
     /// `beamtalk build-stdlib`-generated table of *actual* classes).

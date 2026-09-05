@@ -15,7 +15,7 @@
 //!
 //! These are full-pipeline tests (`check_module_with_protocols`, not a
 //! direct `check_argument_types` unit call) because the bug's fix lives
-//! entirely in the stdlib source declaration (`stdlib/src/Dictionary.bt`) —
+//! entirely in the stdlib source declaration (`stdlib/src/dictionary.bt`) —
 //! the type-checker's generic-type-param machinery (`check_argument_types`
 //! and the separate `check_generic_variance_in_module` pass) already
 //! handled a `Block(T)`-shaped parameter correctly; only the declared

@@ -194,7 +194,7 @@ dispatch('perform:withArguments:timeout:', [_TargetSelector, _ArgList, _Timeout]
         <<"Expected atom selector, list of arguments, and non-negative integer or #infinity timeout">>
     ),
     {error, Error, State};
-%% BT-405: Abstract method contract — mirrors Object.bt pure method body
+%% BT-405: Abstract method contract — mirrors object.bt pure method body
 %% Runtime clause needed until compiled stdlib dispatch is wired up
 dispatch(subclassResponsibility, [], Self, State) ->
     ClassName = class_name(Self, State, 'Object'),

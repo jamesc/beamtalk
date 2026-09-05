@@ -416,7 +416,7 @@ impl CoreErlangGenerator {
     ///
     /// Structurally identical to [`Self::generate_if_true_with_mutations`] —
     /// `and:` short-circuits to the *literal* `false` on the non-taken path
-    /// rather than `ifTrue:`'s `nil`, matching `Boolean.bt`'s own
+    /// rather than `ifTrue:`'s `nil`, matching `boolean.bt`'s own
     /// self-hosted definition (`and: aBlock => self ifTrue: aBlock ifFalse:
     /// [false]`), so the inlined fast path stays behaviorally identical to
     /// the generic-dispatch path it replaces.
@@ -486,7 +486,7 @@ impl CoreErlangGenerator {
     ///
     /// The mirror image of [`Self::generate_and_with_mutations`] — see its
     /// doc comment. `or:`'s non-taken (true) path short-circuits to the
-    /// literal `true`, matching `Boolean.bt`'s `or: aBlock => self ifTrue:
+    /// literal `true`, matching `boolean.bt`'s `or: aBlock => self ifTrue:
     /// [true] ifFalse: aBlock`.
     ///
     /// Returns `{Result, NewState}`:

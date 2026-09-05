@@ -7,7 +7,7 @@
 -moduledoc """
 Integration tests for List compiled dispatch and primitive send.
 
-Tests compiled dispatch via 'bt@stdlib@list':dispatch/3 (List.bt BIF mappings)
+Tests compiled dispatch via 'bt@stdlib@list':dispatch/3 (list.bt BIF mappings)
 and beamtalk_primitive:send/3 integration for the List class.
 
 For direct beamtalk_list module tests (at, detect, reject, etc.),
@@ -26,7 +26,7 @@ class_of_test() ->
 
 %%% ============================================================================
 %%% Compiled dispatch integration tests
-%%% Tests via 'bt@stdlib@list':dispatch/3 (compiled from lib/List.bt)
+%%% Tests via 'bt@stdlib@list':dispatch/3 (compiled from lib/list.bt)
 %%% to verify BIF mappings are wired correctly end-to-end.
 %%% ============================================================================
 

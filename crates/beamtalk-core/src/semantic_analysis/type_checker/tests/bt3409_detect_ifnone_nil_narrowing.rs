@@ -69,7 +69,7 @@ typed Actor subclass: Orchestrator
 }
 
 /// Same idiom through the `List`-specific `detect:ifNone:` override
-/// (`stdlib/src/List.bt`), reached directly rather than via the inherited
+/// (`stdlib/src/list.bt`), reached directly rather than via the inherited
 /// `Collection` implementation.
 #[test]
 fn list_detect_ifnone_nil_block_narrows_after_isnil_guard() {

@@ -671,7 +671,7 @@ Affected components: `crates/beamtalk-core/src/codegen/` (metadata emission), `r
 
 The `Package` class lives in stdlib (like `System`, `File`, `Metaclass`), backed by an Erlang module in `beamtalk_runtime` — it needs access to the class registry, `.app` metadata, and BEAM code server, and must exist before any package loading happens.
 
-Affected components: `runtime/apps/beamtalk_runtime/src/beamtalk_package.erl` (Erlang backing module), `stdlib/src/Package.bt` (Beamtalk facade), `crates/beamtalk-lsp/` (hover/go-to-def), `runtime/apps/beamtalk_runtime/src/` (MCP tools)
+Affected components: `runtime/apps/beamtalk_runtime/src/beamtalk_package.erl` (Erlang backing module), `stdlib/src/package.bt` (Beamtalk facade), `crates/beamtalk-lsp/` (hover/go-to-def), `runtime/apps/beamtalk_runtime/src/` (MCP tools)
 
 ## Migration Path
 

@@ -66,7 +66,7 @@ fn generate_stdlib_types(lib_dir: &Path) {
 /// Collect stdlib class names from `dir`, recursing into subdirectories.
 ///
 /// `stdlib/src/` may be grouped into subdirectories (`collections/`, …).
-/// Those are editorial only — the class name is the file stem regardless of
+/// Those are editorial only — module naming ignores them regardless of
 /// depth, matching `build_stdlib::module_name_from_path`. Recursing keeps
 /// `is_known_stdlib_type()` from silently missing nested classes.
 ///
@@ -74,6 +74,18 @@ fn generate_stdlib_types(lib_dir: &Path) {
 /// `build_stdlib` uses over the same tree). Beyond keeping the two in sync,
 /// it stops a symlinked directory cycle from recursing until the build script
 /// blows its stack.
+///
+/// The name is parsed from each file's actual `subclass:`/`Protocol define:`
+/// declaration (BT-3432), not assumed from the file stem: a file/name
+/// mismatch — same bug BT-3431 fixed for self-dispatch codegen — previously
+/// produced a `STDLIB_CLASS_NAMES` entry that could never match the real,
+/// AST-derived name `is_known_stdlib_type` looks up, silently sending that
+/// class's (or protocol's — both compile to their own `bt@stdlib@{snake}`
+/// module, see `protocol_modules` in the generated `.app.src`) module
+/// references through the non-stdlib `bt@{snake}` fallback instead of
+/// `bt@stdlib@{snake}`. Files with zero or multiple classes/protocols
+/// (malformed) are skipped — `beamtalk build-stdlib`'s own
+/// single-definition-per-file validation is the authority on rejecting those.
 fn collect_stdlib_class_names(dir: &Path, out: &mut Vec<String>) {
     let entries = fs::read_dir(dir).expect("Failed to read stdlib source directory");
     for entry in entries {
@@ -87,8 +99,14 @@ fn collect_stdlib_class_names(dir: &Path, out: &mut Vec<String>) {
         if file_type.is_dir() {
             collect_stdlib_class_names(&path, out);
         } else if path.extension().is_some_and(|ext| ext == "bt") {
-            if let Some(stem) = path.file_stem() {
-                out.push(stem.to_string_lossy().to_string());
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("Failed to read '{}': {e}", path.display()));
+            let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+            let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+            if let [class] = module.classes.as_slice() {
+                out.push(class.name.name.to_string());
+            } else if let [protocol] = module.protocols.as_slice() {
+                out.push(protocol.name.name.to_string());
             }
         }
     }

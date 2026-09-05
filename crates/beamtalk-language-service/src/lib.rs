@@ -2945,8 +2945,8 @@ mod tests {
     fn goto_definition_superclass_in_class_header() {
         let mut service = SimpleLanguageService::new();
 
-        let collection_file = Utf8PathBuf::from("stdlib/src/Collection.bt");
-        let set_file = Utf8PathBuf::from("stdlib/src/Set.bt");
+        let collection_file = Utf8PathBuf::from("stdlib/src/collection.bt");
+        let set_file = Utf8PathBuf::from("stdlib/src/set.bt");
 
         service.update_file(
             collection_file.clone(),
@@ -2967,8 +2967,8 @@ mod tests {
     #[test]
     fn goto_definition_type_annotation_identifier() {
         let mut service = SimpleLanguageService::new();
-        let integer_file = Utf8PathBuf::from("stdlib/src/Integer.bt");
-        let tuple_file = Utf8PathBuf::from("stdlib/src/Tuple.bt");
+        let integer_file = Utf8PathBuf::from("stdlib/src/integer.bt");
+        let tuple_file = Utf8PathBuf::from("stdlib/src/tuple.bt");
 
         service.update_file(
             integer_file.clone(),
@@ -2991,7 +2991,7 @@ mod tests {
     #[test]
     fn goto_definition_constructor_pattern_class_name() {
         let mut service = SimpleLanguageService::new();
-        let result_file = Utf8PathBuf::from("Result.bt");
+        let result_file = Utf8PathBuf::from("result.bt");
         let classify_file = Utf8PathBuf::from("classify.bt");
 
         service.update_file(

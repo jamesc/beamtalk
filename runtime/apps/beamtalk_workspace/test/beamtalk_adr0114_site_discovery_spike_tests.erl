@@ -95,10 +95,10 @@ corpus_accuracy_test_() ->
     ]}.
 
 %% Hand audit (`grep -n "Announcement subclass:" stdlib/src/*.bt`, 2026-08-25):
-%% ActorSpawned.bt:18, ActorStopped.bt:17, BindingChanged.bt:26,
-%% ClassLoaded.bt:17, ClassRemoved.bt:17, FlushCompleted.bt:19,
-%% ObjectStateChanged.bt:26, SupervisionChildAdded.bt:18,
-%% SupervisionChildCrashed.bt:17 — nine direct subclasses, no more, no fewer.
+%% actor_spawned.bt:18, actor_stopped.bt:17, binding_changed.bt:26,
+%% class_loaded.bt:17, class_removed.bt:17, flush_completed.bt:19,
+%% object_state_changed.bt:26, supervision_child_added.bt:18,
+%% supervision_child_crashed.bt:17 — nine direct subclasses, no more, no fewer.
 %% Asserted as a subset, not exact equality: this module runs in ordinary
 %% CI, and an unrelated future PR adding another `Announcement subclass:`
 %% declaration must not fail a spike test whose validation purpose (this
@@ -122,8 +122,8 @@ direct_subclasses_announcement() ->
     ?assert(ordsets:is_subset(ordsets:from_list(Expected), ordsets:from_list(Actual))).
 
 %% Hand audit (`grep -n "Error subclass:" stdlib/src/*.bt`, 2026-08-25):
-%% BEAMError.bt:20, InstantiationError.bt:13, RuntimeError.bt:14,
-%% TypeError.bt:12 — four direct subclasses. `ExitError`/`ThrowError`
+%% beamerror.bt:20, instantiation_error.bt:13, runtime_error.bt:14,
+%% type_error.bt:12 — four direct subclasses. `ExitError`/`ThrowError`
 %% subclass `BEAMError`, not `Error` directly, so they are correctly excluded
 %% here (direct_subclasses/1 is not transitive).
 %% Subset, not exact equality — see direct_subclasses_announcement/0's note.
@@ -144,13 +144,13 @@ direct_subclasses_error() ->
 %% `renameTo:` to be exhaustive: those signatures need rewriting too.
 %%
 %% Cross-class mentions:
-%%   Actor.bt:294    withTimeout: ms :: Timeout | Duration -> TimeoutProxy =>
-%%   Actor.bt:297      (ms isKindOf: Duration) ifTrue: [ ...            (2 rows: different lines)
-%%   DateTime.bt:255  addDuration: d :: Duration -> DateTime => self delegate
-%%   DateTime.bt:280  - other :: DateTime -> Duration =>
-%%   Parallel.bt:73   class sealed all: ... timeout: ms :: Integer | Duration -> List(Result) =>
-%%   Timer.bt:36/48/58  after:do: / every:do: / sleep: (each `Integer | Duration`)
-%% Self-mentions in Duration.bt itself:
+%%   actor.bt:294    withTimeout: ms :: Timeout | Duration -> TimeoutProxy =>
+%%   actor.bt:297      (ms isKindOf: Duration) ifTrue: [ ...            (2 rows: different lines)
+%%   date_time.bt:255  addDuration: d :: Duration -> DateTime => self delegate
+%%   date_time.bt:280  - other :: DateTime -> Duration =>
+%%   parallel.bt:73   class sealed all: ... timeout: ms :: Integer | Duration -> List(Result) =>
+%%   timer.bt:36/48/58  after:do: / every:do: / sleep: (each `Integer | Duration`)
+%% Self-mentions in duration.bt itself:
 %%   instance-side: + - < <= > >= * (lines 184/193/225/243/234/252/203 — each
 %%     signature mentions `Duration` in its param and/or return type, but
 %%     ends up as ONE row per method: when both mentions land on the same
@@ -208,7 +208,7 @@ references_to_duration() ->
 %% Group 2 — live-patch gap reproduction (ADR 0114 Constraint 4).
 %%
 %% `AtomicCounter` is a real, always-loaded stdlib class (native-backed,
-%% `stdlib/src/AtomicCounter.bt`) used purely as "some other real class name"
+%% `stdlib/src/atomic_counter.bt`) used purely as "some other real class name"
 %% for the patched method to reference — any loaded class name would do.
 %%====================================================================
 
