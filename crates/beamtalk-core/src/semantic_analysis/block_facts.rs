@@ -116,6 +116,27 @@ pub fn analyze_method_body(
 /// helpers) keep compiling in a bare, unthreaded block passed to
 /// `select:`/`collect:`/`do:`/etc., while rejecting one whose target may
 /// mutate class state, where BT-3150's `Letrec`-only guard doesn't reach.
+///
+/// BT-3430 (ADR 0118 §Decision 5 follow-up — design decision): investigated
+/// replacing this whole-class, syntax-only pre-flight fixed point with
+/// `beamtalk-codegen`'s `ThreadedValue::close(ctx, CloseContext::Opaque)` /
+/// `VerifyError::StateEffectEscapesExpression` — a post-hoc check of one
+/// already-compiled expression's real prelude. Structurally impossible to
+/// do here regardless of that mechanism's own maturity: this function lives
+/// in `beamtalk-core` (Compilation), which never depends on
+/// `beamtalk-codegen` (Code Generation) —
+/// `docs/development/architecture-principles.md` §1 — so it cannot name
+/// `ThreadedValue`/`close()`/`VerifyError` at all, the same constraint
+/// BT-3423's `StateEffects` fact hit for its own, differently-shaped
+/// "genuinely different questions" split. This function must also run
+/// BEFORE any codegen of any of the class's methods (it needs the whole
+/// class's own call graph to compute a fixed point), where `close()`'s input
+/// — a real, already-compiled expression's prelude — does not exist yet
+/// either. The consuming predicate
+/// (`check_no_unsafe_class_method_self_sends`, `beamtalk-codegen/src/core_erlang/expressions.rs`)
+/// carries the complementary half of this finding (why its `beamtalk-codegen`-side
+/// call sites can't route through `close()` either) and the disposition:
+/// kept separate, cross-referenced, not unified.
 #[allow(clippy::implicit_hasher)] // concrete HashSet (matches ClassContext::class_var_names) is simpler for callers
 pub fn compute_class_var_mutating_selectors(
     class: &ClassDefinition,

@@ -1072,6 +1072,76 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // BT-3430 (ADR 0118 §Decision 5 follow-up — design decision, not yet
+    // implemented; see this issue): investigated routing this predicate's
+    // ~10 call sites through `ThreadedValue::close(ctx, CloseContext::Opaque)`
+    // / `VerifyError::StateEffectEscapesExpression` instead of (or on top
+    // of) `class_var_mutating_selectors()` above. Kept separate — full
+    // finding below.
+    //
+    // **Where things actually stand** (re-verified against this repo state,
+    // not the BT-3422 issue body's forward-looking sketch):
+    // `generate_class_method_self_send` (`dispatch_codegen.rs`) already
+    // returns a real `ThreadedValue` (ADR 0118 phases 5a/5b, BT-3421/
+    // BT-3422) — its `ClassVars` `Bind` is a genuine, un-rendered
+    // `ThreadedStmt::Bind` in the prelude, not baked eagerly into a
+    // `Document`. The *ambient* re-entry point every self-send reached via
+    // ordinary (non-`threaded_expression`) `generate_expression` funnels
+    // through — `try_handle_class_method_self_send` →
+    // `Self::close_threaded_value_doc` (`util.rs`) — already exists too.
+    // But `close_threaded_value_doc` deliberately does NOT call
+    // `ThreadedValue::close`: it renders prelude-then-value unconditionally,
+    // preserving "the pre-ADR-0118 open-let-chain's own contract" (its own
+    // doc comment) for EVERY ambient self-send site alike, trusting this
+    // predicate to have already rejected any block where that would be
+    // wrong.
+    //
+    // **Why `close_threaded_value_doc` can't just start calling `close()`
+    // with `CloseContext::Opaque`.** It is one shared choke point reached
+    // from self-sends in BOTH kinds of position this predicate's own doc
+    // comment distinguishes: the safe/unproven ones (a class method's own
+    // flat top level; a block passed to a *different* class's class-side
+    // method, genuine cross-process messaging — `shadow_cross_class_owner.bt`
+    // guards this one) and the confirmed-unsafe bare-block ones this
+    // predicate rejects pre-flight. Telling them apart at
+    // `close_threaded_value_doc`'s call time — after arbitrary-depth
+    // `generate_expression` recursion, with no record of which message send
+    // the innermost enclosing block literal is even an argument to — means
+    // re-deriving the SAME receiver-class-identity classification each of
+    // this predicate's ~10 call sites already computes once, per block
+    // literal, with the actual message send in hand. A generator-side
+    // context flag threaded through that recursion cannot easily stay
+    // correct across a *nested* block of the opposite safety (a same-class
+    // self-send inside a block-argument-to-a-different-class nested inside
+    // an outer unsafe bare block, or vice versa) without becoming a second,
+    // could-drift-independently copy of this predicate's own call-site
+    // reasoning (CLAUDE.md's no-duplicate-implementations rule) — and
+    // `report_threaded_ir_verify_errors` `debug_assert!`-aborts in debug/CI
+    // on ANY misclassification, so a false positive here is not a quiet
+    // regression, it is a build break across the corpus. That is real,
+    // non-trivial redesign risk against the very protection this predicate
+    // (and its 20 `test_class_method_self_send_*` pins) exists to keep sound
+    // — comparable in shape to BT-3423's own "genuinely different questions"
+    // scope boundary, not a small change scoped to this one predicate.
+    //
+    // **Why `compute_class_var_mutating_selectors` can't be replaced
+    // either.** It is a `beamtalk-core` (Compilation) whole-class,
+    // syntax-only fixed point computed once before any codegen of any block
+    // runs; `beamtalk-core` never depends on `beamtalk-codegen`
+    // (`docs/development/architecture-principles.md` §1), so it structurally
+    // cannot name `ThreadedValue`/`close()`/`VerifyError` at all — see its
+    // own doc comment (`beamtalk-core/src/semantic_analysis/block_facts.rs`)
+    // for this half of the finding.
+    //
+    // **Disposition:** kept separate, cross-referenced here and at
+    // `ThreadedValue::close`/`CloseContext`/`VerifyError::StateEffectEscapesExpression`
+    // (`threaded_ir.rs`) and `close_threaded_value_doc` (`util.rs`) — this
+    // predicate stays the sole gate for class-method self-sends; `close()`'s
+    // `CloseContext::Opaque` arm remains test-only (no production caller).
+    // Revisit only alongside a deliberate redesign of the ambient
+    // self-send re-entry path that carries real block-literal-to-message-send
+    // context through it, not as a follow-up scoped to this predicate alone.
+
     /// Generates code for a block (closure).
     ///
     /// BT-852: Automatically selects Tier 1 (plain) or Tier 2 (stateful) codegen
