@@ -4240,3 +4240,58 @@ change, confirmed by the full snapshot corpus + `stdlib`/`BUnit` suites
 module-doc §Status (BT-3182) is the accurate, current record; this addendum
 is the ADR-level pointer to it, per this ADR's own established
 cross-referencing precedent (Addendum 12).
+
+## Addendum 14 (2026-09-05): ADR 0118 close-out — Addendum 7's "narrow scope
+was never the limiting factor" conclusion superseded
+
+Addendum 7 (§Full-pipeline re-evaluation) concluded, across the five
+construct-family migrations attempted through BT-3149 (loops, conditionals,
+list-ops, gen_server bodies, stateful blocks): "ADR 0111's narrow scope
+(state-threading constructs specifically, not general expression codegen)
+was never a limiting factor for the migrations actually attempted," and
+that nothing surfaced evidence the general expression codegen this ADR's
+own §Scope excludes needed IR coverage. That conclusion was scoped
+correctly to what had been attempted *by construct family* — a new
+statement-shaped node kind reaching a new statement-shaped call site — but
+it did not anticipate the axis [BT-3399](https://linear.app/beamtalk/issue/BT-3399)
+found a few weeks later: a state effect nested *inside expression
+position*, within a construct family already migrated. `generate_self_dispatch`
+(an Actor self-send) had no `ThreadedIr` producer of its own — every
+migrated consumer's `verify()` call covered its OWN construct's `Bind`
+sequence, but a self-send sitting as a binary-op operand, a keyword-send
+argument, or a `whileTrue:` condition was invisible to all of them, because
+nothing represented "an expression, compiled for its value, that also needs
+to advance `State`." Ten narrow fixes (BT-3374, BT-3382, BT-3392, BT-3396,
+BT-3399, BT-3402, BT-3403, BT-3405, BT-3406, BT-3385) chased instances of
+this one shape before [ADR 0118](0118-expression-level-state-threading-preludes.md)
+named it as a single missing abstraction rather than an open-ended list of
+positions.
+
+**Superseded, not contradicted.** Addendum 7's own reasoning already named
+the shape of the exception in advance, in the very same paragraph: "the
+narrow-scope bet keeps paying off one construct family at a time... every
+remaining boundary... is a 'construct family not yet migrated,' the same
+shape as the five that were, not a case where the construct-local rendering
+boundary itself is the blocker." ADR 0118's gap was not a sixth construct
+family — it was a dimension orthogonal to construct family (statement
+position vs. expression position) that the "one construct family at a time"
+framing had no slot for. Addendum 7 was right that no migration attempted
+through BT-3149 needed IR coverage beyond ADR 0111's scope; it was
+incomplete in treating "every remaining boundary is a construct family not
+yet migrated" as exhaustive, when a second axis existed that the five
+completed migrations happened not to cross.
+
+**Resolved without the ADR-0018-§Alternative-3-scale rewrite Addendum 7
+itself estimated this generalization would cost.** ADR 0118 did not hand
+each nested construct's whole `Vec<ThreadedStmt>` fragment up to its
+enclosing method body (the full-pipeline design Addendum 7 priced at
+"meaningfully bigger than 'close out the epic'"). Instead, `ThreadedValue`
+makes every state-effecting expression form a *producer* of a small
+`{ prelude, value }` pair, and a sequencing rule at each expression's
+existing compile site splices that prelude into whichever frame already
+calls `verify()` — the same per-construct verification this ADR's Addendum
+7 described, now also seeing `Bind`s nested inside expression position, not
+only ones at statement-top-level. See `docs/development/debugging.md`'s
+`StateEffectEscapesExpression` row and "Emission-input coverage" paragraph,
+and ADR 0118 itself, for the full design and its own final ≤3% measurement
+against the pre-epic baseline.

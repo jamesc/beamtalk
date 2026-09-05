@@ -193,7 +193,7 @@ where to start reading:
 | `EarlyExitGateSlotMismatch` | A `TupleAccUnpack` node's own `gate_slots` disagrees with its enclosing `ThreadingMode::TupleAcc`'s `gate_slots` — the unpack would read threaded-local values from the wrong tuple positions (well-formed Core Erlang, silently *wrong values*, not a `core_lint` failure). | The list-op family's slot count in `list_ops/*.rs` (`do:`: 0; `collect:`/`select:`/boolean-predicate ops: 1; `takeWhile:`/`dropWhile:`/`detect:`-family: 2). Live since BT-3147 — `mode_gate_slots` (from `ListOpKind::gate_slots`, a canonical per-op table) and `node_gate_slots` (from each call site's own `index_offset - 1`) are genuinely independent sources now. |
 | `TupleAccInValueTypeContext` | `TupleAcc` mode was selected in a `ValueType` context, which has no actor `State` to reference — regression-pinning, `#[cfg(test)]`-only (unreachable today via `select_tuple_acc`'s own early-return; no production constructor). | `control_flow/mod.rs`'s `select_tuple_acc` guard ordering. |
 | `NestedStateAccFallbackUnderDirectParams` | A nested list-op that itself needs a `StateAcc`-map fallback appeared under an enclosing `DirectParams` loop, which has no `StateAcc` map for the inner `{value, StateAcc}` result to unpack into. Regression-pinning, `#[cfg(test)]`-only (unreachable today via `select_direct_params`'s own guard; no production constructor). | `control_flow/mod.rs`'s `select_direct_params`'s `!effects.has_non_tuple_safe_list_op` guard. |
-| `StateEffectEscapesExpression` | A `ThreadedValue` (ADR 0118) whose prelude carries a versioned `Bind` for `prefix` was `close()`d — rendered as nested `let`s around its value — in a context that cannot thread that prefix (`CloseContext::Opaque`), so the state effect the expression performed (a nested actor self-send's `NewState`, say) is scoped away and lost to everything after it: the "silent drop" class of bug as a verifier finding. | The consumer that called `close()` — it should *splice* the prelude into its own frame's IR instead (`stmts.extend(tv.prelude)`, as every `lower_body_exprs_with_reply` arm does since BT-3415), or, at a genuine boundary (a Tier 1 closure body, an FFI argument), surface a user-facing diagnostic built from this error. Constructed only by `ThreadedValue::close`; as of ADR 0118 phase 1a (BT-3415) that has no production caller — un-migrated positions still reach the byte-identical discarding fallback `generate_discarding_self_dispatch`, gated per phase in `stdlib/test/actor_self_send_position_matrix_test.bt`, until phase 2b routes `expression_doc` through `close()`. |
+| `StateEffectEscapesExpression` | A `ThreadedValue` (ADR 0118) whose prelude carries a versioned `Bind` for `prefix` was `close()`d — rendered as nested `let`s around its value — in a context that cannot thread that prefix (`CloseContext::Opaque`), so the state effect the expression performed (a nested actor self-send's `NewState`, say) is scoped away and lost to everything after it: the "silent drop" class of bug as a verifier finding. | The consumer that called `close()` — it should *splice* the prelude into its own frame's IR instead (`stmts.extend(tv.prelude)`, as every `lower_body_exprs_with_reply` arm does since BT-3415), or, at a genuine boundary (a Tier 1 closure body, an FFI argument, a block passed to a class method, spec/doc codegen), surface a user-facing diagnostic built from this error. Constructed only by `ThreadedValue::close`; every ADR 0118 phase (1a-4, plus 5a/5b/6's `ClassVars` consolidation) has landed, so every expression-position consumer now splices its prelude — `close()` itself still has no production caller as of this writing (`expression_doc` deliberately stays a plain forwarder per ADR 0118 §Decision 5: it is reached only by genuinely un-migrated, self-contained-`Document` boundaries, not by any position this table's matrix rows cover). Wiring `close()`'s `StateEffectEscapesExpression` into a user-facing diagnostic at one of those genuine boundaries (`check_no_unsafe_class_method_self_sends`) is tracked separately as a follow-up (BT-3430), not part of this migration. |
 
 `RoutingMismatch` (BT-3135's structural replacement for the two
 `gen_server/methods.rs` routing `debug_assert!`s) was itself deleted by
@@ -254,7 +254,7 @@ narrow that corpus down: `just test-stdlib <file>` / `just test-bunit
 <file>` against the specific fixture, then `dbg!` the `ThreadedIr` fragment
 at the failing construct's emission site.
 
-**Emission-input coverage, as of BT-3165.** `ThreadedIr` started
+**Emission-input coverage, as of ADR 0118 (BT-3424 close-out).** `ThreadedIr` started
 (BT-3129-BT-3144) as a verification-only side channel: a fixture built and
 checked alongside `Document` emission that happened separately, directly
 from AST + generator state (ADR 0111's own Addendum, "delivered vs.
@@ -276,16 +276,34 @@ arm) except for gen_server Actor method bodies and class-method bodies,
 where BT-3148's `lower_body_exprs_with_reply` and BT-3164's
 `lower_class_method_body` (both + `verify_body_with_opaque_version_gaps`)
 already verify the WHOLE method body in one call — the "method-level
-verify()" shape ADR 0111's close-out aimed at. Generalizing that same
-single-call-per-method shape to constructs nested inside expression
-position (conditionals, loops, list-ops, exception handling) would require
-those constructs to hand their real `Vec<ThreadedStmt>` fragment up to the
-enclosing body instead of rendering to a `Document` at their own boundary —
-a comparable migration to the `ThreadedStmt::Statement` opaque-embedding
-design BT-3156 did for gen_server bodies, generalized to expression-nested
-constructs, and was evaluated as ADR-0018-§Alternative-3-scale scope,
-deliberately not attempted here (see the ADR 0111 addendum's "full-pipeline
-re-evaluation" note).
+verify()" shape ADR 0111's close-out aimed at. As of ADR 0111's own close-out
+(BT-3165), a state effect *nested inside expression position* — a self-send
+as a binary-op operand, a conditional leaking its `{Result, State}` tuple
+into a keyword-send argument, and the other rows
+`stdlib/test/actor_self_send_position_matrix_test.bt` pins — still wasn't
+verified as such: generalizing the single-call-per-method shape to those
+positions would have meant hoisting each nested construct's whole real
+`Vec<ThreadedStmt>` fragment up to the enclosing body instead of rendering
+to a `Document` at its own boundary, a rewrite estimated at the scale of
+ADR 0018's rejected Alternative 3 (a full typed Core Erlang IR) and
+deliberately not attempted at the time.
+
+ADR 0118 (BT-3415-BT-3424) closed that gap without needing a rewrite at
+that scale: rather than hoisting a nested construct's fragment up to the
+enclosing body, every state-effecting expression form becomes a *producer*
+of a small `ThreadedValue { prelude, value }` (see this file's
+`StateEffectEscapesExpression` row and ADR 0118 itself for the full design),
+and the existing sequencing rule splices that prelude into whichever
+frame's own per-construct `verify()` call already covers it — the same
+`UnboundVersion`/`NonLinearVersion` checks this table describes, now also
+firing for a `Bind` nested inside expression position, not just one at
+statement-top-level. Every consumer this table's construct families cover
+(conditional/exception arms, stateful-block bodies, loop bodies and the
+loop **condition**, inline-threaded control flow used as a value) is
+migrated as of phase 4 (BT-3420); the remaining gap is the genuinely
+un-migrated, self-contained-`Document` boundaries `close()`'s own row above
+describes, which are a different (and much smaller) case than the
+expression-position coverage this paragraph used to call out of scope.
 
 **`exception_handling.rs`'s `on:do:`/`ensure:` (BT-3165, closing the gap
 BT-3149's close-out found).** `generate_exception_body_with_threading_inner`

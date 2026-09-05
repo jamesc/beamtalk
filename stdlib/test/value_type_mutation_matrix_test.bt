@@ -608,7 +608,8 @@ TestCase subclass: ValueTypeMutationMatrixTest
   //  stdlib/test/actor_self_send_position_matrix_test.bt for the full
   //  position matrix this corpus axis samples from, and
   //  docs/ADR/0118-expression-level-state-threading-preludes.md for the
-  //  phase each `adr0118*Pending` switch corresponds to.
+  //  phase each row below was fixed by (all phases have landed; every row
+  //  asserts the ground-truth behaviour unconditionally).
   // ════════════════════════════════════════════════════════════════════════
   testBinaryOperandSelfSendReadWriteActor =>
     self assert: self actorCorpus binaryOperandSelfSendReadWrite equals: 2
@@ -619,31 +620,19 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testAssignRhsSubExprSelfSendReadWriteActor =>
     self assert: self actorCorpus assignRhsSubExprSelfSendReadWrite equals: 101
 
-  // ADR 0118 phase 1b: cascade on self.
-  adr0118Phase1bCascadeOnSelfPending => false
-
+  // ADR 0118 phase 1b (BT-3416): cascade on self.
   testCascadeOnSelfReadWriteActor =>
-    self adr0118Phase1bCascadeOnSelfPending ifTrue: [
-      self assert: self actorCorpus cascadeOnSelfReadWrite equals: 0
-    ] ifFalse: [self assert: self actorCorpus cascadeOnSelfReadWrite equals: 2]
+    self assert: self actorCorpus cascadeOnSelfReadWrite equals: 2
 
-  // ADR 0118 phase 3: self-send as a whileTrue: CONDITION binary-op operand.
-  adr0118Phase3WhileTrueConditionSelfSendPending => false
-
+  // ADR 0118 phase 3 (BT-3419): self-send as a whileTrue: CONDITION
+  // binary-op operand.
   testWhileTrueConditionSelfSendReadWriteActor =>
-    self adr0118Phase3WhileTrueConditionSelfSendPending
-      ifTrue: [
-        self should: [
-          self actorCorpus whileTrueConditionSelfSendReadWrite
-        ] raise: #arity_mismatch
-      ]
-      ifFalse: [
-        self assert: self actorCorpus whileTrueConditionSelfSendReadWrite equals: 3
-      ]
+    self assert: self actorCorpus whileTrueConditionSelfSendReadWrite equals: 3
 
-  // ADR 0118 phase 2a: self-send in a match: arm.
-  adr0118Phase2aMatchArmSelfSendPending => true
-
+  // ADR 0118 phase 4 (BT-3420): self-send in a match: arm — fixed by phase
+  // 4's inline-threaded control flow producer, not phase 2a (see
+  // stdlib/test/actor_self_send_position_matrix_test.bt's
+  // `testMatchArmSelfSendMatchingArm` comment for why).
   testMatchArmSelfSendReadWriteActorMatching =>
     self assert: (self actorCorpus matchArmSelfSendReadWrite: 1) equals: 2
 
