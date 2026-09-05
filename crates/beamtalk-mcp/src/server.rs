@@ -2667,6 +2667,12 @@ struct LintResult {
 /// outside `stubs/`. Callers derive this from the file path being analysed
 /// (`beamtalk_project::package::is_under_stubs_dir`, called once per
 /// top-level `path` argument below rather than by this per-file helper).
+///
+/// `file_stem` (BT-3431) is the target file's basename without extension,
+/// passed to `check_class_file_name_agreement` so MCP `lint`/
+/// `diagnostic_summary` report the same file-name/class-name mismatch
+/// `beamtalk build`/`beamtalk lint`/the LSP do — `None` for callers with no
+/// real file backing the module skips the check.
 #[allow(clippy::too_many_arguments)] // BT-3398 added is_stub_file; each param is load-bearing context, same as `beamtalk lint`'s `collect_diagnostics`.
 fn run_module_analysis(
     module: &beamtalk_core::ast::Module,
@@ -2679,6 +2685,7 @@ fn run_module_analysis(
     >,
     current_package: Option<&str>,
     is_stub_file: bool,
+    file_stem: Option<&str>,
 ) -> (
     Vec<beamtalk_core::source_analysis::Diagnostic>,
     beamtalk_core::semantic_analysis::ClassHierarchy,
@@ -2704,6 +2711,16 @@ fn run_module_analysis(
             .diagnostics
             .into_iter()
             .filter(|d| d.category.is_some()),
+    );
+
+    // BT-3431: Validate the file name agrees with the class it declares —
+    // `analyse_full` doesn't run this check itself (see
+    // `check_class_file_name_agreement`'s doc), so it must be called
+    // explicitly here, mirroring `compute_project_diagnostics_with_analysis`.
+    diags.extend(
+        beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement(
+            module, file_stem,
+        ),
     );
 
     beamtalk_language_service::queries::diagnostic_provider::apply_expect_directives(
@@ -2868,6 +2885,9 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             native_type_registry.clone(),
             current_package.as_deref(),
             is_stub_file,
+            std::path::Path::new(file_str)
+                .file_stem()
+                .and_then(std::ffi::OsStr::to_str),
         );
 
         all_diags.extend(file_diags);
@@ -3190,6 +3210,7 @@ fn run_lint_structured(path: &str) -> LintResult {
             native_type_registry.clone(),
             current_package.as_deref(),
             is_stub_file,
+            file.file_stem().and_then(std::ffi::OsStr::to_str),
         );
 
         let file_name = file.to_string_lossy().into_owned();
@@ -3458,6 +3479,7 @@ mod tests {
             None,
             None,
             false,
+            None,
         );
         let near_misses: Vec<_> = diags
             .iter()
@@ -3472,6 +3494,60 @@ mod tests {
             near_misses[0].span.line_number(source),
             2,
             "span should point at the comment's own line (2), not `bar`'s line (3): {diags:?}"
+        );
+    }
+
+    /// BT-3431: MCP `lint`/`diagnostic_summary` must report the same
+    /// file-name/class-name mismatch `beamtalk build`/`beamtalk lint`/the
+    /// LSP do — before this fix, `run_module_analysis` never called
+    /// `check_class_file_name_agreement` at all, so this surface silently
+    /// reported clean regardless of `file_stem`.
+    #[test]
+    fn run_module_analysis_reports_mismatched_file_name() {
+        let source = "Value subclass: ExduraEvent";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let (diags, _) = run_module_analysis(
+            &module,
+            source,
+            &[],
+            parse_diags,
+            false,
+            None,
+            None,
+            false,
+            Some("event"),
+        );
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("does not match declared class")),
+            "mismatched file name should be reported: {diags:?}"
+        );
+    }
+
+    /// BT-3431 negative control.
+    #[test]
+    fn run_module_analysis_does_not_report_matching_file_name() {
+        let source = "Value subclass: ExduraEvent";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let (diags, _) = run_module_analysis(
+            &module,
+            source,
+            &[],
+            parse_diags,
+            false,
+            None,
+            None,
+            false,
+            Some("exdura_event"),
+        );
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.contains("does not match declared class")),
+            "matching file name should not be reported: {diags:?}"
         );
     }
 
@@ -3539,8 +3615,17 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _parse_diags) = parse(tokens);
 
-        let (diags, _) =
-            run_module_analysis(&module, source, &[], Vec::new(), false, None, None, false);
+        let (diags, _) = run_module_analysis(
+            &module,
+            source,
+            &[],
+            Vec::new(),
+            false,
+            None,
+            None,
+            false,
+            None,
+        );
 
         assert!(
             diags

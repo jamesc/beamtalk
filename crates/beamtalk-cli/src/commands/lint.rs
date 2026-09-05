@@ -52,6 +52,12 @@ use tracing::warn;
 /// [`beamtalk_project::package::is_under_stubs_dir`] against the file's own
 /// path — since `collect_lint_files`'s `stubs/` exclusion only applies to
 /// its *directory-walk* branch, not a direct single-file lint target.
+///
+/// `file_stem` (BT-3431) is the target file's basename without extension,
+/// passed to `check_class_file_name_agreement` so `beamtalk lint` reports
+/// the same file-name/class-name mismatch `beamtalk build`/the LSP do (via
+/// `ProjectDiagnosticContext::source_file_stem`) — `None` for callers with
+/// no real file backing the module skips the check.
 #[allow(clippy::too_many_arguments)] // BT-2910 added pre_loaded_protocols/pre_loaded_aliases; each param is load-bearing context
 fn collect_diagnostics(
     module: &beamtalk_core::ast::Module,
@@ -68,6 +74,7 @@ fn collect_diagnostics(
     has_package_dependencies: bool,
     current_package: Option<&str>,
     is_stub_file: bool,
+    file_stem: Option<&str>,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     // Collect parser-level lint diagnostics (e.g. unnecessary `.` — BT-948)
     // plus AST-level lint passes.
@@ -115,6 +122,16 @@ fn collect_diagnostics(
             .diagnostics
             .into_iter()
             .filter(|d| d.category.is_some()),
+    );
+
+    // BT-3431: Validate the file name agrees with the class it declares —
+    // `analyse_full` doesn't run this check itself (see
+    // `check_class_file_name_agreement`'s doc), so it must be called
+    // explicitly here, mirroring `compute_project_diagnostics_with_analysis`.
+    lint_diags.extend(
+        beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement(
+            module, file_stem,
+        ),
     );
 
     // BT-1476: Apply @expect directives to suppress matching lint diagnostics.
@@ -353,6 +370,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             has_package_dependencies,
             current_package.as_deref(),
             is_stub_file,
+            file.file_stem(),
         );
 
         // BT-3043: Drop repeat sightings of a pre-loaded alias collision —
@@ -830,6 +848,34 @@ fn collect_lint_diagnostics_with_stub_flag(
         false,
         None,
         is_stub_file,
+        None,
+    )
+}
+
+/// As [`collect_lint_diagnostics`], but with `file_stem` set explicitly —
+/// BT-3431's regression test for `beamtalk lint` reporting the same
+/// file-name/class-name mismatch `beamtalk build`/the LSP do.
+#[cfg(test)]
+fn collect_lint_diagnostics_with_file_stem(
+    source: &str,
+    file_stem: Option<&str>,
+) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
+    let tokens = lex_with_eof(source);
+    let (module, parse_diags) = parse(tokens);
+    collect_diagnostics(
+        &module,
+        source,
+        parse_diags,
+        vec![],
+        vec![],
+        vec![],
+        None,
+        beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+        &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+        false,
+        None,
+        false,
+        file_stem,
     )
 }
 
@@ -895,6 +941,37 @@ mod tests {
                 .iter()
                 .any(|d| d.message.contains("only valid in stubs/ directory")),
             "declare native: inside stubs/ should not be reported: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn mismatched_file_name_is_reported() {
+        // BT-3431: `beamtalk lint` must report the same file-name/class-name
+        // mismatch `beamtalk build`/the LSP do, closing the surface-parity
+        // gap `check_class_file_name_agreement` would otherwise have only on
+        // this surface (the `.category.is_some()` filter alone wouldn't have
+        // dropped it — `FileClassNameMismatch` is a real category — but
+        // nothing called the check here at all before this fix).
+        let source = "Value subclass: ExduraEvent";
+        let diags = collect_lint_diagnostics_with_file_stem(source, Some("event"));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("does not match declared class")),
+            "mismatched file name should be reported: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn matching_file_name_is_not_reported() {
+        // BT-3431 negative control.
+        let source = "Value subclass: ExduraEvent";
+        let diags = collect_lint_diagnostics_with_file_stem(source, Some("exdura_event"));
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.contains("does not match declared class")),
+            "matching file name should not be reported: {diags:?}"
         );
     }
 
@@ -1030,6 +1107,7 @@ mod tests {
             false,
             None,
             false,
+            None,
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
@@ -1234,6 +1312,7 @@ mod tests {
             false,
             None,
             false,
+            None,
         );
 
         let unresolved: Vec<_> = diags
@@ -1438,6 +1517,7 @@ mod tests {
             true, // has_package_dependencies
             Some("consumer"),
             false,
+            None,
         );
 
         let unresolved_names: Vec<String> = diags
@@ -1625,6 +1705,7 @@ mod tests {
                 true,
                 Some("consumer"),
                 false,
+                None,
             )
             .into_iter()
             .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
@@ -1743,6 +1824,7 @@ mod tests {
                 true,
                 Some("consumer"),
                 false,
+                None,
             )
             .into_iter()
             .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
@@ -1903,6 +1985,7 @@ mod tests {
             false,
             None,
             false,
+            None,
         );
 
         let has_untyped_ffi = diags.iter().any(|d| d.message.contains("untyped FFI"));
@@ -1955,6 +2038,7 @@ mod tests {
             false,
             None,
             false,
+            None,
         );
 
         let untyped_ffi: Vec<_> = diags
@@ -2021,6 +2105,7 @@ mod tests {
             false,
             None,
             false,
+            None,
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
