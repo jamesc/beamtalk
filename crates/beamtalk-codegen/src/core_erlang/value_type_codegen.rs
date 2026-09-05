@@ -17,7 +17,7 @@ use super::control_flow::ThreadingPlan;
 use super::intrinsics::validate_block_arity_exact;
 use super::spec_codegen;
 use super::util::ClassIdentity;
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, concat, join, leaf, line, nest};
 use beamtalk_core::ast::{
@@ -3409,61 +3409,46 @@ impl CoreErlangGenerator {
                         let core_var = self
                             .lookup_var(&id.name)
                             .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-                        // BT-3159: a class-method self-send on the RHS (`x := self bump`)
-                        // produces an *open* let-chain via `expression_doc_with_open_scope`
-                        // (ending in `... in `, result value carried out-of-band in
-                        // `last_open_scope_result`). Using the plain `expression_doc` here
-                        // and wrapping it in `let core_var = <val_doc> in` left the chain's
-                        // trailing `in` unclosed — an empty value fragment before a doubled
-                        // `in`. Mirrors `try_generate_block_local_plain_let`'s BT-3150 fix:
-                        // keep the open chain (and its `ClassVarsN` rebind) at this level,
-                        // then bind `core_var` to the carried-out result as a separate,
-                        // still-open `let`.
-                        let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
+                        // ADR 0118 phase 5b (BT-3422): a class-method
+                        // self-send on the RHS (`x := self bump`), at any
+                        // nesting depth, threads as a real prelude via
+                        // `threaded_expression` — spliced ahead of this
+                        // `let core_var = ... in` (mirrors
+                        // `try_generate_block_local_plain_let`'s BT-3150
+                        // fix, now built on `ThreadedValue` rather than an
+                        // open-chain side channel).
+                        let frame = self.current_frame();
+                        let tv = self.threaded_expression(value, frame)?;
+                        let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+                        let value_doc = self.threaded_value_doc(&tv.value);
                         self.bind_var(&id.name, &core_var);
-                        let doc = match open_scope {
-                            Some(OpenScopeResult::Value(result_var)) => docvec![
-                                val_doc,
-                                "let ",
-                                leaf::var(core_var.clone()),
-                                " = ",
-                                leaf::var(result_var),
-                                " in ",
-                            ],
-                            Some(OpenScopeResult::NoValue) => docvec![
-                                val_doc,
-                                "let ",
-                                leaf::var(core_var.clone()),
-                                " = 'nil' in ",
-                            ],
-                            None => {
-                                docvec!["let ", leaf::var(core_var.clone()), " = ", val_doc, " in ",]
-                            }
-                        };
-                        preamble.push(doc);
+                        preamble.push(docvec![
+                            prelude_doc,
+                            "let ",
+                            leaf::var(core_var.clone()),
+                            " = ",
+                            value_doc,
+                            " in ",
+                        ]);
                     }
                 }
             } else {
                 let tmp = self.fresh_temp_var("seq");
-                // BT-3159: mirror the assignment arm above — a bare-statement
-                // class-method self-send also produces an open let-chain that must
-                // be closed before wrapping it in `let tmp = <doc> in`.
-                let (val_doc, open_scope) = self.expression_doc_with_open_scope(body_expr)?;
-                let doc = match open_scope {
-                    Some(OpenScopeResult::Value(result_var)) => docvec![
-                        val_doc,
-                        "let ",
-                        leaf::var(tmp),
-                        " = ",
-                        leaf::var(result_var),
-                        " in ",
-                    ],
-                    Some(OpenScopeResult::NoValue) => {
-                        docvec![val_doc, "let ", leaf::var(tmp), " = 'nil' in ",]
-                    }
-                    None => docvec!["let ", leaf::var(tmp), " = ", val_doc, " in ",],
-                };
-                preamble.push(doc);
+                // ADR 0118 phase 5b (BT-3422): mirror the assignment arm
+                // above — a bare-statement class-method self-send also
+                // threads as a real prelude.
+                let frame = self.current_frame();
+                let tv = self.threaded_expression(body_expr, frame)?;
+                let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+                let value_doc = self.threaded_value_doc(&tv.value);
+                preamble.push(docvec![
+                    prelude_doc,
+                    "let ",
+                    leaf::var(tmp),
+                    " = ",
+                    value_doc,
+                    " in ",
+                ]);
             }
         }
 

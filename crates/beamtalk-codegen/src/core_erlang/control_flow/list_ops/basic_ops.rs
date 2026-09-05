@@ -4,7 +4,7 @@
 //! Basic list iteration operations: `do:` and `collect:`.
 
 use super::super::super::intrinsics::validate_block_arity_exact;
-use super::super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result};
+use super::super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -95,13 +95,14 @@ impl CoreErlangGenerator {
                 // BT-1329: In direct-params loop context, skip StateAcc repack and omit
                 // trailing 'nil'. The extracted vars are left as open let-bindings so they
                 // escape to the outer scope (the caller chains the next expression directly).
-                // BT-1448/BT-3053: Signal open scope with no single value (multiple
-                // accumulator vars may have been rebound; `do:` itself always answers
-                // `nil`) so the annotation guard in generate_expression does not wrap
-                // this open let-chain in `( ... -| [...] )`, and a consumer that needs
-                // to reference a value substitutes `do:`'s own `nil` contract instead
-                // of a nonexistent variable.
-                self.last_open_scope_result = Some(OpenScopeResult::NoValue);
+                // BT-1448/BT-3053/ADR 0118 phase 5b (BT-3422): Signal open scope with no
+                // single value (multiple accumulator vars may have been rebound; `do:`
+                // itself always answers `nil`) so the annotation guard in
+                // generate_expression does not wrap this open let-chain in `( ... -|
+                // [annotation] )`, and `threaded_expression`'s generic fallback
+                // (`generate_expression_as_value`) substitutes `do:`'s own `nil` contract
+                // instead of referencing a nonexistent variable.
+                self.direct_params_do_open_chain = true;
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),

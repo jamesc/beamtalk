@@ -52,7 +52,7 @@ use super::super::intrinsics::{
     STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
 };
 use super::super::threaded_ir::{BindOp, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
-use super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result, block_analysis};
+use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{join, leaf};
@@ -1164,22 +1164,21 @@ impl CoreErlangGenerator {
                 }
             } else if is_last {
                 if has_direct_field_assignments {
-                    // E6 — has_direct_field_assignments sub-branch. BT-3177:
-                    // `closed_expression_doc` (BT-2350), not plain
-                    // `expression_doc` — a class-method self-send with no
-                    // enclosing assignment (e.g. `self bump` as this try
-                    // body's last statement) emits an *open* let-chain
-                    // (`emit_class_var_result_unwrap`) ending in `... in `;
-                    // wrapping that directly as `let rv = <open-chain> in`
-                    // leaves a dangling `in` — a `core_parse_error`, the
-                    // exact failure mode this closes.
+                    // E6 — has_direct_field_assignments sub-branch. BT-3177 /
                     // ADR 0118 phase 2a (BT-3417): thread every
-                    // state-effecting sub-expression (`1 + (self bump)`) as
-                    // real `Bind`s ahead of the compile, via `thread_ahead`
-                    // — the E-side counterpart of C12.
+                    // state-effecting sub-expression (`1 + (self bump)`) —
+                    // AND, since ADR 0118 phase 5b (BT-3422) widened
+                    // `subexpr_needs_prelude` to recognize a class-var
+                    // producer too, a bare class-method self-send with no
+                    // enclosing assignment (e.g. `self bump` as this try
+                    // body's last statement) — as real `Bind`s ahead of the
+                    // compile, via `thread_ahead`. The plain compile below
+                    // then reads the already-threaded value back via
+                    // `precompiled_subexprs` substitution; no open let-chain
+                    // reaches this point any more.
                     let hoist_scope = self.thread_ahead(expr, &mut stmts, frame)?;
                     let rv = self.fresh_temp_var("ExResult");
-                    let expr_doc = self.closed_expression_doc(expr)?;
+                    let expr_doc = self.expression_doc(expr)?;
                     self.finish_precompiled_scope(hoist_scope)?;
                     stmts.push(ThreadedStmt::Statement(
                         docvec!["let ", leaf::var(rv.clone()), " = ", expr_doc, " in"],
@@ -1237,16 +1236,11 @@ impl CoreErlangGenerator {
                         result_var = rv;
                     } else {
                         // E6/E7 — plain expression, no direct field
-                        // assignments in this body. BT-3177: see the E6
-                        // has_direct_field_assignments sub-branch above for
-                        // why this must be `closed_expression_doc`, not
-                        // plain `expression_doc` — same open-scope hazard,
-                        // same fix (BT-2350).
-                        // ADR 0118 phase 2a (BT-3417): see the E6
-                        // sub-branch above.
+                        // assignments in this body. See the E6
+                        // has_direct_field_assignments sub-branch above.
                         let hoist_scope = self.thread_ahead(expr, &mut stmts, frame)?;
                         let rv = self.fresh_temp_var("ExResult");
-                        let expr_doc = self.closed_expression_doc(expr)?;
+                        let expr_doc = self.expression_doc(expr)?;
                         self.finish_precompiled_scope(hoist_scope)?;
                         stmts.push(ThreadedStmt::Statement(
                             docvec!["let ", leaf::var(rv.clone()), " = ", expr_doc, " in"],
@@ -1256,38 +1250,24 @@ impl CoreErlangGenerator {
                     }
                 }
             } else {
-                // E7 — non-last plain expression. BT-3177: unlike the
-                // last-position cases above, a discarded non-last statement
-                // must keep an open class-var chain visible to later
-                // statements in this same try body (a second self-send
-                // later must see the first one's already-bumped
-                // `ClassVarsN`, not roll back to reference an un-mutated
-                // one) — `expression_doc_with_open_scope` + an explicit
-                // discard `let`, mirroring `push_discarded_stmt`'s
-                // established idiom (BT-2350), rather than
-                // `closed_expression_doc`'s scope-closing wrap.
+                // E7 — non-last plain expression. BT-3177: a discarded
+                // non-last statement must keep a class-var mutation visible
+                // to later statements in this same try body (a second
+                // self-send later must see the first one's already-bumped
+                // `ClassVarsN`). ADR 0118 phase 5b (BT-3422): `thread_ahead`
+                // now threads any such producer into `stmts` as a real
+                // `Bind`, in the SAME frame every later statement in this
+                // body shares — visible to them by construction, without
+                // the old lexical-nesting trick — so the plain compile
+                // below never has an open scope to propagate.
                 // ADR 0118 phase 2a (BT-3417): see the E6 sub-branch above.
                 let hoist_scope = self.thread_ahead(expr, &mut stmts, frame)?;
-                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                let expr_doc = self.expression_doc(expr)?;
                 self.finish_precompiled_scope(hoist_scope)?;
-                match open_scope {
-                    Some(OpenScopeResult::Value(result_var)) => {
-                        stmts.push(ThreadedStmt::Statement(expr_doc, span));
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec!["let _ = ", leaf::var(result_var), " in "],
-                            span,
-                        ));
-                    }
-                    Some(OpenScopeResult::NoValue) => {
-                        stmts.push(ThreadedStmt::Statement(expr_doc, span));
-                    }
-                    None => {
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec!["let _ = ", expr_doc, " in"],
-                            span,
-                        ));
-                    }
-                }
+                stmts.push(ThreadedStmt::Statement(
+                    docvec!["let _ = ", expr_doc, " in"],
+                    span,
+                ));
             }
         }
 

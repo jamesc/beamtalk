@@ -2702,8 +2702,8 @@ fn test_class_method_local_var_assignment_of_self_class_method() {
 fn test_class_method_local_var_after_class_var_mutation() {
     // BT-1201 follow-up (reviewer feedback): a class var mutation (`self.cv := expr`) preceding
     // a local var assignment (`x := plainExpr`) must NOT incorrectly treat the local var RHS as
-    // an open-scope expression. The stale `last_open_scope_result` from the field assignment
-    // must be cleared before processing the local var's RHS.
+    // a class-var-producing expression. Any stale producer state left over from the field
+    // assignment must not leak into processing the local var's RHS.
     //
     // Pattern: class a => self.cv := 1. x := self b. x
     // Without the clear, x would be bound to the field-assignment's result var, not `self b`.
@@ -2806,9 +2806,10 @@ fn test_class_method_self_send_as_local_var_assignment_rhs_in_while_loop_compile
     // within the same iteration (`result := result + x`) — the same
     // "self-send return value matters" shape that made blanket-rejecting
     // `Foldl*` bodies wrong (see `test_class_method_self_send_as_collect_transform_still_compiles`).
-    // So this is fixed as a compile bug (use `expression_doc_with_open_scope`,
-    // mirroring BT-1397's fix for the same shape inside blocks generally), not
-    // folded into the reject list. `self.runs` not accumulating across
+    // So this is fixed as a compile bug (thread the self-send's class-var
+    // mutation ahead of the assignment's own compile, mirroring BT-1397's fix
+    // for the same shape inside blocks generally), not folded into the reject
+    // list. `self.runs` not accumulating across
     // iterations is the same pre-existing, tracked `Letrec` limitation as
     // always (this test only pins that it compiles and runs without crashing).
     let src = "Value subclass: DriverAssign\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aList =>\n    i := 1\n    result := 0\n    [i <= aList size] whileTrue: [\n      x := self bump\n      result := result + x\n      i := i + 1\n    ]\n    result";
@@ -2831,11 +2832,12 @@ fn test_class_method_self_send_as_local_var_assignment_rhs_in_while_loop_compile
 
 #[test]
 fn test_do_assigned_to_discarded_local_in_direct_params_loop_still_emits_foldl() {
-    // BT-3150 review follow-up: `try_generate_block_local_plain_let`'s new
-    // open-scope-aware fix (above) initially discarded `val_doc` entirely in
-    // the `OpenScopeResult::NoValue` arm instead of emitting it first (unlike
-    // the `Value` arm right above it). `NoValue` is produced by a mutation-
-    // threaded `do:` nested inside a direct-params outer loop (BT-1329/
+    // BT-3150 review follow-up: `try_generate_block_local_plain_let`'s
+    // producer-aware fix (above) initially discarded `val_doc` entirely in
+    // the direct-params-loop "no single value" arm instead of emitting it
+    // first (unlike the ordinary-value arm right above it). That arm fires
+    // for a mutation-threaded `do:` nested inside a direct-params outer loop
+    // (BT-1329/
     // BT-3053, see `test_do_nested_in_direct_params_loop` in
     // `control_flow/list_ops/tests.rs` for the bare-statement variant this
     // adapts) — there, `val_doc` isn't just "a value", it's the entire

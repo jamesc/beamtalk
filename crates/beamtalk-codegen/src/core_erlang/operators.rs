@@ -156,13 +156,13 @@ impl CoreErlangGenerator {
         let right_is_statically_numeric = self.receiver_is_statically_numeric(&arguments[0]);
 
         // BT-1937: Capture both operands in evaluation order. When either
-        // operand produces an open let-chain (e.g., a class method self-send
-        // mutating a class var), capture_subexpr_sequence force-hoists BOTH
-        // operands into a preamble so left-to-right evaluation order is
-        // preserved. When neither has an open scope, both operands stay
-        // inline and there is no hoisting overhead.
+        // operand needs a real prelude (e.g., a class method self-send
+        // mutating a class var), `thread_subexprs` force-hoists BOTH
+        // operands into that preamble so left-to-right evaluation order is
+        // preserved. When neither needs one, both operands stay inline and
+        // there is no hoisting overhead.
         let exprs: [&Expression; 2] = [left, &arguments[0]];
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "BinOp")?;
+        let (preamble, mut docs) = self.thread_subexprs(&exprs, "BinOp")?;
         let right_code = docs.pop().expect("right operand");
         let left_code = docs.pop().expect("left operand");
 
@@ -196,7 +196,7 @@ impl CoreErlangGenerator {
             ]
         };
 
-        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "BinOp"))
+        Ok(self.close_prelude(&preamble, call_doc, "BinOp"))
     }
 
     /// BT-2709: Whether `expr` is statically known to evaluate to a number, so
@@ -645,7 +645,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // BT-1937: Capture both operands preserving evaluation order.
         let exprs: [&Expression; 2] = [left, right];
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "PowOp")?;
+        let (preamble, mut docs) = self.thread_subexprs(&exprs, "PowOp")?;
         let right_code = docs.pop().expect("right operand");
         let left_code = docs.pop().expect("left operand");
         let call_doc = docvec![
@@ -655,7 +655,7 @@ impl CoreErlangGenerator {
             right_code,
             ")))",
         ];
-        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "PowRes"))
+        Ok(self.close_prelude(&preamble, call_doc, "PowRes"))
     }
 
     /// Generates `++` concatenation with runtime type dispatch.
@@ -681,7 +681,7 @@ impl CoreErlangGenerator {
         // either operand has an open scope, BOTH are force-hoisted into the
         // preamble so left-to-right evaluation order is preserved.
         let exprs: [&Expression; 2] = [left, right];
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "ConcatOp")?;
+        let (preamble, mut docs) = self.thread_subexprs(&exprs, "ConcatOp")?;
         let right_code = docs.pop().expect("right operand");
         let left_code = docs.pop().expect("left operand");
 
@@ -726,6 +726,6 @@ impl CoreErlangGenerator {
             ]
         };
 
-        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "ConcatRes"))
+        Ok(self.close_prelude(&preamble, call_doc, "ConcatRes"))
     }
 }

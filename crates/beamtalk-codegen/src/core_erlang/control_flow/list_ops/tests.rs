@@ -2146,9 +2146,9 @@ fn test_do_nested_in_direct_params_loop() {
     // The outer loop sets in_direct_params_loop=true, which causes
     // generate_list_do_with_mutations to hit the tuple-acc + in_direct_params_loop
     // branch (basic_ops.rs lines 94-112): StateAcc repack is skipped, an open
-    // let-chain is emitted, and last_open_scope_result is set to
-    // Some(OpenScopeResult::NoValue) (BT-3053) so the outer loop can chain the
-    // next expression directly.
+    // let-chain is emitted, and direct_params_do_open_chain is set to true
+    // (BT-3053/ADR 0118 phase 5b) so the outer loop can chain the next
+    // expression directly.
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2186,8 +2186,8 @@ fn test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
     // BT-3053: `^` (Expression::Return, compiled via the NLR-throw path since
     // it's inside a block) fed the *direct result* of a mutation-threaded
     // `do:` nested inside a direct-params loop — the exact shape that used to
-    // reference the bare `"_"` sentinel as if it were a bound variable
-    // (`last_open_scope_result` was `Option<String>` before this fix, and
+    // reference the bare `"_"` sentinel as if it were a bound variable (the
+    // producer-state field was a plain `Option<String>` before this fix, and
     // `"_"` did double duty as both a real name and a "still open, no value"
     // flag). Before the fix this produced `call 'erlang':'throw'({'$bt_nlr',
     // Token, _, State})` — a reference to an unbound `_`. After the fix, the

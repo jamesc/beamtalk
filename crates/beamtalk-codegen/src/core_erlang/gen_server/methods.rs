@@ -13,8 +13,7 @@ use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::spec_codegen;
 use super::super::value_type_codegen::has_opaque_native_representation;
 use super::super::{
-    CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result, block_analysis,
-    threaded_ir,
+    CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis, threaded_ir,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::fname;
@@ -4286,60 +4285,89 @@ impl CoreErlangGenerator {
         )? {
             return Ok(doc);
         }
-        // BT-1942: Use `expression_doc_with_open_scope` so an explicit
-        // `^ expr` where `expr` produces an open let-chain (e.g.
-        // `(self tick) class` or any ProtoObject/Object intrinsic fed a
-        // class method self-send) is emitted correctly. The open chain
-        // must be emitted as a prefix; the value is the returned result
-        // variable, not the chain wrapped in another let binding (which
-        // would produce invalid double-`in` Core Erlang).
+        // ADR 0118 phase 5b (BT-3422): mirrors
+        // `generate_class_method_last_expr_with_class_vars` — when `value`
+        // is itself a recognized producer (a class-var assignment, or a
+        // *locally declared* class-method self-send per
+        // `is_class_method_self_send`'s `class_method_selectors()` check),
+        // `threaded_expression` gives it a real prelude whose rebound
+        // `ClassVarsN` stays lexically visible here, so `current_class_var()`
+        // below is safe to read directly. Otherwise `value` may still
+        // dispatch a class-var-mutating self-send that the compile below
+        // reaches opaquely and closes (e.g. BT-2007 inherited dispatch,
+        // deliberately excluded by that same check) — closing loses the
+        // mutated name's LEXICAL visibility, but not the mutation itself,
+        // so `refresh_class_var_after_opaque_scope` recovers the live value
+        // via the ADR 0110 shadow write instead of relying on lexical scope.
         if has_class_vars {
-            let result_var = self.fresh_temp_var("Ret");
-            let (value_str, open_scope) = self.expression_doc_with_open_scope(value)?;
-            let (preamble, value_doc) = match open_scope {
-                Some(OpenScopeResult::Value(open_scope_result)) => {
-                    (value_str, leaf::var(open_scope_result))
+            if self.is_class_var_assignment(value) || self.is_class_method_self_send(value) {
+                let result_var = self.fresh_temp_var("Ret");
+                let frame = self.current_frame();
+                let tv = self.threaded_expression(value, frame)?;
+                let preamble = self.threaded_prelude_doc(&tv.prelude);
+                let value_doc = self.threaded_value_doc(&tv.value);
+                if self.class_var_mutated() {
+                    let final_cv = self.current_class_var();
+                    Ok(docvec![
+                        preamble,
+                        "let ",
+                        leaf::var(result_var.clone()),
+                        " = ",
+                        value_doc,
+                        " in {'class_var_result', ",
+                        leaf::var(result_var),
+                        ", ",
+                        leaf::var(final_cv),
+                        "}",
+                    ])
+                } else {
+                    Ok(docvec![
+                        preamble,
+                        "let ",
+                        leaf::var(result_var.clone()),
+                        " = ",
+                        value_doc,
+                        " in ",
+                        leaf::var(result_var),
+                    ])
                 }
-                // BT-3053: no single value — substitute do:'s own `nil` contract.
-                Some(OpenScopeResult::NoValue) => (value_str, Document::Str("'nil'")),
-                None => (Document::Nil, value_str),
-            };
-            if self.class_var_mutated() {
-                let final_cv = self.current_class_var();
-                Ok(docvec![
-                    preamble,
-                    "let ",
-                    leaf::var(result_var.clone()),
-                    " = ",
-                    value_doc,
-                    " in {'class_var_result', ",
-                    leaf::var(result_var),
-                    ", ",
-                    leaf::var(final_cv),
-                    "}",
-                ])
             } else {
-                Ok(docvec![
-                    preamble,
-                    "let ",
-                    leaf::var(result_var.clone()),
-                    " = ",
-                    value_doc,
-                    " in ",
-                    leaf::var(result_var),
-                ])
+                let result_var = self.fresh_temp_var("Ret");
+                let cv_version_before = self.class_var_version();
+                let expr_doc = self.expression_doc(value)?;
+                let refresh = self.refresh_class_var_after_opaque_scope(cv_version_before);
+                if self.class_var_mutated() {
+                    let final_cv = self.current_class_var();
+                    Ok(docvec![
+                        "let ",
+                        leaf::var(result_var.clone()),
+                        " = ",
+                        expr_doc,
+                        " in ",
+                        refresh.unwrap_or(Document::Nil),
+                        "{'class_var_result', ",
+                        leaf::var(result_var),
+                        ", ",
+                        leaf::var(final_cv),
+                        "}",
+                    ])
+                } else {
+                    Ok(docvec![
+                        "let ",
+                        leaf::var(result_var.clone()),
+                        " = ",
+                        expr_doc,
+                        " in ",
+                        leaf::var(result_var),
+                    ])
+                }
             }
         } else {
-            // BT-1942: Same treatment for the no-class-vars path.
-            let (value_str, open_scope) = self.expression_doc_with_open_scope(value)?;
-            match open_scope {
-                Some(OpenScopeResult::Value(open_scope_result)) => {
-                    Ok(docvec![value_str, leaf::var(open_scope_result)])
-                }
-                // BT-3053: no single value — substitute do:'s own `nil` contract.
-                Some(OpenScopeResult::NoValue) => Ok(docvec![value_str, "'nil'"]),
-                None => Ok(value_str),
-            }
+            // ADR 0118 phase 5b (BT-3422): same treatment for the
+            // no-class-vars path — no `class_var_mutated()`/`current_class_var()`
+            // read follows, so the prelude and value simply concatenate.
+            let frame = self.current_frame();
+            self.threaded_expression_doc(value, frame)
         }
     }
 
@@ -4406,68 +4434,53 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        let frame = self.current_frame();
         if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
-            let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
+            // ADR 0118 phase 5b (BT-3422): `expr` is itself a producer at
+            // its own top level, so `threaded_expression` always gives it a
+            // real value (never the do:-in-direct-params-loop `'nil'` case
+            // — a class-var assignment/self-send never produces that).
+            // `final_cv` is read AFTER threading so it reflects the rebind.
+            let tv = self.threaded_expression(expr, frame)?;
+            let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+            let value_doc = self.threaded_value_doc(&tv.value);
             let final_cv = self.current_class_var();
-            match open_scope {
-                Some(OpenScopeResult::Value(result_var)) => Ok(docvec![
-                    expr_str,
-                    "{'class_var_result', ",
-                    leaf::var(result_var),
-                    ", ",
-                    leaf::var(final_cv),
-                    "}",
-                ]),
-                // BT-3053: `NoValue` isn't reachable via this branch's own guard
-                // (class-var assignments/self-sends never produce it) — falls
-                // through to the same `'nil'` value the closed (`None`) case
-                // already used before this type existed.
-                Some(OpenScopeResult::NoValue) | None => Ok(docvec![
-                    expr_str,
-                    "{'class_var_result', 'nil', ",
-                    leaf::var(final_cv),
-                    "}",
-                ]),
-            }
+            Ok(docvec![
+                prelude_doc,
+                "{'class_var_result', ",
+                value_doc,
+                ", ",
+                leaf::var(final_cv),
+                "}",
+            ])
         } else {
+            // `expr` is not ITSELF a recognized producer at this level, but
+            // may still dispatch one that the compile below reaches
+            // opaquely and closes (e.g. a same-class self-send NOT declared
+            // locally — BT-2007 inherited dispatch — which
+            // `is_class_method_self_send`'s `class_method_selectors()`
+            // check deliberately excludes, per its own doc comment, since
+            // `try_handle_class_method_self_send`'s real reach is any
+            // `self`-receiver send regardless of selector). Closing loses
+            // the mutated `ClassVarsN` name's LEXICAL visibility, but not
+            // the mutation itself — `refresh_class_var_after_opaque_scope`
+            // recovers the live value via the ADR 0110 shadow write rather
+            // than relying on lexical scope, so this is robust to whatever
+            // depth/shape the opaque compile below reaches.
             let result_var = self.fresh_temp_var("Ret");
-            // BT-1201: Use expression_doc_with_open_scope to detect open-scope results
-            // produced by THIS expression, not by a previous field assignment.
-            let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
-            let open_scope_value_doc = match open_scope {
-                Some(OpenScopeResult::Value(open_scope_result)) => {
-                    Some(leaf::var(open_scope_result))
-                }
-                // BT-3053: no single value — substitute do:'s own `nil` contract.
-                Some(OpenScopeResult::NoValue) => Some(Document::Str("'nil'")),
-                None => None,
-            };
-            if let Some(open_scope_value_doc) = open_scope_value_doc {
-                if self.class_var_mutated() {
-                    let final_cv = self.current_class_var();
-                    Ok(docvec![
-                        expr_str,
-                        "let ",
-                        leaf::var(result_var.clone()),
-                        " = ",
-                        open_scope_value_doc,
-                        " in {'class_var_result', ",
-                        leaf::var(result_var),
-                        ", ",
-                        leaf::var(final_cv),
-                        "}",
-                    ])
-                } else {
-                    Ok(docvec![expr_str, open_scope_value_doc])
-                }
-            } else if self.class_var_mutated() {
+            let cv_version_before = self.class_var_version();
+            let expr_doc = self.expression_doc(expr)?;
+            let refresh = self.refresh_class_var_after_opaque_scope(cv_version_before);
+            if self.class_var_mutated() {
                 let final_cv = self.current_class_var();
                 Ok(docvec![
                     "let ",
                     leaf::var(result_var.clone()),
                     " = ",
-                    expr_str,
-                    " in {'class_var_result', ",
+                    expr_doc,
+                    " in ",
+                    refresh.unwrap_or(Document::Nil),
+                    "{'class_var_result', ",
                     leaf::var(result_var),
                     ", ",
                     leaf::var(final_cv),
@@ -4478,7 +4491,7 @@ impl CoreErlangGenerator {
                     "let ",
                     leaf::var(result_var.clone()),
                     " = ",
-                    expr_str,
+                    expr_doc,
                     " in ",
                     leaf::var(result_var),
                 ])
@@ -4491,31 +4504,12 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        if self.is_class_method_self_send(expr) {
-            // BT-891: Class method self-send as last expression with no class vars.
-            let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
-            match open_scope {
-                Some(OpenScopeResult::Value(result_var)) => {
-                    Ok(docvec![expr_str, leaf::var(result_var)])
-                }
-                // BT-3053: not reachable via this branch's own guard (a class
-                // method self-send never produces NoValue), handled the same
-                // way as the general case for consistency.
-                Some(OpenScopeResult::NoValue) => Ok(docvec![expr_str, "'nil'"]),
-                None => Ok(expr_str),
-            }
-        } else {
-            // BT-1201: Use expression_doc_with_open_scope to detect open-scope results.
-            let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
-            match open_scope {
-                Some(OpenScopeResult::Value(open_scope_result)) => {
-                    Ok(docvec![expr_str, leaf::var(open_scope_result)])
-                }
-                // BT-3053: no single value — substitute do:'s own `nil` contract.
-                Some(OpenScopeResult::NoValue) => Ok(docvec![expr_str, "'nil'"]),
-                None => Ok(expr_str),
-            }
-        }
+        // ADR 0118 phase 5b (BT-3422): no `class_var_result` wrapping and no
+        // later read of `current_class_var()` follows either branch below,
+        // so both the bare self-send case (BT-891) and the general case
+        // (BT-1201) collapse to the same plain threaded compile.
+        let frame = self.current_frame();
+        self.threaded_expression_doc(expr, frame)
     }
 
     /// Generates code for a non-last expression in a class method body.
@@ -4560,31 +4554,29 @@ impl CoreErlangGenerator {
             // arms above.
             self.generate_vt_exception_construct_open(expr)
         } else {
-            // BT-1942: Detect open-scope results produced by the expression
-            // itself (e.g. a ProtoObject/Object intrinsic whose receiver is a
-            // class method self-send). Emit the open chain as-is and bind the
-            // result var to the seq temp so subsequent code can sequence
-            // after it while keeping ClassVarsN in scope.
+            // `expr` may dispatch a class-method self-send (locally
+            // declared or, per BT-2007, inherited) that rebinds `ClassVarsN`
+            // opaquely, closed by the time this call returns —
+            // `refresh_class_var_after_opaque_scope` recovers the live
+            // value via the ADR 0110 shadow write (rather than relying on
+            // lexical scope) so the NEXT statement in this same body — which
+            // reads `current_class_var()` when it builds its own call —
+            // sees it regardless of nesting depth. Bind the result to the
+            // seq temp so subsequent code can sequence after it.
             let tmp_var = self.fresh_temp_var("seq");
-            let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
-            match open_scope {
-                Some(OpenScopeResult::Value(result_var)) => Ok(docvec![
-                    expr_str,
-                    "let ",
-                    leaf::var(tmp_var),
-                    " = ",
-                    leaf::var(result_var),
-                    " in "
-                ]),
-                // BT-3053: no single value — substitute do:'s own `nil` contract.
-                Some(OpenScopeResult::NoValue) => Ok(docvec![
-                    expr_str,
-                    "let ",
-                    leaf::var(tmp_var),
-                    " = 'nil' in "
-                ]),
-                None => Ok(docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "]),
-            }
+            let cv_version_before = self.class_var_version();
+            let expr_doc = self.expression_doc(expr)?;
+            let refresh = self
+                .refresh_class_var_after_opaque_scope(cv_version_before)
+                .unwrap_or(Document::Nil);
+            Ok(docvec![
+                "let ",
+                leaf::var(tmp_var),
+                " = ",
+                expr_doc,
+                " in ",
+                refresh,
+            ])
         }
     }
 
@@ -4612,45 +4604,18 @@ impl CoreErlangGenerator {
                 let core_var = self
                     .lookup_var(var_name)
                     .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                // BT-3169: captured before generating `value` — see
-                // `emit_vt_threaded_local_assignment`'s identical capture for
-                // the full rationale (this is the `Foldl*`-body-selectors
-                // NOT covered by `emit_threaded_assign_rhs`'s own dedicated
-                // path above — anySatisfy:/allSatisfy:/partition:/
-                // takeWhile:/dropWhile:/groupBy:, whose class-method
-                // self-send shape reaches only this generic fallback).
+                // BT-3169: captured before generating `value` — a
+                // class-method self-send inside it (locally declared or,
+                // per BT-2007, inherited — `is_class_method_self_send`'s
+                // `class_method_selectors()` check only recognizes the
+                // former) may rebind `ClassVarsN` opaquely, closed by the
+                // time this call returns; `refresh_class_var_after_opaque_scope`
+                // recovers the live value via the ADR 0110 shadow write
+                // rather than relying on lexical scope, so this is robust
+                // to whatever depth/shape the compile below reaches.
                 let cv_version_before = self.class_var_version();
-                // BT-1201: Use expression_doc_with_open_scope to detect open-scope results.
-                let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
+                let val_doc = self.expression_doc(value)?;
                 self.bind_var(var_name, &core_var);
-                match open_scope {
-                    Some(OpenScopeResult::Value(open_scope_result)) => {
-                        return Ok(docvec![
-                            val_doc,
-                            "let ",
-                            leaf::var(core_var),
-                            " = ",
-                            leaf::var(open_scope_result),
-                            " in "
-                        ]);
-                    }
-                    // BT-3053: no single value — substitute do:'s own `nil` contract.
-                    Some(OpenScopeResult::NoValue) => {
-                        return Ok(docvec![
-                            val_doc,
-                            "let ",
-                            leaf::var(core_var),
-                            " = 'nil' in "
-                        ]);
-                    }
-                    None => {}
-                }
-                // BT-3169: `val_doc` is about to be bound opaquely to
-                // `core_var` below — refresh the live ClassVars name from
-                // the ADR 0110 shadow write if a class-method self-send
-                // inside `val_doc` advanced it, so later code references a
-                // name that's actually visible (see
-                // `refresh_class_var_after_opaque_scope`'s doc comment).
                 let refresh = self
                     .refresh_class_var_after_opaque_scope(cv_version_before)
                     .unwrap_or(Document::Nil);
