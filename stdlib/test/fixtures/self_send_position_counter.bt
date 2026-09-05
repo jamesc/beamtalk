@@ -8,19 +8,18 @@
 // and docs/ADR/0118-expression-level-state-threading-preludes.md §Context
 // for the 47-shape probe this fixture encodes.
 //
-// The three shapes that PANIC the ThreadedIr verifier today (a self-send or
-// an inline-threaded `and:` inside a `whileTrue:` CONDITION block, and a
-// bare-receiver `and:` inside an `ifTrue:` branch inside a `do:` body) are
+// One shape still PANICS the ThreadedIr verifier (a bare-receiver `and:`
+// inside an `ifTrue:` branch, itself inside a `do:` body) and is
 // deliberately NOT here — a debug-build verifier panic aborts the whole
-// BUnit test file, so they are pinned as `#[should_panic]` Rust unit tests
+// BUnit test file, so it is pinned as a `#[should_panic]` Rust unit test
 // in crates/beamtalk-codegen/src/core_erlang/tests/gen_server.rs instead.
 //
 // Naming: `<position>SelfSend[: flag]`. Passing positions come first (the
 // ten recent fixes, BT-3396/BT-3402/BT-3403/etc., already cover their
 // mechanism — this fixture adds one canonical example of each so the whole
-// probe lives in one place); currently-broken positions (runtime crash or
-// silent drop) follow, gated in the test file behind `adr0118PhaseNPending`
-// switches per phase.
+// probe lives in one place); positions that were broken until an ADR 0118
+// phase landed (BT-3415/3416/3417/3418/3419/3420) follow — every one of
+// them now asserts correct behaviour unconditionally.
 
 Actor subclass: SelfSendPositionCounter
   state: count = 0

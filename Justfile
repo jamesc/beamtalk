@@ -1133,14 +1133,41 @@ test-bunit *ARGS: build-stdlib
 
 # Verify ThreadedIr::verify() (ADR 0111) invariants hold across the full
 # stdlib/test/*.bt + stdlib/bootstrap-test/*.btscript corpus (BT-3136
-# close-out). Compiling that corpus via `test-stdlib`/`test-bunit` already
-# runs every state-threading codegen path where `report_threaded_ir_verify_errors`
-# (control_flow/mod.rs) checks each `threaded_ir::verify()` invariant via
-# `debug_assert!` — live here because `cargo run` builds in the dev profile
-# (debug_assertions on), so any violation hard-panics the build instead of
-# only degrading to a diagnostic, as it would in a release build. This is a
-# thin alias over those existing corpus-compiling recipes — a named, explicit
-# CI gate for the verifier itself, not a new test harness.
+# close-out; BT-3424/ADR 0118 close-out corrected this comment's corpus
+# claim below). Compiling that corpus via `test-stdlib`/`test-bunit`
+# already runs every state-threading codegen path where
+# `report_threaded_ir_verify_errors` (control_flow/mod.rs) checks each
+# `threaded_ir::verify()` invariant via `debug_assert!` — live here because
+# `cargo run` builds in the dev profile (debug_assertions on), so any
+# violation hard-panics the build instead of only degrading to a
+# diagnostic, as it would in a release build. This is a thin alias over
+# those existing corpus-compiling recipes — a named, explicit CI gate for
+# the verifier itself, not a new test harness.
+#
+# `stdlib/bootstrap-test/*.btscript` (exercised by `test-stdlib`) is
+# bootstrap-primitive-only — arithmetic, booleans, equality, strings — and
+# contains no Actor code, so it never reaches the actor-state-threading
+# invariants (gen_server routing, class-var shadow-writes, self-send
+# sequencing) this verifier spends most of its checks on. Those are
+# exercised by `stdlib/test/*.bt` (via `test-bunit`): specifically
+# `actor_self_send_position_matrix_test.bt`, `value_type_mutation_matrix_test.bt`,
+# and `metamorphic_threading_test.bt`, plus every other Actor-bearing BUnit
+# suite. `test-stdlib` stays a dependency because it's cheap and still
+# covers the value-type/loop/conditional state-threading invariants that
+# don't need an Actor.
+#
+# This recipe does not assert anything beyond what `test-stdlib`/`test-bunit`
+# already assert when run directly — `debug_assert!` already fires during
+# any dev-profile compile of this corpus, which is exactly what those two
+# recipes do. Checked whether a cheap addition (e.g. a
+# `BEAMTALK_THREADED_IR_STRICT` env var making `report_threaded_ir_verify_errors`
+# hard-fail even in a release-profile compile, where `debug_assert!` is
+# compiled out) could make this recipe assert something new: no such env
+# var exists today, and adding the strict-release path would need a second,
+# separate release build of the whole corpus just for this recipe — not
+# cheap, and no CI job currently compiles this corpus in release mode for
+# it to guard. Left as a thin alias; revisit if a release-mode compile of
+# this corpus is ever added to CI.
 #
 # `just` dedupes shared dependencies within ONE invocation, so `just ci`
 # (which lists `verify-threaded-ir` alongside `test`) doesn't recompile the

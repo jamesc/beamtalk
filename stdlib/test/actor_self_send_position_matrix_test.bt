@@ -11,26 +11,30 @@
 //
 // Axes pinned here (see docs/ADR/0118-expression-level-state-threading-preludes.md
 // §Context for the source probe table):
-//   - PASSING positions (today, and expected to keep passing through every
-//     ADR 0118 phase): loop bounds/receiver/body, ensure:, on:do: handler,
-//     block `value`, count:/allSatisfy:/reject:/anySatisfy:, list-op
-//     receiver, inject:into: initial value, do:separatedBy:, map literal,
+//   - positions expected to pass from the start: loop bounds/receiver/body,
+//     ensure:, on:do: handler, block `value`,
+//     count:/allSatisfy:/reject:/anySatisfy:, list-op receiver,
+//     inject:into: initial value, do:separatedBy:, map literal,
 //     interpolation, keyword arg, self-send arg, early return in a branch,
 //     plain assignment RHS, and:/or: receiver and block.
-//   - BROKEN positions (today): gated behind one `adr0118PhaseNPending`
-//     switch per ADR 0118 phase (see the phase table in the ADR's
-//     Implementation Tracking section). While a switch is `true` the test
-//     asserts the CURRENT (wrong) behaviour — a dropped mutation or a
-//     runtime crash — so the gate cannot silently mask a change; flipping a
-//     switch to `false` (once that phase lands) must be paired with
-//     updating the assertion to the correct value in the same commit.
+//   - positions that were broken until an ADR 0118 phase landed: now that
+//     every phase (1a-4, BT-3415/3416/3417/3418/3419/3420) has landed,
+//     every row below asserts the ground-truth behaviour unconditionally.
+//     This file used to gate each such row behind an `adr0118PhaseNPending`
+//     switch (`true` while the fix was still in flight, asserting the
+//     current wrong behaviour so the gate couldn't silently mask a change);
+//     those switches are gone now that every phase has landed — see git
+//     history for the current-wrong-behaviour assertions they used to
+//     guard.
 //
-// Three shapes from the same probe PANIC the ThreadedIr verifier today (a
-// self-send/`and:` in a `whileTrue:` CONDITION block, and a bare-receiver
-// `and:` inside an `ifTrue:` branch inside a `do:` body) and are pinned
-// instead as `#[should_panic]` Rust unit tests in
-// crates/beamtalk-codegen/src/core_erlang/tests/gen_server.rs — a
-// debug-build verifier panic would abort this whole BUnit file.
+// One shape from the same probe still PANICS the ThreadedIr verifier (a
+// bare-receiver `and:` inside an `ifTrue:` branch, itself inside a `do:`
+// body — `bt3414_bare_and_inside_if_true_branch_inside_do_body_panics_verifier`
+// in crates/beamtalk-codegen/src/core_erlang/tests/gen_server.rs) and stays
+// pinned there as a `#[should_panic]` Rust unit test rather than here — a
+// debug-build verifier panic would abort this whole BUnit file. Filed as a
+// genuine gap outside ADR 0118's phase 1-4 consumer list, left open for a
+// later phase.
 
 TestCase subclass: ActorSelfSendPositionMatrixTest
   field: c = nil
@@ -39,62 +43,25 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
 
   tearDown => self.c isNil ifFalse: [self.c stop]
 
-  // ADR 0118 phase 1a (BT-3415): ThreadedValue, self-dispatch producer,
-  // Actor body consumer, sequencing rule for sends/binary operands. Landed:
-  // a `to:do:` bound / `timesRepeat:` receiver that is (or contains) a
-  // self-send now threads ahead of the loop construct through the Actor
-  // method body's own IR, so the affected cells run their ground-truth
-  // asserts. Kept as a switch for documentation/bisection.
-  adr0118Phase1aPending => false
-
-  // ADR 0118 phase 1b: sequencing rule for literals, interpolation,
-  // return, assignment, cascade, match: scrutinee.
-  adr0118Phase1bPending => false
-
-  // ADR 0118 phase 2a: conditional arms, exception arms, stateful-block
-  // bodies, conditional receiver consume ThreadedValue (BT-3417). No matrix
-  // row is gated on this phase — every position BT-3417 fixes (a self-send
-  // nested in a conditional branch or an `on:do:`/`ensure:` body, including
-  // the `Return`-value shapes `generate_conditional_branch_inline`'s C12
-  // catch-all now reaches) already ran through the PASSING-POSITIONS
-  // section above once landed, and
-  // `testSelfSendAsBinaryOpArgumentInBoundsThreadsMutation`
-  // (`actor_conditional_mutations_test.bt`) pins the BT-3399-order-unsafe
-  // shape phase 2a's universal sequencing rule newly fixes. The two rows
-  // that LOOKED phase-2a-shaped at a glance — a self-send nested in
-  // `ifNil:ifNotNil:`'s block or a `match:` arm's body — turned out, on
-  // inspection while implementing BT-3417, to route through codegen this
-  // phase does not touch (`ifNil:ifNotNil:` always compiles its blocks as
-  // genuine Tier 1 closures; `generate_match_arm_body`'s mutation-threading
-  // fallback compiles its arm via a plain `expression_doc` call, never
-  // `generate_conditional_branch_inline`/`thread_ahead`) — both are gated
-  // on `adr0118Phase4Pending` below instead (see
-  // `testIfNilIfNotNilBlockArgSelfSendNonNil`/`testMatchArmSelfSendMatchingArm`'s
-  // own comments).
-
-  // ADR 0118 phase 2b (BT-3418): loop-body consumers
-  // (`generate_threaded_loop_body_inner`'s field-assignment RHS path,
-  // `emit_non_assign_expr`, `generate_local_var_assignment_in_loop`)
-  // consume `ThreadedValue`; the self-send hoist planner, `HoistSink`, and
-  // the BT-3399 warning are deleted. Landed: `testDoLoopLocalAssignRhsSelfSend`
-  // (a local-assignment RHS binary-op operand inside a `do:` body) is the
-  // row this phase newly fixes — `testDoLoopFieldAssignRhsSelfSend` (a
-  // field-assignment RHS) was already correct before this phase (see its
-  // own comment). One row that LOOKED loop-body-shaped at a glance —
-  // `sort:`'s comparator block — turned out, on inspection while
-  // implementing BT-3418, to be a stored Tier 1 closure ARGUMENT rather
-  // than a statement `generate_threaded_loop_body_inner` itself walks, so
-  // none of this phase's three consumers ever reach it; re-scoped onto
-  // `adr0118Phase4Pending` instead (see `testSortBlockSelfSend`'s own
-  // comment) pending a dedicated follow-up.
-  adr0118Phase2bPending => false
-
-  // ADR 0118 phase 3: ConditionalLoop condition as IR.
-  adr0118Phase3Pending => false
-
-  // ADR 0118 phase 4 (BT-3420): inline-threaded control flow as a producer;
-  // ifNil:ifNotNil:, match: arms, ifNone:, generic Tier 2 blocks. Landed.
-  adr0118Phase4Pending => false
+  // ADR 0118 phases 1a-4 (BT-3415, BT-3416, BT-3417, BT-3418, BT-3419,
+  // BT-3420) have all landed — the per-phase `adr0118PhaseNPending`
+  // switches this file used while phases were still in flight are gone,
+  // and every row below asserts the ground-truth behaviour
+  // unconditionally. Two rows that LOOKED like a fit for phase 2a
+  // (conditional arms, exception arms, stateful-block bodies) turned out,
+  // on inspection while implementing BT-3417, to route through codegen
+  // that phase didn't touch and were fixed by phase 4 instead:
+  // `ifNil:ifNotNil:` always compiles its block argument as a genuine
+  // Tier 1 closure (phase 2a's stateful-block-body migration never reaches
+  // it), and a `match:` arm's mutation-threading fallback compiles its body
+  // via a plain `expression_doc` call, never
+  // `generate_conditional_branch_inline`/`thread_ahead` (see
+  // `testIfNilIfNotNilBlockArgSelfSendNonNil`/`testMatchArmSelfSendMatchingArm`).
+  // A third row, `sort:`'s comparator block, LOOKED like a fit for phase 2b
+  // (loop-body consumers) but turned out, on inspection while implementing
+  // BT-3418, to be a stored Tier 1 closure ARGUMENT rather than a statement
+  // any loop-body consumer walks, and was likewise fixed by phase 4 instead
+  // (see `testSortBlockSelfSend`).
 
   // ════════════════════════════════════════════════════════════════════
   //  PASSING POSITIONS
@@ -217,17 +184,8 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
   // tuple into `+` at runtime — ADR 0118 phase 4 territory, same class
   // as `conditionalArgToKeywordSendSelfSend`.
   testEarlyReturnConditionalReceiverSelfSend =>
-    self adr0118Phase4Pending
-      ifTrue: [
-        self should: [
-          self.c earlyReturnConditionalReceiverSelfSend
-        ] raise: #does_not_understand
-        self assert: self.c getCount equals: 0
-      ]
-      ifFalse: [
-        self assert: self.c earlyReturnConditionalReceiverSelfSend equals: 2
-        self assert: self.c getCount equals: 1
-      ]
+    self assert: self.c earlyReturnConditionalReceiverSelfSend equals: 2
+    self assert: self.c getCount equals: 1
 
   testRaisingOperandBeforeSelfSendInRange =>
     self assert: (self.c raisingOperandBeforeSelfSend: 1) equals: 11
@@ -267,9 +225,7 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
   // the actor's own `count` field never landed.
   testToDoBoundsSelfSend =>
     self assert: self.c toDoBoundsSelfSend equals: 6
-    self adr0118Phase1aPending ifTrue: [
-      self assert: self.c getCount equals: 0
-    ] ifFalse: [self assert: self.c getCount equals: 1]
+    self assert: self.c getCount equals: 1
 
   // `timesRepeat:`'s receiver is a self-send: the block runs the correct
   // number of times (`n` = 1, matching `bumpCount`'s return value); before
@@ -277,190 +233,107 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
   // (ADR 0118 phase 1a).
   testTimesRepeatReceiverSelfSend =>
     self assert: self.c timesRepeatReceiverSelfSend equals: 1
-    self adr0118Phase1aPending ifTrue: [
-      self assert: self.c getCount equals: 0
-    ] ifFalse: [self assert: self.c getCount equals: 1]
+    self assert: self.c getCount equals: 1
 
-  // ADR 0118 phase 3 (ConditionalLoop condition as IR): a self-send used
-  // as a binary-op operand inside a whileTrue: CONDITION block crashes
-  // today (arity mismatch); once the condition's prelude runs in the
-  // loop's own frame, `i` should settle at 3 and `bumpCount` run 3 times.
+  // ADR 0118 phase 3 (ConditionalLoop condition as IR, BT-3419): a
+  // self-send used as a binary-op operand inside a whileTrue: CONDITION
+  // block used to crash (arity mismatch) before this phase; the
+  // condition's prelude now runs in the loop's own frame, so `i` settles
+  // at 3 and `bumpCount` runs 3 times.
   testWhileTrueConditionBinaryOpSelfSend =>
-    self adr0118Phase3Pending
-      ifTrue: [
-        self should: [
-          self.c whileTrueConditionBinaryOpSelfSend
-        ] raise: #arity_mismatch
-      ]
-      ifFalse: [
-        self assert: self.c whileTrueConditionBinaryOpSelfSend equals: 3
-        self assert: self.c getCount equals: 3
-      ]
+    self assert: self.c whileTrueConditionBinaryOpSelfSend equals: 3
+    self assert: self.c getCount equals: 3
 
   testWhileTrueConditionAndOperandSelfSend =>
-    self adr0118Phase3Pending
-      ifTrue: [
-        self should: [
-          self.c whileTrueConditionAndOperandSelfSend
-        ] raise: #arity_mismatch
-      ]
-      ifFalse: [
-        self assert: self.c whileTrueConditionAndOperandSelfSend equals: 3
-        self assert: self.c getCount equals: 2
-      ]
+    self assert: self.c whileTrueConditionAndOperandSelfSend equals: 3
+    self assert: self.c getCount equals: 2
 
-  // ADR 0118 phase 4 (inline-threaded control flow as a producer): a
-  // conditional used as a keyword-send argument leaks the RAW
-  // `{Result, State}` tuple into the argument today — `record:` appends
+  // ADR 0118 phase 4 (inline-threaded control flow as a producer,
+  // BT-3420): a conditional used as a keyword-send argument used to leak
+  // the RAW `{Result, State}` tuple into the argument — `record:` appended
   // the whole tuple to `log`, and the ACTUAL actor state (`count`) never
-  // advances because the leaked tuple, not a real dispatch reply, is what
-  // the caller sees. Pinned via `printString` (a Beamtalk literal cannot
-  // express a raw Erlang tuple) rather than by reconstructing the leak.
+  // advanced because the leaked tuple, not a real dispatch reply, is what
+  // the caller saw.
   testConditionalArgToKeywordSendSelfSendTrue =>
-    self adr0118Phase4Pending
-      ifTrue: [
-        leaked := self.c conditionalArgToKeywordSendSelfSend: true
-        self assert: (leaked printString includesSubstring: "SelfSendPositionCounter") equals: true
-        self assert: self.c getCount equals: 0
-      ]
-      ifFalse: [
-        self assert: (self.c conditionalArgToKeywordSendSelfSend: true) equals: 1
-        self assert: self.c getCount equals: 1
-        self assert: self.c getLog equals: #(1)
-      ]
+    self assert: (self.c conditionalArgToKeywordSendSelfSend: true) equals: 1
+    self assert: self.c getCount equals: 1
+    self assert: self.c getLog equals: #(1)
 
   testConditionalArgToKeywordSendSelfSendFalse =>
-    self adr0118Phase4Pending
-      ifTrue: [
-        leaked := self.c conditionalArgToKeywordSendSelfSend: false
-        self assert: (leaked printString includesSubstring: "SelfSendPositionCounter") equals: true
-        self assert: self.c getCount equals: 0
-      ]
-      ifFalse: [
-        self assert: (self.c conditionalArgToKeywordSendSelfSend: false) equals: 0
-        self assert: self.c getCount equals: 0
-        self assert: self.c getLog equals: #(0)
-      ]
+    self assert: (self.c conditionalArgToKeywordSendSelfSend: false) equals: 0
+    self assert: self.c getCount equals: 0
+    self assert: self.c getLog equals: #(0)
 
   testConditionalArgToAtColonSelfSendTrue =>
-    self adr0118Phase4Pending
-      ifTrue: [
-        self should: [
-          self.c conditionalArgToAtColonSelfSend: true
-        ] raise: #type_error
-      ]
-      ifFalse: [
-        self assert: (self.c conditionalArgToAtColonSelfSend: true) equals: 10
-        self assert: self.c getCount equals: 1
-      ]
+    self assert: (self.c conditionalArgToAtColonSelfSend: true) equals: 10
+    self assert: self.c getCount equals: 1
 
   testConditionalArgToAtColonSelfSendFalse =>
-    self adr0118Phase4Pending
-      ifTrue: [
-        self should: [
-          self.c conditionalArgToAtColonSelfSend: false
-        ] raise: #type_error
-      ]
-      ifFalse: [
-        self assert: (self.c conditionalArgToAtColonSelfSend: false) equals: 20
-        self assert: self.c getCount equals: 0
-      ]
+    self assert: (self.c conditionalArgToAtColonSelfSend: false) equals: 20
+    self assert: self.c getCount equals: 0
 
   testDetectIfNoneSelfSend =>
-    self adr0118Phase4Pending
-      ifTrue: [
-        self should: [self.c detectIfNoneSelfSend] raise: #argument_error
-      ]
-      ifFalse: [
-        self assert: self.c detectIfNoneSelfSend equals: 1
-        self assert: self.c getCount equals: 1
-      ]
+    self assert: self.c detectIfNoneSelfSend equals: 1
+    self assert: self.c getCount equals: 1
 
-  // ADR 0118 phase 1b (sequencing rule for cascade): a cascade on `self`
-  // silently drops every message's mutation today — no crash, no warning.
+  // ADR 0118 phase 1b (sequencing rule for cascade, BT-3416): a cascade on
+  // `self` used to silently drop every message's mutation — no crash, no
+  // warning.
   testCascadeOnSelfSelfSend =>
-    self adr0118Phase1bPending
-      ifTrue: [
-        self assert: self.c cascadeOnSelfSelfSend equals: #()
-        self assert: self.c getCount equals: 0
-      ]
-      ifFalse: [
-        self assert: self.c cascadeOnSelfSelfSend equals: #(1, 2)
-        self assert: self.c getCount equals: 0
-      ]
+    self assert: self.c cascadeOnSelfSelfSend equals: #(1, 2)
+    self assert: self.c getCount equals: 0
 
   testCascadeArgumentSelfSendSelfSend =>
-    self adr0118Phase1bPending
-      ifTrue: [
-        self assert: self.c cascadeArgumentSelfSendSelfSend equals: #()
-        self assert: self.c getCount equals: 0
-      ]
-      ifFalse: [
-        self assert: self.c cascadeArgumentSelfSendSelfSend equals: #(1, 1)
-        self assert: self.c getCount equals: 1
-      ]
+    self assert: self.c cascadeArgumentSelfSendSelfSend equals: #(1, 1)
+    self assert: self.c getCount equals: 1
 
-  // ADR 0118 phase 4 (BT-3417 correction: `ifNil:ifNotNil:` always compiles
-  // its blocks as genuine Tier 1 closures — `intrinsics.rs`'s
-  // `WellKnownSelector::IfNilIfNotNil` arm never reaches
+  // ADR 0118 phase 4 (BT-3417 correction, fixed by BT-3420): `ifNil:ifNotNil:`
+  // always compiles its blocks as genuine Tier 1 closures —
+  // `intrinsics.rs`'s `WellKnownSelector::IfNilIfNotNil` arm never reaches
   // `generate_block_stateful`, so phase 2a's stateful-block-body migration
-  // does not touch this shape; it needs `ifNil:ifNotNil:` itself to become
-  // an inline-threaded producer first). The block's own computed VALUE is
-  // correct today — only the nested self-send's actor-state mutation is
-  // silently lost.
+  // didn't touch this shape; it needed `ifNil:ifNotNil:` itself to become
+  // an inline-threaded producer (phase 4) instead.
   testIfNilIfNotNilBlockArgSelfSendNonNil =>
     self assert: (self.c ifNilIfNotNilBlockArgSelfSend: 5) equals: 6
-    self adr0118Phase4Pending ifTrue: [
-      self assert: self.c getCount equals: 0
-    ] ifFalse: [self assert: self.c getCount equals: 1]
+    self assert: self.c getCount equals: 1
 
   testIfNilIfNotNilBlockArgSelfSendNil =>
     self assert: (self.c ifNilIfNotNilBlockArgSelfSend: nil) equals: 0
     self assert: self.c getCount equals: 0
 
-  // ADR 0118 phase 4 (BT-3417 correction: a `match:` arm's mutation-
-  // threading fallback, `generate_match_arm_body`, compiles its body via a
-  // plain `expression_doc` call — never `generate_conditional_branch_inline`/
-  // `thread_ahead` — so phase 2a's conditional-arm migration does not reach
-  // this shape either). Same symptom — the arm's own value is correct, the
-  // nested mutation is dropped.
+  // ADR 0118 phase 4 (BT-3417 correction, fixed by BT-3420): a `match:`
+  // arm's mutation-threading fallback, `generate_match_arm_body`, compiles
+  // its body via a plain `expression_doc` call — never
+  // `generate_conditional_branch_inline`/`thread_ahead` — so phase 2a's
+  // conditional-arm migration didn't reach this shape either.
   testMatchArmSelfSendMatchingArm =>
     self assert: (self.c matchArmSelfSend: 1) equals: 2
-    self adr0118Phase4Pending ifTrue: [
-      self assert: self.c getCount equals: 0
-    ] ifFalse: [self assert: self.c getCount equals: 1]
+    self assert: self.c getCount equals: 1
 
   testMatchArmSelfSendWildcardArm =>
     self assert: (self.c matchArmSelfSend: 2) equals: 0
     self assert: self.c getCount equals: 0
 
-  // ADR 0118 phase 1b (match: scrutinee sequencing rule).
+  // ADR 0118 phase 1b (match: scrutinee sequencing rule, BT-3416).
   testMatchScrutineeSelfSend =>
     self assert: self.c matchScrutineeSelfSend equals: #one
-    self adr0118Phase1bPending ifTrue: [
-      self assert: self.c getCount equals: 0
-    ] ifFalse: [self assert: self.c getCount equals: 1]
+    self assert: self.c getCount equals: 1
 
-  // Re-scoped off `adr0118Phase2bPending` while implementing BT-3418: this
   // LOOKED loop-body-shaped at a glance (like the two rows below, which
   // phase 2b genuinely does fix), but `sort:`'s comparator is a stored
   // Tier 1 closure ARGUMENT — never a statement inside
-  // `generate_threaded_loop_body_inner`'s own per-statement loop — so
-  // none of phase 2b's three consumers (`emit_non_assign_expr`,
-  // `generate_local_var_assignment_in_loop`, the field-assignment RHS
-  // path) ever reach it; confirmed empirically (flipping the gate off
-  // while implementing BT-3418 failed this test: `getCount` stayed `0`).
+  // `generate_threaded_loop_body_inner`'s own per-statement loop — so none
+  // of phase 2b's three consumers (`emit_non_assign_expr`,
+  // `generate_local_var_assignment_in_loop`, the field-assignment RHS path)
+  // ever reached it (confirmed empirically while implementing BT-3418).
   // `sort:`'s own comparator never affects ordering here, so the sorted
-  // VALUE is already correct either way; only the comparator's self-send
-  // mutation is dropped. Filed as a genuine gap outside ADR 0118's
-  // phase 1-4 consumer list (§Decision 4) rather than folded into any
-  // existing phase switch — gated on `adr0118Phase4Pending` for now as
-  // the nearest not-yet-landed phase, pending its own follow-up issue.
+  // VALUE is already correct either way; it was the comparator's
+  // self-send mutation that was dropped, until phase 4 (BT-3420) fixed it
+  // as a genuine gap outside ADR 0118's phase 1-4 consumer list
+  // (§Decision 4).
   testSortBlockSelfSend =>
     self assert: self.c sortBlockSelfSend equals: #(10, 30)
-    self adr0118Phase4Pending ifTrue: [
-      self assert: self.c getCount equals: 0
-    ] ifFalse: [self assert: self.c getCount equals: 1]
+    self assert: self.c getCount equals: 1
 
   // Loop-body field-assignment RHS with a nested self-send: unlike the
   // ADR 0118 §Context probe's informal note for this shape, empirically
@@ -493,14 +366,10 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
   // INSIDE another expression, which this row is not.
   testAssignRhsBinaryOpSelfSend =>
     self assert: self.c assignRhsBinaryOpSelfSend equals: 4
-    self adr0118Phase1aPending ifTrue: [
-      self assert: self.c getCount equals: 0
-    ] ifFalse: [self assert: self.c getCount equals: 1]
+    self assert: self.c getCount equals: 1
 
-  // ADR 0118 phase 1b (interpolation-segment binary-op sequencing;
-  // deletes the BT-3399 warning for this shape).
+  // ADR 0118 phase 1b (interpolation-segment binary-op sequencing,
+  // BT-3416; deleted the BT-3399 warning for this shape).
   testInterpolationBinaryOpSelfSend =>
     self assert: self.c interpolationBinaryOpSelfSend equals: "3-1"
-    self adr0118Phase1bPending ifTrue: [
-      self assert: self.c getCount equals: 0
-    ] ifFalse: [self assert: self.c getCount equals: 1]
+    self assert: self.c getCount equals: 1

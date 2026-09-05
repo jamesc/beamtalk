@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Actor fixture for tests/repl-protocol/cases/actor_self_send_positions.btscript
+// (ADR 0118 / BT-3424) — a small, self-contained sample of the self-send
+// syntactic positions stdlib/test/actor_self_send_position_matrix_test.bt
+// covers exhaustively via BUnit, driven here end-to-end through the REPL
+// instead. See that matrix test's own fixture,
+// stdlib/test/fixtures/self_send_position_counter.bt, for the full probe
+// this is a small REPL-specific sample of.
+
+Actor subclass: SelfSendPositionsReplActor
+  state: count = 0
+  state: log = #()
+
+  internal bumpCount =>
+    self.count := self.count + 1
+    self.count
+
+  internal record: n =>
+    self.log := self.log ++ #(n)
+    n
+
+  getCount => self.count
+
+  getLog => self.log
+
+  // Cascade on self: every cascaded send shares `self` as its receiver, so
+  // each one's own actor-state mutation must thread through in order.
+  cascadeOnSelf =>
+    self record: 1; record: 2
+    self.log
+
+  // Conditional as a self-send argument: the conditional's own VALUE
+  // (whichever branch runs) becomes the argument to `record:`.
+  conditionalArgSelfSend: flag =>
+    self record: (flag ifTrue: [self bumpCount] ifFalse: [0])
+
+  // Self-send as a binary-op operand inside a whileTrue: CONDITION block.
+  whileTrueConditionSelfSend =>
+    i := 0
+    [(self bumpCount) < 3] whileTrue: [i := i + 1]
+    i
+
+  // Order-sensitive binary operand: the self-send is the RIGHT operand, so
+  // the left operand's own read must still happen (and be sequenced)
+  // ahead of the self-send's mutation.
+  binaryOperandSelfSend =>
+    self.log size + (self bumpCount)

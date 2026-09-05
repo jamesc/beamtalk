@@ -1,28 +1,32 @@
 # ADR 0118: Expression-Level State Threading via ThreadedIr Preludes
 
 ## Status
-Accepted (2026-09-03)
+Implemented (2026-09-05)
 
 ## Implementation Tracking
 
 **Epic:** [BT-3413](https://linear.app/beamtalk/issue/BT-3413)
-**Status:** Planned
+**Status:** Done
 
-| Phase | Issue | Description | Size |
-|---|---|---|---|
-| 0 | [BT-3414](https://linear.app/beamtalk/issue/BT-3414) | Self-send position regression matrix + threading-predicate conformance test | M |
-| 1a | [BT-3415](https://linear.app/beamtalk/issue/BT-3415) | `ThreadedValue`, `close()`, `StateEffectEscapesExpression`; self-dispatch producer; Actor body consumer; sequencing rule for sends and binary operands | M |
-| 1b | [BT-3416](https://linear.app/beamtalk/issue/BT-3416) | Sequencing rule for literals, interpolation, return, assignment, cascade, `match:` scrutinee | M |
-| 2a | [BT-3417](https://linear.app/beamtalk/issue/BT-3417) | Conditional arms, exception arms, stateful-block bodies, conditional receiver consume `ThreadedValue` | M |
-| 2b | [BT-3418](https://linear.app/beamtalk/issue/BT-3418) | Loop-body consumers; delete planner, `HoistSink`, registries, BT-3399 warning | M |
-| 3 | [BT-3419](https://linear.app/beamtalk/issue/BT-3419) | `ConditionalLoop` condition as IR | M |
-| 4 | [BT-3420](https://linear.app/beamtalk/issue/BT-3420) | Inline-threaded control flow as producer; `ifNil:ifNotNil:`, `match:` arms, `ifNone:`, generic Tier 2 blocks | M |
-| 5a | [BT-3421](https://linear.app/beamtalk/issue/BT-3421) | ClassVars producers via `ThreadedValue`, open-scope shimmed | M |
-| 5b | [BT-3422](https://linear.app/beamtalk/issue/BT-3422) | Delete the open-scope protocol and helpers | M |
-| 6 | [BT-3423](https://linear.app/beamtalk/issue/BT-3423) | One `state_effects` fact, one selector table, gates collapsed | M |
-| 7 | [BT-3424](https://linear.app/beamtalk/issue/BT-3424) | Close-out: gates removed, `verify-threaded-ir`, docs, ADR 0111 addendum, measurement, REPL e2e | S |
+| Phase | Issue | Description | Size | PR |
+|---|---|---|---|---|
+| 0 | [BT-3414](https://linear.app/beamtalk/issue/BT-3414) | Self-send position regression matrix + threading-predicate conformance test | M | [#3712](https://github.com/jamesc/beamtalk/pull/3712) |
+| 1a | [BT-3415](https://linear.app/beamtalk/issue/BT-3415) | `ThreadedValue`, `close()`, `StateEffectEscapesExpression`; self-dispatch producer; Actor body consumer; sequencing rule for sends and binary operands | M | [#3717](https://github.com/jamesc/beamtalk/pull/3717) |
+| 1b | [BT-3416](https://linear.app/beamtalk/issue/BT-3416) | Sequencing rule for literals, interpolation, return, assignment, cascade, `match:` scrutinee | M | [#3718](https://github.com/jamesc/beamtalk/pull/3718) |
+| 2a | [BT-3417](https://linear.app/beamtalk/issue/BT-3417) | Conditional arms, exception arms, stateful-block bodies, conditional receiver consume `ThreadedValue` | M | [#3719](https://github.com/jamesc/beamtalk/pull/3719) |
+| 2b | [BT-3418](https://linear.app/beamtalk/issue/BT-3418) | Loop-body consumers; delete planner, `HoistSink`, registries, BT-3399 warning | M | [#3720](https://github.com/jamesc/beamtalk/pull/3720) |
+| 3 | [BT-3419](https://linear.app/beamtalk/issue/BT-3419) | `ConditionalLoop` condition as IR | M | [#3723](https://github.com/jamesc/beamtalk/pull/3723) |
+| 4 | [BT-3420](https://linear.app/beamtalk/issue/BT-3420) | Inline-threaded control flow as producer; `ifNil:ifNotNil:`, `match:` arms, `ifNone:`, generic Tier 2 blocks | M | [#3722](https://github.com/jamesc/beamtalk/pull/3722) |
+| 5a | [BT-3421](https://linear.app/beamtalk/issue/BT-3421) | ClassVars producers via `ThreadedValue`, open-scope shimmed | M | [#3730](https://github.com/jamesc/beamtalk/pull/3730) |
+| 5b | [BT-3422](https://linear.app/beamtalk/issue/BT-3422) | Delete the open-scope protocol and helpers | M | [#3733](https://github.com/jamesc/beamtalk/pull/3733) |
+| 6 | [BT-3423](https://linear.app/beamtalk/issue/BT-3423) | One `state_effects` fact, one selector table, gates collapsed | M | [#3734](https://github.com/jamesc/beamtalk/pull/3734) |
+| 7 | [BT-3424](https://linear.app/beamtalk/issue/BT-3424) | Close-out: gates removed, `verify-threaded-ir`, docs, ADR 0111 addendum, measurement, REPL e2e | S | this PR |
 
 Dependency order: 3414 → 3415 → 3416 → 3417 → 3418 → {3419, 3420, 3421} → 3422 → 3423 → 3424.
+
+**Follow-up filed separately, not part of this epic's close-out:** [BT-3430](https://linear.app/beamtalk/issue/BT-3430) — wiring `ThreadedValue::close`'s `StateEffectEscapesExpression` into `check_no_unsafe_class_method_self_sends`'s user-facing diagnostic (phase 5b's own acceptance criteria named this and it was deliberately not completed in BT-3422).
+
+**Final measurement** — see this ADR's own addendum below for the whole-epic ≤3% gate result against the pre-epic baseline commit.
 
 ## Context
 
