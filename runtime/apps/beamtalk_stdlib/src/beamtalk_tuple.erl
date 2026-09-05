@@ -10,7 +10,7 @@ Tuple runtime helper functions.
 
 This module provides runtime support for Tuple methods that require
 complex pattern matching or error handling logic. The Tuple class
-is now compiled from lib/Tuple.bt (BT-417), but delegates complex
+is now compiled from lib/tuple.bt (BT-417), but delegates complex
 methods to this runtime operations module.
 
 ## Supported Functions

@@ -2931,7 +2931,7 @@ actor_carries_process_dict_marker_test() ->
 %%% ============================================================================
 %%% BT-1988 / ADR 0079 Phase 2: stdlib FFI shims
 %%%
-%%% These exercise the Erlang side of the Actor.bt named-registration API —
+%%% These exercise the Erlang side of the actor.bt named-registration API —
 %%% `doSpawnAs/2`, `doSpawnWith/3`, `registerAs/2`, `unregister/1`,
 %%% `registeredName/1`, `isRegistered/1`, `named/2`, `allRegistered/1`. The
 %%% Beamtalk-side round-trip is covered by `stdlib/test/actor_named_test.bt`;
@@ -3074,7 +3074,7 @@ dummy_class_self() ->
     }.
 
 %%% ============================================================================
-%%% BT-3072: doSpawn/1, doSpawnWith/2 — Actor.bt's lifted `spawn`/`spawnWith:`
+%%% BT-3072: doSpawn/1, doSpawnWith/2 — actor.bt's lifted `spawn`/`spawnWith:`
 %%% bodies (`(Erlang beamtalk_actor) doSpawn: self` / `doSpawnWith: self
 %%% args: initArgs`). `class_send/3`'s explicit `spawn`/`spawnWith:` clauses
 %%% still route every normal dispatch path to the compiled per-class

@@ -1761,8 +1761,8 @@ defmodule BtAttach.Workspace do
   the saved `(class, selector)` should appear here.
 
   Reads `beamtalk_workspace_changelog:change_entries/0` — the same
-  `$beamtalk_class`-tagged value maps that back the `ChangeLog.bt` /
-  `ChangeEntry.bt` value objects — in a **single RPC**. Each entry is already a
+  `$beamtalk_class`-tagged value maps that back the `change_log.bt` /
+  `change_entry.bt` value objects — in a **single RPC**. Each entry is already a
   plain atom-keyed map (not an opaque `#entry{}` record), so nothing fragile
   crosses the node boundary and there is no per-entry round-trip. We keep only the
   entries flagged `active` (current epoch, not orphaned, not yet flushed — the

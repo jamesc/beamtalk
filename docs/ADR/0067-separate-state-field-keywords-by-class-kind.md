@@ -172,7 +172,7 @@ Each class kind has its own construction mechanism. `new`/`new:` move from Objec
 | **Actor** | `spawn` / `spawnWith:` | Creates gen_server process |
 | **Object** | *(not instantiable)* | Class-method namespace, no instances needed |
 
-Currently Actor inherits `new`/`new:` from Object and overrides them to throw `InstantiationError` at runtime — a code smell where methods are inherited just to be broken. With class kinds enforced at compile time, `new`/`new:` on Actor or Object becomes a compile error, and the runtime overrides in Actor.bt are removed.
+Currently Actor inherits `new`/`new:` from Object and overrides them to throw `InstantiationError` at runtime — a code smell where methods are inherited just to be broken. With class kinds enforced at compile time, `new`/`new:` on Actor or Object becomes a compile error, and the runtime overrides in actor.bt are removed.
 
 **Exception impact:** All ~30 usages of `SomeError new signal: "msg"` become `SomeError signal: "msg"` via a new class-side `signal:` primitive. This is acceptable since `signal`/`signal:` are already intrinsics. See [BT-1524](https://linear.app/beamtalk/issue/BT-1524) for implementation.
 
@@ -461,7 +461,7 @@ Rejected because mixed mutability within a single class is confusing and doesn't
 ### Phase 3: Migrate existing code
 - Update all 21 `Object subclass:` files with `state:` to use `Value subclass:` with `field:`
 - Reclassify `Collection` from `abstract typed Object subclass:` to `abstract typed Value subclass:` (enables subclasses to use `field:`)
-- Update existing `Value subclass:` files to use `field:` instead of `state:` (including `Value.bt`'s own doc comment example)
+- Update existing `Value subclass:` files to use `field:` instead of `state:` (including `value.bt`'s own doc comment example)
 - Migrate `TestCase` from `Object subclass:` to `Value subclass:` with `field:` — the Erlang test runner (`beamtalk_test_case.erl`) already threads state between setUp → test → tearDown; it needs minimal changes to use the return value from setUp as the test fixture
 - Update examples, test fixtures, and documentation
 - **Affected:** stdlib, tests, examples, docs
@@ -539,7 +539,7 @@ TestCase subclass: CounterTest
 | examples/gof-patterns/ | 6 | CelsiusThermometer, HtmlElement, HtmlBuilder, CommandHistory, TextBuffer, Sorter |
 
 **Collection reclassification** (1 file):
-`stdlib/src/Collection.bt`: `abstract typed Object subclass:` → `abstract typed Value subclass:` (enables subclasses Set, Bag, Interval to use `field:`)
+`stdlib/src/collection.bt`: `abstract typed Object subclass:` → `abstract typed Value subclass:` (enables subclasses Set, Bag, Interval to use `field:`)
 
 **Stdlib Value subclasses** needing `state:` → `field:` rename (8 files):
 Result, HTTPRequest, HTTPResponse, HTTPRoute, HTTPRouter, SupervisionSpec (stdlib/src), ValuePoint, InspectPair (stdlib/test/fixtures)
@@ -548,10 +548,10 @@ Result, HTTPRequest, HTTPResponse, HTTPRoute, HTTPRouter, SupervisionSpec (stdli
 Set, Bag, Interval (currently `Collection subclass:`, will inherit Value kind after BT-1532)
 
 **Doc comment update:**
-`stdlib/src/Value.bt`: doc comment example uses `state: x = 0` — update to `field: x = 0`
+`stdlib/src/value.bt`: doc comment example uses `state: x = 0` — update to `field: x = 0`
 
 **Special case — TestCase:**
-`stdlib/src/TestCase.bt`: `Object subclass:` → `Value subclass:` with `field:` (subclasses migrate `state:` → `field:`, setUp syntax changes from `self.x := value` to `self withX: value`)
+`stdlib/src/test_case.bt`: `Object subclass:` → `Value subclass:` with `field:` (subclasses migrate `state:` → `field:`, setUp syntax changes from `self.x := value` to `self withX: value`)
 
 **External projects** requiring migration (identified during audit):
 - **Symphony:** 5 files — WorkspaceManager, LinearClient, Config, CandidateFilter, PromptRenderer (`Object subclass:` with `state:` → `Value subclass:` with `field:`)

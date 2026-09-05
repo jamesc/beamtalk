@@ -281,7 +281,7 @@ Extensions are node-local — in a distributed BEAM cluster, each node maintains
 One extension file per target class (e.g., `String.extension.bt`). Rejected because it doesn't scale — a popular class like String would accumulate dozens of unrelated extensions in a single file, making the file hard to navigate and causing merge conflicts when multiple developers add extensions to the same class.
 
 ### `ClassName_extensions.bt` (Kotlin/C#-style)
-Same single-file-per-class problem as Tonel, plus the underscore conflicts with Beamtalk's established PascalCase file naming convention (`String.bt`, `Array.bt`, not `string.bt` or `array_extensions.bt`).
+Same single-file-per-class problem as Tonel, plus the underscore conflicts with Beamtalk's established PascalCase file naming convention (`string.bt`, `array.bt`, not `string.bt` or `array_extensions.bt`).
 
 ### Mixed convention (A + B)
 Allow both `+Feature` and `.extension` patterns. Rejected because having two conventions leads to inconsistency — developers would need to decide which to use, and different packages would make different choices, fragmenting the ecosystem.

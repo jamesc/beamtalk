@@ -106,9 +106,9 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
         },
     );
 
-    // Value is already present in the generated set (stdlib/src/Value.bt).
+    // Value is already present in the generated set (stdlib/src/value.bt).
     // Do NOT insert it manually here — that would silently overwrite generated
-    // metadata (methods, state) if Value.bt ever gains them (BT-507, ADR 0042).
+    // metadata (methods, state) if value.bt ever gains them (BT-507, ADR 0042).
 
     classes
 }

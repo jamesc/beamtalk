@@ -29,7 +29,7 @@ Accepted | Implemented (2026-02-24) — Path 2 (dynamic/closure-based) removed (
 
 This creates two related problems:
 
-1. **Principle 6 violation**: `subclass:` is the only significant class-related operation that is not an inspectable Beamtalk message. Every other class protocol method (`superclass`, `canUnderstand:`, `methods`, etc.) is defined in `Behaviour.bt` or `Class.bt` following ADR 0032. Class *creation* is the conspicuous exception.
+1. **Principle 6 violation**: `subclass:` is the only significant class-related operation that is not an inspectable Beamtalk message. Every other class protocol method (`superclass`, `canUnderstand:`, `methods`, etc.) is defined in `behaviour.bt` or `class.bt` following ADR 0032. Class *creation* is the conspicuous exception.
 
 2. **No dynamic class creation path**: When the Beamtalk REPL is eventually ported to pure Beamtalk (ADR 0034 trajectory), evaluating `Object subclass: Foo` at the prompt must work at runtime without a Rust compiler round-trip. Today there is no mechanism for this. The REPL self-hosting path requires a dynamic class creation story.
 
@@ -97,10 +97,10 @@ The compiler generates the full BEAM module (method functions, dispatch tables, 
 
 ~~Dynamic classes stored closures in a class gen_server and dispatched via `beamtalk_dynamic_object`. This path had fundamental correctness issues (state mutation silently dropped, `super` calls broken, self-sends broken) and was removed in BT-873. The REPL now uses the compile-and-load path (BT-869).~~
 
-### ClassBuilder.bt
+### class_builder.bt
 
 ```beamtalk
-// stdlib/src/ClassBuilder.bt
+// stdlib/src/class_builder.bt
 /// Fluent builder for creating and registering Beamtalk classes.
 /// All class creation goes through the compiled path (BT-873).
 ///
@@ -163,7 +163,7 @@ Actor subclass: ClassBuilder
 `Class` gets a factory method:
 
 ```beamtalk
-// stdlib/src/Class.bt — added
+// stdlib/src/class.bt — added
 /// Return a new ClassBuilder for creating a subclass of the receiver.
 ///
 /// ## Examples
@@ -458,12 +458,12 @@ Keep compiled class `on_load` calling `beamtalk_object_class:start/2` directly (
 
 ### Phase 1: ClassBuilder Bootstrap and Codegen Change
 
-**Affected components:** `stdlib/src/ClassBuilder.bt`, `stdlib/src/Class.bt`, `beamtalk-core` (codegen), `beamtalk_runtime` (class gen_server, registry)
+**Affected components:** `stdlib/src/class_builder.bt`, `stdlib/src/class.bt`, `beamtalk-core` (codegen), `beamtalk_runtime` (class gen_server, registry)
 
 1. Implement `beamtalk_class_builder.erl` — the Erlang backing for `@intrinsic classBuilderRegister`. Handles the compiled path (function references from BEAM modules). Delegates to `beamtalk_object_class:start/2` for first registration; detects `{error, {already_started, _}}` and falls back to `beamtalk_object_class:update_class/2` for hot reload. After registration, stops the builder's gen_server process (`gen_server:stop/1`). Returns the newly created class object. Validate with a single hand-wired test class before proceeding.
 2. Update bootstrap in `beamtalk_bootstrap.erl`: pre-wire ClassBuilder as an Actor subclass before user classes load. Bootstrap sequence: `ProtoObject → Object → Behaviour → Class → Metaclass → ClassBuilder → Actor`.
-3. Add `Class.bt` method: `classBuilder => ClassBuilder new superclass: self`
-4. Create `stdlib/src/ClassBuilder.bt` with cascade-based builder API. ClassBuilder is an Actor — no BT-833 dependency needed. Alternatively, hand-wire as `beamtalk_class_builder_bt.erl` for v0.1 (consistent with `beamtalk_class_bt.erl` and `beamtalk_metaclass_bt.erl`).
+3. Add `class.bt` method: `classBuilder => ClassBuilder new superclass: self`
+4. Create `stdlib/src/class_builder.bt` with cascade-based builder API. ClassBuilder is an Actor — no BT-833 dependency needed. Alternatively, hand-wire as `beamtalk_class_builder_bt.erl` for v0.1 (consistent with `beamtalk_class_bt.erl` and `beamtalk_metaclass_bt.erl`).
 5. Update codegen (`crates/beamtalk-core/src/codegen/core_erlang/`) to emit ClassBuilder cascade in generated module init instead of direct `beamtalk_object_class:start/2` calls
 6. Add post-bootstrap assertion: `Class respondsTo: #classBuilder` must return `true`
 7. Run full test suite — all existing class definition behaviour must be preserved
@@ -489,7 +489,7 @@ Keep compiled class `on_load` calling `beamtalk_object_class:start/2` directly (
 | Issue | Phase | Description | Status |
 |-------|-------|-------------|--------|
 | BT-835 | Phase 1 — Runtime foundation | `beamtalk_class_builder.erl` + bootstrap stub + sequence update | Done |
-| BT-836 | Phase 1 — Stdlib + intrinsic | `ClassBuilder.bt`, `Class#classBuilder`, `classBuilderRegister` intrinsic | Done |
+| BT-836 | Phase 1 — Stdlib + intrinsic | `class_builder.bt`, `Class#classBuilder`, `classBuilderRegister` intrinsic | Done |
 | BT-837 | Phase 1 — Codegen | `generate_register_class` emits ClassBuilder cascade; snapshot updates | Done |
 | BT-838 | Phase 2 — Dynamic dispatch | Path 2 closure-based dynamic class creation + tests | **Reverted (BT-873)** |
 | BT-839 | Phase 3 — REPL integration | REPL evaluator desugaring + E2E tests | Not merged (too complex) |

@@ -46,7 +46,7 @@ impl CoreErlangGenerator {
     /// 2. Wraps the pid in a `#beamtalk_object{}` record with class metadata
     /// 3. Returns the object record, or throws error on failure
     ///
-    /// BT-3072: `Actor.bt` separately declares a real `class sealed spawn`
+    /// BT-3072: `actor.bt` separately declares a real `class sealed spawn`
     /// body (`(Erlang beamtalk_actor) doSpawn: self`) as the documented,
     /// xref-visible definition of dynamic-dispatch `spawn` — but this
     /// per-actor-module compiled function remains the one every dispatch
@@ -368,14 +368,14 @@ impl CoreErlangGenerator {
     /// `erlang:apply(Module, new, Args)` fast path, which bypasses
     /// class-method dispatch entirely.
     ///
-    /// BT-3071/BT-3074: Actor.bt's own `class sealed new` / `class sealed
+    /// BT-3071/BT-3074: actor.bt's own `class sealed new` / `class sealed
     /// new:` declarations used to compile through this same helper (via an
     /// `@intrinsic` marker), guaranteeing the two could never drift. They now
     /// send `Exception signalKind:class:selector:hint:` instead — a plain
     /// Beamtalk expression, not an intrinsic — so they are a *separately
     /// written* equivalent of this raise, not compiler-enforced to match. If
-    /// the hint text or kind here ever changes, update Actor.bt's `new`/
-    /// `new:` bodies to match by hand (low risk: `Actor.bt`'s declared bodies
+    /// the hint text or kind here ever changes, update actor.bt's `new`/
+    /// `new:` bodies to match by hand (low risk: `actor.bt`'s declared bodies
     /// are unreachable via any current dispatch path — see the doc comments
     /// on those methods).
     /// Generates just the expression, no `fun` wrapper:

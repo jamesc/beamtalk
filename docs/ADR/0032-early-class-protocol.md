@@ -18,7 +18,7 @@ Class hierarchy walking logic is duplicated across six locations in the codebase
 | `beamtalk_primitive.erl` | Primitive `responds_to/2` | Does not walk hierarchy at all |
 | `class_hierarchy/mod.rs` | Static compile-time hierarchy | Must be manually kept in sync with runtime |
 
-There are no `Behaviour.bt`, `Class.bt`, or `Metaclass.bt` files. All class-side behavior is hardcoded in Erlang with no way to extend or override from Beamtalk. This contradicts Principle 6 (Messages All The Way Down) and Principle 8 (Reflection as Primitive).
+There are no `behaviour.bt`, `class.bt`, or `metaclass.bt` files. All class-side behavior is hardcoded in Erlang with no way to extend or override from Beamtalk. This contradicts Principle 6 (Messages All The Way Down) and Principle 8 (Reflection as Primitive).
 
 Recent bugs illustrate the cost of this duplication:
 - **BT-721** (2026-02-19): `respondsTo:` couldn't detect inherited methods because `responds_to_slow` called `has_method/2`, which only checks local methods.
@@ -63,7 +63,7 @@ ProtoObject
             └─ Counter, MyService, ... (user actors)
 ```
 
-`Class` is sealed — users cannot subclass it at v0.1. All methods on `Behaviour` are sealed — users cannot override the class protocol. This limits the blast radius of the class protocol (reloading `Behaviour.bt` only matters for stdlib maintainers) and prevents subtle dispatch bugs from user overrides. Both restrictions can be relaxed in future releases as the metaclass tower matures.
+`Class` is sealed — users cannot subclass it at v0.1. All methods on `Behaviour` are sealed — users cannot override the class protocol. This limits the blast radius of the class protocol (reloading `behaviour.bt` only matters for stdlib maintainers) and prevents subtle dispatch bugs from user overrides. Both restrictions can be relaxed in future releases as the metaclass tower matures.
 
 `Behaviour` and `Class` are regular classes in the instance hierarchy. Every class object is treated as an instance of `Class` for dispatch purposes. When a class-side message is not found in the user-defined class methods, dispatch walks the `Class` → `Behaviour` → `Object` → `ProtoObject` chain — the same mechanism used for any other object. No special cases, no hardcoded selectors.
 
@@ -82,10 +82,10 @@ class_send(ClassPid, Selector, Args, ClassObject) ->
 
 This eliminates all 12 hardcoded selector clauses. Class objects are just objects — dispatch like one.
 
-### Behaviour.bt — The Core Class Protocol
+### behaviour.bt — The Core Class Protocol
 
 ```beamtalk
-// stdlib/src/Behaviour.bt
+// stdlib/src/behaviour.bt
 /// The abstract superclass of all class-describing objects.
 /// Provides method dictionary access, hierarchy queries,
 /// and instance creation protocol.
@@ -231,10 +231,10 @@ abstract Object subclass: Behaviour
   sealed isMeta => false
 ```
 
-### Class.bt — Concrete Class Identity
+### class.bt — Concrete Class Identity
 
 ```beamtalk
-// stdlib/src/Class.bt
+// stdlib/src/class.bt
 /// A concrete class in the Beamtalk system. Adds name, class variable
 /// access, and class identity protocol on top of Behaviour.
 sealed Behaviour subclass: Class
@@ -263,10 +263,10 @@ sealed Behaviour subclass: Class
   sealed class => @intrinsic classClass
 ```
 
-### Updated Object.bt — respondsTo: Delegates to canUnderstand:
+### Updated object.bt — respondsTo: Delegates to canUnderstand:
 
 ```beamtalk
-// In stdlib/src/Object.bt — replace the intrinsic with a Beamtalk method
+// In stdlib/src/object.bt — replace the intrinsic with a Beamtalk method
 sealed respondsTo: selector: Symbol -> Boolean =>
   self class canUnderstand: selector
 ```
@@ -276,7 +276,7 @@ This single line replaces five Erlang code paths. `canUnderstand:` is a pure Bea
 ### New Instance-Side Methods on Object
 
 ```beamtalk
-// In stdlib/src/Object.bt — hierarchy-aware type testing
+// In stdlib/src/object.bt — hierarchy-aware type testing
 
 /// Test whether the receiver is an instance of aClass or any of its subclasses.
 ///
@@ -599,9 +599,9 @@ Prove the core assumption before building the full feature: a class-side message
 
 3. Update `class_send/3` in `beamtalk_class_dispatch.erl`: replace 12 hardcoded selector clauses with a fallback to `beamtalk_dispatch:dispatch('Class', Selector, Args, ClassObject)`.
 
-4. Create `stdlib/src/Behaviour.bt` — hierarchy queries and method dictionary (chain walks in Beamtalk)
-5. Create `stdlib/src/Class.bt` — name, identity, printString (sealed)
-6. Update `stdlib/src/Object.bt`:
+4. Create `stdlib/src/behaviour.bt` — hierarchy queries and method dictionary (chain walks in Beamtalk)
+5. Create `stdlib/src/class.bt` — name, identity, printString (sealed)
+6. Update `stdlib/src/object.bt`:
    - Replace `respondsTo:` intrinsic with `self class canUnderstand: selector`
    - Add `isKindOf:` and `isMemberOf:`
 7. Register Behaviour and Class in the static `ClassHierarchy` (Rust semantic analysis)

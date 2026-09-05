@@ -88,13 +88,13 @@ redefinition), so this channel has no equivalent of Constraint 4's gap.
    under-predict from source alone
 
 The first pass of this spike's `references_to_duration` test hand-counted
-only *other* classes' mentions of `Duration` (8, across `Actor.bt`,
-`DateTime.bt`, `Parallel.bt`, `Timer.bt`) and asserted `length(references_to(
+only *other* classes' mentions of `Duration` (8, across `actor.bt`,
+`date_time.bt`, `parallel.bt`, `timer.bt`) and asserted `length(references_to(
 'Duration')) == 8`. Run against the real booted stdlib, this failed:
 **21**, not 8. Both discrepancies turned out to be `referencesTo:` doing the
 *correct*, exhaustive thing — the hand audit was wrong, not the index:
 
-1. **Self-references count.** `Duration.bt` itself has 13 methods whose own
+1. **Self-references count.** `duration.bt` itself has 13 methods whose own
    signatures mention `Duration` (7 instance-side comparison/arithmetic
    operators — `+ - * < <= > >=` — and 6 class-side constructors —
    `milliseconds: seconds: minutes: hours: days: fromString:`). Every one of
@@ -115,7 +115,7 @@ only *other* classes' mentions of `Duration` (8, across `Actor.bt`,
    that needs rewriting is still present) but means a naive
    "count textual occurrences of the class name" prediction will not match
    `length(references_to(X))` when a method mentions the same class more
-   than once on one line. Verified by contrast: `Actor.bt`'s `withTimeout:`
+   than once on one line. Verified by contrast: `actor.bt`'s `withTimeout:`
    mentions `Duration` on two *different* lines (type annotation, then
    `isKindOf:`) and correctly produces two separate rows.
 
@@ -181,7 +181,7 @@ already uses for its own passing extension coverage). Result:
 This time the `build_method_entry/5`-level gap is real and confirmed
 separately (`beamtalk_extensions:index_extension_xref/3` does call
 `build_method_entry/5`, and the EUnit-level test in this spike confirms its
-own such call returns `references => []`) — but `SystemNavigation.bt`'s
+own such call returns `references => []`) — but `system_navigation.bt`'s
 `referencesTo:` implementation compensates for it with a **dedicated,
 unconditional rescan of every registered extension's source**
 (`collectExtensionReferencesFor:into:`, BT-2196), whose own comment says

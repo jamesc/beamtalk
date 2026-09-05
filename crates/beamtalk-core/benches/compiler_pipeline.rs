@@ -103,7 +103,7 @@ const INPUTS: &[BenchInput] = &[
     BenchInput {
         name: "xlarge",
         module_name: "bench_xlarge",
-        fixture: "stdlib/src/String.bt",
+        fixture: "stdlib/src/string.bt",
         analysable: false,
     },
 ];

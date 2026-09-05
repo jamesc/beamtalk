@@ -303,7 +303,7 @@ file, using `X class subclass: Y class` to declare the metaclass side alongside 
 instance side. Both declarations live in the same file — no file split required.
 
 ```beamtalk
-// Float.bt — instance side and class side in the same file
+// float.bt — instance side and class side in the same file
 
 Number subclass: Float
     state: value = 0.0
@@ -329,7 +329,7 @@ on the metaclass of `Y` rather than on `Y` itself. The metaclass inheritance
 For a class with both instance and class sides:
 
 ```beamtalk
-// TranscriptStream.bt
+// transcript_stream.bt
 
 Object subclass: TranscriptStream
     classVar: uniqueInstance = nil
@@ -542,13 +542,13 @@ The consequences below are conditional on the option selected.
 
 The stdlib contains exactly 57 class-side method definitions distributed across 22 files:
 
-- `stdlib/src/System.bt` (8) — `class exit:`, `class env:`, etc.
-- `stdlib/src/DateTime.bt` (6) — `class now`, `class today`, etc.
-- `stdlib/src/File.bt` (5) — `class readFrom:`, `class writeTo:put:`, etc.
-- `stdlib/src/Random.bt` (4) — `class next`, `class nextInt:`, etc.
-- `stdlib/src/Float.bt` (3) — `class pi`, `class nan`, `class infinity`
-- `stdlib/src/TranscriptStream.bt` (3), `stdlib/src/TestRunner.bt` (3),
-  `stdlib/src/Stream.bt` (3), `stdlib/src/JSON.bt` (3)
+- `stdlib/src/system.bt` (8) — `class exit:`, `class env:`, etc.
+- `stdlib/src/date_time.bt` (6) — `class now`, `class today`, etc.
+- `stdlib/src/file.bt` (5) — `class readFrom:`, `class writeTo:put:`, etc.
+- `stdlib/src/random.bt` (4) — `class next`, `class nextInt:`, etc.
+- `stdlib/src/float.bt` (3) — `class pi`, `class nan`, `class infinity`
+- `stdlib/src/transcript_stream.bt` (3), `stdlib/src/test_runner.bt` (3),
+  `stdlib/src/stream.bt` (3), `stdlib/src/JSON.bt` (3)
 - Plus 13 other files with 1–2 class-side methods each (Array, Collection,
   TestCase, Regex, Metaclass, String, etc.)
 
@@ -630,7 +630,7 @@ Because this is a syntax breaking change, migration must be coordinated with a c
 ```text
 // Option B example diagnostic:
 error: `class` is no longer a method modifier — use `meta methodName`
-  --> stdlib/src/Float.bt:12:5
+  --> stdlib/src/float.bt:12:5
    |
 12 |     class pi -> Float => @primitive "pi"
    |     ^^^^^

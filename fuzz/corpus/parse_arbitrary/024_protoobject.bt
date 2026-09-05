@@ -160,7 +160,7 @@ nil /= nil  // => false
 // IMPLEMENTATION STATUS
 // ===========================================================================
 //
-// ✅ ProtoObject.bt defined in lib/
+// ✅ proto_object.bt defined in lib/
 // ✅ Compiler support for `class` message
 // ✅ Compiler support for `==` and `/=` operators
 // ✅ Compiler support for `doesNotUnderstand:args:`

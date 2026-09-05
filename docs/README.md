@@ -90,20 +90,20 @@ The foundational classes implementing Smalltalk's "everything is a message" phil
 
 | Class | Description |
 |-------|-------------|
-| [Object](../stdlib/src/Object.bt) | Base class for value types; [Actor](../stdlib/src/Actor.bt) for BEAM processes |
-| [Block](../stdlib/src/Block.bt) | First-class closures |
-| [True](../stdlib/src/True.bt) / [False](../stdlib/src/False.bt) | Boolean control flow via messages |
-| [UndefinedObject](../stdlib/src/UndefinedObject.bt) | Null object pattern (`nil` singleton) |
-| [Integer](../stdlib/src/Integer.bt) | Arbitrary precision arithmetic |
-| [String](../stdlib/src/String.bt) | UTF-8 text with grapheme operations |
-| [Array](../stdlib/src/Array.bt) | Fixed-size indexed collection (tuple) |
-| [List](../stdlib/src/List.bt) | Linked list with fast prepend |
-| [Set](../stdlib/src/Set.bt) | Unordered unique elements |
-| [Dictionary](../stdlib/src/Dictionary.bt) | Key-value map |
-| [Regex](../stdlib/src/Regex.bt) | Regular expression matching (PCRE2) |
-| [DateTime](../stdlib/src/DateTime.bt) | Date and time operations |
+| [Object](../stdlib/src/object.bt) | Base class for value types; [Actor](../stdlib/src/actor.bt) for BEAM processes |
+| [Block](../stdlib/src/block.bt) | First-class closures |
+| [True](../stdlib/src/true.bt) / [False](../stdlib/src/false.bt) | Boolean control flow via messages |
+| [UndefinedObject](../stdlib/src/undefined_object.bt) | Null object pattern (`nil` singleton) |
+| [Integer](../stdlib/src/integer.bt) | Arbitrary precision arithmetic |
+| [String](../stdlib/src/string.bt) | UTF-8 text with grapheme operations |
+| [Array](../stdlib/src/array.bt) | Fixed-size indexed collection (tuple) |
+| [List](../stdlib/src/list.bt) | Linked list with fast prepend |
+| [Set](../stdlib/src/set.bt) | Unordered unique elements |
+| [Dictionary](../stdlib/src/dictionary.bt) | Key-value map |
+| [Regex](../stdlib/src/regex.bt) | Regular expression matching (PCRE2) |
+| [DateTime](../stdlib/src/date_time.bt) | Date and time operations |
 | [JSON](../stdlib/src/JSON.bt) | JSON parsing and encoding |
-| [Collection](../stdlib/src/Collection.bt) | Abstract collection protocol |
+| [Collection](../stdlib/src/collection.bt) | Abstract collection protocol |
 
 See [stdlib/src/README.md](../stdlib/src/README.md) for detailed documentation.
 

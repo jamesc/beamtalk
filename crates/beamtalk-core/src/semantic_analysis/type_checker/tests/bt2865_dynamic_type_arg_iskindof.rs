@@ -175,7 +175,7 @@ fn merge_method_local_binding_explicit_dynamic_then_known_stays_dynamic() {
 /// Regression guard: the broad BT-2039 rule (any non-`ExplicitDynamic`
 /// reason loses to Known) must cover ordinary `UnannotatedParam`, not just
 /// the narrower `UntypedFfi`/`DynamicSpec` — this is the exact shape that
-/// regressed `stdlib/src/SystemNavigation.bt`'s `inject:into:` block during
+/// regressed `stdlib/src/system_navigation.bt`'s `inject:into:` block during
 /// this fix's development: an accumulator's `ifTrue:`/`ifFalse:` branches
 /// where one arm reassigns to an unannotated value and the other returns the
 /// existing (Known) accumulator.

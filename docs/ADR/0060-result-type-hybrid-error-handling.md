@@ -83,7 +83,7 @@ Introduce a `Result` value class for operations where failure is a normal, expec
 `Result` is a sealed Value subclass with two states: ok and error.
 
 ```beamtalk
-// stdlib/src/Result.bt
+// stdlib/src/result.bt
 sealed Value subclass: Result
   state: okValue :: Object = nil
   state: errReason :: Object = nil
@@ -725,7 +725,7 @@ This follows Elixir's `File.read/1` vs `File.read!/1` convention. The caller cho
 
 ### Alternative E: `tryDo:` Only (Minimal Approach)
 
-Ship only `Result.bt` and `tryDo:`. Don't migrate any FFI modules. Users compose via `tryDo:` wrapping:
+Ship only `result.bt` and `tryDo:`. Don't migrate any FFI modules. Users compose via `tryDo:` wrapping:
 
 ```beamtalk
 (Result tryDo: [File readAll: path])
@@ -834,7 +834,7 @@ Ship Result and migrate all FFI modules in one step. Existing callers (including
 
 **Components:** stdlib (Beamtalk), runtime (Erlang), stdlib tests, e2e tests
 
-1. **`stdlib/src/Result.bt`** — Value class with `state:` declarations, `ifOk:ifError:`, `map:`, `andThen:`, `valueOr:`, `valueOrDo:`, `unwrap`, `mapError:`, `printString`. Boot order: ensure Result loads before File, Yaml, etc. in `build_stdlib.rs`
+1. **`stdlib/src/result.bt`** — Value class with `state:` declarations, `ifOk:ifError:`, `map:`, `andThen:`, `valueOr:`, `valueOrDo:`, `unwrap`, `mapError:`, `printString`. Boot order: ensure Result loads before File, Yaml, etc. in `build_stdlib.rs`
 2. **`runtime/apps/beamtalk_stdlib/src/beamtalk_result.erl`** — `from_tagged_tuple/1` helper, `class_tryDo:/3` for `tryDo:` class method
 3. **`beamtalk_file.erl`** — Convert all 12 fallible methods to return Result via `from_tagged_tuple/1`. Each replaces a 5-line error builder chain per error case with 2-3 lines
 4. **`beamtalk_regex.erl`** — `Regex from:` returns Result (invalid pattern is expected)

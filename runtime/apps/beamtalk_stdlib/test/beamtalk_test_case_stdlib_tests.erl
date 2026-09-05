@@ -473,7 +473,7 @@ run_single_structured_fail_test() ->
 %%% the compiled Exports chunk directly and never depends on module_info/1.
 %%%
 %%% BifFallbackTestCase's testPasses/testFails inherit assert:equals: from
-%%% the real TestCase.bt hierarchy, so the class registry must actually be
+%%% the real test_case.bt hierarchy, so the class registry must actually be
 %%% booted first — boot_real_stdlib/1 (shared with beamtalk_workspace's
 %%% integration tests, see beamtalk_test_support:beamtalk_test_boot) starts
 %%% beamtalk_runtime and runs beamtalk_stdlib:init/0 before the assertions

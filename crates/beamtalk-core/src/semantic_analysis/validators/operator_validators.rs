@@ -38,7 +38,7 @@
 //! A body that is a single `@primitive` / `@intrinsic` pragma is *not* an
 //! override: it is how the stdlib declares the built-in lowering itself, so
 //! that `=:=` shows up in completions and `respondsTo:` with a class-specific
-//! signature (`ProtoObject.bt:50`, `Integer.bt:99`, …). Codegen ignores those
+//! signature (`proto_object.bt:50`, `integer.bt:99`, …). Codegen ignores those
 //! bodies for the same reason it ignores every other one. They are exempt.
 
 use crate::ast::{Expression, MessageSelector, MethodDefinition, Module};

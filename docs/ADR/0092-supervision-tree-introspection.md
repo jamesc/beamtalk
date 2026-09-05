@@ -132,7 +132,7 @@ tree is not a stable value.
 2. **No self-deadlock on the walk.** The introspection object must run as a
    plain value in the calling eval worker, never as a class-side gen_server —
    exactly the lesson `SystemNavigation` documents
-   (`stdlib/src/SystemNavigation.bt:18-23`): "routing the iteration through a
+   (`stdlib/src/system_navigation.bt:18-23`): "routing the iteration through a
    class gen_server would self-deadlock when the walk reaches `SystemNavigation`
    itself." A process walk that reaches the eval worker's own supervisor has
    the same hazard.
@@ -334,9 +334,9 @@ kept name- and shape-identical. The split is by *role*, not by vocabulary:
 | children | `children` → child **ids** (`List(Symbol)`) | `childNodes` → child **records** |
 
 Two alignment changes to the **shipped** live `Supervisor`
-(`stdlib/src/Supervisor.bt`) fall out of this and are part of this ADR's scope:
+(`stdlib/src/supervisor.bt`) fall out of this and are part of this ADR's scope:
 
-- **Rename `count` → `childCount`** (`Supervisor.bt:135`) for the
+- **Rename `count` → `childCount`** (`supervisor.bt:135`) for the
   running-children count, updating its call sites and tests in the same change.
   No deprecated alias is kept — pre-1.0, a clean rename is preferred over
   carrying two names. (`count` reads as "my own count" on a non-collection;
@@ -721,7 +721,7 @@ change-events deferred to the Announcements substrate (ADR 0093 / `SystemAnnounc
   in the shim and pinned by the deny-list parity test (Implementation §4), so
   the cost is contained and a missing entry fails CI rather than leaking.
 - `node pid` hands back a `Pid`, but `Pid`'s current protocol is thin
-  (`isAlive`, `kill`, `exit:`, equality, printing — `stdlib/src/Pid.bt`).
+  (`isAlive`, `kill`, `exit:`, equality, printing — `stdlib/src/pid.bt`).
   Inspecting a node is rich; *acting* on its process from the `Pid` alone is
   limited today. For Beamtalk actors the richer move is `node behaviourClass`
   + the actor object; growing `Pid` (e.g. `send:`) is out of scope here.
@@ -791,8 +791,8 @@ two more later + facade method), **docs/tests**. No parser or codegen changes.
   counterpart), ADR 0091 (Remote Workspace Access), ADR 0093 (Announcements —
   Typed Event Substrate: supervision deltas are published on `SystemAnnouncer`;
   §8 is the seam)
-- Documentation: `stdlib/src/WorkspaceInterface.bt`,
-  `stdlib/src/SystemNavigation.bt`, `stdlib/src/Supervisor.bt`,
+- Documentation: `stdlib/src/workspace_interface.bt`,
+  `stdlib/src/system_navigation.bt`, `stdlib/src/supervisor.bt`,
   `runtime/apps/beamtalk_runtime/src/beamtalk_supervisor.erl`
 - External: Pharo Process Browser; BEAM `:observer`
   (`erts/lib/observer/src/observer_pro_wx.erl`); Phoenix LiveDashboard process

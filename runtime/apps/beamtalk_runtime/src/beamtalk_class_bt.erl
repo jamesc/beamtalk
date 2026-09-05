@@ -21,7 +21,7 @@ mechanism was verified (BT-732 acceptance criteria met).
 
 ## Future (ADR 0032 Phase 2)
 
-This stub will be replaced by a compiled Class.bt stdlib module once
+This stub will be replaced by a compiled class.bt stdlib module once
 the full Behaviour/Class/Metaclass protocol is implemented.
 
 ## Class Chain
@@ -54,10 +54,10 @@ The probe method has been removed; the dispatch mechanism remains.
 ADR 0038 Phase 1 (BT-835): Exposes `classBuilder` as an instance method so
 that `Class respondsTo: #classBuilder` returns true (post-bootstrap assertion).
 The full implementation (`ClassBuilder new superclass: self`) is in Phase 2
-(Class.bt stdlib source). This stub makes the method discoverable.
+(class.bt stdlib source). This stub makes the method discoverable.
 
 Future (ADR 0032 Phase 2): This stub will be replaced by a compiled
-Class.bt stdlib module with the real Class protocol methods.
+class.bt stdlib module with the real Class protocol methods.
 """.
 -spec dispatch(atom(), list(), term(), map()) ->
     {reply, term(), map()} | {error, #beamtalk_error{}, map()}.
@@ -65,7 +65,7 @@ dispatch('classBuilder', _Args, _Self, State) ->
     %% ADR 0038 Phase 1: classBuilder is wired via has_method/1 (see below), so that
     %% Class respondsTo: #classBuilder returns true after bootstrap. The dispatch here
     %% returns does_not_understand because Phase 1 only makes it discoverable; the full
-    %% ClassBuilder protocol is implemented in Phase 2 (ClassBuilder.bt stdlib module).
+    %% ClassBuilder protocol is implemented in Phase 2 (class_builder.bt stdlib module).
     Error = beamtalk_error:new(does_not_understand, 'Class', 'classBuilder'),
     {error, Error, State};
 dispatch(Selector, _Args, _Self, State) ->
@@ -80,7 +80,7 @@ looking up in the flattened table.
 ADR 0038 Phase 1 (BT-835): Returns true for `classBuilder` so that
 `Class respondsTo: #classBuilder` returns true post-bootstrap.
 
-ADR 0032 Phase 2: Will be replaced by compiled Class.bt exports.
+ADR 0032 Phase 2: Will be replaced by compiled class.bt exports.
 """.
 -spec has_method(atom()) -> boolean().
 has_method('classBuilder') -> true;

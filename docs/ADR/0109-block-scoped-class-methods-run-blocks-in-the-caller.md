@@ -200,7 +200,7 @@ Extend `stdlib/test/class_var_nlr_shadow_test.bt` (or a sibling file if scope gr
 
 **Restructure `beamtalk_class_dispatch` for a general call/callback/resume protocol.** Rejected: large change to the hottest path, new failure semantics to define, and no benefit to the ~99% of class methods that take no Block. Revisit only if block-taking class methods become common.
 
-**Document the constraints and stop there.** This is the status quo after BT-2975, which documented all three consequences in `File.bt` and `beamtalk-language-features.md`. Rejected because the append-only-log pattern the API exists to serve is precisely the one that trips the 60s ceiling, and "don't message `File` from inside `File`" is a rule users only learn by hitting an opaque gen_server tuple.
+**Document the constraints and stop there.** This is the status quo after BT-2975, which documented all three consequences in `file.bt` and `beamtalk-language-features.md`. Rejected because the append-only-log pattern the API exists to serve is precisely the one that trips the 60s ceiling, and "don't message `File` from inside `File`" is a rule users only learn by hitting an opaque gen_server tuple.
 
 **Make the class-call timeout configurable.** Addresses only the third problem, and by making the global-lock window longer. Rejected as strictly worse than not holding the lock.
 

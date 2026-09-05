@@ -9,7 +9,7 @@
 // runtime/apps/beamtalk_workspace/test/beamtalk_adr0114_site_discovery_spike_tests.erl
 // for the two surfaces that do NOT: `>>`/`compile:source:` recompile the
 // whole class with a complete xref, and `register/5` sourced extensions are
-// unconditionally rescanned by SystemNavigation.bt's `referencesTo:` itself
+// unconditionally rescanned by system_navigation.bt's `referencesTo:` itself
 // (BT-2196), bypassing the xref table's gap entirely).
 //
 // A ClassBuilder class built with a real block-literal method body (BT-2246

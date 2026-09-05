@@ -57,7 +57,7 @@ Migrate six methods from raise-on-failure to `Result`-returning. Adopt the **ide
 
 ### API
 
-**Static supervisor (`stdlib/src/Supervisor.bt`):**
+**Static supervisor (`stdlib/src/supervisor.bt`):**
 
 ```beamtalk
 class supervise -> Result(Supervisor, Error) =>
@@ -67,7 +67,7 @@ terminate: aClass -> Result(Nil, Error) =>
   (Erlang beamtalk_supervisor) terminateChild: self class: aClass
 ```
 
-**Dynamic supervisor (`stdlib/src/DynamicSupervisor.bt`):**
+**Dynamic supervisor (`stdlib/src/dynamic_supervisor.bt`):**
 
 ```beamtalk
 class supervise -> Result(Self, Error) =>
@@ -388,8 +388,8 @@ Both probes are small (<1 day each) and their outcomes determine the exact shape
 - **Effort:** S-M. Phase 0a probe landed (BT-1994); the path is now unambiguous.
 
 ### Phase 2: Stdlib signature migration
-- **`stdlib/src/Supervisor.bt`:** update `class supervise` return type to `Result(Supervisor, Error)`; update `terminate:` return type to `Result(Nil, Error)`. No body changes (FFI call already returns the Result per Phase 1).
-- **`stdlib/src/DynamicSupervisor.bt`:** update `class supervise`, `startChild`, `startChild:`, `terminateChild:` return types to their Result-shaped equivalents. No body changes.
+- **`stdlib/src/supervisor.bt`:** update `class supervise` return type to `Result(Supervisor, Error)`; update `terminate:` return type to `Result(Nil, Error)`. No body changes (FFI call already returns the Result per Phase 1).
+- **`stdlib/src/dynamic_supervisor.bt`:** update `class supervise`, `startChild`, `startChild:`, `terminateChild:` return types to their Result-shaped equivalents. No body changes.
 - **BUnit tests** (`stdlib/test/`): update `dynamic_supervisor_defaults_test.bt`, `dynamic_supervisor_initialize_test.bt`, `supervisor_initialize_test.bt`, `supervision_class_method_test.bt`, fixtures under `stdlib/test/fixtures/`. Rewrite `pool := TestSup supervise` to `pool := (TestSup supervise) unwrap` and similar for `startChild`/`terminate:`.
 - **Effort:** S.
 
@@ -410,7 +410,7 @@ Phase 1 → Phase 2 (blocks stdlib signatures on runtime returning Result) → P
 
 ### Affected components (summary)
 - Runtime: `beamtalk_supervisor.erl` only.
-- Stdlib: `Supervisor.bt`, `DynamicSupervisor.bt`.
+- Stdlib: `supervisor.bt`, `dynamic_supervisor.bt`.
 - Tests: 5 BUnit files (`supervisor_defaults_test`, `supervisor_initialize_test`, `dynamic_supervisor_defaults_test`, `dynamic_supervisor_initialize_test`, `supervision_class_method_test`), 4 e2e btscripts (`supervisor`, `supervisor_class_method`, `supervisor_initialize`, `named-actors`), ~10 e2e supervisor fixtures under `tests/repl-protocol/fixtures/`.
 - Docs: language-features supervision chapter + CHANGELOG.
 - External: out-of-tree projects (Exdura, symphony) via coordinated branches.
@@ -500,14 +500,14 @@ Separately:
 | 3 | [BT-1996](https://linear.app/beamtalk/issue/BT-1996) | 1 | Runtime: migrate `startLink/1` to Result-shaped return |
 | 4 | [BT-1997](https://linear.app/beamtalk/issue/BT-1997) | 1 | Runtime: migrate `startChild/1,2` and `with_live_supervisor/3` to Result-shaped returns |
 | 5 | [BT-1998](https://linear.app/beamtalk/issue/BT-1998) | 1 | Runtime: migrate `terminateChild/2` (both arities) with idempotent `not_found` on static path |
-| 6 | [BT-1999](https://linear.app/beamtalk/issue/BT-1999) | 2 | Stdlib: update `Supervisor.bt` / `DynamicSupervisor.bt` return types and migrate BUnit tests |
+| 6 | [BT-1999](https://linear.app/beamtalk/issue/BT-1999) | 2 | Stdlib: update `supervisor.bt` / `dynamic_supervisor.bt` return types and migrate BUnit tests |
 | 7 | [BT-2000](https://linear.app/beamtalk/issue/BT-2000) | 3 | E2E + examples: migrate supervisor btscripts and `examples/otp-tree` to Result-shaped API |
 | 8 | [BT-2001](https://linear.app/beamtalk/issue/BT-2001) | 3 | Docs: language-features supervision chapter + CHANGELOG + this Implementation Tracking section |
 
 **Critical path:** BT-1994 → BT-1996 → BT-1997 → BT-1998 → BT-1999 → BT-2000 → BT-2001.
 **Parallelizable:** BT-1995 alongside BT-1994 (independent probes). Runtime migrations BT-1996..BT-1998 landed sequentially but touch disjoint functions in `beamtalk_supervisor.erl` so later reordering would also have been safe.
 
-**Divergence from proposed Phase 2 signature:** the proposal above (§Phase 1, §Phase 2) specifies `Supervisor class>>supervise -> Result(Supervisor, Error)` for the static path. Phase 2 shipped with `-> Result(Self, Error)` instead, unifying the static and dynamic paths and matching the ADR 0079 precedent for `Actor` registry operations (`spawnAs:`, `named:`). This means `AppSupervisor supervise` type-narrows to `Result(AppSupervisor, Error)` at the call site via the standard `Self` → concrete-subclass substitution. See `stdlib/src/Supervisor.bt:90` for the shipped signature.
+**Divergence from proposed Phase 2 signature:** the proposal above (§Phase 1, §Phase 2) specifies `Supervisor class>>supervise -> Result(Supervisor, Error)` for the static path. Phase 2 shipped with `-> Result(Self, Error)` instead, unifying the static and dynamic paths and matching the ADR 0079 precedent for `Actor` registry operations (`spawnAs:`, `named:`). This means `AppSupervisor supervise` type-narrows to `Result(AppSupervisor, Error)` at the call site via the standard `Self` → concrete-subclass substitution. See `stdlib/src/supervisor.bt:90` for the shipped signature.
 
 ## References
 - Related issues: [BT-1977](https://linear.app/beamtalk/issue/BT-1977) — this ADR's driving issue

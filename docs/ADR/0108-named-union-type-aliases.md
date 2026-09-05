@@ -437,7 +437,7 @@ type RestartStrategy = #temporary | #transient | #permanent
 
   How a supervised child restarts after exit.
 
-Declared in: stdlib/src/Supervisor.bt:12
+Declared in: stdlib/src/supervisor.bt:12
 ```
 
 For an alias with no doc comment, the block below the declaration line

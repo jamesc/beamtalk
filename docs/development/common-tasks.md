@@ -36,7 +36,7 @@ The build walks it recursively, so a nested class compiles, documents, installs
 and loads exactly like a top-level one — a flat and a nested tree produce
 byte-identical `beamtalk_stdlib.app` output.
 
-**Subdirectories never affect module names.** `stdlib/src/collections/Array.bt`
+**Subdirectories never affect module names.** `stdlib/src/collections/array.bt`
 compiles to `bt@stdlib@array`, not `bt@stdlib@collections@array`. This
 deliberately diverges from user packages, where `src/util/math.bt` becomes
 `util@math`.
@@ -56,7 +56,7 @@ cosmetic layout choice, and turn every future file move into an ABI change.
 Two consequences:
 
 - **Class file names must be unique across all subdirectories**, and unique
-  *after case-folding* — `to_module_name` lowercases, so `BEAMError.bt` and
+  *after case-folding* — `to_module_name` lowercases, so `beamerror.bt` and
   `Beamerror.bt` both yield `bt@stdlib@beamerror`. `build-stdlib` fails with a
   duplicate-module error rather than silently clobbering a module in `ebin/`.
 - Moving a class between subdirectories is free at build time, but does
@@ -97,7 +97,7 @@ Two consequences:
    - Update implementation status table
 
 **Example from BT-176 (ProtoObject):**
-- ✅ Class: `stdlib/src/ProtoObject.bt` — pragma declarations + pure Beamtalk methods
+- ✅ Class: `stdlib/src/proto_object.bt` — pragma declarations + pure Beamtalk methods
 - ✅ Runtime: `runtime/apps/beamtalk_runtime/src/beamtalk_primitive.erl` — dispatch for ProtoObject methods
 - ✅ Tests: `stdlib/test/` BUnit tests for the class
 - ✅ Docs: Updated `stdlib/src/README.md` with class hierarchy
@@ -252,7 +252,7 @@ Beamtalk has **one** nil class with **two** names:
 
 | Name              | Where it appears                                                                 |
 | ----------------- | -------------------------------------------------------------------------------- |
-| `UndefinedObject` | Canonical class-hierarchy spelling. Used internally by the type checker, BEAM FFI specs, protocol registry, `InferredType::known(...)`, `is_assignable_to` lookups, `Debug` output for `InferredType`, and the stdlib class definition (`stdlib/src/UndefinedObject.bt`). |
+| `UndefinedObject` | Canonical class-hierarchy spelling. Used internally by the type checker, BEAM FFI specs, protocol registry, `InferredType::known(...)`, `is_assignable_to` lookups, `Debug` output for `InferredType`, and the stdlib class definition (`stdlib/src/undefined_object.bt`). |
 | `Nil`             | Source-sympathetic surface spelling. What users type in annotations (`:: Nil`, `-> Nil`) and read back in user-facing messages: diagnostics, hover, signature help, code-action inserts, and REPL output. (Beamtalk does not yet support union type annotations in `.bt` source — `Foo \| Nil` is how the compiler _renders_ a nullable inference, not something you can write as a type.) |
 
 The two are aliased: the type resolver canonicalises `Nil`/`nil` → `UndefinedObject` during annotation resolution (`type_resolver.rs`), and `WellKnownClass::is_nil_class()` treats both as the nil type.

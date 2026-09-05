@@ -540,7 +540,7 @@ fn redundant_super_initialize_diagnostic(span: Span) -> Diagnostic {
 ///
 /// Fires only for `setUp`: it is the one `TestCase` lifecycle method whose
 /// return value the runner threads as the receiver of each test method (see
-/// `stdlib/src/TestCase.bt`'s class doc comment). `tearDown` returns `Nil`
+/// `stdlib/src/test_case.bt`'s class doc comment). `tearDown` returns `Nil`
 /// and `setUpOnce`'s return is stored as a suite fixture, not threaded as
 /// `self`, so neither is affected by this trap.
 ///

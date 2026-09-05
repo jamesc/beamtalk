@@ -112,7 +112,7 @@ set_domain(SubDomain) ->
 %% union it produces for `error`-free enumerations like `logFormat/0`
 %% (`text | json` -> `#text | #json`). The user-facing `Beamtalk logLevel`
 %% return type is therefore carried by the source annotation in
-%% `BeamtalkInterface.bt` (compiled into `generated_builtins.rs`), which every
+%% `beamtalk_interface.bt` (compiled into `generated_builtins.rs`), which every
 %% consumer of the getter sees; it is a subtype of the inferred
 %% `... | Symbol`, so the getter still type-checks. Tightening the
 %% direct-FFI-call inference for `ok`/`error`-bearing atom unions is deferred to

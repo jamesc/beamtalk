@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Test List class compilation as a value type (not gen_server).
-// Mirrors lib/List.bt exactly — new/0 should return [] (empty list).
+// Mirrors lib/list.bt exactly — new/0 should return [] (empty list).
 
 sealed Object subclass: List
 

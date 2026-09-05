@@ -578,7 +578,7 @@ extract_revert_target_from_map(M) ->
     %% class-side entry are otherwise indistinguishable to `find_revert_target/2`
     %% (which is keyed on `(class, selector)` only) — it would pick whichever has
     %% the higher `seq`, silently reverting the wrong side. `side` rides the same
-    %% ChangeEntry map (`ChangeEntry.bt`'s `side` field, populated from
+    %% ChangeEntry map (`change_entry.bt`'s `side` field, populated from
     %% `entry_to_value/2`'s `side_symbol(entry_side(E))`), so extracting it here
     %% and threading it into `find_revert_target/3` lets the caller-selected
     %% entry's side (not just its class+selector) constrain which candidate wins.

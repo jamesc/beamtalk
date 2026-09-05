@@ -700,7 +700,7 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 - Update actor framework to interpret method return values (new state vs early return via `^`)
 - Add `pid` method to `Actor` base class (extracts pid from `#beamtalk_object{}` record)
 - Verify REPL binding semantics are preserved (workspace rebinding still works)
-- **Affected:** `beamtalk_dispatch.erl`, `beamtalk_actor.erl`, `beamtalk_repl_shell.erl`, `Actor.bt`
+- **Affected:** `beamtalk_dispatch.erl`, `beamtalk_actor.erl`, `beamtalk_repl_shell.erl`, `actor.bt`
 
 ### Phase 4: Migration and Testing (L)
 

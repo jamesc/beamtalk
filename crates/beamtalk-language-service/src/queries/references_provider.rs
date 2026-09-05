@@ -1011,10 +1011,10 @@ mod tests {
 
     #[test]
     fn find_references_protocol_cross_file() {
-        let file_a = Utf8PathBuf::from("Printable.bt");
+        let file_a = Utf8PathBuf::from("printable.bt");
         let module_a = parse_source("Protocol define: Printable\n  asString -> String\n");
 
-        let file_b = Utf8PathBuf::from("Logger.bt");
+        let file_b = Utf8PathBuf::from("logger.bt");
         let module_b = parse_source(
             "Actor subclass: Logger(T :: Printable)\n  \
              log: msg => self\n",
@@ -1315,7 +1315,7 @@ mod tests {
         let module_a =
             parse_source("type RestartStrategy = #temporary | #transient | #permanent\n");
 
-        let file_b = Utf8PathBuf::from("Supervisor.bt");
+        let file_b = Utf8PathBuf::from("supervisor.bt");
         let module_b = parse_source(
             "Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n",
         );

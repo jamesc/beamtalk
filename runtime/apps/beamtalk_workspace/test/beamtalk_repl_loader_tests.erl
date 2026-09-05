@@ -18,13 +18,13 @@ temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
 %%====================================================================
 
 is_stdlib_path_relative_test() ->
-    ?assert(beamtalk_repl_loader:is_stdlib_path("stdlib/src/Integer.bt")).
+    ?assert(beamtalk_repl_loader:is_stdlib_path("stdlib/src/integer.bt")).
 
 is_stdlib_path_relative_nested_test() ->
-    ?assert(beamtalk_repl_loader:is_stdlib_path("stdlib/src/collections/Array.bt")).
+    ?assert(beamtalk_repl_loader:is_stdlib_path("stdlib/src/collections/array.bt")).
 
 is_stdlib_path_absolute_test() ->
-    ?assert(beamtalk_repl_loader:is_stdlib_path("/workspace/project/stdlib/src/Integer.bt")).
+    ?assert(beamtalk_repl_loader:is_stdlib_path("/workspace/project/stdlib/src/integer.bt")).
 
 is_stdlib_path_not_stdlib_src_test() ->
     ?assertNot(beamtalk_repl_loader:is_stdlib_path("src/MyClass.bt")).
@@ -36,13 +36,13 @@ is_stdlib_path_no_trailing_slash_test() ->
     ?assertNot(beamtalk_repl_loader:is_stdlib_path("stdlib/src")).
 
 is_stdlib_path_wrong_subdir_test() ->
-    ?assertNot(beamtalk_repl_loader:is_stdlib_path("stdlib/srcs/Integer.bt")).
+    ?assertNot(beamtalk_repl_loader:is_stdlib_path("stdlib/srcs/integer.bt")).
 
 is_stdlib_path_empty_test() ->
     ?assertNot(beamtalk_repl_loader:is_stdlib_path("")).
 
 is_stdlib_path_deep_absolute_test() ->
-    ?assert(beamtalk_repl_loader:is_stdlib_path("/home/user/beamtalk/stdlib/src/String.bt")).
+    ?assert(beamtalk_repl_loader:is_stdlib_path("/home/user/beamtalk/stdlib/src/string.bt")).
 
 %%====================================================================
 %% to_snake_case/1
@@ -404,7 +404,7 @@ resolve_package_module_no_match_test() ->
 try_package_relative_match_test() ->
     {ok, Cwd} = file:get_cwd(),
     ProjectRoot = filename:join(Cwd, "project"),
-    AbsPath = filename:join([ProjectRoot, "src", "collections", "Array.bt"]),
+    AbsPath = filename:join([ProjectRoot, "src", "collections", "array.bt"]),
     Result = beamtalk_repl_loader:try_package_relative(AbsPath, ProjectRoot, "src"),
     ?assertMatch({ok, _}, Result),
     {ok, Parts} = Result,

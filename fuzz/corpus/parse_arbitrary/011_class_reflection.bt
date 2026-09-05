@@ -13,7 +13,7 @@
 // Class objects are returned by `Beamtalk classNamed:` and support
 // reflection messages to introspect the class definition.
 
-// @load lib/BeamtalkInterface.bt
+// @load lib/beamtalk_interface.bt
 // @load tests/repl-protocol/fixtures/counter.bt
 
 // ===========================================================================

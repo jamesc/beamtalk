@@ -15,7 +15,7 @@ to Erlang lists before passing them to `lists:foldl`.
 BT-815: Provides `inject_into/3` — called by the `@primitive "inject:into:"`
 body on the abstract Collection class.  Most other collection methods
 (collect:, select:, reject:, includes:, detect:, anySatisfy:, allSatisfy:)
-are now self-hosted as pure Beamtalk on Collection.bt and no longer need
+are now self-hosted as pure Beamtalk on collection.bt and no longer need
 Erlang helpers.
 
 BT-2695: Provides the numeric aggregates `sum/1`, `maximum/1`, `minimum/1`,
@@ -49,7 +49,7 @@ Fold a block over the collection with an accumulator.
 
 Calls Block(Acc, Elem) for each element — accumulator first, element
 second — matching the Beamtalk `block value: acc value: each` convention
-used by Collection.bt's `collect:`, `select:`, and `reject:`.
+used by collection.bt's `collect:`, `select:`, and `reject:`.
 
 Hand-rolls the fold rather than wrapping `lists:foldl/3` (which calls
 `Fun(Elem, Acc)`): the BT block takes the accumulator first, so a foldl

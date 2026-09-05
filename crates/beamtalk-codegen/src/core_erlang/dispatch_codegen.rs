@@ -66,7 +66,7 @@ fn unwrap_parens(expr: &Expression) -> &Expression {
 /// BT-3214 (extends BT-2095): true if `expr`'s static type is Character,
 /// determined purely from its syntactic shape — no general static type
 /// inference exists in codegen, so this recognizes exactly the syntactic
-/// forms that `Character.bt` declares as producing a Character: a Character
+/// forms that `character.bt` declares as producing a Character: a Character
 /// literal (`$A`), the class factory `Character value:`, and the two
 /// instance methods with a `-> Character` return type, `uppercase` and
 /// `lowercase` (applied recursively, since their own receiver must itself
@@ -3986,7 +3986,7 @@ pub(super) fn is_class_auto_export_selector(selector_atom: &str, arity: usize) -
 ///
 /// Unlike `is_class_auto_export_selector`'s raw module exports, these
 /// selectors are ordinary `@primitive`-backed methods inherited from
-/// `Behaviour`/`Class` (see `stdlib/src/Behaviour.bt`) that non-self-send
+/// `Behaviour`/`Class` (see `stdlib/src/behaviour.bt`) that non-self-send
 /// dispatch resolves via `try_class_chain_fallthrough`'s
 /// `beamtalk_dispatch:lookup/5` walk — a walk that itself is not reachable
 /// from inside the class's own process (it round-trips through
@@ -4413,7 +4413,7 @@ mod tests {
     }
 
     /// BT-3214: `uppercase`/`lowercase` also have a declared `-> Character`
-    /// return type (`Character.bt`), so a chain like `$a uppercase asString`
+    /// return type (`character.bt`), so a chain like `$a uppercase asString`
     /// hits the identical bug as `(Character value: 10) asString` — the
     /// receiver of `asString` (`$a uppercase`) is statically Character but
     /// isn't a literal or a `value:` call. The check must recurse: applying
@@ -4476,10 +4476,10 @@ mod tests {
     /// BT-3214: enforces the invariant `is_character_typed_receiver` depends
     /// on — that its hardcoded selector set (`value:` as the class factory,
     /// `uppercase`/`lowercase` as the Character-returning instance methods)
-    /// is *exactly* the set of methods `stdlib/src/Character.bt` declares
+    /// is *exactly* the set of methods `stdlib/src/character.bt` declares
     /// with a `-> Character` return type. This is the enforcing test
     /// architecture-principles.md requires for any "must stay in sync"
-    /// coupling: parses the real `Character.bt` off disk and fails loudly if
+    /// coupling: parses the real `character.bt` off disk and fails loudly if
     /// a future edit adds, removes, or renames a Character-returning method
     /// there without updating the codegen recognizer to match — silent drift
     /// here would silently reopen the exact bug this issue fixes for the new
@@ -4492,7 +4492,7 @@ mod tests {
             .parent()
             .expect("repo root")
             .to_path_buf();
-        let character_bt_path = repo_root.join("stdlib/src/Character.bt");
+        let character_bt_path = repo_root.join("stdlib/src/character.bt");
         let Ok(source) = std::fs::read_to_string(&character_bt_path) else {
             eprintln!(
                 "skipping: {} not present in this checkout",
@@ -4505,14 +4505,14 @@ mod tests {
         let (module, diags) = parse(tokens);
         assert!(
             diags.iter().all(|d| d.severity != Severity::Error),
-            "Character.bt must parse without errors: {diags:?}"
+            "character.bt must parse without errors: {diags:?}"
         );
 
         let character_class = module
             .classes
             .iter()
             .find(|c| c.name.name == "Character")
-            .expect("Character.bt must define the Character class");
+            .expect("character.bt must define the Character class");
 
         let returns_character = |method: &MethodDefinition| -> bool {
             matches!(
@@ -4538,7 +4538,7 @@ mod tests {
             class_side,
             BTreeSet::from(["value:".to_string()]),
             "is_character_typed_receiver's class-side factory-method list \
-             (\"value:\") no longer matches Character.bt's actual \
+             (\"value:\") no longer matches character.bt's actual \
              `-> Character` class methods — update the recognizer in \
              dispatch_codegen.rs to match"
         );
@@ -4546,7 +4546,7 @@ mod tests {
             instance_side,
             BTreeSet::from(["uppercase".to_string(), "lowercase".to_string()]),
             "is_character_typed_receiver's instance-side selector list \
-             (\"uppercase\", \"lowercase\") no longer matches Character.bt's \
+             (\"uppercase\", \"lowercase\") no longer matches character.bt's \
              actual `-> Character` instance methods — update the recognizer \
              in dispatch_codegen.rs to match"
         );

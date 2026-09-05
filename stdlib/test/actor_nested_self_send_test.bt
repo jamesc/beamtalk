@@ -12,7 +12,7 @@
 //
 // BT-3402: tests that a self-send (or a direct field mutation) nested
 // inside an `and:`/`or:` block ARGUMENT correctly threads actor state.
-// `and:`/`or:` are self-hosted Boolean methods (Boolean.bt), not compiler
+// `and:`/`or:` are self-hosted Boolean methods (boolean.bt), not compiler
 // intrinsics, so without the fix the block argument compiles as a plain
 // Tier 1 closure and any mutation inside it is silently lost — the
 // enclosing method's returned state never reflects it, even though the

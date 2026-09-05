@@ -366,7 +366,7 @@ impl CoreErlangGenerator {
 
             // BT-2803: valueWithArguments: (call-site-intercepted @intrinsic,
             // was previously a bare @primitive with no access to the calling
-            // method's state — see stdlib/src/Block.bt).
+            // method's state — see stdlib/src/block.bt).
             "valueWithArguments:" if arguments.len() == 1 => {
                 self.try_generate_block_value_with_arguments_keyword(receiver, &arguments[0])
             }
@@ -731,9 +731,9 @@ impl CoreErlangGenerator {
                         Ok(Some(doc))
                     }
                     // BT-2703: `eachWithIndex:`/`do:separatedBy:` are self-hosted in
-                    // Collection.bt. In an actor method that mutates state, desugar to a
+                    // collection.bt. In an actor method that mutates state, desugar to a
                     // stateful `inject:into:` fold so the mutation threads; otherwise
-                    // return `None` and let the ordinary dispatch reach the Collection.bt
+                    // return `None` and let the ordinary dispatch reach the collection.bt
                     // method.
                     "eachWithIndex:" if arguments.len() == 1 => {
                         self.try_generate_each_with_index(receiver, &arguments[0])
@@ -2608,7 +2608,7 @@ impl CoreErlangGenerator {
         }
 
         // BT-3402: `and:`/`or:` short-circuit boolean protocol. Both are
-        // ordinary self-hosted `Boolean` methods (`Boolean.bt`: `and: aBlock
+        // ordinary self-hosted `Boolean` methods (`boolean.bt`: `and: aBlock
         // => self ifTrue: aBlock ifFalse: [false]`, `or: aBlock => self
         // ifTrue: [true] ifFalse: aBlock`) — not `WellKnownSelector`s (see
         // `state_threading_selectors`'s doc comment), so generic dispatch
@@ -2618,7 +2618,7 @@ impl CoreErlangGenerator {
         // closure then discards its own `NewState` exactly like `ifTrue:`
         // blocks did before BT-915 — see this function's `IfTrue`/`IfFalse`
         // arms below, which this mirrors. Recognizing the literal `and:`/
-        // `or:` call shape here, before generic dispatch (and Boolean.bt's
+        // `or:` call shape here, before generic dispatch (and boolean.bt's
         // self-hosted definition) is ever reached, lets the block compile
         // through the same `generate_conditional_branch_inline` machinery
         // `ifTrue:`/`ifFalse:` use, so nested self-sends and field

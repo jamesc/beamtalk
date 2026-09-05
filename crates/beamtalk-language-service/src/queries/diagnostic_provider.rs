@@ -1917,7 +1917,7 @@ typed Object subclass: MyTyped
             // Note: "actor new" (`Actor subclass: A ... A new`) used to live here as
             // a Warning/Hint exemplar, but BT-3071 lifted Actor's `new`/`new:` into
             // real, hierarchy-resolvable `class sealed new`/`new:` declarations on
-            // Actor.bt — so the TypeChecker no longer treats the send as unknown and
+            // actor.bt — so the TypeChecker no longer treats the send as unknown and
             // stops contributing a Warning/Hint diagnostic for it (the DNU-style
             // secondary signal this snippet exercised). The actual "use spawn, not
             // new" protection is untouched: `check_actor_new_usage` (BT-563/BT-1524)

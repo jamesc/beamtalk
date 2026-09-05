@@ -8,8 +8,8 @@
 -moduledoc """
 Thin Behaviour/Class intrinsics (ADR 0032 Phase 2).
 
-These functions back the `@primitive "classXxx"` declarations in `lib/Behaviour.bt`
-and `lib/Class.bt`. Each function receives a class object `Self`
+These functions back the `@primitive "classXxx"` declarations in `lib/behaviour.bt`
+and `lib/class.bt`. Each function receives a class object `Self`
 (a `#beamtalk_object{}` tuple with a ClassPid at position 4) and exposes
 either raw data from the class gen_server state / registry or small,
 hierarchy-aware queries over that data.
@@ -757,7 +757,7 @@ evaluate `AbsentBlock` instead of raising when the selector resolves nowhere.
 Backs `@primitive "classRemoveSelectorIfAbsent"`
 (`Behaviour>>removeSelector:ifAbsent:`). `AbsentBlock` arrives as an ordinary
 compiled Block value — a 0-arity Erlang fun (Beamtalk blocks compile to
-funs; see `Block.bt`) — called directly here, exactly as
+funs; see `block.bt`) — called directly here, exactly as
 `beamtalk_actor.erl`'s `onExit:` callback calls its own block argument.
 
 Unlike a block argument received by a *locally-defined* class method (which
@@ -2775,7 +2775,7 @@ log_selector_rename(
 -doc """
 Check if the receiver class conforms to a protocol.
 
-ADR 0068 Phase 2c: Backs `@primitive "classConformsTo"` in Behaviour.bt.
+ADR 0068 Phase 2c: Backs `@primitive "classConformsTo"` in behaviour.bt.
 Structural conformance — the class conforms if it responds to all required
 selectors of the protocol.
 
@@ -2790,7 +2790,7 @@ classConformsTo(Self, ProtocolName) ->
 -doc """
 Return the list of protocols the receiver class conforms to.
 
-ADR 0068 Phase 2c: Backs `@primitive "classProtocols"` in Behaviour.bt.
+ADR 0068 Phase 2c: Backs `@primitive "classProtocols"` in behaviour.bt.
 Returns a list of protocol name atoms, sorted alphabetically.
 """.
 -spec classProtocols(#beamtalk_object{}) -> [atom()].
@@ -2806,7 +2806,7 @@ classProtocols(Self) ->
 -doc """
 Return the class this metaclass describes.
 
-ADR 0036: Backs `@primitive "metaclassThisClass"` in Metaclass.bt.
+ADR 0036: Backs `@primitive "metaclassThisClass"` in metaclass.bt.
 A metaclass object carries the class pid; we retrieve its name and return
 the class object. Example: `Counter class class thisClass == Counter`.
 """.
@@ -2819,7 +2819,7 @@ metaclassThisClass(Self) ->
 -doc """
 Return the superclass of the metaclass parallel hierarchy.
 
-ADR 0036: Backs `@primitive "metaclassSuperclass"` in Metaclass.bt.
+ADR 0036: Backs `@primitive "metaclassSuperclass"` in metaclass.bt.
 The superclass of Counter's metaclass is the metaclass of Counter's superclass.
 Example: `Counter class superclass == Actor class`.
 
@@ -2855,7 +2855,7 @@ metaclassSuperclass(Self) ->
 -doc """
 Return all selectors callable on the described class object (class-side + Behaviour protocol).
 
-BT-1169: Backs `@primitive "metaclassAllMethods"` in Metaclass.bt.
+BT-1169: Backs `@primitive "metaclassAllMethods"` in metaclass.bt.
 Combines class-side selectors of the described class (via metaclassClassMethods/1)
 with all instance methods of the 'Class' hierarchy (Behaviour protocol: reload,
 superclass, etc.). Result is deduplicated and sorted.
@@ -2892,7 +2892,7 @@ metaclassAllMethods(Self) ->
 -doc """
 Return all class-side method selectors (full inheritance chain).
 
-ADR 0036: Backs `@primitive "metaclassClassMethods"` in Metaclass.bt.
+ADR 0036: Backs `@primitive "metaclassClassMethods"` in metaclass.bt.
 Walks the superclass chain collecting all class-side selectors.
 """.
 -spec metaclassClassMethods(#beamtalk_object{}) -> [atom()].
@@ -2913,7 +2913,7 @@ metaclassClassMethods(Self) ->
 -doc """
 Return local class-side method selectors (non-inherited).
 
-ADR 0036: Backs `@primitive "metaclassLocalClassMethods"` in Metaclass.bt.
+ADR 0036: Backs `@primitive "metaclassLocalClassMethods"` in metaclass.bt.
 Returns only class methods defined directly on this class.
 """.
 -spec metaclassLocalClassMethods(#beamtalk_object{}) -> [atom()].
@@ -2925,7 +2925,7 @@ metaclassLocalClassMethods(Self) ->
 -doc """
 Test whether the selector is defined as a class-side method.
 
-ADR 0036: Backs `@primitive "metaclassIncludesSelector"` in Metaclass.bt.
+ADR 0036: Backs `@primitive "metaclassIncludesSelector"` in metaclass.bt.
 Does NOT check superclasses — local containment only.
 """.
 -spec metaclassIncludesSelector(#beamtalk_object{}, atom()) -> boolean().
@@ -2937,7 +2937,7 @@ metaclassIncludesSelector(Self, Selector) ->
 -doc """
 Guard for direct Metaclass instantiation — backs `class sealed new`.
 
-ADR 0036: Backs `@primitive "metaclassNew"` in Metaclass.bt.
+ADR 0036: Backs `@primitive "metaclassNew"` in metaclass.bt.
 Called from the generated `new/0` constructor of Metaclass.
 Always raises a user_error; metaclasses must be obtained via `x class class`.
 """.

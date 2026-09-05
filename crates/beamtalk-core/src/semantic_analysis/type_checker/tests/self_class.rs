@@ -517,7 +517,7 @@ Nav new
 
 #[test]
 fn new_on_actor_subclass_no_longer_dnu() {
-    // BT-3071: Actor.bt now declares real `class sealed new` / `new:`
+    // BT-3071: actor.bt now declares real `class sealed new` / `new:`
     // methods (lifted from the codegen-injected error stubs), so `new`
     // resolves like any other inherited class method — no DNU from the
     // TypeChecker here, and this is correct: the send is not "unknown", it

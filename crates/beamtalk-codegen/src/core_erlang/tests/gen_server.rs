@@ -3176,8 +3176,8 @@ fn test_class_method_self_send_in_block_compiles_when_class_has_no_class_vars() 
     // `compute_class_var_mutating_selectors` only has this class's own
     // `class_methods` to analyze), so it conservatively treats any such
     // self-send as unsafe. That conservatism is unsound as a blanket rule:
-    // `stdlib/src/Subprocess.bt` self-sends `spawnWith:` (inherited from
-    // `Actor`, `stdlib/src/Actor.bt`) from inside a `tryDo:` block, and
+    // `stdlib/src/subprocess.bt` self-sends `spawnWith:` (inherited from
+    // `Actor`, `stdlib/src/actor.bt`) from inside a `tryDo:` block, and
     // `just build` failed on it once this guard landed.
     //
     // The fix: gate the whole check on the class actually declaring class
@@ -3321,7 +3321,7 @@ fn test_class_method_self_send_in_each_with_index_block_is_compile_error() {
     // BT-3151 review follow-up: `eachWithIndex:` desugars to `inject:into:`
     // (`try_generate_each_with_index`, `enumeration_ops.rs`) only when the
     // user block needs mutation threading; a bare self-send-only block falls
-    // through to `Collection.bt`'s own self-hosted `eachWithIndex:` — a
+    // through to `collection.bt`'s own self-hosted `eachWithIndex:` — a
     // same-process, in-process call, same as every other list-op call site.
     let src = "Value subclass: DriverEachWithIndex\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x\n  class run: aList =>\n    aList eachWithIndex: [:item :i | self check: item]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -4713,7 +4713,7 @@ fn test_method_xref_baked_into_register_class() {
     // BT-3073: `Counter` no longer carries synthetic class-side rows for
     // `new`/`new:`/`spawn`/`spawnWith:` — BT-3071/BT-3072 lifted those bodies
     // into real, source-backed class methods on `Actor` itself
-    // (`stdlib/src/Actor.bt`), so a subclass like `Counter` genuinely
+    // (`stdlib/src/actor.bt`), so a subclass like `Counter` genuinely
     // *inherits* them rather than *defining* them, and its own methodXref
     // carries no row for them at all (the honest Smalltalk answer — see
     // BT-2614, which introduced the now-removed rows). Bound the methodXref

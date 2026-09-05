@@ -15,7 +15,7 @@ use beamtalk_cerl_doc::leaf;
 /// Exception primitive implementations (BT-338).
 ///
 /// Exception field access delegates to `beamtalk_exception_handler` runtime module.
-/// This avoids naming conflict: compiled Exception.bt produces `beamtalk_exception`,
+/// This avoids naming conflict: compiled exception.bt produces `beamtalk_exception`,
 /// while the handler module provides the actual implementation.
 pub(crate) fn generate_exception_bif(
     selector: &str,

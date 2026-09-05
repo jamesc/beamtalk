@@ -23,7 +23,7 @@
 //!
 //! BT-3402: `and:`/`or:` join the string-matched group for the same reason
 //! as the loop/iteration selectors — they are ordinary self-hosted
-//! `Boolean` methods (`Boolean.bt`'s `and:`/`or:`, each defined in terms of
+//! `Boolean` methods (`boolean.bt`'s `and:`/`or:`, each defined in terms of
 //! `ifTrue:ifFalse:`), not selectors the type-checker itself intrinsifies.
 //! Codegen still inlines their literal call shape the same way it inlines
 //! `ifTrue:`/`ifFalse:` (see `try_generate_boolean_protocol`'s `and:`/`or:`

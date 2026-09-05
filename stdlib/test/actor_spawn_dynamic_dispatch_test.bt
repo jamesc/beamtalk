@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3072: `Actor.bt` now declares real `class sealed spawn` / `spawnWith:`
+// BT-3072: `actor.bt` now declares real `class sealed spawn` / `spawnWith:`
 // bodies (`(Erlang beamtalk_actor) doSpawn: self` / `doSpawnWith: self
 // args: initArgs`) instead of `@intrinsic actorSpawn` / `actorSpawnWith`
 // markers. The compiler's static `Counter spawn` fast path

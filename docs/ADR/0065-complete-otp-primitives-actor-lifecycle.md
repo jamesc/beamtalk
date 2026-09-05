@@ -408,9 +408,9 @@ Add `actor link` and `actor unlink` to mirror `erlang:link/1` and `erlang:unlink
 ## Implementation
 
 ### Phase 1: Server class and handleInfo: (M)
-**Affected components:** Stdlib (Server.bt), Codegen (callbacks.rs, actor detection), Runtime (beamtalk_actor.erl)
+**Affected components:** Stdlib (server.bt), Codegen (callbacks.rs, actor detection), Runtime (beamtalk_actor.erl)
 
-1. **Stdlib:** Add `Server.bt` — `abstract Actor subclass: Server` with a default `handleInfo: msg => nil` (overridable no-op). Actor does not define `handleInfo:` — plain Actors raise DNU if sent this message. Verify that `Server.bt` generates a correct `init/1` that passes `InitArgs` through the two-hop chain (`UserClass → server:init → Actor base`), including `spawnWith:` args.
+1. **Stdlib:** Add `server.bt` — `abstract Actor subclass: Server` with a default `handleInfo: msg => nil` (overridable no-op). Actor does not define `handleInfo:` — plain Actors raise DNU if sent this message. Verify that `server.bt` generates a correct `init/1` that passes `InitArgs` through the two-hop chain (`UserClass → server:init → Actor base`), including `spawnWith:` args.
 2. **Hierarchy resolution:** Add `is_server_subclass()` to `ClassHierarchy`, following the existing `is_supervisor_subclass` pattern. Enrich `class_superclass_index` in the package compiler so cross-file inheritance (`Server subclass: Foo` in one file, `Foo subclass: Bar` in another) resolves correctly — analogous to how `Actor` is handled today.
 3. **Codegen:** In `generate_handle_info()` (callbacks.rs ~445-472), check if the class is a Server subclass via `is_server_subclass()`. If yes, generate dispatch to `handleInfo:` with error logging; if no (plain Actor), generate the current ignore-all stub.
 4. **No special validation needed:** `handleInfo:` is a regular method on Server. Actor doesn't define it — DNU is the natural error. The codegen `is_server_subclass()` check determines which `handle_info/2` to generate.
@@ -443,7 +443,7 @@ BT-1451 delivers `terminate:` runtime support. Follow-up issue for `withShutdown
 ## References
 - Related issues: BT-1452 (this ADR), BT-1442 (monitor/pid/onExit — landed), BT-1451 (terminate: runtime fix — in progress)
 - Related ADRs: ADR 0005 (BEAM Object Model), ADR 0013 (Class Methods/Instantiation), ADR 0043 (Sync-by-Default Messaging), ADR 0059 (Supervision Tree Syntax)
-- Code: `callbacks.rs:445-472` (handle_info codegen), `beamtalk_actor.erl:778-784` (handle_info runtime), `Timer.bt` (Timer class)
+- Code: `callbacks.rs:445-472` (handle_info codegen), `beamtalk_actor.erl:778-784` (handle_info runtime), `timer.bt` (Timer class)
 - Documentation: `docs/beamtalk-language-features.md` (actors, supervision, pattern matching)
 - Elixir community precedent for log-and-continue in handle_info:
   - [Should we catch stray messages in a GenServer?](https://elixirforum.com/t/should-we-catch-stray-messages-in-a-genserver/2656)

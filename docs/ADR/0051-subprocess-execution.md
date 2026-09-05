@@ -7,7 +7,7 @@ Accepted | Implemented (2026-03-05)
 
 ### Problem Statement
 
-Beamtalk has no way to execute external OS commands. The existing `Port` class (`stdlib/src/Port.bt`) is an opaque wrapper for BEAM port identifiers — it provides `asString`, `=:=`, and `hash`, but cannot create, communicate with, or manage subprocesses.
+Beamtalk has no way to execute external OS commands. The existing `Port` class (`stdlib/src/port.bt`) is an opaque wrapper for BEAM port identifiers — it provides `asString`, `=:=`, and `hash`, but cannot create, communicate with, or manage subprocesses.
 
 This blocks two categories of use cases:
 
@@ -20,13 +20,13 @@ This ADR addresses both use cases:
 
 ### Current State
 
-- `Port.bt` provides only display/comparison methods for port identifiers received from Erlang interop
+- `port.bt` provides only display/comparison methods for port identifiers received from Erlang interop
 - No `beamtalk_port.erl` runtime module exists — port primitives are handled inline in `beamtalk_primitive.erl`
 - The workaround is raw Erlang FFI: `Erlang os cmd: "ls -la"` — which has no exit code, no streaming, shell injection risk, and blocks the caller
 - ADR 0021 explicitly deferred `Process output: "ls -la"` as a future Stream integration point
 - ADR 0022 established the OTP Port pattern for the compiler: `open_port({spawn_executable, ...})` with `{packet, 4}`, ETF framing, and OTP supervision — this is the internal template for subprocess management
-- `System.bt` already handles OS-level concerns (`getEnv:`, `osPlatform`, `pid`) — a natural home for simple command execution
-- `Actor.bt` provides `spawn` / `spawnWith:` for creating actor processes with `gen_server`-backed lifecycle — the foundation for interactive subprocess management
+- `system.bt` already handles OS-level concerns (`getEnv:`, `osPlatform`, `pid`) — a natural home for simple command execution
+- `actor.bt` provides `spawn` / `spawnWith:` for creating actor processes with `gen_server`-backed lifecycle — the foundation for interactive subprocess management
 
 ### Constraints
 
@@ -111,7 +111,7 @@ The initial design considered returning a Stream directly from the actor (e.g., 
 
    **Resolution:** The `lines` method returns a Stream whose generator calls `gen_server:call(ActorPid, {readLine, []}, infinity)` — a message send, not a direct port read. The generator executes in the caller's process (correct for Streams), and each `next` step sends a sync message to the actor to get the next line. No resource handle crosses the process boundary — only the actor's PID. `readLine` remains as the lower-level primitive for timeout-based and request-response patterns.
 
-2. **Actor constructor pattern** — `Actor.bt` only has `spawn` and `spawnWith:`. A `Subprocess open: "cmd" args: #("a")` factory method doesn't exist in the current protocol.
+2. **Actor constructor pattern** — `actor.bt` only has `spawn` and `spawnWith:`. A `Subprocess open: "cmd" args: #("a")` factory method doesn't exist in the current protocol.
 
    **Resolution:** `spawnWith:` with a config dictionary is sufficient. The Erlang-side `init/1` callback receives the config map and opens the port. A convenience class method `open:args:` desugars to `spawnWith:`:
 
@@ -638,7 +638,7 @@ Provide a convenience API that invokes the system shell, enabling pipes, redirec
 **Rejected because:** Shell injection is a top security vulnerability in subprocess execution. The EEF Security Working Group explicitly recommends against `{spawn, Command}` in favor of `spawn_executable`. Users who need piping can compose Beamtalk streams. The composability of `System output:` with `select:` / `collect:` makes shell piping unnecessary for most cases. (Note: Beamtalk stream composition is sequential, not concurrent like shell pipes — each stage blocks while the previous produces output.)
 
 ### Alternative: Port class extension
-Extend the existing `Port.bt` to add subprocess creation methods.
+Extend the existing `port.bt` to add subprocess creation methods.
 
 **Rejected because:** `Port` is a BEAM interop type representing port *identifiers* from Erlang code (ADR 0028). Adding subprocess creation conflates BEAM interop artifacts with OS process management.
 
@@ -679,8 +679,8 @@ Create `Subprocess` as a non-actor class wrapping a port handle, with methods li
 - The Rust helper binary adds ~400-500 lines of Rust code to the build — a new binary artifact alongside the compiler binary
 
 ### Neutral
-- `Port.bt` remains unchanged — still an opaque BEAM interop type
-- `System.bt` gains three method families — moderate surface area expansion
+- `port.bt` remains unchanged — still an opaque BEAM interop type
+- `system.bt` gains three method families — moderate surface area expansion
 - `Subprocess` adds one new Actor subclass — minimal addition to the class hierarchy
 - Port-backed Streams (Tier 1) have the same cross-process constraint as file-backed Streams (ADR 0021) — no new constraint introduced
 - The stdlib dependency on OTP's `os:find_executable/1` is minimal and well-tested
@@ -721,7 +721,7 @@ Build a standalone Rust binary that the BEAM spawns as a port. The binary manage
 - `runtime/apps/beamtalk_runtime/src/beamtalk_command_result.erl` — value dispatch
 
 **Extend `System`:**
-- Add `run:args:` and `run:args:env:dir:` to `stdlib/src/System.bt`
+- Add `run:args:` and `run:args:env:dir:` to `stdlib/src/system.bt`
 - Add runtime dispatch in `runtime/apps/beamtalk_runtime/src/beamtalk_system.erl`
 - Implement via `beamtalk_exec_port` — sends spawn command to Rust helper, collects tagged stdout/stderr until exit, returns `CommandResult`
 
@@ -731,7 +731,7 @@ Build a standalone Rust binary that the BEAM spawns as a port. The binary manage
 ### Phase 3: `System output:args:` streaming (M)
 
 **Extend `System`:**
-- Add `output:args:` and `output:args:do:` to `stdlib/src/System.bt`
+- Add `output:args:` and `output:args:do:` to `stdlib/src/system.bt`
 - Implement Stream generator backed by `beamtalk_exec_port` — the Erlang module receives tagged stdout data from the Rust helper and feeds the Stream
 - `output:args:do:` wraps block in `ensure:` for deterministic cleanup — sends shutdown command to helper on block exit
 
@@ -741,7 +741,7 @@ Build a standalone Rust binary that the BEAM spawns as a port. The binary manage
 ### Phase 4: `Subprocess` actor (L)
 
 **New class: `Subprocess`**
-- `stdlib/src/Subprocess.bt` — Actor subclass with `open:args:`, `open:args:env:dir:`, `writeLine:`, `readLine`, `readLine:`, `readStderrLine`, `readStderrLine:`, `lines`, `stderrLines`, `exitCode`, `close`
+- `stdlib/src/subprocess.bt` — Actor subclass with `open:args:`, `open:args:env:dir:`, `writeLine:`, `readLine`, `readLine:`, `readStderrLine`, `readStderrLine:`, `lines`, `stderrLines`, `exitCode`, `close`
 - `runtime/apps/beamtalk_runtime/src/beamtalk_subprocess.erl` — hand-written gen_server:
   - `init/1` — sends spawn command to `beamtalk_exec_port`, initializes port state and buffer queues
   - `handle_call/3` — dispatches `writeLine:`, `readLine`, `readLine:`, `readStderrLine`, `readStderrLine:`, `exitCode`, `close`, `lines`, `stderrLines`

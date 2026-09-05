@@ -102,7 +102,7 @@ Where the two notions of equality are genuinely different questions rather than 
 1. **Update implementation:**
    - Change lexer to recognize new Beamtalk comparison operator tokens in source: `/=`, `=:=`, `=/=` instead of `~=`, `=`
    - Update operator mapping in `builtins.rs` to use the new Beamtalk comparison tokens (`/=`, `=:=`, `=/=`) and drop support for the legacy `~=` and `=` comparison tokens
-   - Remove the user-defined `~=` method from `ProtoObject.bt`; inequality will now be provided by the built-in `/=` operator
+   - Remove the user-defined `~=` method from `proto_object.bt`; inequality will now be provided by the built-in `/=` operator
 
 2. **Update tests:**
    - Replace all `~=` with `/=`
@@ -112,7 +112,7 @@ Where the two notions of equality are genuinely different questions rather than 
 
 3. **Update documentation:**
    - `docs/beamtalk-syntax-rationale.md` - Update operator table
-   - `stdlib/src/ProtoObject.bt` - Update equality operator documentation
+   - `stdlib/src/proto_object.bt` - Update equality operator documentation
    - All code examples using comparison operators
 
 ## Examples

@@ -188,7 +188,7 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
 /// Compiles every stdlib source file to Core Erlang, collecting class
 /// metadata and protocol module names along the way.
 ///
-/// Protocol-only files (e.g. `Printable.bt`) have no class definition — they
+/// Protocol-only files (e.g. `printable.bt`) have no class definition — they
 /// are still compiled so the protocol gets registered at runtime, but
 /// contribute no `ClassMeta`. Files are independent (no compile ordering
 /// required); cross-file class/alias visibility comes entirely from
@@ -421,13 +421,13 @@ fn find_stdlib_files(lib_dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 
 /// Reject two stdlib sources that would compile to the same module.
 ///
-/// Module names come from the file stem alone, so `collections/Array.bt` and
-/// `legacy/Array.bt` both become `bt@stdlib@array` — the second silently
+/// Module names come from the file stem alone, so `collections/array.bt` and
+/// `legacy/array.bt` both become `bt@stdlib@array` — the second silently
 /// clobbering the first in `ebin/`. Flat layouts got uniqueness for free from
 /// the filesystem; nested ones have to check.
 ///
 /// Keyed on the *derived module name*, not the raw stem, because
-/// [`module_name_from_path`] case-folds: `BEAMError.bt` and `Beamerror.bt` are
+/// [`module_name_from_path`] case-folds: `beamerror.bt` and `Beamerror.bt` are
 /// distinct filenames that both produce `bt@stdlib@beamerror`. Comparing stems
 /// would wave that collision straight through.
 fn check_duplicate_module_names(source_files: &[Utf8PathBuf]) -> Result<()> {
@@ -923,8 +923,8 @@ fn collect_stdlib_alias_sources(source_files: &[Utf8PathBuf]) -> Result<Vec<Alia
 /// seeded `pre_loaded_aliases` from a live scan but left `pre_loaded_protocols`
 /// at its `Vec::default()`, so a stdlib file compiled with a `:: SomeProtocol`
 /// type annotation referencing a protocol declared in *another* stdlib file
-/// (e.g. `Console.bt`/`Json.bt`'s `:: Printable` parameters, with `Printable`
-/// declared in `Printable.bt`) could never see that protocol as resolved —
+/// (e.g. `console.bt`/`json.bt`'s `:: Printable` parameters, with `Printable`
+/// declared in `printable.bt`) could never see that protocol as resolved —
 /// each file is compiled independently, with only this pre-pass's output as
 /// its window into the rest of stdlib.
 ///
@@ -1059,7 +1059,7 @@ fn extract_alias_source_snippets(path: &Utf8Path) -> Result<Vec<String>> {
 
 /// Check whether a `.bt` file contains only protocol definitions (no classes).
 ///
-/// Protocol-only files (e.g. `Printable.bt`) define structural protocols via
+/// Protocol-only files (e.g. `printable.bt`) define structural protocols via
 /// `Protocol define:` but contain no class definitions. These files still need
 /// to be compiled so the protocol gets registered at runtime, but they have no
 /// class metadata to extract.
@@ -2173,8 +2173,8 @@ mod tests {
     /// registered into file B's own `ProtocolRegistry` during semantic
     /// analysis, in the very same run the protocol was first declared in.
     ///
-    /// This is the exact shape of the real stdlib bug: `Console.bt`/`Json.bt`
-    /// reference `Printable` (declared in `Printable.bt`) in a `::
+    /// This is the exact shape of the real stdlib bug: `console.bt`/`json.bt`
+    /// reference `Printable` (declared in `printable.bt`) in a `::
     /// Printable` parameter annotation — a different file entirely, compiled
     /// independently. Before this fix, `ProtocolRegistry::has_protocol` for a
     /// cross-file protocol name was always `false` while compiling any other
@@ -2191,7 +2191,7 @@ mod tests {
     fn test_cross_file_protocol_resolution_seeds_pre_loaded_protocols() {
         let (_temp, lib_dir) = temp_utf8_dir();
 
-        // File A: declares the protocol, mirroring `Printable.bt`.
+        // File A: declares the protocol, mirroring `printable.bt`.
         let file_a = lib_dir.join("ProtocolFixtureA.bt");
         fs::write(
             &file_a,
@@ -2200,7 +2200,7 @@ mod tests {
         .unwrap();
 
         // File B: references it in a parameter type annotation — the exact
-        // shape of `Console.bt`'s `printLine: aValue :: Printable -> Nil`.
+        // shape of `console.bt`'s `printLine: aValue :: Printable -> Nil`.
         let file_b = lib_dir.join("ProtocolFixtureB.bt");
         fs::write(
             &file_b,
@@ -2430,14 +2430,14 @@ mod tests {
     fn test_find_stdlib_files() {
         let (_temp, lib_dir) = temp_utf8_dir();
 
-        fs::write(lib_dir.join("Integer.bt"), "// stub").unwrap();
-        fs::write(lib_dir.join("String.bt"), "// stub").unwrap();
+        fs::write(lib_dir.join("integer.bt"), "// stub").unwrap();
+        fs::write(lib_dir.join("string.bt"), "// stub").unwrap();
         fs::write(lib_dir.join("README.md"), "not a bt file").unwrap();
 
         let files = find_stdlib_files(&lib_dir).unwrap();
         assert_eq!(files.len(), 2);
-        assert!(files.iter().any(|f| f.file_name() == Some("Integer.bt")));
-        assert!(files.iter().any(|f| f.file_name() == Some("String.bt")));
+        assert!(files.iter().any(|f| f.file_name() == Some("integer.bt")));
+        assert!(files.iter().any(|f| f.file_name() == Some("string.bt")));
     }
 
     #[test]
@@ -2463,13 +2463,13 @@ mod tests {
     #[test]
     fn test_module_name_from_path() {
         // ADR 0016: All stdlib modules use bt@stdlib@ prefix
-        let path = Utf8PathBuf::from("lib/Integer.bt");
+        let path = Utf8PathBuf::from("lib/integer.bt");
         assert_eq!(module_name_from_path(&path).unwrap(), "bt@stdlib@integer");
     }
 
     #[test]
     fn test_module_name_from_path_non_primitive() {
-        let path = Utf8PathBuf::from("lib/BeamtalkInterface.bt");
+        let path = Utf8PathBuf::from("lib/beamtalk_interface.bt");
         assert_eq!(
             module_name_from_path(&path).unwrap(),
             "bt@stdlib@beamtalk_interface"
@@ -2478,7 +2478,7 @@ mod tests {
 
     #[test]
     fn test_module_name_from_path_multi_word() {
-        let path = Utf8PathBuf::from("lib/ProtoObject.bt");
+        let path = Utf8PathBuf::from("lib/proto_object.bt");
         assert_eq!(
             module_name_from_path(&path).unwrap(),
             "bt@stdlib@proto_object"
@@ -2511,8 +2511,8 @@ mod tests {
         let (_temp, ebin_dir) = temp_utf8_dir();
 
         let source_files = vec![
-            Utf8PathBuf::from("lib/Integer.bt"),
-            Utf8PathBuf::from("lib/String.bt"),
+            Utf8PathBuf::from("lib/integer.bt"),
+            Utf8PathBuf::from("lib/string.bt"),
         ];
 
         generate_app_file(&ebin_dir, &source_files, &[], &[], &[]).unwrap();
@@ -2545,7 +2545,7 @@ mod tests {
         let (_temp, ebin_dir) = temp_utf8_dir();
 
         let source_files = vec![
-            Utf8PathBuf::from("lib/Integer.bt"),
+            Utf8PathBuf::from("lib/integer.bt"),
             Utf8PathBuf::from("lib/my-bad-name.bt"),
         ];
 
@@ -2557,7 +2557,7 @@ mod tests {
     fn test_generate_app_file_with_protocol_modules() {
         let (_temp, ebin_dir) = temp_utf8_dir();
 
-        let source_files = vec![Utf8PathBuf::from("lib/Integer.bt")];
+        let source_files = vec![Utf8PathBuf::from("lib/integer.bt")];
         let protocol_modules = vec!["bt@stdlib@printable".to_string()];
 
         generate_app_file(&ebin_dir, &source_files, &[], &protocol_modules, &[]).unwrap();
@@ -2573,12 +2573,12 @@ mod tests {
     fn test_generate_app_file_with_type_aliases() {
         let (_temp, ebin_dir) = temp_utf8_dir();
 
-        let source_files = vec![Utf8PathBuf::from("lib/Supervisor.bt")];
+        let source_files = vec![Utf8PathBuf::from("lib/supervisor.bt")];
         let alias_metadata = vec![app_file::AliasMetadata {
             name: "SupervisionStrategy".to_string(),
             expansion: "#oneForOne | #oneForAll | #restForOne".to_string(),
             doc: None,
-            source_file: "lib/Supervisor.bt".to_string(),
+            source_file: "lib/supervisor.bt".to_string(),
             internal: false,
         }];
 
@@ -2938,10 +2938,10 @@ mod tests {
         let (_temp, dir) = temp_utf8_dir();
         fs::create_dir_all(dir.join("collections")).unwrap();
         fs::create_dir_all(dir.join("actors/supervision")).unwrap();
-        fs::write(dir.join("Object.bt"), "Object subclass: Object\n").unwrap();
-        fs::write(dir.join("collections/Array.bt"), "Object subclass: Array\n").unwrap();
+        fs::write(dir.join("object.bt"), "Object subclass: Object\n").unwrap();
+        fs::write(dir.join("collections/array.bt"), "Object subclass: Array\n").unwrap();
         fs::write(
-            dir.join("actors/supervision/Supervisor.bt"),
+            dir.join("actors/supervision/supervisor.bt"),
             "Object subclass: Supervisor\n",
         )
         .unwrap();
@@ -2952,7 +2952,7 @@ mod tests {
         stems.sort_unstable();
         assert_eq!(
             stems,
-            vec!["Array", "Object", "Supervisor"],
+            vec!["array", "object", "supervisor"],
             "Nested classes must be found at any depth. Got: {files:?}"
         );
     }
@@ -2962,9 +2962,9 @@ mod tests {
         // Subdirectories are editorial only — `bt@stdlib@array` regardless of
         // where the file sits. Deliberately unlike user packages, where
         // `src/util/math.bt` becomes `util@math`.
-        let flat = module_name_from_path(Utf8Path::new("stdlib/src/Array.bt")).unwrap();
+        let flat = module_name_from_path(Utf8Path::new("stdlib/src/array.bt")).unwrap();
         let nested =
-            module_name_from_path(Utf8Path::new("stdlib/src/collections/Array.bt")).unwrap();
+            module_name_from_path(Utf8Path::new("stdlib/src/collections/array.bt")).unwrap();
 
         assert_eq!(flat, "bt@stdlib@array");
         assert_eq!(nested, flat, "Subdirectory must not change the module name");
@@ -2973,9 +2973,9 @@ mod tests {
     #[test]
     fn check_duplicate_module_names_accepts_unique_names_across_subdirectories() {
         let files = vec![
-            Utf8PathBuf::from("stdlib/src/Object.bt"),
-            Utf8PathBuf::from("stdlib/src/collections/Array.bt"),
-            Utf8PathBuf::from("stdlib/src/numeric/Integer.bt"),
+            Utf8PathBuf::from("stdlib/src/object.bt"),
+            Utf8PathBuf::from("stdlib/src/collections/array.bt"),
+            Utf8PathBuf::from("stdlib/src/numeric/integer.bt"),
         ];
         assert!(check_duplicate_module_names(&files).is_ok());
     }
@@ -2984,16 +2984,16 @@ mod tests {
     fn check_duplicate_module_names_rejects_same_stem_in_two_subdirectories() {
         // Both compile to `bt@stdlib@array`, silently clobbering in ebin/.
         let files = vec![
-            Utf8PathBuf::from("stdlib/src/collections/Array.bt"),
-            Utf8PathBuf::from("stdlib/src/legacy/Array.bt"),
+            Utf8PathBuf::from("stdlib/src/collections/array.bt"),
+            Utf8PathBuf::from("stdlib/src/legacy/array.bt"),
         ];
 
         let err = check_duplicate_module_names(&files)
             .unwrap_err()
             .to_string();
         assert!(
-            err.contains("stdlib/src/collections/Array.bt")
-                && err.contains("stdlib/src/legacy/Array.bt"),
+            err.contains("stdlib/src/collections/array.bt")
+                && err.contains("stdlib/src/legacy/array.bt"),
             "Error must name both colliding paths in full, so the user knows \
              which two files to rename. Got: {err}"
         );
@@ -3007,9 +3007,9 @@ mod tests {
     fn check_duplicate_module_names_catches_case_folded_collision() {
         // `to_module_name` lowercases, so these distinct filenames both yield
         // `bt@stdlib@beamerror`. A raw-stem comparison would miss it — and
-        // `BEAMError.bt` is a real stdlib class, so the shape is not academic.
+        // `beamerror.bt` is a real stdlib class, so the shape is not academic.
         let files = vec![
-            Utf8PathBuf::from("stdlib/src/BEAMError.bt"),
+            Utf8PathBuf::from("stdlib/src/beamerror.bt"),
             Utf8PathBuf::from("stdlib/src/errors/Beamerror.bt"),
         ];
 
@@ -3034,7 +3034,7 @@ mod tests {
     }
 
     /// BT-3033: `beamtalk_primitive:is_string_binary_shared_selector/1` hand-lists
-    /// the `Binary.bt` instance selectors that `String.bt` inherits unchanged
+    /// the `binary.bt` instance selectors that `string.bt` inherits unchanged
     /// (byte-level primitives, safe to dispatch without the `is_utf8/1` scan).
     /// This test recomputes that set from the real `.bt` sources — Binary's own
     /// instance selectors minus whatever String redefines — and fails if it
@@ -3042,7 +3042,7 @@ mod tests {
     /// that changes the override relationship is caught here instead of
     /// silently reintroducing BT-2999-style misdispatch.
     ///
-    /// BT-3049: this only sees overrides made by editing `Binary.bt`/`String.bt`
+    /// BT-3049: this only sees overrides made by editing `binary.bt`/`string.bt`
     /// directly — it has no visibility into selectors added via the `extend`
     /// mechanism (ADR 0066), which lives in separate extension sources, not the
     /// class bodies this test parses. That's a known, currently-low-risk gap
@@ -3053,13 +3053,13 @@ mod tests {
     #[test]
     fn test_binary_string_shared_selectors_stay_in_sync() {
         let root = project_root();
-        let binary_path = root.join("stdlib/src/Binary.bt");
-        let string_path = root.join("stdlib/src/String.bt");
+        let binary_path = root.join("stdlib/src/binary.bt");
+        let string_path = root.join("stdlib/src/string.bt");
 
         let binary_meta = extract_class_metadata(&binary_path, "bt@stdlib@binary")
-            .expect("Binary.bt should parse");
+            .expect("binary.bt should parse");
         let string_meta = extract_class_metadata(&string_path, "bt@stdlib@string")
-            .expect("String.bt should parse");
+            .expect("string.bt should parse");
 
         let string_overrides: std::collections::HashSet<&str> = string_meta
             .methods
@@ -3093,11 +3093,11 @@ mod tests {
 
         assert_eq!(
             inherited_unchanged, hardcoded,
-            "Binary.bt selectors NOT overridden by String.bt (left) no longer \
+            "binary.bt selectors NOT overridden by string.bt (left) no longer \
              match beamtalk_primitive.erl's is_string_binary_shared_selector/1 \
              (right). Update that Erlang function to match — a selector only \
-             belongs there if String.bt truly inherits it unchanged from \
-             Binary.bt."
+             belongs there if string.bt truly inherits it unchanged from \
+             binary.bt."
         );
     }
 
@@ -3506,7 +3506,7 @@ mod tests {
     #[test]
     fn test_extract_class_metadata_timer_marks_spawning_class_methods() {
         let (_temp, dir) = temp_utf8_dir();
-        let file = dir.join("Timer.bt");
+        let file = dir.join("timer.bt");
         fs::write(
             &file,
             "Object subclass: Timer\n  \
@@ -3535,7 +3535,7 @@ mod tests {
     #[test]
     fn test_extract_class_metadata_timer_missing_selectors_errors() {
         let (_temp, dir) = temp_utf8_dir();
-        let file = dir.join("Timer.bt");
+        let file = dir.join("timer.bt");
         fs::write(&file, "Object subclass: Timer\n  class noop => nil\n").unwrap();
 
         let err = extract_class_metadata(&file, "bt@stdlib@timer")
@@ -3547,7 +3547,7 @@ mod tests {
     #[test]
     fn test_extract_class_metadata_parallel_marks_spawning_class_methods() {
         let (_temp, dir) = temp_utf8_dir();
-        let file = dir.join("Parallel.bt");
+        let file = dir.join("parallel.bt");
         fs::write(
             &file,
             "Object subclass: Parallel\n  \
@@ -3564,7 +3564,7 @@ mod tests {
     #[test]
     fn test_extract_class_metadata_collection_marks_spawning_methods() {
         let (_temp, dir) = temp_utf8_dir();
-        let file = dir.join("Collection.bt");
+        let file = dir.join("collection.bt");
         fs::write(
             &file,
             "Object subclass: Collection\n  \
@@ -3661,7 +3661,7 @@ mod tests {
     #[test]
     fn test_is_protocol_only_file_true_for_protocol_only_source() {
         let (_temp, dir) = temp_utf8_dir();
-        let file = dir.join("Printable.bt");
+        let file = dir.join("printable.bt");
         fs::write(&file, "Protocol define: Printable\n  asString -> String\n").unwrap();
         assert!(is_protocol_only_file(&file).unwrap());
     }
@@ -3698,7 +3698,7 @@ mod tests {
     fn test_collect_stdlib_protocol_infos_skips_unreadable_file() {
         let (_temp, dir) = temp_utf8_dir();
         let missing = dir.join("Missing.bt");
-        let real = dir.join("Printable.bt");
+        let real = dir.join("printable.bt");
         fs::write(&real, "Protocol define: Printable\n  asString -> String\n").unwrap();
 
         let infos = collect_stdlib_protocol_infos(&[missing, real]);

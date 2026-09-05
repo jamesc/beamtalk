@@ -8,7 +8,7 @@
 //! § Duplication & the Shared-Leaf-Module Pattern).
 //!
 //! Beamtalk classes already group methods in source with a `// === Name ===`
-//! divider comment (e.g. `Actor.bt`'s `// === Timeout proxy ===`). This module
+//! divider comment (e.g. `actor.bt`'s `// === Timeout proxy ===`). This module
 //! is the single, canonical recognizer for that convention: it parses divider
 //! comments and associates the methods that follow each one — until the next
 //! divider or the end of the class — into a [`MethodCategory`].

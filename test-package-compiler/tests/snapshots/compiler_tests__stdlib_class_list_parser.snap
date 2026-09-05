@@ -2755,7 +2755,7 @@ Module {
                         preceding_blank_line: true,
                     },
                     Comment {
-                        content: "Mirrors lib/List.bt exactly — new/0 should return [] (empty list).",
+                        content: "Mirrors lib/list.bt exactly — new/0 should return [] (empty list).",
                         span: Span {
                             start: 208,
                             end: 214,

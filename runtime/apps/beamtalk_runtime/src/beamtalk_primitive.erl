@@ -445,7 +445,7 @@ with drifted liveness handling: the test-runner copy unconditionally
 rendered `#Actor<...>`, so a dead pid was reported as alive.
 
 Deliberately distinct from `print_string/1`'s `#Pid<...>` rendering for
-`Pid`-class values (ADR-documented in `stdlib/src/Pid.bt`, liveness-agnostic
+`Pid`-class values (ADR-documented in `stdlib/src/pid.bt`, liveness-agnostic
 by design) — this is wire/test display only, layered on top of the same
 underlying pid, not a replacement for it.
 """.
@@ -632,7 +632,7 @@ BT-3200: `respondsTo:` on a class-object receiver — checks `ClassName`'s own
 class-side methods/extensions before falling back to the generic
 `Class`/`Behaviour`/`Object` protocol.
 
-`respondsTo:` is a sealed compiler intrinsic (`Object.bt`), so every call
+`respondsTo:` is a sealed compiler intrinsic (`object.bt`), so every call
 site compiles directly to `beamtalk_primitive:responds_to/2` — it never
 reaches `beamtalk_dispatch:lookup/5` or a compiled class's own `dispatch/4`.
 Before this, a class object's `respondsTo:` always answered against the
@@ -730,7 +730,7 @@ module_for_value(X, _Selector) ->
 -doc """
 True for selectors where `String` and `Binary` behave identically (BT-3033).
 
-Derived from `Binary.bt`'s own instance methods that `String.bt` does *not*
+Derived from `binary.bt`'s own instance methods that `string.bt` does *not*
 redefine — per ADR 0086's method override table, these are the byte-level
 primitives String inherits unchanged (`byteAt:`, `byteSize`, `part:size:`,
 `concat:`, `toBytes`, `asStringUnchecked`, `asBase64`, `asBase64Url`,
@@ -745,7 +745,7 @@ Kept in sync with the two source files by
 which fails the build if either file's method list drifts from this set.
 
 Soundness depends on a codegen invariant, not just name-matching: a selector
-`String.bt` doesn't locally define is never duplicated into
+`string.bt` doesn't locally define is never duplicated into
 `'bt@stdlib@string'`'s compiled `dispatch/3`/`has_method/1` — it's compiled
 as a runtime delegation to `'bt@stdlib@binary'`'s implementation instead. So
 routing one of these selectors through `'bt@stdlib@string'` would call the
@@ -760,7 +760,7 @@ list's safety would need re-deriving from semantics again, not just names.
 This function alone is *not* sufficient to pick the fast path, only a
 necessary precondition: since these selectors are locally defined on
 `Binary`, ADR 0066 forbids a competing `Binary` extension for any of them,
-but a `String` extension is legal (they're absent from `String.bt`) and
+but a `String` extension is legal (they're absent from `string.bt`) and
 would make the selector no longer "identical either way" — it would run
 String-only logic against a receiver `class_of/1` still reports as
 `Binary`. Callers must additionally check `beamtalk_extensions:has/2` for a
