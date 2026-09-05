@@ -92,9 +92,9 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
   // ADR 0118 phase 3: ConditionalLoop condition as IR.
   adr0118Phase3Pending => false
 
-  // ADR 0118 phase 4: inline-threaded control flow as a producer;
-  // ifNil:ifNotNil:, match: arms, ifNone:, generic Tier 2 blocks.
-  adr0118Phase4Pending => true
+  // ADR 0118 phase 4 (BT-3420): inline-threaded control flow as a producer;
+  // ifNil:ifNotNil:, match: arms, ifNone:, generic Tier 2 blocks. Landed.
+  adr0118Phase4Pending => false
 
   // ════════════════════════════════════════════════════════════════════
   //  PASSING POSITIONS
@@ -167,6 +167,31 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
     self assert: self.c selfSendArgSelfSend equals: 1
     self assert: self.c getCount equals: 1
     self assert: self.c getLog equals: #(1)
+
+  // BT-3420 (ADR 0118 phase 4): a mutation-threaded conditional nested as
+  // an argument INSIDE another conditional's branch body — the tuple leak
+  // that `try generate_expression`'s C12 catch-all inside a branch used to
+  // let through unwrapped, fixed by the same inline-control-flow producer
+  // as the top-level `conditionalArgToKeywordSendSelfSend` shape.
+  testConditionalArgInsideBranchSelfSendTrue =>
+    self assert: (self.c conditionalArgInsideBranchSelfSend: true) equals: 1
+    self assert: self.c getCount equals: 1
+    self assert: self.c getLog equals: #(1)
+
+  testConditionalArgInsideBranchSelfSendFalse =>
+    self assert: (self.c conditionalArgInsideBranchSelfSend: false) equals: 0
+    self assert: self.c getCount equals: 0
+
+  // BT-3420 (ADR 0118 phase 4): self-send in the `ifNil:` (nil) block
+  // specifically — the mirror image of `ifNilIfNotNilBlockArgSelfSend`'s
+  // `ifNotNil:` block below.
+  testIfNilBlockArgSelfSendNil =>
+    self assert: (self.c ifNilBlockArgSelfSend: nil) equals: 1
+    self assert: self.c getCount equals: 1
+
+  testIfNilBlockArgSelfSendNonNil =>
+    self assert: (self.c ifNilBlockArgSelfSend: 5) equals: 0
+    self assert: self.c getCount equals: 0
 
   testEarlyReturnInBranchSelfSendTrue =>
     self assert: (self.c earlyReturnInBranchSelfSend: true) equals: 10

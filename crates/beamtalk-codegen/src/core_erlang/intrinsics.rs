@@ -1954,6 +1954,22 @@ impl CoreErlangGenerator {
             }
             Some(WellKnownSelector::IfNil) => {
                 debug_assert_eq!(arguments.len(), 1);
+                // BT-3420 (ADR 0118 phase 4): same inline mutation-threading
+                // check as `ifNotNil:` below — a self-send or field mutation
+                // inside the `ifNil:` block must not be lost to a plain
+                // closure.
+                if self.context == CodeGenContext::Actor || self.in_loop_body {
+                    if let Expression::Block(block) = &arguments[0] {
+                        if self.conditional_needs_mutation_threading(receiver, &[block]) {
+                            let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
+                                receiver,
+                                Some(block),
+                                None,
+                            )?;
+                            return Ok(Some(tuple_doc));
+                        }
+                    }
+                }
                 // BT-1942: Hoist open-scope receiver/block (e.g. class method self-sends).
                 let (preamble, mut docs) =
                     self.capture_subexpr_sequence(&[receiver, &arguments[0]], "IfNil")?;
@@ -1999,7 +2015,11 @@ impl CoreErlangGenerator {
                             // This ensures a block with >1 params still raises
                             // BlockArityMismatch rather than producing invalid Core Erlang.
                             validate_if_not_nil_block(&arguments[0], selector_name)?;
-                            let doc = self.generate_if_not_nil_with_mutations(receiver, block)?;
+                            let doc = self.generate_nil_conditional_with_mutations_tuple(
+                                receiver,
+                                None,
+                                Some(block),
+                            )?;
                             return Ok(Some(doc));
                         }
                     }
@@ -2038,6 +2058,27 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::IfNilIfNotNil) => {
                 debug_assert_eq!(arguments.len(), 2);
                 let selector_name = WellKnownSelector::IfNilIfNotNil.as_str();
+                // BT-3420 (ADR 0118 phase 4): inline mutation-threading
+                // check, same as the single-block `ifNil:`/`ifNotNil:`
+                // arms above.
+                if self.context == CodeGenContext::Actor || self.in_loop_body {
+                    if let (Expression::Block(nil_block), Expression::Block(not_nil_block)) =
+                        (&arguments[0], &arguments[1])
+                    {
+                        if self.conditional_needs_mutation_threading(
+                            receiver,
+                            &[nil_block, not_nil_block],
+                        ) {
+                            validate_if_not_nil_block(&arguments[1], selector_name)?;
+                            let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
+                                receiver,
+                                Some(nil_block),
+                                Some(not_nil_block),
+                            )?;
+                            return Ok(Some(tuple_doc));
+                        }
+                    }
+                }
                 // If the notNil block has 0 parameters, don't pass the receiver
                 // BT-1942: Hoist open-scope sub-expressions (e.g. class method self-sends).
                 let block_takes_arg = validate_if_not_nil_block(&arguments[1], selector_name)?;
@@ -2082,6 +2123,27 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::IfNotNilIfNil) => {
                 debug_assert_eq!(arguments.len(), 2);
                 let selector_name = WellKnownSelector::IfNotNilIfNil.as_str();
+                // BT-3420 (ADR 0118 phase 4): inline mutation-threading
+                // check, same as the single-block `ifNil:`/`ifNotNil:`
+                // arms above.
+                if self.context == CodeGenContext::Actor || self.in_loop_body {
+                    if let (Expression::Block(not_nil_block), Expression::Block(nil_block)) =
+                        (&arguments[0], &arguments[1])
+                    {
+                        if self.conditional_needs_mutation_threading(
+                            receiver,
+                            &[not_nil_block, nil_block],
+                        ) {
+                            validate_if_not_nil_block(&arguments[0], selector_name)?;
+                            let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
+                                receiver,
+                                Some(nil_block),
+                                Some(not_nil_block),
+                            )?;
+                            return Ok(Some(tuple_doc));
+                        }
+                    }
+                }
                 // If the notNil block has 0 parameters, don't pass the receiver
                 // BT-1942: Hoist open-scope sub-expressions (e.g. class method self-sends).
                 let block_takes_arg = validate_if_not_nil_block(&arguments[0], selector_name)?;
@@ -2669,9 +2731,9 @@ impl CoreErlangGenerator {
                                 self.set_repl_loop_mutated(true);
                             }
                             let doc = if kw == "and:" {
-                                self.generate_and_with_mutations(receiver, block)?
+                                self.generate_and_with_mutations_tuple(receiver, block)?
                             } else {
-                                self.generate_or_with_mutations(receiver, block)?
+                                self.generate_or_with_mutations_tuple(receiver, block)?
                             };
                             return Ok(Some(doc));
                         }
@@ -2705,7 +2767,7 @@ impl CoreErlangGenerator {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
                         }
-                        let doc = self.generate_if_true_with_mutations(receiver, block)?;
+                        let doc = self.generate_if_true_with_mutations_tuple(receiver, block)?;
                         return Ok(Some(doc));
                     }
                 }
@@ -2721,7 +2783,7 @@ impl CoreErlangGenerator {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
                         }
-                        let doc = self.generate_if_false_with_mutations(receiver, block)?;
+                        let doc = self.generate_if_false_with_mutations_tuple(receiver, block)?;
                         return Ok(Some(doc));
                     }
                 }
@@ -2740,7 +2802,7 @@ impl CoreErlangGenerator {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
                         }
-                        let doc = self.generate_if_true_if_false_with_mutations(
+                        let doc = self.generate_if_true_if_false_with_mutations_tuple(
                             receiver,
                             true_block,
                             false_block,

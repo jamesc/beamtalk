@@ -4200,7 +4200,10 @@ impl CoreErlangGenerator {
             // BT-3402: `and:`/`or:` now have their own inline-case generators
             // (`generate_and_with_mutations`/`generate_or_with_mutations`), so they
             // satisfy (b) the same way `ifTrue:`/`ifFalse:` do.
-            "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifNotNil:" | "and:" | "or:" => {
+            // BT-3420: `ifNil:`/`ifNil:ifNotNil:`/`ifNotNil:ifNil:` now share
+            // `generate_nil_conditional_with_mutations`, satisfying (b) too.
+            "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifNotNil:" | "and:" | "or:"
+            | "ifNil:" | "ifNil:ifNotNil:" | "ifNotNil:ifNil:" => {
                 Self::non_empty(self.conditional_threaded_locals(&Self::block_args(arguments)))
             }
             // BT-3160: on:do:/ensure: thread outer-local mutations the same way a

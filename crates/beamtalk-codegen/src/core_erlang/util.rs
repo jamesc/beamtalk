@@ -281,6 +281,20 @@ impl CoreErlangGenerator {
         let inner = expr.unwrap_parens();
         let span = inner.span();
 
+        // ADR 0118 phase 4 (BT-3420): an inline-threaded control-flow
+        // construct — `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`, `and:`/`or:`,
+        // the nil-conditional family, or `match:` — that needs mutation
+        // threading is a producer in its own right: its `_with_mutations`/
+        // `generate_match` builder's internal `{Value, NewState}` case
+        // becomes a real prelude via `control_flow_tuple_to_threaded_value`
+        // instead of an opaque tuple `Document` a caller might embed
+        // unwrapped. This closes the row that used to leak that tuple into
+        // an argument position (`self record: (flag ifTrue: [self bump]
+        // ifFalse: [0])`).
+        if let Some(tv) = self.inline_control_flow_producer(inner)? {
+            return Ok(tv);
+        }
+
         if self.is_prelude_producer(inner) {
             let Expression::MessageSend {
                 selector,
@@ -627,6 +641,11 @@ impl CoreErlangGenerator {
         if Self::is_trivial_subexpr(inner) {
             return false;
         }
+        // ADR 0118 phase 4 (BT-3420): mirrors `threaded_expression`'s new
+        // inline-control-flow producer branch — see its doc comment.
+        if self.inline_control_flow_needs_threading(inner) {
+            return true;
+        }
         if self.is_prelude_producer(inner) {
             return true;
         }
@@ -666,69 +685,35 @@ impl CoreErlangGenerator {
 
     /// BT-3396/BT-3414 (ADR 0118 phase 0): `true` if compiling `expr`
     /// through [`Self::threaded_expression`] would give it a non-empty
-    /// prelude, INCLUDING the `and:`/`or:` mutation-threading carve-out
-    /// below — the decision predicate for "does this conditional need
-    /// inlining because of its receiver?"
-    /// (`conditional_needs_mutation_threading`,
-    /// `compile_conditional_receiver`'s own `and:`/`or:` special case).
+    /// prelude — the decision predicate for "does this conditional need
+    /// inlining because of its receiver?" (`conditional_needs_mutation_threading`).
     ///
     /// Formerly `contains_hoistable_self_send`
     /// (`control_flow/conditionals.rs`), backed by the hoist planner's own
     /// walk so a decision and its emission could never disagree. ADR 0118
-    /// phase 2b (BT-3418) deleted that walk; this predicate now shares
+    /// phase 2b (BT-3418) deleted that walk; this predicate shares
     /// [`Self::subexpr_needs_prelude`] with the sequencing rule itself
     /// instead — the same "would compiling this actually produce a
     /// prelude?" question the rule already answers for every one of its
     /// own children — so it still cannot disagree with what compiling
     /// `expr` does, without sharing code with an emitting walk. Lives here
     /// (not `control_flow/conditionals.rs`) because it is now a thin
-    /// wrapper over `subexpr_needs_prelude`. `until phase 6 replaces it`:
-    /// ADR 0118 phase 4 turns a mutation-threaded `and:`/`or:` into a real
-    /// producer, and phase 6 unifies the class-var/actor-state receiver
-    /// positions this predicate still special-cases below.
+    /// wrapper over `subexpr_needs_prelude`.
+    ///
+    /// ADR 0118 phase 4 (BT-3420) deleted this function's own `and:`/`or:`
+    /// carve-out: `subexpr_needs_prelude` now recognizes a nested
+    /// mutation-threaded `and:`/`or:`/nil-conditional/`match:` receiver
+    /// (`((self recordOnce: which) and: [x]) ifTrue:ifFalse:`) directly, via
+    /// [`Self::inline_control_flow_needs_threading`], so the signal this
+    /// carve-out used to restore here is never lost in the first place.
+    /// Phase 6 unifies the remaining class-var/actor-state receiver
+    /// positions this predicate still special-cases below (there are none
+    /// left as of this phase — kept as a thin wrapper for its own call
+    /// sites' sake).
     pub(in crate::core_erlang) fn conditional_receiver_needs_threading(
         &self,
         expr: &Expression,
     ) -> bool {
-        // BT-3402/BT-3396 interaction: `and:`/`or:` is `is_conditional_selector`
-        // (widened by BT-3402), so `sequenced_send_children`/
-        // `subexpr_needs_prelude` treat it as opaque — never recursing into
-        // a bare self-send that is ITS OWN receiver (`(self recordOnce: x)
-        // and: [true]`). That opacity is correct for the sequencing rule
-        // (this exact shape is threaded by `compile_conditional_receiver`'s
-        // own `and:`/`or:` special case instead of the generic rule), but
-        // this predicate is also the decision this conditional's ENCLOSING
-        // caller (`conditional_needs_mutation_threading`) uses to decide
-        // whether ITS receiver needs the inline mutation-threading path at
-        // all. Losing this signal here left the outer conditional wrongly
-        // classified as not needing threading — falling through to plain
-        // generic dispatch, where `and:`/`or:`'s own
-        // `try_generate_boolean_protocol` interception still unconditionally
-        // fires and compiles to a `{Result, NewState}` *tuple* value with no
-        // caller positioned to unwrap it, corrupting the state-version
-        // numbering (`unbound variable 'State1'`). So: explicitly recognize
-        // this exact shape here too — same gate
-        // (`and_or_needs_mutation_threading`) `compile_conditional_receiver`
-        // uses to actually execute it — before falling back to
-        // `subexpr_needs_prelude` for every other shape.
-        if let Expression::MessageSend {
-            receiver: and_or_receiver,
-            selector: MessageSelector::Keyword(parts),
-            arguments,
-            ..
-        } = expr.unwrap_parens()
-        {
-            if parts.len() == 1 && arguments.len() == 1 {
-                let kw = parts[0].keyword.as_str();
-                if kw == "and:" || kw == "or:" {
-                    if let Expression::Block(block) = &arguments[0] {
-                        if self.and_or_needs_mutation_threading(and_or_receiver, block) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
         self.subexpr_needs_prelude(expr)
     }
 

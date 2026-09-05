@@ -26,8 +26,8 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, CascadeMessage,
-    Expression, Identifier, Literal, MapPair, MapPatternKey, MatchArm, MessageSelector, Pattern,
-    StringSegment,
+    Expression, ExpressionStatement, Identifier, Literal, MapPair, MapPatternKey, MatchArm,
+    MessageSelector, Pattern, StringSegment,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -2962,6 +2962,33 @@ impl CoreErlangGenerator {
         }
         if self.control_flow_has_mutations(body) {
             return self.expression_doc(body);
+        }
+        // BT-3420 (ADR 0118 phase 4): an arm body that is plain AST-directed
+        // code but contains a (possibly nested, hoistable) actor self-send —
+        // `1 -> 1 + (self bumpCount)` — must not compile through a bare
+        // `expression_doc` call, which has no hoisting of its own and
+        // silently drops the self-send's mutation. Route it through
+        // `generate_conditional_branch_inline` instead — the SAME per-frame
+        // `ThreadedIr` machinery `ifTrue:`/`ifFalse:` branches use, wrapped
+        // in a synthetic single-statement `Block` — so its full C1-C13
+        // statement classification (field/local assignment, a nested
+        // self-send anywhere `thread_ahead` reaches) applies here too,
+        // rather than re-deriving a narrower hoist by hand.
+        if self.conditional_receiver_needs_threading(body) {
+            let synthetic_block = Block::new(
+                Vec::new(),
+                vec![ExpressionStatement::bare(body.clone())],
+                body.span(),
+            );
+            let (branch_doc, _branch_final) = self.with_branch_context(|this| {
+                this.generate_conditional_branch_inline(&synthetic_block)
+            })?;
+            return Ok(docvec![
+                "let StateAcc = ",
+                base_state_var,
+                " in ",
+                branch_doc
+            ]);
         }
         let body_doc = self.expression_doc(body)?;
         Ok(docvec!["{", body_doc, ", ", base_state_var, "}"])
