@@ -42,7 +42,7 @@
 //! Non-mutating calls return `None` here and fall through to the ordinary dispatch
 //! to the `Collection.bt` method, preserving existing behaviour.
 
-use super::super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+use super::super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{
@@ -122,11 +122,11 @@ fn inlined_body(body: &[ExpressionStatement]) -> Vec<Expression> {
 impl CoreErlangGenerator {
     /// Returns `true` if `block` mutates field/local state in a way that requires
     /// threading (and so cannot be served by a plain dispatch to the `Collection.bt`
-    /// method). Mirrors the per-block analysis in `control_flow_has_mutations`.
+    /// method). BT-3423: shares [`Self::block_arg_needs_threading`] — the same
+    /// combinator `control_flow_has_mutations` and
+    /// `conditional_needs_mutation_threading` use for their own per-block check.
     fn enumeration_block_needs_threading(&self, block: &Block) -> bool {
-        let analysis = block_analysis::analyze_block(block);
-        self.needs_mutation_threading(&analysis)
-            || self.body_has_list_op_cross_scope_mutations(block)
+        self.block_arg_needs_threading(block)
     }
 
     /// Returns `true` when the desugared fold threads actor `State`: an actor

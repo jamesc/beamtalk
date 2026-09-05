@@ -589,6 +589,24 @@ from expected-fail to pass rather than adding one-off tests.
    to see the class-var `Bind`s because they are now in the prelude.
 6. **One predicate, one table.** `state_effects` semantic fact; collapse the
    codegen gates; unify the selector tables; delete the lint's copy.
+   BT-3423 note: phases 2b/4/5b's `ThreadedValue`/prelude machinery already
+   converged codegen's own "does this receiver sub-tree need threading"
+   question onto one internal predicate
+   (`CoreErlangGenerator::conditional_receiver_needs_threading`, a thin
+   wrapper over `subexpr_needs_prelude` — formerly `contains_hoistable_self_send`)
+   ahead of this phase, by a different mechanism than this section
+   originally proposed (`subtree_needs_threading` reading `state_effects`
+   directly). `state_effects` is added as specified for the consumers that
+   *cannot* reach that codegen-internal predicate — `beamtalk-core` cannot
+   depend on `beamtalk-codegen` (§Architecture), so the lint and any future
+   LSP diagnostic need their own semantic-level fact — while codegen's
+   remaining "does this literal block's body need mutation threading"
+   duplication (four independently-inlined copies across
+   `control_flow_has_mutations`, `enumeration_block_needs_threading`,
+   `conditional_needs_mutation_threading`) collapses to one
+   `block_arg_needs_threading` helper instead. The selector tables unify as
+   planned (`state_threaded_block_arg_indices`, one source for
+   `get_control_flow_threaded_vars` and the lint).
 7. **Close-out.** `just verify-threaded-ir` runs the matrix corpus (the
    bootstrap-test corpus it names today contains no actor code); docs
    (`debugging.md` verifier table, `beamtalk-language-features.md`'s

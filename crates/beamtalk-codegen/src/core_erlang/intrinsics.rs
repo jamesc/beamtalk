@@ -2783,13 +2783,16 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         blocks: &[&Block],
     ) -> bool {
-        use super::block_analysis;
-
         blocks.iter().any(|block| {
-            let analysis = block_analysis::analyze_block(block);
-            self.needs_mutation_threading(&analysis)
-                || self.body_has_list_op_cross_scope_mutations(block)
-                || (self.in_loop_body && !analysis.local_writes.is_empty())
+            // BT-3423: shares `block_arg_needs_threading`'s block-body check
+            // (block-local/field mutations plus a cross-scope list-op
+            // mutation) — the same combinator `control_flow_has_mutations`
+            // and `enumeration_block_needs_threading` use — extended here
+            // with the in-loop-body-local-write disjunct only this caller
+            // needs.
+            self.block_arg_needs_threading(block)
+                || (self.in_loop_body
+                    && !self.block_profile_or_analyze(block).local_writes.is_empty())
         }) || self.conditional_receiver_needs_threading(receiver)
     }
 

@@ -3157,6 +3157,46 @@ impl CoreErlangGenerator {
         !cross_scope_writes.is_empty()
     }
 
+    /// BT-3423: the precomputed [`block_analysis::BlockMutationAnalysis`]
+    /// profile for `block` when one exists (populated by `compute_semantic_facts`
+    /// alongside every other fact), else computed on the fly. This exact
+    /// `block_profile(…).cloned().unwrap_or_else(|| analyze_block(…))` pattern
+    /// was independently inlined at every call site that needed a block's
+    /// analysis; extracted so it (and, via [`Self::block_arg_needs_threading`],
+    /// the "does this literal block need mutation threading" check built on
+    /// top of it) has one home.
+    pub(super) fn block_profile_or_analyze(
+        &self,
+        block: &Block,
+    ) -> block_analysis::BlockMutationAnalysis {
+        self.semantic_facts
+            .block_profile(&block.span)
+            .cloned()
+            .unwrap_or_else(|| block_analysis::analyze_block(block))
+    }
+
+    /// BT-3423 (ADR 0118 phase 6): the single "does this literal block's body
+    /// need mutation threading" check — block-local/field mutations
+    /// ([`Self::needs_mutation_threading`], reading [`Self::block_profile_or_analyze`])
+    /// OR a cross-scope mutation buried in a nested list-op/counted loop the
+    /// block-level analysis alone can't see
+    /// ([`Self::body_has_list_op_cross_scope_mutations`]). Replaces three
+    /// identical copies of this exact two-part check that were inlined in
+    /// `control_flow_has_mutations` (`gen_server/methods.rs`: the exception-
+    /// selector receiver, each conditional branch argument, and the default
+    /// per-argument loop) plus a fourth copy in `enumeration_block_needs_threading`
+    /// (`control_flow/list_ops/enumeration_ops.rs`) — the "must stay in sync"
+    /// duplication ADR 0118 §Context calls out.
+    /// [`Self::conditional_needs_mutation_threading`] (`intrinsics.rs`) also
+    /// calls this for its per-block check, extending it with an
+    /// in-loop-body-local-write disjunct that the other four call sites don't
+    /// need.
+    pub(in crate::core_erlang) fn block_arg_needs_threading(&self, block: &Block) -> bool {
+        let analysis = self.block_profile_or_analyze(block);
+        self.needs_mutation_threading(&analysis)
+            || self.body_has_list_op_cross_scope_mutations(block)
+    }
+
     /// BT-1329: Recursively scans an expression for list op message sends with
     /// cross-scope mutations. Unlike `collect_list_op_cross_scope_mutations`,
     /// this also looks inside Assignment values.
@@ -4121,83 +4161,85 @@ impl CoreErlangGenerator {
         };
         let selector_name: String = parts.iter().map(|kw| kw.keyword.as_str()).collect();
 
+        // BT-2703: `eachWithIndex:`/`do:separatedBy:` desugar to an `inject:into:`
+        // fold (see `enumeration_ops`), packing the block's outer-local mutations
+        // into the same `__local__` StateAcc keys. The element block is the first
+        // argument; `do:separatedBy:`'s separator (the second block) runs in the
+        // fold too, so its outer-local writes are unioned in as well. Gated on
+        // `enumeration_threads_actor_state`: only the actor fold packs those keys
+        // into a `{Acc, State}` reply tuple, so outside it (value types, REPL, a
+        // direct-params loop) there is no `__local__` StateAcc to extract from —
+        // context-dependent threading is exactly why BT-3423's shared
+        // `state_threaded_block_arg_indices` table excludes these two selectors
+        // (see its doc comment), so they're handled here instead of falling
+        // through to it.
         match selector_name.as_str() {
-            "to:do:" if arguments.len() == 2 => self.threaded_locals_of_loop_body(arguments.get(1)),
-            "to:by:do:" if arguments.len() == 3 => {
-                self.threaded_locals_of_loop_body(arguments.get(2))
-            }
-            // BT-1276: collect:/select:/reject: pack updated locals into the StateAcc map
-            // returned as element(2, ...) of the result tuple, so the outer method body can
-            // extract them via maps:get — same pattern as do:/inject:into:.
-            //
-            // BT-2355: foldl predicate ops (count:/detect:/detect:ifNone:) follow the same
-            // shape — the mutating predicate is the first argument and its updated locals are
-            // packed into the StateAcc map at the end of the fold (always, regardless of
-            // iteration count). Any trailing handler (e.g. detect:ifNone:'s ifNone block) is
-            // not part of the fold, so it is ignored here.
-            //
-            // BT-2356/BT-2374: the remaining state-threading list/dict ops — and the counted
-            // `timesRepeat:` loop — pack via the same `ThreadingPlan` machinery and so must be
-            // extracted with the identical local set. All route through
-            // `compute_threaded_locals_for_loop` (the packing side) so every packed
-            // `__local__` key — including write-only and nested cross-scope mutations — is read
-            // back (no missing key ⇒ no `{badkey}`). They share the body-block-is-first-argument
-            // shape, so they share one arm.
-            "timesRepeat:" | "do:" | "collect:" | "select:" | "reject:" | "count:" | "detect:"
-            | "detect:ifNone:" | "anySatisfy:" | "allSatisfy:" | "flatMap:" | "takeWhile:"
-            | "dropWhile:" | "groupBy:" | "partition:" | "sort:" | "doWithKey:"
-            | "keysAndValuesDo:" => self.threaded_locals_of_loop_body(arguments.first()),
-            "inject:into:" if arguments.len() == 2 => {
-                self.threaded_locals_of_loop_body(arguments.get(1))
-            }
-            // BT-2703: `eachWithIndex:`/`do:separatedBy:` desugar to an `inject:into:`
-            // fold (see `enumeration_ops`), packing the block's outer-local mutations
-            // into the same `__local__` StateAcc keys. The element block is the first
-            // argument; `do:separatedBy:`'s separator (the second block) runs in the
-            // fold too, so its outer-local writes are unioned in as well. Gated on
-            // `enumeration_threads_actor_state`: only the actor fold packs those keys
-            // into a `{Acc, State}` reply tuple, so outside it (value types, REPL, a
-            // direct-params loop) there is no `__local__` StateAcc to extract from.
             "eachWithIndex:" if arguments.len() == 1 && self.enumeration_threads_actor_state() => {
-                self.threaded_locals_of_loop_body(arguments.first())
+                return self.threaded_locals_of_loop_body(arguments.first());
             }
             "do:separatedBy:" if arguments.len() == 2 && self.enumeration_threads_actor_state() => {
-                Self::non_empty(self.conditional_threaded_locals(&Self::block_args(arguments)))
+                return Self::non_empty(
+                    self.conditional_threaded_locals(&Self::block_args(arguments)),
+                );
             }
-            // BT-2355: conditionals thread outer-local mutations through the StateAcc
-            // map under `__local__` keys (see generate_*_with_mutations, which also seed
-            // those keys so extraction is safe even when the taken branch did not write
-            // them). Only the selectors that (a) `is_conditional_selector` recognises as
-            // state-threading and (b) have a `generate_*_with_mutations` inline-case
-            // generator are listed here — others (`ifNil:`, `ifFalse:ifTrue:`, …) are not
-            // routed through that path, so adding them here would be unreachable.
-            // BT-3402: `and:`/`or:` now have their own inline-case generators
-            // (`generate_and_with_mutations`/`generate_or_with_mutations`), so they
-            // satisfy (b) the same way `ifTrue:`/`ifFalse:` do.
-            // BT-3420: `ifNil:`/`ifNil:ifNotNil:`/`ifNotNil:ifNil:` now share
-            // `generate_nil_conditional_with_mutations`, satisfying (b) too.
-            "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifNotNil:" | "and:" | "or:"
-            | "ifNil:" | "ifNil:ifNotNil:" | "ifNotNil:ifNil:" => {
-                Self::non_empty(self.conditional_threaded_locals(&Self::block_args(arguments)))
+            _ => {}
+        }
+
+        // BT-2355: conditionals thread outer-local mutations through the StateAcc
+        // map under `__local__` keys (see generate_*_with_mutations, which also seed
+        // those keys so extraction is safe even when the taken branch did not write
+        // them). `is_conditional_selector` names exactly the selectors with a
+        // `generate_*_with_mutations` inline-case generator — others (`ifFalse:ifTrue:`,
+        // …) are not routed through that path, so treating them here would be
+        // unreachable.
+        if beamtalk_core::state_threading_selectors::is_conditional_selector(&selector_name) {
+            return Self::non_empty(self.conditional_threaded_locals(&Self::block_args(arguments)));
+        }
+
+        // BT-3160: on:do:/ensure: thread outer-local mutations the same way a
+        // conditional's branches do — the try (receiver) block and any
+        // handler/cleanup block(s) are mutually-exclusive-or-sequential
+        // alternatives that are all compiled, only some of which run at a given
+        // call, so the union of their local writes is the threaded set. The
+        // seeding counterpart (`generate_on_do_with_mutations`/
+        // `generate_ensure_with_mutations`, via `seed_conditional_locals`)
+        // guarantees every `__local__` key extracted here is present even on a
+        // path that didn't itself write it.
+        if beamtalk_core::state_threading_selectors::is_exception_selector(&selector_name) {
+            let mut blocks: Vec<&Block> = Vec::new();
+            if let Expression::Block(b) = receiver.as_ref() {
+                blocks.push(b);
             }
-            // BT-3160: on:do:/ensure: thread outer-local mutations the same way a
-            // conditional's branches do — the try (receiver) block and any
-            // handler/cleanup block(s) are mutually-exclusive-or-sequential
-            // alternatives that are all compiled, only some of which run at a given
-            // call, so the union of their local writes is the threaded set. The
-            // seeding counterpart (`generate_on_do_with_mutations`/
-            // `generate_ensure_with_mutations`, via `seed_conditional_locals`)
-            // guarantees every `__local__` key extracted here is present even on a
-            // path that didn't itself write it.
-            sel if beamtalk_core::state_threading_selectors::is_exception_selector(sel) => {
-                let mut blocks: Vec<&Block> = Vec::new();
-                if let Expression::Block(b) = receiver.as_ref() {
-                    blocks.push(b);
-                }
-                blocks.extend(Self::block_args(arguments));
+            blocks.extend(Self::block_args(arguments));
+            return Self::non_empty(self.conditional_threaded_locals(&blocks));
+        }
+
+        // BT-3423 (ADR 0118 §7): everything else is the loop/list-op family —
+        // `to:do:`/`to:by:do:`/`inject:into:` (block at a non-zero index) and
+        // the `timesRepeat:`/`do:`/`collect:`/… foldl family (block at index
+        // 0), all of which pack updated locals into the StateAcc map returned
+        // as `element(2, …)` of the result tuple (BT-1276/BT-2355/BT-2356) via
+        // `compute_threaded_locals_for_loop`, the single packing-side
+        // authority. The shared `state_threaded_block_arg_indices` table
+        // (single source with `is_state_threading_keyword_selector`) says
+        // which argument index(es) hold the threaded block(s); every entry
+        // reaching this fallback today has exactly one, but the union path
+        // below stays generic rather than assuming that.
+        match beamtalk_core::state_threading_selectors::state_threaded_block_arg_indices(
+            &selector_name,
+        ) {
+            [] => None,
+            [i] => self.threaded_locals_of_loop_body(arguments.get(*i)),
+            indices => {
+                let blocks: Vec<&Block> = indices
+                    .iter()
+                    .filter_map(|&i| match arguments.get(i) {
+                        Some(Expression::Block(b)) => Some(b),
+                        _ => None,
+                    })
+                    .collect();
                 Self::non_empty(self.conditional_threaded_locals(&blocks))
             }
-            _ => None,
         }
     }
 

@@ -401,12 +401,12 @@ fn enter_block(
 /// returns — contradicting this lint's general "capture by value, mutation
 /// lost" assumption.
 ///
-/// Delegates to `beamtalk_core::ast::is_state_threaded_block_arg` — the
-/// single source of truth for this table, shared with
-/// `beamtalk-codegen`'s `block_arg_for_selector`, so the two can never
-/// silently drift (CLAUDE.md's "No duplicate implementations" rule; see
-/// that function's doc comment for the full selector list and the
-/// conformance story for each half of it).
+/// Delegates to `beamtalk_core::state_threading_selectors::is_state_threaded_block_arg`
+/// — the single canonical "which selectors thread which block-argument
+/// positions" table (BT-3423 / ADR 0118 §7), shared with `beamtalk-codegen`'s
+/// `get_control_flow_threaded_vars`, so the two can never silently drift
+/// (CLAUDE.md's "No duplicate implementations" rule; see that table's doc
+/// comment for the full selector list and index mapping).
 ///
 /// BT-3385 confirmed empirically (`BUnit` runtime tests, see
 /// `stdlib/test/bt_3385_dead_assignment_test.bt`) that mutating ANY captured
@@ -420,15 +420,26 @@ fn enter_block(
 /// compiler does not silently drop such a mutation, but currently refuses
 /// the indirect invocation outright at runtime (a separate, more confusing
 /// failure mode outside this lint's scope) rather than threading it through;
-/// `on:do:`/`ensure:` (exception handling) and `detect:ifNone:`'s `ifNone:`
-/// arm — BT-3385 did not verify these shapes and leaves them to the
-/// conservative (may still false-positive) existing behavior rather than
-/// guess.
+/// `eachWithIndex:`/`do:separatedBy:`, whose threading is context-dependent
+/// (see the shared table's doc comment) and so conservatively excluded from
+/// it entirely.
+///
+/// BT-3423 correction: the pre-unification version of this lint's own table
+/// additionally excluded `on:do:`'s handler and `ensure:`'s cleanup block
+/// ("BT-3385 did not verify these shapes"). The shared canonical table has
+/// no such carve-out — codegen threads both the same way as the loop/
+/// conditional family (BT-3160, `generate_on_do_with_mutations`/
+/// `generate_ensure_with_mutations`) — so unifying onto it also stops this
+/// lint over-warning on those two shapes; see
+/// `on_do_and_ensure_handler_no_longer_warn` below.
 fn is_state_threaded_block_arg(msg_ctx: Option<&BlockMessageContext>) -> bool {
     let Some(ctx) = msg_ctx else {
         return false;
     };
-    beamtalk_core::ast::is_state_threaded_block_arg(&ctx.selector, ctx.arg_index)
+    beamtalk_core::state_threading_selectors::is_state_threaded_block_arg(
+        &ctx.selector,
+        ctx.arg_index,
+    )
 }
 
 /// Emit a dead-assignment warning diagnostic.
@@ -911,11 +922,49 @@ sealed typed Value subclass: Foo
         }
     }
 
+    /// `and:`/`or:` thread captured-local mutations too (BT-3402's codegen
+    /// fix; BT-3423 closes the gap where this lint's own table hadn't
+    /// caught up) — no longer flagged.
+    #[test]
+    fn and_or_no_longer_warn() {
+        for src in [
+            "x := 1.\nflag and: [x := 2. true]",
+            "x := 1.\nflag or: [x := 2. false]",
+        ] {
+            let diags = lint(src);
+            assert!(
+                diags.is_empty(),
+                "Expected no lints for {src:?}, got: {diags:?}"
+            );
+        }
+    }
+
+    /// BT-3423: unifying onto the shared canonical table (rather than the
+    /// pre-unification version of this lint's own, narrower one) also picks
+    /// up `on:do:`'s handler block and `ensure:`'s cleanup block, neither of
+    /// which was in the old table ("BT-3385 did not verify these shapes").
+    /// Codegen threads both the same way as the loop/conditional family
+    /// (BT-3160) — see `is_state_threaded_block_arg`'s doc comment — so
+    /// these are no longer false positives.
+    #[test]
+    fn on_do_and_ensure_handler_no_longer_warn() {
+        for src in [
+            "x := 1.\n[nil] on: Error do: [:e | x := 2]",
+            "x := 1.\n[nil] ensure: [x := 2]",
+        ] {
+            let diags = lint(src);
+            assert!(
+                diags.is_empty(),
+                "Expected no lints for {src:?}, got: {diags:?}"
+            );
+        }
+    }
+
     /// The whole family of loop / list-op selectors that codegen's
-    /// `block_arg_for_selector` (`crates/beamtalk-codegen/src/core_erlang/
-    /// control_flow/mod.rs`) recognizes for captured-local threading — none
-    /// of these should warn on a mutation of an outer local at the
-    /// recognized block-argument position, whatever the accumulator's name.
+    /// `get_control_flow_threaded_vars` (`crates/beamtalk-codegen/src/core_erlang/
+    /// mod.rs`) recognizes for captured-local threading — none of these
+    /// should warn on a mutation of an outer local at the recognized
+    /// block-argument position, whatever the accumulator's name.
     #[test]
     fn loop_and_list_op_family_no_longer_warns() {
         let cases = [
