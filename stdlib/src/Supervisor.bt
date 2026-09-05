@@ -65,6 +65,13 @@ abstract Object subclass: Supervisor
   /// via `which:` or injecting dependencies). Runs in the caller's
   /// process, so `which:` and other supervisor calls will not deadlock.
   ///
+  /// Fires exactly once, at the initial `supervise` call — it does
+  /// **not** re-fire on OTP-driven child restarts (including
+  /// `restForOne` cascades), since those start each child directly
+  /// from its child spec and never re-enter this dispatch path. A
+  /// dependency reference that must survive a restart needs named
+  /// actor registration (see ADR 0079) instead of one-shot wiring here.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// Supervisor subclass: App

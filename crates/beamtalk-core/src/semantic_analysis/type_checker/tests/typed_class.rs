@@ -125,7 +125,7 @@ fn test_expect_type_suppresses_typed_method_warnings() {
         vec![bare(int_lit(42))],
         span(),
     );
-    method.expect = Some((ExpectCategory::Type, None, span()));
+    method.expect = Some((vec![ExpectCategory::Type], None, span()));
 
     let class_def = ClassDefinition::with_modifiers(
         ident("MyTyped"),
@@ -157,7 +157,7 @@ fn test_expect_all_suppresses_typed_method_warnings() {
         vec![bare(int_lit(42))],
         span(),
     );
-    method.expect = Some((ExpectCategory::All, None, span()));
+    method.expect = Some((vec![ExpectCategory::All], None, span()));
 
     let class_def = ClassDefinition::with_modifiers(
         ident("MyTyped"),

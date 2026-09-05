@@ -5840,7 +5840,12 @@ x := computeSomething       // unused-variable warning suppressed
 
 @expect all
 anything                    // any diagnostic suppressed (discouraged — use a specific category)
+
+@expect unresolved_ffi, type
+(Erlang some_module) someCall   // suppresses both categories on this one expression
 ```
+
+**Combined form (BT-3387):** A single `@expect` can list more than one category, separated by commas, to suppress every listed category on the same following expression or declaration — useful when one expression genuinely triggers two independent diagnostics at once (e.g. an FFI call to a module outside the known-OTP list, whose return type is also inferred as `Dynamic`). The directive is only reported stale if *none* of its listed categories match a real diagnostic; if at least one does, the directive is satisfied even though another listed category turned out unnecessary.
 
 **Suppression categories:**
 
@@ -5873,7 +5878,7 @@ typed Object subclass: Collection(E)
   first => (Erlang erlang) hd: self asErlangList   // polymorphic return — suppress missing-annotation warning
 ```
 
-Declaration-level `@expect` supports the same categories and stale-directive rules as expression-level `@expect`.
+Declaration-level `@expect` supports the same categories, combined-category lists, and stale-directive rules as expression-level `@expect`.
 
 **Unknown categories are parse errors:** Writing an unknown category (e.g. `@expect selfcapture`) is rejected at parse time with an error listing the valid names. This prevents typos from silently suppressing nothing.
 

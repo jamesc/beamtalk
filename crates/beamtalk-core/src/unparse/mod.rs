@@ -994,8 +994,8 @@ fn unparse_method_definition_inner(
     }
 
     // BT-1856: Emit @expect directive before the method declaration
-    if let Some((cat, ref reason, _)) = method.expect {
-        let base = docvec!["@expect ", unparse_expect_category(cat)];
+    if let Some((ref cats, ref reason, _)) = method.expect {
+        let base = docvec!["@expect ", unparse_expect_categories(cats)];
         if let Some(reason) = reason {
             docs.push(docvec![base, " \"", leaf::string_content(reason), "\""]);
         } else {
@@ -1137,17 +1137,17 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
     }
 
     // BT-1856: Emit @expect directive before the declaration
-    if let Some((cat, ref reason, _)) = state.expect {
+    if let Some((ref cats, ref reason, _)) = state.expect {
         if let Some(reason) = reason {
             docs.push(docvec![
                 "@expect ",
-                unparse_expect_category(cat),
+                unparse_expect_categories(cats),
                 " \"",
                 leaf::string_content(reason),
                 "\""
             ]);
         } else {
-            docs.push(docvec!["@expect ", unparse_expect_category(cat)]);
+            docs.push(docvec!["@expect ", unparse_expect_categories(cats)]);
         }
         docs.push(line());
     }
@@ -1297,9 +1297,9 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
         }
         Expression::StringInterpolation { segments, .. } => unparse_string_interpolation(segments),
         Expression::ExpectDirective {
-            category, reason, ..
+            categories, reason, ..
         } => {
-            let base = docvec!["@expect ", unparse_expect_category(*category)];
+            let base = docvec!["@expect ", unparse_expect_categories(categories)];
             if let Some(reason) = reason {
                 docvec![base, " \"", leaf::string_content(reason), "\""]
             } else {
@@ -2022,6 +2022,13 @@ fn unparse_type_annotation_opt(ty: Option<&TypeAnnotation>) -> Document<'static>
 
 fn unparse_expect_category(cat: ExpectCategory) -> Document<'static> {
     Document::Str(cat.as_str())
+}
+
+/// Unparses a (possibly multi-category, BT-3387) `@expect` category list as
+/// `cat1, cat2, ...`.
+fn unparse_expect_categories(cats: &[ExpectCategory]) -> Document<'static> {
+    let docs: Vec<Document<'static>> = cats.iter().copied().map(unparse_expect_category).collect();
+    join_docs(docs, ", ")
 }
 
 // --- Comment unparsing ---

@@ -1154,6 +1154,103 @@ mod tests {
         );
     }
 
+    // ── BT-3387: combined `@expect cat1, cat2` form ──
+
+    #[test]
+    fn expect_combined_categories_suppresses_dnu() {
+        // @expect dnu, type is still valid single-line syntax when only one
+        // category is actually needed — the comma form must not break the
+        // plain single-category case.
+        let source = "@expect dnu, type\n42 unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        assert!(
+            parse_diags.is_empty(),
+            "Should have no parse errors, got: {parse_diags:?}"
+        );
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "@expect dnu, type should suppress DNU hint, got: {diagnostics:?}"
+        );
+        let stale = diagnostics
+            .iter()
+            .any(|d| d.message.contains("stale @expect"));
+        assert!(
+            !stale,
+            "@expect dnu, type must not be stale when DNU hint is present, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_combined_categories_unknown_name_skipped_valid_still_applies() {
+        // BT-3387: a typo mixed into a category list should still report an
+        // "unknown @expect category" error for the bad name, while the
+        // other, valid name in the same directive still suppresses.
+        let source = "@expect selfcapture, dnu\n42 foo";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_error = diagnostics
+            .iter()
+            .any(|d| d.message.contains("unknown @expect category"));
+        assert!(
+            has_error,
+            "Typo in one of several categories should still be a parse error, got: {diagnostics:?}"
+        );
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "the other, valid category in the list should still suppress DNU, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_combined_categories_round_trips_through_unparse() {
+        // @expect unresolved_ffi, type should round-trip through unparse.
+        let source = "@expect unresolved_ffi, type\n42 unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+
+        let output = beamtalk_core::unparse::unparse_module(&module);
+        assert!(
+            output.contains("@expect unresolved_ffi, type"),
+            "Unparsed output should contain the combined category list, got: {output}"
+        );
+    }
+
+    #[test]
+    fn expect_combined_categories_on_method_declaration_round_trips() {
+        // BT-3387's motivating case: a combined @expect on a method
+        // declaration (the form that previously required splitting into two
+        // methods, since stacking two separate `@expect` lines before a
+        // declaration was rejected outright).
+        let source = "\
+typed Object subclass: MyTyped
+  @expect unresolved_ffi, type
+  publicKeyModule => Erlang public_key
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        assert!(
+            parse_diags.is_empty(),
+            "Should have no parse errors, got: {parse_diags:?}"
+        );
+
+        let output = beamtalk_core::unparse::unparse_module(&module);
+        assert!(
+            output.contains("@expect unresolved_ffi, type"),
+            "Unparsed output should contain the combined category list, got: {output}"
+        );
+    }
+
     // ── BT-1476: Dead block assignment warning + @expect dead_assignment ──
 
     // ── BT-1476: @expect dead_assignment parsing and stale detection ──
