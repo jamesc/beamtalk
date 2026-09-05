@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3428: the local-assign-control-flow-RHS POSITION regression matrix.
+//
+// BT-3383 fixed a self-send `collect:` assigned to a local at a method's
+// TOP LEVEL degrading its result species from List to Tuple. BT-3425 found
+// the identical bug one container position deeper — the same assignment
+// inside an `ifTrue:`/`ifFalse:` branch — and fixed it. This file pins the
+// remaining container positions BT-3425's own acceptance criteria flagged
+// for audit (`whileTrue:`, `to:do:`, `timesRepeat:`, a list-op nested
+// inside another list-op, `on:do:`) against
+// `LocalAssignControlFlowMatrixActor` (`fixtures/local_assign_control_flow_matrix_actor.bt`)
+// so this root cause can't resurface silently in a still-uncovered position
+// again — every position asserts `List`, matching BT-3383's fixed
+// top-level case.
+
+TestCase subclass: LocalAssignControlFlowPositionMatrixTest
+  field: a = nil
+
+  setUp => self.a := LocalAssignControlFlowMatrixActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
+
+  // P0: top-level statement (BT-3383).
+  testTopLevelAssign =>
+    self assert: (self.a topLevelAssign: #(1, 2, 3)) equals: List
+    self assert: self.a getCount equals: 3
+
+  // P1: ifTrue:/ifFalse: branch (BT-3425).
+  testIfTrueBranchAssign =>
+    self assert: (self.a ifTrueBranchAssign: #(1, 2, 3) when: true) equals: List
+    self assert: self.a getCount equals: 3
+
+  // P2: whileTrue: loop body (BT-3428).
+  testWhileTrueBodyAssign =>
+    self assert: (self.a whileTrueBodyAssign: #(1, 2, 3)) equals: List
+    self assert: self.a getCount equals: 3
+
+  // P3: to:do: loop body (BT-3428).
+  testToDoBodyAssign =>
+    self assert: (self.a toDoBodyAssign: #(1, 2, 3)) equals: List
+    self assert: self.a getCount equals: 3
+
+  // P4: timesRepeat: loop body (BT-3428).
+  testTimesRepeatBodyAssign =>
+    self assert: (self.a timesRepeatBodyAssign: #(1, 2, 3)) equals: List
+    self assert: self.a getCount equals: 3
+
+  // P5: a list-op block body nested inside another list-op (BT-3428).
+  // Every sub-list's `inner class` should read List, not Tuple.
+  testNestedListOpBodyAssign =>
+    result := self.a nestedListOpBodyAssign: #(#(1, 2), #(3))
+    self assert: result equals: #(List, List)
+    self assert: self.a getCount equals: 3
+
+  // P6: on:do: body (already correct before BT-3428, shares BT-3425's fix).
+  testOnDoBodyAssign =>
+    self assert: (self.a onDoBodyAssign: #(1, 2, 3)) equals: List
+    self assert: self.a getCount equals: 3
+
+  // P7 (BT-3428 review-finding regression): a captured local OTHER than the
+  // collect:'s own assignment target, mutated inside the collect:'s block,
+  // must not be left stale after a whileTrue: body closes.
+  testWhileTrueOtherLocalRebind =>
+    self assert: (self.a whileTrueOtherLocalRebind: #(1, 2, 3)) equals: 3
