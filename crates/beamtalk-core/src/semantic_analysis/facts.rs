@@ -33,6 +33,74 @@ pub enum DispatchKind {
     Unknown,
 }
 
+/// BT-3423 (ADR 0118 §Decision 7): "does this expression sub-tree have a
+/// state effect that needs threading" — one semantic fact replacing the
+/// several codegen predicates (`needs_mutation_threading`'s self-send arm,
+/// `contains_hoistable_self_send`, `control_flow_has_mutations`, …) that
+/// each re-derive some version of this question.
+///
+/// Computed bottom-up over a whole method/block body by
+/// [`compute_state_effects_for_expr`]: a node's fact is the union of its
+/// sub-expressions' facts (seeing through parentheses and into non-closure
+/// sub-expressions) plus any effect the node itself directly produces. A
+/// `Block` argument at a message-send position that
+/// [`crate::state_threading_selectors::is_state_threading_keyword_selector`]/
+/// [`crate::state_threading_selectors::is_state_threading_unary_selector`]
+/// does not recognize as an inline (state-threading) block argument is a
+/// **closure boundary**: the block's own subtree still gets its own fact
+/// (keyed by its span, so a caller inspecting the block's body directly —
+/// e.g. deciding whether closing over actor state is legal — still sees
+/// it), but that fact is not folded into the enclosing expression's, because
+/// a self-send or field write inside a real closure does not make the
+/// closure's *call site* itself state-effecting.
+///
+/// `actor_self_send`/`field_write` and `class_self_send`/`class_var_write`
+/// are deliberately separate pairs rather than one context-agnostic
+/// "self-send"/"field-write" flag: the same AST shape (`self foo`, `self.f
+/// := …`) means "this needs an Actor `State` thread" inside an instance
+/// method but "this needs a `ClassVars` thread" inside a class method, and a
+/// context-aware consumer reads only the pair matching its current context.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+// Four fields, each a distinct effect kind named directly in ADR 0118 §7
+// (`actor_self_send`/`field_write`/`class_var_write`/`class_self_send`) —
+// a state machine or nested enum would obscure that a node can have any
+// combination of them (e.g. both a self-send AND a field write) at once.
+#[allow(clippy::struct_excessive_bools)]
+pub struct StateEffects {
+    /// A synchronous self-send (`self foo`) reachable from an instance
+    /// method or script/workspace body — needs the Actor `State` thread.
+    pub actor_self_send: bool,
+    /// A `self.field := …` write (instance context) — needs the Actor
+    /// `State` thread (or, for a Value type, the field's own threading).
+    pub field_write: bool,
+    /// A `self.classVar := …` write reachable from a class method — needs
+    /// the `ClassVars` thread.
+    pub class_var_write: bool,
+    /// A synchronous self-send (`self foo`) reachable from a class method
+    /// — needs the `ClassVars` thread.
+    pub class_self_send: bool,
+}
+
+impl StateEffects {
+    /// `true` if any effect is set.
+    #[must_use]
+    pub fn any(self) -> bool {
+        self.actor_self_send || self.field_write || self.class_var_write || self.class_self_send
+    }
+
+    /// Unions two facts field-by-field (used when folding sub-expression
+    /// facts into their parent's).
+    #[must_use]
+    fn union(self, other: Self) -> Self {
+        Self {
+            actor_self_send: self.actor_self_send || other.actor_self_send,
+            field_write: self.field_write || other.field_write,
+            class_var_write: self.class_var_write || other.class_var_write,
+            class_self_send: self.class_self_send || other.class_self_send,
+        }
+    }
+}
+
 /// Pre-computed facts for a single class definition.
 ///
 /// Populated by [`compute_semantic_facts`] and stored in [`SemanticFacts::class_facts`].
@@ -84,6 +152,10 @@ pub struct SemanticFacts {
     pub block_profiles: HashMap<Span, BlockProfile>,
     /// Dispatch classification for every [`Expression::MessageSend`] node, keyed by message span.
     pub dispatch_kinds: HashMap<Span, DispatchKind>,
+    /// BT-3423: [`StateEffects`] fact for every expression node reachable from
+    /// a method/block body, keyed by that node's span. See [`StateEffects`]'s
+    /// doc comment for how it's computed and the closure-boundary rule.
+    pub state_effects: HashMap<Span, StateEffects>,
     /// Per-class method index, keyed by class name.
     pub class_facts: HashMap<String, ClassFacts>,
     /// Set of method (or legacy block) spans whose body contains a `^` inside a block.
@@ -103,6 +175,34 @@ impl SemanticFacts {
     /// Returns the block profile for the given span, or `None` if not found.
     pub fn block_profile(&self, span: &Span) -> Option<&BlockProfile> {
         self.block_profiles.get(span)
+    }
+
+    /// Returns the [`StateEffects`] fact for the given span, or the all-`false`
+    /// default if not found (e.g. a span outside any analysed method/block, or
+    /// facts not yet populated — see [`Self::state_effects_or_compute`] for a
+    /// fallback that still gives the right answer in that second case).
+    #[must_use]
+    pub fn state_effects(&self, span: &Span) -> StateEffects {
+        self.state_effects.get(span).copied().unwrap_or_default()
+    }
+
+    /// Returns `expr`'s [`StateEffects`] fact: the precomputed one when
+    /// [`compute_semantic_facts`] has run, else computed on the fly (mirrors
+    /// [`Self::has_block_nlr_or_walk`]'s AST-walk fallback for
+    /// `methods_with_block_nlr`) — used by codegen tests and any other
+    /// caller that constructs a `CoreErlangGenerator` without a full
+    /// analysis pass.
+    #[must_use]
+    pub fn state_effects_or_compute(
+        &self,
+        expr: &Expression,
+        in_class_method: bool,
+    ) -> StateEffects {
+        if self.is_populated {
+            self.state_effects(&expr.span())
+        } else {
+            compute_state_effects_for_expr(expr, in_class_method)
+        }
     }
 
     /// Returns the pre-computed facts for the class with the given name, or `None`.
@@ -277,6 +377,8 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
             }
         }
         collect_expression_facts(&stmt.expression, &mut facts);
+        // Module-level/script code is never class-method context.
+        compute_state_effects(&stmt.expression, false, &mut facts.state_effects);
     }
 
     // Compute per-class method index facts
@@ -309,7 +411,12 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
 
     // Process class methods
     for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
+        let tagged_methods = class
+            .methods
+            .iter()
+            .map(|m| (m, false))
+            .chain(class.class_methods.iter().map(|m| (m, true)));
+        for (method, in_class_method) in tagged_methods {
             // Detect block NLR: ^ inside a block requires the NLR throw/catch mechanism.
             if method
                 .body
@@ -321,6 +428,7 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
 
             for stmt in &method.body {
                 collect_expression_facts(&stmt.expression, &mut facts);
+                compute_state_effects(&stmt.expression, in_class_method, &mut facts.state_effects);
             }
         }
     }
@@ -340,6 +448,11 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
 
         for stmt in &method.body {
             collect_expression_facts(&stmt.expression, &mut facts);
+            compute_state_effects(
+                &stmt.expression,
+                standalone.is_class_method,
+                &mut facts.state_effects,
+            );
         }
     }
 
@@ -492,6 +605,214 @@ fn classify_dispatch(
     }
 
     DispatchKind::Unknown
+}
+
+/// BT-3423: computes the [`StateEffects`] fact for `expr` directly, without
+/// consulting or populating a `SemanticFacts` side-car — the fallback
+/// [`SemanticFacts::state_effects_or_compute`] uses when facts haven't been
+/// computed for the enclosing module (mirrors `has_block_nlr_or_walk`'s
+/// AST-walk fallback).
+#[must_use]
+pub fn compute_state_effects_for_expr(expr: &Expression, in_class_method: bool) -> StateEffects {
+    let mut scratch = HashMap::new();
+    compute_state_effects(expr, in_class_method, &mut scratch)
+}
+
+/// Returns `true` if `expr` is a reference to `self`.
+fn is_self_reference(expr: &Expression) -> bool {
+    matches!(expr, Expression::Identifier(id) if id.name == "self")
+}
+
+/// Computes the [`StateEffects`] fact for `expr` and every sub-expression
+/// reachable from it, inserting each node's own fact into `out` (keyed by
+/// span) and returning `expr`'s own (unioned) fact so a caller can fold it
+/// into an enclosing node. See [`StateEffects`]'s doc comment for the
+/// bottom-up/closure-boundary rules this implements.
+///
+/// `in_class_method` selects which pair of effect flags a `self`-send or
+/// `self.field := …` write is bucketed into (see [`StateEffects`]'s doc
+/// comment) — the same flag [`compute_semantic_facts`] already threads
+/// through its class-method-vs-instance-method loop.
+#[allow(clippy::too_many_lines)] // one match arm per Expression variant, mirrors collect_expression_facts
+fn compute_state_effects(
+    expr: &Expression,
+    in_class_method: bool,
+    out: &mut HashMap<Span, StateEffects>,
+) -> StateEffects {
+    let effects = match expr {
+        Expression::Parenthesized { expression, .. } => {
+            compute_state_effects(expression, in_class_method, out)
+        }
+
+        Expression::Identifier(_)
+        | Expression::ClassReference { .. }
+        | Expression::Super(_)
+        | Expression::Primitive { .. }
+        | Expression::Literal(..)
+        | Expression::Error { .. }
+        | Expression::ExpectDirective { .. }
+        | Expression::Spread { .. } => StateEffects::default(),
+
+        Expression::FieldAccess { receiver, .. } => {
+            compute_state_effects(receiver, in_class_method, out)
+        }
+
+        Expression::Block(block) => compute_block_state_effects(block, in_class_method, out),
+
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            is_cast,
+            ..
+        } => {
+            let mut eff = compute_state_effects(receiver, in_class_method, out);
+            if !is_cast && is_self_reference(receiver) {
+                if in_class_method {
+                    eff.class_self_send = true;
+                } else {
+                    eff.actor_self_send = true;
+                }
+            }
+            let selector_name = selector.name();
+            let inline_block_arg =
+                crate::state_threading_selectors::is_state_threading_keyword_selector(
+                    selector_name.as_str(),
+                ) || crate::state_threading_selectors::is_state_threading_unary_selector(
+                    selector_name.as_str(),
+                );
+            for arg in arguments {
+                if let Expression::Block(block) = arg {
+                    let block_eff = compute_block_state_effects(block, in_class_method, out);
+                    if inline_block_arg {
+                        eff = eff.union(block_eff);
+                    }
+                } else {
+                    eff = eff.union(compute_state_effects(arg, in_class_method, out));
+                }
+            }
+            eff
+        }
+
+        Expression::Assignment { target, value, .. } => {
+            let mut eff = compute_state_effects(value, in_class_method, out);
+            if let Expression::FieldAccess { receiver, .. } = target.as_ref() {
+                if is_self_reference(receiver) {
+                    if in_class_method {
+                        eff.class_var_write = true;
+                    } else {
+                        eff.field_write = true;
+                    }
+                }
+            } else {
+                eff = eff.union(compute_state_effects(target, in_class_method, out));
+            }
+            eff
+        }
+
+        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
+            compute_state_effects(value, in_class_method, out)
+        }
+
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            let mut eff = compute_state_effects(receiver, in_class_method, out);
+            // The parser folds a cascade's FIRST message into `receiver` as a
+            // whole `MessageSend` (so a self-send there is already captured
+            // above); every cascaded message shares that same underlying
+            // receiver (mirrors `block_analyzer`'s identical handling).
+            let cascade_receiver = match receiver.as_ref() {
+                Expression::MessageSend {
+                    receiver: inner, ..
+                } => inner.as_ref(),
+                other => other,
+            };
+            if is_self_reference(cascade_receiver) {
+                if in_class_method {
+                    eff.class_self_send = true;
+                } else {
+                    eff.actor_self_send = true;
+                }
+            }
+            for msg in messages {
+                for arg in &msg.arguments {
+                    eff = eff.union(compute_state_effects(arg, in_class_method, out));
+                }
+            }
+            eff
+        }
+
+        Expression::Match { value, arms, .. } => {
+            let mut eff = compute_state_effects(value, in_class_method, out);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    eff = eff.union(compute_state_effects(guard, in_class_method, out));
+                }
+                eff = eff.union(compute_state_effects(&arm.body, in_class_method, out));
+            }
+            eff
+        }
+
+        Expression::MapLiteral { pairs, .. } => {
+            let mut eff = StateEffects::default();
+            for pair in pairs {
+                eff = eff.union(compute_state_effects(&pair.key, in_class_method, out));
+                eff = eff.union(compute_state_effects(&pair.value, in_class_method, out));
+            }
+            eff
+        }
+
+        Expression::ListLiteral { elements, tail, .. } => {
+            let mut eff = StateEffects::default();
+            for elem in elements {
+                eff = eff.union(compute_state_effects(elem, in_class_method, out));
+            }
+            if let Some(t) = tail {
+                eff = eff.union(compute_state_effects(t, in_class_method, out));
+            }
+            eff
+        }
+
+        Expression::ArrayLiteral { elements, .. } => {
+            let mut eff = StateEffects::default();
+            for elem in elements {
+                eff = eff.union(compute_state_effects(elem, in_class_method, out));
+            }
+            eff
+        }
+
+        Expression::StringInterpolation { segments, .. } => {
+            let mut eff = StateEffects::default();
+            for seg in segments {
+                if let StringSegment::Interpolation(e) = seg {
+                    eff = eff.union(compute_state_effects(e, in_class_method, out));
+                }
+            }
+            eff
+        }
+    };
+    out.insert(expr.span(), effects);
+    effects
+}
+
+/// [`compute_state_effects`] applied to every statement of a block's body,
+/// unioned into one fact stored (and returned) for the block's own span.
+fn compute_block_state_effects(
+    block: &Block,
+    in_class_method: bool,
+    out: &mut HashMap<Span, StateEffects>,
+) -> StateEffects {
+    let mut eff = StateEffects::default();
+    for stmt in &block.body {
+        eff = eff.union(compute_state_effects(
+            &stmt.expression,
+            in_class_method,
+            out,
+        ));
+    }
+    out.insert(block.span, eff);
+    eff
 }
 
 #[cfg(test)]
@@ -1007,5 +1328,238 @@ mod tests {
         module.method_definitions.push(standalone);
         let facts = compute_semantic_facts(&module);
         assert!(facts.methods_with_block_nlr.contains(&method_span));
+    }
+
+    // ---------------------------------------------------------------
+    // StateEffects (BT-3423 / ADR 0118 §7)
+    // ---------------------------------------------------------------
+
+    fn self_send(name: &str, span: Span) -> Expression {
+        Expression::MessageSend {
+            receiver: Box::new(ident("self")),
+            selector: MessageSelector::Unary(name.into()),
+            arguments: vec![],
+            is_cast: false,
+            span,
+        }
+    }
+
+    fn field_write(field: &str, value: Expression, span: Span) -> Expression {
+        Expression::Assignment {
+            target: Box::new(Expression::FieldAccess {
+                receiver: Box::new(ident("self")),
+                field: Identifier::new(field, ts()),
+                span: ts(),
+            }),
+            value: Box::new(value),
+            type_annotation: None,
+            span,
+        }
+    }
+
+    #[test]
+    fn state_effects_default_is_no_effects() {
+        assert!(!StateEffects::default().any());
+    }
+
+    #[test]
+    fn state_effects_pure_expression_has_no_effects() {
+        let eff = compute_state_effects_for_expr(&lit(1), false);
+        assert!(!eff.any());
+    }
+
+    #[test]
+    fn state_effects_instance_self_send_sets_actor_self_send() {
+        let expr = self_send("bump", ts());
+        let eff = compute_state_effects_for_expr(&expr, false);
+        assert!(eff.actor_self_send);
+        assert!(!eff.class_self_send);
+        assert!(!eff.field_write);
+        assert!(!eff.class_var_write);
+    }
+
+    #[test]
+    fn state_effects_class_method_self_send_sets_class_self_send() {
+        let expr = self_send("bump", ts());
+        let eff = compute_state_effects_for_expr(&expr, true);
+        assert!(eff.class_self_send);
+        assert!(!eff.actor_self_send);
+    }
+
+    #[test]
+    fn state_effects_actor_cast_is_not_a_self_send_effect() {
+        // `self bump!` (fire-and-forget) doesn't return a new state to thread
+        // through the current expression the way a synchronous self-send does.
+        let expr = Expression::MessageSend {
+            receiver: Box::new(ident("self")),
+            selector: MessageSelector::Unary("bump".into()),
+            arguments: vec![],
+            is_cast: true,
+            span: ts(),
+        };
+        let eff = compute_state_effects_for_expr(&expr, false);
+        assert!(!eff.any());
+    }
+
+    #[test]
+    fn state_effects_instance_field_write_sets_field_write() {
+        let expr = field_write("count", lit(1), ts());
+        let eff = compute_state_effects_for_expr(&expr, false);
+        assert!(eff.field_write);
+        assert!(!eff.class_var_write);
+    }
+
+    #[test]
+    fn state_effects_class_method_field_write_sets_class_var_write() {
+        let expr = field_write("total", lit(1), ts());
+        let eff = compute_state_effects_for_expr(&expr, true);
+        assert!(eff.class_var_write);
+        assert!(!eff.field_write);
+    }
+
+    #[test]
+    fn state_effects_see_through_parentheses() {
+        let expr = Expression::Parenthesized {
+            expression: Box::new(self_send("bump", ts())),
+            span: ts(),
+        };
+        assert!(compute_state_effects_for_expr(&expr, false).actor_self_send);
+    }
+
+    #[test]
+    fn state_effects_propagate_from_binary_operand() {
+        // `(self bump) + 1` — the self-send is the receiver of a nested
+        // MessageSend, reached by recursing into non-closure sub-expressions.
+        let expr = Expression::MessageSend {
+            receiver: Box::new(self_send("bump", ts())),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![lit(1)],
+            is_cast: false,
+            span: ts(),
+        };
+        assert!(compute_state_effects_for_expr(&expr, false).actor_self_send);
+    }
+
+    #[test]
+    fn state_effects_propagate_from_cascade_second_message() {
+        // `self record: 1; record: 2` — both messages share the same `self`
+        // receiver; a self-send effect is set even though only the FIRST
+        // message is folded into `Cascade.receiver` by the parser.
+        let expr = Expression::Cascade {
+            receiver: Box::new(Expression::MessageSend {
+                receiver: Box::new(ident("self")),
+                selector: MessageSelector::Keyword(vec![KeywordPart::new("record:", ts())]),
+                arguments: vec![lit(1)],
+                is_cast: false,
+                span: ts(),
+            }),
+            messages: vec![CascadeMessage::new(
+                MessageSelector::Keyword(vec![KeywordPart::new("record:", ts())]),
+                vec![lit(2)],
+                ts(),
+            )],
+            span: ts(),
+        };
+        assert!(compute_state_effects_for_expr(&expr, false).actor_self_send);
+    }
+
+    #[test]
+    fn state_effects_propagate_through_inline_conditional_block() {
+        // `true ifTrue: [self bump]` — `ifTrue:` is a state-threading keyword
+        // selector, so the block argument is NOT a closure boundary: its
+        // self-send propagates to the enclosing `MessageSend`'s own fact.
+        let expr = Expression::MessageSend {
+            receiver: Box::new(ident("true")),
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("ifTrue:", ts())]),
+            arguments: vec![Expression::Block(block_with(
+                vec![bare(self_send("bump", ts()))],
+                ts(),
+            ))],
+            is_cast: false,
+            span: ts(),
+        };
+        assert!(compute_state_effects_for_expr(&expr, false).actor_self_send);
+    }
+
+    #[test]
+    fn state_effects_closure_boundary_does_not_propagate_but_is_recorded() {
+        // `foo customLoop: [self bump]` — `customLoop:` is not a recognized
+        // state-threading selector, so the block argument is a real closure:
+        // its self-send must NOT be folded into the enclosing send's own
+        // fact, but the block's OWN span must still carry it (a caller
+        // inspecting the block's body directly — e.g. "can this block close
+        // over actor state?" — still needs the answer).
+        let block_span = Span::new(10, 20);
+        let block = block_with(vec![bare(self_send("bump", ts()))], block_span);
+        let send_span = Span::new(0, 30);
+        let expr = Expression::MessageSend {
+            receiver: Box::new(ident("foo")),
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("customLoop:", ts())]),
+            arguments: vec![Expression::Block(block)],
+            is_cast: false,
+            span: send_span,
+        };
+
+        let mut out = HashMap::new();
+        let top_level = compute_state_effects(&expr, false, &mut out);
+
+        assert!(
+            !top_level.actor_self_send,
+            "a self-send inside a real closure must not propagate to the call site"
+        );
+        assert!(
+            out.get(&block_span).is_some_and(|e| e.actor_self_send),
+            "the block's own span must still record its self-send"
+        );
+    }
+
+    #[test]
+    fn state_effects_union_combines_independent_effects() {
+        let a = StateEffects {
+            actor_self_send: true,
+            ..StateEffects::default()
+        };
+        let b = StateEffects {
+            field_write: true,
+            ..StateEffects::default()
+        };
+        let combined = a.union(b);
+        assert!(combined.actor_self_send);
+        assert!(combined.field_write);
+        assert!(!combined.class_var_write);
+        assert!(!combined.class_self_send);
+    }
+
+    #[test]
+    fn state_effects_or_compute_uses_precomputed_fact_when_populated() {
+        let method_span = Span::new(50, 150);
+        let field_span = Span::new(60, 70);
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("bump".into()),
+            vec![],
+            vec![bare(field_write("count", lit(1), field_span))],
+            method_span,
+        );
+        let class = ClassDefinition::new(
+            Identifier::new("Counter", ts()),
+            Identifier::new("Object", ts()),
+            vec![],
+            vec![method],
+            ts(),
+        );
+        let facts = compute_semantic_facts(&Module::with_classes(vec![class], ts()));
+        let field_expr = field_write("count", lit(1), field_span);
+        assert!(
+            facts
+                .state_effects_or_compute(&field_expr, false)
+                .field_write
+        );
+    }
+
+    #[test]
+    fn state_effects_or_compute_falls_back_to_ast_walk_when_unpopulated() {
+        let facts = SemanticFacts::default();
+        let expr = self_send("bump", ts());
+        assert!(facts.state_effects_or_compute(&expr, false).actor_self_send);
     }
 }

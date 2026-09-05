@@ -1788,16 +1788,18 @@ impl CoreErlangGenerator {
     /// behavior exactly.
     ///
     /// Position eligibility is delegated to
-    /// `beamtalk_core::ast::is_state_threaded_block_arg` — the single
-    /// source of truth for this table, shared with `beamtalk-lint`'s
-    /// `DeadAssignment` check (BT-3385) so the two can never silently
-    /// drift (CLAUDE.md's "No duplicate implementations" rule). That
-    /// shared table also covers `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
-    /// (threaded via dedicated codegen elsewhere, not this loop/fold
-    /// table) — explicitly excluded below so a conditional's block is
-    /// never misclassified as a nested loop/fold body by this function's
-    /// callers (e.g. [`Self::nested_loop_or_fold_body`], which calls this
-    /// with whatever keyword selector it finds, unfiltered).
+    /// `beamtalk_core::ast::is_loop_or_fold_block_arg` — the single
+    /// source of truth for this NARROWER loop/fold-shape table (BT-3423:
+    /// deliberately not the broader
+    /// `beamtalk_core::state_threading_selectors::is_state_threaded_block_arg`
+    /// canonical table shared by `get_control_flow_threaded_vars` and
+    /// `beamtalk-lint`'s `DeadAssignment` check — see that function's doc
+    /// comment for why). That table also covers `ifTrue:`/`ifFalse:`/
+    /// `ifTrue:ifFalse:` (threaded via dedicated codegen elsewhere, not this
+    /// loop/fold table) — explicitly excluded below so a conditional's
+    /// block is never misclassified as a nested loop/fold body by this
+    /// function's callers (e.g. [`Self::nested_loop_or_fold_body`], which
+    /// calls this with whatever keyword selector it finds, unfiltered).
     fn block_arg_for_selector<'a>(
         sel: &str,
         arguments: &'a [Expression],
@@ -1806,7 +1808,7 @@ impl CoreErlangGenerator {
             return None;
         }
         arguments.iter().enumerate().find_map(|(idx, arg)| {
-            if beamtalk_core::ast::is_state_threaded_block_arg(sel, idx) {
+            if beamtalk_core::ast::is_loop_or_fold_block_arg(sel, idx) {
                 match arg {
                     Expression::Block(block) => Some(block),
                     _ => None,

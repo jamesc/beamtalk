@@ -5137,27 +5137,19 @@ impl CoreErlangGenerator {
         // a block that may contain field mutations.
         if beamtalk_core::state_threading_selectors::is_exception_selector(sel_str.as_str()) {
             if let Expression::Block(block) = receiver.as_ref() {
-                // Use pre-computed block profile when available.
-                let analysis = self
-                    .semantic_facts
-                    .block_profile(&block.span)
-                    .cloned()
-                    .unwrap_or_else(|| block_analysis::analyze_block(block));
-                if self.needs_mutation_threading(&analysis) {
-                    return true;
-                }
-                // BT-3173: a nested list-op/counted-loop inside the try body may
-                // mutate an outer local even when the try body's own top-level
-                // analysis sees no direct mutation (`analyze_block` does not
-                // propagate writes out of a nested, non-conditional block —
-                // same gap BT-2356/BT-1329 already close for conditionals and
-                // ordinary block arguments below). Without this, `[nested-loop]
-                // ensure: [...]`/`on:do:` is classified as pure here even though
-                // the nested loop's own cross-scope collector (this call site's
-                // sibling, `compute_threaded_locals_for_loop`) correctly detects
-                // the mutation — the same "two decision points disagree" shape
-                // as the do:/collect: self-classification gap this issue fixes.
-                if self.body_has_list_op_cross_scope_mutations(block) {
+                // BT-3173: also covers a nested list-op/counted-loop inside the
+                // try body mutating an outer local even when the try body's own
+                // top-level analysis sees no direct mutation (`analyze_block`
+                // does not propagate writes out of a nested, non-conditional
+                // block — same gap BT-2356/BT-1329 already close for
+                // conditionals and ordinary block arguments below). Without
+                // this, `[nested-loop] ensure: [...]`/`on:do:` would be
+                // classified as pure here even though the nested loop's own
+                // cross-scope collector (this call site's sibling,
+                // `compute_threaded_locals_for_loop`) correctly detects the
+                // mutation — the same "two decision points disagree" shape as
+                // the do:/collect: self-classification gap this issue fixes.
+                if self.block_arg_needs_threading(block) {
                     return true;
                 }
             }
@@ -5182,22 +5174,13 @@ impl CoreErlangGenerator {
                 return true;
             }
             for arg in arguments {
+                // BT-2356: `block_arg_needs_threading` also catches a nested list
+                // op inside a branch mutating an outer local even when the
+                // branch block itself has no direct mutation (`analyze_block`
+                // does not propagate writes out of nested blocks) — e.g.
+                // `flag ifTrue: [ items do: [:x | sum := sum + x] ]`.
                 if let Expression::Block(block) = arg {
-                    let analysis = self
-                        .semantic_facts
-                        .block_profile(&block.span)
-                        .cloned()
-                        .unwrap_or_else(|| block_analysis::analyze_block(block));
-                    if self.needs_mutation_threading(&analysis) {
-                        return true;
-                    }
-                    // BT-2356: a nested list op inside a branch may mutate an outer
-                    // local even when the branch block itself has no direct mutation
-                    // (`analyze_block` does not propagate writes out of nested blocks).
-                    // Without this the conditional is classified as pure and the
-                    // nested op's mutation is dropped — e.g.
-                    // `flag ifTrue: [ items do: [:x | sum := sum + x] ]`.
-                    if self.body_has_list_op_cross_scope_mutations(block) {
+                    if self.block_arg_needs_threading(block) {
                         return true;
                     }
                 }
@@ -5209,21 +5192,11 @@ impl CoreErlangGenerator {
         // BT-1486: Check ALL block arguments, not just the last one.
         // For selectors like `detect:ifNone:`, the mutation-bearing block is the
         // first argument (predicate), not the last (ifNone handler).
+        // BT-1329: `block_arg_needs_threading` also catches nested list ops with
+        // cross-scope mutations that `analyze_block` alone can't see.
         for arg in arguments {
             if let Expression::Block(block) = arg {
-                let analysis = self
-                    .semantic_facts
-                    .block_profile(&block.span)
-                    .cloned()
-                    .unwrap_or_else(|| block_analysis::analyze_block(block));
-                if self.needs_mutation_threading(&analysis) {
-                    return true;
-                }
-                // BT-1329: Also check for nested list ops with cross-scope mutations.
-                // `analyze_block` doesn't propagate local_writes from nested blocks,
-                // so variables mutated inside do:/collect:/inject:/select:/reject: blocks
-                // are invisible to the standard `needs_mutation_threading` check.
-                if self.body_has_list_op_cross_scope_mutations(block) {
+                if self.block_arg_needs_threading(block) {
                     return true;
                 }
             }

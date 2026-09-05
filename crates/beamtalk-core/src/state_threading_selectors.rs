@@ -146,6 +146,61 @@ pub fn is_conditional_selector(sel: &str) -> bool {
     ) || matches!(sel, "and:" | "or:")
 }
 
+/// BT-3423 (ADR 0118 §Decision 7): the single "which selectors thread which
+/// block-argument positions" table, replacing the parallel copies that
+/// previously lived in `beamtalk-core::ast::well_known::is_state_threaded_block_arg`
+/// (consulted by `beamtalk-codegen`'s `block_arg_for_selector`) and (via a
+/// thin per-crate wrapper) `beamtalk-lint`'s `DeadAssignment` check — the
+/// second of which was missing `and:`/`or:` from BT-3402 onward (the gap
+/// this issue closes).
+///
+/// Returns the 0-based argument indices of `sel` whose block-literal
+/// argument is compiled inline (its body's outer-local mutations are
+/// threaded back to the caller, not silently lost) rather than as an
+/// isolated closure. An empty slice means either `sel` isn't a
+/// state-threading selector at all, or its threading is context-dependent
+/// (`eachWithIndex:`/`do:separatedBy:` only thread inside an Actor's own
+/// fold, not always — see `CoreErlangGenerator::enumeration_threads_actor_state`
+/// in `beamtalk-codegen`) or the threaded block is the *receiver*, not an
+/// argument (`whileTrue:`/`whileFalse:`'s condition block,
+/// `on:do:`/`ensure:`'s try/protected block) — receiver-position threading
+/// is decided separately by each caller (codegen already special-cases the
+/// receiver for these selectors; the lint never inspects a receiver block
+/// at all).
+///
+/// Gated on [`is_state_threading_keyword_selector`] so this table can never
+/// claim an argument index for a selector that isn't classified as
+/// state-threading in the first place — the two are derived from the same
+/// selector data, even though the index mapping below is necessarily
+/// selector-specific (arities and block-argument positions vary).
+#[must_use]
+pub fn state_threaded_block_arg_indices(sel: &str) -> &'static [usize] {
+    if !is_state_threading_keyword_selector(sel) {
+        return &[];
+    }
+    match sel {
+        // Context-dependent — see this function's doc comment.
+        "eachWithIndex:" | "do:separatedBy:" => &[],
+        "to:do:" | "inject:into:" | "on:do:" => &[1],
+        "to:by:do:" => &[2],
+        // Two-block conditionals: `generate_*_with_mutations` threads both
+        // branches (BT-1392/BT-2359 for `ifTrue:ifFalse:`; BT-3420's
+        // `generate_nil_conditional_with_mutations` for the `ifNil:`
+        // two-block forms).
+        "ifTrue:ifFalse:" | "ifNil:ifNotNil:" | "ifNotNil:ifNil:" => &[0, 1],
+        // BT-3402/BT-3423: `and:`/`or:` join `ifTrue:`/`ifFalse:` here —
+        // same single-block-argument shape.
+        _ => &[0],
+    }
+}
+
+/// Returns `true` if a block-literal argument at `arg_index` for `selector`
+/// is state-threaded per [`state_threaded_block_arg_indices`].
+#[must_use]
+pub fn is_state_threaded_block_arg(selector: &str, arg_index: usize) -> bool {
+    state_threaded_block_arg_indices(selector).contains(&arg_index)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +269,232 @@ mod tests {
         assert!(is_conditional_selector("ifNil:"));
         assert!(is_conditional_selector("ifNil:ifNotNil:"));
         assert!(is_conditional_selector("ifNotNil:ifNil:"));
+    }
+
+    // ---------------------------------------------------------------
+    // state_threaded_block_arg_indices / is_state_threaded_block_arg
+    // (BT-3423 / ADR 0118 §7 — the one selector table)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn threaded_block_arg_single_block_selectors_are_index_zero() {
+        for sel in [
+            "whileTrue:",
+            "whileFalse:",
+            "timesRepeat:",
+            "do:",
+            "collect:",
+            "select:",
+            "reject:",
+            "anySatisfy:",
+            "allSatisfy:",
+            "detect:",
+            "detect:ifNone:",
+            "count:",
+            "flatMap:",
+            "takeWhile:",
+            "dropWhile:",
+            "groupBy:",
+            "partition:",
+            "sort:",
+            "doWithKey:",
+            "keysAndValuesDo:",
+            "ensure:",
+            "ifTrue:",
+            "ifFalse:",
+            "ifNotNil:",
+            "ifNil:",
+            // BT-3402/BT-3423: the gap this issue closes.
+            "and:",
+            "or:",
+        ] {
+            assert_eq!(
+                state_threaded_block_arg_indices(sel),
+                &[0],
+                "expected {sel:?} to thread only its argument at index 0"
+            );
+            assert!(is_state_threaded_block_arg(sel, 0), "{sel:?} arg 0");
+            assert!(!is_state_threaded_block_arg(sel, 1), "{sel:?} arg 1");
+        }
+    }
+
+    #[test]
+    fn threaded_block_arg_two_block_selectors() {
+        for sel in ["ifTrue:ifFalse:", "ifNil:ifNotNil:", "ifNotNil:ifNil:"] {
+            assert_eq!(state_threaded_block_arg_indices(sel), &[0, 1], "{sel:?}");
+            assert!(is_state_threaded_block_arg(sel, 0));
+            assert!(is_state_threaded_block_arg(sel, 1));
+            assert!(!is_state_threaded_block_arg(sel, 2));
+        }
+    }
+
+    #[test]
+    fn threaded_block_arg_second_arg_selectors() {
+        assert_eq!(state_threaded_block_arg_indices("to:do:"), &[1]);
+        assert_eq!(state_threaded_block_arg_indices("inject:into:"), &[1]);
+        assert_eq!(state_threaded_block_arg_indices("on:do:"), &[1]);
+        assert!(!is_state_threaded_block_arg("to:do:", 0));
+        assert!(is_state_threaded_block_arg("to:do:", 1));
+    }
+
+    #[test]
+    fn threaded_block_arg_third_arg_selector() {
+        assert_eq!(state_threaded_block_arg_indices("to:by:do:"), &[2]);
+        assert!(is_state_threaded_block_arg("to:by:do:", 2));
+        assert!(!is_state_threaded_block_arg("to:by:do:", 1));
+    }
+
+    #[test]
+    fn threaded_block_arg_context_dependent_selectors_are_empty() {
+        // eachWithIndex:/do:separatedBy: only thread inside an Actor's own
+        // fold (see this function's doc comment) — not unconditionally, so
+        // they're excluded from this table rather than claimed incorrectly.
+        assert_eq!(
+            state_threaded_block_arg_indices("eachWithIndex:"),
+            &[] as &[usize]
+        );
+        assert_eq!(
+            state_threaded_block_arg_indices("do:separatedBy:"),
+            &[] as &[usize]
+        );
+    }
+
+    #[test]
+    fn threaded_block_arg_non_state_threading_selector_is_empty() {
+        assert_eq!(
+            state_threaded_block_arg_indices("customLoop:"),
+            &[] as &[usize]
+        );
+        assert!(!is_state_threaded_block_arg("customLoop:", 0));
+    }
+
+    /// BT-3423 (ADR 0118 §7) conformance test: enumerates every
+    /// [`WellKnownSelector`] variant (via an exhaustive `match` — adding a
+    /// new variant without extending this match is a compile error, so this
+    /// table can never silently fall behind the enum it classifies) and
+    /// asserts [`state_threaded_block_arg_indices`] agrees with the expected
+    /// arg-index classification for each one.
+    ///
+    /// This is the selector-table half of "does the codegen threaded-vars
+    /// map and the selector predicate agree on which arg indices thread":
+    /// `beamtalk-codegen`'s `get_control_flow_threaded_vars` (`mod.rs`)
+    /// reads `state_threaded_block_arg_indices` directly for every
+    /// `WellKnownSelector`-backed selector below except the conditional
+    /// family (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`/`ifNil:`/
+    /// `ifNil:ifNotNil:`/`ifNotNil:ifNil:`) and `on:do:`, which it instead
+    /// routes through `is_conditional_selector`/`is_exception_selector` —
+    /// so for those the "agreement" is that this table's indices match what
+    /// those two predicates + their dedicated `generate_*_with_mutations`
+    /// codegen actually thread (documented per-arm below), not a literal
+    /// shared code path. Either way, a selector reaching neither special
+    /// case falls through to this table verbatim, so the two representations
+    /// cannot drift apart for it.
+    #[test]
+    fn well_known_selector_arg_indices_are_exhaustively_classified() {
+        fn expected_indices(sel: WellKnownSelector) -> &'static [usize] {
+            match sel {
+                // Two-block conditionals.
+                WellKnownSelector::IfTrueIfFalse
+                | WellKnownSelector::IfNilIfNotNil
+                | WellKnownSelector::IfNotNilIfNil => &[0, 1],
+                // One-block conditionals, plus `whileTrue:`/`whileFalse:`
+                // (KEYWORD selectors despite the name resemblance to
+                // `WhileTrue`/`WhileFalse` — their receiver is the
+                // condition block, handled separately by codegen; their one
+                // keyword argument, the loop body, is arg0 here) and
+                // `ensure:` (its one argument, the cleanup block, is arg0).
+                WellKnownSelector::IfTrue
+                | WellKnownSelector::IfFalse
+                | WellKnownSelector::IfNotNil
+                | WellKnownSelector::IfNil
+                | WellKnownSelector::WhileTrue
+                | WellKnownSelector::WhileFalse
+                | WellKnownSelector::Ensure => &[0],
+                // `on:do:`: arg0 is the exception class, arg1 the handler block.
+                WellKnownSelector::OnDo => &[1],
+                // Every other WellKnownSelector variant is either not a
+                // keyword selector at all (unary/no block argument:
+                // `isNil`, `class`, `repeat`, `hash`, `fieldNames`,
+                // `perform:` family, block-`value` family, `isOk`/`isError`
+                // family) or a keyword selector whose argument is never a
+                // state-threaded block (`isKindOf:`, `respondsTo:`,
+                // `error:`, `fieldAt:`/`fieldAt:put:`) — none carry a block
+                // argument this table recognizes.
+                WellKnownSelector::IsNil
+                | WellKnownSelector::NotNil
+                | WellKnownSelector::IsKindOf
+                | WellKnownSelector::Class
+                | WellKnownSelector::RespondsTo
+                | WellKnownSelector::Value
+                | WellKnownSelector::ValueColon
+                | WellKnownSelector::ValueValue
+                | WellKnownSelector::ValueValueValue
+                | WellKnownSelector::IsOk
+                | WellKnownSelector::IsError
+                | WellKnownSelector::IsOkColon
+                | WellKnownSelector::IsErrorColon
+                | WellKnownSelector::Repeat
+                | WellKnownSelector::Hash
+                | WellKnownSelector::Error
+                | WellKnownSelector::FieldAt
+                | WellKnownSelector::FieldAtPut
+                | WellKnownSelector::FieldNames
+                | WellKnownSelector::Perform
+                | WellKnownSelector::PerformWithArgs
+                | WellKnownSelector::PerformLocallyWithArgs => &[],
+            }
+        }
+
+        // Mirrors `beamtalk_core::ast::well_known::tests::ALL_VARIANTS` — kept
+        // as a literal list here (rather than importing a test-only const
+        // across the module boundary) since this test's whole point is to
+        // force a compile error in `expected_indices` above when a new
+        // variant appears; a shared list wouldn't need the array below to
+        // change, but `expected_indices`'s `match` still would.
+        const ALL_VARIANTS: &[WellKnownSelector] = &[
+            WellKnownSelector::IsNil,
+            WellKnownSelector::NotNil,
+            WellKnownSelector::IfNil,
+            WellKnownSelector::IfNotNil,
+            WellKnownSelector::IfNilIfNotNil,
+            WellKnownSelector::IfNotNilIfNil,
+            WellKnownSelector::IsKindOf,
+            WellKnownSelector::Class,
+            WellKnownSelector::RespondsTo,
+            WellKnownSelector::IfTrue,
+            WellKnownSelector::IfFalse,
+            WellKnownSelector::IfTrueIfFalse,
+            WellKnownSelector::OnDo,
+            WellKnownSelector::Value,
+            WellKnownSelector::ValueColon,
+            WellKnownSelector::ValueValue,
+            WellKnownSelector::ValueValueValue,
+            WellKnownSelector::IsOk,
+            WellKnownSelector::IsError,
+            WellKnownSelector::IsOkColon,
+            WellKnownSelector::IsErrorColon,
+            WellKnownSelector::WhileTrue,
+            WellKnownSelector::WhileFalse,
+            WellKnownSelector::Repeat,
+            WellKnownSelector::Ensure,
+            WellKnownSelector::Hash,
+            WellKnownSelector::Error,
+            WellKnownSelector::FieldAt,
+            WellKnownSelector::FieldAtPut,
+            WellKnownSelector::FieldNames,
+            WellKnownSelector::Perform,
+            WellKnownSelector::PerformWithArgs,
+            WellKnownSelector::PerformLocallyWithArgs,
+        ];
+
+        for &sel in ALL_VARIANTS {
+            let name = sel.as_str();
+            assert_eq!(
+                state_threaded_block_arg_indices(name),
+                expected_indices(sel),
+                "state_threaded_block_arg_indices({name:?}) disagreed with the \
+                 expected WellKnownSelector classification"
+            );
+        }
     }
 }
