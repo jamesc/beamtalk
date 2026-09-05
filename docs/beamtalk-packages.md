@@ -128,6 +128,8 @@ Keys are kebab-case diagnostic categories (`dnu`, `type`, `unused`, `empty-body`
 
 **Cross-surface parity:** `beamtalk build`/`check`, the LSP (BT-2800), and the REPL (BT-2839) all apply this table identically — a package that sets `dnu = "error"` fails the CLI build, shows the same site as an `Error` in the editor, *and* shows an `Error` at the REPL, never a soft hint. The LSP loads `beamtalk.toml` once per workspace root at startup; the REPL's compiler-port process loads it once per session from its working directory (the project root the REPL was started in). Edits to the `[diagnostics]` section while the server/session is running require an editor/LSP restart or a fresh REPL session to take effect.
 
+**Want a provable DNU to fail your build, even on an ordinary single-receiver send?** ADR 0100 Rule 1's default (`Hint`) stays quiet even when the checker has fully proven a selector doesn't exist on a concrete, fully-loaded class with no `doesNotUnderstand:` handler — deliberately, to avoid turning today's large body of quiet hints into warnings the instant a project's cross-file/dependency knowledge becomes complete (see the ADR's "Hint vs Warning for the closed-complete case" tension point). That default has a real cost: a genuinely-broken send (e.g. two chained keyword messages accidentally merging into one selector no class implements) can stay a silent `Hint` until it's exercised at runtime. If your project would rather fail the build on a provable DNU than risk that, set `dnu = "warn"` (or `"error"`) explicitly — this table is exactly the opt-in escalation lever ADR 0100 Rule 3 reserves for that choice.
+
 See [ADR 0100](ADR/0100-open-world-diagnostic-policy.md) for the full policy rationale.
 
 ## Dependency Management CLI
