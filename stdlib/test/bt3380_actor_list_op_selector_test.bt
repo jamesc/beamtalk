@@ -48,7 +48,9 @@ TestCase subclass: BT3380ActorListOpSelectorTest
 
   testExternalDetectIfNoneReturnsPlainResultNotOkTuple =>
     self.probe setTag: "detectIfNone"
-    self assert: (self.probe detect: [:x | x] ifNone: [nil]) equals: "detectIfNone"
+    self assert: (self.probe detect: [:x |
+      x
+    ] ifNone: [nil]) equals: "detectIfNone"
 
   testExternalCountReturnsPlainResultNotOkTuple =>
     self.probe setTag: "count"
