@@ -1353,6 +1353,67 @@ Object subclass: Foo
     }
 
     #[test]
+    fn expect_declaration_no_category_same_line_as_real_declaration_is_not_swallowed() {
+        // Review follow-up: `@expect` with the category forgotten and NO
+        // separator at all before the real declaration on the *same* line
+        // (`@expect state: x = 0`) must not have `state:` swallowed as if
+        // it were garbage — `state:` lexes as a Keyword, not an Identifier,
+        // so it falls into the same "no category" recovery branch as a
+        // stray `,`, but unlike a stray `,` it IS the real next
+        // declaration and must be left alone.
+        let source = "\
+Object subclass: Foo
+  @expect state: x = 0
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags.iter().any(|d| d
+                .message
+                .contains("@expect must be followed by a category name")),
+            "expected a parse error for the missing category, got: {parse_diags:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "got: {:?}", module.classes);
+        assert_eq!(
+            module.classes[0].state.len(),
+            1,
+            "the state: x declaration must not be swallowed, got: {:?}",
+            module.classes[0].state
+        );
+    }
+
+    #[test]
+    fn expect_combined_categories_comma_continuation_into_a_declaration_keyword_is_not_swallowed() {
+        // Review follow-up: the comma-continuation loop can also land on a
+        // declaration keyword — `@expect dnu, state: x = 0` continues past
+        // the comma (both `dnu,` and `state:` are on the same line), then
+        // hits `state:` expecting another category identifier. `state:`
+        // must be left alone here too, for the same reason as the test
+        // above.
+        let source = "\
+Object subclass: Foo
+  @expect dnu, state: x = 0
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags.iter().any(|d| d
+                .message
+                .contains("@expect must be followed by a category name")),
+            "expected a parse error for the missing second category, got: {parse_diags:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "got: {:?}", module.classes);
+        assert_eq!(
+            module.classes[0].state.len(),
+            1,
+            "the state: x declaration must not be swallowed, got: {:?}",
+            module.classes[0].state
+        );
+    }
+
+    #[test]
     fn expect_combined_categories_round_trips_through_unparse() {
         // @expect unresolved_ffi, type should round-trip through unparse.
         let source = "@expect unresolved_ffi, type\n42 unknownMethod";

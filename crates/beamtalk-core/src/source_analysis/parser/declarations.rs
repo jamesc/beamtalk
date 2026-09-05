@@ -1006,6 +1006,19 @@ impl Parser {
         (categories, reason, span)
     }
 
+    /// Returns `true` if the current token could start a class-body
+    /// declaration — i.e. matches one of `parse_class_body`'s own
+    /// recognized starts (`state:`/`field:`/`classState:`/`handleScope:`,
+    /// or a method definition). Used by [`Parser::parse_expect_tail`] to
+    /// avoid ever swallowing a real declaration while discarding garbage
+    /// left over from a malformed `@expect` (BT-3387 review follow-up).
+    fn current_token_could_start_a_declaration(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            TokenKind::Keyword(k) if matches!(k.as_str(), "state:" | "field:" | "classState:" | "handleScope:")
+        ) || self.is_at_method_definition()
+    }
+
     /// Parses the comma-separated category list and optional reason string
     /// that follow an already-consumed `@expect` token (BT-3387), shared by
     /// the statement-level (`parse_expect_directive`, `expressions.rs`) and
@@ -1060,12 +1073,21 @@ impl Parser {
                 // Consume one same-line offending token (e.g. `@expect ,` or
                 // `@expect 42`) so it isn't left dangling for the caller —
                 // same class-body-truncation risk the dangling-comma fix
-                // above addresses. A token on the *next* line is left
-                // alone: that's very plausibly the real next
-                // declaration/statement (e.g. `@expect` with the category
-                // simply forgotten, followed by a normal `state:` on its
-                // own line), not garbage to discard.
-                if !self.is_at_end() && !self.current_token().has_leading_newline() {
+                // above addresses. Two things must hold, not just same-line:
+                // a token on the *next* line is left alone since that's
+                // plausibly the real next declaration/statement (e.g.
+                // `@expect` with the category simply forgotten, followed by
+                // a normal `state:` on its own line); AND a same-line token
+                // that itself could start a class-body declaration (e.g.
+                // `@expect state: x = 0`, category forgotten with no
+                // separator at all) must ALSO be left alone — otherwise this
+                // swallows the real declaration instead of discarding
+                // garbage, which is worse than the dangling-token bug being
+                // fixed here.
+                if !self.is_at_end()
+                    && !self.current_token().has_leading_newline()
+                    && !self.current_token_could_start_a_declaration()
+                {
                     let bad_token = self.advance();
                     span = start.merge(bad_token.span());
                 }
