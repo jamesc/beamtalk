@@ -6067,14 +6067,17 @@ mod tests {
         let _ = fs::remove_dir_all(&temp);
     }
 
-    /// BT-3433: a `didOpen` for a file referencing a sibling same-directory
-    /// class, raced against `preload_workspace_source_files`, must not leave
-    /// that sibling class permanently unresolved. Before this fix, indexing
-    /// the opened file *before* preload populated the sibling meant its
-    /// `ProjectIndex` entry (and therefore `check_unresolved_classes`'s
-    /// `pre_loaded_classes` snapshot) never got refreshed once preload ran —
-    /// only a later edit (which re-runs full analysis) would pick the
-    /// sibling up.
+    /// BT-3433: rules out a *state* bug as the cause of the reported false
+    /// `Unresolved class` warning. `svc.diagnostics()` always recomputes
+    /// fresh against the current `ProjectIndex`, so once
+    /// `preload_workspace_source_files` has indexed a sibling class, every
+    /// subsequent diagnosis sees it — regardless of whether the referencing
+    /// file was indexed (via a racing `didOpen`) before or after that
+    /// preload ran. This held true even before the BT-3433 fix below; the
+    /// real bug was a *notification send-order* race, not a stale
+    /// `ProjectIndex`/`pre_loaded_classes` snapshot — see
+    /// `did_open_during_preload_defers_to_republish_for_sibling_class` for
+    /// the test that actually exercises the fix.
     #[tokio::test]
     async fn did_open_racing_preload_resolves_sibling_class() {
         let temp = unique_temp_dir("beamtalk_lsp_sibling_class_race");
