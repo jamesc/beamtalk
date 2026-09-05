@@ -257,27 +257,19 @@ format_formatted_diagnostics(FormattedList) ->
 
 -doc "Format a single diagnostic for human-readable display.".
 -spec format_diagnostic_text(term()) -> binary().
-format_diagnostic_text(D) when is_map(D) ->
-    Msg = maps:get(message, D, <<"Unknown error">>),
+format_diagnostic_text(D) ->
+    #{message := Msg} = Norm = beamtalk_repl_errors:normalize_diagnostic(D),
     LinePrefix =
-        % elp:fixme W0032 maps:find with complex branch logic
-        case maps:find(line, D) of
-            {ok, Line} when is_integer(Line) ->
-                [<<"Line ">>, integer_to_binary(Line), <<": ">>];
-            _ ->
-                []
+        case maps:find(line, Norm) of
+            {ok, Line} -> [<<"Line ">>, integer_to_binary(Line), <<": ">>];
+            error -> []
         end,
     HintSuffix =
-        % elp:fixme W0032 maps:find with complex branch logic
-        case maps:find(hint, D) of
+        case maps:find(hint, Norm) of
             {ok, Hint} -> [<<"\nHint: ">>, Hint];
             error -> []
         end,
-    iolist_to_binary([LinePrefix, Msg, HintSuffix]);
-format_diagnostic_text(D) when is_binary(D) ->
-    D;
-format_diagnostic_text(D) ->
-    iolist_to_binary(io_lib:format("~p", [D])).
+    iolist_to_binary([LinePrefix, Msg, HintSuffix]).
 
 -doc """
 Build the `KnownVars' list passed to the compiler port for a REPL eval.

@@ -1908,36 +1908,22 @@ structured_file_errors(Path, Reason) ->
 
 -doc "Convert a single compiler diagnostic map to a structured error map.".
 -spec diagnostic_to_error_map(binary(), term()) -> map().
-diagnostic_to_error_map(PathBin, D) when is_map(D) ->
-    Msg = maps:get(message, D, <<"Unknown error">>),
-    ErrMap0 = #{
-        <<"path">> => PathBin,
-        <<"kind">> => <<"compile_error">>,
-        <<"message">> => Msg
-    },
-    ErrMap1 =
-        % elp:fixme W0032 maps:find with complex branch logic
-        case maps:find(line, D) of
-            {ok, Line} when is_integer(Line) -> ErrMap0#{<<"line">> => Line};
-            _ -> ErrMap0
-        end,
-    % elp:fixme W0032 maps:find with complex branch logic
-    case maps:find(hint, D) of
-        {ok, Hint} when is_binary(Hint) -> ErrMap1#{<<"hint">> => Hint};
-        _ -> ErrMap1
-    end;
-diagnostic_to_error_map(PathBin, D) when is_binary(D) ->
-    #{
-        <<"path">> => PathBin,
-        <<"kind">> => <<"compile_error">>,
-        <<"message">> => D
-    };
 diagnostic_to_error_map(PathBin, D) ->
-    #{
+    Norm = beamtalk_repl_errors:normalize_diagnostic(D),
+    Base = #{
         <<"path">> => PathBin,
         <<"kind">> => <<"compile_error">>,
-        <<"message">> => iolist_to_binary(io_lib:format("~p", [D]))
-    }.
+        <<"message">> => maps:get(message, Norm)
+    },
+    Base1 =
+        case maps:find(line, Norm) of
+            {ok, Line} -> Base#{<<"line">> => Line};
+            error -> Base
+        end,
+    case maps:find(hint, Norm) of
+        {ok, Hint} -> Base1#{<<"hint">> => Hint};
+        error -> Base1
+    end.
 
 -doc """
 Collect collision warnings for the loaded classes after a file load.
