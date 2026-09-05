@@ -4191,6 +4191,23 @@ impl CoreErlangGenerator {
         if self.is_tier2_value_call(value) {
             return Ok(None);
         }
+        // BT-3428: a control-flow-with-mutations RHS (e.g. a mutating list-op
+        // like `collect:` whose block mutates a DIFFERENT outer local than
+        // `id.name`, or a nested `ifTrue:ifFalse:`/`match:`/`on:do:` with
+        // mutations) also returns a closed `{Value, StateAcc}` 2-tuple — same
+        // shape as the Tier 2 case just above. `id.name` itself may correctly
+        // be absent from `threaded` (this assignment's own target needs no
+        // StateAcc threading), but the RHS's *other* mutated locals still do,
+        // and the plain `let core_var = <val_doc> in` below has no way to
+        // unwrap the tuple or rethread them — it would bind `core_var` to the
+        // raw tuple and silently drop every other local the RHS's block
+        // mutated. Fall back to `generate_local_var_assignment_in_loop`,
+        // which (as of BT-3428) unwraps this exact shape and rebinds those
+        // other locals via `push_control_flow_threaded_var_rereads`'s
+        // loop-body counterpart.
+        if self.control_flow_has_mutations(value) {
+            return Ok(None);
+        }
         let core_var = self
             .lookup_var(&id.name)
             .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
@@ -4377,6 +4394,75 @@ impl CoreErlangGenerator {
                         ],
                         val_var,
                     ));
+                }
+
+                // BT-3428: RHS is itself control-flow-with-mutations (e.g. a
+                // mutating list-op like `collect:`/`do:`/`select:` whose
+                // block — or its own receiver — needs state threading, or a
+                // nested `ifTrue:ifFalse:`/`match:`/`on:do:` with mutations).
+                // Same `{Value, StateAcc}` 2-tuple shape as the Tier 2 case
+                // above, produced by the ordinary `expression_doc` path
+                // rather than `generate_tier2_value_call_doc` — must be
+                // unwrapped identically, instead of falling into the generic
+                // path below (which assumes a single, non-tuple value and
+                // would bind `val_var`/`maps:put` to the raw tuple itself).
+                // Mirrors `lower_local_var_assignment_bind`'s C3b case
+                // (`conditionals.rs`) — the conditional-branch-arm sibling
+                // this loop-body function has always structurally
+                // paralleled — including its rebind of any OTHER outer local
+                // the RHS's own block mutated (BT-3428, found via the review
+                // of that C3b fix).
+                if self.control_flow_has_mutations(value) {
+                    let cf_tuple = self.fresh_temp_var("CfTuple");
+                    let cf_state = self.fresh_temp_var("CfSt");
+                    let frame = self.current_frame();
+                    let mut prelude_stmts: Vec<ThreadedStmt> = Vec::new();
+                    let thread_scope = self.thread_ahead(value, &mut prelude_stmts, frame)?;
+                    let prelude_doc = self.threaded_prelude_doc(&prelude_stmts);
+                    let value_code = self.expression_doc(value)?;
+                    self.finish_precompiled_scope(thread_scope)?;
+
+                    let _ = self.next_state_var();
+                    let new_state = if self.in_loop_body {
+                        self.current_state_var()
+                    } else {
+                        format!("State{}", self.state_version())
+                    };
+
+                    self.bind_var(&id.name, &val_var);
+
+                    let mut docs = vec![
+                        prelude_doc,
+                        docvec![
+                            "let ",
+                            leaf::var(cf_tuple.clone()),
+                            " = ",
+                            value_code,
+                            " in let ",
+                            leaf::var(val_var.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            leaf::var(cf_tuple.clone()),
+                            ") in let ",
+                            leaf::var(cf_state.clone()),
+                            " = call 'erlang':'element'(2, ",
+                            leaf::var(cf_tuple),
+                            ") in let ",
+                            leaf::var(new_state.clone()),
+                            " = call 'maps':'put'(",
+                            leaf::atom(state_key.to_string()),
+                            ", ",
+                            leaf::var(val_var.clone()),
+                            ", ",
+                            leaf::var(cf_state),
+                            ") in ",
+                        ],
+                    ];
+                    if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
+                        docs.extend(
+                            self.rebind_threaded_vars_from_state(&threaded_vars, &new_state),
+                        );
+                    }
+                    return Ok((Document::Vec(docs), val_var));
                 }
 
                 // ADR 0118 phase 2b (BT-3418): thread every state-effecting

@@ -1,0 +1,114 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3428: Actor fixture for the local-assign-control-flow-RHS position
+// matrix. Each method assigns a mutating construct (a self-send `collect:`,
+// whose block also mutates actor state) to a LOCAL variable, then reads
+// that local back — inside a different container position per method. This
+// exercises the "RHS is itself control-flow-with-mutations, assigned to a
+// local, and that local is read afterward" shape across every position the
+// compiler could plausibly route it through differently:
+//
+//   - top-level statement (BT-3383)
+//   - ifTrue:/ifFalse: branch (BT-3425)
+//   - whileTrue: loop body (BT-3428)
+//   - to:do: loop body (BT-3428)
+//   - timesRepeat: loop body (BT-3428)
+//   - a list-op block body nested inside another list-op (BT-3428)
+//   - on:do: body (already correct — shares BT-3425's fix)
+//
+// Every method returns the assigned local's `class` — species preservation
+// (List, not Tuple) is the symptom BT-3383/3425/3428 all share, so it is
+// also the simplest thing for `mutation_matrix_test.bt`'s sibling to assert
+// per position without needing a second accessor.
+
+Actor subclass: LocalAssignControlFlowMatrixActor
+  state: count = 0
+
+  getCount => self.count
+
+  // Self-send with a field mutation — the block body every position below
+  // passes to `collect:`. Threading this mutation (and the block's return
+  // value) correctly is exactly what BT-3383/BT-3425/BT-3428 are about.
+  helper: x =>
+    self.count := self.count + 1
+    x * 2
+
+  // P0: top-level statement (BT-3383, already fixed) — sanity anchor so a
+  // regression in the shared root cause shows up here too, not only in the
+  // newer positions below.
+  topLevelAssign: items =>
+    mapped := items collect: [:x | self helper: x]
+    mapped class
+
+  // P1: ifTrue:/ifFalse: branch (BT-3425, already fixed).
+  ifTrueBranchAssign: items when: flag =>
+    (flag
+      ifTrue: [
+        mapped := items collect: [:x | self helper: x]
+        mapped class
+      ]
+      ifFalse: [nil])
+
+  // P2: whileTrue: loop body (BT-3428).
+  whileTrueBodyAssign: items =>
+    i := 0
+    mapped := nil
+    [i < 1]
+      whileTrue: [
+        mapped := items collect: [:x | self helper: x]
+        i := i + 1
+      ]
+    mapped class
+
+  // P3: to:do: loop body (BT-3428).
+  toDoBodyAssign: items =>
+    mapped := nil
+    1 to: 1 do: [:i | mapped := items collect: [:x | self helper: x]]
+    mapped class
+
+  // P4: timesRepeat: loop body (BT-3428).
+  timesRepeatBodyAssign: items =>
+    mapped := nil
+    1 timesRepeat: [mapped := items collect: [:x | self helper: x]]
+    mapped class
+
+  // P5: a list-op block body nested inside another list-op (BT-3428) —
+  // `list_ops/transform_ops.rs`'s call site for the same loop-body
+  // assignment lowering, distinct from the whileTrue:/to:do:/timesRepeat:
+  // (Letrec/counted-loop) call site above.
+  nestedListOpBodyAssign: items =>
+    items
+      collect: [:sub |
+        inner := sub collect: [:x | self helper: x]
+        inner class
+      ]
+
+  // P6: on:do: body (already correct — shares BT-3425's
+  // `lower_local_var_assignment_bind` fix with the ifTrue:/ifFalse: case).
+  onDoBodyAssign: items =>
+    mapped := nil
+    [
+      mapped := items collect: [:x | self helper: x]
+    ] on: Exception do: [:e | nil]
+    mapped class
+
+  // P7 (BT-3428 review-finding regression): a DIFFERENT outer local than the
+  // collect:'s own assignment target, mutated inside the collect:'s block,
+  // must also be re-threaded out of a whileTrue: body correctly — not left
+  // stale. Mirrors the equivalent conditional-branch regression test
+  // (ActorSelfSendCollectTest>>testCollectInsideBranchThreadsOtherCapturedLocal)
+  // BT-3425's own fix added, one container position deeper.
+  whileTrueOtherLocalRebind: items =>
+    i := 0
+    localCount := 0
+    [i < 1]
+      whileTrue: [
+        _result := items
+          collect: [:item |
+            localCount := localCount + 1
+            self helper: item
+          ]
+        i := i + 1
+      ]
+    localCount
