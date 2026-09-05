@@ -48,8 +48,8 @@ TestCase subclass: ActorSpawnDynamicDispatchTest
 
   testSpawnSelfInsideForeignBlockDoesNotDeadlock =>
     // BT-3047 shape: `self spawn` inside a block handed to a foreign
-    // class's block-taking method (fixtures/bt3072_spawn_parent.bt +
-    // fixtures/bt3047_driver_plain.bt) must resolve against the block's
+    // class's block-taking method (fixtures/bt3072spawn_parent.bt +
+    // fixtures/bt3047driver_plain.bt) must resolve against the block's
     // lexical home class (BT3072SpawnParent), not the driver it executes in.
     actor := BT3072SpawnParent spawnSelfThrough: BT3047DriverPlain over: #(1)
     self assert: actor class equals: BT3072SpawnParent

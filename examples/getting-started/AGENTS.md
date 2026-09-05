@@ -12,10 +12,10 @@ getting-started/
 │   ├── counter.bt           # Stateful actor
 │   ├── hanoi.bt             # Towers of Hanoi (recursion)
 │   ├── logging_counter.bt   # Inheritance and super
-│   ├── protoobject_proxy.bt # Transparent proxy pattern
+│   ├── transparent_proxy.bt # Transparent proxy pattern
 │   └── stream.bt            # Lazy pipelines
 ├── test/
-│   ├── counter_test.bt          # BUnit tests for Counter
+│   ├── example_counter_test.bt  # BUnit tests for Counter
 │   ├── hello_test.bt            # BUnit tests for Hello
 │   ├── hanoi_test.bt            # BUnit tests for Hanoi
 │   └── logging_counter_test.bt  # BUnit tests for LoggingCounter

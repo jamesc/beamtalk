@@ -6375,9 +6375,9 @@ fn test_nested_letrec_self_send_buried_in_conditional_compiles() {
     // (`loop_body_threads_class_vars`) is narrowly top-level-only by
     // design — recursing into a conditional buried inside a `Letrec` body
     // is exactly the shape that predicate was narrowed to exclude (the
-    // `class_var_subexpr.bt` `tickInLoopConditional` regression documented
+    // `class_var_sub_expr.bt` `tickInLoopConditional` regression documented
     // on `loop_body_threads_class_vars` itself), and it's also the shape
-    // `class_var_subexpr_test.bt`'s
+    // `class_var_sub_expr_test.bt`'s
     // `testTickInLoopConditionalCompilesAndRuns` already pins as
     // accepted, silently-non-threading behavior at a single loop level
     // (BT-2308, out of BT-3172's scope). The inner loop was never going to

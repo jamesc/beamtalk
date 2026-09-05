@@ -243,7 +243,7 @@ fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
 /// and protocol definitions. Returns:
 ///
 /// 1. A module index mapping each class name to its module name (e.g. `"Env"`
-///    → `"bt@env"` for `fixtures/scheme/env.bt`).
+///    → `"bt@scheme_env"` for `fixtures/scheme/scheme_env.bt`).
 /// 2. A superclass index mapping each class name to its superclass (e.g.
 ///    `"ValueSubCircle"` → `"ValueBaseShape"`).
 /// 3. A `Vec<ClassInfo>` of full class metadata for validator/type-checker
@@ -1086,7 +1086,7 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         .extend(fixture_superclass_index);
     // BT-1736: Fixture ClassInfo is now included in all_class_infos so the type
     // checker can validate cross-file references in test files. The Shape class
-    // name collision between abstract_shape.bt and class_method_self_new.bt was
+    // name collision between abstract_shape.bt and shape.bt was
     // resolved by renaming abstract_shape's class to AbstractShape.
     pipeline.all_class_infos.extend(fixture_class_infos);
     // BT-2006: Fixture-defined protocols need to flow through to each test
@@ -2303,18 +2303,18 @@ mod tests {
         fs::create_dir_all(&subdir).unwrap();
 
         fs::write(
-            subdir.join("env.bt"),
+            subdir.join("scheme_env.bt"),
             "Object subclass: SchemeEnv\n  lookup => nil\n",
         )
         .unwrap();
 
-        // fixture_module_name uses the file stem only, so env.bt → bt@env
-        let files = vec![subdir.join("env.bt")];
+        // fixture_module_name uses the file stem only, so scheme_env.bt → bt@scheme_env
+        let files = vec![subdir.join("scheme_env.bt")];
         let (module_index, superclass_index, _class_infos, protocol_infos) =
             build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("SchemeEnv").map(String::as_str),
-            Some("bt@env")
+            Some("bt@scheme_env")
         );
         assert_eq!(
             superclass_index.get("SchemeEnv").map(String::as_str),

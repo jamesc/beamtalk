@@ -1783,6 +1783,10 @@ impl LanguageService for SimpleLanguageService {
                 // `ProjectIndex::is_stub_file`'s doc for why this can't be a
                 // tracked-membership check like `is_stdlib_file`.
                 let is_stub_file = self.project_index.is_stub_file(file);
+                // BT-3431: file basename (without extension), so the shared
+                // pipeline can validate it agrees with the class declared
+                // here — see `ProjectDiagnosticContext::source_file_stem`'s doc.
+                let source_file_stem = file.file_stem().map(std::string::ToString::to_string);
                 let ctx = crate::queries::diagnostic_provider::ProjectDiagnosticContext {
                     options,
                     cross_file_classes,
@@ -1796,6 +1800,7 @@ impl LanguageService for SimpleLanguageService {
                     // severity.
                     diagnostics_overrides: self.diagnostics_overrides.clone(),
                     is_stub_file,
+                    source_file_stem,
                     ..Default::default()
                 };
                 crate::queries::diagnostic_provider::compute_project_diagnostics(

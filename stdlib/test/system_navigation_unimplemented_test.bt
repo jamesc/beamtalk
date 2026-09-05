@@ -7,7 +7,7 @@
 //
 // `unimplementedSelectors` is an instance method on `SystemNavigation`, reached
 // via the `default` (or future scoped) constructor. See the note in
-// `beamtalk_implementors_test.bt` for why the class side is constructors only
+// `system_navigation_implementors_test.bt` for why the class side is constructors only
 // and the queries live on the instance.
 //
 // Behavioural tests (a real typo surfaces with a site; doesNotUnderstand: /

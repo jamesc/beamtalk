@@ -7,7 +7,7 @@
 //
 // `referencesTo:` is an instance method on `SystemNavigation`, reached via
 // the `default` (or future scoped) constructor. Mirrors the structure of
-// `beamtalk_senders_test.bt`: the behavioural happy-path / multi-site /
+// `system_navigation_senders_test.bt`: the behavioural happy-path / multi-site /
 // stdlib-included / no-references / type-check cases live in the E2E
 // REPL-protocol suite which has the live class registry populated with
 // user classes. These BUnit checks cover selector existence, composition

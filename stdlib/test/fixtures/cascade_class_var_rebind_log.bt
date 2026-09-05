@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3412: shared order-recording actor for
+// stdlib/test/fixtures/cascade_class_var_rebind.bt — see that file for full
+// context. `record:` both mutates `entries` and returns a value, so it can
+// be used directly as a cascade argument expression.
+
+Actor subclass: CascadeClassVarRebindLog
+  state: entries :: List = #()
+
+  record: tag -> Symbol =>
+    self.entries := self.entries ++ #(tag)
+    tag
+
+  entries -> List => self.entries

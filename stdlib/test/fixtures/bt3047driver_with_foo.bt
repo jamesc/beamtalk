@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3047 / ADR 0109 amendment: a block-taking class method whose hierarchy
+// *does* define its own `foo` (distinct from BT3047Ancestor's) — pins the
+// "silently executes the wrong method against the wrong class's live state"
+// half of the bug. Before the fix, `self foo` inside a block that
+// fixtures/bt3047parent.bt hands to this class would resolve against THIS
+// class's `foo` (since it happened to run inside this class's process)
+// instead of the block's lexical home (BT3047Ancestor, via BT3047Parent).
+
+Value subclass: BT3047DriverWithFoo
+
+  class foo -> Symbol => #FromDriver
+
+  // BT-3047: the block runs inside THIS class's own gen_server process
+  // (ADR 0109), not the caller's.
+  class run: aBlock :: Block over: aList :: List -> Nil =>
+    aList do: [:x | aBlock value: x]
+    nil

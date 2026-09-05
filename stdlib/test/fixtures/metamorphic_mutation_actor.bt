@@ -6,7 +6,7 @@
 // bodies with actor field mutations) so block-wrap/rename-locals/
 // redundant-temp have a real actor state-threading call site to probe.
 //
-// Mirrors stdlib/test/fixtures/bt1226_multi_state_actor.bt's pattern
+// Mirrors stdlib/test/fixtures/bt1226multi_state_actor.bt's pattern
 // (two field mutations per do: iteration) at a smaller scale.
 
 Actor subclass: MetamorphicMutationActor

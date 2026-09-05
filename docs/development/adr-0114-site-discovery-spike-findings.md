@@ -17,10 +17,10 @@ method) before any rename primitive is built on top of it.
   beamtalk_adr0114_site_discovery_spike_tests` → **6 tests, 0 failures**.
   Also green inside the full suite: `rebar3 eunit --app=beamtalk_runtime,
   beamtalk_workspace,beamtalk_compiler` → **5900 tests, 0 failures**.
-- `stdlib/test/adr_0114_class_builder_live_patch_gap_test.bt` — the gap
+- `stdlib/test/adr0114class_builder_live_patch_gap_test.bt` — the gap
   reproduced end-to-end through `SystemNavigation referencesTo:` against a
   real `ClassBuilder`-installed method (`just test-bunit
-  test/adr_0114_class_builder_live_patch_gap_test.bt` → passes).
+  test/adr0114class_builder_live_patch_gap_test.bt` → passes).
 - `tests/repl-protocol/cases/adr_0114_live_patch_gap.btscript` — checks the
   two OTHER live-patch surfaces the ADR names (`>>`/`compile:source:` via a
   prior revision of this file, and `register/5` extensions in the current
@@ -193,7 +193,7 @@ extension method never actually surfaces as a missed reference at the
 
 ### 3c. `ClassBuilder` `methodSource:` — DOES reproduce the gap
 
-Confirmed via `stdlib/test/adr_0114_class_builder_live_patch_gap_test.bt`:
+Confirmed via `stdlib/test/adr0114class_builder_live_patch_gap_test.bt`:
 a class built with `Object classBuilder name: #Adr0114BuilderGapProbe;
 superclass: Object; methods: #{#makeCounter => [:_self | AtomicCounter
 new: #adr0114BuilderProbe]}; register` (a real block-literal method body,

@@ -89,6 +89,15 @@ pub struct ProjectDiagnosticContext<'a> {
     /// caller that never sets this still correctly rejects `declare native:`
     /// outside `stubs/`.
     pub is_stub_file: bool,
+    /// Basename (without extension) of the file being analysed, or `None`
+    /// when there is no real file backing the module (REPL sessions,
+    /// in-memory snippets). Used by
+    /// [`check_class_file_name_agreement`](beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement)
+    /// (BT-3431) to validate that the file name agrees with the class it
+    /// declares — a mismatch silently breaks self-dispatch codegen with no
+    /// other diagnostic. Callers derive this from the file path they're
+    /// about to analyse, mirroring `is_stub_file` above.
+    pub source_file_stem: Option<String>,
 }
 
 /// Unified post-analysis diagnostic pipeline (BT-2009).
@@ -160,6 +169,16 @@ pub fn compute_project_diagnostics_with_analysis(
     // `AnalysisResult` (hierarchy, semantic facts, inferred return types,
     // alias registry) can be handed to codegen without cloning it.
     diagnostics.extend(std::mem::take(&mut analysis_result.diagnostics));
+
+    // BT-3431: Validate that the file name agrees with the class it
+    // declares — a mismatch silently breaks self-dispatch codegen (see
+    // `check_class_file_name_agreement`'s doc) with no other diagnostic.
+    diagnostics.extend(
+        beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement(
+            module,
+            ctx.source_file_stem.as_deref(),
+        ),
+    );
 
     // BT-1732: Enrich unresolved class warnings with dependency package hints.
     if let Some(registry) = ctx.dep_registry {

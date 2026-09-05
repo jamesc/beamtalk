@@ -132,6 +132,7 @@ fn diagnostic_category_from_kebab(key: &str) -> Option<DiagnosticCategory> {
         "inheritance" => DiagnosticCategory::Inheritance,
         "sendability" => DiagnosticCategory::Sendability,
         "native-declaration-location" => DiagnosticCategory::NativeDeclarationLocation,
+        "file-class-name-mismatch" => DiagnosticCategory::FileClassNameMismatch,
         _ => return None,
     })
 }
@@ -158,6 +159,7 @@ const DIAGNOSTIC_CATEGORY_KEYS: &[&str] = &[
     "inheritance",
     "sendability",
     "native-declaration-location",
+    "file-class-name-mismatch",
 ];
 
 /// Return a human-readable TOML type name for error messages.
@@ -990,6 +992,7 @@ type-annotation = "hint"
 inheritance = "error"
 sendability = "hint"
 native-declaration-location = "error"
+file-class-name-mismatch = "error"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();

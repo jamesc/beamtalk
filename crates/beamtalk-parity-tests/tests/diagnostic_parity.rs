@@ -196,7 +196,7 @@ fn corpus_cases() -> Vec<CorpusCase> {
         },
         CorpusCase {
             name: "stdlib_mode",
-            lsp_target: "test/math_box_test.bt",
+            lsp_target: "test/math_box_harness.bt",
             // BT-2027: lint the `test/` subdir specifically — the regression
             // surfaced when the extraction set didn't include sibling `src/`.
             lint_target: "test",
@@ -211,7 +211,7 @@ fn corpus_cases() -> Vec<CorpusCase> {
         },
         CorpusCase {
             name: "protocol_cross_file",
-            lsp_target: "src/consumer.bt",
+            lsp_target: "src/size_consumer.bt",
             lint_target: "",
             expected: ExpectedCounts {
                 cli_lint: 0,
@@ -241,8 +241,8 @@ fn corpus_cases() -> Vec<CorpusCase> {
         },
         CorpusCase {
             name: "unreadable_target",
-            lsp_target: "src/locked.bt",
-            lint_target: "src/locked.bt",
+            lsp_target: "src/locked_target.bt",
+            lint_target: "src/locked_target.bt",
             // BT-2067: every surface must surface at least one diagnostic
             // for an unreadable target file. LSP's behaviour here is
             // implementation-defined (it may or may not publish a
@@ -253,13 +253,13 @@ fn corpus_cases() -> Vec<CorpusCase> {
                 mcp_summary: 1,
                 lsp: 0,
             },
-            unreadable_files: &["src/locked.bt"],
+            unreadable_files: &["src/locked_target.bt"],
             why: "BT-2067: every diagnostic surface must report unreadable target file",
         },
         CorpusCase {
             name: "unreadable_package",
-            lsp_target: "src/target.bt",
-            lint_target: "src/target.bt",
+            lsp_target: "src/target_class.bt",
+            lint_target: "src/target_class.bt",
             // BT-2056: MCP lint and diagnostic_summary surface a warning for
             // unreadable extraction files. CLI lint historically logged a
             // miette-formatted error; LSP doesn't currently surface anything

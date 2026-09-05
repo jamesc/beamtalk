@@ -7,7 +7,7 @@
 // slot?").
 //
 // Both are instance methods on `SystemNavigation`, reached via the `default`
-// (or future scoped) constructor. As with `beamtalk_senders_test.bt` and
+// (or future scoped) constructor. As with `system_navigation_senders_test.bt` and
 // `system_navigation_references_test.bt`, the behavioural happy-path checks
 // (does the scan actually find reads and writes, with the right #class /
 // #selector / #line shape?) live in the E2E REPL-protocol suite

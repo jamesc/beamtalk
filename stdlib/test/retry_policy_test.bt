@@ -3,7 +3,7 @@
 
 // BUnit tests for RetryPolicy value type and do: retry executor (BT-2973).
 //
-// Reuses the shared MyCustomError fixture (stdlib/test/fixtures/custom_error.bt)
+// Reuses the shared MyCustomError fixture (stdlib/test/fixtures/my_custom_error.bt)
 // as a distinguishable error class for nonRetryableErrors matching.
 
 TestCase subclass: RetryPolicyTest

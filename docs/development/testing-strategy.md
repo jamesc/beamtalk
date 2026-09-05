@@ -341,7 +341,7 @@ Counter spawn
 ```
 
 **Bootstrap files (DO NOT migrate to BUnit):**
-`arithmetic.btscript`, `blocks.btscript`, `booleans.btscript`, `equality.btscript`, `erlang_exceptions.btscript`, `errors.btscript`, `exceptions.btscript`, `float.btscript`, `literals.btscript`, `string_methods.btscript`, `symbol.btscript`
+`arithmetic.btscript`, `blocks.btscript`, `booleans.btscript`, `equality.btscript`, `erlang_exceptions.btscript`, `errors.btscript`, `exceptions.btscript`, `float.btscript`, `literals.btscript`, `string_methods.btscript`, `scheme_symbol.btscript`
 
 **When to use stdlib expression tests:**
 | Test needs... | Use stdlib test? |

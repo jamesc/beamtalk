@@ -1633,7 +1633,7 @@ impl CoreErlangGenerator {
     /// `let`, not threaded out to the loop body's own statement sequence.
     /// Confirmed by a real regression while validating this issue: a
     /// pre-existing, previously-compiling fixture
-    /// (`class_var_subexpr.bt`'s `tickInLoopConditional`, a self-send
+    /// (`class_var_sub_expr.bt`'s `tickInLoopConditional`, a self-send
     /// nested inside a `to:do:` body's `ifTrue:` *condition*) started
     /// emitting `unbound variable 'ClassVars1'` once this predicate used
     /// the recursive analysis — the self-send's own internally-minted
@@ -1716,9 +1716,9 @@ impl CoreErlangGenerator {
         // (`loop_body_threads_class_vars`, already checked above) is
         // deliberately top-level-only — recursing into a conditional
         // buried inside a `Letrec` body is EXACTLY the shape that predicate
-        // was narrowed to exclude (the `class_var_subexpr.bt`
+        // was narrowed to exclude (the `class_var_sub_expr.bt`
         // `tickInLoopConditional` regression), and it's also the shape
-        // `class_var_subexpr_test.bt`'s `testTickInLoopConditionalCompilesAndRuns`
+        // `class_var_sub_expr_test.bt`'s `testTickInLoopConditionalCompilesAndRuns`
         // pins as already-accepted, out-of-scope, silently-non-threading
         // behavior (BT-2308) at a single loop level — rejecting only the
         // nested-loop variant of that exact same shape would be an

@@ -6,7 +6,7 @@
 // Backs System Browser-style navigation ("who calls this Erlang function?").
 //
 // `ffiSitesFor:` is an instance method on `SystemNavigation`, reached via the
-// `default` (or future scoped) constructor. As with `beamtalk_senders_test.bt`
+// `default` (or future scoped) constructor. As with `system_navigation_senders_test.bt`
 // and `system_navigation_fields_test.bt`, the behavioural happy-path checks
 // (does the scan actually find FFI call sites, with the right #class /
 // #selector / #line shape, and does arity narrowing work?) live in the E2E
