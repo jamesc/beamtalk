@@ -12,93 +12,68 @@
 // root-cause writeup.
 
 TestCase subclass: BT3380ActorListOpSelectorTest
+  field: probe = nil
+
+  setUp => self.probe := BT3380CollectionProbe spawn
+
+  tearDown => self.probe isNil ifFalse: [self.probe stop]
 
   testExternalDoReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "do"
-    self assert: (probe do: [:x | x]) equals: "do"
-    probe stop
+    self.probe setTag: "do"
+    self assert: (self.probe do: [:x | x]) equals: "do"
 
   testExternalCollectReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "collect"
-    self assert: (probe collect: [:x | x]) equals: "collect"
-    probe stop
+    self.probe setTag: "collect"
+    self assert: (self.probe collect: [:x | x]) equals: "collect"
 
   testExternalSelectReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "select"
-    self assert: (probe select: [:x | x]) equals: "select"
-    probe stop
+    self.probe setTag: "select"
+    self assert: (self.probe select: [:x | x]) equals: "select"
 
   testExternalRejectReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "reject"
-    self assert: (probe reject: [:x | x]) equals: "reject"
-    probe stop
+    self.probe setTag: "reject"
+    self assert: (self.probe reject: [:x | x]) equals: "reject"
 
   testExternalAnySatisfyReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "anySatisfy"
-    self assert: (probe anySatisfy: [:x | x]) equals: "anySatisfy"
-    probe stop
+    self.probe setTag: "anySatisfy"
+    self assert: (self.probe anySatisfy: [:x | x]) equals: "anySatisfy"
 
   testExternalAllSatisfyReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "allSatisfy"
-    self assert: (probe allSatisfy: [:x | x]) equals: "allSatisfy"
-    probe stop
+    self.probe setTag: "allSatisfy"
+    self assert: (self.probe allSatisfy: [:x | x]) equals: "allSatisfy"
 
   testExternalDetectReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "detect"
-    self assert: (probe detect: [:x | x]) equals: "detect"
-    probe stop
+    self.probe setTag: "detect"
+    self assert: (self.probe detect: [:x | x]) equals: "detect"
 
   testExternalDetectIfNoneReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "detectIfNone"
-    self assert: (probe detect: [:x | x] ifNone: [nil]) equals: "detectIfNone"
-    probe stop
+    self.probe setTag: "detectIfNone"
+    self assert: (self.probe detect: [:x | x] ifNone: [nil]) equals: "detectIfNone"
 
   testExternalCountReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "count"
-    self assert: (probe count: [:x | x]) equals: "count"
-    probe stop
+    self.probe setTag: "count"
+    self assert: (self.probe count: [:x | x]) equals: "count"
 
   testExternalFlatMapReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "flatMap"
-    self assert: (probe flatMap: [:x | x]) equals: "flatMap"
-    probe stop
+    self.probe setTag: "flatMap"
+    self assert: (self.probe flatMap: [:x | x]) equals: "flatMap"
 
   testExternalTakeWhileReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "takeWhile"
-    self assert: (probe takeWhile: [:x | x]) equals: "takeWhile"
-    probe stop
+    self.probe setTag: "takeWhile"
+    self assert: (self.probe takeWhile: [:x | x]) equals: "takeWhile"
 
   testExternalDropWhileReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "dropWhile"
-    self assert: (probe dropWhile: [:x | x]) equals: "dropWhile"
-    probe stop
+    self.probe setTag: "dropWhile"
+    self assert: (self.probe dropWhile: [:x | x]) equals: "dropWhile"
 
   testExternalPartitionReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "partition"
-    self assert: (probe partition: [:x | x]) equals: "partition"
-    probe stop
+    self.probe setTag: "partition"
+    self assert: (self.probe partition: [:x | x]) equals: "partition"
 
   testExternalGroupByReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "groupBy"
-    self assert: (probe groupBy: [:x | x]) equals: "groupBy"
-    probe stop
+    self.probe setTag: "groupBy"
+    self assert: (self.probe groupBy: [:x | x]) equals: "groupBy"
 
   testExternalSortReturnsPlainResultNotOkTuple =>
-    probe := BT3380CollectionProbe spawn
-    probe setTag: "sort"
-    self assert: (probe sort: [:a :b | a < b]) equals: "sort"
-    probe stop
+    self.probe setTag: "sort"
+    self assert: (self.probe sort: [:a :b | a < b]) equals: "sort"
