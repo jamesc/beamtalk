@@ -45,5 +45,4 @@ Actor subclass: SelfSendPositionsReplActor
   // Order-sensitive binary operand: the self-send is the RIGHT operand, so
   // the left operand's own read must still happen (and be sequenced)
   // ahead of the self-send's mutation.
-  binaryOperandSelfSend =>
-    self.log size + (self bumpCount)
+  binaryOperandSelfSend => self.log size + (self bumpCount)
