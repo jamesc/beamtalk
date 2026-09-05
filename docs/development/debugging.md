@@ -228,6 +228,24 @@ trigger state threading in the first place — see `docs/beamtalk-language-featu
 of that boundary, and ADR 0111 Addendum 9 for the full six-question design
 this migration implements.
 
+**The `whileTrue:`/`whileFalse:` condition as real IR (ADR 0118 phase 3,
+BT-3419).** `ConditionalLoop` no longer treats its condition as an opaque,
+outside-the-frame `Document` (the pre-BT-3419 `continue_header` field): it
+now carries `condition: Vec<ThreadedStmt>` (the condition block's own
+prelude — typically a self-send producer's `Bind`, or a plain local-var
+rebind) and `condition_value: ValueRef` (the condition's pure final boolean),
+verified in the SAME frame `body` is — `verify()`'s `UnboundVersion`/
+`NonLinearVersion` checks apply to the condition's `Bind`s unchanged, no new
+`VerifyError` variant. `render_conditional_loop` emits `condition`'s prelude
+inside the loop's own `fun`, directly ahead of the `case`, so a self-send's
+`State` advance is available to both the continuing recursive call and the
+exit arm — closing the two `#[should_panic]` regressions BT-3414 pinned for
+a self-send (or an inline-threaded `and:`) inside a `whileTrue:`/
+`whileFalse:` condition block. The remaining opaque half, `continue_arm`
+(the case-clause pattern text, e.g. `"<'true'> when 'true' -> "`), is sound
+opacity in the same sense `exit_arm`'s pattern half is — see the variant's
+own doc comment.
+
 `just verify-threaded-ir` (wired into `just ci`) compiles the full
 `stdlib/test/*.bt` + `stdlib/bootstrap-test/*.btscript` corpus in a debug
 build so any of these panics the build instead of only degrading to a

@@ -8,11 +8,12 @@
 -moduledoc """
 EUnit tests for beamtalk_repl_errors (BT-2097).
 
-Covers all four exported functions:
+Covers all five exported functions:
   safe_to_existing_atom/1  — empty-binary, known atom, nonexistent atom, non-binary
   format_name/1            — atom, binary, list, other (integer, tuple)
   ensure_structured_error/1 — all ~15 error-pattern branches
   ensure_structured_error/2 — delegation to /1 for known patterns + class-contextual fallback
+  normalize_diagnostic/1   — map (all fields, partial, empty), binary passthrough, fallback
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -474,3 +475,63 @@ ensure_structured_error_2_delegates_actors_exist_test() ->
         beamtalk_repl_errors:ensure_structured_error(Reason),
         beamtalk_repl_errors:ensure_structured_error(Reason, error)
     ).
+
+%%% ============================================================================
+%%% normalize_diagnostic/1
+%%% ============================================================================
+
+normalize_diagnostic_map_all_fields_test() ->
+    D = #{message => <<"Unused var">>, line => 5, hint => <<"prefix with _">>},
+    ?assertEqual(
+        #{message => <<"Unused var">>, line => 5, hint => <<"prefix with _">>},
+        beamtalk_repl_errors:normalize_diagnostic(D)
+    ).
+
+normalize_diagnostic_map_message_and_line_test() ->
+    D = #{message => <<"Type error">>, line => 12},
+    ?assertEqual(
+        #{message => <<"Type error">>, line => 12},
+        beamtalk_repl_errors:normalize_diagnostic(D)
+    ).
+
+normalize_diagnostic_map_message_only_test() ->
+    D = #{message => <<"Parse error">>},
+    ?assertEqual(
+        #{message => <<"Parse error">>},
+        beamtalk_repl_errors:normalize_diagnostic(D)
+    ).
+
+normalize_diagnostic_map_missing_message_uses_default_test() ->
+    D = #{line => 3},
+    ?assertEqual(
+        #{message => <<"Unknown error">>, line => 3},
+        beamtalk_repl_errors:normalize_diagnostic(D)
+    ).
+
+normalize_diagnostic_map_non_integer_line_omitted_test() ->
+    D = #{message => <<"Error">>, line => <<"not-an-int">>},
+    ?assertEqual(#{message => <<"Error">>}, beamtalk_repl_errors:normalize_diagnostic(D)).
+
+normalize_diagnostic_map_non_binary_hint_omitted_test() ->
+    D = #{message => <<"Error">>, hint => some_atom},
+    ?assertEqual(#{message => <<"Error">>}, beamtalk_repl_errors:normalize_diagnostic(D)).
+
+normalize_diagnostic_binary_passthrough_test() ->
+    ?assertEqual(
+        #{message => <<"plain error text">>},
+        beamtalk_repl_errors:normalize_diagnostic(<<"plain error text">>)
+    ).
+
+normalize_diagnostic_atom_fallback_test() ->
+    Result = beamtalk_repl_errors:normalize_diagnostic(some_atom),
+    ?assertMatch(#{message := _}, Result),
+    #{message := Msg} = Result,
+    ?assert(is_binary(Msg)),
+    ?assert(byte_size(Msg) > 0).
+
+normalize_diagnostic_tuple_fallback_test() ->
+    Result = beamtalk_repl_errors:normalize_diagnostic({error, reason}),
+    ?assertMatch(#{message := _}, Result),
+    #{message := Msg} = Result,
+    ?assert(is_binary(Msg)),
+    ?assert(byte_size(Msg) > 0).

@@ -7447,52 +7447,62 @@ fn bt3416_self_dispatch_in_later_interpolation_segment_now_threads_after_earlier
 }
 
 // BT-3414 (ADR 0118 phase 0): three shapes from the ADR's 47-shape self-send
-// position probe (§Context) PANIC the ThreadedIr verifier today rather than
-// merely crashing at runtime or silently dropping a mutation. A debug-build
-// verifier panic (`report_threaded_ir_verify_errors`'s `debug_assert!`,
-// control_flow/mod.rs) aborts the WHOLE test-binary invocation, so — unlike
-// every other row in the same probe — these three cannot live in a BUnit
-// `.bt` fixture (see stdlib/test/fixtures/self_send_position_counter.bt's
-// header comment); they are pinned here as `#[should_panic]` unit tests
-// instead. Each names the ADR 0118 phase expected to turn it into ordinary,
-// compiling, correct code.
+// position probe (§Context) PANICKED the ThreadedIr verifier (rather than
+// merely crashing at runtime or silently dropping a mutation) before ADR
+// 0118 phase 3 (BT-3419). A debug-build verifier panic
+// (`report_threaded_ir_verify_errors`'s `debug_assert!`, control_flow/mod.rs)
+// aborts the WHOLE test-binary invocation, so — unlike every other row in
+// the same probe — the two BT-3419 closes cannot live in a BUnit `.bt`
+// fixture (see stdlib/test/fixtures/self_send_position_counter.bt's header
+// comment); they are pinned here. The third (`bt3414_bare_and_inside_if_true_branch_inside_do_body`,
+// below) is a different shape — a bare-receiver `and:` inside an `ifTrue:`
+// inside a `do:` body — still open for a later phase (ADR 0118's own
+// "Out of Scope" note for phase 3: "Inline-threaded control flow in
+// expression position").
 
 #[test]
-#[should_panic(expected = "ThreadedIr verify")]
-#[cfg(debug_assertions)]
-fn bt3414_self_send_in_and_receiver_inside_while_true_condition_panics_verifier() {
+fn bt3414_self_send_in_and_receiver_inside_while_true_condition_now_compiles_and_threads_state() {
     // `[i := i + 1. (self bumpCount) > 0 and: [i < 3]] whileTrue: [nil]` —
     // a self-send as the RECEIVER of an inline-threaded `and:`, itself the
-    // whileTrue: CONDITION block's last expression. The condition compiles
-    // outside the loop's own ThreadedIr frame, so the self-send's `Bind`
-    // lands somewhere the verifier's frame-flow check cannot see when the
-    // loop later references its version: `UnboundVersion`. ADR 0118 phase 3
-    // (`ConditionalLoop` carries its condition as IR) closes this row.
+    // whileTrue: CONDITION block's last expression. Before ADR 0118 phase 3
+    // (BT-3419), `generate_while_true`'s mode selection only inspected the
+    // BODY's own mutations (trivially none — `[nil]`), so this fell to the
+    // simple (non-threading) codegen path, which compiled the condition as
+    // a genuine stateful Tier-2 closure and panicked the verifier
+    // (`UnboundVersion`). Now: `generate_while_true` also checks the
+    // condition (`condition_has_state_effects`), routing this into the
+    // mutation-threading path, and every iteration's `bumpCount` dispatch
+    // correctly advances the actor's `count` field.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    i := 0\n    [\n      i := i + 1\n      (self bumpCount) > 0 and: [i < 3]\n    ] whileTrue: [nil]\n    i\n\n  internal bumpCount =>\n    self.count := self.count + 1\n    self.count\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let _ = generate_module(
+    let code = generate_module(
         &module,
         CodegenOptions::new("bt3414_and_receiver_self_send_in_while_condition")
             .with_workspace_mode(true),
-    );
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert_compiles_through_erlc("bt3414_and_receiver_self_send_in_while_condition", &code);
 }
 
 #[test]
-#[should_panic(expected = "ThreadedIr verify")]
-#[cfg(debug_assertions)]
-fn bt3414_self_send_as_and_receiver_alone_inside_while_true_condition_panics_verifier() {
+fn bt3414_self_send_as_and_receiver_alone_inside_while_true_condition_now_compiles_and_threads_state()
+ {
     // `[i := i + 1. (self flagTrue) and: [i < 3]] whileTrue: [nil]` — same
     // shape as above with a bare self-send (no binary-op wrapper) as the
-    // `and:` receiver. Also `UnboundVersion`; also closed by ADR 0118
-    // phase 3.
+    // `and:` receiver. Also closed by ADR 0118 phase 3 (BT-3419).
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    i := 0\n    [\n      i := i + 1\n      (self flagTrue) and: [i < 3]\n    ] whileTrue: [nil]\n    i\n\n  internal flagTrue =>\n    self.count := self.count + 1\n    true\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let _ = generate_module(
+    let code = generate_module(
         &module,
         CodegenOptions::new("bt3414_bare_and_receiver_self_send_in_while_condition")
             .with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert_compiles_through_erlc(
+        "bt3414_bare_and_receiver_self_send_in_while_condition",
+        &code,
     );
 }
 

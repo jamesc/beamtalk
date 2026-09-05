@@ -46,6 +46,20 @@ TestCase subclass: ActorSelfSendCollectTest
     resultClass := self.c doubleAllAssignThenClass: #(1, 2, 3)
     self assert: resultClass equals: List
 
+  // BT-3425: narrower variant of BT-3383 — the collect: (with self-send
+  // block body, bound to a local first) is computed inside the TAKEN
+  // ifTrue: branch, not at the method's top level.
+  testCollectWithSelfSendInsideBranchAssignThenClass =>
+    resultClass := self.c doubleAllInsideBranchAssignThenClass: #(1, 2, 3) when: true
+    self assert: resultClass equals: List
+
+  // BT-3425 (review finding): a captured local other than the collect:'s
+  // own assignment target, mutated inside the collect: block, must not be
+  // left stale after the ifTrue: branch closes.
+  testCollectInsideBranchThreadsOtherCapturedLocal =>
+    count := self.c countLocalInsideBranchThenReturnLocal: #(1, 2, 3) when: true
+    self assert: count equals: 3
+
   testCollectWithSelfSendEmptyList =>
     result := self.c doubleAll: #()
     self assert: result equals: #()

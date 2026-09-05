@@ -90,7 +90,7 @@ TestCase subclass: ActorSelfSendPositionMatrixTest
   adr0118Phase2bPending => false
 
   // ADR 0118 phase 3: ConditionalLoop condition as IR.
-  adr0118Phase3Pending => true
+  adr0118Phase3Pending => false
 
   // ADR 0118 phase 4 (BT-3420): inline-threaded control flow as a producer;
   // ifNil:ifNotNil:, match: arms, ifNone:, generic Tier 2 blocks. Landed.
