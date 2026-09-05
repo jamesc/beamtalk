@@ -1235,6 +1235,55 @@ mod tests {
             }
             other => panic!("expected ExpectDirective, got: {other:?}"),
         }
+        // The dangling comma must be consumed with its own diagnostic (not
+        // left dangling as a stray token) so `type unknownMethod` still
+        // parses as its own statement.
+        assert_eq!(module.expressions.len(), 2, "got: {:?}", module.expressions);
+        assert!(
+            matches!(
+                &module.expressions[1].expression,
+                beamtalk_core::ast::Expression::MessageSend { .. }
+            ),
+            "the next line must still parse as its own statement, got: {:?}",
+            module.expressions[1].expression
+        );
+    }
+
+    #[test]
+    fn expect_combined_categories_dangling_comma_does_not_truncate_class_body() {
+        // BT-3387 review follow-up: a trailing comma at the end of a
+        // declaration-level `@expect` line must not be left dangling —
+        // `parse_class_body`'s caller treats a stray `,` as "not a valid
+        // declaration" and would otherwise silently drop every subsequent
+        // state/method declaration in the class (the same failure mode the
+        // BT-1918 comment on the reason-string lookahead guards against).
+        let source = "\
+Object subclass: Foo
+  @expect dnu,
+  state: x = 0
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags
+                .iter()
+                .any(|d| d.message.contains("trailing ','")),
+            "expected a diagnostic about the dangling comma, got: {parse_diags:?}"
+        );
+        assert!(
+            !parse_diags.iter().any(|d| d
+                .message
+                .contains("must precede a state/field or method declaration")),
+            "the class body must not be treated as truncated, got: {parse_diags:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "got: {:?}", module.classes);
+        assert_eq!(
+            module.classes[0].state.len(),
+            1,
+            "the state: x declaration after the dangling comma must still parse, got: {:?}",
+            module.classes[0].state
+        );
     }
 
     #[test]

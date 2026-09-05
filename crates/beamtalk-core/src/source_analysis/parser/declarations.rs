@@ -1060,6 +1060,11 @@ impl Parser {
                 break;
             }
 
+            if !is_comma(self.current_kind()) {
+                // No comma at all — the category list ends here, cleanly.
+                break;
+            }
+
             // Same-line only, mirroring the reason-string lookahead below:
             // a comma (or the identifier after it) on the next line is not a
             // continuation of this directive's category list — e.g. a
@@ -1068,15 +1073,28 @@ impl Parser {
             // plausibly name a real category, like a variable called
             // `type`) silently absorbed into the list instead of starting
             // the next statement.
-            let comma_continues_same_line = is_comma(self.current_kind())
-                && !self.current_token().has_leading_newline()
+            let continues_same_line = !self.current_token().has_leading_newline()
                 && self
                     .peek_token_at(1)
                     .is_some_and(|t| !t.has_leading_newline());
-            if comma_continues_same_line {
-                let comma_token = self.advance();
-                span = start.merge(comma_token.span());
-            } else {
+            let comma_token = self.advance();
+            span = start.merge(comma_token.span());
+            if !continues_same_line {
+                // Dangling comma (e.g. a typo or an aborted edit): consume
+                // it here, with a diagnostic, rather than leaving it as the
+                // current token. At the declaration level in particular,
+                // leaving it dangling makes `parse_class_body`'s caller
+                // treat the position as "not a valid declaration" (see the
+                // BT-1918 comment on the reason-string lookahead below,
+                // which this mirrors) and silently drop every subsequent
+                // state/method declaration in the class.
+                let message: EcoString =
+                    "trailing ',' in @expect category list must be followed by another category \
+                     on the same line"
+                        .into();
+                self.diagnostics
+                    .push(Diagnostic::error(message.clone(), span));
+                last_error = Some(message);
                 break;
             }
         }
