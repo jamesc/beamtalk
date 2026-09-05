@@ -590,13 +590,23 @@ pub fn apply_expect_directives_excluding_lint_only(
     apply_expect_directives_impl(module, diagnostics, LINT_PASS_ONLY_CATEGORIES);
 }
 
+/// A collected `@expect` directive: its (possibly multi-category, BT-3387)
+/// category list, optional reason, the directive's own span (for stale
+/// warnings), the span of the expression/declaration it targets (for
+/// diagnostic matching), and whether that target contains a block literal
+/// (see [`expect_category_unchecked`]).
+type ExpectDirectiveEntry = (Vec<ExpectCategory>, Option<EcoString>, Span, Span, bool);
+
+/// A stale `@expect` directive pending its warning: category list, optional
+/// reason, and the directive's own span.
+type StaleExpectEntry = (Vec<ExpectCategory>, Option<EcoString>, Span);
+
 fn apply_expect_directives_impl(
     module: &Module,
     diagnostics: &mut Vec<Diagnostic>,
     unchecked_categories: &[DiagnosticCategory],
 ) {
-    // (cat, reason, directive_span, target_span, target_contains_block)
-    let mut directives: Vec<(ExpectCategory, Option<EcoString>, Span, Span, bool)> = Vec::new();
+    let mut directives: Vec<ExpectDirectiveEntry> = Vec::new();
 
     collect_directives_from_exprs(&module.expressions, &mut directives);
     for class in &module.classes {
@@ -604,13 +614,13 @@ fn apply_expect_directives_impl(
         // directive_span = the @expect token span (for stale warnings),
         // target_span = the declaration span (for matching diagnostics).
         for state_decl in class.state.iter().chain(class.class_variables.iter()) {
-            if let Some((cat, ref reason, expect_span)) = state_decl.expect {
+            if let Some((ref cats, ref reason, expect_span)) = state_decl.expect {
                 let contains_block = state_decl
                     .default_value
                     .as_ref()
                     .is_some_and(expression_contains_block);
                 directives.push((
-                    cat,
+                    cats.clone(),
                     reason.clone(),
                     expect_span,
                     state_decl.span,
@@ -635,9 +645,9 @@ fn apply_expect_directives_impl(
             // remove this now-unnecessary pragma" warning rather than
             // narrowing a method-level directive's target below what it
             // actually covers.
-            if let Some((cat, ref reason, expect_span)) = method.expect {
+            if let Some((ref cats, ref reason, expect_span)) = method.expect {
                 directives.push((
-                    cat,
+                    cats.clone(),
                     reason.clone(),
                     expect_span,
                     method.span,
@@ -650,9 +660,9 @@ fn apply_expect_directives_impl(
     for standalone in &module.method_definitions {
         // Same whole-method `contains_block` scoping as above, and the same
         // tradeoff — see that loop's comment.
-        if let Some((cat, ref reason, expect_span)) = standalone.method.expect {
+        if let Some((ref cats, ref reason, expect_span)) = standalone.method.expect {
             directives.push((
-                cat,
+                cats.clone(),
                 reason.clone(),
                 expect_span,
                 standalone.method.span,
@@ -667,18 +677,27 @@ fn apply_expect_directives_impl(
     }
 
     let mut suppressed_indices: Vec<usize> = Vec::new();
-    let mut stale_directives: Vec<(ExpectCategory, Option<EcoString>, Span)> = Vec::new();
+    let mut stale_directives: Vec<StaleExpectEntry> = Vec::new();
 
-    for (cat, reason, directive_span, target_span, contains_block) in &directives {
+    for (cats, reason, directive_span, target_span, contains_block) in &directives {
         let mut matched = false;
         for (i, diag) in diagnostics.iter().enumerate() {
-            if target_span.contains(diag.span) && category_matches(*cat, diag.category) {
+            if target_span.contains(diag.span)
+                && cats.iter().any(|cat| category_matches(*cat, diag.category))
+            {
                 suppressed_indices.push(i);
                 matched = true;
             }
         }
-        if !matched && !expect_category_unchecked(*cat, unchecked_categories, *contains_block) {
-            stale_directives.push((*cat, reason.clone(), *directive_span));
+        // BT-3387: a compound `@expect a, b` is only reported stale when
+        // *none* of its categories could be validated as matching — if any
+        // category matched a real diagnostic, the directive earns its keep
+        // even though another listed category turned out unnecessary.
+        let all_unchecked = cats
+            .iter()
+            .all(|cat| expect_category_unchecked(*cat, unchecked_categories, *contains_block));
+        if !matched && !all_unchecked {
+            stale_directives.push((cats.clone(), reason.clone(), *directive_span));
         }
     }
 
@@ -691,16 +710,19 @@ fn apply_expect_directives_impl(
 
     // Emit warnings for stale directives (BT-1412: warning, not error, so
     // compilation can proceed — the annotation is just unnecessary).
-    for (cat, reason, span) in stale_directives {
+    for (cats, reason, span) in stale_directives {
+        let cats_str = cats
+            .iter()
+            .map(|c| c.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
         let message = if let Some(reason) = reason {
             format!(
-                "stale @expect {} \"{reason}\": no matching diagnostic found on the following expression — consider removing it",
-                cat.as_str()
+                "stale @expect {cats_str} \"{reason}\": no matching diagnostic found on the following expression — consider removing it"
             )
         } else {
             format!(
-                "stale @expect {}: no matching diagnostic found on the following expression — consider removing it",
-                cat.as_str()
+                "stale @expect {cats_str}: no matching diagnostic found on the following expression — consider removing it"
             )
         };
         diagnostics.push(
@@ -783,18 +805,18 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
 /// to find `@expect` directives inside block bodies (BT-2010).
 fn collect_directives_from_exprs(
     exprs: &[ExpressionStatement],
-    directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span, bool)>,
+    directives: &mut Vec<ExpectDirectiveEntry>,
 ) {
     for (i, stmt) in exprs.iter().enumerate() {
         if let Expression::ExpectDirective {
-            category,
+            categories,
             reason,
             span,
         } = &stmt.expression
         {
             if let Some(next) = exprs.get(i + 1) {
                 directives.push((
-                    *category,
+                    categories.clone(),
                     reason.clone(),
                     *span,
                     next.expression.span(),
@@ -804,7 +826,7 @@ fn collect_directives_from_exprs(
                 // Trailing @expect with no following expression — treat as stale.
                 // Use the directive's own span as the target span so it will
                 // never match any real diagnostic and will always be reported stale.
-                directives.push((*category, reason.clone(), *span, *span, false));
+                directives.push((categories.clone(), reason.clone(), *span, *span, false));
             }
         }
         // BT-2010: Recurse into expression subtrees to find block bodies
@@ -842,10 +864,7 @@ fn expression_contains_block(expr: &Expression) -> bool {
 /// This handles `@expect` inside `ifTrue: [...]`, `collect: [:x | ...]`,
 /// nested blocks, match arms, and any other expression that contains
 /// sub-expressions with block bodies.
-fn collect_directives_from_expr(
-    expr: &Expression,
-    directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span, bool)>,
-) {
+fn collect_directives_from_expr(expr: &Expression, directives: &mut Vec<ExpectDirectiveEntry>) {
     match expr {
         Expression::Block(block) => {
             // Found a block body — scan it for @expect directives using the
@@ -1306,6 +1325,91 @@ dnu = "error"
                 .iter()
                 .any(|d| d.message.contains("stale @expect")),
             "got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-3387: combined `@expect cat1, cat2` form ──
+
+    /// The motivating case: a single expression that genuinely triggers two
+    /// distinct diagnostic categories at once (e.g. an unresolved-FFI call
+    /// whose return type is also inferred as Dynamic) can be fully
+    /// suppressed by one `@expect unresolved_ffi, type` directive, instead
+    /// of requiring an artificial second expression to attach a second
+    /// `@expect` to.
+    #[test]
+    fn apply_expect_directives_combined_categories_suppresses_both() {
+        let source = "@expect unresolved_ffi, type\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        let target_span = module.expressions.last().unwrap().expression.span();
+        diagnostics.push(
+            Diagnostic::warning("test unresolved ffi", target_span)
+                .with_category(DiagnosticCategory::UnresolvedFfi),
+        );
+        diagnostics.push(
+            Diagnostic::hint("test type", target_span).with_category(DiagnosticCategory::Type),
+        );
+        apply_expect_directives(&module, &mut diagnostics);
+
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d.category != Some(DiagnosticCategory::UnresolvedFfi)
+                    && d.category != Some(DiagnosticCategory::Type)),
+            "both categories listed in a combined @expect should be suppressed, got: {diagnostics:?}"
+        );
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect")),
+            "a combined @expect satisfied by real diagnostics must not be stale, got: {diagnostics:?}"
+        );
+    }
+
+    /// A combined directive is not stale as long as *any* of its listed
+    /// categories matches a real diagnostic — an unused category in the
+    /// list doesn't make the whole directive stale.
+    #[test]
+    fn apply_expect_directives_combined_categories_not_stale_when_only_one_matches() {
+        let source = "@expect unresolved_ffi, sendability\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        let target_span = module.expressions.last().unwrap().expression.span();
+        diagnostics.push(
+            Diagnostic::warning("test unresolved ffi", target_span)
+                .with_category(DiagnosticCategory::UnresolvedFfi),
+        );
+        apply_expect_directives(&module, &mut diagnostics);
+
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect")),
+            "one matching category out of several listed must not be stale, got: {diagnostics:?}"
+        );
+    }
+
+    /// When *none* of a combined directive's categories match anything, the
+    /// whole directive is reported stale — and the warning names every
+    /// category that was listed, not just the first.
+    #[test]
+    fn apply_expect_directives_combined_categories_stale_lists_all_categories() {
+        let source = "@expect unused, sendability\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        apply_expect_directives(&module, &mut diagnostics);
+
+        let stale = diagnostics
+            .iter()
+            .find(|d| d.message.contains("stale @expect"))
+            .unwrap_or_else(|| panic!("expected a stale @expect warning, got: {diagnostics:?}"));
+        assert!(
+            stale.message.contains("unused") && stale.message.contains("sendability"),
+            "stale warning should name every listed category, got: {}",
+            stale.message
         );
     }
 }

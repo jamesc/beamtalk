@@ -342,15 +342,18 @@ pub enum Expression {
         span: Span,
     },
 
-    /// A diagnostic suppression directive (`@expect category`).
+    /// A diagnostic suppression directive (`@expect category` or
+    /// `@expect category1, category2, ...`).
     ///
-    /// Suppresses diagnostics of the given category on the immediately
-    /// following expression in the same expression list.
+    /// Suppresses diagnostics of any of the given categories on the
+    /// immediately following expression in the same expression list.
     ///
-    /// Example: `@expect dnu` before a message send that may produce a DNU hint.
+    /// Example: `@expect dnu` before a message send that may produce a DNU
+    /// hint. BT-3387: `@expect unresolved_ffi, type` suppresses both
+    /// categories on a single following expression.
     ExpectDirective {
-        /// The category of diagnostic to suppress.
-        category: ExpectCategory,
+        /// The categories of diagnostic to suppress (non-empty).
+        categories: Vec<ExpectCategory>,
         /// Optional human-readable reason for the suppression (BT-1918).
         ///
         /// Parsed from `@expect category "reason string"`. When present, the

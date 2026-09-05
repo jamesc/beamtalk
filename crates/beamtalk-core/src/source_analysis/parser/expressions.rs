@@ -18,9 +18,8 @@
 
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
-    CascadeMessage, ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart,
-    Literal, MapPair, MapPatternKey, MapPatternPair, MatchArm, MessageSelector, Pattern,
-    StringSegment,
+    CascadeMessage, Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MapPair,
+    MapPatternKey, MapPatternPair, MatchArm, MessageSelector, Pattern, StringSegment,
 };
 use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
@@ -2516,63 +2515,30 @@ impl Parser {
         }
     }
 
-    /// Parses an `@expect category` or `@expect category "reason"` directive.
+    /// Parses an `@expect category` or `@expect category1, category2 "reason"`
+    /// directive.
     ///
     /// The `@expect` token has already been identified by `parse_primary`.
-    /// This method consumes it, parses the category name, and optionally
-    /// parses a reason string that follows (BT-1918).
+    /// This method consumes it and delegates to
+    /// [`Parser::parse_expect_tail`] (`declarations.rs`) for the shared
+    /// category-list/reason grammar (BT-3387), which that helper shares with
+    /// the declaration-level `@expect` form. If no valid category was found
+    /// (unknown name, or nothing following `@expect` at all), this becomes
+    /// an `Expression::Error` — same as before BT-3387 — rather than an
+    /// `ExpectDirective` that would silently suppress every diagnostic on
+    /// the next expression.
     fn parse_expect_directive(&mut self) -> Expression {
         let start_token = self.advance(); // consume AtExpect
-        let start = start_token.span();
-
-        if let TokenKind::Identifier(name) = self.current_kind() {
-            let name = name.clone();
-            let end_token = self.advance();
-            let mut span = start.merge(end_token.span());
-            if let Some(category) = ExpectCategory::from_name(&name) {
-                // BT-1918: Parse optional reason string after category (same line only).
-                let reason = if matches!(self.current_kind(), TokenKind::String(_))
-                    && !self.current_token().has_leading_newline()
-                {
-                    let reason_str = if let TokenKind::String(s) = self.current_kind() {
-                        s.clone()
-                    } else {
-                        unreachable!()
-                    };
-                    let reason_token = self.advance();
-                    span = start.merge(reason_token.span());
-                    Some(reason_str)
-                } else {
-                    None
-                };
-                Expression::ExpectDirective {
-                    category,
-                    reason,
-                    span,
-                }
-            } else {
-                let valid = ExpectCategory::valid_names().join(", ");
-                let message: EcoString =
-                    format!("unknown @expect category '{name}', valid categories are: {valid}")
-                        .into();
-                self.diagnostics
-                    .push(Diagnostic::error(message.clone(), span));
-                // Consume trailing reason string to avoid secondary parse errors.
-                if matches!(self.current_kind(), TokenKind::String(_))
-                    && !self.current_token().has_leading_newline()
-                {
-                    self.advance();
-                }
-                Expression::Error { message, span }
-            }
-        } else {
-            let valid = ExpectCategory::valid_names().join(", ");
-            let span = start;
-            let message: EcoString =
-                format!("@expect must be followed by a category name ({valid})").into();
-            self.diagnostics
-                .push(Diagnostic::error(message.clone(), span));
+        let (categories, reason, span, error_message) = self.parse_expect_tail(start_token.span());
+        if categories.is_empty() {
+            let message = error_message.unwrap_or_else(|| "invalid @expect directive".into());
             Expression::Error { message, span }
+        } else {
+            Expression::ExpectDirective {
+                categories,
+                reason,
+                span,
+            }
         }
     }
 

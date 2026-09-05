@@ -7797,7 +7797,7 @@ mod tests {
         let stmts = vec![
             ExpressionStatement::bare(int_lit(42)),
             ExpressionStatement::bare(Expression::ExpectDirective {
-                category: ExpectCategory::Dnu,
+                categories: vec![ExpectCategory::Dnu],
                 reason: None,
                 span: span(),
             }),
