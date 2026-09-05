@@ -1424,6 +1424,22 @@ async fn publish_diagnostics_impl(
     };
     let mut diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = {
         let svc = service.lock().expect("service lock poisoned");
+        // BT-3433: a didOpen/didChange racing the LSP's startup workspace
+        // preload can compute diagnostics against a partially-populated
+        // `ProjectIndex` (e.g. a sibling class not yet indexed), producing a
+        // false `Unresolved class` warning. Sending it would race
+        // `republish_open_diagnostics` — the self-healing pass the startup
+        // sequence runs once preload completes — to be the last
+        // `publishDiagnostics` notification the client sees for this URI, and
+        // that race is not guaranteed to resolve in the correct notification's
+        // favor. Skip the send entirely: the caller has already recorded this
+        // path as open (in `Backend::versions`) before calling here, so
+        // `republish_open_diagnostics` is guaranteed to (re)publish it once,
+        // correctly, after preload finishes — see `is_preload_in_progress`'s
+        // doc for why this check and that recording never race each other.
+        if svc.is_preload_in_progress() {
+            return;
+        }
         let source = svc.file_source(&path);
         svc.diagnostics(&path)
             .into_iter()
@@ -1573,6 +1589,14 @@ impl LanguageServer for Backend {
             preload_config.take()
         };
         if let Some(ref config) = preload_config {
+            // BT-3433: mark preload in-flight so a didOpen/didChange racing
+            // this sequence defers its own `publish_diagnostics` to the
+            // self-healing republish below instead of racing it to be the
+            // last notification sent — see `is_preload_in_progress`'s doc.
+            {
+                let mut svc = self.service.lock().expect("service lock poisoned");
+                svc.set_preload_in_progress(true);
+            }
             // BT-2960: load each workspace root's real beamtalk.toml
             // [package] name before preload indexes files under that root,
             // so first-time stamping is already correct. BT-2961: this
@@ -1589,6 +1613,14 @@ impl LanguageServer for Backend {
             // ADR 0100 Rule 3 / BT-2800: load beamtalk.toml's [diagnostics]
             // severity-override table so the LSP agrees with `beamtalk build`.
             self.load_diagnostics_table(&config.roots).await;
+            // BT-3433: the project index is now fully populated (and won't
+            // change again from this startup sequence) — clear the flag
+            // *before* republishing below, so republish's own
+            // `publish_diagnostics` calls actually send.
+            {
+                let mut svc = self.service.lock().expect("service lock poisoned");
+                svc.set_preload_in_progress(false);
+            }
 
             // BT-2027: Re-publish diagnostics for every open file after preload
             // completes. If a file was opened via `did_open` before preload
@@ -6035,6 +6067,216 @@ mod tests {
         let _ = fs::remove_dir_all(&temp);
     }
 
+    /// BT-3433: a `didOpen` for a file referencing a sibling same-directory
+    /// class, raced against `preload_workspace_source_files`, must not leave
+    /// that sibling class permanently unresolved. Before this fix, indexing
+    /// the opened file *before* preload populated the sibling meant its
+    /// `ProjectIndex` entry (and therefore `check_unresolved_classes`'s
+    /// `pre_loaded_classes` snapshot) never got refreshed once preload ran —
+    /// only a later edit (which re-runs full analysis) would pick the
+    /// sibling up.
+    #[tokio::test]
+    async fn did_open_racing_preload_resolves_sibling_class() {
+        let temp = unique_temp_dir("beamtalk_lsp_sibling_class_race");
+        let project_root = temp.join("project");
+        let workflow_dir = project_root.join("src").join("workflow");
+        fs::create_dir_all(&workflow_dir).expect("create workflow dir");
+
+        let signal_path = workflow_dir.join("signal.bt");
+        fs::write(&signal_path, "Object subclass: Signal").expect("write signal.bt");
+
+        let workflow_context_path = workflow_dir.join("workflow_context.bt");
+        let workflow_context_source =
+            "Object subclass: WorkflowContext\n\n  makeSignal => Signal new\n";
+        fs::write(&workflow_context_path, workflow_context_source)
+            .expect("write workflow_context.bt");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        // Simulated didOpen arrives first (race): workflow_context.bt is
+        // indexed before preload has populated Signal anywhere in the
+        // ProjectIndex.
+        let workflow_context_utf8 =
+            Utf8PathBuf::from_path_buf(workflow_context_path).expect("temp path is UTF-8");
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(
+                workflow_context_utf8.clone(),
+                workflow_context_source.to_string(),
+            );
+        }
+
+        // Startup preload completes afterwards, populating signal.bt.
+        backend
+            .preload_workspace_source_files(PreloadConfig {
+                roots: vec![project_root],
+                stdlib_dirs: vec![],
+            })
+            .await;
+
+        let svc = backend.service.lock().expect("service lock poisoned");
+        let diags = svc.diagnostics(&workflow_context_utf8);
+        assert!(
+            !diags.iter().any(|d| d.message.contains("Unresolved class")),
+            "a didOpen racing preload must not leave a same-directory \
+             sibling class unresolved once preload has indexed it, got {diags:?}"
+        );
+        drop(svc);
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// BT-3433: end-to-end counterpart of
+    /// `did_open_racing_preload_resolves_sibling_class` — drives the real
+    /// `did_open` handler (not direct `ProjectIndex` state checks) through a
+    /// real `LspService`/socket pair, with `preload_in_progress` set exactly
+    /// as `initialized()` sets it before preload starts, and inspects every
+    /// `textDocument/publishDiagnostics` notification actually sent for the
+    /// opened file.
+    ///
+    /// Before the BT-3433 fix, `did_open` always published immediately, so a
+    /// `didOpen` racing preload sent a stale `Unresolved class` notification
+    /// that `republish_open_diagnostics` (BT-2027) had to race to overwrite —
+    /// a real send-order race between two concurrent tasks on `tower-lsp`'s
+    /// capacity-1 notification channel, not guaranteed to resolve in the
+    /// correct notification's favor (unlike the *strictly sequential*
+    /// "`did_open` fully completes, then preload starts" case the removed
+    /// predecessor of this test exercised, which already self-healed
+    /// correctly without the fix — the race this test guards is the
+    /// concurrent one, only reproducible by controlling the flag directly).
+    /// After the fix, `did_open` skips the send outright while preload is
+    /// in-flight, so there is no second, wrong notification to race against —
+    /// `republish_open_diagnostics` is the *only* publish for this URI.
+    #[tokio::test]
+    async fn did_open_during_preload_defers_to_republish_for_sibling_class() {
+        use futures_util::StreamExt;
+
+        let temp = unique_temp_dir("beamtalk_lsp_sibling_class_notification_race");
+        let project_root = temp.join("project");
+        let workflow_dir = project_root.join("src").join("workflow");
+        fs::create_dir_all(&workflow_dir).expect("create workflow dir");
+        fs::write(
+            project_root.join("beamtalk.toml"),
+            "[package]\nname = \"exdura\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write beamtalk.toml");
+
+        fs::write(workflow_dir.join("signal.bt"), "Object subclass: Signal")
+            .expect("write signal.bt");
+
+        let workflow_context_path = workflow_dir.join("workflow_context.bt");
+        let workflow_context_source =
+            "Object subclass: WorkflowContext\n\n  makeSignal => Signal new\n";
+        fs::write(&workflow_context_path, workflow_context_source)
+            .expect("write workflow_context.bt");
+        let workflow_context_uri = Url::from_file_path(&workflow_context_path).expect("path → uri");
+
+        // BT-3433's actual trigger: `check_unresolved_classes` only runs at
+        // all when `pre_loaded_classes` is non-empty (an open-world
+        // assumption — with *zero* other files known, any class reference
+        // might legitimately live in one not yet indexed). A single file
+        // racing `did_open` before preload sees a completely empty
+        // `ProjectIndex` and skips the check entirely, so it alone can't
+        // reproduce the false positive. A second, unrelated file already
+        // open (as a restored editor tab commonly is) makes
+        // `pre_loaded_classes` non-empty for `workflow_context.bt`'s own
+        // diagnosis while `Signal` specifically still isn't indexed yet.
+        let other_path = project_root.join("src").join("other.bt");
+        fs::write(&other_path, "Object subclass: Other").expect("write other.bt");
+        let other_uri = Url::from_file_path(&other_path).expect("path → uri");
+
+        let (mut service, mut socket) = tower_lsp::LspService::new(Backend::new);
+        initialize_service(&mut service, &project_root).await;
+        let backend: &Backend = service.inner();
+
+        // `ClientSocket`'s channel has capacity 1 (`tower-lsp`'s
+        // `Client::new`), so a second send before anyone reads the first
+        // would block forever. Drain it concurrently on a spawned task
+        // (forwarding onto an unbounded channel) rather than reading only
+        // after every `did_open`/preload/republish call below returns.
+        let (forward_tx, mut forward_rx) = tokio::sync::mpsc::unbounded_channel();
+        let reader = tokio::spawn(async move {
+            while let Some(notification) = socket.next().await {
+                if forward_tx.send(notification).is_err() {
+                    break;
+                }
+            }
+        });
+
+        // Mirrors the flag flip `initialized()` performs before starting
+        // preload (BT-3433) — see that method's doc for why this must be
+        // set before any racing didOpen's own `publish_diagnostics` check.
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.set_preload_in_progress(true);
+        }
+
+        // Both didOpens arrive while preload is (per the flag above) still
+        // in flight — both must index the file (so `versions`/`ProjectIndex`
+        // still reflect them) but skip their own `publish_diagnostics` send.
+        // `other.bt` opens first, exactly like a second restored editor tab
+        // would.
+        real_did_open(backend, other_uri.clone(), "Object subclass: Other").await;
+        real_did_open(
+            backend,
+            workflow_context_uri.clone(),
+            workflow_context_source,
+        )
+        .await;
+
+        // Mirrors the diagnostics-relevant subset of `initialized()`'s
+        // sequence (`load_root_packages` → `preload_workspace_source_files`
+        // → `republish_open_diagnostics`), skipping `load_type_cache` /
+        // `load_diagnostics_table` (unrelated to class resolution) and
+        // `resolve_otp_lib_dir` / `register_type_hierarchy_capability`
+        // (client *requests* that would hang forever here — nothing is
+        // polling the socket to answer them, unlike the notifications this
+        // test reads back below).
+        backend
+            .load_root_packages(std::slice::from_ref(&project_root))
+            .await;
+        backend
+            .preload_workspace_source_files(PreloadConfig {
+                roots: vec![project_root],
+                stdlib_dirs: vec![],
+            })
+            .await;
+        // Mirrors `initialized()`'s own flip: clear the flag *before*
+        // republishing, so republish's `publish_diagnostics` calls send.
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.set_preload_in_progress(false);
+        }
+        backend.republish_open_diagnostics().await;
+
+        // Exactly two `publishDiagnostics` notifications total are expected:
+        // one per tracked open path (`other.bt`, `workflow_context.bt`), both
+        // from `republish_open_diagnostics` — neither `did_open` sent
+        // anything, since preload was in-flight both times.
+        let diagnostics_by_uri = recv_two_publish_diagnostics(&mut forward_rx).await;
+        reader.abort();
+
+        assert_eq!(
+            diagnostics_by_uri.keys().collect::<HashSet<_>>(),
+            HashSet::from([&other_uri, &workflow_context_uri]),
+            "expected exactly one publishDiagnostics notification per open \
+             file (both from republish_open_diagnostics, since did_open \
+             skipped its own send while preload was in-flight)"
+        );
+        let healed = &diagnostics_by_uri[&workflow_context_uri];
+        assert!(
+            !healed
+                .iter()
+                .any(|d| d.message.contains("Unresolved class")),
+            "the sole notification the client receives for a didOpen-during-\
+             preload file must not carry an Unresolved class warning against \
+             a sibling class preload has since indexed, got {healed:?}"
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
     #[test]
     fn collect_preload_files_classifies_overlapping_path_as_stdlib() {
         // When the same .bt file appears in both a workspace src/ dir and a
@@ -7553,6 +7795,77 @@ mod tests {
             versions.insert(path.clone(), 1);
         }
         Url::from_file_path(path.as_std_path()).expect("path → uri")
+    }
+
+    /// Helper: drives the real `did_open` handler (unlike `open_test_file`
+    /// above) so its own `publish_diagnostics` call actually runs — used by
+    /// `did_open_during_preload_defers_to_republish_for_sibling_class` (BT-3433)
+    /// to verify that call's send behavior, not just the resulting state.
+    async fn real_did_open(backend: &Backend, uri: Url, text: &str) {
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: tower_lsp::lsp_types::TextDocumentItem {
+                    uri,
+                    language_id: "beamtalk".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .await;
+    }
+
+    /// Helper: drives a real `initialize` JSON-RPC request through
+    /// `LspService`'s `tower::Service` impl so `ServerState` reaches
+    /// `Initialized` — a bare `LspService::new` never does, and
+    /// `Client::publish_diagnostics`/`send_notification` silently no-op
+    /// (never touching the socket) until it does.
+    async fn initialize_service(service: &mut tower_lsp::LspService<Backend>, project_root: &Path) {
+        use tower::{Service, ServiceExt};
+
+        let root_uri = Url::from_directory_path(project_root).expect("root uri");
+        let init_request = tower_lsp::jsonrpc::Request::build("initialize")
+            .params(serde_json::json!({
+                "capabilities": {},
+                "workspaceFolders": [{"uri": root_uri.to_string(), "name": "project"}],
+            }))
+            .id(1)
+            .finish();
+        let init_response = service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(init_request)
+            .await
+            .expect("initialize call succeeds");
+        assert!(
+            init_response.is_some_and(|r| r.is_ok()),
+            "initialize request must succeed for ServerState to reach Initialized"
+        );
+    }
+
+    /// Helper: receives exactly two `textDocument/publishDiagnostics`
+    /// notifications from `forward_rx` (see
+    /// `did_open_during_preload_defers_to_republish_for_sibling_class`'s use
+    /// of a spawned reader task forwarding onto this channel) and returns
+    /// the diagnostics keyed by URI. `.recv().await` (not `try_recv`)
+    /// correctly waits for the reader task to actually forward each one,
+    /// rather than racing it.
+    async fn recv_two_publish_diagnostics(
+        forward_rx: &mut tokio::sync::mpsc::UnboundedReceiver<tower_lsp::jsonrpc::Request>,
+    ) -> HashMap<Url, Vec<tower_lsp::lsp_types::Diagnostic>> {
+        let mut diagnostics_by_uri = HashMap::new();
+        for _ in 0..2 {
+            let notification = forward_rx
+                .recv()
+                .await
+                .expect("expected exactly two publishDiagnostics notifications");
+            assert_eq!(notification.method(), "textDocument/publishDiagnostics");
+            let params: tower_lsp::lsp_types::PublishDiagnosticsParams =
+                serde_json::from_value(notification.params().expect("params").clone())
+                    .expect("valid PublishDiagnosticsParams");
+            diagnostics_by_uri.insert(params.uri, params.diagnostics);
+        }
+        diagnostics_by_uri
     }
 
     fn references_params(

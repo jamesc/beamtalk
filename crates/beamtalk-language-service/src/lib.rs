@@ -193,6 +193,26 @@ pub struct SimpleLanguageService {
     /// the LSP server after loading `beamtalk.toml` from each workspace
     /// root, so the LSP agrees with `beamtalk build` on diagnostic severity.
     diagnostics_overrides: beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
+    /// Whether the LSP server's startup workspace preload is currently
+    /// in-flight (BT-3433).
+    ///
+    /// A `didOpen`/`didChange` for a file racing preload can compute and
+    /// publish diagnostics against a `ProjectIndex` that is only partially
+    /// populated (e.g. a sibling class not yet indexed), producing a false
+    /// `Unresolved class` warning. `preload_workspace_source_files`'s own
+    /// startup-sequence caller sets this `true` before preload starts and
+    /// `false` only after the project index is fully populated, and the
+    /// shared `publish_diagnostics_impl` skips sending (without losing the
+    /// update: the file's path is already tracked in the LSP's open-file
+    /// map by the time this is checked) whenever it's `true` — the
+    /// self-healing `republish_open_diagnostics` pass that follows is then
+    /// the only publish for that file during the race window, so at most
+    /// one, correctly-computed notification ever reaches the client instead
+    /// of two racing to be last. Both flips happen under the same lock this
+    /// flag itself lives behind (`Backend::service`), so a concurrent
+    /// `didOpen`'s read of this flag is never reordered relative to the
+    /// startup sequence's own flip.
+    preload_in_progress: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -236,6 +256,7 @@ impl SimpleLanguageService {
             has_package_dependencies: false,
             diagnostics_overrides:
                 beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
+            preload_in_progress: false,
         }
     }
 
@@ -253,6 +274,7 @@ impl SimpleLanguageService {
             has_package_dependencies: false,
             diagnostics_overrides:
                 beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
+            preload_in_progress: false,
         }
     }
 
@@ -286,6 +308,20 @@ impl SimpleLanguageService {
     /// keeps every receiver `Open`.
     pub fn set_has_package_dependencies(&mut self, has_deps: bool) {
         self.has_package_dependencies = has_deps;
+    }
+
+    /// Declare whether the LSP server's startup workspace preload is
+    /// currently in-flight (BT-3433). See the `preload_in_progress` field
+    /// doc for why `publish_diagnostics_impl` consults this.
+    pub fn set_preload_in_progress(&mut self, in_progress: bool) {
+        self.preload_in_progress = in_progress;
+    }
+
+    /// Returns whether the LSP server's startup workspace preload is
+    /// currently in-flight (BT-3433).
+    #[must_use]
+    pub fn is_preload_in_progress(&self) -> bool {
+        self.preload_in_progress
     }
 
     /// Sets the `[diagnostics]` severity-override table loaded from the
