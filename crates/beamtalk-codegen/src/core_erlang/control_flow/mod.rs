@@ -4312,6 +4312,73 @@ impl CoreErlangGenerator {
         Ok((Document::Nil, None))
     }
 
+    /// BT-3428 (Claude Review follow-up on PR #3727): shared by
+    /// `generate_local_var_assignment_in_loop`'s Tier 2 value-call case and
+    /// its control-flow-with-mutations case — both RHS shapes compile
+    /// (`generate_tier2_value_call_doc`/`expression_doc` respectively) to a
+    /// closed `{Value, StateAcc}` 2-tuple needing identical treatment:
+    /// unwrap element 1 into `val_var`, thread element 2 into `new_state`
+    /// via `maps:put`, then rebind any OTHER outer local `source_expr`'s own
+    /// block mutated. The rebind is a no-op for a Tier 2 call —
+    /// `get_control_flow_threaded_vars` only matches the control-flow
+    /// selectors `control_flow_has_mutations` gates the other case on, never
+    /// a bare `value`/`value:` call — so folding both callers through this
+    /// one helper is structurally identical for the pre-existing Tier 2
+    /// case, though not byte-identical: `fresh_temp_var` draws from one
+    /// global counter, and this helper now mints `tuple_var`/`tuple_state_var`
+    /// *after* `value_code` is built (previously minted before), shifting the
+    /// numeric suffixes assigned to those two temps and everything
+    /// `generate_tier2_value_call_doc` mints internally — every name stays
+    /// unique, and existing tests match this shape with `\w*` wildcards.
+    ///
+    /// Extracted after a Claude Review finding on this PR: before this
+    /// helper, the control-flow-with-mutations case was a fourth
+    /// near-identical copy of this idiom (the Tier 2 case here, plus
+    /// `conditionals.rs`'s C3/C3b, which use the `ThreadedStmt`-based arm
+    /// emitter rather than this file's plain `Document` composition and so
+    /// are not folded in here) — exactly the shape of gap this PR's own P7
+    /// regression closed for the third copy.
+    fn emit_tuple_unwrap_pack_and_rebind(
+        &mut self,
+        temp_var_prefixes: (&str, &str),
+        value_code: Document<'static>,
+        val_var: &str,
+        state_key: &str,
+        new_state: &str,
+        source_expr: &Expression,
+    ) -> Document<'static> {
+        let (tuple_prefix, tuple_state_prefix) = temp_var_prefixes;
+        let tuple_var = self.fresh_temp_var(tuple_prefix);
+        let tuple_state_var = self.fresh_temp_var(tuple_state_prefix);
+        let mut docs = vec![docvec![
+            "let ",
+            leaf::var(tuple_var.clone()),
+            " = ",
+            value_code,
+            " in let ",
+            leaf::var(val_var.to_string()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(tuple_var.clone()),
+            ") in let ",
+            leaf::var(tuple_state_var.clone()),
+            " = call 'erlang':'element'(2, ",
+            leaf::var(tuple_var),
+            ") in let ",
+            leaf::var(new_state.to_string()),
+            " = call 'maps':'put'(",
+            leaf::atom(state_key.to_string()),
+            ", ",
+            leaf::var(val_var.to_string()),
+            ", ",
+            leaf::var(tuple_state_var),
+            ") in ",
+        ]];
+        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(source_expr) {
+            docs.extend(self.rebind_threaded_vars_from_state(&threaded_vars, new_state));
+        }
+        Document::Vec(docs)
+    }
+
     /// BT-153: Generate a local variable assignment inside a loop body with state threading.
     ///
     /// Generates code like:
@@ -4349,8 +4416,6 @@ impl CoreErlangGenerator {
                 //   - `maps:put` uses `NewStateAcc` (preserving the block's captured mutations)
                 //     rather than the old `StateAcc` (which would discard them).
                 if self.is_tier2_value_call(value) {
-                    let t2_tuple = self.fresh_temp_var("T2");
-                    let t2_state = self.fresh_temp_var("T2St");
                     let value_code = self.generate_tier2_value_call_doc(value)?;
 
                     let _ = self.next_state_var();
@@ -4368,32 +4433,15 @@ impl CoreErlangGenerator {
 
                     // BT-1053: Return val_var so callers (e.g. generate_conditional_branch_inline)
                     // can use it as the branch result.
-                    return Ok((
-                        docvec![
-                            "let ",
-                            leaf::var(t2_tuple.clone()),
-                            " = ",
-                            value_code,
-                            " in let ",
-                            leaf::var(val_var.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(t2_tuple.clone()),
-                            ") in let ",
-                            leaf::var(t2_state.clone()),
-                            " = call 'erlang':'element'(2, ",
-                            leaf::var(t2_tuple),
-                            ") in let ",
-                            leaf::var(new_state),
-                            " = call 'maps':'put'(",
-                            leaf::atom(state_key.to_string()),
-                            ", ",
-                            leaf::var(val_var.clone()),
-                            ", ",
-                            leaf::var(t2_state),
-                            ") in ",
-                        ],
-                        val_var,
-                    ));
+                    let doc = self.emit_tuple_unwrap_pack_and_rebind(
+                        ("T2", "T2St"),
+                        value_code,
+                        &val_var,
+                        &state_key,
+                        &new_state,
+                        value,
+                    );
+                    return Ok((doc, val_var));
                 }
 
                 // BT-3428: RHS is itself control-flow-with-mutations (e.g. a
@@ -4413,8 +4461,6 @@ impl CoreErlangGenerator {
                 // the RHS's own block mutated (BT-3428, found via the review
                 // of that C3b fix).
                 if self.control_flow_has_mutations(value) {
-                    let cf_tuple = self.fresh_temp_var("CfTuple");
-                    let cf_state = self.fresh_temp_var("CfSt");
                     let frame = self.current_frame();
                     let mut prelude_stmts: Vec<ThreadedStmt> = Vec::new();
                     let thread_scope = self.thread_ahead(value, &mut prelude_stmts, frame)?;
@@ -4431,38 +4477,15 @@ impl CoreErlangGenerator {
 
                     self.bind_var(&id.name, &val_var);
 
-                    let mut docs = vec![
-                        prelude_doc,
-                        docvec![
-                            "let ",
-                            leaf::var(cf_tuple.clone()),
-                            " = ",
-                            value_code,
-                            " in let ",
-                            leaf::var(val_var.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(cf_tuple.clone()),
-                            ") in let ",
-                            leaf::var(cf_state.clone()),
-                            " = call 'erlang':'element'(2, ",
-                            leaf::var(cf_tuple),
-                            ") in let ",
-                            leaf::var(new_state.clone()),
-                            " = call 'maps':'put'(",
-                            leaf::atom(state_key.to_string()),
-                            ", ",
-                            leaf::var(val_var.clone()),
-                            ", ",
-                            leaf::var(cf_state),
-                            ") in ",
-                        ],
-                    ];
-                    if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
-                        docs.extend(
-                            self.rebind_threaded_vars_from_state(&threaded_vars, &new_state),
-                        );
-                    }
-                    return Ok((Document::Vec(docs), val_var));
+                    let doc = self.emit_tuple_unwrap_pack_and_rebind(
+                        ("CfTuple", "CfSt"),
+                        value_code,
+                        &val_var,
+                        &state_key,
+                        &new_state,
+                        value,
+                    );
+                    return Ok((Document::Vec(vec![prelude_doc, doc]), val_var));
                 }
 
                 // ADR 0118 phase 2b (BT-3418): thread every state-effecting
