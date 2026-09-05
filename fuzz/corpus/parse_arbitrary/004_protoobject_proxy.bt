@@ -20,7 +20,7 @@
 //
 // ```bash
 // $ cargo run -- repl
-// > :load examples/protoobject_proxy.bt
+// > :load examples/transparent_proxy.bt
 // > :load tests/repl-protocol/fixtures/counter.bt
 //
 // # Create a counter and increment it

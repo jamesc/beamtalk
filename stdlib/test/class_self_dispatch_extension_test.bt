@@ -5,7 +5,7 @@
 // inside another class method of the same class, not just via an external
 // `Target sel` / `Target class sel` send (BT-3192 fixed only the latter).
 //
-// See fixtures/bt3198_class_self_extension.bt for the host class whose
+// See fixtures/bt3198self_ext_host.bt for the host class whose
 // `callSelfExtension` class method does the self-send.
 
 TestCase subclass: ClassSelfDispatchExtensionTest

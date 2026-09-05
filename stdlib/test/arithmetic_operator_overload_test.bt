@@ -154,7 +154,7 @@ TestCase subclass: ArithmeticOperatorOverloadTest
 
   /// `a`/`b` are deliberately untyped parameters, so
   /// `receiver_is_statically_numeric` is false for both — the same technique
-  /// `bt3163_comparison_guard_actor.bt`'s `compareUnsafe:with:` uses to force
+  /// `bt3163comparison_guard_actor.bt`'s `compareUnsafe:with:` uses to force
   /// the analogous comparison guard. This forces the *dynamically*-numeric
   /// left-operand call site: `guarded_op_doc`'s runtime `is_number(Left)`
   /// check, whose true branch BT-3263 wraps in the coercion `try`/`catch`

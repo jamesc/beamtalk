@@ -15,8 +15,8 @@
 // `beamtalk_primitive:class_of_object_by_name/1` by resolving the module
 // via the `beamtalk_class_metadata` ETS table instead (no message send).
 //
-// Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt,
-// fixtures/bt3052_parent.bt.
+// Fixtures: fixtures/bt3047ancestor.bt, fixtures/bt3047driver_plain.bt,
+// fixtures/bt3052parent.bt.
 
 TestCase subclass: SelfNewClassInForeignBlockTest
 

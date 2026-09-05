@@ -6,8 +6,8 @@
 // against the block's lexical home class — closure-captured via `ClassSelf`
 // — not whichever class's process happens to be running the block.
 //
-// Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_parent.bt,
-// fixtures/bt3047_driver_plain.bt, fixtures/bt3047_driver_with_foo.bt.
+// Fixtures: fixtures/bt3047ancestor.bt, fixtures/bt3047parent.bt,
+// fixtures/bt3047driver_plain.bt, fixtures/bt3047driver_with_foo.bt.
 
 TestCase subclass: ClassMethodBlockSelfIdentityTest
 

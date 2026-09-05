@@ -21,8 +21,8 @@
 // by routing `self superclass` through the real intrinsic directly (see
 // `class_self_send_reflective_primitive` in dispatch_codegen.rs).
 //
-// Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt,
-// fixtures/bt3054_parent.bt.
+// Fixtures: fixtures/bt3047ancestor.bt, fixtures/bt3047driver_plain.bt,
+// fixtures/bt3054parent.bt.
 
 TestCase subclass: SuperclassInForeignBlockTest
 

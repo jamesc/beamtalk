@@ -11,7 +11,7 @@
 // beamtalk_behaviour_intrinsics primitives directly (see
 // `class_self_send_reflective_primitive` in dispatch_codegen.rs).
 //
-// Fixtures: fixtures/bt3057_ancestor.bt, fixtures/bt3057_middle.bt.
+// Fixtures: fixtures/bt3057ancestor.bt, fixtures/bt3057middle.bt.
 
 TestCase subclass: ClassMethodSelfSendReflectivePrimitivesTest
 

@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3378: Fixture actor for the "flat, sibling ifTrue: sequence" actor
+// liveness regression. See bt3378watcher.bt and
+// bt3378flat_if_true_actor_liveness_test.bt.
+
+Actor subclass: BT3378Child
+  state: tag = nil
+
+  setTag: t :: Symbol -> BT3378Child =>
+    self.tag := t
+    self
+
+  getTag => self.tag

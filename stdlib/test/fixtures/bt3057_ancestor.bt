@@ -1,8 +1,0 @@
-// Copyright 2026 James Casey
-// SPDX-License-Identifier: Apache-2.0
-
-// BT-3057: root of the small hierarchy used by
-// class_method_self_send_reflective_primitives_test.bt — see
-// fixtures/bt3057_middle.bt for the class methods under test.
-
-Value subclass: BT3057Ancestor

@@ -14,7 +14,7 @@ Six classes make up the interpreter. They are loaded in dependency order below.
 `SchemeSymbol` is a tiny value type with a single `name` string. Its only job is to be *distinguishable* from Beamtalk `String` so the evaluator can tell "look this up in the environment" from "return this string literal as-is".
 
 ```bash
-sed -n '14,25p' src/scheme/symbol.bt
+sed -n '14,25p' src/scheme/scheme_symbol.bt
 ```
 
 ```output
@@ -37,7 +37,7 @@ Object subclass: SchemeSymbol
 The reader uses a **functional char-list** approach: every parse method receives the remaining characters as a `List` of single-character strings and returns a 2-element `#(parsedValue, remainingChars)` pair. This avoids mutable state and composes naturally with Beamtalk blocks.
 
 ```bash
-sed -n '44,51p' src/scheme/reader.bt
+sed -n '44,51p' src/scheme/scheme_reader.bt
 ```
 
 ```output
@@ -56,7 +56,7 @@ sed -n '44,51p' src/scheme/reader.bt
 Each environment frame is a **live Beamtalk Actor** holding a `Dictionary` of bindings and an optional parent reference. Mutation (`define`) is sent as a message and the actor updates its own state. `lookup:` walks the parent chain automatically. Because actors own their state, there is no need to thread an updated environment through every recursive call — a key advantage over a purely functional representation.
 
 ```bash
-sed -n '18,43p' src/scheme/env.bt
+sed -n '18,43p' src/scheme/scheme_env.bt
 ```
 
 ```output
@@ -93,7 +93,7 @@ Actor subclass: SchemeEnv
 A `SchemeLambda` is an immutable value object capturing `params` (a list of name strings), `body` (the unevaluated AST), and `closureEnv` (the `SchemeEnv` actor at the point of definition). There is no code here — application is handled entirely by `SchemeEval>>apply:args:in:`.
 
 ```bash
-sed -n '15,25p' src/scheme/lambda.bt
+sed -n '15,25p' src/scheme/scheme_lambda.bt
 ```
 
 ```output
@@ -115,7 +115,7 @@ Object subclass: SchemeLambda
 `SchemeEval` is the heart of the interpreter. `eval:in:` dispatches on expression type using `class =:=` guards — self-evaluating atoms return immediately, symbols trigger an environment lookup, and lists are either special forms or function application. Built-in procedures are stored as **Beamtalk Blocks** directly in the environment dictionary, so `apply:args:in:` can call them without any separate primitive dispatch table.
 
 ```bash
-sed -n '48,65p' src/scheme/eval.bt
+sed -n '48,65p' src/scheme/scheme_eval.bt
 ```
 
 ```output
@@ -140,7 +140,7 @@ sed -n '48,65p' src/scheme/eval.bt
 ```
 
 ```bash
-sed -n '112,123p' src/scheme/eval.bt
+sed -n '112,123p' src/scheme/scheme_eval.bt
 ```
 
 ```output
@@ -163,7 +163,7 @@ sed -n '112,123p' src/scheme/eval.bt
 The printer is the display layer: it converts Beamtalk values back to readable Scheme strings using the same type-dispatch pattern as the evaluator. `nil` → `"()"`, `true` → `"#t"`, `List` → recursively formatted `"(1 2 3)"`.
 
 ```bash
-sed -n '17,37p' src/scheme/printer.bt
+sed -n '17,37p' src/scheme/scheme_printer.bt
 ```
 
 ```output

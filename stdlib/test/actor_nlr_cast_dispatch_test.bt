@@ -4,7 +4,7 @@
 // BT-3374: `^self otherMethod` (non-local return of a non-Nil self-call)
 // nested one block deep, in a method dispatched via cast (`!`) from a
 // foreign process (an `onExit:` callback), used to silently drop the
-// nested call's effects — see fixtures/actor_nlr_cast_self_dispatch.bt.
+// nested call's effects — see fixtures/bt3374cast_nlr_sender.bt.
 
 TestCase subclass: ActorNlrCastDispatchTest
   field: sender = nil
@@ -35,7 +35,7 @@ TestCase subclass: ActorNlrCastDispatchTest
     self assert: self.sender debugLog equals: #("configureVictim start", "configureVictim end", "configureVictim start", "configureVictim end")
 
   // Regression coverage for the C0b codegen arm specifically (see
-  // fixtures/actor_nlr_cast_self_dispatch.bt's `reconfigureWithMarker:`):
+  // fixtures/bt3374cast_nlr_sender.bt's `reconfigureWithMarker:`):
   // a sibling `self.field := ...` mutation in the same `ifTrue:` branch as
   // `^self configureVictim` forces `ThreadedIr`/`StateAcc` threading, which
   // is a different codegen path than the plain-branch shape the two tests

@@ -4,7 +4,7 @@
 // BT-3407: classState value set via one class-method call must be visible to
 // another class-method call on the same class — specifically inside a
 // Supervisor's `class children`, invoked via the deadlock-avoiding
-// `static_init` bypass path. See stdlib/test/fixtures/class_state_supervisor.bt.
+// `static_init` bypass path. See stdlib/test/fixtures/class_state_sup_app.bt.
 
 TestCase subclass: ClassStateSupervisorTest
   field: sup = nil

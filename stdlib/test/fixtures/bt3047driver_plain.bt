@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3047 / ADR 0109 amendment: a block-taking class method whose hierarchy
+// does *not* define `foo` — pins the "confusing does_not_understand blaming
+// the wrong class" half of the bug (fixtures/bt3047parent.bt hands this
+// class a block containing `self foo`, inherited only from BT3047Ancestor;
+// before the fix, resolving `self foo` against THIS class's hierarchy raised
+// DNU here instead of running BT3047Ancestor's implementation).
+
+Value subclass: BT3047DriverPlain
+
+  // BT-3047: the block runs inside THIS class's own gen_server process
+  // (ADR 0109), not the caller's.
+  class run: aBlock :: Block over: aList :: List -> Nil =>
+    aList do: [:x | aBlock value: x]
+    nil

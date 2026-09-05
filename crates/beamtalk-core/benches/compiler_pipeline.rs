@@ -95,7 +95,7 @@ const INPUTS: &[BenchInput] = &[
     BenchInput {
         name: "large",
         module_name: "bench_large",
-        fixture: "examples/sicp/src/scheme/eval.bt",
+        fixture: "examples/sicp/src/scheme/scheme_eval.bt",
         analysable: true,
     },
     // XLarge: String stdlib — many methods, string interpolation, 574 lines.
@@ -236,12 +236,15 @@ fn bench_end_to_end(c: &mut Criterion) {
 fn bench_project(c: &mut Criterion) {
     let fixtures = [
         ("bench_main", "examples/sicp/src/main.bt"),
-        ("bench_env", "examples/sicp/src/scheme/env.bt"),
-        ("bench_eval", "examples/sicp/src/scheme/eval.bt"),
-        ("bench_lambda", "examples/sicp/src/scheme/lambda.bt"),
-        ("bench_printer", "examples/sicp/src/scheme/printer.bt"),
-        ("bench_reader", "examples/sicp/src/scheme/reader.bt"),
-        ("bench_symbol", "examples/sicp/src/scheme/symbol.bt"),
+        ("bench_env", "examples/sicp/src/scheme/scheme_env.bt"),
+        ("bench_eval", "examples/sicp/src/scheme/scheme_eval.bt"),
+        ("bench_lambda", "examples/sicp/src/scheme/scheme_lambda.bt"),
+        (
+            "bench_printer",
+            "examples/sicp/src/scheme/scheme_printer.bt",
+        ),
+        ("bench_reader", "examples/sicp/src/scheme/scheme_reader.bt"),
+        ("bench_symbol", "examples/sicp/src/scheme/scheme_symbol.bt"),
     ];
     let sources: Vec<_> = fixtures
         .iter()

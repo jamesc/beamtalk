@@ -9,9 +9,9 @@ sicp/
 ├── beamtalk.toml        # Package manifest
 ├── src/
 │   └── scheme/
-│       ├── lambda.bt    # SchemeLambda — Scheme closure value type
-│       ├── env.bt       # SchemeEnv — lexical environment (immutable-update)
-│       └── eval.bt      # SchemeEval — tokeniser, parser, and evaluator
+│       ├── scheme_lambda.bt    # SchemeLambda — Scheme closure value type
+│       ├── scheme_env.bt       # SchemeEnv — lexical environment (immutable-update)
+│       └── scheme_eval.bt      # SchemeEval — tokeniser, parser, and evaluator
 ├── test/
 │   └── scheme_test.bt   # BUnit tests for SchemeEval
 ├── AGENTS.md            # This file
