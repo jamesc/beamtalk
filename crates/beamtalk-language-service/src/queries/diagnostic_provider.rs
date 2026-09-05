@@ -1213,6 +1213,31 @@ mod tests {
     }
 
     #[test]
+    fn expect_combined_categories_comma_does_not_continue_across_a_newline() {
+        // Review follow-up on BT-3387: a trailing comma at the end of an
+        // @expect line (e.g. a typo or an aborted edit) must not have the
+        // next line's leading identifier silently absorbed into the
+        // category list just because it happens to spell a real category
+        // name (`type` here doubles as a very plausible variable/receiver
+        // name). The comma-continuation must be same-line only, mirroring
+        // the existing same-line rule for the reason string.
+        let source = "@expect dnu,\ntype unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, _parse_diags) = parse(tokens);
+
+        match &module.expressions[0].expression {
+            beamtalk_core::ast::Expression::ExpectDirective { categories, .. } => {
+                assert_eq!(
+                    categories,
+                    &[beamtalk_core::ast::ExpectCategory::Dnu],
+                    "the next line's `type` must not be absorbed into the category list"
+                );
+            }
+            other => panic!("expected ExpectDirective, got: {other:?}"),
+        }
+    }
+
+    #[test]
     fn expect_combined_categories_round_trips_through_unparse() {
         // @expect unresolved_ffi, type should round-trip through unparse.
         let source = "@expect unresolved_ffi, type\n42 unknownMethod";

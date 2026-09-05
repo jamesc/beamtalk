@@ -1060,7 +1060,20 @@ impl Parser {
                 break;
             }
 
-            if is_comma(self.current_kind()) {
+            // Same-line only, mirroring the reason-string lookahead below:
+            // a comma (or the identifier after it) on the next line is not a
+            // continuation of this directive's category list — e.g. a
+            // trailing comma left over from an aborted edit must not have
+            // the following line's leading identifier (which could
+            // plausibly name a real category, like a variable called
+            // `type`) silently absorbed into the list instead of starting
+            // the next statement.
+            let comma_continues_same_line = is_comma(self.current_kind())
+                && !self.current_token().has_leading_newline()
+                && self
+                    .peek_token_at(1)
+                    .is_some_and(|t| !t.has_leading_newline());
+            if comma_continues_same_line {
                 let comma_token = self.advance();
                 span = start.merge(comma_token.span());
             } else {
