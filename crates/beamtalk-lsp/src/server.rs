@@ -5056,19 +5056,11 @@ fn runtime_class_to_document_symbol(
         // would hide selectors the user knows exist.
         let line = m.line.unwrap_or(0);
         let range = zero_width_range_for_line(line);
-        // Class-side methods get a `(class)` detail string so editors
-        // can disambiguate `Counter >> #foo` from `Counter class >> #foo`
-        // in the outline. Instance-side methods carry no detail (parity
-        // with the cold-file path, which leaves detail unset).
-        let detail = if m.class_side {
-            Some("(class)".to_string())
-        } else {
-            None
-        };
+        let (kind, detail) = method_symbol_kind_and_detail(m.class_side);
         children.push(tower_lsp::lsp_types::DocumentSymbol {
             name: m.selector.to_string(),
             detail,
-            kind: SymbolKind::METHOD,
+            kind,
             tags: None,
             deprecated: None,
             range,
@@ -5414,6 +5406,22 @@ fn to_lsp_diagnostic(
     }
 }
 
+/// BT-3442: the `SymbolKind`/`detail` pair for a method `DocumentSymbol`,
+/// shared by every conversion path that builds one (currently the
+/// AST-fallback `to_lsp_symbol` and the runtime `runtime_class_to_document_symbol`)
+/// so they can't silently disagree on how VS Code's Outline, breadcrumbs,
+/// and Go to Symbol in File distinguish a class-side method from an
+/// instance-side method sharing the same selector. `FUNCTION` isn't used
+/// elsewhere in either path's `SymbolKind` mapping, so it's free to
+/// repurpose for "static-ish member" — the closest standard fit.
+fn method_symbol_kind_and_detail(class_side: bool) -> (SymbolKind, Option<String>) {
+    if class_side {
+        (SymbolKind::FUNCTION, Some("class method".to_string()))
+    } else {
+        (SymbolKind::METHOD, None)
+    }
+}
+
 /// Converts a beamtalk `DocumentSymbol` to an LSP `DocumentSymbol`.
 #[expect(deprecated, reason = "LSP DocumentSymbol requires deprecated field")]
 fn to_lsp_symbol(
@@ -5428,30 +5436,24 @@ fn to_lsp_symbol(
         .collect();
 
     let selection_range = sym.name_span.map_or(range, |s| span_to_range(s, source));
+    let (kind, detail) = match sym.kind {
+        DocumentSymbolKind::Class => (SymbolKind::CLASS, None),
+        DocumentSymbolKind::Method => method_symbol_kind_and_detail(false),
+        DocumentSymbolKind::ClassMethod => method_symbol_kind_and_detail(true),
+        DocumentSymbolKind::Field => (SymbolKind::FIELD, None),
+        // BT-2601: a `// === Name ===` divider's method-category
+        // container. NAMESPACE is the closest standard LSP `SymbolKind`
+        // for "a named grouping of members that isn't itself a
+        // type/function" — VS Code renders it with a distinct icon from
+        // Method/Class, which is all that's needed here (nesting,
+        // breadcrumbs, and sticky-scroll come from the tree shape, not
+        // the icon choice).
+        DocumentSymbolKind::Category => (SymbolKind::NAMESPACE, None),
+    };
     tower_lsp::lsp_types::DocumentSymbol {
         name: sym.name.to_string(),
-        kind: match sym.kind {
-            DocumentSymbolKind::Class => SymbolKind::CLASS,
-            DocumentSymbolKind::Method => SymbolKind::METHOD,
-            // BT-3442: class-side methods get a distinct `SymbolKind` from
-            // instance-side ones (plus the "class method" `detail` below) so
-            // VS Code's Outline/breadcrumbs/Go to Symbol can tell apart two
-            // same-selector methods on opposite sides of a class. FUNCTION
-            // isn't used elsewhere in this mapping, so it's free to repurpose
-            // for "static-ish member" — closest standard `SymbolKind` fit.
-            DocumentSymbolKind::ClassMethod => SymbolKind::FUNCTION,
-            DocumentSymbolKind::Field => SymbolKind::FIELD,
-            // BT-2601: a `// === Name ===` divider's method-category
-            // container. NAMESPACE is the closest standard LSP `SymbolKind`
-            // for "a named grouping of members that isn't itself a
-            // type/function" — VS Code renders it with a distinct icon from
-            // Method/Class, which is all that's needed here (nesting,
-            // breadcrumbs, and sticky-scroll come from the tree shape, not
-            // the icon choice).
-            DocumentSymbolKind::Category => SymbolKind::NAMESPACE,
-        },
-        detail: matches!(sym.kind, DocumentSymbolKind::ClassMethod)
-            .then(|| "class method".to_string()),
+        kind,
+        detail,
         tags: None,
         deprecated: None,
         range,
@@ -9079,9 +9081,14 @@ mod tests {
         assert_eq!(children.len(), 2);
         let increment = children.iter().find(|c| c.name == "increment").unwrap();
         assert!(increment.detail.is_none());
+        assert_eq!(increment.kind, SymbolKind::METHOD);
         assert_eq!(increment.range.start, Position::new(6, 0));
         let with_initial = children.iter().find(|c| c.name == "withInitial:").unwrap();
-        assert_eq!(with_initial.detail.as_deref(), Some("(class)"));
+        // BT-3442: class-side methods now share the `to_lsp_symbol` path's
+        // SymbolKind::FUNCTION + "class method" detail convention, so this
+        // path can no longer silently diverge from the AST-fallback one.
+        assert_eq!(with_initial.kind, SymbolKind::FUNCTION);
+        assert_eq!(with_initial.detail.as_deref(), Some("class method"));
         assert_eq!(with_initial.range.start, Position::new(2, 0));
     }
 
