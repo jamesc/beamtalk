@@ -7684,7 +7684,13 @@ mod tests {
     /// preload already settled has no race to avoid.
     #[test]
     fn should_defer_reload_publish_for_preload_requires_open_and_in_progress() {
-        let path = Utf8PathBuf::from("/workspace/src/activity/activity_retry_helper.bt");
+        // Real (if nonexistent) platform-native paths, not a hand-written
+        // `/workspace/...` literal — `Url::from_file_path` requires an
+        // absolute path in the host platform's own form (e.g. a drive
+        // letter on Windows), which a Unix-style literal is not.
+        let temp = unique_temp_dir("beamtalk_lsp_defer_reload_publish");
+        let path = Utf8PathBuf::from_path_buf(temp.join("activity_retry_helper.bt"))
+            .expect("temp path is UTF-8");
         let uri = Url::from_file_path(path.as_std_path()).expect("path → uri");
         let versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>> =
             Arc::new(Mutex::new(HashMap::from([(path.clone(), 1)])));
@@ -7712,7 +7718,8 @@ mod tests {
             "preload in-flight and URI open: must defer to republish_open_diagnostics"
         );
 
-        let closed_path = Utf8PathBuf::from("/workspace/src/activity/activity_outcome.bt");
+        let closed_path = Utf8PathBuf::from_path_buf(temp.join("activity_outcome.bt"))
+            .expect("temp path is UTF-8");
         let closed_uri = Url::from_file_path(closed_path.as_std_path()).expect("path → uri");
         assert!(
             !should_defer_reload_publish_for_preload(
