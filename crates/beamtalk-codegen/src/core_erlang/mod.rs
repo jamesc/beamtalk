@@ -1373,11 +1373,17 @@ pub(super) struct ClassContext {
     class_var_version: VersionCounter,
     /// BT-412: Whether class variables were mutated in the current method.
     pub class_var_mutated: bool,
-    /// Class name → compiled module name index for resolving cross-file class references.
+    /// Class → compiled module resolution authority for this generation unit
+    /// (ADR 0119 / BT-3436).
     ///
-    /// Populated from `CodegenOptions::class_module_index` before generation begins.
-    /// Used by `compiled_module_name` to resolve subdirectory classes correctly.
-    pub class_module_index: std::collections::HashMap<String, String>,
+    /// Built once from `CodegenOptions::class_module_index` by
+    /// [`CoreErlangGenerator::set_class_module_index`] before generation
+    /// begins, keyed under this module's own [`PackageId`](beamtalk_core::semantic_analysis::PackageId)
+    /// (derived from `self.module_name`). `compiled_module_name` queries this
+    /// registry first, falling back to the best-effort naming convention only
+    /// on a genuine miss — see that method's doc for the full resolution
+    /// order.
+    pub class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry,
     /// BT-403: Selectors of sealed methods in the current class.
     /// Used to generate standalone functions and direct call dispatch.
     pub sealed_method_selectors: std::collections::HashSet<String>,
@@ -1450,7 +1456,7 @@ impl ClassContext {
             class_var_mutating_selectors: std::collections::HashSet::new(),
             class_var_version: VersionCounter::new(),
             class_var_mutated: false,
-            class_module_index: std::collections::HashMap::new(),
+            class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             class_slot_constructor_selector: None,
             in_class_method: false,
@@ -2281,20 +2287,59 @@ impl CoreErlangGenerator {
         self.class_context_mut().class_var_mutated = value;
     }
 
-    /// Returns a reference to the class module index.
-    pub(super) fn class_module_index(&self) -> &std::collections::HashMap<String, String> {
-        static EMPTY: std::sync::LazyLock<std::collections::HashMap<String, String>> =
-            std::sync::LazyLock::new(std::collections::HashMap::new);
-        self.class_context
-            .as_ref()
-            .map_or(&*EMPTY, |ctx| &ctx.class_module_index)
+    /// Derives this generation unit's own [`PackageId`] from `self.module_name`
+    /// (ADR 0119 / BT-3436): `bt@stdlib@...` is [`PackageId::Stdlib`],
+    /// `bt@{pkg}@...` is [`PackageId::Package`], anything else (a bare
+    /// `bt@{snake}` or an unprefixed test-fixture name) is
+    /// [`PackageId::SingleFile`]. Used both to key registry entries in
+    /// [`Self::set_class_module_index`] and, on a registry miss, to compute
+    /// the existing best-effort naming convention directly in
+    /// `compiled_module_name` — replacing the deleted `user_package_prefix`,
+    /// which re-derived the same package name by string-parsing an
+    /// already-computed module name instead of typing it once here.
+    ///
+    /// [`PackageId`]: beamtalk_core::semantic_analysis::PackageId
+    pub(super) fn own_package_id(&self) -> beamtalk_core::semantic_analysis::PackageId {
+        use beamtalk_core::semantic_analysis::PackageId;
+        match self
+            .module_name
+            .strip_prefix("bt@")
+            .and_then(|rest| rest.split_once('@'))
+        {
+            Some(("stdlib", _)) => PackageId::Stdlib,
+            Some((pkg, _)) => PackageId::Package(pkg.to_string()),
+            None => PackageId::SingleFile,
+        }
     }
 
-    /// Sets the class module index, initialising the context if absent.
+    /// Returns a reference to the class → compiled module resolution
+    /// registry for this generation unit (ADR 0119 / BT-3436).
+    pub(super) fn class_module_registry(
+        &self,
+    ) -> &beamtalk_core::semantic_analysis::ClassModuleRegistry {
+        static EMPTY: std::sync::LazyLock<beamtalk_core::semantic_analysis::ClassModuleRegistry> =
+            std::sync::LazyLock::new(beamtalk_core::semantic_analysis::ClassModuleRegistry::new);
+        self.class_context
+            .as_ref()
+            .map_or(&*EMPTY, |ctx| &ctx.class_module_registry)
+    }
+
+    /// Sets the class module index, building the [`ClassModuleRegistry`]
+    /// entries it backs (keyed under this unit's own [`PackageId`] — see
+    /// [`Self::own_package_id`]) and initialising the context if absent.
+    ///
+    /// [`ClassModuleRegistry`]: beamtalk_core::semantic_analysis::ClassModuleRegistry
+    /// [`PackageId`]: beamtalk_core::semantic_analysis::PackageId
     // BT-3340: widened from `pub(crate)` — `beamtalk-repl` sets this before
     // generating a REPL module so cross-class self-sends resolve.
     pub fn set_class_module_index(&mut self, index: std::collections::HashMap<String, String>) {
-        self.class_context_mut().class_module_index = index;
+        use beamtalk_core::semantic_analysis::{ClassModuleRegistry, ModuleName};
+        let pkg = self.own_package_id();
+        let mut registry = ClassModuleRegistry::new();
+        for (class_name, module_name) in index {
+            registry.insert(pkg.clone(), class_name, ModuleName::Generated(module_name));
+        }
+        self.class_context_mut().class_module_registry = registry;
     }
 
     /// Returns a reference to the sealed method selectors set.

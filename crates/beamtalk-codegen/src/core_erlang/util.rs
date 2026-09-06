@@ -21,7 +21,7 @@ use beamtalk_cerl_doc::leaf::{atom, string_lit};
 use beamtalk_cerl_doc::{Document, join};
 use beamtalk_core::ast::{
     CascadeMessage, ClassDefinition, Expression, ExpressionStatement, Identifier, MessageSelector,
-    StringSegment,
+    Module, StringSegment,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -1235,6 +1235,21 @@ impl CoreErlangGenerator {
         self.class_identity().is_some_and(ClassIdentity::is_sealed)
     }
 
+    /// Finds the AST class definition currently being generated.
+    ///
+    /// ADR 0119 (BT-3436): replaces the deleted `module_matches_class`, which
+    /// answered this same question by re-deriving and comparing module-name
+    /// strings (and could spuriously match, e.g. `bt@other_pkg@util@math`
+    /// against class `Math`). Under ADR 0040's one-class-per-file rule this
+    /// needs no module-name comparison at all — `self.class_name()` (set once
+    /// per module by `setup_class_identity`) already identifies the class
+    /// being generated directly, so this is a straight identity check against
+    /// `module.classes`, not a lookup.
+    pub(super) fn current_class<'m>(&self, module: &'m Module) -> Option<&'m ClassDefinition> {
+        let current_name = self.class_name();
+        module.classes.iter().find(|c| c.name.name == current_name)
+    }
+
     /// Build the `beamtalk_source` Core Erlang attribute fragment (BT-845/BT-860).
     ///
     /// Returns `, 'beamtalk_source' = ["<path>"]` when `source_path` is set
@@ -1263,131 +1278,9 @@ pub fn to_module_name(class_name: &str) -> String {
     beamtalk_core::ast::to_module_name(class_name)
 }
 
-/// Extracts the user package prefix from a workspace-qualified module name (BT-794).
-///
-/// Given `bt@{package}@{rest}`, returns `Some("bt@{package}@")`.
-/// Returns `None` for stdlib modules (`bt@stdlib@...`), unprefixed names, or
-/// names without a package segment.
-///
-/// # Limitations
-///
-/// This function intentionally returns only the top-level package segment
-/// (`bt@{package}@`), discarding any subdirectory path components. For example,
-/// `bt@sicp@scheme@eval` returns `bt@sicp@` rather than `bt@sicp@scheme@`.
-///
-/// Callers such as `compiled_module_name` use this prefix to construct module
-/// names for referenced classes. This means cross-module references within a
-/// package only produce correct names when the referenced class lives at the
-/// package root (e.g. `bt@{package}@{class}`). Classes nested in subdirectories
-/// (e.g. `bt@{package}@{subdir}@{class}`) cannot be resolved by class name alone
-/// and are not currently supported for inter-class dispatch.
-///
-/// # Examples
-///
-/// ```ignore
-/// assert_eq!(user_package_prefix("bt@bank@account"), Some("bt@bank@".into()));
-/// // Subdirectory segments are stripped — `scheme@` is not preserved:
-/// assert_eq!(user_package_prefix("bt@sicp@scheme@eval"), Some("bt@sicp@".into()));
-/// assert_eq!(user_package_prefix("bt@stdlib@integer"), None);
-/// assert_eq!(user_package_prefix("counter"), None);
-/// assert_eq!(user_package_prefix("bt@counter"), None);
-/// ```
-pub(super) fn user_package_prefix(module_name: &str) -> Option<String> {
-    let rest = module_name.strip_prefix("bt@")?;
-    let (pkg, suffix) = rest.split_once('@')?;
-    if pkg == "stdlib" || suffix.is_empty() {
-        return None;
-    }
-    Some(format!("bt@{pkg}@"))
-}
-
-/// Returns true if `module_name` corresponds to the compiled form of `class_name`.
-///
-/// ADR 0016/0026: Module names may be prefixed with `bt@` (user code),
-/// `bt@stdlib@` (stdlib), `bt@{package}@` (package mode), or unprefixed (legacy/tests).
-/// The unprefixed arm is retained because hand-constructed test-fixture `Module`s use
-/// bare class names (e.g. "counter"); real compilation always emits a `bt@…` prefix.
-pub(super) fn module_matches_class(module_name: &str, class_name: &str) -> bool {
-    let snake = to_module_name(class_name);
-    module_name == snake
-        || module_name == format!("bt@{snake}")
-        || module_name == format!("bt@stdlib@{snake}")
-        || module_name
-            .strip_prefix("bt@")
-            .and_then(|rest| rest.rsplit_once('@'))
-            .is_some_and(|(_, suffix)| suffix == snake)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_module_matches_class_unprefixed() {
-        assert!(module_matches_class("counter", "Counter"));
-    }
-
-    #[test]
-    fn test_module_matches_class_bt_prefix() {
-        assert!(module_matches_class("bt@counter", "Counter"));
-    }
-
-    #[test]
-    fn test_module_matches_class_stdlib_prefix() {
-        assert!(module_matches_class("bt@stdlib@integer", "Integer"));
-    }
-
-    #[test]
-    fn test_module_matches_class_package_prefix() {
-        assert!(module_matches_class("bt@my_app@counter", "Counter"));
-    }
-
-    #[test]
-    fn test_module_matches_class_package_multi_word() {
-        assert!(module_matches_class("bt@my_app@my_counter", "MyCounter"));
-    }
-
-    #[test]
-    fn test_module_matches_class_package_subdirectory() {
-        // bt@my_app@util@math should match class Math (rsplit_once on last @)
-        assert!(module_matches_class("bt@my_app@util@math", "Math"));
-    }
-
-    #[test]
-    fn test_module_matches_class_no_match() {
-        assert!(!module_matches_class("bt@other", "Counter"));
-    }
-
-    #[test]
-    fn test_user_package_prefix_package_mode() {
-        assert_eq!(
-            user_package_prefix("bt@bank@account"),
-            Some("bt@bank@".into())
-        );
-    }
-
-    #[test]
-    fn test_user_package_prefix_deep_path() {
-        assert_eq!(
-            user_package_prefix("bt@sicp@scheme@eval"),
-            Some("bt@sicp@".into())
-        );
-    }
-
-    #[test]
-    fn test_user_package_prefix_stdlib() {
-        assert_eq!(user_package_prefix("bt@stdlib@integer"), None);
-    }
-
-    #[test]
-    fn test_user_package_prefix_unprefixed() {
-        assert_eq!(user_package_prefix("counter"), None);
-    }
-
-    #[test]
-    fn test_user_package_prefix_bt_only() {
-        assert_eq!(user_package_prefix("bt@counter"), None);
-    }
 
     #[test]
     fn test_versioned_var_version_zero_returns_prefix() {

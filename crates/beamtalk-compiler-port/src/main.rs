@@ -1491,20 +1491,34 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
 /// override (from package-mode callers) or the default `bt@{snake_case}`
 /// convention.  All code paths that produce module names for `.bt` classes
 /// should call this function so the derivation logic is unified.
+///
+/// ADR 0119 / BT-3436: the no-override branch mints the name via
+/// `ClassModuleRegistry::assign` — this is exactly that method's documented
+/// use case (a hot-reloaded inline class definition with no `.bt` source
+/// file to derive a path-based name from), exercising the registry primitive
+/// `beamtalk-core` added in BT-3435. `module_name_override` is left as a
+/// direct pass-through: it is the exact, already-correct (subdirectory-aware)
+/// module name a package-mode caller's own Pass 1 computed, not a name this
+/// function should re-derive.
 fn derive_class_module_name(
     class_name: &str,
     module_name_override: Option<&str>,
     stdlib_mode: bool,
 ) -> String {
+    use beamtalk_core::semantic_analysis::{ClassModuleRegistry, ModuleNamingScheme, PackageId};
+
     if let Some(name) = module_name_override {
         return name.to_string();
     }
-    let base_name = beamtalk_codegen::core_erlang::to_module_name(class_name);
-    if stdlib_mode {
-        format!("bt@stdlib@{base_name}")
+    let (pkg, naming) = if stdlib_mode {
+        (PackageId::Stdlib, ModuleNamingScheme::Stdlib)
     } else {
-        format!("bt@{base_name}")
-    }
+        (PackageId::SingleFile, ModuleNamingScheme::SingleFile)
+    };
+    ClassModuleRegistry::new()
+        .assign(&pkg, class_name, &naming)
+        .as_str()
+        .to_string()
 }
 
 /// BT-571: Handle inline class definition in REPL expression context.

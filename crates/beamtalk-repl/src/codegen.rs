@@ -68,7 +68,17 @@ pub fn generate_repl_expressions(expressions: &[Expression], module_name: &str) 
 /// Like [`generate_repl_expressions`] but accepts a `class_module_index` that maps
 /// class names to their compiled module names (e.g. `"Counter"` -> `"bt@getting_started@counter"`).
 /// This is needed in workspace/package mode so that `compiled_module_name` resolves
-/// class references correctly instead of falling back to the heuristic prefix.
+/// class references correctly instead of falling back to the best-effort convention.
+///
+/// ADR 0119 / BT-3436: `class_module_index` stays a plain `HashMap` here — it
+/// is ADR 0050's stable, versioned compiler-port wire field (predating this
+/// ADR), not a shape this crate should reinterpret. What changed is what
+/// happens to it downstream: [`CoreErlangGenerator::set_class_module_index`]
+/// converts it straight into the shared
+/// [`ClassModuleRegistry`](beamtalk_core::semantic_analysis::ClassModuleRegistry)
+/// that `compiled_module_name` queries, so the REPL no longer feeds a
+/// resolution path independent from the CLI's own package-mode index —
+/// both converge on the one registry authority.
 ///
 /// # Errors
 ///

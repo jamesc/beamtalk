@@ -3667,36 +3667,52 @@ impl CoreErlangGenerator {
         })
     }
 
-    /// Computes the compiled module name for a class (ADR 0016 / ADR 0026 / BT-794).
+    /// Computes the compiled module name for a class (ADR 0016 / ADR 0026 /
+    /// BT-794; registry lookup per ADR 0119 / BT-3436).
     ///
     /// Resolution order:
-    /// 1. `class_module_index` — explicit mapping built during two-pass compilation.
-    ///    This correctly handles classes in package subdirectories (e.g. `SchemeEnv`
-    ///    → `bt@sicp_example@scheme@env`).
-    /// 2. Stdlib classes → `bt@stdlib@{snake_case}`
-    /// 3. User-defined classes in package mode → `bt@{package}@{snake_case}`
-    ///    (package prefix extracted from `self.module_name`)
-    /// 4. User-defined classes without package context → `bt@{snake_case}` (legacy)
+    /// 1. [`ClassModuleRegistry::module_for_class`] — built from
+    ///    `class_module_index` (the explicit mapping from two-pass
+    ///    compilation) keyed under this unit's own `PackageId`
+    ///    ([`CoreErlangGenerator::own_package_id`]). This correctly handles
+    ///    classes in package subdirectories (e.g. `SchemeEnv` →
+    ///    `bt@sicp_example@scheme@env`) — no guessing, no fallback tiers.
+    /// 2. On a genuine miss (ADR 0100's open-world policy: an unregistered
+    ///    class reference is a warning, not an error, and must still reach
+    ///    codegen), the existing best-effort convention: stdlib classes →
+    ///    `bt@stdlib@{snake_case}`; a user-defined class in package mode →
+    ///    `bt@{package}@{snake_case}`; otherwise → `bt@{snake_case}`.
+    ///
+    /// [`ClassModuleRegistry::module_for_class`]: beamtalk_core::semantic_analysis::ClassModuleRegistry::module_for_class
     pub fn compiled_module_name(&self, class_name: &str) -> String {
-        if let Some(module) = self.class_module_index().get(class_name) {
-            return module.clone();
+        let pkg = self.own_package_id();
+        if let Some(module) = self
+            .class_module_registry()
+            .module_for_class(&pkg, class_name)
+        {
+            return module.as_str().to_string();
         }
         let snake = super::util::to_module_name(class_name);
         if Self::is_known_stdlib_type(class_name) {
             format!("bt@stdlib@{snake}")
-        } else if let Some(prefix) = super::util::user_package_prefix(&self.module_name) {
-            format!("{prefix}{snake}")
+        } else if let beamtalk_core::semantic_analysis::PackageId::Package(name) = pkg {
+            format!("bt@{name}@{snake}")
         } else {
             format!("bt@{snake}")
         }
     }
 
     /// Computes the compiled module name for a package-qualified class reference
-    /// (ADR 0070 Phase 2).
+    /// (ADR 0070 Phase 2; registry lookup per ADR 0119 / BT-3436).
     ///
     /// When a class reference has an explicit package qualifier (e.g., `json@Parser`),
-    /// the module name is deterministic: `bt@{package}@{snake_case}`. This bypasses
-    /// the `class_module_index` and heuristic resolution used by `compiled_module_name`.
+    /// first queries the registry under the *referenced* package's `PackageId` —
+    /// closing the divergence where a qualified reference to a class in a
+    /// package subdirectory used to disagree with the same class's unqualified
+    /// resolution (ADR 0119 Context item 5). On a registry miss, falls back to
+    /// `resolve_qualified_module_name`'s deterministic `bt@{package}@{snake_case}`
+    /// composition — `resolve_qualified_module_name` itself is unchanged; its
+    /// `None`-arm contract is deliberate and tested (ADR 0119 Decision).
     ///
     /// When no package qualifier is present (`package` is `None`), falls back to
     /// `compiled_module_name` for backward-compatible resolution.
@@ -3706,7 +3722,15 @@ impl CoreErlangGenerator {
         package: Option<&str>,
     ) -> String {
         match package {
-            Some(pkg) => beamtalk_core::ast::resolve_qualified_module_name(class_name, Some(pkg)),
+            Some(pkg) => {
+                let target = beamtalk_core::semantic_analysis::PackageId::Package(pkg.to_string());
+                self.class_module_registry()
+                    .module_for_class(&target, class_name)
+                    .map_or_else(
+                        || beamtalk_core::ast::resolve_qualified_module_name(class_name, Some(pkg)),
+                        |module| module.as_str().to_string(),
+                    )
+            }
             None => self.compiled_module_name(class_name),
         }
     }

@@ -48,7 +48,7 @@ module 'abstract_class_spawn' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
     let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
         <'true'> when 'true' -> 'skipped'
         <'false'> when 'true' ->
-            call 'erlang':'put'('$beamtalk_actor', 'abstract_class_spawn')
+            call 'erlang':'put'('$beamtalk_actor', 'Shape')
     end in
     let DefaultState = ~{
         '__class_mod__' => 'abstract_class_spawn'
@@ -60,7 +60,7 @@ module 'abstract_class_spawn' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
             {'ok', CleanState}
         <'false'> when 'true' ->
             let _TelPid = call 'erlang':'self'() in
-            let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'abstract_class_spawn'}~) in
+            let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'Shape'}~) in
             {'ok', FinalState}
     end
 
