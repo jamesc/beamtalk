@@ -1280,7 +1280,7 @@ impl Backend {
         let listener_handle = tokio::spawn(flush_event_listener(
             listener_client,
             listener_roots,
-            open_paths_handle,
+            open_paths_handle.clone(),
             flush_rx,
         ));
 
@@ -1294,34 +1294,21 @@ impl Backend {
             class_changed_rx,
         ));
 
-        let reload_check_handle = self.spawn_reload_check_listener(client.clone(), reload_check_rx);
+        let reload_check_handle = self.spawn_reload_check_listener(
+            client.clone(),
+            reload_check_rx,
+            open_paths_handle.clone(),
+        );
 
         {
             let mut runtime_guard = self.runtime.lock().await;
             *runtime_guard = Some(client.clone());
         }
-        {
-            let mut listener_guard = self.flush_listener.lock().await;
-            // Cancel any prior listener (shouldn't happen, but be defensive).
-            if let Some(prev) = listener_guard.take() {
-                prev.abort();
-            }
-            *listener_guard = Some(listener_handle);
-        }
-        {
-            let mut guard = self.class_changed_listener.lock().await;
-            if let Some(prev) = guard.take() {
-                prev.abort();
-            }
-            *guard = Some(class_changed_handle);
-        }
-        {
-            let mut guard = self.reload_check_listener.lock().await;
-            if let Some(prev) = guard.take() {
-                prev.abort();
-            }
-            *guard = Some(reload_check_handle);
-        }
+        // Cancel each prior listener (shouldn't happen, but be defensive)
+        // before storing its replacement.
+        Self::store_listener_handle(&self.flush_listener, listener_handle).await;
+        Self::store_listener_handle(&self.class_changed_listener, class_changed_handle).await;
+        Self::store_listener_handle(&self.reload_check_listener, reload_check_handle).await;
 
         // BT-2801 (ADR 0105 surface-parity gap): seed `reload_diagnostics`
         // with any findings that already existed in
@@ -1348,6 +1335,7 @@ impl Backend {
             &seed_roots,
             &self.service,
             &self.reload_diagnostics,
+            &open_paths_handle,
         )
         .await;
 
@@ -1366,6 +1354,7 @@ impl Backend {
         &self,
         runtime_client: RuntimeClient,
         reload_check_rx: tokio::sync::mpsc::UnboundedReceiver<ReloadCheckEvent>,
+        open_paths: OpenPathsHandle,
     ) -> tokio::task::JoinHandle<()> {
         let roots = {
             let roots = self
@@ -1381,7 +1370,23 @@ impl Backend {
             Arc::clone(&self.service),
             Arc::clone(&self.reload_diagnostics),
             reload_check_rx,
+            open_paths,
         ))
+    }
+
+    /// Abort a previous listener task, if any, and store its replacement.
+    /// Extracted out of `ensure_runtime_attached` (which repeats this for
+    /// three listeners) purely to keep that function under the lint's
+    /// line-count limit.
+    async fn store_listener_handle(
+        guard: &tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+        handle: tokio::task::JoinHandle<()>,
+    ) {
+        let mut guard = guard.lock().await;
+        if let Some(prev) = guard.take() {
+            prev.abort();
+        }
+        *guard = Some(handle);
     }
 
     async fn publish_diagnostics(&self, uri: &Url) {
@@ -1403,12 +1408,17 @@ impl Backend {
         // recording never race each other.
         //
         // This check lives here, not in the shared `publish_diagnostics_impl`
-        // below, precisely because that invariant does *not* hold for its
-        // other two callers, `reload_check_listener` and
-        // `seed_reload_diagnostics` — both explicitly target URIs that need
-        // not be open in the editor (see their own comments), so gating
+        // below, precisely because that invariant does *not* unconditionally
+        // hold for its other two callers, `reload_check_listener` and
+        // `seed_reload_diagnostics` — both target URIs that need not be open
+        // in the editor (see their own comments), and unconditionally gating
         // their sends here would silently and permanently drop a
-        // reload-induced diagnostic with nothing left to resend it.
+        // reload-induced diagnostic for a *closed* file, with nothing left to
+        // resend it. Those two callers instead gate themselves conditionally
+        // via `should_defer_reload_publish_for_preload` (BT-3433 follow-up):
+        // deferring only when the target URI is *also* open, so the same
+        // guarantee this method relies on — `republish_open_diagnostics`
+        // resends every open path once preload completes — covers them too.
         {
             let svc = self.service.lock().expect("service lock poisoned");
             if svc.is_preload_in_progress() {
@@ -3138,6 +3148,7 @@ async fn reload_check_listener(
     service: Arc<Mutex<SimpleLanguageService>>,
     reload_diagnostics: Arc<std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>>,
     mut reload_check_rx: tokio::sync::mpsc::UnboundedReceiver<ReloadCheckEvent>,
+    open_paths: OpenPathsHandle,
 ) {
     while let Some(event) = reload_check_rx.recv().await {
         if event.checked_owners.is_empty() {
@@ -3257,7 +3268,22 @@ async fn reload_check_listener(
             // have open — `publishDiagnostics`' `version` field is optional
             // per the LSP spec, so omitting it is correct here (unlike the
             // flush listener, which only touches already-open buffers).
-            publish_diagnostics_impl(&client, &service, &reload_diagnostics, &uri, None).await;
+            //
+            // BT-3433 (follow-up): if the URI *is* open and startup preload
+            // is still in-flight, `publish_diagnostics_impl` would recompute
+            // `svc.diagnostics()` against the same partially-populated
+            // `ProjectIndex` that caused the original false `Unresolved
+            // class` positive, and its send could still race
+            // `republish_open_diagnostics`'s later, correct one — the same
+            // channel-ordering race `Backend::publish_diagnostics` was fixed
+            // to avoid, just reached through this listener instead of
+            // `did_open`/`did_change`/`did_save`. Skip the send in that case:
+            // the `reload_diagnostics` map above is already updated, and
+            // `republish_open_diagnostics` is guaranteed to pick it up in its
+            // one, correct publish once preload completes.
+            if !should_defer_reload_publish_for_preload(&service, &open_paths, &uri) {
+                publish_diagnostics_impl(&client, &service, &reload_diagnostics, &uri, None).await;
+            }
         }
     }
     tracing::debug!("reload_check_listener: channel closed, exiting");
@@ -3331,6 +3357,7 @@ async fn seed_reload_diagnostics(
     workspace_roots: &[PathBuf],
     service: &Mutex<SimpleLanguageService>,
     reload_diagnostics: &std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>,
+    open_paths: &OpenPathsHandle,
 ) {
     // Awaited inline in the attach path (not `tokio::spawn`ed) so that by the
     // time `ensure_runtime_attached` returns, any already-open document has
@@ -3392,8 +3419,44 @@ async fn seed_reload_diagnostics(
         touched_uris.insert(uri);
     }
     for uri in touched_uris {
-        publish_diagnostics_impl(client, service, reload_diagnostics, &uri, None).await;
+        // BT-3433 (follow-up): same deferral as `reload_check_listener` —
+        // `ensure_runtime_attached` (this function's only caller) runs
+        // on-demand, independently of the startup preload sequence, so it
+        // can race it. Skip the send for an open URI while preload is
+        // in-flight; `reload_diagnostics` above is already updated, so
+        // `republish_open_diagnostics` picks this seed up correctly once
+        // preload completes.
+        if !should_defer_reload_publish_for_preload(service, open_paths, &uri) {
+            publish_diagnostics_impl(client, service, reload_diagnostics, &uri, None).await;
+        }
     }
+}
+
+/// BT-3433 (follow-up): true if publishing diagnostics for `uri` right now
+/// would risk the same startup-preload notification race
+/// [`Backend::publish_diagnostics`] was fixed to avoid for
+/// `did_open`/`did_change`/`did_save` — i.e. startup preload is still
+/// in-flight *and* `uri` is currently open in the editor.
+///
+/// A closed-file URI is always safe to publish immediately: nothing else
+/// (`republish_open_diagnostics` only iterates open files) will ever
+/// resend it, so deferring would drop the diagnostic forever — matching
+/// why `publish_diagnostics_impl` itself isn't gated unconditionally. An
+/// open-file URI is safe to defer: `republish_open_diagnostics` is
+/// guaranteed to (re)publish it, correctly, once preload finishes.
+fn should_defer_reload_publish_for_preload(
+    service: &Mutex<SimpleLanguageService>,
+    open_paths: &OpenPathsHandle,
+    uri: &Url,
+) -> bool {
+    let Some(path) = uri_to_path(uri) else {
+        return false;
+    };
+    if !open_paths.contains(&path) {
+        return false;
+    }
+    let svc = service.lock().expect("service lock poisoned");
+    svc.is_preload_in_progress()
 }
 
 /// Group a flat findings snapshot by `(owner, changed_class)` — the same
@@ -7608,6 +7671,57 @@ mod tests {
             }
             other => panic!("expected Operations document_changes, got {other:?}"),
         }
+    }
+
+    /// BT-3433 (follow-up): `reload_check_listener`/`seed_reload_diagnostics`
+    /// must defer their `publish_diagnostics_impl` send — same as
+    /// `Backend::publish_diagnostics` already does for
+    /// `did_open`/`did_change`/`did_save` — exactly when doing otherwise
+    /// would risk the startup-preload notification race: preload in-flight
+    /// *and* the target URI open. Neither condition alone is enough: a
+    /// closed URI is never resent by `republish_open_diagnostics`, so
+    /// deferring it would drop the diagnostic forever, and an open URI with
+    /// preload already settled has no race to avoid.
+    #[test]
+    fn should_defer_reload_publish_for_preload_requires_open_and_in_progress() {
+        let path = Utf8PathBuf::from("/workspace/src/activity/activity_retry_helper.bt");
+        let uri = Url::from_file_path(path.as_std_path()).expect("path → uri");
+        let versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>> =
+            Arc::new(Mutex::new(HashMap::from([(path.clone(), 1)])));
+        let open_paths = OpenPathsHandle {
+            versions: Arc::clone(&versions),
+        };
+
+        let mut service = SimpleLanguageService::new();
+        assert!(
+            !should_defer_reload_publish_for_preload(
+                &Mutex::new(service.clone()),
+                &open_paths,
+                &uri
+            ),
+            "preload settled: nothing to race, must not defer an open file's publish"
+        );
+
+        service.set_preload_in_progress(true);
+        assert!(
+            should_defer_reload_publish_for_preload(
+                &Mutex::new(service.clone()),
+                &open_paths,
+                &uri
+            ),
+            "preload in-flight and URI open: must defer to republish_open_diagnostics"
+        );
+
+        let closed_path = Utf8PathBuf::from("/workspace/src/activity/activity_outcome.bt");
+        let closed_uri = Url::from_file_path(closed_path.as_std_path()).expect("path → uri");
+        assert!(
+            !should_defer_reload_publish_for_preload(
+                &Mutex::new(service),
+                &open_paths,
+                &closed_uri
+            ),
+            "preload in-flight but URI not open: nothing will ever resend it, must publish now"
+        );
     }
 
     #[test]
