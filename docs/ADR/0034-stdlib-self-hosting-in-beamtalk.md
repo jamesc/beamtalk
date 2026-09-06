@@ -76,6 +76,16 @@ sealed Object subclass: Future
 > **Note:** This is the minimal `@primitive` stub for the *existing* Future API. The full
 > Future class design — combinators (`then:`, `all:`, `race:`), auto-await semantics, and
 > Duration integration — is a separate ADR scoped by BT-507.
+>
+> **Superseded (BT-3438):** This `Future.bt` was never implemented. ADR 0043
+> (Sync-by-Default Actor Messaging) shipped shortly after this ADR and made
+> actor sends return values directly via `gen_server:call`, so ordinary code
+> no longer receives a `Future` — the premise above ("every message send to
+> an actor returns a Future") no longer holds. `Parallel` (`stdlib/src/parallel.bt`)
+> became the fan-out/join combinator surface instead, by deliberate choice
+> (see its doc comment). BT-507 was closed without a dedicated Future
+> combinator ADR; none is planned. `Future` remains an internal-only
+> `beamtalk_future.erl` primitive with no `.bt` source file.
 
 ```beamtalk
 /// A handle to an open file, available within a `File open:do:` block.
