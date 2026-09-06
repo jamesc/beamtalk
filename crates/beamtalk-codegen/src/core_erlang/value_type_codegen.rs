@@ -4766,4 +4766,97 @@ mod tests {
             );
         }
     }
+
+    // ── ADR 0119 / BT-3436: registry-based `compiled_module_name*` ─────────
+
+    #[test]
+    fn test_compiled_module_name_registry_hit_takes_precedence_over_heuristic() {
+        // A class present in class_module_index resolves through the
+        // registry even when it lives in a subdirectory the bare
+        // `bt@{pkg}@{snake}` fallback convention could never reconstruct.
+        let mut generator = CoreErlangGenerator::new("bt@sicp@main");
+        let mut index = std::collections::HashMap::new();
+        index.insert("SchemeEnv".to_string(), "bt@sicp@scheme@env".to_string());
+        generator.set_class_module_index(index);
+
+        assert_eq!(
+            generator.compiled_module_name("SchemeEnv"),
+            "bt@sicp@scheme@env"
+        );
+    }
+
+    #[test]
+    fn test_compiled_module_name_falls_back_to_stdlib_convention_on_miss() {
+        // A stdlib class absent from class_module_index still resolves via
+        // the closed-form bt@stdlib@{snake} convention (ADR 0100 open-world
+        // policy: a registry miss is not an error).
+        let generator = CoreErlangGenerator::new("bt@my_app@main");
+        assert_eq!(
+            generator.compiled_module_name("Dictionary"),
+            "bt@stdlib@dictionary"
+        );
+    }
+
+    #[test]
+    fn test_compiled_module_name_falls_back_to_package_convention_on_miss() {
+        // A user-defined class absent from class_module_index falls back to
+        // the package-root convention (own package name, no subdirectory
+        // info to recover — the same best-effort guess the deleted
+        // `user_package_prefix` made, now derived from a typed `PackageId`
+        // instead of re-parsing `self.module_name`).
+        let generator = CoreErlangGenerator::new("bt@my_app@sub@main");
+        assert_eq!(generator.compiled_module_name("Helper"), "bt@my_app@helper");
+    }
+
+    #[test]
+    fn test_compiled_module_name_falls_back_to_single_file_convention_on_miss() {
+        let generator = CoreErlangGenerator::new("counter");
+        assert_eq!(generator.compiled_module_name("Helper"), "bt@helper");
+    }
+
+    #[test]
+    fn test_compiled_module_name_qualified_resolves_subdirectory_class_via_registry() {
+        // ADR 0119 Context item 5: an explicitly-qualified `pkg@Class`
+        // reference to a class in a package subdirectory used to bypass
+        // class_module_index entirely and compose `bt@{pkg}@{snake}`
+        // directly — disagreeing with the same class's unqualified
+        // resolution. Routing through the registry closes that divergence.
+        let mut generator = CoreErlangGenerator::new("bt@sicp@main");
+        let mut index = std::collections::HashMap::new();
+        index.insert("SchemeEnv".to_string(), "bt@sicp@scheme@env".to_string());
+        generator.set_class_module_index(index);
+
+        assert_eq!(
+            generator.compiled_module_name_qualified("SchemeEnv", Some("sicp")),
+            generator.compiled_module_name("SchemeEnv"),
+            "qualified and unqualified references to the same subdirectory \
+             class must resolve identically"
+        );
+        assert_eq!(
+            generator.compiled_module_name_qualified("SchemeEnv", Some("sicp")),
+            "bt@sicp@scheme@env"
+        );
+    }
+
+    #[test]
+    fn test_compiled_module_name_qualified_falls_back_on_registry_miss() {
+        // No class_module_index entry for the referenced package/class pair
+        // (e.g. a genuine cross-package reference this registry doesn't
+        // cover) — falls back to `resolve_qualified_module_name`'s
+        // deterministic `bt@{package}@{snake}` composition, unchanged.
+        let generator = CoreErlangGenerator::new("bt@my_app@main");
+        assert_eq!(
+            generator.compiled_module_name_qualified("Parser", Some("json")),
+            "bt@json@parser"
+        );
+    }
+
+    #[test]
+    fn test_compiled_module_name_qualified_without_package_delegates_to_unqualified() {
+        let generator = CoreErlangGenerator::new("bt@my_app@main");
+        assert_eq!(
+            generator.compiled_module_name_qualified("Helper", None),
+            generator.compiled_module_name("Helper")
+        );
+    }
 }

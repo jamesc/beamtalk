@@ -15,12 +15,18 @@
 //! module name instead of every caller carrying its own ad hoc `String`.
 //!
 //! **Phase 1 scope (this module):** the data structure and its construction
-//! primitives only. Nothing in the compiler consumes this registry yet —
-//! `compiled_module_name`, `module_matches_class`, the REPL, and the
-//! compiler-port keep their existing (bug-shaped) logic until the follow-up
-//! issue routes them through here (ADR 0119 Implementation steps 3-5). This
-//! keeps `just ci` green with zero compiled-output change while the registry
-//! itself gets built and tested in isolation.
+//! primitives only — nothing in the compiler consumed this registry when it
+//! was added. **Phase 2 (BT-3436)** wired the actual consumers up to it:
+//! `beamtalk-codegen`'s `compiled_module_name`/`compiled_module_name_qualified`
+//! query it (falling back to the best-effort convention only on a genuine
+//! miss), `module_matches_class` was deleted in favor of a direct
+//! `CoreErlangGenerator::current_class` identity check (ADR 0040: no
+//! module-name comparison needed), and `beamtalk-compiler-port`'s
+//! `derive_class_module_name` mints names via [`ClassModuleRegistry::assign`]
+//! instead of a closed-form `format!`. `beamtalk-repl` and the REPL/compiler-
+//! port wire format (`class_module_index`, ADR 0050) are unchanged — see
+//! `beamtalk-repl/src/codegen.rs`'s doc comments for how that flows through
+//! the registry downstream instead of an independent resolution path.
 //!
 //! See `docs/ADR/0119-class-module-name-resolution-registry.md` for the full
 //! design rationale, prior art, and the open questions left for later phases.

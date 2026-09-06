@@ -2328,6 +2328,24 @@ impl CoreErlangGenerator {
     /// entries it backs (keyed under this unit's own [`PackageId`] — see
     /// [`Self::own_package_id`]) and initialising the context if absent.
     ///
+    /// `index` may (per `beamtalk-cli`'s dependency-merge path) already
+    /// contain a dependency package's own classes alongside this unit's own
+    /// package — every entry is keyed under `own_package_id()` regardless,
+    /// same as the flat `HashMap` this registry replaces did no keying at
+    /// all. That is a harmless simplification for the exact-match lookup
+    /// [`Self::compiled_module_name`] does (`module_for_class(&own_pkg,
+    /// class_name)` finds a merged dependency entry exactly as
+    /// `class_module_index.get(class_name)` used to), but it does mean a
+    /// package-qualified reference to a *different* package
+    /// (`compiled_module_name_qualified`'s `PackageId::Package(pkg)` lookup)
+    /// won't find a dependency entry mis-keyed under this unit's own
+    /// package — falling back to `resolve_qualified_module_name`'s
+    /// closed-form composition there, exactly as before this ADR (which
+    /// never consulted the index for a qualified reference at all). A
+    /// precedence-ordered, per-dependency-`PackageId` registry merge is the
+    /// documented follow-up (ADR 0119 `module_for_class`'s doc), not this
+    /// wiring pass.
+    ///
     /// [`ClassModuleRegistry`]: beamtalk_core::semantic_analysis::ClassModuleRegistry
     /// [`PackageId`]: beamtalk_core::semantic_analysis::PackageId
     // BT-3340: widened from `pub(crate)` — `beamtalk-repl` sets this before

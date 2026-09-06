@@ -337,10 +337,13 @@ build_class_superclass_index() ->
 -doc """
 Build a class→module index from all registered class gen-servers.
 
-When a class lives in a subdirectory (e.g. src/singleton/app_logger.bt),
-the Rust compiler's user_package_prefix loses the subdirectory segment. By passing
-a full class→module map, compiled_module_name/2 uses the correct module name
-(e.g. bt@gang_of_four@singleton@app_logger) instead of guessing bt@gang_of_four@app_logger.
+When a class lives in a subdirectory (e.g. src/singleton/app_logger.bt), the
+Rust compiler's registry-miss fallback (ADR 0119 / BT-3436's
+`CoreErlangGenerator::own_package_id`, replacing the deleted
+`user_package_prefix`) has no path info to recover the subdirectory segment
+from. By passing a full class→module map, compiled_module_name/2 resolves
+through the registry instead and uses the correct module name (e.g.
+bt@gang_of_four@singleton@app_logger) instead of guessing bt@gang_of_four@app_logger.
 """.
 -spec build_class_module_index() -> #{binary() => binary()}.
 build_class_module_index() ->
