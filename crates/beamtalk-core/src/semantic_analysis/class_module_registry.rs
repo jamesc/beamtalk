@@ -597,6 +597,85 @@ mod tests {
     }
 
     #[test]
+    fn bt_3081_regression_class_for_module_preserves_acronym_case() {
+        // BT-3081 (Erlang runtime side, Done): `beamtalk_stack_frame`'s
+        // `module_to_class`/`snake_to_class` inverse rebuilt a class name
+        // from its snake_case module suffix by naive title-casing —
+        // provably lossy for acronym-cased names: "BEAMError" ->
+        // "beam_error" -> 'Beamerror' (wrong). Fixed there by routing
+        // through the live class registry instead of re-deriving.
+        //
+        // `ClassModuleRegistry` is this ADR's Rust-side analogue of that
+        // same "one class-name<->module-name authority" question, and BT-3437
+        // asks for this exact scenario reproduced against it:
+        // `class_for_module` must return the real class name recorded at
+        // `assign`/`insert` time, never a re-derivation from the module
+        // string, so the same lossy-inverse bug shape cannot recur here.
+        // `to_module_name` only inserts an `_` on a lowercase->uppercase
+        // transition, so consecutive capitals collapse together — exactly
+        // the fold that makes "BEAMError" and "Beamerror" both compile to
+        // "beamerror" and makes the *inverse* direction lossy if it tries to
+        // re-derive a class name from that snake_case string instead of
+        // consulting a real authority (BT-3081's bug).
+        let mut registry = ClassModuleRegistry::new();
+        let module = registry.assign(&PackageId::Stdlib, "BEAMError", &ModuleNamingScheme::Stdlib);
+        assert_eq!(
+            module,
+            ModuleName::Generated("bt@stdlib@beamerror".to_string())
+        );
+
+        let (pkg, class_name) = registry
+            .class_for_module(&module)
+            .expect("module was just assigned");
+        assert_eq!(pkg, &PackageId::Stdlib);
+        assert_eq!(
+            class_name, "BEAMError",
+            "class_for_module must return the exact original class name, not a \
+             lossy case-fold reconstruction from the snake_case module suffix \
+             (BT-3081's bug shape: 'beamerror' -> 'Beamerror')"
+        );
+    }
+
+    #[test]
+    fn bt_3437_future_native_backing_module_resolves_to_real_module_not_a_guessed_bt_module() {
+        // ADR 0119 Decision / BT-3435: `Future` is a runtime-only builtin
+        // backed by hand-written `beamtalk_future.erl` (ADR 0056), with no
+        // `stdlib/src/Future.bt` source file. Nothing seeds it into the
+        // registry today — no live call site actually resolves `Future`'s
+        // module (see `ModuleName::Native`'s doc and
+        // `compute_direct_call_eligible`'s gate) — but the design must
+        // still resolve it *correctly* were it ever registered: to its real
+        // `Native("beamtalk_future")` backing module, never a guessed
+        // `Generated("bt@stdlib@future")`/`Generated("bt@future")` module
+        // that doesn't exist (the class of mistake the old four-tier
+        // best-effort convention would make for any class with no `.bt`
+        // source to derive a path from).
+        let mut registry = ClassModuleRegistry::new();
+        let native = ModuleName::Native("beamtalk_future".to_string());
+        registry.insert(PackageId::Stdlib, "Future", native.clone());
+
+        assert_eq!(
+            registry.module_for_class(&PackageId::Stdlib, "Future"),
+            Some(&native),
+            "Future must resolve to its real native backing module"
+        );
+        assert_eq!(
+            registry.class_for_module(&native),
+            Some((&PackageId::Stdlib, "Future"))
+        );
+        // Not the nonexistent generated modules a naming-convention guess
+        // would produce for a class with no source file to derive from.
+        assert_ne!(
+            registry.module_for_class(&PackageId::Stdlib, "Future"),
+            Some(&ModuleName::Generated("bt@stdlib@future".to_string()))
+        );
+        assert_ne!(
+            registry.module_for_class(&PackageId::Stdlib, "Future"),
+            Some(&ModuleName::Generated("bt@future".to_string()))
+        );
+    }
+
+    #[test]
     fn relative_module_segments_joins_subdirectories() {
         let segments =
             relative_module_segments(Utf8Path::new("scheme/Env.bt")).expect("valid path");
@@ -629,6 +708,14 @@ mod tests {
         // The BT-3432 bug shape: `TestCase.bt` renamed to `test_case.bt`
         // (path-derived: bt@stdlib@test_case) while the class stays `TestCase`
         // — the two must always agree, so a real mismatch is a hard error.
+        //
+        // BT-3437 (this exact scenario against the unified registry): this
+        // is the literal historical rename that broke `TestCase` resolution
+        // via the old file-stem-scanning `STDLIB_CLASS_NAMES` (deleted in
+        // BT-3435). `build_stdlib.rs::compile_all_stdlib_files` calls this
+        // same validator on every real stdlib source file at
+        // `beamtalk build-stdlib` time, so this bug shape is now caught at
+        // build time, not silently mis-resolved at codegen time.
         let err = validate_stdlib_module_name(
             "TestCase",
             &ModuleName::Generated("bt@stdlib@wrong_name".to_string()),

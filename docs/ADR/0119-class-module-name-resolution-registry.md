@@ -225,7 +225,7 @@ Explicitly rejected by the issue itself — this is the third real bug from the 
 
 **Epic:** BT-3434
 **Issues:** BT-3435 (foundation — `ClassModuleRegistry`), BT-3436 (consumers — codegen/REPL/compiler-port wiring), BT-3437 (validation — regression tests + corpus verification)
-**Status:** Planned
+**Status:** Complete — all three issues are Done. BT-3437 added regression tests reproducing BT-3081/BT-3431/BT-3432's specific scenarios against the unified registry, a package-compiler/e2e subdirectory-dispatch test, and a `Future`/native-backing-module resolution test, and confirmed `test-package-compiler`'s insta snapshot suite is byte-identical (zero diffs) — the "no behavior change" constraint holds. The two open questions in Implementation (the Erlang-side `beamtalk_repl_ops_load.erl` regex scanner, and ADR 0114 live-rename invalidation) were both explicitly deferred, not resolved, and remain open follow-ups.
 
 ## References
 - Related issues: BT-3434, BT-3081, BT-3431, BT-3432
