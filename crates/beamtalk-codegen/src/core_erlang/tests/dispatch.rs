@@ -463,6 +463,42 @@ fn test_bt906_class_module_index_overrides_heuristic_for_spawn() {
     );
 }
 
+// ── ADR 0119 / BT-3436: `own_package_id` ────────────────────────────────
+
+#[test]
+fn test_own_package_id_stdlib_module() {
+    use beamtalk_core::semantic_analysis::PackageId;
+    let generator = CoreErlangGenerator::new("bt@stdlib@ordered_collection");
+    assert_eq!(generator.own_package_id(), PackageId::Stdlib);
+}
+
+#[test]
+fn test_own_package_id_package_module_preserves_subdirectory_free_name() {
+    use beamtalk_core::semantic_analysis::PackageId;
+    // A deep subdirectory module still yields the top-level package name —
+    // `own_package_id` only needs to identify *which* package this
+    // generation unit belongs to, not its position within it.
+    let generator = CoreErlangGenerator::new("bt@sicp@scheme@env");
+    assert_eq!(
+        generator.own_package_id(),
+        PackageId::Package("sicp".to_string())
+    );
+}
+
+#[test]
+fn test_own_package_id_single_file_module() {
+    use beamtalk_core::semantic_analysis::PackageId;
+    let generator = CoreErlangGenerator::new("bt@counter");
+    assert_eq!(generator.own_package_id(), PackageId::SingleFile);
+}
+
+#[test]
+fn test_own_package_id_unprefixed_test_fixture_module() {
+    use beamtalk_core::semantic_analysis::PackageId;
+    let generator = CoreErlangGenerator::new("counter");
+    assert_eq!(generator.own_package_id(), PackageId::SingleFile);
+}
+
 #[test]
 fn test_generate_actor_new_error_methods() {
     // BT-217: Actor classes must export and generate new/0 and new/1 error methods

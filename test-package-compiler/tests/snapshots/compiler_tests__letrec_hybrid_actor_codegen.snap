@@ -76,7 +76,7 @@ module 'letrec_hybrid_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_
     let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
         <'true'> when 'true' -> 'skipped'
         <'false'> when 'true' ->
-            call 'erlang':'put'('$beamtalk_actor', 'letrec_hybrid_actor')
+            call 'erlang':'put'('$beamtalk_actor', 'HybridCtr')
     end in
     let DefaultState = ~{
         '__class_mod__' => 'letrec_hybrid_actor'
@@ -90,7 +90,7 @@ module 'letrec_hybrid_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_
             {'ok', CleanState}
         <'false'> when 'true' ->
             let _TelPid = call 'erlang':'self'() in
-            let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'letrec_hybrid_actor'}~) in
+            let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'HybridCtr'}~) in
             {'ok', FinalState}
     end
 
@@ -216,7 +216,7 @@ module 'letrec_hybrid_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_
 
 'terminate'/2 = fun (Reason, State) ->
     let _TelPid = call 'erlang':'self'() in
-    let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => 'letrec_hybrid_actor', 'reason' => Reason}~) in
+    let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => 'HybridCtr', 'reason' => Reason}~) in
     %% Call terminate: method if defined — exceptions must not prevent shutdown
     let Self = call 'beamtalk_actor':'make_self'(State) in
     let _TermDisp = try call 'letrec_hybrid_actor':'dispatch'('terminate:', [Reason], Self, State)

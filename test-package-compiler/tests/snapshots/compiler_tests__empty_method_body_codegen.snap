@@ -76,7 +76,7 @@ module 'empty_method_body' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_co
     let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
         <'true'> when 'true' -> 'skipped'
         <'false'> when 'true' ->
-            call 'erlang':'put'('$beamtalk_actor', 'empty_method_body')
+            call 'erlang':'put'('$beamtalk_actor', 'EmptyActor')
     end in
     let DefaultState = ~{
         '__class_mod__' => 'empty_method_body'
@@ -89,7 +89,7 @@ module 'empty_method_body' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_co
             {'ok', CleanState}
         <'false'> when 'true' ->
             let _TelPid = call 'erlang':'self'() in
-            let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'empty_method_body'}~) in
+            let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'EmptyActor'}~) in
             {'ok', FinalState}
     end
 
@@ -215,7 +215,7 @@ module 'empty_method_body' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_co
 
 'terminate'/2 = fun (Reason, State) ->
     let _TelPid = call 'erlang':'self'() in
-    let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => 'empty_method_body', 'reason' => Reason}~) in
+    let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => 'EmptyActor', 'reason' => Reason}~) in
     %% Call terminate: method if defined — exceptions must not prevent shutdown
     let Self = call 'beamtalk_actor':'make_self'(State) in
     let _TermDisp = try call 'empty_method_body':'dispatch'('terminate:', [Reason], Self, State)

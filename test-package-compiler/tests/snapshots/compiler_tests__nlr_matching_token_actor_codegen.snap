@@ -76,7 +76,7 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
     let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
         <'true'> when 'true' -> 'skipped'
         <'false'> when 'true' ->
-            call 'erlang':'put'('$beamtalk_actor', 'nlr_matching_token_actor')
+            call 'erlang':'put'('$beamtalk_actor', 'NlrActor')
     end in
     let DefaultState = ~{
         '__class_mod__' => 'nlr_matching_token_actor'
@@ -89,7 +89,7 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
             {'ok', CleanState}
         <'false'> when 'true' ->
             let _TelPid = call 'erlang':'self'() in
-            let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'nlr_matching_token_actor'}~) in
+            let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'NlrActor'}~) in
             {'ok', FinalState}
     end
 
@@ -215,7 +215,7 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
 
 'terminate'/2 = fun (Reason, State) ->
     let _TelPid = call 'erlang':'self'() in
-    let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => 'nlr_matching_token_actor', 'reason' => Reason}~) in
+    let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => 'NlrActor', 'reason' => Reason}~) in
     %% Call terminate: method if defined — exceptions must not prevent shutdown
     let Self = call 'beamtalk_actor':'make_self'(State) in
     let _TermDisp = try call 'nlr_matching_token_actor':'dispatch'('terminate:', [Reason], Self, State)

@@ -111,14 +111,21 @@ pub fn validate_single_definition(module: &Module) -> Vec<Diagnostic> {
 ///
 /// A `.bt` file's Erlang module name is derived from its own file path
 /// (`to_module_name(file_stem)`), independently of the class name declared
-/// inside it (ADR 0016/0026). Self-dispatch/state-routing codegen (`gen_server`
-/// callbacks, class-var shadow-writes) separately derives the *expected*
-/// module name from the declared class name and only treats a class as
-/// belonging to its own module when the two agree — see
-/// `module_matches_class` (`beamtalk-codegen::core_erlang::util`). When they
-/// disagree, that codegen silently fails to recognize self, breaking
-/// self-message routing with no diagnostic. This check catches the mismatch
-/// early, before it reaches codegen.
+/// inside it (ADR 0016/0026). Every *other* file's reference to this class —
+/// `compiled_module_name`'s registry lookup (ADR 0119 / BT-3436), hot-reload's
+/// file-to-module mapping — resolves through that file-path-derived name, so
+/// a class whose file name disagrees with its own declared name cannot be
+/// dispatched to by name from anywhere else, with no diagnostic at the point
+/// of failure. This check catches the mismatch early, before it reaches
+/// codegen.
+///
+/// (Self-dispatch/state-routing codegen in the *same* file — `gen_server`
+/// callbacks, class-var shadow-writes — no longer depends on this agreement
+/// at all: `CoreErlangGenerator::current_class` identifies "the class I am
+/// generating right now" straight from the parsed `Module` (`ADR 0119`'s
+/// `module_matches_class` replacement), never by re-deriving and comparing a
+/// module name. This validator's continued value is entirely about the
+/// *cross-file* resolution case above.)
 ///
 /// Only applies to a file declaring exactly one class (ADR 0040's "one class
 /// per file"); a file with zero or multiple classes is either fine (protocol

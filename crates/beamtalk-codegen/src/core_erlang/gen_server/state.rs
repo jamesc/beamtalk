@@ -29,10 +29,7 @@ impl CoreErlangGenerator {
     ) -> Result<Vec<Document<'static>>> {
         let mut fields = Vec::new();
 
-        let current_class = module.classes.iter().find(|c| {
-            use super::super::util::module_matches_class;
-            module_matches_class(&self.module_name, &c.name.name)
-        });
+        let current_class = self.current_class(module);
 
         if let Some(class) = current_class {
             for state in &class.state {
@@ -90,11 +87,8 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Find the current class being compiled (matches module name)
-        let current_class = module.classes.iter().find(|c| {
-            use super::super::util::module_matches_class;
-            module_matches_class(&self.module_name, &c.name.name)
-        });
+        // Find the current class being compiled (identity check — ADR 0119/BT-3436).
+        let current_class = self.current_class(module);
 
         if let Some(class) = current_class {
             // Emit this class's own fields. Inherited state from a non-base parent
@@ -113,10 +107,9 @@ impl CoreErlangGenerator {
                 ]);
             }
         } else {
-            // Fallback: no class matched the module name. Reached by hand-constructed test
-            // fixtures that build a `Module` with an unprefixed/bare class name (e.g.
-            // "counter") instead of the `bt@…` scheme real compilation uses — see
-            // `util::module_matches_class`. Load-bearing for those tests, not dead code.
+            // Fallback: no class identity was set (e.g. a hand-constructed test
+            // fixture that calls this method directly without going through
+            // `setup_class_identity`). Load-bearing for those tests, not dead code.
             for class in &module.classes {
                 for state in &class.state {
                     let value_code = if let Some(ref default_value) = state.default_value {
