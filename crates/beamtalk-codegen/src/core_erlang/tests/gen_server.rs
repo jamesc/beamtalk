@@ -4760,6 +4760,49 @@ fn test_method_xref_baked_into_register_class() {
     }
 }
 
+/// BT-3439: `register_class/0` bakes a `stateVarXref` field into the
+/// `BuilderState` map, the state-var analogue of `methodXref` — one row per
+/// declared instance variable, carrying its name and 1-based declaration
+/// line. Covers both a defaulted `state:` slot and a typed slot with *no*
+/// default value (`state: name :: Type`, no `= ...`) — the exact shape the
+/// VS Code sidebar's `findStateVarDeclaration` regex fails to match (BT-3439
+/// investigation), which is precisely why this baked line data exists: so
+/// `beamtalk.navigateToStateVar` no longer needs that regex to succeed.
+#[test]
+fn test_state_var_xref_baked_into_register_class() {
+    let src = concat!(
+        "Actor subclass: Widget\n",            // line 1
+        "  state: count = 0\n",                // line 2
+        "  state: engine :: WorkflowEngine\n", // line 3 (no default, `::` type)
+        "\n",
+        "  increment =>\n",
+        "    self.count := self.count + 1\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("widget").with_source(src))
+        .expect("codegen should succeed");
+
+    assert!(
+        code.contains("'stateVarXref' => ["),
+        "Should bake a stateVarXref list. Got:\n{code}"
+    );
+    let sv_start = code
+        .find("'stateVarXref' => [")
+        .expect("stateVarXref present");
+    let sv_tail = &code[sv_start..];
+    let sv_seg = &sv_tail[..sv_tail.find("'classState'").unwrap_or(sv_tail.len())];
+
+    assert!(
+        sv_seg.contains("'name' => 'count', 'line' => 2"),
+        "count should be recorded at line 2. Got:\n{sv_seg}"
+    );
+    assert!(
+        sv_seg.contains("'name' => 'engine', 'line' => 3"),
+        "a defaultless, `::`-typed slot should still be recorded, at line 3. Got:\n{sv_seg}"
+    );
+}
+
 /// ADR 0087 Phase 6 (BT-2304): compiler-generated auto-accessors for a
 /// `Value subclass:` class ride the `method_xref` write path with
 /// `source_status => synthetic` and a derived `synthetic_origin` line pointing

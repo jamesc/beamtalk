@@ -8,7 +8,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { planDocumentRetarget, type DocumentMovedParams } from "./documentMoved";
-import { findMethodDeclaration, findStateVarDeclaration } from "./textUtils";
+import {
+  findMethodDeclaration,
+  findStateVarDeclaration,
+  offsetForDeclarationLine,
+} from "./textUtils";
 import {
   LanguageClient,
   type LanguageClientOptions,
@@ -1118,11 +1122,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
 
-      // Find the method declaration position by scanning line by line.
-      // Beamtalk declarations: `class selector =>` (class-side), `selector =>` (instance-side).
-      // LSP go-to-definition is used *after* showTextDocument below for precise navigation.
+      // BT-3439: prefer the real declaration line from beamtalk_xref's
+      // compiled index over guessing via source-text regex/search — the
+      // regex (methodHeadPattern) doesn't understand this codebase's `::`
+      // typed-parameter syntax, and the regex-miss fallback (a bare
+      // text.indexOf of the joined selector) essentially never matches real
+      // source, so navigation could land on an unrelated identifier
+      // elsewhere in the file (see BT-3439's investigation). Only fall back
+      // to the regex/text-search path when no real line is available (a
+      // class compiled before this field existed, or a ClassBuilder-built
+      // class with no compiler to derive one from) or the line is stale
+      // (the file was edited since the class was last compiled/reloaded).
+      // LSP go-to-definition is used *after* showTextDocument below for
+      // precise navigation either way.
       const text = document.getText();
-      let declOffset = findMethodDeclaration(text, method.selector, method.side);
+      // The full joined selector never appears verbatim in source (that's
+      // exactly the original bug), so validate the real-line path against
+      // just its first keyword (or the whole thing, for a unary/binary
+      // selector, since split(":")[0] is a no-op without a colon).
+      let declOffset =
+        method.line !== undefined
+          ? offsetForDeclarationLine(text, method.line, method.selector.split(":")[0])
+          : -1;
+      if (declOffset === -1) declOffset = findMethodDeclaration(text, method.selector, method.side);
       if (declOffset === -1) declOffset = text.indexOf(method.selector);
       if (declOffset === -1) {
         await vscode.window.showInformationMessage(
@@ -1185,8 +1207,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           );
           return;
         }
+        // BT-3439: prefer the real declaration line from beamtalk_xref's
+        // compiled index — see the analogous comment in navigateToMethod.
+        // findStateVarDeclaration's regex additionally requires a trailing
+        // `= default`, so it always misses a defaultless typed declaration
+        // like `state: engine :: WorkflowEngine`; the real-line path covers
+        // that case even when it isn't a `::`-syntax problem.
         const text = document.getText();
-        let declOffset = findStateVarDeclaration(text, stateVar.name);
+        let declOffset =
+          stateVar.line !== undefined
+            ? offsetForDeclarationLine(text, stateVar.line, stateVar.name)
+            : -1;
+        if (declOffset === -1) declOffset = findStateVarDeclaration(text, stateVar.name);
         if (declOffset === -1) declOffset = text.indexOf(stateVar.name);
         if (declOffset === -1) {
           await vscode.window.showInformationMessage(

@@ -340,6 +340,7 @@ module 'class_var_multi_field_mutations' ['start_link'/1, 'start_link'/2, 'init'
             'methodSignatures' => ~{}~,
             'classMethodSignatures' => ~{'resetAndBump' => #{#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<65>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<66>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']])}#}~,
             'methodXref' => [~{'class_side' => 'true', 'selector' => 'resetAndBump', 'line' => 1, 'sends' => [~{'selector' => '+', 'line' => 4, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [], 'source_status' => 'indexed'}~],
+            'stateVarXref' => [],
             'classState' => ~{'total' => 0, 'label' => #{#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,

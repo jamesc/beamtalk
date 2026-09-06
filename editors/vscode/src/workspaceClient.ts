@@ -48,10 +48,21 @@ export interface MethodInfo {
   name: string;
   selector: string;
   side: "instance" | "class";
+  /**
+   * BT-3439: the method's real declaration line, from `beamtalk_xref`'s
+   * compiled index. `undefined` for a class compiled before this field
+   * existed, or a `ClassBuilder`-built class with no compiler to derive a
+   * line from — callers fall back to the source-text regex guess in that
+   * case (see `findMethodDeclaration` in `textUtils.ts`).
+   */
+  line?: number;
 }
 
 export interface StateVarInfo {
   name: string;
+  /** BT-3439: see `MethodInfo.line` — same real-vs-fallback story, but for
+   * instance-variable declarations. */
+  line?: number;
 }
 
 export type BindingsMap = Record<string, unknown>;
@@ -333,14 +344,22 @@ export class WorkspaceClient {
   /** List all methods and state vars for a loaded class. */
   async methods(className: string): Promise<{ methods: MethodInfo[]; stateVars: StateVarInfo[] }> {
     const resp = (await this._request({ op: "methods", class: className })) as {
-      methods?: Array<{ name: string; selector: string; side: "instance" | "class" }>;
-      state_vars?: string[];
+      methods?: Array<{
+        name: string;
+        selector: string;
+        side: "instance" | "class";
+        line?: number | null;
+      }>;
+      state_vars?: Array<{ name: string; line?: number | null }>;
     };
-    const methods = Array.isArray(resp.methods) ? resp.methods : [];
+    const methodsRaw = Array.isArray(resp.methods) ? resp.methods : [];
     const stateVarsRaw = Array.isArray(resp.state_vars) ? resp.state_vars : [];
     return {
-      methods,
-      stateVars: stateVarsRaw.map((name) => ({ name })),
+      // BT-3439: `line` is `null` on the wire (a class predating this field,
+      // or ClassBuilder-built) — normalize to `undefined` so callers can use
+      // a single `??`/optional-chaining check for "no real line available".
+      methods: methodsRaw.map((m) => ({ ...m, line: m.line ?? undefined })),
+      stateVars: stateVarsRaw.map((v) => ({ name: v.name, line: v.line ?? undefined })),
     };
   }
 

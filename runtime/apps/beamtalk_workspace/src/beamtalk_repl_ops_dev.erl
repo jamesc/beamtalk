@@ -2208,7 +2208,8 @@ list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
                         #{
                             <<"name">> => atom_to_binary(S, utf8),
                             <<"selector">> => atom_to_binary(S, utf8),
-                            <<"side">> => <<"instance">>
+                            <<"side">> => <<"instance">>,
+                            <<"line">> => ws_method_line(ClassName, false, S)
                         }
                      || S <- InstanceSelectors
                     ],
@@ -2216,7 +2217,8 @@ list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
                         #{
                             <<"name">> => atom_to_binary(S, utf8),
                             <<"selector">> => atom_to_binary(S, utf8),
-                            <<"side">> => <<"class">>
+                            <<"side">> => <<"class">>,
+                            <<"line">> => ws_method_line(ClassName, true, S)
                         }
                      || S <- ClassSelectors
                     ],
@@ -2224,7 +2226,24 @@ list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
             end
     end.
 
--spec list_state_vars_for_ws(binary()) -> [binary()].
+-doc """
+Resolve a method's declaration line for the `\"methods\"` ws op (BT-3439), or
+`null` when unregistered (e.g. a `ClassBuilder`-built class compiled before
+this feature landed).
+
+A direct `beamtalk_xref:method_info/3` ETS lookup — reuses the same cheap,
+already-populated index the LiveView `browse-protocols` op and the LSP
+`nav-query` op read from, instead of leaving `beamtalk.navigateToMethod` (VS
+Code Workspace Explorer sidebar) to guess the position via source-text regex.
+""".
+-spec ws_method_line(atom(), boolean(), atom()) -> pos_integer() | null.
+ws_method_line(ClassName, ClassSide, Selector) ->
+    case beamtalk_xref:method_info(ClassName, ClassSide, Selector) of
+        undefined -> null;
+        #{line := Line} -> Line
+    end.
+
+-spec list_state_vars_for_ws(binary()) -> [map()].
 list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
     case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
         {error, badarg} ->
@@ -2234,8 +2253,26 @@ list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
                 undefined ->
                     [];
                 Pid ->
-                    IVars = beamtalk_runtime_api:instance_variables(Pid),
-                    lists:sort([atom_to_binary(V, utf8) || V <- IVars])
+                    IVars = lists:sort(beamtalk_runtime_api:instance_variables(Pid)),
+                    [
+                        #{
+                            <<"name">> => atom_to_binary(V, utf8),
+                            %% BT-3439: real declaration line when the class
+                            %% was compiled with this feature (via
+                            %% beamtalk_xref:register_state_vars/2); `null`
+                            %% for a ClassBuilder-built class with no
+                            %% compiler to derive one from, or a class
+                            %% compiled before this feature landed —
+                            %% `beamtalk.navigateToStateVar` falls back to
+                            %% its source-text regex guess in that case.
+                            <<"line">> =>
+                                case beamtalk_xref:state_var_line(ClassName, V) of
+                                    undefined -> null;
+                                    Line -> Line
+                                end
+                        }
+                     || V <- IVars
+                    ]
             end
     end.
 

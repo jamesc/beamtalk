@@ -7,6 +7,7 @@ import {
   findStateVarDeclaration,
   extractStateVarInfo,
   extractMethodDocComment,
+  offsetForDeclarationLine,
 } from "../textUtils";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -449,5 +450,76 @@ describe("extractStateVarInfo — typed state vars", () => {
   it("extracts empty string default for typed string state var", () => {
     const info = extractStateVarInfo(TYPED_BT, "owner");
     expect(info?.defaultValue).toBe('""');
+  });
+});
+
+describe("offsetForDeclarationLine (BT-3439)", () => {
+  // Actor subclass: Widget         <- line 1
+  //   state: count = 0             <- line 2
+  //   state: engine :: Engine      <- line 3
+  //                                <- line 4
+  //   increment =>                 <- line 5
+  //     self.count := self.count + 1  <- line 6
+  const SRC = [
+    "Actor subclass: Widget",
+    "  state: count = 0",
+    "  state: engine :: Engine",
+    "",
+    "  increment =>",
+    "    self.count := self.count + 1",
+  ].join("\n");
+
+  it("resolves a real line to the offset of its first non-whitespace column", () => {
+    const offset = offsetForDeclarationLine(SRC, 2, "count");
+    expect(offset).not.toBe(-1);
+    expect(SRC.slice(offset, offset + 5)).toBe("state");
+  });
+
+  it("resolves a method line by its first selector keyword", () => {
+    const offset = offsetForDeclarationLine(SRC, 5, "increment");
+    expect(offset).not.toBe(-1);
+    expect(SRC.slice(offset, offset + 9)).toBe("increment");
+  });
+
+  it("returns -1 for a line number outside the document", () => {
+    expect(offsetForDeclarationLine(SRC, 0, "count")).toBe(-1);
+    expect(offsetForDeclarationLine(SRC, 999, "count")).toBe(-1);
+  });
+
+  it("returns -1 when the line no longer contains the expected needle (BT-3439 stale line)", () => {
+    // Simulates the file being edited (a line inserted above `engine`)
+    // after the class was last compiled — beamtalk_xref still reports
+    // line 3 for `engine`, but line 3 is now something else entirely.
+    const edited = ["// a new comment", ...SRC.split("\n")].join("\n");
+    expect(offsetForDeclarationLine(edited, 3, "engine")).toBe(-1);
+    // The correct, shifted line (4) still resolves.
+    expect(offsetForDeclarationLine(edited, 4, "engine")).not.toBe(-1);
+  });
+
+  it("does not false-positive on a stale line that merely contains the needle as a substring (review feedback)", () => {
+    // `count`'s real declaration (line 2) is edited away; the stale line 3
+    // it used to occupy now reads a comment that happens to contain
+    // "count" as part of "discount" — a bare substring check would wrongly
+    // validate this line and navigate there.
+    const edited = ["Actor subclass: Widget", "// discount handling"].join("\n");
+    expect(offsetForDeclarationLine(edited, 2, "count")).toBe(-1);
+  });
+
+  it("does not false-positive on a short method-keyword needle embedded in an unrelated word", () => {
+    // `at:put:`'s first keyword ("at") is a substring of extremely common
+    // tokens like "state" — a bare substring check would wrongly validate
+    // any such line as the (stale) declaration of `at:put:`.
+    expect(offsetForDeclarationLine("  state: count = 0", 1, "at")).toBe(-1);
+  });
+
+  it("still matches a real declaration whose needle sits at a line's start/end", () => {
+    expect(offsetForDeclarationLine("count", 1, "count")).not.toBe(-1);
+  });
+
+  it("matches a symbolic binary-selector needle correctly", () => {
+    const src = ["Object subclass: Vector", "  + other =>", "    self x + other x"].join("\n");
+    const offset = offsetForDeclarationLine(src, 2, "+");
+    expect(offset).not.toBe(-1);
+    expect(src[offset]).toBe("+");
   });
 });

@@ -132,6 +132,73 @@ export function extractMethodDocComment(
   return undefined;
 }
 
+/**
+ * Resolves a 1-based declaration line (from `beamtalk_xref`'s compiled index,
+ * BT-3439) to a character offset at the line's first non-whitespace column —
+ * the same "start of the declaration head" position `findMethodDeclaration`/
+ * `findStateVarDeclaration` locate via regex, but from a real backend line
+ * number instead of a source-text guess.
+ *
+ * Returns -1 (callers should fall back to the regex-based finders, exactly
+ * as they already do when those finders themselves return -1) when either:
+ * - `oneBasedLine` falls outside the document, or
+ * - the line no longer contains `expectedNeedle` as its own token (a
+ *   word-boundary match, not a bare substring — see `hasWordBoundaryMatch`).
+ *
+ * The second check matters because the first alone can't catch every kind of
+ * staleness: if the file was edited (lines inserted/deleted above the
+ * declaration) since the class was last compiled/reloaded, `oneBasedLine`
+ * can still be in range — just pointing at a different, unrelated line now.
+ * `expectedNeedle` should be something only the real declaration line would
+ * contain: `stateVar.name` for a field, or the first `:`-delimited part of
+ * `method.selector` for a method (the full joined selector never appears
+ * verbatim in source — see `findMethodDeclaration`'s doc — so checking for
+ * it here would always miss and defeat the real-line path entirely).
+ */
+export function offsetForDeclarationLine(
+  text: string,
+  oneBasedLine: number,
+  expectedNeedle: string
+): number {
+  const lines = text.split("\n");
+  if (oneBasedLine < 1 || oneBasedLine > lines.length) return -1;
+  const line = lines[oneBasedLine - 1];
+  if (!hasWordBoundaryMatch(line, expectedNeedle)) return -1;
+  let offset = 0;
+  for (let i = 0; i < oneBasedLine - 1; i++) {
+    offset += lines[i].length + 1;
+  }
+  const match = /\S/.exec(line);
+  return offset + (match ? match.index : 0);
+}
+
+/**
+ * True if `needle` occurs in `line` at a word boundary on both sides — not
+ * embedded inside a longer identifier. A plain `line.includes(needle)` would
+ * false-positive on e.g. `count` inside `discount`, or `at` (from `at:put:`)
+ * inside `state`/`format`/`data` — exactly defeating the staleness check
+ * `offsetForDeclarationLine` uses this for (BT-3439 review feedback).
+ *
+ * Hand-rolled rather than a `\bneedle\b` regex because `\b` is only
+ * meaningful around word characters (`[A-Za-z0-9_]`) — a symbolic/binary
+ * selector needle like `+` has no well-defined `\b` on either side, so a
+ * regex-based check would behave inconsistently for it. Checking the
+ * actual neighboring characters works uniformly for both cases.
+ */
+function hasWordBoundaryMatch(line: string, needle: string): boolean {
+  if (needle === "") return false;
+  const isWordChar = (ch: string | undefined): boolean => ch !== undefined && /\w/.test(ch);
+  let from = 0;
+  for (;;) {
+    const idx = line.indexOf(needle, from);
+    if (idx === -1) return false;
+    if (!isWordChar(line[idx - 1]) && !isWordChar(line[idx + needle.length])) {
+      return true;
+    }
+    from = idx + 1;
+  }
+}
+
 export function findMethodDeclaration(
   text: string,
   selector: string,
