@@ -36,9 +36,10 @@ Storage layout (all `protected, named_table, {read_concurrency, true}`):
   machinery: instance variables are never hot-patched one at a time (there
   is no `put_state_var/3` counterpart to `put_method/4`) — they only ever
   change via a whole-class (re)register, so `register_state_vars/2` simply
-  replaces a class's rows outright (delete-then-insert) under the single
-  gen_server call's natural serialization. No `current_gen` filtering is
-  needed on the read side.
+  replaces a class's rows outright. No `current_gen` filtering is needed on
+  the read side, but see that function's own doc for the (narrower, biased
+  toward stale-hit-over-false-miss) guarantee its insert-before-delete
+  ordering actually provides against a concurrent `state_var_line/2` reader.
 
 See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 """.
@@ -323,11 +324,17 @@ Replace all state-var (instance-variable) declaration-line rows for a class
 
 Unlike `register_class/2`, this has no generation/sweep protocol: a class's
 instance variables only ever change as a whole (a full class reload), never
-one at a time (there is no `put_state_var/3`), so a plain delete-then-insert
-under this single gen_server call is already atomic with respect to readers —
-there is no "old generation" a concurrent reader could observe mid-swap, since
-`state_var_line/2` reads are direct ETS lookups the gen_server call fully
-precedes or follows, never interleaves.
+one at a time (there is no `put_state_var/3`). It still isn't a single atomic
+swap, though — `state_var_line/2` reads are direct ETS lookups outside this
+gen_server's serialization, so a concurrent reader can genuinely run between
+this handler's own separate ETS calls. What the implementation guarantees
+instead: new rows are inserted *before* any now-stale ones are deleted, so a
+key retained across registrations (the common case — most reloads don't drop
+a field) is only ever overwritten, never absent; a reader can only ever
+observe an old-but-still-registered value or the new one, never a false
+`undefined`. A key genuinely dropped from the new set is deleted only after
+the new set is fully installed, so the narrow window there biases toward a
+stale hit over a false miss too.
 
 A no-op call with an empty list clears the class's rows (matching
 `register_class/2`'s empty-list handling at its `register_xref/2` call site
@@ -1553,11 +1560,28 @@ handle_call({register_class, Class, MethodXref}, _From, State) ->
     schedule_sweep(Class, NewGen),
     {reply, ok, State};
 handle_call({register_state_vars, Class, StateVarXref}, _From, State) ->
-    %% BT-3439: no generation protocol needed (see module doc) — delete the
-    %% class's existing rows and insert the fresh set in the same call.
-    true = ets:match_delete(?STATE_VARS_TABLE, {{Class, '_'}, '_'}),
+    %% BT-3439 (review follow-up): insert the new rows *before* removing any
+    %% now-stale ones, rather than delete-then-insert. `state_var_line/2` is a
+    %% direct ETS lookup outside this gen_server's serialization, so a
+    %% concurrent reader can run between two separate ETS calls in this
+    %% handler — delete-then-insert would let it observe a real gap where
+    %% *every* row for a reloading class is momentarily absent (not just an
+    %% old-vs-new value swap). Insert-first means a key retained across
+    %% registrations is simply overwritten (a single atomic `ets:insert`),
+    %% never absent; only a key genuinely dropped from the new set is deleted
+    %% at all, and only after the new set already covers everything else. A
+    %% reader hitting that one narrow window sees the old (soon-superseded)
+    %% value rather than `undefined` — never a false negative for a still-
+    %% current field. Still no generation protocol needed (see the module
+    %% doc): instance variables are never hot-patched one at a time.
+    OldNames = [Name || [Name] <- ets:match(?STATE_VARS_TABLE, {{Class, '$1'}, '_'})],
+    NewNames = sets:from_list([Name || #{name := Name} <- StateVarXref], [{version, 2}]),
     Rows = [{{Class, Name}, Line} || #{name := Name, line := Line} <- StateVarXref],
     true = ets:insert(?STATE_VARS_TABLE, Rows),
+    [
+        ets:delete(?STATE_VARS_TABLE, {Class, Name})
+     || Name <- OldNames, not sets:is_element(Name, NewNames)
+    ],
     {reply, ok, State};
 handle_call({purge_class, Class}, _From, State) ->
     do_purge_class(Class),

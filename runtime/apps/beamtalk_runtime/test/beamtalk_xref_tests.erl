@@ -425,6 +425,34 @@ register_state_vars_test_() ->
         ]
     end}.
 
+%% BT-3439 (review follow-up): register_state_vars/2 inserts the new rows
+%% before deleting any now-stale ones, rather than delete-then-insert, so a
+%% concurrent state_var_line/2 reader can never observe a retained field as
+%% momentarily absent (see that function's doc for the full rationale — the
+%% true race isn't unit-testable, but this pins the observable end state the
+%% insert-first/delete-stale-only ordering must still produce: a kept key's
+%% value is updated in place, a dropped key is gone, an added key appears).
+register_state_vars_overlapping_reregister_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                ok = beamtalk_xref:register_state_vars('Counter', [
+                    #{name => value, line => 5},
+                    #{name => total, line => 9}
+                ]),
+                %% Re-register with `value` kept (new line), `total` dropped,
+                %% `count` added.
+                ok = beamtalk_xref:register_state_vars('Counter', [
+                    #{name => value, line => 6},
+                    #{name => count, line => 12}
+                ]),
+                ?assertEqual(6, beamtalk_xref:state_var_line('Counter', value)),
+                ?assertEqual(12, beamtalk_xref:state_var_line('Counter', count)),
+                ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', total))
+            end)
+        ]
+    end}.
+
 purge_class_clears_state_vars_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
