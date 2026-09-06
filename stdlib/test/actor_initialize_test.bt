@@ -13,11 +13,9 @@ TestCase subclass: ActorInitializeTest
   tearDown => self.c isNil ifFalse: [self.c stop]
 
   // === Basic initialize protocol ===
-  testInitializeCalledOnSpawn =>
-    self assert: self.c isInitialized
+  testInitializeCalledOnSpawn => self assert: self.c isInitialized
 
-  testInitializeSetsState =>
-    self assert: self.c getValue equals: 100
+  testInitializeSetsState => self assert: self.c getValue equals: 100
 
   testInitializeRunsBeforeFirstMessage =>
     // getValue is the first message — initialize must have already run
