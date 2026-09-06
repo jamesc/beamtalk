@@ -133,7 +133,6 @@ TestCase subclass: AnnouncementsTest
     received delete
 
   // --- announceAndWait:timeout: (sync with custom timeout) ---
-
   testAnnounceAndWaitWithTimeoutDelivers =>
     received := AtomicCounter new: #announcementsTestTimeoutDelivers
     self.announcer when: TestEvent do: [:e | received incrementBy: e payload]
@@ -148,7 +147,6 @@ TestCase subclass: AnnouncementsTest
     self assert: result equals: nil
 
   // --- unsubscribe: receiver (scoped remove by receiver pid) ---
-
   testUnsubscribeReceiverRemovesSubscriptions =>
     received := AtomicCounter new: #announcementsTestUnsubReceiver
     myPid := Erlang erlang self
