@@ -263,9 +263,6 @@ fn type_mentions_class(annotation: &TypeAnnotation, class_name: &str) -> bool {
     }
 }
 
-// Auto-generated from lib/*.bt by build.rs — do not edit manually.
-include!(concat!(env!("OUT_DIR"), "/stdlib_types.rs"));
-
 impl CoreErlangGenerator {
     /// Generates a value type module (BT-213).
     ///
@@ -3634,9 +3631,18 @@ impl CoreErlangGenerator {
     /// Returns true if the class is a known stdlib type (ADR 0016).
     ///
     /// All stdlib types compile to `bt@stdlib@{snake_case}` modules.
-    /// Derived automatically from `lib/*.bt` via `build.rs` (BT-472).
+    ///
+    /// BT-3435 (ADR 0119 step 0): delegates to
+    /// `ClassHierarchy::is_generated_builtin_class`, the one correct,
+    /// already-parsed answer (from `beamtalk build-stdlib`'s real class
+    /// metadata) — replacing the deleted `STDLIB_CLASS_NAMES` (`build.rs`'s
+    /// file-stem directory scan), which included protocol-only files
+    /// declaring no class and trusted file stems over parsed names (the
+    /// BT-3432 bug shape).
     fn is_known_stdlib_type(class_name: &str) -> bool {
-        STDLIB_CLASS_NAMES.contains(&class_name)
+        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::is_generated_builtin_class(
+            class_name,
+        )
     }
 
     /// Returns true if `class` defines `doesNotUnderstand:args:` with a
@@ -4703,41 +4709,36 @@ mod tests {
         );
     }
 
-    /// BT-3085: `STDLIB_CLASS_NAMES` (this module's `build.rs`-generated
-    /// constant, parsed from every `stdlib/src/*.bt` file's declared class or
-    /// protocol name (BT-3432) — including protocol-only files like
-    /// `printable.bt`/`json_representable.bt` that declare no class) must be
-    /// a superset of every real built-in class
-    /// (`ClassHierarchy::with_builtins()`, built from
-    /// `generated_builtins.rs::is_generated_builtin_class` — the richer,
-    /// `beamtalk build-stdlib`-generated table of *actual* classes).
+    /// BT-3435 (ADR 0119 step 0): `is_known_stdlib_type` must agree with
+    /// `ClassHierarchy::with_builtins()` — every real built-in class name
+    /// registered there (via `generated_builtins.rs::is_generated_builtin_class`,
+    /// the `beamtalk build-stdlib`-generated table of *actual* parsed
+    /// classes) must be recognised as a known stdlib type, with the one
+    /// expected exception, `'Future'`: a runtime-only built-in with no
+    /// `stdlib/src/Future.bt` source (see `builtins.rs::is_builtin_class`'s
+    /// doc) that compiles to the hand-written `beamtalk_future` native module
+    /// (ADR 0056), not `bt@stdlib@future`.
     ///
-    /// The one expected exception is `'Future'`: a runtime-only built-in
-    /// with no `stdlib/src/Future.bt` source (see `builtins.rs::is_builtin_class`'s
-    /// doc), so it can never appear in a directory scan.
-    ///
-    /// This is a superset check, not equality, because `STDLIB_CLASS_NAMES`
-    /// also contains protocol-only file stems that never become classes —
-    /// asserting equality would make this test fail on every new protocol
-    /// file. What must never happen is a real class silently missing from
-    /// `STDLIB_CLASS_NAMES`, which would make `is_known_stdlib_type` emit the
-    /// wrong `bt@{snake}` (non-stdlib) module prefix for it instead of
-    /// `bt@stdlib@{snake}`.
+    /// This used to be a superset check against `STDLIB_CLASS_NAMES` (a
+    /// `build.rs` file-stem directory scan that also matched protocol-only
+    /// files declaring no class, e.g. `printable.bt`). Now that
+    /// `is_known_stdlib_type` delegates directly to
+    /// `is_generated_builtin_class`, the two can never disagree except for
+    /// the documented `Future` exception — so this is a strict equality
+    /// check, not a superset one.
     #[test]
-    fn test_stdlib_class_names_superset_of_builtin_classes() {
+    fn test_is_known_stdlib_type_matches_builtin_classes() {
         use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
 
         let hierarchy = ClassHierarchy::with_builtins();
         for name in hierarchy.class_names() {
-            if name == "Future" {
-                continue;
-            }
-            assert!(
-                super::STDLIB_CLASS_NAMES.contains(&name.as_str()),
-                "built-in class '{name}' is missing from build.rs's \
-                 STDLIB_CLASS_NAMES (stdlib/src/*.bt directory scan) — expected \
-                 every real generated_builtins.rs class to have a matching \
-                 stdlib/src/{name}.bt file"
+            let expected = name != "Future";
+            assert_eq!(
+                CoreErlangGenerator::is_known_stdlib_type(name),
+                expected,
+                "is_known_stdlib_type('{name}') should be {expected} — every \
+                 real generated_builtins.rs class is a known stdlib type \
+                 except the runtime-only 'Future' built-in"
             );
         }
     }

@@ -82,6 +82,17 @@ pub(super) fn is_runtime_protected_class(name: &str) -> bool {
     name == "Future" || generated::is_generated_builtin_class(name)
 }
 
+/// Returns true if `name` is a *generated* stdlib class — one with a real
+/// `stdlib/src/*.bt` source file, parsed by `beamtalk build-stdlib`.
+///
+/// Unlike [`is_builtin_class`], this deliberately excludes `Future`: `Future`
+/// has no `.bt` source (BT-1057) and does not compile to a `bt@stdlib@{snake}`
+/// module (ADR 0016), so it is not a "known stdlib type" in the sense
+/// `beamtalk-codegen`'s `is_known_stdlib_type` needs (BT-3435, ADR 0119 step 0).
+pub(super) fn is_generated_builtin_class(name: &str) -> bool {
+    generated::is_generated_builtin_class(name)
+}
+
 /// Returns all built-in class definitions.
 ///
 /// Combines auto-generated definitions from `stdlib/src/*.bt` with runtime-only

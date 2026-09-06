@@ -3506,6 +3506,21 @@ impl CoreErlangGenerator {
                 continue;
             }
             // Gate 3: Class must have class methods
+            //
+            // BT-3435 (ADR 0119 Context): this is the only place that
+            // iterates *every* hierarchy class unconditionally, including
+            // `Future` (a runtime-only builtin with no `stdlib/src/Future.bt`
+            // source — see `class_hierarchy/builtins.rs`). `Future`'s
+            // hardcoded `ClassInfo` always has empty `class_methods` today,
+            // so this gate is what keeps it from reaching
+            // `compiled_module_name` here and emitting a reference to a
+            // nonexistent `bt@...` module. If BT-507 ever gives `Future` (or
+            // another no-`.bt`-source builtin) real class methods, this gate
+            // stops protecting it and its module resolution needs a real
+            // registry answer (`ClassModuleRegistry`'s `ModuleName::Native`
+            // variant exists for exactly this) — not implemented
+            // speculatively now, since no current call site resolves
+            // `Future`'s module at all.
             if class_info.class_methods.is_empty() {
                 continue;
             }

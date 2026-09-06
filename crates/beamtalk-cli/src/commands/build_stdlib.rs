@@ -227,6 +227,24 @@ fn compile_all_stdlib_files(
 
         // Extract class metadata (class_name, superclass) before compilation
         let meta = extract_class_metadata(source_file, &module_name)?;
+
+        // BT-3435 (ADR 0119 step 2): validate the file-stem-derived
+        // `module_name` (computed above by `module_name_from_path`, from the
+        // file's path alone) against the closed-form name a real parse of
+        // the class would produce. The stdlib arm never becomes a free
+        // lookup — the Erlang runtime derives `bt@stdlib@{snake}` closed-form
+        // with no registry to consult (ADR 0119 Context) — so this doesn't
+        // change what module a stdlib class compiles to; it catches the
+        // BT-3432 bug shape (a `.bt` file renamed without renaming, or vice
+        // versa, the class it declares) at `build-stdlib` time instead of
+        // silently trusting the file stem.
+        beamtalk_core::semantic_analysis::validate_stdlib_module_name(
+            &meta.class_name,
+            &beamtalk_core::semantic_analysis::ModuleName::Generated(module_name.clone()),
+        )
+        .into_diagnostic()
+        .wrap_err_with(|| format!("in stdlib source file '{source_file}'"))?;
+
         class_metadata.push(meta);
 
         if !quiet {

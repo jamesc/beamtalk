@@ -2061,31 +2061,22 @@ pub fn collect_formattable_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8Path
 /// - `src/util/math.bt` → `util@math`
 ///
 /// Falls back to the file stem when no source root is available.
+///
+/// BT-3435 (ADR 0119 step 0): the segment-validation and per-segment
+/// `to_module_name` conversion delegate to
+/// `beamtalk_core::semantic_analysis::relative_module_segments` — the one
+/// implementation of "how a file path becomes module-name segments" shared
+/// with the new `ClassModuleRegistry`'s Pass-1 construction (CLAUDE.md's "No
+/// duplicate implementations" rule) — rather than re-implementing the loop
+/// here.
 pub(crate) fn compute_relative_module(
     file: &Utf8Path,
     source_root: Option<&Utf8Path>,
 ) -> Result<String> {
     if let Some(root) = source_root {
         if let Ok(relative) = file.strip_prefix(root) {
-            let without_ext = relative.with_extension("");
-            let segments: Vec<String> = without_ext
-                .components()
-                .map(|c| {
-                    let segment = c.as_str();
-                    // Validate each path segment
-                    if !segment
-                        .chars()
-                        .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-                    {
-                        miette::bail!(
-                            "Invalid directory name '{}' in source path '{}': must contain only alphanumeric characters and underscores",
-                            segment,
-                            file
-                        );
-                    }
-                    Ok(beamtalk_codegen::core_erlang::to_module_name(segment))
-                })
-                .collect::<Result<_>>()?;
+            let segments = beamtalk_core::semantic_analysis::relative_module_segments(relative)
+                .map_err(|e| miette::miette!("{e}"))?;
             return Ok(segments.join("@"));
         }
     }
