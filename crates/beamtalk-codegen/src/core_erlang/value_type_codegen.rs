@@ -4852,6 +4852,32 @@ mod tests {
     }
 
     #[test]
+    fn test_compiled_module_name_qualified_falls_back_when_index_only_covers_own_package() {
+        // set_class_module_index keys every entry under this generation
+        // unit's own PackageId (see that method's doc) — including a
+        // dependency's classes merged in by beamtalk-cli's path-dependency
+        // build. A qualified reference naming that *other* package therefore
+        // still misses the registry and must fall back to
+        // resolve_qualified_module_name's convention, exactly as before this
+        // ADR: it never regresses to something worse than a miss.
+        let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+        let mut index = std::collections::HashMap::new();
+        // A dependency class merged into this package's index, as
+        // beamtalk-cli's deps/path.rs does — real module name deliberately
+        // does NOT follow the bt@json@{snake} convention, so a false-positive
+        // registry hit would be obviously wrong here.
+        index.insert("Parser".to_string(), "bt@json@v2@parser".to_string());
+        generator.set_class_module_index(index);
+
+        assert_eq!(
+            generator.compiled_module_name_qualified("Parser", Some("json")),
+            "bt@json@parser",
+            "a qualified reference to a different package must not pick up \
+             an index entry keyed under this unit's own package"
+        );
+    }
+
+    #[test]
     fn test_compiled_module_name_qualified_without_package_delegates_to_unqualified() {
         let generator = CoreErlangGenerator::new("bt@my_app@main");
         assert_eq!(
