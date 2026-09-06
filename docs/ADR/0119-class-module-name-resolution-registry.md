@@ -221,6 +221,12 @@ Explicitly rejected by the issue itself — this is the third real bug from the 
 
 **Estimated size**: XL, matching the issue's own label — likely a floor rather than a ceiling if the workspace-mode open question above is pulled into scope.
 
+## Implementation Tracking
+
+**Epic:** BT-3434
+**Issues:** BT-3435 (foundation — `ClassModuleRegistry`), BT-3436 (consumers — codegen/REPL/compiler-port wiring), BT-3437 (validation — regression tests + corpus verification)
+**Status:** Planned
+
 ## References
 - Related issues: BT-3434, BT-3081, BT-3431, BT-3432
 - Related ADRs: ADR 0016 (unified stdlib module naming), ADR 0026 (package module naming), ADR 0050 (incremental compiler ClassHierarchy — establishes `class_module_index` as a versioned compiler-port wire field), ADR 0056 (native backing modules), ADR 0070 (package-qualified class references), ADR 0089 (typed Document leaves), ADR 0100 (open-world diagnostic policy), ADR 0111 (ThreadedIr verifier — structured-error house pattern), ADR 0114 (class/method rename in the live workspace), ADR 0117 (beamtalk-core crate split)
