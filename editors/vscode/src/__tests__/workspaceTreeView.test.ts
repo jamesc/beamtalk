@@ -2,68 +2,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { WebSocketCallbacks, WebSocketFactory } from "../workspaceClient";
-import { WorkspaceClient } from "../workspaceClient";
-import { WorkspaceTreeDataProvider } from "../workspaceTreeView";
+import { buildVscodeModule } from "./vscodeMock";
 
-// ─── Minimal `vscode` module mock ──────────────────────────────────────────────
+// ─── `vscode` module mock (shared with resolveTreeItem.test.ts) ───────────────
 //
 // `workspaceTreeView.ts` runs inside the extension host in production, where
 // `vscode` is a real module injected by VS Code. Under `vitest` there is no
 // extension host, so `vscode` must be mocked before the module under test is
-// imported. Only the runtime VALUES the tree view actually constructs/calls
-// need a fake — everything else it imports from `vscode` (`CancellationToken`,
-// `DocumentSymbol`, `Uri`, `SymbolKind`, …) is used purely in type positions,
-// erased at compile time, and never touched at runtime by the code paths these
-// tests exercise.
-vi.mock("vscode", () => {
-  class ThemeIcon {
-    constructor(public id: string) {}
-  }
-  class MarkdownString {
-    constructor(public value?: string) {}
-  }
-  class TreeItem {
-    label: string;
-    collapsibleState: number;
-    description?: string;
-    iconPath?: unknown;
-    contextValue?: string;
-    tooltip?: unknown;
-    command?: unknown;
-    constructor(label: string, collapsibleState?: number) {
-      this.label = label;
-      this.collapsibleState = collapsibleState ?? 0;
-    }
-  }
-  class EventEmitter<T> {
-    private listeners: Array<(value: T) => void> = [];
-    event = (listener: (value: T) => void) => {
-      this.listeners.push(listener);
-      return { dispose: () => {} };
-    };
-    fire(value: T): void {
-      for (const listener of this.listeners) listener(value);
-    }
-    dispose(): void {
-      this.listeners = [];
-    }
-  }
-  return {
-    TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
-    ThemeIcon,
-    MarkdownString,
-    TreeItem,
-    EventEmitter,
-    // Referenced only in type positions or inside functions this suite never
-    // calls (document-symbol / hover navigation helpers elsewhere in the
-    // file) — present as harmless stand-ins so a stray runtime reference
-    // doesn't throw `undefined is not a function`.
-    commands: { executeCommand: vi.fn() },
-    window: {},
-    workspace: {},
-  };
-});
+// imported. `executeCommand`/`openTextDocument` are referenced only in type
+// positions or inside functions this suite never calls (document-symbol /
+// hover navigation helpers elsewhere in the file) — present as harmless
+// stand-ins so a stray runtime reference doesn't throw `undefined is not a
+// function`.
+//
+// NOTE: `./vscodeMock` must be imported before `../workspaceClient` /
+// `../workspaceTreeView` below — those transitively import the real `vscode`
+// module, and the mock factory needs `buildVscodeModule` already resolved by
+// the time that import is evaluated.
+const { executeCommandMock, openTextDocumentMock } = vi.hoisted(() => ({
+  executeCommandMock: vi.fn(),
+  openTextDocumentMock: vi.fn(),
+}));
+
+vi.mock("vscode", () => buildVscodeModule({ executeCommandMock, openTextDocumentMock }));
+
+import type { WebSocketCallbacks, WebSocketFactory } from "../workspaceClient";
+import { WorkspaceClient } from "../workspaceClient";
+import { WorkspaceTreeDataProvider } from "../workspaceTreeView";
 
 // ─── Mock WebSocket (mirrors workspaceClient.test.ts) ──────────────────────────
 

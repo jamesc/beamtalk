@@ -6,7 +6,6 @@ import {
   extractMethodDocComment,
   extractStateVarInfo,
   findMethodDeclaration,
-  findStateVarDeclaration,
   offsetForDeclarationLine,
 } from "./textUtils";
 import type {
@@ -468,7 +467,7 @@ export class WorkspaceTreeDataProvider
   private async _lspHoverTooltip(
     sourceFile: string | undefined,
     symbol: string,
-    kind: "class" | "method" | "class-method" | "field",
+    kind: "class" | "method" | "class-method",
     decl?: { side?: "instance" | "class"; declaredLine?: number }
   ): Promise<vscode.MarkdownString | undefined> {
     if (!sourceFile || sourceFile === "unknown") return undefined;
@@ -505,19 +504,19 @@ export class WorkspaceTreeDataProvider
     }
   }
 
-  /** Resolve a class/method/field declaration to a text offset via source search — no LSP round trip. */
+  /**
+   * Resolve a class/method declaration to a text offset via source search —
+   * no LSP round trip. State-var hover ("field") never reaches here: the
+   * `state-item` case in `resolveTreeItem` goes through `_stateVarTooltip`
+   * instead, which reads source text directly, so this only ever needs to
+   * handle the two kinds `_lspHoverTooltip` is actually called with.
+   */
   private _declarationOffset(
     text: string,
-    kind: "class" | "method" | "class-method" | "field",
+    kind: "class" | "method" | "class-method",
     symbol: string,
     decl?: { side?: "instance" | "class"; declaredLine?: number }
   ): number {
-    if (kind === "field") {
-      const line = decl?.declaredLine;
-      let offset = line !== undefined ? offsetForDeclarationLine(text, line, symbol) : -1;
-      if (offset === -1) offset = findStateVarDeclaration(text, symbol);
-      return offset;
-    }
     if (kind === "method" || kind === "class-method") {
       const side = decl?.side ?? (kind === "class-method" ? "class" : "instance");
       const line = decl?.declaredLine;

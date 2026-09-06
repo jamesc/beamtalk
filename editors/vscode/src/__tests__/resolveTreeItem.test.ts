@@ -5,70 +5,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Type-only: erased at compile time, never touched at runtime (see the
 // `vscode.mock` note below and workspaceTreeView.test.ts's identical comment).
 import type * as vscode from "vscode";
+import { buildVscodeModule } from "./vscodeMock";
 
-// ─── Minimal `vscode` module mock (mirrors workspaceTreeView.test.ts) ──────────
+// ─── `vscode` module mock (shared with workspaceTreeView.test.ts) ─────────────
 
 const { executeCommandMock, openTextDocumentMock } = vi.hoisted(() => ({
   executeCommandMock: vi.fn(),
   openTextDocumentMock: vi.fn(),
 }));
 
-vi.mock("vscode", () => {
-  class ThemeIcon {
-    constructor(public id: string) {}
-  }
-  class MarkdownString {
-    value = "";
-    constructor(value?: string) {
-      if (value) this.value = value;
-    }
-    appendMarkdown(v: string) {
-      this.value += v;
-    }
-  }
-  class TreeItem {
-    label: string;
-    collapsibleState: number;
-    description?: string;
-    iconPath?: unknown;
-    contextValue?: string;
-    tooltip?: unknown;
-    command?: unknown;
-    constructor(label: string, collapsibleState?: number) {
-      this.label = label;
-      this.collapsibleState = collapsibleState ?? 0;
-    }
-  }
-  class EventEmitter<T> {
-    private listeners: Array<(value: T) => void> = [];
-    event = (listener: (value: T) => void) => {
-      this.listeners.push(listener);
-      return { dispose: () => {} };
-    };
-    fire(value: T): void {
-      for (const listener of this.listeners) listener(value);
-    }
-    dispose(): void {
-      this.listeners = [];
-    }
-  }
-  return {
-    TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
-    ThemeIcon,
-    MarkdownString,
-    TreeItem,
-    EventEmitter,
-    Uri: { file: (p: string) => ({ fsPath: p, path: p, toString: () => p }) },
-    SymbolKind: {
-      Class: 4,
-      Method: 5,
-      Field: 7,
-    },
-    commands: { executeCommand: executeCommandMock },
-    window: {},
-    workspace: { openTextDocument: openTextDocumentMock },
-  };
-});
+vi.mock("vscode", () => buildVscodeModule({ executeCommandMock, openTextDocumentMock }));
 
 import { WorkspaceTreeDataProvider } from "../workspaceTreeView";
 import type { ClassItemNode, MethodItemNode } from "../workspaceTreeView";
