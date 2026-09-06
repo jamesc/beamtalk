@@ -1295,6 +1295,8 @@ dev_runtime_test_() ->
                 fun context_completion_unknown_lowercase/0},
             {"methods op returns instance + class methods", fun methods_op_returns_methods/0},
             {"methods op returns state vars", fun methods_op_returns_state_vars/0},
+            {"methods op state vars carry a real line when xref-registered",
+                fun methods_op_state_vars_carry_line_when_registered/0},
             {"list_class_methods_for_ws includes inherited side tags",
                 fun list_class_methods_known_class/0},
             {"list-classes op returns the registered class", fun list_classes_op_returns_class/0},
@@ -1665,13 +1667,51 @@ methods_op_returns_methods() ->
     ?assertEqual([<<"class">>], Sides).
 
 methods_op_returns_state_vars() ->
+    %% BT-3439: WidgetDev is built directly via beamtalk_object_class:start/2
+    %% (setup_dev_runtime/0), not compiled — no state_var_xref was ever baked
+    %% for it, so every entry's line is `null`. This is exactly the "class
+    %% predates the feature / ClassBuilder-built" fallback case
+    %% beamtalk.navigateToStateVar's regex fallback exists for.
     Msg = make_msg(<<"methods">>, <<"mm-2">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
     ),
     Decoded = json:decode(Result),
     StateVars = maps:get(<<"state_vars">>, Decoded),
-    ?assertEqual([<<"height">>, <<"width">>], StateVars).
+    Names = [maps:get(<<"name">>, V) || V <- StateVars],
+    ?assertEqual([<<"height">>, <<"width">>], Names),
+    Lines = [maps:get(<<"line">>, V) || V <- StateVars],
+    ?assertEqual([null, null], Lines).
+
+methods_op_state_vars_carry_line_when_registered() ->
+    %% BT-3439: once beamtalk_xref has real rows for a class (as codegen bakes
+    %% for a compiled class via register_class/0), the ws op surfaces them.
+    %% beamtalk_xref is a beamtalk_runtime_sup worker; this app's eunit run
+    %% doesn't necessarily boot that supervision tree, so stand one up
+    %% on-demand exactly like beamtalk_xref_tests:setup/0 does.
+    case whereis(beamtalk_xref) of
+        undefined -> {ok, _} = beamtalk_xref:start_link();
+        _ -> ok
+    end,
+    ok = beamtalk_xref:register_state_vars('WidgetDev', [
+        #{name => width, line => 12},
+        #{name => height, line => 13}
+    ]),
+    Msg = make_msg(<<"methods">>, <<"mm-3">>, undefined),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    StateVars = maps:get(<<"state_vars">>, Decoded),
+    ByName = maps:from_list([
+        {maps:get(<<"name">>, V), maps:get(<<"line">>, V)}
+     || V <- StateVars
+    ]),
+    ?assertEqual(#{<<"width">> => 12, <<"height">> => 13}, ByName),
+    %% Clean up so this fixture doesn't leak real lines into other tests that
+    %% share the WidgetDev fixture (setup_dev_runtime/0's own state, not this
+    %% test's registration, is the source of truth for what WidgetDev "is").
+    ok = beamtalk_xref:register_state_vars('WidgetDev', []).
 
 list_class_methods_known_class() ->
     Result = beamtalk_repl_ops_dev:list_class_methods_for_ws(<<"WidgetDev">>),

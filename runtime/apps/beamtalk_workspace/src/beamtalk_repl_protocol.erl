@@ -542,10 +542,11 @@ encode_codegen(CoreErlang, Warnings, Msg) ->
 -doc """
 Encode a methods response (BT-2402).
 
-`Methods` is a list of method-descriptor maps and `StateVars` a list of
-instance-variable name binaries for the `methods` op.
+`Methods` and `StateVars` are both lists of descriptor maps for the `methods`
+op — `StateVars` entries carry `name` and `line` (BT-3439: `line` is `null`
+when the class predates line tracking or was built via `ClassBuilder`).
 """.
--spec encode_methods([map()], [binary()], protocol_msg()) -> binary().
+-spec encode_methods([map()], [map()], protocol_msg()) -> binary().
 encode_methods(Methods, StateVars, Msg) ->
     Base = base_response(Msg),
     iolist_to_binary(

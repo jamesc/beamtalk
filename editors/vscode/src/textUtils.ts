@@ -132,6 +132,29 @@ export function extractMethodDocComment(
   return undefined;
 }
 
+/**
+ * Resolves a 1-based declaration line (from `beamtalk_xref`'s compiled index,
+ * BT-3439) to a character offset at the line's first non-whitespace column —
+ * the same "start of the declaration head" position `findMethodDeclaration`/
+ * `findStateVarDeclaration` locate via regex, but from a real backend line
+ * number instead of a source-text guess.
+ *
+ * Returns -1 when `oneBasedLine` falls outside the document (e.g. the file
+ * was edited since the class was last compiled/reloaded) — callers should
+ * fall back to the regex-based finders in that case, exactly as they already
+ * do when those finders themselves return -1.
+ */
+export function offsetForDeclarationLine(text: string, oneBasedLine: number): number {
+  const lines = text.split("\n");
+  if (oneBasedLine < 1 || oneBasedLine > lines.length) return -1;
+  let offset = 0;
+  for (let i = 0; i < oneBasedLine - 1; i++) {
+    offset += lines[i].length + 1;
+  }
+  const match = /\S/.exec(lines[oneBasedLine - 1]);
+  return offset + (match ? match.index : 0);
+}
+
 export function findMethodDeclaration(
   text: string,
   selector: string,

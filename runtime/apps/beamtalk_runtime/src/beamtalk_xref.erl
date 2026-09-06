@@ -31,6 +31,14 @@ Storage layout (all `protected, named_table, {read_concurrency, true}`):
 - `beamtalk_xref_senders` (bag): selector → call sites
 - `beamtalk_xref_references` (bag): class → reference sites
 - `xref_class_gen` (set): class → current generation
+- `beamtalk_xref_state_vars` (set): {class, var name} → declaration line
+  (BT-3439). Unlike the method tables, this has no generation/sweep
+  machinery: instance variables are never hot-patched one at a time (there
+  is no `put_state_var/3` counterpart to `put_method/4`) — they only ever
+  change via a whole-class (re)register, so `register_state_vars/2` simply
+  replaces a class's rows outright (delete-then-insert) under the single
+  gen_server call's natural serialization. No `current_gen` filtering is
+  needed on the read side.
 
 See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 """.
@@ -47,7 +55,8 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     register_class/2,
     purge_class/1,
     put_method/4,
-    purge_method/3
+    purge_method/3,
+    register_state_vars/2
 ]).
 
 %% API — read path
@@ -65,7 +74,8 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     all_sends_bt/0,
     all_sent_selectors_bt/0,
     callers_of_native_module/1,
-    method_info/3
+    method_info/3,
+    state_var_line/2
 ]).
 
 %% API — xref-entry construction helpers (ADR 0087 Phase 4, BT-2301)
@@ -88,6 +98,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 -define(SENDERS_TABLE, beamtalk_xref_senders).
 -define(REFERENCES_TABLE, beamtalk_xref_references).
 -define(CLASS_GEN_TABLE, xref_class_gen).
+-define(STATE_VARS_TABLE, beamtalk_xref_state_vars).
 
 %% Bound on `read_stable/1` revalidation retries (Phase 4 / BT-2300). Converges
 %% in 0-1 retries in practice; the bound only caps spin under a write storm.
@@ -168,6 +179,18 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     source_status := source_status(),
     provenance := provenance(),
     gen := gen()
+}.
+
+%% BT-3439: one row baked by codegen's `build_state_var_xref_list`
+%% (`crates/beamtalk-codegen/src/core_erlang/gen_server/methods.rs`) per
+%% declared instance variable (`state:`/`field:`) — just a name and its
+%% 1-based declaration line. No `sends`/`references`/`source_status`
+%% channel like `method_xref_entry()`: instance variables don't send, aren't
+%% referenced from elsewhere, and (per the module doc) are never hot-patched
+%% independently of a whole-class reload, so there is no provenance to track.
+-type state_var_xref_entry() :: #{
+    name := atom(),
+    line := pos_integer()
 }.
 
 -type site() :: #{
@@ -253,6 +276,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 -export_type([
     method_xref_entry/0,
     method_info/0,
+    state_var_xref_entry/0,
     site/0,
     bt_row/0,
     native_caller_row/0,
@@ -292,6 +316,26 @@ re-registers; the sweep handles stale rows.
 -spec register_class(class_name(), [method_xref_entry()]) -> ok.
 register_class(Class, MethodXref) when is_atom(Class), is_list(MethodXref) ->
     gen_server:call(?MODULE, {register_class, Class, MethodXref}).
+
+-doc """
+Replace all state-var (instance-variable) declaration-line rows for a class
+(BT-3439). Synchronous.
+
+Unlike `register_class/2`, this has no generation/sweep protocol: a class's
+instance variables only ever change as a whole (a full class reload), never
+one at a time (there is no `put_state_var/3`), so a plain delete-then-insert
+under this single gen_server call is already atomic with respect to readers —
+there is no "old generation" a concurrent reader could observe mid-swap, since
+`state_var_line/2` reads are direct ETS lookups the gen_server call fully
+precedes or follows, never interleaves.
+
+A no-op call with an empty list clears the class's rows (matching
+`register_class/2`'s empty-list handling at its `register_xref/2` call site
+in `beamtalk_object_class`, which skips the call entirely for `[]`).
+""".
+-spec register_state_vars(class_name(), [state_var_xref_entry()]) -> ok.
+register_state_vars(Class, StateVarXref) when is_atom(Class), is_list(StateVarXref) ->
+    gen_server:call(?MODULE, {register_state_vars, Class, StateVarXref}).
 
 -doc """
 Remove all rows belonging to a class from every xref table.
@@ -1203,6 +1247,30 @@ method_info(Class, ClassSide, Selector) when
             end
     end.
 
+-doc """
+Return the 1-based declaration line of `Class`'s instance variable `Name`, or
+`undefined` if unregistered (BT-3439) — e.g. a class compiled before this
+feature landed, a runtime-built `ClassBuilder` class (no compiler to derive a
+line from), or simply not a real field on the class.
+
+Used by the `\"methods\"` REPL op (`beamtalk_repl_ops_dev:list_state_vars_for_ws/1`)
+so the VS Code Workspace Explorer sidebar's field goto
+(`beamtalk.navigateToStateVar`) can jump to the real declaration instead of a
+source-text regex guess. Direct ETS lookup on a `set` table — no generation
+filtering needed, see the module doc for why.
+""".
+-spec state_var_line(class_name(), atom()) -> pos_integer() | undefined.
+state_var_line(Class, Name) when is_atom(Class), is_atom(Name) ->
+    case ets:whereis(?STATE_VARS_TABLE) of
+        undefined ->
+            undefined;
+        _ ->
+            case ets:lookup(?STATE_VARS_TABLE, {Class, Name}) of
+                [] -> undefined;
+                [{_Key, Line}] -> Line
+            end
+    end.
+
 %%====================================================================
 %% Internal: read helpers (miss-policy)
 %%====================================================================
@@ -1450,7 +1518,7 @@ log_xref_miss(Class, Query) ->
 init([]) ->
     beamtalk_logging_config:set_domain(runtime),
 
-    %% Create the four ETS tables, owned by this process. Heir is undefined
+    %% Create the five ETS tables, owned by this process. Heir is undefined
     %% per the acceptance criteria — tables die with the process, supervisor
     %% restart triggers re-population from the next round of register_class/0
     %% calls (or from miss-policy fallback once Phase 3 lands).
@@ -1460,9 +1528,15 @@ init([]) ->
     ?SENDERS_TABLE = ets:new(?SENDERS_TABLE, BagOpts),
     ?REFERENCES_TABLE = ets:new(?REFERENCES_TABLE, BagOpts),
     ?CLASS_GEN_TABLE = ets:new(?CLASS_GEN_TABLE, SetOpts),
+    %% BT-3439: `set`, not `bag` — `register_state_vars/2` replaces a class's
+    %% rows outright rather than versioning them, so at most one row per
+    %% {Class, Name} ever exists.
+    ?STATE_VARS_TABLE = ets:new(?STATE_VARS_TABLE, SetOpts),
 
     ?LOG_INFO("xref started", #{
-        tables => [?METHODS_TABLE, ?SENDERS_TABLE, ?REFERENCES_TABLE, ?CLASS_GEN_TABLE]
+        tables => [
+            ?METHODS_TABLE, ?SENDERS_TABLE, ?REFERENCES_TABLE, ?CLASS_GEN_TABLE, ?STATE_VARS_TABLE
+        ]
     }),
     {ok, #state{}}.
 
@@ -1477,6 +1551,13 @@ handle_call({register_class, Class, MethodXref}, _From, State) ->
     insert_method_xref_rows(Class, MethodXref, NewGen),
     publish_gen(Class, NewGen),
     schedule_sweep(Class, NewGen),
+    {reply, ok, State};
+handle_call({register_state_vars, Class, StateVarXref}, _From, State) ->
+    %% BT-3439: no generation protocol needed (see module doc) — delete the
+    %% class's existing rows and insert the fresh set in the same call.
+    true = ets:match_delete(?STATE_VARS_TABLE, {{Class, '_'}, '_'}),
+    Rows = [{{Class, Name}, Line} || #{name := Name, line := Line} <- StateVarXref],
+    true = ets:insert(?STATE_VARS_TABLE, Rows),
     {reply, ok, State};
 handle_call({purge_class, Class}, _From, State) ->
     do_purge_class(Class),
@@ -1748,6 +1829,8 @@ do_purge_class(Class) ->
         [{{'_', #{owner => '$1'}}, [{'=:=', '$1', {const, Class}}], [true]}]
     ),
     true = ets:delete(?CLASS_GEN_TABLE, Class),
+    %% BT-3439: state-var rows are keyed by {Class, Name} — direct match.
+    true = ets:match_delete(?STATE_VARS_TABLE, {{Class, '_'}, '_'}),
     ok.
 
 -doc """

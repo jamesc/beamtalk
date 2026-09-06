@@ -764,6 +764,11 @@ init({ClassName, ClassInfo}) ->
     %% compatibility. A failure here propagates as a class-creation failure.
     MethodXref = maps:get(method_xref, ClassInfo, []),
     register_xref(ClassName, MethodXref),
+    %% BT-3439: Forward the per-instance-variable declaration-line index the
+    %% same way, from `ClassInfo`'s `state_var_xref` key (baked by codegen via
+    %% `BuilderState.stateVarXref`, the state-var analogue of `method_xref`).
+    StateVarXref = maps:get(state_var_xref, ClassInfo, []),
+    register_state_var_xref(ClassName, StateVarXref),
 
     %% ADR 0093 §2 (BT-2445): Announce ClassLoaded on the system bus *after* the
     %% metadata row is written (line above), so any subscriber that reads the
@@ -802,6 +807,32 @@ register_xref(ClassName, MethodXref) ->
             ok;
         _Pid ->
             ok = beamtalk_xref:register_class(ClassName, MethodXref)
+    end.
+
+-doc """
+Forward a class's per-instance-variable declaration-line rows to
+`beamtalk_xref` (BT-3439), the state-var analogue of `register_xref/2`.
+
+A no-op when `StateVarXref` is empty — a hand-coded stub class, a class
+compiled before this feature landed, or a `ClassBuilder`-built class with no
+compiler to derive lines from. Same `beamtalk_xref`-absent guard as
+`register_xref/2`.
+""".
+-spec register_state_var_xref(class_name(), [map()]) -> ok.
+register_state_var_xref(_ClassName, []) ->
+    ok;
+register_state_var_xref(ClassName, StateVarXref) ->
+    case erlang:whereis(beamtalk_xref) of
+        undefined ->
+            ?LOG_DEBUG(#{
+                event => xref_not_running,
+                class => ClassName,
+                reason => "beamtalk_xref not registered; skipping state-var index population",
+                domain => [beamtalk, runtime]
+            }),
+            ok;
+        _Pid ->
+            ok = beamtalk_xref:register_state_vars(ClassName, StateVarXref)
     end.
 
 -doc """
@@ -1218,6 +1249,11 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             %% register_class/2 only inserts (the old-generation sweep is Phase 4),
             %% so a plain re-register would leave stale rows behind.
             refresh_xref(ClassName, maps:get(method_xref, ClassInfo, [])),
+            %% BT-3439: state-var rows were already cleared by refresh_xref's
+            %% purge_class/1 above (it purges every xref table, state vars
+            %% included) — a plain register (not a refresh_xref-style
+            %% purge-then-register) is enough here.
+            register_state_var_xref(ClassName, maps:get(state_var_xref, ClassInfo, [])),
             %% ADR 0093 §2 (BT-2445): hot redefinition is also a ClassLoaded —
             %% announced from the handle_call reply path after the refreshed
             %% metadata is committed.

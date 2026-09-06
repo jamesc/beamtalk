@@ -2536,6 +2536,10 @@ impl CoreErlangGenerator {
             let method_xref_doc =
                 self.build_method_xref_list(class, &instance_methods, &class_methods_primary);
 
+            // BT-3439: Per-instance-variable declaration-line index, the
+            // state-var analogue of `method_xref_doc` above.
+            let state_var_xref_doc = self.build_state_var_xref_list(class);
+
             // BT-412: Class variable initial values
             let class_vars_doc = self.build_class_var_map(&class.class_variables)?;
 
@@ -2630,6 +2634,7 @@ impl CoreErlangGenerator {
                 method_sigs_doc,
                 class_method_sigs_doc,
                 method_xref_doc,
+                state_var_xref_doc,
                 class_vars_doc,
                 class_doc_value,
                 method_docs_doc,
@@ -2971,6 +2976,42 @@ impl CoreErlangGenerator {
         docvec!["[", join(entries, &Document::Str(", ")), "]"]
     }
 
+    /// BT-3439: Builds the `state_var_xref` list document baked into
+    /// `register_class/0`'s `ClassInfo` (via `BuilderState.stateVarXref`),
+    /// analogous to [`Self::build_method_xref_list`] but for instance-variable
+    /// (`state:`/`field:`) declarations rather than methods.
+    ///
+    /// One entry per declared instance variable, carrying its name and
+    /// 1-based declaration line (derived from [`StateDeclaration::span`] via
+    /// [`Self::span_to_line`]) — `beamtalk_xref:register_state_vars/2` uses
+    /// this so the VS Code Workspace Explorer sidebar's field goto
+    /// (`beamtalk.navigateToStateVar`) can jump to the real declaration
+    /// instead of guessing via source-text regex (BT-3439).
+    ///
+    /// A slot whose span cannot be resolved to a line (should not happen for
+    /// real source, only a defensive fallback) is skipped rather than
+    /// emitting a misleading line 1.
+    pub(in crate::core_erlang::gen_server) fn build_state_var_xref_list(
+        &self,
+        class: &ClassDefinition,
+    ) -> Document<'static> {
+        let entries: Vec<Document<'static>> = class
+            .state
+            .iter()
+            .filter_map(|slot| {
+                let line = self.span_to_line(slot.span)?;
+                Some(docvec![
+                    "~{'name' => ",
+                    leaf::atom(slot.name.name.to_string()),
+                    ", 'line' => ",
+                    leaf::int_lit(i64::from(line)),
+                    "}~",
+                ])
+            })
+            .collect();
+        docvec!["[", join(entries, &Document::Str(", ")), "]"]
+    }
+
     /// ADR 0087 Phase 6 (BT-2304): Builds `method_xref` rows for the
     /// compiler-generated auto-accessors of a `Value subclass:` class.
     ///
@@ -3294,6 +3335,7 @@ impl CoreErlangGenerator {
         method_sigs_doc: Document<'static>,
         class_method_sigs_doc: Document<'static>,
         method_xref_doc: Document<'static>,
+        state_var_xref_doc: Document<'static>,
         class_vars_doc: Document<'static>,
         class_doc_value: Document<'static>,
         method_docs_doc: Document<'static>,
@@ -3341,6 +3383,13 @@ impl CoreErlangGenerator {
                     // maps, not a `~{ }~` map, so it is wrapped only by build_method_xref_list.
                     "'methodXref' => ",
                     method_xref_doc,
+                    ",",
+                    line(),
+                    // BT-3439: per-instance-variable declaration-line index,
+                    // the state-var analogue of 'methodXref' above. A list of
+                    // maps (like methodXref), not a `~{ }~` map.
+                    "'stateVarXref' => ",
+                    state_var_xref_doc,
                     ",",
                     line(),
                     "'classState' => ~{",
