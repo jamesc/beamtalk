@@ -12,7 +12,10 @@
 //! BT-3362 (ADR 0117 Decision step 5): the `STDLIB_CLASS_NAMES` /
 //! `is_known_stdlib_type()` generator that used to live alongside this moved
 //! to `beamtalk-codegen/build.rs` along with its sole consumer,
-//! `core_erlang::value_type_codegen`.
+//! `core_erlang::value_type_codegen`. BT-3435 (ADR 0119 step 0) deleted that
+//! generator entirely: `is_known_stdlib_type()` now delegates directly to
+//! `ClassHierarchy::is_generated_builtin_class`, so `beamtalk-codegen` has no
+//! `build.rs` at all any more.
 
 use std::env;
 use std::path::Path;

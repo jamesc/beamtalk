@@ -25,6 +25,7 @@ pub(crate) mod block_context;
 pub mod block_facts;
 pub mod class_hierarchy;
 pub mod class_kind_writeback;
+pub mod class_module_registry;
 pub mod collision_checker;
 pub mod error;
 pub mod facts;
@@ -57,6 +58,10 @@ pub use block_facts::BlockMutationAnalysis;
 pub use block_facts::analyze_block;
 pub use class_hierarchy::ClassHierarchy;
 pub use class_kind_writeback::apply_class_kind_writeback;
+pub use class_module_registry::{
+    ClassModuleRegistry, ClassModuleRegistryError, ModuleName, ModuleNamingScheme, PackageId,
+    RegistryEntry, relative_module_segments, validate_stdlib_module_name,
+};
 pub use collision_checker::{
     DepInfo, DependencyRegistry, build_dependency_registry, build_dependency_registry_with_graph,
     check_collision_at_use_sites, check_stdlib_reservation, check_transitive_dep_usage,
