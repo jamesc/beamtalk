@@ -131,3 +131,54 @@ TestCase subclass: AnnouncementsTest
     self assert: received value equals: 1
     sub unsubscribe
     received delete
+
+  // --- announceAndWait:timeout: (sync with custom timeout) ---
+
+  testAnnounceAndWaitWithTimeoutDelivers =>
+    received := AtomicCounter new: #announcementsTestTimeoutDelivers
+    self.announcer when: TestEvent do: [:e | received incrementBy: e payload]
+    self.announcer announceAndWait: (TestEvent payload: 99) timeout: 5000
+    // Synchronous — handler finishes before announceAndWait:timeout: returns
+    self assert: received value equals: 99
+    received delete
+
+  testAnnounceAndWaitWithTimeoutReturnsNil =>
+    // announceAndWait:timeout: returns nil (declared return type)
+    result := self.announcer announceAndWait: (TestEvent payload: 1) timeout: 5000
+    self assert: result equals: nil
+
+  // --- unsubscribe: receiver (scoped remove by receiver pid) ---
+
+  testUnsubscribeReceiverRemovesSubscriptions =>
+    received := AtomicCounter new: #announcementsTestUnsubReceiver
+    myPid := Erlang erlang self
+    self.announcer when: TestEvent do: [:e | received increment]
+    self assert: self.announcer subscriptionCount equals: 1
+    self.announcer unsubscribe: myPid
+    self assert: self.announcer subscriptionCount equals: 0
+    // Synchronous announce confirms no delivery after unsubscribe
+    self.announcer announceAndWait: (TestEvent payload: 1) timeout: 5000
+    self assert: received value equals: 0
+    received delete
+
+  testUnsubscribeReceiverNoSubscriptionsIsNoOp =>
+    // Calling unsubscribe: when the receiver has no subscriptions must not raise
+    myPid := Erlang erlang self
+    before := self.announcer subscriptionCount
+    self.announcer unsubscribe: myPid
+    self assert: self.announcer subscriptionCount equals: before
+
+  testUnsubscribeReceiverScopedToAnnouncer =>
+    // unsubscribe: is scoped to self — subscriptions on a different announcer survive
+    received := AtomicCounter new: #announcementsTestUnsubScope
+    myPid := Erlang erlang self
+    other := Announcer new
+    self.announcer when: TestEvent do: [:e | received incrementBy: 1]
+    other when: TestEvent do: [:e | received incrementBy: 10]
+    self.announcer unsubscribe: myPid
+    self assert: self.announcer subscriptionCount equals: 0
+    // Subscription on `other` is untouched; sync announce confirms delivery
+    other announceAndWait: (TestEvent payload: 1) timeout: 5000
+    self assert: received value equals: 10
+    other unsubscribe: myPid
+    received delete
