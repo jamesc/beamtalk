@@ -377,6 +377,13 @@ impl Parser {
 - `TypeChecker`: Validates type constraints
 - `SemanticValidator`: Validates message send arity, undefined names
 - `BlockContextClassifier`: Determines block context (ControlFlow/Stored/Passed/Other)
+- `ClassModuleRegistry` (ADR 0119, BT-3435): the single authority for "what
+  compiled Erlang module is class X in" — a `(PackageId, class name) →
+  ModuleName` map plus its inverse, replacing the ad hoc re-derivations
+  previously scattered across `beamtalk-cli`/`beamtalk-codegen`/`beamtalk-repl`/
+  `beamtalk-compiler-port`. `ModuleName` (`Generated`/`Native`) and `PackageId`
+  (`Stdlib`/`Package`/`SingleFile`) are its value objects. Phase 1 only — no
+  consumer is wired to it yet; see ADR 0119 for the full design.
 
 **Key Patterns:**
 - **Scope Chain:** Walk parent scopes for name resolution
