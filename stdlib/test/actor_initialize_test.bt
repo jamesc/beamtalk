@@ -6,21 +6,23 @@
 // Fixtures: stdlib/test/fixtures/initialize_counter.bt
 
 TestCase subclass: ActorInitializeTest
+  field: c = nil
+
+  setUp => self.c := InitializeCounter spawn
+
+  tearDown => self.c isNil ifFalse: [self.c stop]
 
   // === Basic initialize protocol ===
   testInitializeCalledOnSpawn =>
-    c := InitializeCounter spawn
-    self assert: c isInitialized
+    self assert: self.c isInitialized
 
   testInitializeSetsState =>
-    c := InitializeCounter spawn
-    self assert: c getValue equals: 100
+    self assert: self.c getValue equals: 100
 
   testInitializeRunsBeforeFirstMessage =>
     // getValue is the first message — initialize must have already run
-    c := InitializeCounter spawn
-    self assert: c getValue equals: 100
-    self assert: c increment equals: 101
+    self assert: self.c getValue equals: 100
+    self assert: self.c increment equals: 101
 
   // === Actors without initialize ===
   testActorWithoutInitializeWorks =>
