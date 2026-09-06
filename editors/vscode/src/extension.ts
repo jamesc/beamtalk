@@ -196,6 +196,24 @@ async function resolveServerPath(context: vscode.ExtensionContext): Promise<Reso
 }
 
 /**
+ * Resolve `beamtalk.stdlibSourceDir` for `initializationOptions`.
+ *
+ * Expands a leading `${workspaceFolder}` (the server itself only resolves
+ * bare relative paths against its discovered project roots, so a literal
+ * `${workspaceFolder}` placeholder must be substituted client-side). Empty
+ * when unset, which tells the server to fall back to sysroot auto-discovery.
+ */
+function resolveStdlibSourceDir(): string {
+  const config = vscode.workspace.getConfiguration("beamtalk");
+  const configured = config.get<string>("stdlibSourceDir", "").trim();
+  if (!configured) {
+    return "";
+  }
+  const projectRoot = findProjectRoot();
+  return projectRoot ? configured.replace(/\$\{workspaceFolder\}/g, projectRoot) : configured;
+}
+
+/**
  * TextDocumentContentProvider for `beamtalk-stdlib://` virtual URIs.
  *
  * Fetches content from the LSP server via the `beamtalk-lsp/fetchContent`
@@ -385,6 +403,9 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
     outputChannel,
     traceOutputChannel,
     revealOutputChannelOn: RevealOutputChannelOn.Never,
+    initializationOptions: {
+      stdlibSourceDir: resolveStdlibSourceDir(),
+    },
   };
 
   client = new LanguageClient("beamtalk", "Beamtalk Language Server", serverOptions, clientOptions);
