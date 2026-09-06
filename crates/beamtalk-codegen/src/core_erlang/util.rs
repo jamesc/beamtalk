@@ -1319,4 +1319,39 @@ mod tests {
         assert_eq!(ext_var(1), "_Ext1");
         assert_eq!(ext_var(42), "_Ext42");
     }
+
+    #[test]
+    fn bt_3431_regression_current_class_survives_file_class_name_mismatch() {
+        // BT-3431's exact scenario: a `.bt` file whose basename disagrees
+        // with the class it declares (`event.bt` containing `class
+        // ExduraEvent`) used to silently break gen_server self-dispatch and
+        // state-threading codegen. The deleted `module_matches_class`
+        // answered "is this the class I'm generating right now?" by
+        // re-deriving a module name from the *file-path*-derived module
+        // name (`self.module_name`) and comparing it, structurally, against
+        // a candidate built from the *class* name — so a real mismatch made
+        // the class look like "not itself", with no diagnostic at the point
+        // of failure.
+        //
+        // ADR 0119/BT-3436 replaced that comparison outright: `current_class`
+        // identifies the class being generated directly from the parsed AST
+        // (`self.class_name()`, set once per module by
+        // `setup_class_identity` from the class's own declared name), never
+        // by re-deriving and comparing a module-name string — so this exact
+        // mismatch shape can no longer affect self-dispatch identity at all.
+        let source = "Value subclass: ExduraEvent";
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+
+        // The file-path-derived module name ("event", from a hypothetical
+        // `event.bt`) deliberately disagrees with the class-name-derived one
+        // ("exdura_event") — exactly BT-3431's mismatch.
+        let mut generator = CoreErlangGenerator::new("event");
+        generator.setup_class_identity(&module);
+
+        let found = generator
+            .current_class(&module)
+            .expect("current_class must find ExduraEvent despite the file/class name mismatch");
+        assert_eq!(found.name.name, "ExduraEvent");
+    }
 }

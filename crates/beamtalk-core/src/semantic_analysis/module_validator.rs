@@ -323,6 +323,15 @@ mod tests {
 
     #[test]
     fn test_class_file_name_agreement_mismatch_errors() {
+        // BT-3431's literal real-world scenario (`event.bt` / `class
+        // ExduraEvent`) — and BT-3437's registry-facing regression for it:
+        // this validator is what stands between that mismatch and a silent
+        // cross-file dispatch failure now that `compiled_module_name`
+        // resolves other files' references to this class through the
+        // `ClassModuleRegistry` (ADR 0119/BT-3436), which is itself built
+        // from the file-path-derived name — an undetected mismatch here
+        // would mean the registry's module for `ExduraEvent` never matches
+        // what the file's own declared name expects.
         let source = "Value subclass: ExduraEvent";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
