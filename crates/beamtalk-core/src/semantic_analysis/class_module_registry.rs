@@ -269,6 +269,17 @@ impl ClassModuleRegistry {
     /// `ModuleName` and calls this; batch construction from a file list (or
     /// from cached [`RegistryEntry`] rows) calls this once per discovered
     /// class.
+    ///
+    /// Assumes `module` is unique per `(pkg, class_name)` key, which the
+    /// `bt@`/`bt@{pkg}@`/`bt@stdlib@` naming schemes guarantee by
+    /// construction. If two different `(pkg, class_name)` keys were ever
+    /// inserted with the *same* `module` — the exact naming collision this
+    /// ADR exists to prevent — the second call's entry silently wins in
+    /// `module_to_class`, so [`Self::class_for_module`] would answer for the
+    /// wrong class while [`Self::module_for_class`] still answers correctly
+    /// for both. Not asserted here: nothing in Phase 1 constructs such a
+    /// collision, and enforcing it is a caller-level concern once a real
+    /// build path calls this at scale (BT-3436).
     pub fn insert(&mut self, pkg: PackageId, class_name: impl Into<String>, module: ModuleName) {
         let class_name = class_name.into();
         self.module_to_class

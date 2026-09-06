@@ -2076,7 +2076,7 @@ pub(crate) fn compute_relative_module(
     if let Some(root) = source_root {
         if let Ok(relative) = file.strip_prefix(root) {
             let segments = beamtalk_core::semantic_analysis::relative_module_segments(relative)
-                .map_err(|e| miette::miette!("{e}"))?;
+                .into_diagnostic()?;
             return Ok(segments.join("@"));
         }
     }
