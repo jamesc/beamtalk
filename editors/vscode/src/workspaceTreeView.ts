@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { extractMethodDocComment, extractStateVarInfo } from "./textUtils";
+import {
+  extractMethodDocComment,
+  extractStateVarInfo,
+  findMethodDeclaration,
+  offsetForDeclarationLine,
+} from "./textUtils";
 import type {
   ActorInfo,
   BindingsMap,
@@ -445,7 +450,8 @@ export class WorkspaceTreeDataProvider
         (await this._lspHoverTooltip(
           element.classInfo.source_file,
           element.method.selector,
-          element.method.side === "class" ? "class-method" : "method"
+          element.method.side === "class" ? "class-method" : "method",
+          { side: element.method.side, declaredLine: element.method.line }
         )) ??
         (await this._methodDocCommentTooltip(element)) ??
         this._methodTooltipFallback(element.method);
@@ -461,39 +467,92 @@ export class WorkspaceTreeDataProvider
   private async _lspHoverTooltip(
     sourceFile: string | undefined,
     symbol: string,
-    kind: "class" | "method" | "class-method" | "field"
+    kind: "class" | "method" | "class-method",
+    decl?: { side?: "instance" | "class"; declaredLine?: number }
   ): Promise<vscode.MarkdownString | undefined> {
     if (!sourceFile || sourceFile === "unknown") return undefined;
     try {
       const uri = vscode.Uri.file(sourceFile);
-      await vscode.workspace.openTextDocument(uri);
+      const doc = await vscode.workspace.openTextDocument(uri);
 
-      // Use the LSP document symbol provider to find the exact position — no regex.
+      // Fast path: locate the declaration the same way `navigateToMethod` /
+      // `navigateToStateVar` already do (BT-3439's real-line-first, then
+      // regex, then plain text-search chain) and hover at that single
+      // position directly. This skips `executeDocumentSymbolProvider`
+      // entirely — a full-file symbol computation that every sidebar hover
+      // otherwise paid for on top of the hover request itself. Since
+      // `resolveTreeItem` is only ever invoked once per tree item, an
+      // attempt slow enough to outlast the mouse's dwell time effectively
+      // never shows a tooltip at all rather than just showing one late.
+      const fastOffset = this._declarationOffset(doc.getText(), kind, symbol, decl);
+      if (fastOffset !== -1) {
+        const fast = await this._hoverAt(uri, doc.positionAt(fastOffset));
+        if (fast) return fast;
+      }
+
+      // Fallback: the LSP document symbol provider finds the exact position
+      // (used when there's no declared line yet, or the fast text search
+      // missed — e.g. a class compiled before BT-3439's real-line field).
       const docSymbols = await vscode.commands.executeCommand<
         vscode.DocumentSymbol[] | vscode.SymbolInformation[]
       >("vscode.executeDocumentSymbolProvider", uri);
-
       const pos = this._findSymbolPosition(docSymbols ?? [], symbol, kind);
       if (!pos) return undefined;
-
-      const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
-        "vscode.executeHoverProvider",
-        uri,
-        pos
-      );
-      if (!hovers || hovers.length === 0) return undefined;
-      const md = new vscode.MarkdownString();
-      for (const hover of hovers) {
-        const contents = Array.isArray(hover.contents) ? hover.contents : [hover.contents];
-        for (const c of contents) {
-          if (typeof c === "string") md.appendMarkdown(c);
-          else if (c && "value" in c && c.value) md.appendMarkdown(c.value);
-        }
-      }
-      return md.value ? md : undefined;
+      return await this._hoverAt(uri, pos);
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Resolve a class/method declaration to a text offset via source search —
+   * no LSP round trip. State-var hover ("field") never reaches here: the
+   * `state-item` case in `resolveTreeItem` goes through `_stateVarTooltip`
+   * instead, which reads source text directly, so this only ever needs to
+   * handle the two kinds `_lspHoverTooltip` is actually called with.
+   */
+  private _declarationOffset(
+    text: string,
+    kind: "class" | "method" | "class-method",
+    symbol: string,
+    decl?: { side?: "instance" | "class"; declaredLine?: number }
+  ): number {
+    if (kind === "method" || kind === "class-method") {
+      const side = decl?.side ?? (kind === "class-method" ? "class" : "instance");
+      const line = decl?.declaredLine;
+      // The full joined selector never appears verbatim in source when it has
+      // keyword parts — validate the real-line path against just its first
+      // keyword instead (see offsetForDeclarationLine's doc).
+      let offset =
+        line !== undefined ? offsetForDeclarationLine(text, line, symbol.split(":")[0]) : -1;
+      if (offset === -1) offset = findMethodDeclaration(text, symbol, side);
+      return offset;
+    }
+    // "class": no declared-line metadata is tracked for classes (ClassInfo
+    // carries no `line` field), so fall through to the document-symbol path.
+    return -1;
+  }
+
+  /** Run the hover provider at a position and flatten the result into one MarkdownString. */
+  private async _hoverAt(
+    uri: vscode.Uri,
+    pos: vscode.Position
+  ): Promise<vscode.MarkdownString | undefined> {
+    const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+      "vscode.executeHoverProvider",
+      uri,
+      pos
+    );
+    if (!hovers || hovers.length === 0) return undefined;
+    const md = new vscode.MarkdownString();
+    for (const hover of hovers) {
+      const contents = Array.isArray(hover.contents) ? hover.contents : [hover.contents];
+      for (const c of contents) {
+        if (typeof c === "string") md.appendMarkdown(c);
+        else if (c && "value" in c && c.value) md.appendMarkdown(c.value);
+      }
+    }
+    return md.value ? md : undefined;
   }
 
   /** Find the position of a class, method, or field symbol from document symbols. */
