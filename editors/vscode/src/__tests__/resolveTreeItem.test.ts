@@ -80,6 +80,23 @@ const flatDocumentSymbols = [
   },
 ];
 
+// BT-3440: a class with an instance-side and a class-side method sharing the
+// same selector. Before BT-3439's real-line fast path existed, both sides'
+// hover fell through to `_findSymbolPosition`, whose `targetKind` array is
+// identical for "method" and "class-method" — so it couldn't tell them apart
+// and always returned whichever same-named symbol its walk hit first.
+const SOURCE_BOTH_SIDES = [
+  "class Account",
+  "  state: balance :: Integer = 0",
+  "",
+  "  deposit: amount =>",
+  "    balance := balance + amount",
+  "",
+  "  class deposit: amount =>",
+  "    ^self new",
+  "",
+].join("\n");
+
 describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
   let provider: InstanceType<typeof WorkspaceTreeDataProvider>;
 
@@ -162,5 +179,76 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
     const node: ClassItemNode = { kind: "class-item", info: classInfo };
     const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
     expect((resolved?.tooltip as { value: string }).value).toContain("Account");
+  });
+
+  it("BT-3440: distinguishes an instance-side and class-side method sharing a selector via the declared-line fast path", async () => {
+    openTextDocumentMock.mockResolvedValue(makeDoc(SOURCE_BOTH_SIDES));
+    executeCommandMock.mockImplementation((cmd: string, _uri: unknown, pos?: { line: number }) => {
+      if (cmd === "vscode.executeHoverProvider") {
+        // Real hovers are position-sensitive: line 3 (0-based) is the instance
+        // method's head, line 6 is the class method's — a stand-in for the
+        // LSP actually resolving the symbol under the cursor.
+        const content =
+          pos?.line === 6 ? "**deposit:** (class) amount" : "**deposit:** (instance) amount";
+        return Promise.resolve([{ contents: [{ value: content }] }]);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const instanceNode: MethodItemNode = {
+      kind: "method-item",
+      method: { name: "deposit:", selector: "deposit:", side: "instance", line: 4 },
+      classInfo,
+    };
+    const classNode: MethodItemNode = {
+      kind: "method-item",
+      method: { name: "deposit:", selector: "deposit:", side: "class", line: 7 },
+      classInfo,
+    };
+
+    const instanceResolved = await provider.resolveTreeItem(blankItem(), instanceNode, noToken);
+    const classResolved = await provider.resolveTreeItem(blankItem(), classNode, noToken);
+
+    expect((instanceResolved?.tooltip as { value: string }).value).toContain("(instance)");
+    expect((classResolved?.tooltip as { value: string }).value).toContain("(class)");
+    // The fast path resolves both without ever hitting the ambiguous
+    // document-symbol fallback.
+    expect(executeCommandMock).not.toHaveBeenCalledWith(
+      "vscode.executeDocumentSymbolProvider",
+      expect.anything()
+    );
+  });
+
+  it("BT-3440: distinguishes them via the side-aware regex fallback when no declared line is available", async () => {
+    openTextDocumentMock.mockResolvedValue(makeDoc(SOURCE_BOTH_SIDES));
+    executeCommandMock.mockImplementation((cmd: string, _uri: unknown, pos?: { line: number }) => {
+      if (cmd === "vscode.executeHoverProvider") {
+        const content =
+          pos?.line === 6 ? "**deposit:** (class) amount" : "**deposit:** (instance) amount";
+        return Promise.resolve([{ contents: [{ value: content }] }]);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const instanceNode: MethodItemNode = {
+      kind: "method-item",
+      method: { name: "deposit:", selector: "deposit:", side: "instance" }, // no `line`
+      classInfo,
+    };
+    const classNode: MethodItemNode = {
+      kind: "method-item",
+      method: { name: "deposit:", selector: "deposit:", side: "class" }, // no `line`
+      classInfo,
+    };
+
+    const instanceResolved = await provider.resolveTreeItem(blankItem(), instanceNode, noToken);
+    const classResolved = await provider.resolveTreeItem(blankItem(), classNode, noToken);
+
+    expect((instanceResolved?.tooltip as { value: string }).value).toContain("(instance)");
+    expect((classResolved?.tooltip as { value: string }).value).toContain("(class)");
+    expect(executeCommandMock).not.toHaveBeenCalledWith(
+      "vscode.executeDocumentSymbolProvider",
+      expect.anything()
+    );
   });
 });
