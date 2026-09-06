@@ -3058,6 +3058,78 @@ fn handle_class_state_field_defaults(request: &Map) -> Term {
     }
 }
 
+/// Handle a `build_class_module_index_in_source` request (BT-3441).
+///
+/// Backs the REPL/workspace cold-load fallback for `class_module_index`
+/// (ADR 0050, `beamtalk_repl_ops_load:build_source_class_module_index/1`):
+/// given the source text of a single `src/**/*.bt` file, its path relative
+/// to `src/` (extension included, `/`-joined), and the project's package
+/// name, returns every class the file declares plus the package-qualified
+/// module atom the CLI's own index build (`build_class_module_index` /
+/// `compute_relative_module`, `crates/beamtalk-cli/src/commands/build.rs`)
+/// would compute for it. Class extraction uses the real parser (never a
+/// regex, so a `subclass:` declaration in any shape the grammar allows is
+/// found), and the module name is computed via the shared
+/// `relative_module_segments` leaf — the same one `compute_relative_module`
+/// and `ClassModuleRegistry`'s Pass-1 construction already use — so the
+/// Erlang cold-load index can never diverge from the CLI's by re-deriving
+/// its own casing rule.
+///
+/// Request fields:
+/// - `source` (binary): the `.bt` file's source text
+/// - `relative_path` (binary): the file's path relative to `src/`,
+///   `/`-joined, extension included (e.g. `util/http_response.bt`)
+/// - `package_name` (binary): the project's package name (e.g. `web`)
+///
+/// Response on success: `#{status => ok, module_name =>
+/// <<"bt@web@util@http_response">>, classes => [<<"ClassName">>, ...]}`.
+/// Parse errors in `source` are not surfaced as a failure — a partially
+/// recovered class list still beats the previous regex scanner's silent
+/// drop, and the caller only needs whatever classes the file declares.
+/// `relative_path` is expected to always be a real project file under
+/// `src/` (never client-supplied), but a segment outside
+/// `[A-Za-z0-9_]` comes back as `#{status => error, reason =>
+/// invalid_path_segment, message => <<...>>}` rather than a crash.
+fn handle_build_class_module_index_in_source(request: &Map) -> Term {
+    use beamtalk_core::semantic_analysis::relative_module_segments;
+
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let Some(relative_path) = map_get(request, "relative_path").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'relative_path' field".to_string()]);
+    };
+    let Some(package_name) = map_get(request, "package_name").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'package_name' field".to_string()]);
+    };
+
+    let segments = match relative_module_segments(camino::Utf8Path::new(&relative_path)) {
+        Ok(segments) => segments,
+        Err(err) => {
+            return Term::from(Map::from([
+                (atom("status"), atom("error")),
+                (atom("reason"), atom("invalid_path_segment")),
+                (atom("message"), binary(&err.to_string())),
+            ]));
+        }
+    };
+    let module_name = format!("bt@{package_name}@{}", segments.join("@"));
+
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+    let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    let classes: Vec<Term> = module
+        .classes
+        .iter()
+        .map(|class| binary(&class.name.name))
+        .collect();
+
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("module_name"), binary(&module_name)),
+        (atom("classes"), Term::from(List::from(classes))),
+    ]))
+}
+
 fn class_span_error_response(err: &beamtalk_core::source_analysis::ClassSpanResolveError) -> Term {
     use beamtalk_core::source_analysis::ClassSpanResolveError;
     let reason = match err {
@@ -3265,6 +3337,7 @@ fn handle_request(request_term: &Term) -> Term {
         "find_definition_selector_spans" => handle_find_definition_selector_spans(map),
         "categorize_methods" => handle_categorize_methods(map),
         "class_state_field_defaults" => handle_class_state_field_defaults(map),
+        "build_class_module_index_in_source" => handle_build_class_module_index_in_source(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
 }
@@ -4876,6 +4949,101 @@ Object subclass: Counter
             (atom("source"), binary(SPAN_FIXTURE)),
         ]);
         let response = handle_resolve_class_span(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
+    }
+
+    // --- build_class_module_index_in_source tests (BT-3441) ---
+
+    #[test]
+    fn build_class_module_index_in_source_root_file() {
+        let request = Map::from([
+            (atom("command"), atom("build_class_module_index_in_source")),
+            (
+                atom("source"),
+                binary("Object subclass: HttpResponse\n  ok -> Boolean => true\n"),
+            ),
+            (atom("relative_path"), binary("HttpResponse.bt")),
+            (atom("package_name"), binary("web")),
+        ]);
+        let response = handle_build_class_module_index_in_source(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        assert_eq!(
+            map_get(m, "module_name").and_then(term_to_string),
+            Some("bt@web@http_response".to_string()),
+            "{response:?}"
+        );
+        assert_eq!(
+            map_get(m, "classes").and_then(term_to_string_list),
+            Some(vec!["HttpResponse".to_string()]),
+            "{response:?}"
+        );
+    }
+
+    #[test]
+    fn build_class_module_index_in_source_subdirectory_and_multiple_classes() {
+        // Exercises the exact bug shape the regex scanner risked (BT-3081/
+        // BT-3431/BT-3432): a subdirectory path segment and more than one
+        // class declared in the same file.
+        let request = Map::from([
+            (atom("command"), atom("build_class_module_index_in_source")),
+            (
+                atom("source"),
+                binary("Object subclass: Alpha\n\nActor subclass: Beta\n  state: x = 0\n"),
+            ),
+            (atom("relative_path"), binary("util/multi.bt")),
+            (atom("package_name"), binary("web")),
+        ]);
+        let response = handle_build_class_module_index_in_source(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        assert_eq!(
+            map_get(m, "module_name").and_then(term_to_string),
+            Some("bt@web@util@multi".to_string()),
+            "{response:?}"
+        );
+        assert_eq!(
+            map_get(m, "classes").and_then(term_to_string_list),
+            Some(vec!["Alpha".to_string(), "Beta".to_string()]),
+            "{response:?}"
+        );
+    }
+
+    #[test]
+    fn build_class_module_index_in_source_invalid_path_segment_is_structured_error() {
+        let request = Map::from([
+            (atom("command"), atom("build_class_module_index_in_source")),
+            (atom("source"), binary("Object subclass: Foo\n")),
+            (atom("relative_path"), binary("bad-segment.bt")),
+            (atom("package_name"), binary("web")),
+        ]);
+        let response = handle_build_class_module_index_in_source(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
+        assert_eq!(
+            map_get(m, "reason"),
+            Some(&atom("invalid_path_segment")),
+            "{response:?}"
+        );
+    }
+
+    #[test]
+    fn build_class_module_index_in_source_missing_field_is_error() {
+        let request = Map::from([
+            (atom("command"), atom("build_class_module_index_in_source")),
+            (atom("relative_path"), binary("foo.bt")),
+            (atom("package_name"), binary("web")),
+        ]);
+        let response = handle_build_class_module_index_in_source(&request);
         let Term::Map(ref m) = response else {
             panic!("Expected map response, got: {response:?}");
         };
