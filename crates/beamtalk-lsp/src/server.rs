@@ -5432,7 +5432,14 @@ fn to_lsp_symbol(
         name: sym.name.to_string(),
         kind: match sym.kind {
             DocumentSymbolKind::Class => SymbolKind::CLASS,
-            DocumentSymbolKind::Method | DocumentSymbolKind::ClassMethod => SymbolKind::METHOD,
+            DocumentSymbolKind::Method => SymbolKind::METHOD,
+            // BT-3442: class-side methods get a distinct `SymbolKind` from
+            // instance-side ones (plus the "class method" `detail` below) so
+            // VS Code's Outline/breadcrumbs/Go to Symbol can tell apart two
+            // same-selector methods on opposite sides of a class. FUNCTION
+            // isn't used elsewhere in this mapping, so it's free to repurpose
+            // for "static-ish member" — closest standard `SymbolKind` fit.
+            DocumentSymbolKind::ClassMethod => SymbolKind::FUNCTION,
             DocumentSymbolKind::Field => SymbolKind::FIELD,
             // BT-2601: a `// === Name ===` divider's method-category
             // container. NAMESPACE is the closest standard LSP `SymbolKind`
@@ -5443,7 +5450,8 @@ fn to_lsp_symbol(
             // the icon choice).
             DocumentSymbolKind::Category => SymbolKind::NAMESPACE,
         },
-        detail: None,
+        detail: matches!(sym.kind, DocumentSymbolKind::ClassMethod)
+            .then(|| "class method".to_string()),
         tags: None,
         deprecated: None,
         range,
@@ -5460,6 +5468,48 @@ mod tests {
     use beamtalk_language_service::HoverInfo;
     use camino::Utf8PathBuf;
     use std::fs;
+
+    /// BT-3442: a class-side method sharing a selector with an instance
+    /// method must map to a different LSP `SymbolKind` (and carry a
+    /// disambiguating `detail`) so VS Code's Outline, breadcrumbs, and Go
+    /// to Symbol can tell the two apart — before this fix both sides
+    /// mapped to `SymbolKind::METHOD` with no `detail`, so the two entries
+    /// were visually identical.
+    #[test]
+    fn to_lsp_symbol_distinguishes_class_and_instance_method_sharing_a_selector() {
+        use beamtalk_core::source_analysis::Span;
+        use beamtalk_language_service::DocumentSymbol;
+
+        let source = "x".repeat(20);
+        let instance_symbol = DocumentSymbol {
+            name: "value".into(),
+            kind: DocumentSymbolKind::Method,
+            span: Span::new(0, 5),
+            name_span: None,
+            children: vec![],
+        };
+        let class_symbol = DocumentSymbol {
+            name: "value".into(),
+            kind: DocumentSymbolKind::ClassMethod,
+            span: Span::new(6, 11),
+            name_span: None,
+            children: vec![],
+        };
+
+        let instance_lsp = to_lsp_symbol(instance_symbol, &source);
+        let class_lsp = to_lsp_symbol(class_symbol, &source);
+
+        assert_eq!(instance_lsp.name, "value");
+        assert_eq!(class_lsp.name, "value");
+        assert_eq!(instance_lsp.kind, SymbolKind::METHOD);
+        assert_eq!(class_lsp.kind, SymbolKind::FUNCTION);
+        assert_ne!(
+            instance_lsp.kind, class_lsp.kind,
+            "same-selector instance/class methods must map to distinct SymbolKinds"
+        );
+        assert_eq!(instance_lsp.detail, None);
+        assert_eq!(class_lsp.detail.as_deref(), Some("class method"));
+    }
 
     #[test]
     fn configured_stdlib_source_dirs_rejects_relative_traversal_outside_root() {
