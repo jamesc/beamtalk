@@ -64,6 +64,12 @@ compiler_test_() ->
         {"class_state_field_defaults reports presence per field",
             fun class_state_field_defaults_reports_presence/0},
         {"class_state_field_defaults class not found", fun class_state_field_defaults_not_found/0},
+        {"build_class_module_index_in_source root file",
+            fun build_class_module_index_in_source_root_file/0},
+        {"build_class_module_index_in_source subdirectory with multiple classes",
+            fun build_class_module_index_in_source_subdir_multi_class/0},
+        {"build_class_module_index_in_source invalid path segment",
+            fun build_class_module_index_in_source_invalid_path_segment/0},
         {"command vocabulary corpus is recognized (BT-3095)",
             fun command_vocabulary_corpus_is_recognized/0}
     ]}.
@@ -346,6 +352,38 @@ class_state_field_defaults_not_found() ->
     Result = beamtalk_compiler:class_state_field_defaults(Source, <<"NoSuchClass">>),
     ?assertMatch({error, class_not_found, _}, Result).
 
+%% --- build_class_module_index_in_source (BT-3441) ---
+
+build_class_module_index_in_source_root_file() ->
+    Result = beamtalk_compiler:build_class_module_index_in_source(
+        <<"Object subclass: HttpResponse\n  ok -> Boolean => true\n">>,
+        <<"HttpResponse.bt">>,
+        <<"web">>
+    ),
+    ?assertEqual({ok, <<"bt@web@http_response">>, [<<"HttpResponse">>]}, Result).
+
+%% Exercises the exact regression this ticket replaces the regex scanner to
+%% close: a subdirectory path segment (module-name derivation) together with
+%% more than one class declared in the same file (class extraction) — the
+%% two things the previous hand-rolled scanner risked getting wrong.
+build_class_module_index_in_source_subdir_multi_class() ->
+    Result = beamtalk_compiler:build_class_module_index_in_source(
+        <<"Object subclass: Alpha\n\nActor subclass: Beta\n  state: x = 0\n">>,
+        <<"util/multi.bt">>,
+        <<"web">>
+    ),
+    ?assertEqual(
+        {ok, <<"bt@web@util@multi">>, [<<"Alpha">>, <<"Beta">>]}, Result
+    ).
+
+build_class_module_index_in_source_invalid_path_segment() ->
+    Result = beamtalk_compiler:build_class_module_index_in_source(
+        <<"Object subclass: Foo\n">>,
+        <<"bad-segment.bt">>,
+        <<"web">>
+    ),
+    ?assertMatch({error, invalid_path_segment, _}, Result).
+
 %%% ---------------------------------------------------------------
 %%% Command-vocabulary conformance corpus (BT-3095)
 %%% ---------------------------------------------------------------
@@ -464,6 +502,15 @@ assert_command_recognized(<<"find_definition_selector_spans">>) ->
         {ok, [_ | _]},
         beamtalk_compiler:find_definition_selector_spans(
             span_fixture(), <<"SpanCounter">>, increment, bump, instance
+        )
+    );
+assert_command_recognized(<<"build_class_module_index_in_source">>) ->
+    ?assertMatch(
+        {ok, <<"bt@bt3095pkg@bt3095_target">>, [<<"Bt3095Target">>]},
+        beamtalk_compiler:build_class_module_index_in_source(
+            <<"Object subclass: Bt3095Target\n">>,
+            <<"bt3095_target.bt">>,
+            <<"bt3095pkg">>
         )
     );
 assert_command_recognized(Command) ->

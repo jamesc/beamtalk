@@ -1174,48 +1174,34 @@ read_package_name_missing_manifest_test() ->
         rm_temp_dir(Dir)
     end.
 
-extract_all_bt_classes_multiple_test() ->
-    %% Unlike extract_bt_class_info/1 (first class only), this returns every
-    %% declared class in the file so a multi-class source contributes all of
-    %% them to the cold-load index.
-    Dir = filename:absname(make_temp_dir()),
-    try
-        Src = <<
-            "Object subclass: Alpha\n\n"
-            "Actor subclass: Beta\n  state: x = 0\n\n"
-            "Value subclass: Gamma\n"
-        >>,
-        Path = write_temp_file(Dir, "multi.bt", Src),
-        ?assertEqual(
-            [<<"Alpha">>, <<"Beta">>, <<"Gamma">>],
-            beamtalk_repl_ops_load:extract_all_bt_classes(Path)
-        )
-    after
-        rm_temp_dir(Dir)
+%% BT-3441: build_source_class_module_index/1 now indexes each file via the
+%% compiler port (beamtalk_compiler:build_class_module_index_in_source/3)
+%% instead of a regex + hand-rolled snake-case, so every test below needs the
+%% compiler application (and its port) running. Idempotent and never stopped
+%% here — mirrors beamtalk_compiler_tests's own setup/teardown convention of
+%% leaving the app started for the rest of the shared EUnit node.
+ensure_compiler_started() ->
+    application:ensure_all_started(compiler),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
     end.
 
-extract_all_bt_classes_missing_file_test() ->
-    ?assertEqual([], beamtalk_repl_ops_load:extract_all_bt_classes("/nonexistent/x.bt")).
-
-source_module_name_root_test() ->
-    %% A src/-root file maps to bt@<pkg>@<snake(stem)>, the same atom the CLI's
-    %% compute_relative_module produces.
+relative_bt_path_root_test() ->
     Dir = filename:absname(make_temp_dir()),
     try
         SrcDir = filename:join(Dir, "src"),
         ok = file:make_dir(SrcDir),
         Path = filename:join(SrcDir, "http_response.bt"),
         ?assertEqual(
-            <<"bt@web@http_response">>,
-            beamtalk_repl_ops_load:source_module_name(Path, SrcDir, <<"web">>)
+            <<"http_response.bt">>,
+            beamtalk_repl_ops_load:relative_bt_path(Path, SrcDir)
         )
     after
         rm_temp_dir(Dir)
     end.
 
-source_module_name_subdir_test() ->
-    %% A subdirectory under src/ becomes an `@' segment, each snake-cased —
-    %% bt@<pkg>@<dir>@<stem> — exactly as the CLI nests subdirectory modules.
+relative_bt_path_subdir_test() ->
     Dir = filename:absname(make_temp_dir()),
     try
         SrcDir = filename:join(Dir, "src"),
@@ -1224,8 +1210,8 @@ source_module_name_subdir_test() ->
         ok = file:make_dir(SubDir),
         Path = filename:join(SubDir, "math_helper.bt"),
         ?assertEqual(
-            <<"bt@web@util@math_helper">>,
-            beamtalk_repl_ops_load:source_module_name(Path, SrcDir, <<"web">>)
+            <<"util/math_helper.bt">>,
+            beamtalk_repl_ops_load:relative_bt_path(Path, SrcDir)
         )
     after
         rm_temp_dir(Dir)
@@ -1234,7 +1220,9 @@ source_module_name_subdir_test() ->
 build_source_class_module_index_cold_test() ->
     %% The whole point of BT-2671: on a COLD load (no class registered yet) the
     %% source index already knows every class defined in src/, keyed to its
-    %% package-qualified module atom.
+    %% package-qualified module atom. Also exercises a multi-class file (BT-3441:
+    %% the real parser must find every declared class, not just the first).
+    ensure_compiler_started(),
     Dir = filename:absname(make_temp_dir()),
     try
         write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"coldpkg\"\n">>),
@@ -1242,17 +1230,21 @@ build_source_class_module_index_cold_test() ->
         ok = file:make_dir(SrcDir),
         write_temp_file(SrcDir, "foo.bt", <<"Object subclass: Foo\n">>),
         write_temp_file(
-            SrcDir, "bar.bt", <<"Actor subclass: Bar\n  state: x = 0\n">>
+            SrcDir,
+            "bar.bt",
+            <<"Actor subclass: Bar\n  state: x = 0\n\nValue subclass: Baz\n">>
         ),
         Index = beamtalk_repl_ops_load:build_source_class_module_index(Dir),
         ?assertEqual(<<"bt@coldpkg@foo">>, maps:get(<<"Foo">>, Index)),
-        ?assertEqual(<<"bt@coldpkg@bar">>, maps:get(<<"Bar">>, Index))
+        ?assertEqual(<<"bt@coldpkg@bar">>, maps:get(<<"Bar">>, Index)),
+        ?assertEqual(<<"bt@coldpkg@bar">>, maps:get(<<"Baz">>, Index))
     after
         rm_temp_dir(Dir)
     end.
 
 build_source_class_module_index_no_package_test() ->
     %% No package name → empty index (caller falls back to the live registry).
+    ensure_compiler_started(),
     Dir = filename:absname(make_temp_dir()),
     try
         SrcDir = filename:join(Dir, "src"),
@@ -1263,10 +1255,39 @@ build_source_class_module_index_no_package_test() ->
         rm_temp_dir(Dir)
     end.
 
+%% BT-3441 acceptance criterion 3 (regression, analogous to BT-3431/BT-3432):
+%% a subdirectory class whose file-stem casing (HttpResponse.bt, PascalCase)
+%% differs from its snake_case module segment — the exact shape that broke
+%% module-name resolution before the Rust-side registry unified this rule
+%% (BT-3081/BT-3431/BT-3432). Against the new compiler-port-backed
+%% implementation, the module-name segment must come out snake-cased exactly
+%% as `beamtalk build` (compute_relative_module/relative_module_segments)
+%% would produce, never a lossy or divergent guess.
+build_source_class_module_index_subdir_casing_mismatch_test() ->
+    ensure_compiler_started(),
+    Dir = filename:absname(make_temp_dir()),
+    try
+        write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"webpkg\"\n">>),
+        SrcDir = filename:join(Dir, "src"),
+        SubDir = filename:join(SrcDir, "util"),
+        ok = file:make_dir(SrcDir),
+        ok = file:make_dir(SubDir),
+        write_temp_file(
+            SubDir,
+            "HttpResponse.bt",
+            <<"Object subclass: HttpResponse\n  ok -> Boolean => true\n">>
+        ),
+        Index = beamtalk_repl_ops_load:build_source_class_module_index(Dir),
+        ?assertEqual(<<"bt@webpkg@util@http_response">>, maps:get(<<"HttpResponse">>, Index))
+    after
+        rm_temp_dir(Dir)
+    end.
+
 regenerate_header_includes_cold_source_class_test() ->
     %% BT-2671 acceptance: regenerate_native_class_header/1 must emit a
     %% -define for a class defined in src/ even though it is NOT registered
     %% (cold load). The previous registry-only path produced no macro for it.
+    ensure_compiler_started(),
     Dir = filename:absname(make_temp_dir()),
     try
         write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"coldhdr\"\n">>),
@@ -1294,6 +1315,7 @@ cold_load_native_macro_compiles_test() ->
     %% being loaded must compile+resolve, with the class NEVER registered. The
     %% pre-BT-2671 registry-only header would omit the macro → compile failure
     %% (relocated symptom-2 cascade).
+    ensure_compiler_started(),
     Dir = filename:absname(make_temp_dir()),
     try
         write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"e2ecold\"\n">>),

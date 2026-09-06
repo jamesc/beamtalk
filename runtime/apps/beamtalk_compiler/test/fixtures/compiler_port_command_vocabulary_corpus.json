@@ -19,5 +19,6 @@
   "categorize_methods",
   "class_state_field_defaults",
   "find_selector_send_spans",
-  "find_definition_selector_spans"
+  "find_definition_selector_spans",
+  "build_class_module_index_in_source"
 ]

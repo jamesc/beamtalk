@@ -51,7 +51,8 @@ to avoid temp files on disk (BT-48).
     class_state_field_defaults/2,
     reindent_method_source/2,
     find_selector_send_spans/3,
-    find_definition_selector_spans/5
+    find_definition_selector_spans/5,
+    build_class_module_index_in_source/3
 ]).
 
 %% gen_server callbacks
@@ -642,6 +643,32 @@ categorize_methods(Source, ClassName) ->
     end.
 
 -doc """
+Build the class→module-name index for a single `src/**/*.bt` file (BT-3441)
+— see `beamtalk_compiler_port:build_class_module_index_in_source/4' for the
+full wire shape. Backs the REPL/workspace cold-load fallback for
+`class_module_index' (ADR 0050,
+`beamtalk_repl_ops_load:build_source_class_module_index/1'). Returns
+`{ok, ModuleName, ClassNames}' on success; a bad `relative_path' returns
+`{error, invalid_path_segment, Message}'; transport failures return
+`{error, port_error | noproc | timeout, Message}'.
+""".
+-spec build_class_module_index_in_source(binary(), binary(), binary()) ->
+    {ok, binary(), [binary()]} | {error, atom(), binary()}.
+build_class_module_index_in_source(Source, RelativePath, PackageName) ->
+    try
+        gen_server:call(
+            ?MODULE,
+            {build_class_module_index_in_source, Source, RelativePath, PackageName},
+            30000
+        )
+    catch
+        exit:{noproc, _} ->
+            {error, noproc, <<"Compiler server is not available">>};
+        exit:{timeout, _} ->
+            {error, timeout, <<"Compiler server timed out">>}
+    end.
+
+-doc """
 Field-level default-value presence for `ClassName''s `state:'/`field:'
 declarations in `Source' (ADR 0082 extension, BT-3254).
 
@@ -1049,6 +1076,13 @@ handle_call({categorize_methods, Source, ClassName}, _From, State) ->
 handle_call({class_state_field_defaults, Source, ClassName}, _From, State) ->
     Result = beamtalk_compiler_port:class_state_field_defaults(
         State#state.port, Source, ClassName
+    ),
+    {reply, Result, State};
+handle_call(
+    {build_class_module_index_in_source, Source, RelativePath, PackageName}, _From, State
+) ->
+    Result = beamtalk_compiler_port:build_class_module_index_in_source(
+        State#state.port, Source, RelativePath, PackageName
     ),
     {reply, Result, State};
 handle_call({reindent_method_source, Source, BaseIndent}, _From, State) ->
