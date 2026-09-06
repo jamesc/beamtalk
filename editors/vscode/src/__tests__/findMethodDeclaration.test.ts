@@ -7,6 +7,7 @@ import {
   findStateVarDeclaration,
   extractStateVarInfo,
   extractMethodDocComment,
+  offsetForDeclarationLine,
 } from "../textUtils";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -449,5 +450,49 @@ describe("extractStateVarInfo — typed state vars", () => {
   it("extracts empty string default for typed string state var", () => {
     const info = extractStateVarInfo(TYPED_BT, "owner");
     expect(info?.defaultValue).toBe('""');
+  });
+});
+
+describe("offsetForDeclarationLine (BT-3439)", () => {
+  // Actor subclass: Widget         <- line 1
+  //   state: count = 0             <- line 2
+  //   state: engine :: Engine      <- line 3
+  //                                <- line 4
+  //   increment =>                 <- line 5
+  //     self.count := self.count + 1  <- line 6
+  const SRC = [
+    "Actor subclass: Widget",
+    "  state: count = 0",
+    "  state: engine :: Engine",
+    "",
+    "  increment =>",
+    "    self.count := self.count + 1",
+  ].join("\n");
+
+  it("resolves a real line to the offset of its first non-whitespace column", () => {
+    const offset = offsetForDeclarationLine(SRC, 2, "count");
+    expect(offset).not.toBe(-1);
+    expect(SRC.slice(offset, offset + 5)).toBe("state");
+  });
+
+  it("resolves a method line by its first selector keyword", () => {
+    const offset = offsetForDeclarationLine(SRC, 5, "increment");
+    expect(offset).not.toBe(-1);
+    expect(SRC.slice(offset, offset + 9)).toBe("increment");
+  });
+
+  it("returns -1 for a line number outside the document", () => {
+    expect(offsetForDeclarationLine(SRC, 0, "count")).toBe(-1);
+    expect(offsetForDeclarationLine(SRC, 999, "count")).toBe(-1);
+  });
+
+  it("returns -1 when the line no longer contains the expected needle (BT-3439 stale line)", () => {
+    // Simulates the file being edited (a line inserted above `engine`)
+    // after the class was last compiled — beamtalk_xref still reports
+    // line 3 for `engine`, but line 3 is now something else entirely.
+    const edited = ["// a new comment", ...SRC.split("\n")].join("\n");
+    expect(offsetForDeclarationLine(edited, 3, "engine")).toBe(-1);
+    // The correct, shifted line (4) still resolves.
+    expect(offsetForDeclarationLine(edited, 4, "engine")).not.toBe(-1);
   });
 });

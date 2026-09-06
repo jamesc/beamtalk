@@ -1136,7 +1136,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // LSP go-to-definition is used *after* showTextDocument below for
       // precise navigation either way.
       const text = document.getText();
-      let declOffset = method.line !== undefined ? offsetForDeclarationLine(text, method.line) : -1;
+      // The full joined selector never appears verbatim in source (that's
+      // exactly the original bug), so validate the real-line path against
+      // just its first keyword (or the whole thing, for a unary/binary
+      // selector, since split(":")[0] is a no-op without a colon).
+      let declOffset =
+        method.line !== undefined
+          ? offsetForDeclarationLine(text, method.line, method.selector.split(":")[0])
+          : -1;
       if (declOffset === -1) declOffset = findMethodDeclaration(text, method.selector, method.side);
       if (declOffset === -1) declOffset = text.indexOf(method.selector);
       if (declOffset === -1) {
@@ -1208,7 +1215,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // that case even when it isn't a `::`-syntax problem.
         const text = document.getText();
         let declOffset =
-          stateVar.line !== undefined ? offsetForDeclarationLine(text, stateVar.line) : -1;
+          stateVar.line !== undefined
+            ? offsetForDeclarationLine(text, stateVar.line, stateVar.name)
+            : -1;
         if (declOffset === -1) declOffset = findStateVarDeclaration(text, stateVar.name);
         if (declOffset === -1) declOffset = text.indexOf(stateVar.name);
         if (declOffset === -1) {

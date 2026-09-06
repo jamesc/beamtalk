@@ -139,19 +139,35 @@ export function extractMethodDocComment(
  * `findStateVarDeclaration` locate via regex, but from a real backend line
  * number instead of a source-text guess.
  *
- * Returns -1 when `oneBasedLine` falls outside the document (e.g. the file
- * was edited since the class was last compiled/reloaded) — callers should
- * fall back to the regex-based finders in that case, exactly as they already
- * do when those finders themselves return -1.
+ * Returns -1 (callers should fall back to the regex-based finders, exactly
+ * as they already do when those finders themselves return -1) when either:
+ * - `oneBasedLine` falls outside the document, or
+ * - the line no longer contains `expectedNeedle`.
+ *
+ * The second check matters because the first alone can't catch every kind of
+ * staleness: if the file was edited (lines inserted/deleted above the
+ * declaration) since the class was last compiled/reloaded, `oneBasedLine`
+ * can still be in range — just pointing at a different, unrelated line now.
+ * `expectedNeedle` should be something only the real declaration line would
+ * contain: `stateVar.name` for a field, or the first `:`-delimited part of
+ * `method.selector` for a method (the full joined selector never appears
+ * verbatim in source — see `findMethodDeclaration`'s doc — so checking for
+ * it here would always miss and defeat the real-line path entirely).
  */
-export function offsetForDeclarationLine(text: string, oneBasedLine: number): number {
+export function offsetForDeclarationLine(
+  text: string,
+  oneBasedLine: number,
+  expectedNeedle: string
+): number {
   const lines = text.split("\n");
   if (oneBasedLine < 1 || oneBasedLine > lines.length) return -1;
+  const line = lines[oneBasedLine - 1];
+  if (!line.includes(expectedNeedle)) return -1;
   let offset = 0;
   for (let i = 0; i < oneBasedLine - 1; i++) {
     offset += lines[i].length + 1;
   }
-  const match = /\S/.exec(lines[oneBasedLine - 1]);
+  const match = /\S/.exec(line);
   return offset + (match ? match.index : 0);
 }
 
