@@ -453,6 +453,7 @@ pub fn compute_diagnostics_and_referenced_aliases(
     parse_diagnostics: Vec<Diagnostic>,
     known_vars: &[&str],
     pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_protocols: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
     diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> (Vec<Diagnostic>, Vec<EcoString>) {
@@ -461,6 +462,7 @@ pub fn compute_diagnostics_and_referenced_aliases(
         parse_diagnostics,
         known_vars,
         pre_loaded_classes,
+        pre_loaded_protocols,
         pre_loaded_aliases,
         diagnostics_overrides,
     );
@@ -485,12 +487,14 @@ pub fn compute_diagnostics_and_analysis(
     parse_diagnostics: Vec<Diagnostic>,
     known_vars: &[&str],
     pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_protocols: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
     diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> (Vec<Diagnostic>, semantic_analysis::AnalysisResult) {
     let ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
         .with_known_vars(known_vars)
         .with_pre_loaded_classes(pre_loaded_classes)
+        .with_pre_loaded_protocols(pre_loaded_protocols)
         .with_pre_loaded_aliases(pre_loaded_aliases);
     let mut analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, ctx);
     // BT-3123: diagnostics are consumed by `run_diagnostic_pipeline` below;

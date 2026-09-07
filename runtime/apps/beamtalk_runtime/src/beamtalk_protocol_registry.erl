@@ -229,6 +229,7 @@ register_protocol(#{name := Name} = Info) ->
         #{domain => [beamtalk, runtime]}
     ),
     maybe_create_protocol_class(Name, Info),
+    notify_compiler_server(Name, Info),
     ok;
 register_protocol(BadInfo) ->
     ?LOG_WARNING(
@@ -261,9 +262,47 @@ unregister_protocol(Module) when is_atom(Module) ->
         undefined ->
             ok;
         _ ->
+            %% BT-3473: Capture the names being purged via the *same* match
+            %% condition `select_delete` below uses, immediately before
+            %% deleting them, so the compiler server's ambient `protocols`
+            %% cache (mirroring `classes`' own register/remove pair) is told
+            %% about exactly the rows actually removed — otherwise a purged
+            %% protocol's stale entry would linger there forever, the same
+            %% gap BT-3105 closed for `classes` via `remove_class/1`.
+            %%
+            %% Code-review finding: an earlier version computed `Purged` from
+            %% an independent `ets:tab2list/1` scan, then ran `select_delete`
+            %% as a second, separate scan — a protocol re-registered under a
+            %% different module in between would have its (now
+            %% differently-owned) row correctly left in place by
+            %% `select_delete`, but the stale `Purged` snapshot would still
+            %% notify the compiler server to remove it. Deriving `Purged` from
+            %% an `ets:select/2` using the identical guard, run immediately
+            %% before the delete, narrows that window to the two ETS calls
+            %% themselves instead of this function's whole body.
+            %%
+            %% Residual (accepted): `select` and `select_delete` are still
+            %% two independent ETS operations, so any row change for
+            %% `Module` in the gap between them can desync `Purged` from what
+            %% is actually deleted, in either direction: a row inserted in
+            %% the gap gets deleted without ever appearing in `Purged` (the
+            %% compiler server misses that removal and carries a stale entry
+            %% until the next registration overwrites it), and a row
+            %% re-registered under a *different* module in the gap is
+            %% correctly left in place by `select_delete` but still notified
+            %% as removed via the stale `Purged` snapshot (the compiler
+            %% server can transiently lose a still-live protocol until its
+            %% next registration). ETS has no atomic
+            %% "select-and-delete-returning-rows" primitive, and a
+            %% self-healing diagnostics-suppression cache doesn't warrant a
+            %% dedicated lock/gen_server serialization point for this
+            %% narrower-still race.
+            MatchGuard = [{'=:=', '$1', {const, Module}}],
+            Purged = ets:select(?PROTOCOL_TABLE, [{{'$2', #{module => '$1'}}, MatchGuard, ['$2']}]),
             _ = ets:select_delete(?PROTOCOL_TABLE, [
-                {{'_', #{module => '$1'}}, [{'=:=', '$1', {const, Module}}], [true]}
+                {{'_', #{module => '$1'}}, MatchGuard, [true]}
             ]),
+            lists:foreach(fun notify_compiler_server_removed/1, Purged),
             ok
     end,
     %% BT-3222: Unconditional, not just on an actual match — this is also the
@@ -273,6 +312,55 @@ unregister_protocol(Module) when is_atom(Module) ->
     %% cache entries even when the removed class's own module defined no
     %% protocol.
     invalidate_conforms_cache().
+
+-doc """
+Notify the compiler server of a protocol (re-)registration (BT-3473).
+
+Mirrors `beamtalk_object_class`'s own `register_class/2` notification: a
+fire-and-forget cast, silently dropped if `beamtalk_compiler` is not running
+(non-REPL compilation, test runs, or a deployment without that app). Without
+this, the runtime-seeded (image `recheckImage`) diagnostics path has no way
+to tell a protocol apart from an ordinary class — `Name` reaches the checker
+as a zero-method `ClassInfo` in `class_hierarchy` alone, which defeats the
+nominal-mismatch escape hatch and makes every selector on a
+`Name`-typed receiver look unresolved (the false positives this issue
+tracks). `Info` is threaded through verbatim; `beamtalk-compiler-port`
+degrades gracefully on any field it doesn't recognise.
+""".
+-spec notify_compiler_server(atom(), map()) -> ok.
+notify_compiler_server(Name, Info) ->
+    try
+        beamtalk_compiler_server:register_protocol(Name, Info)
+    catch
+        error:undef ->
+            ok
+    end,
+    ok.
+
+-doc """
+Notify the compiler server that `Name` is no longer a registered protocol
+(BT-3473), mirroring `notify_compiler_server/2`'s degrade-silently contract.
+
+Unlike `notify_compiler_server/2` above, this bypasses
+`beamtalk_compiler_server:remove_protocol/1`'s own exported wrapper in favour
+of a raw `gen_server:cast` naming the process — the same choice
+`beamtalk_class_lifecycle:purge_compiler_cache/1` makes for `remove_class/1`,
+and for the identical reason documented on that function: avoid a
+compile-time dependency in the wrong direction (`beamtalk_runtime` must not
+depend on `beamtalk_compiler`). `register_protocol/1` above already crosses
+that line the same way `beamtalk_object_class`'s own registration path does
+(an earlier, already-accepted precedent this module doesn't re-litigate) —
+but there is no established precedent for doing so on removal, so this
+follows the more careful convention instead of adding a second one.
+""".
+-spec notify_compiler_server_removed(atom()) -> ok.
+notify_compiler_server_removed(Name) ->
+    try
+        gen_server:cast(beamtalk_compiler_server, {remove_protocol, Name})
+    catch
+        _:_ -> ok
+    end,
+    ok.
 
 %%% ============================================================================
 %%% Query API

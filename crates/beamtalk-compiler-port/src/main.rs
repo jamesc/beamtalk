@@ -394,6 +394,118 @@ fn parse_class_hierarchy_from_term(
         .collect()
 }
 
+/// Parse a `required_methods`/`required_class_methods` ETF list
+/// (`beamtalk_protocol_registry:register_protocol/1`'s wire shape —
+/// `[#{selector => atom(), arity => integer()}, ...]`) into
+/// `ProtocolMethodRequirement`s (BT-3473).
+///
+/// Selector/arity only: the live image's ambient protocol cache never carries
+/// the original `::`-annotated parameter/return type text (that lives only in
+/// the protocol's defining source file, which this port doesn't have access
+/// to for a cross-file re-check), so `return_type`/`param_types` are always
+/// `None`. Good enough for the escape hatches that key off protocol *names*
+/// (`is_protocol_type`, DNU suppression via `ClassHierarchy::has_class`) —
+/// see `parse_protocol_info_from_meta_term`'s doc.
+fn parse_protocol_method_requirements(
+    term: Option<&Term>,
+) -> Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolMethodRequirement> {
+    use beamtalk_core::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
+
+    let Some(Term::List(list)) = term else {
+        return vec![];
+    };
+    list.elements
+        .iter()
+        .filter_map(|entry| {
+            let Term::Map(m) = entry else { return None };
+            let selector = map_get(m, "selector").and_then(term_to_atom)?;
+            let arity = map_get(m, "arity").and_then(term_to_usize)?;
+            Some(ProtocolMethodRequirement {
+                selector: ecow::EcoString::from(selector.as_str()),
+                arity,
+                return_type: None,
+                param_types: vec![None; arity],
+            })
+        })
+        .collect()
+}
+
+/// Deserialize a single ambient protocol-registry entry (BT-3473) —
+/// `beamtalk_protocol_registry:register_protocol/1`'s `Info` map, threaded
+/// through `beamtalk_compiler_server`'s `protocols` cache the same way
+/// `class_hierarchy` threads `register_class/2`'s — into a `ProtocolInfo`.
+///
+/// Returns `None` if `term` is not a map.
+fn parse_protocol_info_from_meta_term(
+    protocol_name: &str,
+    term: &Term,
+) -> Option<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo> {
+    use beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo;
+    use beamtalk_core::source_analysis::Span;
+
+    let Term::Map(m) = term else { return None };
+
+    let type_params = map_get(m, "type_params")
+        .map(term_to_atom_list)
+        .unwrap_or_default();
+    // No wire representation for bounds on this channel (BT-3473 scope is
+    // suppressing false positives via name/selector recognition, not full
+    // generic-bounds re-derivation) — unbounded for every type param.
+    let type_param_bounds = vec![None; type_params.len()];
+    let extending = map_get(m, "extending")
+        .and_then(term_to_atom)
+        .and_then(|s| {
+            if s == "undefined" {
+                None
+            } else {
+                Some(ecow::EcoString::from(s.as_str()))
+            }
+        });
+    let methods = parse_protocol_method_requirements(map_get(m, "required_methods"));
+    let class_methods = parse_protocol_method_requirements(map_get(m, "required_class_methods"));
+
+    Some(ProtocolInfo {
+        name: ecow::EcoString::from(protocol_name),
+        type_params,
+        type_param_bounds,
+        extending,
+        methods,
+        class_methods,
+        // Synthetic entry — there is no source span in the live image to
+        // point diagnostics at (mirrors ClassInfo's BEAM-metadata-derived
+        // entries, which carry no span either).
+        span: Span::new(0, 0),
+    })
+}
+
+/// Parse a `protocol_registry` ETF term (`#{atom() => meta_map()}`,
+/// `beamtalk_compiler_server`'s ambient `protocols` cache) into
+/// `Vec<ProtocolInfo>` (BT-3473). Degrades gracefully on malformed entries
+/// (silently skipped), mirroring `parse_class_hierarchy_from_term`.
+fn parse_protocol_registry_from_term(
+    term: &Term,
+) -> Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo> {
+    let Term::Map(m) = term else { return vec![] };
+    m.map
+        .iter()
+        .filter_map(|(name_term, meta_term)| {
+            let protocol_name = term_to_atom(name_term)?;
+            parse_protocol_info_from_meta_term(&protocol_name, meta_term)
+        })
+        .collect()
+}
+
+/// Extract an optional `protocol_registry` field, returning `Vec<ProtocolInfo>`
+/// (BT-3473). Mirrors `extract_class_hierarchy`.
+fn extract_protocol_registry(
+    request: &Map,
+) -> Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo> {
+    match map_get(request, "protocol_registry") {
+        None => vec![],
+        Some(term) => parse_protocol_registry_from_term(term),
+    }
+}
+
 /// Merge a method into a method list, replacing any existing method with the
 /// same selector and kind, else appending it.
 ///
@@ -1228,6 +1340,7 @@ fn parse_and_check_expression(
             parse_diagnostics,
             &known_var_refs,
             pre_class_hierarchy,
+            vec![],
             pre_loaded_aliases,
             diagnostics_overrides(),
         );
@@ -1808,6 +1921,7 @@ fn handle_compile(request: &Map) -> Term {
             parse_diagnostics,
             &[],
             pre_class_hierarchy.clone(),
+            vec![],
             pre_loaded_aliases.clone(),
             diagnostics_overrides(),
         );
@@ -2152,6 +2266,7 @@ fn handle_compile_method(request: &Map) -> Term {
             merged_parse_diags,
             &[],
             pre_class_hierarchy.clone(),
+            vec![],
             pre_loaded_aliases.clone(),
             diagnostics_overrides(),
         );
@@ -2264,6 +2379,19 @@ fn handle_compile_method(request: &Map) -> Term {
 /// class's *new* signature and see the resulting diagnostics located and
 /// severity-tagged (`"expression"` mode only; `"method"` mode stays
 /// class-context-free per the paragraph above).
+///
+/// The optional `protocol_registry` field (BT-3473) rides the same opt-in as
+/// `class_hierarchy` (`beamtalk_compiler_server` threads both together, gated
+/// on the same `class_hierarchy => true` request flag) and carries the live
+/// image's ambient protocol cache. Without it, a protocol registered in
+/// another file reaches `analyse_full` only as a zero-method `ClassInfo` in
+/// `class_hierarchy` (the image's `beamtalk_object_class`/class-registration
+/// path has no concept of "this class is actually a protocol"), which
+/// defeats `is_type_compatible`'s nominal-mismatch escape hatch and makes
+/// every selector on a protocol-typed receiver look unresolved. Supplying
+/// the real protocol names (and their required selectors) lets the existing
+/// BT-2088/BT-3472 filter in `analyse_full` drop the synthetic class entry
+/// the same way it already does for the LSP's `ProjectIndex` path.
 fn handle_diagnostics(request: &Map) -> Term {
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
@@ -2277,6 +2405,7 @@ fn handle_diagnostics(request: &Map) -> Term {
     } else {
         let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
         let pre_class_hierarchy = extract_class_hierarchy(request);
+        let pre_loaded_protocols = extract_protocol_registry(request);
         // BT-2899 (ADR 0108): `known_type_aliases` (the same channel
         // `compile_expression`/`compile_method` accept) so a re-check
         // round trip (`beamtalk_recheck.erl`) resolves `::` annotations
@@ -2290,6 +2419,7 @@ fn handle_diagnostics(request: &Map) -> Term {
             parse_diagnostics,
             &[],
             pre_class_hierarchy,
+            pre_loaded_protocols,
             pre_loaded_aliases,
             diagnostics_overrides(),
         )
@@ -3909,6 +4039,151 @@ mod tests {
                 "diagnostic missing category key: {diag:?}"
             );
         }
+    }
+
+    /// BT-3473: without `protocol_registry`, a runtime-seeded protocol
+    /// reaches `analyse_full` only as a zero-method `class_hierarchy` entry
+    /// (`beamtalk_protocol_registry:create_protocol_class/2`'s actual wire
+    /// shape has no `superclass`/`method_info` — see
+    /// `parse_protocol_info_from_meta_term`'s doc), which defeats the
+    /// BT-2088/BT-3472 nominal-mismatch escape hatch and makes every
+    /// selector on a protocol-typed receiver look unresolved. This proves
+    /// the pre-fix shape actually reproduces both false positives — the
+    /// `TimeoutToken`/`NullTimer` scenario from the issue.
+    #[test]
+    fn diagnostics_class_hierarchy_alone_reproduces_false_protocol_mismatch() {
+        let class_hierarchy_term = Term::from(Map::from([(
+            atom("TimeoutToken"),
+            Term::from(Map::from([
+                (atom("is_sealed"), atom("true")),
+                (atom("is_abstract"), atom("true")),
+            ])),
+        )]));
+
+        let request = Map::from([
+            (atom("command"), atom("diagnostics")),
+            (
+                atom("source"),
+                binary(
+                    "Value subclass: NullTimer\n\
+                     \x20 cancel -> Boolean => false\n\
+                     \x20 isActive -> Boolean => true\n\
+                     \n\
+                     typed Object subclass: Pool\n\
+                     \x20 make -> TimeoutToken => NullTimer new\n\
+                     \x20 use: t :: TimeoutToken -> Boolean => t cancel\n\
+                     \x20 go -> Boolean => self use: NullTimer new\n",
+                ),
+            ),
+            (atom("class_hierarchy"), class_hierarchy_term),
+        ]);
+
+        let response = handle_diagnostics(&request);
+        let messages = diagnostic_messages(&response);
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("declares return type TimeoutToken")),
+            "expected the pre-fix false type mismatch, got: {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|m| m.contains("does not understand")),
+            "expected the pre-fix false Dnu hint, got: {messages:?}"
+        );
+    }
+
+    /// BT-3473: the companion fix to the test above — supplying
+    /// `protocol_registry` alongside `class_hierarchy` lets the existing
+    /// BT-2088/BT-3472 filter in `analyse_full` recognise `TimeoutToken` as
+    /// a protocol (not a plain class) the same way it already does for the
+    /// LSP's `ProjectIndex` path, so `NullTimer`'s structural conformance is
+    /// correctly recognised and neither false positive fires.
+    #[test]
+    fn diagnostics_protocol_registry_suppresses_false_protocol_mismatch() {
+        let class_hierarchy_term = Term::from(Map::from([(
+            atom("TimeoutToken"),
+            Term::from(Map::from([
+                (atom("is_sealed"), atom("true")),
+                (atom("is_abstract"), atom("true")),
+            ])),
+        )]));
+        let protocol_registry_term = Term::from(Map::from([(
+            atom("TimeoutToken"),
+            Term::from(Map::from([
+                (
+                    atom("required_methods"),
+                    Term::from(eetf::List::from(vec![
+                        Term::from(Map::from([
+                            (atom("selector"), atom("cancel")),
+                            (atom("arity"), Term::from(eetf::FixInteger::from(0))),
+                        ])),
+                        Term::from(Map::from([
+                            (atom("selector"), atom("isActive")),
+                            (atom("arity"), Term::from(eetf::FixInteger::from(0))),
+                        ])),
+                    ])),
+                ),
+                (atom("type_params"), Term::from(eetf::List::from(vec![]))),
+                (atom("extending"), atom("undefined")),
+            ])),
+        )]));
+
+        let request = Map::from([
+            (atom("command"), atom("diagnostics")),
+            (
+                atom("source"),
+                binary(
+                    "Value subclass: NullTimer\n\
+                     \x20 cancel -> Boolean => false\n\
+                     \x20 isActive -> Boolean => true\n\
+                     \n\
+                     typed Object subclass: Pool\n\
+                     \x20 make -> TimeoutToken => NullTimer new\n\
+                     \x20 use: t :: TimeoutToken -> Boolean => t cancel\n\
+                     \x20 go -> Boolean => self use: NullTimer new\n",
+                ),
+            ),
+            (atom("class_hierarchy"), class_hierarchy_term),
+            (atom("protocol_registry"), protocol_registry_term),
+        ]);
+
+        let response = handle_diagnostics(&request);
+        let messages = diagnostic_messages(&response);
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("declares return type TimeoutToken")),
+            "NullTimer structurally conforms to TimeoutToken — no nominal mismatch \
+             expected, got: {messages:?}"
+        );
+        assert!(
+            !messages.iter().any(|m| m.contains("does not understand")),
+            "TimeoutToken's required selectors are known — no Dnu hint expected, \
+             got: {messages:?}"
+        );
+    }
+
+    /// Extract every diagnostic's `message` string from a `handle_diagnostics`
+    /// response, for the two BT-3473 tests above.
+    fn diagnostic_messages(response: &Term) -> Vec<String> {
+        let Term::Map(m) = response else {
+            panic!("Expected map response: {response:?}");
+        };
+        let Some(Term::List(diagnostics)) = map_get(m, "diagnostics") else {
+            panic!("Expected diagnostics list: {response:?}");
+        };
+        diagnostics
+            .elements
+            .iter()
+            .map(|diag| {
+                let Term::Map(dm) = diag else {
+                    panic!("Expected diagnostic map, got {diag:?}");
+                };
+                map_get(dm, "message")
+                    .and_then(term_to_string)
+                    .unwrap_or_default()
+            })
+            .collect()
     }
 
     /// ADR 0108 hot-reload re-check trigger (BT-2899): `diagnostics` now
