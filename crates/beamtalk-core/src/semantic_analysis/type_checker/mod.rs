@@ -54,6 +54,7 @@ thread_local! {
 }
 
 mod env_key;
+mod exhaustiveness;
 mod inference;
 mod narrowing;
 pub mod native_type_registry;
