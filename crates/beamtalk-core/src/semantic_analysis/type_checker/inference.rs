@@ -4705,10 +4705,12 @@ impl TypeChecker {
         // param types per member and merge them, instead of falling through
         // to the `Dynamic`-receiver fallback below (which types every block
         // param `Dynamic(UnannotatedParam)`, a reason the BT-1914 lint does
-        // not filter). Returns `None` when no member contributed anything
-        // useful, in which case we fall through to the existing fallback.
+        // not filter). Handles every argument (block and non-block alike),
+        // so it always returns rather than conditionally falling through —
+        // falling through here would re-run `infer_expr` on non-block
+        // arguments already inferred inside it, double-emitting diagnostics.
         if let InferredType::Union { members, .. } = receiver_ty {
-            if let Some(arg_types) = self.resolve_union_block_param_types(
+            return self.resolve_union_block_param_types(
                 members,
                 arguments,
                 selector_name,
@@ -4716,9 +4718,7 @@ impl TypeChecker {
                 env,
                 in_abstract_method,
                 is_class_side_send,
-            ) {
-                return arg_types;
-            }
+            );
         }
 
         // Fast path: receiver must be Known to look up method signatures.
@@ -4873,14 +4873,12 @@ impl TypeChecker {
     /// `Known`-receiver path) and reused verbatim in the returned vector —
     /// they don't depend on which union member resolves the block, so
     /// re-inferring them per member (or in the caller) would double-emit any
-    /// diagnostics their inference produces.
-    ///
-    /// Returns `None` when no block argument could be resolved from any
-    /// member — the caller then falls through to the pre-existing
-    /// `Known`-receiver-only handling (which delegates non-`Known` receivers,
-    /// `Union` included, to [`Self::infer_args_with_dynamic_block_params`]),
-    /// preserving prior behaviour for a union with no block-resolvable
-    /// members. Otherwise returns the final per-argument inferred types.
+    /// diagnostics their inference produces. This includes the common case
+    /// of a `Union` receiver with no block arguments at all (e.g. a plain
+    /// `unionResult includes: x` send): every argument is inferred exactly
+    /// once here, in Phase 1, and Phase 2 below is then a no-op for them.
+    /// Always returns the final per-argument inferred types — never `None`
+    /// — so the caller must not re-infer any argument on top of this.
     #[allow(clippy::too_many_arguments)] // mirrors infer_args_with_block_context's arg count
     #[allow(clippy::too_many_lines)] // per-member resolution + merge adds necessary branches
     fn resolve_union_block_param_types(
@@ -4892,7 +4890,7 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
         is_class_side_send: bool,
-    ) -> Option<Vec<InferredType>> {
+    ) -> Vec<InferredType> {
         // Phase 1 (receiver-independent): infer non-block arguments once so
         // method-local generic params can be resolved from them per member
         // below; block arguments get a placeholder, overwritten in Phase 2.
@@ -4908,7 +4906,6 @@ impl TypeChecker {
         // Per block-argument position: the block param type lists
         // contributed by each participating union member.
         let mut per_position: Vec<Vec<Vec<InferredType>>> = vec![Vec::new(); arguments.len()];
-        let mut any_contribution = false;
 
         for member in members {
             let InferredType::Known {
@@ -4931,9 +4928,20 @@ impl TypeChecker {
             if WellKnownClass::from_str(resolve_name).is_some_and(WellKnownClass::is_nil_class) {
                 continue;
             }
-            if !hierarchy.has_class(resolve_name)
-                || hierarchy.has_instance_dnu_override(resolve_name)
-            {
+            if !hierarchy.has_class(resolve_name) {
+                continue;
+            }
+            // BT-3463 review: branch the DNU-override check on class-side vs
+            // instance-side, mirroring the `find_class_method`/`find_method`
+            // branch immediately below — a class-side-only or
+            // instance-side-only override must only skip the matching send
+            // kind, not both.
+            let has_dnu_override = if is_class_side_send {
+                hierarchy.has_class_dnu_override(resolve_name)
+            } else {
+                hierarchy.has_instance_dnu_override(resolve_name)
+            };
+            if has_dnu_override {
                 continue;
             }
             let method_lookup = if is_class_side_send {
@@ -4982,12 +4990,7 @@ impl TypeChecker {
                     Vec::new()
                 };
                 per_position[i].push(block_param_types);
-                any_contribution = true;
             }
-        }
-
-        if !any_contribution {
-            return None;
         }
 
         // Phase 2: merge each block argument's per-member contributions and
@@ -5015,7 +5018,7 @@ impl TypeChecker {
             }
         }
 
-        Some(arg_types)
+        arg_types
     }
 
     /// Merge per-member block-param-type contributions for a single block

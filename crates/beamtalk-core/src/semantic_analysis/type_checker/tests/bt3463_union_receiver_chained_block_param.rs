@@ -225,3 +225,40 @@ typed Actor subclass: Watcher
         checker.diagnostics()
     );
 }
+
+/// Regression guard (review finding on this PR): a message sent to a
+/// `Union`-typed receiver with *no block argument at all* (e.g. `includes:`)
+/// must not double-infer its non-block arguments. Before this fix,
+/// `resolve_union_block_param_types` only signalled a contribution when a
+/// block argument resolved, so a receiver/selector pair with zero block
+/// arguments always fell through to `infer_args_with_dynamic_block_params`,
+/// which re-ran `infer_expr` on every argument already inferred once inside
+/// `resolve_union_block_param_types` — double-emitting any diagnostic that
+/// argument's inference produces (here, BT-1914 on the unannotated `flag`
+/// parameter).
+#[test]
+fn union_receiver_non_block_send_does_not_double_infer_arguments() {
+    let source = r"
+typed Object subclass: RestartEntry
+  label => 'entry'
+
+typed Actor subclass: Watcher
+  state: restartTimestamps :: Dictionary(Symbol, List(RestartEntry)) = #{}
+
+  hasEntry: name :: Symbol flag: flag -> Boolean =>
+    (self.restartTimestamps at: name ifAbsent: [#()]) includes: flag
+";
+    let module = parse_source(source);
+    let hierarchy = build_hierarchy(&module);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let warnings = dynamic_in_typed_class_warnings(checker.diagnostics());
+    assert_eq!(
+        warnings.len(),
+        1,
+        "the unannotated `flag` argument should fire the Dynamic-in-typed-class \
+         warning exactly once (not zero, not twice from double-inference); got: {:?}",
+        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
