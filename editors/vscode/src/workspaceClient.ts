@@ -56,6 +56,20 @@ export interface MethodInfo {
    * case (see `findMethodDeclaration` in `textUtils.ts`).
    */
   line?: number;
+  /**
+   * BT-3444: the xref tag verbatim (`indexed` | `synthetic` |
+   * `unindexed_runtime_fun`) — the same fact the LiveView IDE method list
+   * already badges (BT-2714). A `synthetic` method (e.g. a `Value
+   * subclass:`'s compiler-generated field accessor) has no user-written
+   * declaration anywhere in `classInfo.source_file`, so it renders with a
+   * distinct icon/tooltip in the sidebar and never wires up
+   * `beamtalk.navigateToMethod` (there is nothing to navigate to).
+   */
+  source_status?: "indexed" | "synthetic" | "unindexed_runtime_fun";
+  /** BT-3444: compiler-derived signature, resolved only for `synthetic` rows. */
+  signature?: string;
+  /** BT-3444: compiler-derived doc, resolved only for `synthetic` rows. */
+  doc?: string;
 }
 
 export interface StateVarInfo {
@@ -349,6 +363,9 @@ export class WorkspaceClient {
         selector: string;
         side: "instance" | "class";
         line?: number | null;
+        source_status?: "indexed" | "synthetic" | "unindexed_runtime_fun";
+        signature?: string | null;
+        doc?: string | null;
       }>;
       state_vars?: Array<{ name: string; line?: number | null }>;
     };
@@ -358,7 +375,15 @@ export class WorkspaceClient {
       // BT-3439: `line` is `null` on the wire (a class predating this field,
       // or ClassBuilder-built) — normalize to `undefined` so callers can use
       // a single `??`/optional-chaining check for "no real line available".
-      methods: methodsRaw.map((m) => ({ ...m, line: m.line ?? undefined })),
+      // BT-3444: `signature`/`doc` are `null` on the wire for every
+      // non-`synthetic` row (they're resolved for synthetic rows only) —
+      // same normalization.
+      methods: methodsRaw.map((m) => ({
+        ...m,
+        line: m.line ?? undefined,
+        signature: m.signature ?? undefined,
+        doc: m.doc ?? undefined,
+      })),
       stateVars: stateVarsRaw.map((v) => ({ name: v.name, line: v.line ?? undefined })),
     };
   }

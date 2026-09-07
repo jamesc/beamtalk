@@ -446,6 +446,16 @@ export class WorkspaceTreeDataProvider
       return item;
     }
     if (element.kind === "method-item") {
+      // BT-3444: a `synthetic` method has no declaration anywhere in
+      // source, so the LSP-hover / doc-comment lookups below would only
+      // ever fail (there is nothing at any position to hover over or read
+      // a `///` comment from) — go straight to the wire-supplied
+      // signature/doc (BT-2735's synthetic-only resolution) instead of
+      // paying for two guaranteed-empty lookups.
+      if (element.method.source_status === "synthetic") {
+        item.tooltip = this._syntheticMethodTooltip(element.method);
+        return item;
+      }
       item.tooltip =
         (await this._lspHoverTooltip(
           element.classInfo.source_file,
@@ -604,6 +614,24 @@ export class WorkspaceTreeDataProvider
     return new vscode.MarkdownString(
       `**${method.selector}**\n\n_${method.side === "instance" ? "instance-side" : "class-side"}_`
     );
+  }
+
+  /**
+   * BT-3444: tooltip for a `synthetic` method (a compiler-generated row with
+   * no user-written source anywhere). Built entirely from the `methods` ws
+   * op's wire-supplied `signature`/`doc` (resolved server-side for
+   * `synthetic` rows only, BT-2735) — never a file read or LSP round trip,
+   * since there is no declaration in source to read one from.
+   */
+  private _syntheticMethodTooltip(method: MethodInfo): vscode.MarkdownString {
+    const md = new vscode.MarkdownString(`**${method.signature ?? method.selector}**`);
+    md.appendMarkdown(
+      `\n\n_${method.side === "instance" ? "instance-side" : "class-side"} · compiler-generated, no source_`
+    );
+    if (method.doc) {
+      md.appendMarkdown(`\n\n${method.doc}`);
+    }
+    return md;
   }
 
   /**
@@ -814,6 +842,20 @@ export class WorkspaceTreeDataProvider
 
   private _methodItem(node: MethodItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.method.selector, vscode.TreeItemCollapsibleState.None);
+    // BT-3444: a `synthetic` method (e.g. a `Value subclass:`'s
+    // compiler-generated field accessor) has no user-written declaration
+    // anywhere in the class's source file, unlike every other row here —
+    // badge it visibly distinct (gear icon + muted description) and never
+    // wire up "Go to Definition", which would otherwise fail to find the
+    // selector in source and surface a "not found" message (BT-3439's
+    // navigateToMethod). Mirrors the LiveView IDE method list's `derived`
+    // badge for the same `source_status = synthetic` fact (BT-2714).
+    if (node.method.source_status === "synthetic") {
+      item.iconPath = new vscode.ThemeIcon("gear");
+      item.description = "compiler-generated";
+      item.contextValue = "method-item-synthetic";
+      return item;
+    }
     item.iconPath = new vscode.ThemeIcon("symbol-method");
     const hasSource = !!node.classInfo.source_file && node.classInfo.source_file !== "unknown";
     item.contextValue = hasSource ? "method-item" : "method-item-no-source";

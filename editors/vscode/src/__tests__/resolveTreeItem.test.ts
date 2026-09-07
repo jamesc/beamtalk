@@ -251,4 +251,52 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
       expect.anything()
     );
   });
+
+  describe("BT-3444: synthetic (compiler-generated) methods", () => {
+    const syntheticNode: MethodItemNode = {
+      kind: "method-item",
+      method: {
+        name: "withBalance:",
+        selector: "withBalance:",
+        side: "instance",
+        line: 2, // BT-3439 line: the `state: balance` slot declaration, not this method
+        source_status: "synthetic",
+        signature: "withBalance: aValue -> Account",
+        doc: "Compiler-derived copy-setter for slot `balance`.",
+      },
+      classInfo,
+    };
+
+    it("badges the tree item as synthetic without a navigable command", () => {
+      const item = provider.getTreeItem(syntheticNode);
+      expect(item.contextValue).toBe("method-item-synthetic");
+      expect(item.command).toBeUndefined();
+      expect((item.iconPath as { id: string }).id).toBe("gear");
+    });
+
+    it("builds the tooltip from the wire-supplied signature/doc, never a file read or LSP round trip", async () => {
+      const resolved = await provider.resolveTreeItem(blankItem(), syntheticNode, noToken);
+      const tooltip = (resolved?.tooltip as { value: string }).value;
+      expect(tooltip).toContain("withBalance: aValue -> Account");
+      expect(tooltip).toContain("compiler-generated");
+      expect(tooltip).toContain("Compiler-derived copy-setter for slot `balance`.");
+      expect(openTextDocumentMock).not.toHaveBeenCalled();
+      expect(executeCommandMock).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the bare selector when no signature was resolved", async () => {
+      const node: MethodItemNode = {
+        kind: "method-item",
+        method: {
+          name: "withBalance:",
+          selector: "withBalance:",
+          side: "instance",
+          source_status: "synthetic",
+        },
+        classInfo,
+      };
+      const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
+      expect((resolved?.tooltip as { value: string }).value).toContain("withBalance:");
+    });
+  });
 });
