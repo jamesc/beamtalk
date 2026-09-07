@@ -1686,14 +1686,20 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         if let Some(path) = self.resolve_path_for_uri(&uri) {
+            // Recorded *before* `update_file` so a concurrently dispatched
+            // `did_close` for the same path (a close immediately followed by
+            // a reopen) can observe "this path is open again" as early as
+            // possible — see `did_close`'s own comment for why this specific
+            // ordering, paired with the lock it holds there, is what makes
+            // the reopen race-proof rather than just less likely.
+            {
+                let mut versions = self.versions.lock().expect("versions lock poisoned");
+                versions.insert(path.clone(), params.text_document.version);
+            }
             if uri.scheme() != "beamtalk-stdlib" {
                 // Stdlib files are pre-loaded at startup; skip re-indexing.
                 let mut svc = self.service.lock().expect("service lock poisoned");
-                svc.update_file(path.clone(), params.text_document.text);
-            }
-            {
-                let mut versions = self.versions.lock().expect("versions lock poisoned");
-                versions.insert(path, params.text_document.version);
+                svc.update_file(path, params.text_document.text);
             }
             self.publish_diagnostics(&uri).await;
         }
@@ -1751,7 +1757,18 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         if let Some(path) = self.resolve_path_for_uri(&uri) {
-            if uri.scheme() != "beamtalk-stdlib" {
+            // True when a `did_open`/`did_change` for this same path (a
+            // close immediately followed by a reopen, or an edit landing
+            // mid-close) raced in and won — see the version snapshot/compare
+            // below. When it does, this whole handler must back off
+            // entirely: not touch `svc`, not remove the now-current
+            // `versions` entry, and not clear the reopened document's
+            // diagnostics at the bottom.
+            let mut reopened = false;
+            if uri.scheme() == "beamtalk-stdlib" {
+                let mut versions = self.versions.lock().expect("versions lock poisoned");
+                versions.remove(&path);
+            } else {
                 // Startup preload (BT-2027) indexes every file under each
                 // root's `src/`/`test/`/`_build/deps/*/src` regardless of
                 // whether it is open, so the index is workspace-wide, not
@@ -1763,6 +1780,15 @@ impl LanguageServer for Backend {
                 // on close, so disk is the truth). Files preload never
                 // covered — scratch files outside those dirs, untitled
                 // buffers, files deleted from disk — are still removed.
+                //
+                // Snapshotted *before* any of the (I/O-bearing) work below,
+                // so it reflects this document's version at the instant we
+                // started closing it — not a later one a racing
+                // `did_open`/`did_change` on the same path might install.
+                let version_before = {
+                    let versions = self.versions.lock().expect("versions lock poisoned");
+                    versions.get(&path).copied()
+                };
                 let covered = {
                     let roots = self
                         .workspace_roots
@@ -1770,16 +1796,43 @@ impl LanguageServer for Backend {
                         .expect("workspace_roots lock poisoned");
                     preload_covers(path.as_std_path(), &roots)
                 };
-                let mut svc = self.service.lock().expect("service lock poisoned");
-                let keep = covered || svc.project_index().is_stdlib_file(&path);
-                match keep.then(|| fs::read_to_string(&path).ok()).flatten() {
-                    Some(content) => svc.update_file(path.clone(), content),
-                    None => svc.remove_file(&path),
+                let is_stdlib = {
+                    let svc = self.service.lock().expect("service lock poisoned");
+                    svc.project_index().is_stdlib_file(&path)
+                };
+                let keep = covered || is_stdlib;
+                // Read with no lock held — `fs::read_to_string` is not
+                // instantaneous, and a reopen can be dispatched concurrently
+                // and complete while we're still reading. Applying our now-
+                // stale disk snapshot afterwards would silently clobber that
+                // fresher in-memory content.
+                let disk_content = keep.then(|| fs::read_to_string(&path).ok()).flatten();
+
+                // Guard against exactly that race: hold `versions` for the
+                // whole check-then-act block below, so nothing can observe or
+                // act on a half-applied state. If the version we snapshotted
+                // above no longer matches, some other handler for this same
+                // path ran (and, being strictly later, is authoritative) —
+                // back off. Note `contains_key` alone can't distinguish this
+                // from the ordinary case (the entry we're *about* to remove
+                // is of course still present); only a value change proves a
+                // race happened.
+                let mut versions = self.versions.lock().expect("versions lock poisoned");
+                reopened = versions.get(&path).copied() != version_before;
+                if reopened {
+                    // Leave `svc` and this `versions` entry alone — they
+                    // belong to whatever raced in.
+                } else {
+                    let mut svc = self.service.lock().expect("service lock poisoned");
+                    match disk_content {
+                        Some(content) => svc.update_file(path.clone(), content),
+                        None => svc.remove_file(&path),
+                    }
+                    versions.remove(&path);
                 }
             }
-            {
-                let mut versions = self.versions.lock().expect("versions lock poisoned");
-                versions.remove(&path);
+            if reopened {
+                return;
             }
             self.clear_dirty(&path);
             {
@@ -6576,6 +6629,131 @@ mod tests {
             "a file outside preload coverage must still be dropped on close"
         );
         drop(svc);
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// Regression for the review Blocker on `did_close_keeps_preloaded_file_indexed_from_disk`'s
+    /// fix: `did_close`'s disk read is not instantaneous, so a `did_open` for the
+    /// same path racing in and completing *during* that read must not have its
+    /// fresher content clobbered by the close's now-stale disk snapshot once the
+    /// read finally returns.
+    ///
+    /// Forces the interleaving deterministically (rather than hoping a timing
+    /// race reproduces) by backing `target.bt` with a FIFO: `did_close`'s
+    /// `fs::read_to_string` blocks on it until this test explicitly writes and
+    /// closes the write end, giving a fixed point at which to run the
+    /// concurrent `did_open` and observe its effect *before* letting the close
+    /// proceed.
+    #[tokio::test]
+    async fn did_close_racing_reopen_does_not_clobber_reopened_content() {
+        let temp = unique_temp_dir("beamtalk_lsp_close_reopen_race");
+        let project_root = temp.join("project");
+        let src_dir = project_root.join("src");
+        fs::create_dir_all(&src_dir).expect("create src dir");
+
+        let target_path = src_dir.join("target.bt");
+        let mkfifo_status = std::process::Command::new("mkfifo")
+            .arg(&target_path)
+            .status()
+            .expect("run mkfifo");
+        assert!(
+            mkfifo_status.success(),
+            "mkfifo must succeed on this platform"
+        );
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend
+            .initialize(InitializeParams {
+                workspace_folders: Some(vec![tower_lsp::lsp_types::WorkspaceFolder {
+                    uri: Url::from_directory_path(&project_root).expect("root uri"),
+                    name: "project".to_string(),
+                }]),
+                ..InitializeParams::default()
+            })
+            .await
+            .expect("initialize ok");
+
+        let target_uri = Url::from_file_path(&target_path).expect("path -> uri");
+        // Open with version 1 — did_close will snapshot this version before
+        // blocking on the FIFO read below.
+        real_did_open(backend, target_uri.clone(), "Object subclass: Original").await;
+
+        std::thread::scope(|scope| {
+            let close_handle = scope.spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("build runtime")
+                    .block_on(backend.did_close(DidCloseTextDocumentParams {
+                        text_document: tower_lsp::lsp_types::TextDocumentIdentifier {
+                            uri: target_uri.clone(),
+                        },
+                    }));
+            });
+
+            // Give did_close a moment to reach the (blocking) FIFO read before
+            // the reopen below — best-effort; the FIFO itself is what makes
+            // the interleaving deterministic (the reopen below completing does
+            // not depend on this sleep, only on happening before the write
+            // further down unblocks the read).
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            // The reopen: new content, new version, racing did_close's blocked
+            // read. Run on a real, separate OS thread (not just a joined
+            // future) so this genuinely executes concurrently with did_close's
+            // blocking read rather than only after it, matching the real
+            // multi-threaded tokio runtime `#[tokio::main]` uses.
+            let reopen_handle = scope.spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("build runtime")
+                    .block_on(backend.did_open(DidOpenTextDocumentParams {
+                        text_document: tower_lsp::lsp_types::TextDocumentItem {
+                            uri: target_uri.clone(),
+                            language_id: "beamtalk".to_string(),
+                            version: 2,
+                            text: "Object subclass: Reopened".to_string(),
+                        },
+                    }));
+            });
+            reopen_handle.join().expect("reopen thread panicked");
+
+            // Reopen has now fully applied (versions=2, svc has `Reopened`).
+            // Unblock did_close's read: write something to the FIFO — its
+            // content must never reach `svc`, since the reopen above is
+            // strictly newer.
+            fs::write(&target_path, "Object subclass: StaleFromDisk")
+                .expect("write unblocks the FIFO reader");
+
+            close_handle.join().expect("close thread panicked");
+        });
+
+        let engine_utf8 = Utf8PathBuf::from_path_buf(target_path.clone()).expect("utf8 path");
+        let svc = backend.service.lock().expect("service lock poisoned");
+        assert!(
+            svc.project_index().hierarchy().has_class("Reopened"),
+            "the racing reopen's content must survive"
+        );
+        assert!(
+            !svc.project_index().hierarchy().has_class("StaleFromDisk"),
+            "did_close's stale disk read must not clobber the racing reopen"
+        );
+        assert!(
+            !svc.project_index().hierarchy().has_class("Original"),
+            "the pre-race content must be gone — the reopen replaced it"
+        );
+        drop(svc);
+
+        let versions = backend.versions.lock().expect("versions lock poisoned");
+        assert_eq!(
+            versions.get(&engine_utf8).copied(),
+            Some(2),
+            "did_close must not remove the version entry a racing reopen installed"
+        );
+        drop(versions);
 
         let _ = fs::remove_dir_all(&temp);
     }
