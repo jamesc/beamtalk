@@ -18,7 +18,7 @@
 
 use proptest::prelude::*;
 
-use super::{LanguageService, Position, SimpleLanguageService};
+use super::super::{LanguageService, Position, SimpleLanguageService};
 use camino::Utf8PathBuf;
 
 // ============================================================================

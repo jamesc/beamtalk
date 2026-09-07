@@ -16,6 +16,7 @@ pub(super) use crate::ast::{
     ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
 };
 pub(super) use crate::semantic_analysis::class_hierarchy::DeclaredType;
+pub(super) use crate::semantic_analysis::class_hierarchy::MethodInfo;
 pub(super) use crate::source_analysis::{DiagnosticCategory, Span};
 
 pub(super) fn span() -> Span {
@@ -375,6 +376,34 @@ pub(super) fn make_method(selector: &str, body: Vec<Expression>) -> MethodDefini
 
 pub(super) fn eco_string(s: &str) -> ecow::EcoString {
     ecow::EcoString::from(s)
+}
+
+/// Helper: build a `MethodInfo` with the given param types and return type.
+///
+/// Shared by the `inference_method_local_params` and `inference_generics_bt2023`
+/// feature modules (BT-3450) — both exercise `TypeChecker::infer_method_local_params`
+/// against fixture `MethodInfo`s.
+pub(super) fn method_info(
+    selector: &str,
+    param_types: Vec<Option<&str>>,
+    return_type: Option<&str>,
+) -> MethodInfo {
+    let arity = param_types.len();
+    MethodInfo {
+        selector: selector.into(),
+        arity,
+        kind: MethodKind::Primary,
+        defined_in: "TestClass".into(),
+        is_sealed: false,
+        is_internal: false,
+        spawns_block: false,
+        return_type: return_type.map(DeclaredType::parse),
+        param_types: param_types
+            .into_iter()
+            .map(|p| p.map(DeclaredType::parse))
+            .collect(),
+        doc: None,
+    }
 }
 
 /// Build a `GenResult(T, E)` class in the hierarchy for generic tests.

@@ -17,7 +17,7 @@
 
 use std::collections::BTreeSet;
 
-use super::{reindent_method_source, unparse_method};
+use super::super::{reindent_method_source, unparse_method};
 use crate::ast::Module;
 use crate::source_analysis::corpus_test_support::{
     corpus_files, corpus_present, enumerate_methods, read_corpus_file,
