@@ -7413,7 +7413,7 @@ fn bt3415_registering_the_same_subexpression_twice_is_never_silent() {
         .expect("one statement")
         .expression;
     let mut generator = CoreErlangGenerator::new("bt3415_double_registration");
-    let mut scope = super::super::PrecompiledScope::new();
+    let mut scope = super::super::sequencing::PrecompiledScope::new();
     generator
         .register_precompiled_subexpr(&mut scope, expr, Document::Str("'a'"), false)
         .expect("first registration succeeds");

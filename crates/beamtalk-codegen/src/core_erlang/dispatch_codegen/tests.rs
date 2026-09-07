@@ -1,11 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{
-    class_self_send_reflective_primitive, is_character_typed_receiver,
-    is_class_auto_export_selector,
-};
+use super::{class_self_send_reflective_primitive, is_class_auto_export_selector};
 use crate::core_erlang::CoreErlangGenerator;
+use crate::core_erlang::expr_shape::is_character_typed_receiver;
 use beamtalk_core::ast::{
     Expression, Identifier, KeywordPart, Literal, MessageSelector, MethodDefinition, TypeAnnotation,
 };

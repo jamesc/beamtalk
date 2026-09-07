@@ -1876,9 +1876,9 @@ impl CoreErlangGenerator {
         // visible at the same nesting level as everything else in `docs` —
         // and is caught by the `class_var_version_before_cascade` snapshot
         // above, taken before this call runs.
-        let (receiver_prelude, mut receiver_docs) =
-            self.thread_subexprs(std::slice::from_ref(&underlying_receiver), "Recv")?;
-        let receiver_value_doc = receiver_docs.remove(0);
+        let mut seq = self.sequence_call(std::slice::from_ref(&underlying_receiver), "Recv")?;
+        let receiver_value_doc = seq.next();
+        let receiver_prelude = seq.into_prelude();
         let mut docs: Vec<Document<'static>> = Vec::new();
         if !receiver_prelude.is_empty() {
             docs.push(self.threaded_prelude_doc(&receiver_prelude));
@@ -2784,9 +2784,9 @@ impl CoreErlangGenerator {
                     leaf::var(val_var),
                 ));
             } else {
-                let (prelude, mut arg_docs) =
-                    self.thread_subexprs(std::slice::from_ref(&arg), "CascadeArg")?;
-                splits.push((prelude, arg_docs.remove(0)));
+                let mut seq = self.sequence_call(std::slice::from_ref(&arg), "CascadeArg")?;
+                let doc = seq.next();
+                splits.push((seq.into_prelude(), doc));
             }
         }
 
