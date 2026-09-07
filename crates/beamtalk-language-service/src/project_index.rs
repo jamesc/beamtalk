@@ -33,9 +33,9 @@ use std::collections::{HashMap, HashSet};
 ///
 /// The language service has no manifest parser of its own — parsing
 /// `beamtalk.toml` is deliberately `beamtalk-lsp`'s concern, not
-/// `beamtalk-core`'s (mirrors why `beamtalk-lsp/src/server.rs`'s dependency
-/// preload is filesystem-driven rather than manifest-driven — see that
-/// module's `dependency_src_dirs` doc). `beamtalk-lsp` reads each workspace
+/// `beamtalk-core`'s (mirrors why `beamtalk-lsp/src/server/config.rs`'s
+/// dependency preload is filesystem-driven rather than manifest-driven —
+/// see that module's `dependency_src_dirs` doc). `beamtalk-lsp` reads each workspace
 /// root's real `beamtalk.toml` `[package] name` and passes it in via
 /// [`ProjectIndex::set_root_packages`] (BT-2960) — [`Self::package_for_alias_stamping`]
 /// consults that map first, so two distinct real packages opened as sibling
@@ -58,8 +58,8 @@ const CURRENT_PROJECT_PACKAGE_MARKER: &str = "$project";
 pub const STDLIB_PACKAGE_MARKER: &str = "stdlib";
 
 /// Derives the dependency package name for `file` from its path (BT-2951):
-/// mirrors `beamtalk-lsp/src/server.rs`'s `dependency_src_dirs` filesystem
-/// convention — any file under a `_build/deps/<name>/src/` directory belongs
+/// mirrors `beamtalk-lsp/src/server/config.rs`'s `dependency_src_dirs`
+/// filesystem convention — any file under a `_build/deps/<name>/src/` directory belongs
 /// to dependency `<name>`. `None` for a file with no such path segment
 /// (a same-project file).
 fn dependency_package_for_path(file: &Utf8Path) -> Option<EcoString> {

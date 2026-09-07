@@ -18,7 +18,7 @@
 //! * A REPL meta-command is dispatched in
 //!   `crates/beamtalk-cli/src/commands/repl/mod.rs` but is not referenced
 //!   in the parity doc.
-//! * An LSP capability is enabled in `crates/beamtalk-lsp/src/server.rs`
+//! * An LSP capability is enabled in `crates/beamtalk-lsp/src/server/`
 //!   but is not referenced in the parity doc.
 //!
 //! Run via `just check-surface-drift` — the binary discovers the repo
@@ -44,7 +44,14 @@ const REPL_DISPATCH: &str = "crates/beamtalk-cli/src/commands/repl/mod.rs";
 /// makes `code.repl_meta` reflect "the completion list" side of the parity
 /// doc check and the dispatch-coverage check (`check_drift` rule 4b) below.
 const REPL_COMMANDS_TABLE: &str = "crates/beamtalk-cli/src/commands/repl/commands.rs";
-const LSP_SERVER: &str = "crates/beamtalk-lsp/src/server.rs";
+/// Display-only: where an LSP capability lives, for error messages. The
+/// `ServerCapabilities { .. }` literal and the `BEAMTALK_LSP_COMMANDS` array
+/// it references now live in two different files under this tree — see
+/// `LSP_SERVER_CAPABILITIES` and `LSP_SERVER_COMMANDS`, which `scan_lsp_caps`
+/// reads and concatenates before scanning.
+const LSP_SERVER: &str = "crates/beamtalk-lsp/src/server/";
+const LSP_SERVER_CAPABILITIES: &str = "crates/beamtalk-lsp/src/server/handlers/lifecycle.rs";
+const LSP_SERVER_COMMANDS: &str = "crates/beamtalk-lsp/src/server/commands.rs";
 
 fn main() -> ExitCode {
     match run() {
@@ -220,7 +227,7 @@ impl ParityDoc {
                 // capability → doc) sees the full set; without it only the
                 // first code span would be picked up via `parse_cell`, and
                 // the later spans would silently drift out of sync with the
-                // capabilities advertised in `crates/beamtalk-lsp/src/server.rs`.
+                // capabilities advertised in `crates/beamtalk-lsp/src/server/`.
                 for code in extract_all_code(&cells[4]) {
                     let trimmed = code.trim_start();
                     if trimmed.starts_with("executeCommand:")
@@ -449,7 +456,10 @@ impl CodeInventory {
         inv.scan_mcp_tools(&repo_root.join(MCP_SERVER))?;
         inv.scan_repl_meta(&repo_root.join(REPL_COMMANDS_TABLE))?;
         inv.scan_repl_command_dispatch(&repo_root.join(REPL_DISPATCH))?;
-        inv.scan_lsp_caps(&repo_root.join(LSP_SERVER))?;
+        inv.scan_lsp_caps(
+            &repo_root.join(LSP_SERVER_CAPABILITIES),
+            &repo_root.join(LSP_SERVER_COMMANDS),
+        )?;
         // Sanity-check: if any scanner found zero items, the heuristic may
         // have broken. Fail loudly rather than producing false-positive drift
         // errors for every op/tool.
@@ -549,10 +559,18 @@ impl CodeInventory {
         Ok(())
     }
 
-    fn scan_lsp_caps(&mut self, path: &Path) -> Result<(), String> {
-        let text = fs::read_to_string(path)
-            .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-        extract_lsp_caps(&text, &mut self.lsp_caps);
+    /// `extract_lsp_caps` expects one text blob containing both the
+    /// `ServerCapabilities { .. }` literal and the `BEAMTALK_LSP_COMMANDS`
+    /// array it resolves `executeCommand:` entries against. Those two now
+    /// live in separate files (`caps_path`, `commands_path`), so read and
+    /// concatenate them before scanning.
+    fn scan_lsp_caps(&mut self, caps_path: &Path, commands_path: &Path) -> Result<(), String> {
+        let caps_text = fs::read_to_string(caps_path)
+            .map_err(|e| format!("failed to read {}: {e}", caps_path.display()))?;
+        let commands_text = fs::read_to_string(commands_path)
+            .map_err(|e| format!("failed to read {}: {e}", commands_path.display()))?;
+        let combined = format!("{caps_text}\n{commands_text}");
+        extract_lsp_caps(&combined, &mut self.lsp_caps);
         Ok(())
     }
 }
