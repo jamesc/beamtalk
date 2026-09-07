@@ -1000,9 +1000,17 @@ handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From,
     %% unconditional overwrite here would silently drop stdlib aliases from
     %% that caller's more complete list. This is purely a backstop for a
     %% caller that doesn't bother passing one.
+    %%
+    %% BT-3477: the ambient protocol cache rides the same unconditional
+    %% injection as `class_hierarchy` — see `handle_call({compile, ...})`'s
+    %% identical addition below for why this can't stay opt-in the way
+    %% diagnostics/3's is.
     Options1 = maps:merge(
         #{known_type_aliases => alias_source_list(State#state.aliases)},
-        Options#{class_hierarchy => State#state.classes}
+        Options#{
+            class_hierarchy => State#state.classes,
+            protocol_registry => State#state.protocols
+        }
     ),
     Result = beamtalk_compiler_port:compile_expression(
         State#state.port, Source, ModuleName, KnownVars, Options1
@@ -1013,7 +1021,10 @@ handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, 
     %% `compile_expression` clause above — same reasoning applies here.
     Options1 = maps:merge(
         #{known_type_aliases => alias_source_list(State#state.aliases)},
-        Options#{class_hierarchy => State#state.classes}
+        Options#{
+            class_hierarchy => State#state.classes,
+            protocol_registry => State#state.protocols
+        }
     ),
     Result = beamtalk_compiler_port:compile_expression_trace(
         State#state.port, Source, ModuleName, KnownVars, Options1
@@ -1031,15 +1042,24 @@ handle_call({compile, Source, Options}, _From, State) ->
     %% the alias table it's checking against actually includes earlier-turn
     %% aliases — this is the fix for the BT-2912 concrete repro (`type Point
     %% = Integer` then `Actor subclass: Point` in a later turn/`:load`).
+    %%
+    %% BT-3477: the ambient protocol cache rides the same unconditional
+    %% injection as `class_hierarchy` above — a live `compile` of a class
+    %% whose method signature references a cross-file protocol needs it for
+    %% the same nominal-mismatch/Dnu escape hatch BT-3473 wired for
+    %% diagnostics/3.
     Options1 = Options#{
         class_hierarchy => State#state.classes,
+        protocol_registry => State#state.protocols,
         known_type_aliases => alias_source_list(State#state.aliases)
     },
     Result = do_compile(State#state.port, Source, Options1),
     {reply, Result, State};
 handle_call({compile_method, ClassSource, MethodSource, Options}, _From, State) ->
+    %% BT-3477: see `handle_call({compile, ...})`'s identical comment above.
     Options1 = Options#{
         class_hierarchy => State#state.classes,
+        protocol_registry => State#state.protocols,
         known_type_aliases => alias_source_list(State#state.aliases)
     },
     Result = do_compile_method(State#state.port, ClassSource, MethodSource, Options1),
@@ -1459,14 +1479,23 @@ do_compile(Port, Source, Options) ->
             0 -> Request4;
             _ -> Request4#{class_hierarchy => Classes}
         end,
+    %% BT-3477: likewise inject the ambient protocol cache, mirroring
+    %% `Classes' above — see handle_call({compile, ...})'s doc for why this
+    %% is unconditional (not opt-in like diagnostics/3's).
+    Protocols = maps:get(protocol_registry, Options, #{}),
+    Request6 =
+        case map_size(Protocols) of
+            0 -> Request5;
+            _ -> Request5#{protocol_registry => Protocols}
+        end,
     %% ADR 0108 hot-reload re-check trigger (BT-2899): likewise inject the
     %% ambient session alias cache — see handle_call({compile, ...})'s doc
     %% for why this is unconditional (not opt-in like diagnostics/3's).
     Aliases = maps:get(known_type_aliases, Options, []),
     RequestFinal =
         case Aliases of
-            [] -> Request5;
-            _ -> Request5#{known_type_aliases => Aliases}
+            [] -> Request6;
+            _ -> Request6#{known_type_aliases => Aliases}
         end,
     case send_port_request(Port, RequestFinal, 30000) of
         {ok, Response} ->
@@ -1535,13 +1564,20 @@ do_compile_method(Port, ClassSource, MethodSource, Options) ->
             0 -> Request4;
             _ -> Request4#{class_hierarchy => Classes}
         end,
+    %% BT-3477: see do_compile/3's identical addition.
+    Protocols = maps:get(protocol_registry, Options, #{}),
+    Request6 =
+        case map_size(Protocols) of
+            0 -> Request5;
+            _ -> Request5#{protocol_registry => Protocols}
+        end,
     %% ADR 0108 hot-reload re-check trigger (BT-2899): see do_compile/3's
     %% identical addition.
     Aliases = maps:get(known_type_aliases, Options, []),
     RequestFinal =
         case Aliases of
-            [] -> Request5;
-            _ -> Request5#{known_type_aliases => Aliases}
+            [] -> Request6;
+            _ -> Request6#{known_type_aliases => Aliases}
         end,
     case send_port_request(Port, RequestFinal, 30000) of
         {ok, Response} ->

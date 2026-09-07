@@ -340,6 +340,16 @@ protocol_cache_test_() ->
             "diagnostics/3 threads protocol_registry so a runtime-seeded protocol "
             "class entry doesn't shadow the protocol",
             fun api_diagnostics_protocol_registry_suppresses_false_protocol_mismatch/0
+        },
+        {
+            "compile/2 threads protocol_registry so a runtime-seeded protocol "
+            "class entry doesn't shadow the protocol (BT-3477)",
+            fun api_compile_protocol_registry_suppresses_false_protocol_mismatch/0
+        },
+        {
+            "compile_method/3 threads protocol_registry so a runtime-seeded protocol "
+            "class entry doesn't shadow the protocol (BT-3477)",
+            fun api_compile_method_protocol_registry_suppresses_false_protocol_mismatch/0
         }
     ]}.
 
@@ -507,6 +517,125 @@ any_message_contains(Diagnostics, Needle) ->
         fun(D) -> binary:match(maps:get(message, D), Needle) =/= nomatch end,
         Diagnostics
     ).
+
+%% Test-only helper: does any plain-binary warning (`compile`/`compile_method`'s
+%% `warnings` field — unlike `diagnostics`' diagnostic maps above) contain
+%% `Needle`?
+any_warning_contains(Warnings, Needle) ->
+    lists:any(fun(W) -> binary:match(W, Needle) =/= nomatch end, Warnings).
+
+%% BT-3477: the `compile/2` sibling of
+%% `api_diagnostics_protocol_registry_suppresses_false_protocol_mismatch` above
+%% — `compile/2` (unlike `diagnostics/3`) runs codegen, which enforces BT-1666's
+%% one-class-per-file rule, so `NullTimer` can't be defined inline alongside
+%% `Pool` the way the diagnostics test does it. Instead `NullTimer` is seeded
+%% into the ambient class cache with a real `method_info` (the wire shape a
+%% class compiled in an earlier REPL turn/another file actually has), standing
+%% in for the cross-file class the issue describes; `compile/2` threads
+%% `class_hierarchy`/`protocol_registry` unconditionally (see
+%% `handle_call({compile, ...})`'s doc), so no opt-in flag is needed here.
+api_compile_protocol_registry_suppresses_false_protocol_mismatch() ->
+    ok = beamtalk_compiler_server:clear_classes(),
+    Source = <<
+        "typed Object subclass: Pool\n"
+        "  make -> TimeoutToken => NullTimer new\n"
+        "  use: t :: TimeoutToken -> Boolean => t cancel\n"
+        "  go -> Boolean => self use: NullTimer new\n"
+    >>,
+    beamtalk_compiler_server:register_class('NullTimer', #{
+        superclass => 'Value',
+        is_sealed => false,
+        is_abstract => false,
+        is_value => true,
+        is_typed => false,
+        fields => [],
+        field_types => #{},
+        method_info => #{
+            cancel => #{arity => 0, param_types => [], return_type => 'Boolean'},
+            isActive => #{arity => 0, param_types => [], return_type => 'Boolean'}
+        },
+        class_method_info => #{},
+        class_variables => []
+    }),
+    beamtalk_compiler_server:register_class('TimeoutToken', #{
+        is_sealed => true, is_abstract => true
+    }),
+
+    {ok, #{warnings := WarningsBefore}} = beamtalk_compiler_server:compile(Source, #{
+        module_name => <<"bt@pool">>
+    }),
+    ?assert(any_warning_contains(WarningsBefore, <<"declares return type TimeoutToken">>)),
+    ?assert(any_warning_contains(WarningsBefore, <<"does not understand">>)),
+
+    beamtalk_compiler_server:register_protocol('TimeoutToken', #{
+        name => 'TimeoutToken',
+        required_methods => [
+            #{selector => cancel, arity => 0},
+            #{selector => isActive, arity => 0}
+        ],
+        type_params => [],
+        extending => undefined
+    }),
+
+    {ok, #{warnings := WarningsAfter}} = beamtalk_compiler_server:compile(Source, #{
+        module_name => <<"bt@pool">>
+    }),
+    ?assertNot(any_warning_contains(WarningsAfter, <<"declares return type TimeoutToken">>)),
+    ?assertNot(any_warning_contains(WarningsAfter, <<"does not understand">>)).
+
+%% BT-3477: the `compile_method/3` sibling of the test above — the live-image
+%% write surface (IDE save / `compile:source:` / REPL `>>`) hits the same
+%% false positive when patching a method onto an already-installed class.
+%% `ClassSource` carries the pre-fix type-mismatch (`make`); the patched
+%% `MethodSource` carries the pre-fix Dnu (`use:`) — both re-checked together
+%% on the merged module.
+api_compile_method_protocol_registry_suppresses_false_protocol_mismatch() ->
+    ok = beamtalk_compiler_server:clear_classes(),
+    ClassSource = <<
+        "typed Object subclass: Pool\n"
+        "  make -> TimeoutToken => NullTimer new\n"
+    >>,
+    MethodSource = <<"use: t :: TimeoutToken -> Boolean =>\n  t cancel">>,
+    beamtalk_compiler_server:register_class('NullTimer', #{
+        superclass => 'Value',
+        is_sealed => false,
+        is_abstract => false,
+        is_value => true,
+        is_typed => false,
+        fields => [],
+        field_types => #{},
+        method_info => #{
+            cancel => #{arity => 0, param_types => [], return_type => 'Boolean'},
+            isActive => #{arity => 0, param_types => [], return_type => 'Boolean'}
+        },
+        class_method_info => #{},
+        class_variables => []
+    }),
+    beamtalk_compiler_server:register_class('TimeoutToken', #{
+        is_sealed => true, is_abstract => true
+    }),
+
+    {ok, #{warnings := WarningsBefore}} = beamtalk_compiler_server:compile_method(
+        ClassSource, MethodSource, #{module_name => <<"bt@pool">>, is_class_method => false}
+    ),
+    ?assert(any_warning_contains(WarningsBefore, <<"declares return type TimeoutToken">>)),
+    ?assert(any_warning_contains(WarningsBefore, <<"does not understand">>)),
+
+    beamtalk_compiler_server:register_protocol('TimeoutToken', #{
+        name => 'TimeoutToken',
+        required_methods => [
+            #{selector => cancel, arity => 0},
+            #{selector => isActive, arity => 0}
+        ],
+        type_params => [],
+        extending => undefined
+    }),
+
+    {ok, #{warnings := WarningsAfter}} = beamtalk_compiler_server:compile_method(
+        ClassSource, MethodSource, #{module_name => <<"bt@pool">>, is_class_method => false}
+    ),
+    ?assertNot(any_warning_contains(WarningsAfter, <<"declares return type TimeoutToken">>)),
+    ?assertNot(any_warning_contains(WarningsAfter, <<"does not understand">>)).
 
 %%% ---------------------------------------------------------------
 %%% ADR 0108 hot-reload re-check trigger (BT-2899): ambient alias cache
