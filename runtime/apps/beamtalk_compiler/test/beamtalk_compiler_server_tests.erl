@@ -323,14 +323,12 @@ remove_class_when_down() ->
 
 protocol_cache_test_() ->
     {setup, fun start_compiler/0, fun stop_compiler/1, [
-        {"register_protocol → protocol visible in get_protocols",
-            fun register_protocol_visible/0},
+        {"register_protocol → protocol visible in get_protocols", fun register_protocol_visible/0},
         {"register_protocol twice → overwrites", fun register_protocol_overwrites/0},
         {"clear_classes → protocol cache emptied too", fun clear_classes_empties_protocols/0},
         {"register_protocol when server down → no crash", fun register_protocol_when_down/0},
         {"remove_protocol → protocol no longer in cache", fun remove_protocol_removes/0},
-        {"remove_protocol leaves other protocols untouched",
-            fun remove_protocol_leaves_others/0},
+        {"remove_protocol leaves other protocols untouched", fun remove_protocol_leaves_others/0},
         {"remove_protocol of unregistered protocol is a no-op",
             fun remove_protocol_unknown_is_noop/0},
         {"remove_protocol when server down → no crash", fun remove_protocol_when_down/0},
@@ -338,9 +336,11 @@ protocol_cache_test_() ->
             fun protocol_registry_register_notifies_compiler_server/0},
         {"beamtalk_protocol_registry:unregister_protocol/1 notifies the ambient cache",
             fun protocol_registry_unregister_notifies_compiler_server/0},
-        {"diagnostics/3 threads protocol_registry so a runtime-seeded protocol "
+        {
+            "diagnostics/3 threads protocol_registry so a runtime-seeded protocol "
             "class entry doesn't shadow the protocol",
-            fun api_diagnostics_protocol_registry_suppresses_false_protocol_mismatch/0}
+            fun api_diagnostics_protocol_registry_suppresses_false_protocol_mismatch/0
+        }
     ]}.
 
 %% BT-3473: exercises the real cross-app entry point

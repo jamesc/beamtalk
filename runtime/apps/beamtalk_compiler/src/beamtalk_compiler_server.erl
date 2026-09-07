@@ -1095,8 +1095,11 @@ handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
     {Classes, Aliases, Protocols} =
         case maps:get(class_hierarchy, Options, false) of
             true ->
-                {State#state.classes, alias_source_list(State#state.aliases),
-                    State#state.protocols};
+                {
+                    State#state.classes,
+                    alias_source_list(State#state.aliases),
+                    State#state.protocols
+                };
             false ->
                 {#{}, [], #{}};
             Overlay when is_map(Overlay) ->
