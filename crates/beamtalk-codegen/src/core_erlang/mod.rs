@@ -80,6 +80,10 @@
 //! - [`intrinsics`] - Compiler intrinsics (block evaluation, `ProtoObject`, `Object`)
 //! - [`operators`] - Binary operator compilation (arithmetic, comparison, string concat)
 //! - [`block_analysis`] - Block mutation analysis for control flow
+//! - [`sequencing`] - BT-3457: sub-expression sequencing primitives shared across
+//!   dispatch, operator, and expression codegen (ADR 0118)
+//! - [`expr_shape`] - BT-3457: expression-shape predicates (`is_field_assignment`,
+//!   `is_class_var_assignment`, …) shared across the whole crate
 //! - [`util`] - Utility functions (indentation, name conversions)
 //!
 //! # References
@@ -93,6 +97,7 @@ mod class_builder_source;
 mod control_flow;
 mod dispatch_codegen;
 pub mod erlang_types;
+mod expr_shape;
 mod expressions;
 mod gen_server;
 mod intrinsics;
@@ -100,6 +105,7 @@ mod operators;
 pub mod primitive_bindings;
 mod primitives;
 pub mod selector_mangler;
+mod sequencing;
 mod spec_codegen;
 mod supervisor_codegen;
 mod threaded_expr;
@@ -1504,163 +1510,6 @@ impl ValueTypeContext {
     }
 }
 
-/// One entry of [`CoreErlangGenerator::precompiled_subexprs`] — see that
-/// field's doc comment.
-struct PrecompiledSubexpr {
-    /// The already-compiled value to substitute for the node.
-    doc: Document<'static>,
-    /// Whether a hit should wrap `doc` in the BT-940 source-line
-    /// annotation `generate_expression` gives every closed message send —
-    /// `true` only for a producer's own result reference (which never
-    /// went through `generate_expression`), so a sequenced self-send
-    /// renders byte-identically to the planner's substitution; `false` for
-    /// a sequencing temp or a value `generate_expression` already built.
-    ///
-    /// INVARIANT: an `annotate: true` doc must be a *closed* expression —
-    /// `( doc -| [line] )` around an open `let … in ` chain is invalid Core
-    /// Erlang (the hazard the `MessageSend` arm's open-scope guard exists
-    /// for). Today the only `true` registration is
-    /// `CoreErlangGenerator::self_dispatch_result_value`'s fixed
-    /// `call 'erlang':'element'(1, _SD)` shape; `take_precompiled_subexpr`
-    /// additionally re-applies that arm's guard as defence in depth.
-    annotate: bool,
-    /// Set on the first hit; a never-hit entry is an invariant violation
-    /// reported by `finish_precompiled_scope`.
-    used: bool,
-}
-
-/// The set of [`CoreErlangGenerator::precompiled_subexprs`] entries one
-/// sequencing pass registered — returned by the pass, handed back to
-/// [`CoreErlangGenerator::finish_precompiled_scope`] once the parent has
-/// been compiled. `#[must_use]`: dropping it leaks entries into the next
-/// statement and skips the consulted-exactly check.
-#[must_use = "hand this back to finish_precompiled_scope once the parent is compiled"]
-pub(super) struct PrecompiledScope(Vec<Span>);
-
-impl PrecompiledScope {
-    pub(super) fn new() -> Self {
-        Self(Vec::new())
-    }
-}
-
-impl CoreErlangGenerator {
-    /// ADR 0118 phase 1a (BT-3415): records `expr`'s already-sequenced
-    /// value so the enclosing parent's ordinary compile substitutes it —
-    /// see [`Self::precompiled_subexprs`]. Keyed by the paren-unwrapped
-    /// span: `generate_expression`'s `Parenthesized` arm recurses, and
-    /// every `unwrap_parens()`-first path reaches the inner node, so the
-    /// inner span is the one every route converges on.
-    ///
-    /// `annotate` may be `true` only for a closed expression document —
-    /// see [`PrecompiledSubexpr::annotate`]'s invariant.
-    ///
-    /// # Errors
-    ///
-    /// Two live scopes registering the same node would let the inner
-    /// `finish_precompiled_scope` remove the entry out from under the
-    /// outer one, whose consulted-exactly check would then pass vacuously
-    /// while the parent compiled the child afresh — a double dispatch with
-    /// no error. A duplicate registration is therefore a hard
-    /// [`CodeGenError::Internal`] in every build profile (a diagnostic in
-    /// `codegen_warnings` would be discarded by the CLI's build path).
-    pub(super) fn register_precompiled_subexpr(
-        &mut self,
-        scope: &mut PrecompiledScope,
-        expr: &Expression,
-        doc: Document<'static>,
-        annotate: bool,
-    ) -> Result<()> {
-        let span = expr.unwrap_parens().span();
-        if self.precompiled_subexprs.contains_key(&span) {
-            return Err(CodeGenError::Internal(format!(
-                "ADR 0118 sequencing: sub-expression at {span:?} registered twice"
-            )));
-        }
-        self.precompiled_subexprs.insert(
-            span,
-            PrecompiledSubexpr {
-                doc,
-                annotate,
-                used: false,
-            },
-        );
-        scope.0.push(span);
-        Ok(())
-    }
-
-    /// ADR 0118 phase 5b (BT-3422): `true` if `expr` (any nesting of
-    /// parens) was already registered by an enclosing `sequence_children`
-    /// call — a pure, non-consuming check for a caller deciding whether to
-    /// re-thread `expr` itself (wrong: double-dispatch) or read the
-    /// substitution back via the ordinary `expression_doc`/
-    /// `take_precompiled_subexpr` path.
-    pub(super) fn precompiled_subexprs_contains(&self, expr: &Expression) -> bool {
-        self.precompiled_subexprs
-            .contains_key(&expr.unwrap_parens().span())
-    }
-
-    /// The `generate_expression` entry hook for
-    /// [`Self::precompiled_subexprs`]: `Some(doc)` if `expr` was
-    /// pre-sequenced, marking the entry consulted.
-    fn take_precompiled_subexpr(&mut self, expr: &Expression) -> Option<Document<'static>> {
-        if self.precompiled_subexprs.is_empty() {
-            return None;
-        }
-        let span = expr.span();
-        let (doc, annotate) = {
-            let entry = self.precompiled_subexprs.get_mut(&span)?;
-            entry.used = true;
-            (entry.doc.clone(), entry.annotate)
-        };
-        // Never annotate while an open let-chain is in flight — an
-        // annotated open chain is invalid Core Erlang (BT-940). Defence in
-        // depth over the closed-doc invariant on `PrecompiledSubexpr::annotate`.
-        if annotate && self.can_annotate_closed_expression() {
-            if let Some(line_num) = self.span_to_line(span) {
-                return Some(self.annotate_with_line(doc, line_num));
-            }
-        }
-        Some(doc)
-    }
-
-    /// BT-940: whether the expression just produced may be wrapped in a
-    /// source-line annotation — only a CLOSED expression can be; an open
-    /// let-chain (a class-method send, a class-var assignment, a
-    /// direct-params list op) ends in a dangling `in ` that `( expr -|
-    /// [annotation] )` would break. The single predicate behind
-    /// `generate_expression`'s `MessageSend` arm and
-    /// [`Self::take_precompiled_subexpr`], so a new open-scope side channel
-    /// only has to be added here.
-    fn can_annotate_closed_expression(&self) -> bool {
-        !self.direct_params_do_open_chain && self.direct_params_list_op_result.is_none()
-    }
-
-    /// Removes every entry `scope` registered, once the parent compile
-    /// that was meant to consult them is done. An entry that was never
-    /// consulted means that compile bypassed `generate_expression` for the
-    /// child — its prelude already ran (or its temp is already bound) but
-    /// the parent compiled the child afresh, so a state-effecting child
-    /// would dispatch twice: an internal error, never a silent drop.
-    pub(super) fn finish_precompiled_scope(&mut self, scope: PrecompiledScope) -> Result<()> {
-        let mut unused = Vec::new();
-        for span in scope.0 {
-            if let Some(entry) = self.precompiled_subexprs.remove(&span) {
-                if !entry.used {
-                    unused.push(span);
-                }
-            }
-        }
-        if let Some(span) = unused.first() {
-            return Err(CodeGenError::Internal(format!(
-                "ADR 0118 sequencing: a pre-sequenced sub-expression at {span:?} was never \
-                 substituted by its parent's compile (the parent's codegen path bypasses \
-                 generate_expression for that child)"
-            )));
-        }
-        Ok(())
-    }
-}
-
 // Core Erlang code generator.
 //
 // This is the main code generator that coordinates compilation of Beamtalk
@@ -1955,8 +1804,10 @@ pub struct CoreErlangGenerator {
     /// consumers this used to run alongside (`hoisted_self_send_results`/
     /// `hoisted_field_reads`), so this is now the ONLY substitution
     /// mechanism a `threaded_expression`/`thread_ahead` caller relies on.
-    precompiled_subexprs:
-        std::collections::HashMap<beamtalk_core::source_analysis::Span, PrecompiledSubexpr>,
+    precompiled_subexprs: std::collections::HashMap<
+        beamtalk_core::source_analysis::Span,
+        sequencing::PrecompiledSubexpr,
+    >,
     /// BT-845/BT-860: Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     source_path: Option<String>,

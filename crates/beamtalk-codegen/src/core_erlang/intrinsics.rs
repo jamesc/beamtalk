@@ -266,8 +266,8 @@ impl CoreErlangGenerator {
             self.generate_block_value_call(receiver, &[])?
         } else {
             // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
-            let (preamble, mut docs) = self.thread_subexprs(&[receiver], "ValRecv")?;
-            let recv_doc = docs.remove(0);
+            let mut seq = self.sequence_call(&[receiver], "ValRecv")?;
+            let recv_doc = seq.next();
             let recv_var = self.fresh_temp_var("ValRecv");
             // BT-2914: arity-discriminate before applying — a Tier 2
             // (stateful) zero-arg block is an arity-1 fun whose `StateAcc`
@@ -304,7 +304,7 @@ impl CoreErlangGenerator {
                 leaf::var(recv_var),
                 ", 'value', []) end end end",
             ];
-            self.close_prelude(&preamble, call_doc, "ValRes")
+            seq.close(self, call_doc, "ValRes")
         };
         Ok(Some(doc))
     }
@@ -882,8 +882,9 @@ impl CoreErlangGenerator {
         prefix: &str,
         parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
-        let (prelude, mut docs) = self.thread_subexprs(&[receiver], prefix)?;
-        let code = docs.remove(0);
+        let mut seq = self.sequence_call(&[receiver], prefix)?;
+        let code = seq.next();
+        let prelude = seq.into_prelude();
         if !prelude.is_empty() {
             parts.push(self.threaded_prelude_doc(&prelude));
         }
@@ -916,8 +917,9 @@ impl CoreErlangGenerator {
                 " in ",
             ]);
         } else {
-            let (prelude, mut docs) = self.thread_subexprs(&[arg], prefix)?;
-            let code = docs.remove(0);
+            let mut seq = self.sequence_call(&[arg], prefix)?;
+            let code = seq.next();
+            let prelude = seq.into_prelude();
             if !prelude.is_empty() {
                 parts.push(self.threaded_prelude_doc(&prelude));
             }
@@ -1733,14 +1735,14 @@ impl CoreErlangGenerator {
         // BT-412: `class` (unary, well-known) returns class as first-class object.
         if matches!(selector.well_known(), Some(WellKnownSelector::Class)) {
             // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
-            let (preamble, mut docs) = self.thread_subexprs(&[receiver], "Obj")?;
-            let recv_doc = docs.remove(0);
+            let mut seq = self.sequence_call(&[receiver], "Obj")?;
+            let recv_doc = seq.next();
             let call_doc = docvec![
                 "call 'beamtalk_primitive':'class_of_object'(",
                 recv_doc,
                 ")",
             ];
-            return Ok(Some(self.close_prelude(&preamble, call_doc, "ClassRes")));
+            return Ok(Some(seq.close(self, call_doc, "ClassRes")));
         }
 
         // BT-2073: `perform:` family routes through the `WellKnownSelector` enum;
@@ -1750,11 +1752,11 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::PerformWithArgs) => {
                 debug_assert_eq!(arguments.len(), 2);
                 // BT-1942: Hoist open-scope receiver + args (e.g. class method self-sends).
-                let (preamble, mut docs) =
-                    self.thread_subexprs(&[receiver, &arguments[0], &arguments[1]], "Perf")?;
-                let recv_doc = docs.remove(0);
-                let sel_doc = docs.remove(0);
-                let args_doc = docs.remove(0);
+                let mut seq =
+                    self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "Perf")?;
+                let recv_doc = seq.next();
+                let sel_doc = seq.next();
+                let args_doc = seq.next();
                 let call_doc = docvec![
                     "call 'beamtalk_message_dispatch':'send'(",
                     recv_doc,
@@ -1764,18 +1766,18 @@ impl CoreErlangGenerator {
                     args_doc,
                     ")",
                 ];
-                Ok(Some(self.close_prelude(&preamble, call_doc, "PerfRes")))
+                Ok(Some(seq.close(self, call_doc, "PerfRes")))
             }
             // BT-1664: Execute a class method in the caller's process,
             // bypassing the class object's gen_server.
             Some(WellKnownSelector::PerformLocallyWithArgs) => {
                 debug_assert_eq!(arguments.len(), 2);
                 // BT-1942: Hoist open-scope receiver + args (e.g. class method self-sends).
-                let (preamble, mut docs) =
-                    self.thread_subexprs(&[receiver, &arguments[0], &arguments[1]], "PerfLoc")?;
-                let recv_doc = docs.remove(0);
-                let sel_doc = docs.remove(0);
-                let args_doc = docs.remove(0);
+                let mut seq =
+                    self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "PerfLoc")?;
+                let recv_doc = seq.next();
+                let sel_doc = seq.next();
+                let args_doc = seq.next();
                 let call_doc = docvec![
                     "call 'beamtalk_object_class':'local_call'(",
                     recv_doc,
@@ -1785,15 +1787,14 @@ impl CoreErlangGenerator {
                     args_doc,
                     ")",
                 ];
-                Ok(Some(self.close_prelude(&preamble, call_doc, "PerfLocRes")))
+                Ok(Some(seq.close(self, call_doc, "PerfLocRes")))
             }
             Some(WellKnownSelector::Perform) => {
                 debug_assert_eq!(arguments.len(), 1);
                 // BT-1942: Hoist open-scope receiver + selector arg.
-                let (preamble, mut docs) =
-                    self.thread_subexprs(&[receiver, &arguments[0]], "Perf")?;
-                let recv_doc = docs.remove(0);
-                let sel_doc = docs.remove(0);
+                let mut seq = self.sequence_call(&[receiver, &arguments[0]], "Perf")?;
+                let recv_doc = seq.next();
+                let sel_doc = seq.next();
                 let call_doc = docvec![
                     "call 'beamtalk_message_dispatch':'send'(",
                     recv_doc,
@@ -1801,7 +1802,7 @@ impl CoreErlangGenerator {
                     sel_doc,
                     ", [])",
                 ];
-                Ok(Some(self.close_prelude(&preamble, call_doc, "PerfRes")))
+                Ok(Some(seq.close(self, call_doc, "PerfRes")))
             }
             _ => Ok(None),
         }
@@ -1868,8 +1869,8 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::IsNil) => {
                 debug_assert!(arguments.is_empty());
                 // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
-                let (preamble, mut docs) = self.thread_subexprs(&[receiver], "Obj")?;
-                let recv_doc = docs.remove(0);
+                let mut seq = self.sequence_call(&[receiver], "Obj")?;
+                let recv_doc = seq.next();
                 let recv_var = self.fresh_temp_var("Obj");
                 let call_doc = docvec![
                     "let ",
@@ -1880,13 +1881,13 @@ impl CoreErlangGenerator {
                     leaf::var(recv_var),
                     " of <'nil'> when 'true' -> 'true' <_> when 'true' -> 'false' end",
                 ];
-                Ok(Some(self.close_prelude(&preamble, call_doc, "IsNilRes")))
+                Ok(Some(seq.close(self, call_doc, "IsNilRes")))
             }
             Some(WellKnownSelector::NotNil) => {
                 debug_assert!(arguments.is_empty());
                 // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
-                let (preamble, mut docs) = self.thread_subexprs(&[receiver], "Obj")?;
-                let recv_doc = docs.remove(0);
+                let mut seq = self.sequence_call(&[receiver], "Obj")?;
+                let recv_doc = seq.next();
                 let recv_var = self.fresh_temp_var("Obj");
                 let call_doc = docvec![
                     "let ",
@@ -1897,7 +1898,7 @@ impl CoreErlangGenerator {
                     leaf::var(recv_var),
                     " of <'nil'> when 'true' -> 'false' <_> when 'true' -> 'true' end",
                 ];
-                Ok(Some(self.close_prelude(&preamble, call_doc, "NotNilRes")))
+                Ok(Some(seq.close(self, call_doc, "NotNilRes")))
             }
             Some(WellKnownSelector::IfNil) => {
                 debug_assert_eq!(arguments.len(), 1);
@@ -1918,10 +1919,9 @@ impl CoreErlangGenerator {
                     }
                 }
                 // BT-1942: Hoist open-scope receiver/block (e.g. class method self-sends).
-                let (preamble, mut docs) =
-                    self.thread_subexprs(&[receiver, &arguments[0]], "IfNil")?;
-                let recv_doc = docs.remove(0);
-                let block_doc = docs.remove(0);
+                let mut seq = self.sequence_call(&[receiver, &arguments[0]], "IfNil")?;
+                let recv_doc = seq.next();
+                let block_doc = seq.next();
                 let recv_var = self.fresh_temp_var("Obj");
                 let block_var = self.fresh_temp_var("NilBlk");
                 let call_doc = docvec![
@@ -1941,7 +1941,7 @@ impl CoreErlangGenerator {
                     leaf::var(recv_var),
                     " end",
                 ];
-                Ok(Some(self.close_prelude(&preamble, call_doc, "IfNilRes")))
+                Ok(Some(seq.close(self, call_doc, "IfNilRes")))
             }
             Some(WellKnownSelector::IfNotNil) => {
                 debug_assert_eq!(arguments.len(), 1);
@@ -1972,10 +1972,9 @@ impl CoreErlangGenerator {
                 // If the block has 0 parameters, don't pass the receiver (avoids badarity)
                 // BT-1942: Hoist open-scope receiver/block (e.g. class method self-sends).
                 let block_takes_arg = validate_if_not_nil_block(&arguments[0], selector_name)?;
-                let (preamble, mut docs) =
-                    self.thread_subexprs(&[receiver, &arguments[0]], "IfNotNil")?;
-                let recv_doc = docs.remove(0);
-                let block_doc = docs.remove(0);
+                let mut seq = self.sequence_call(&[receiver, &arguments[0]], "IfNotNil")?;
+                let recv_doc = seq.next();
+                let block_doc = seq.next();
                 let recv_var = self.fresh_temp_var("Obj");
                 let block_var = self.fresh_temp_var("NotNilBlk");
                 let apply = not_nil_apply(&block_var, &recv_var, block_takes_arg);
@@ -1994,7 +1993,7 @@ impl CoreErlangGenerator {
                     apply,
                     " end",
                 ];
-                Ok(Some(self.close_prelude(&preamble, call_doc, "IfNotNilRes")))
+                Ok(Some(seq.close(self, call_doc, "IfNotNilRes")))
             }
             Some(WellKnownSelector::IfNilIfNotNil) => {
                 debug_assert_eq!(arguments.len(), 2);
@@ -2023,11 +2022,11 @@ impl CoreErlangGenerator {
                 // If the notNil block has 0 parameters, don't pass the receiver
                 // BT-1942: Hoist open-scope sub-expressions (e.g. class method self-sends).
                 let block_takes_arg = validate_if_not_nil_block(&arguments[1], selector_name)?;
-                let (preamble, mut docs) =
-                    self.thread_subexprs(&[receiver, &arguments[0], &arguments[1]], "IfNilNotNil")?;
-                let recv_doc = docs.remove(0);
-                let nil_doc = docs.remove(0);
-                let not_nil_doc = docs.remove(0);
+                let mut seq =
+                    self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "IfNilNotNil")?;
+                let recv_doc = seq.next();
+                let nil_doc = seq.next();
+                let not_nil_doc = seq.next();
                 let recv_var = self.fresh_temp_var("Obj");
                 let nil_var = self.fresh_temp_var("NilBlk");
                 let not_nil_var = self.fresh_temp_var("NotNilBlk");
@@ -2053,11 +2052,7 @@ impl CoreErlangGenerator {
                     apply,
                     " end",
                 ];
-                Ok(Some(self.close_prelude(
-                    &preamble,
-                    call_doc,
-                    "IfNilNotNilRes",
-                )))
+                Ok(Some(seq.close(self, call_doc, "IfNilNotNilRes")))
             }
             Some(WellKnownSelector::IfNotNilIfNil) => {
                 debug_assert_eq!(arguments.len(), 2);
@@ -2086,11 +2081,11 @@ impl CoreErlangGenerator {
                 // If the notNil block has 0 parameters, don't pass the receiver
                 // BT-1942: Hoist open-scope sub-expressions (e.g. class method self-sends).
                 let block_takes_arg = validate_if_not_nil_block(&arguments[0], selector_name)?;
-                let (preamble, mut docs) =
-                    self.thread_subexprs(&[receiver, &arguments[0], &arguments[1]], "IfNotNilNil")?;
-                let recv_doc = docs.remove(0);
-                let not_nil_doc = docs.remove(0);
-                let nil_doc = docs.remove(0);
+                let mut seq =
+                    self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "IfNotNilNil")?;
+                let recv_doc = seq.next();
+                let not_nil_doc = seq.next();
+                let nil_doc = seq.next();
                 let recv_var = self.fresh_temp_var("Obj");
                 let not_nil_var = self.fresh_temp_var("NotNilBlk");
                 let nil_var = self.fresh_temp_var("NilBlk");
@@ -2116,11 +2111,7 @@ impl CoreErlangGenerator {
                     apply,
                     " end",
                 ];
-                Ok(Some(self.close_prelude(
-                    &preamble,
-                    call_doc,
-                    "IfNotNilNilRes",
-                )))
+                Ok(Some(seq.close(self, call_doc, "IfNotNilNilRes")))
             }
             // Not a nil-protocol intrinsic — let the caller continue.
             _ => Ok(None),
@@ -2157,9 +2148,9 @@ impl CoreErlangGenerator {
         }
         debug_assert_eq!(arguments.len(), 1);
         // BT-1942: Hoist open-scope receiver + message (e.g. class method self-sends).
-        let (preamble, mut docs) = self.thread_subexprs(&[receiver, &arguments[0]], "Err")?;
-        let recv_doc = docs.remove(0);
-        let msg_doc = docs.remove(0);
+        let mut seq = self.sequence_call(&[receiver, &arguments[0]], "Err")?;
+        let recv_doc = seq.next();
+        let msg_doc = seq.next();
         let recv_var = self.fresh_temp_var("Obj");
         let msg_var = self.fresh_temp_var("Msg");
         let class_var = self.fresh_temp_var("Class");
@@ -2193,7 +2184,7 @@ impl CoreErlangGenerator {
             leaf::var(err1),
             ")",
         ];
-        Ok(Some(self.close_prelude(&preamble, call_doc, "ErrRes")))
+        Ok(Some(seq.close(self, call_doc, "ErrRes")))
     }
 
     /// Generates code for object identity and representation methods.
@@ -2213,8 +2204,8 @@ impl CoreErlangGenerator {
         if matches!(selector.well_known(), Some(WellKnownSelector::Hash)) {
             debug_assert!(arguments.is_empty());
             // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
-            let (preamble, mut docs) = self.thread_subexprs(&[receiver], "Obj")?;
-            let recv_doc = docs.remove(0);
+            let mut seq = self.sequence_call(&[receiver], "Obj")?;
+            let recv_doc = seq.next();
             let recv_var = self.fresh_temp_var("Obj");
             let call_doc = docvec![
                 "let ",
@@ -2225,7 +2216,7 @@ impl CoreErlangGenerator {
                 leaf::var(recv_var),
                 ")",
             ];
-            return Ok(Some(self.close_prelude(&preamble, call_doc, "HashRes")));
+            return Ok(Some(seq.close(self, call_doc, "HashRes")));
         }
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
@@ -2235,9 +2226,9 @@ impl CoreErlangGenerator {
                     // method self-send) so the mutated ClassVarsN binding
                     // propagates upward — `close_prelude` splices it ahead of
                     // the identity return.
-                    let (preamble, mut docs) = self.thread_subexprs(&[receiver], "Yourself")?;
-                    let recv_doc = docs.remove(0);
-                    Ok(Some(self.close_prelude(&preamble, recv_doc, "YourselfRes")))
+                    let mut seq = self.sequence_call(&[receiver], "Yourself")?;
+                    let recv_doc = seq.next();
+                    Ok(Some(seq.close(self, recv_doc, "YourselfRes")))
                 }
                 // BT-477: printString removed as intrinsic — now uses polymorphic
                 // dispatch via Object >> printString and per-class overrides.
@@ -2289,8 +2280,8 @@ impl CoreErlangGenerator {
             }
 
             // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
-            let (preamble, mut docs) = self.thread_subexprs(&[receiver], "FNames")?;
-            let recv_doc = docs.remove(0);
+            let mut seq = self.sequence_call(&[receiver], "FNames")?;
+            let recv_doc = seq.next();
             let receiver_var = self.fresh_var("Receiver");
             let pid_var = self.fresh_var("Pid");
 
@@ -2315,7 +2306,7 @@ impl CoreErlangGenerator {
                 leaf::var(pid_var),
                 ", 'fieldNames', []) end",
             ];
-            return Ok(Some(self.close_prelude(&preamble, call_doc, "FNamesRes")));
+            return Ok(Some(seq.close(self, call_doc, "FNamesRes")));
         }
         match selector {
             MessageSelector::Keyword(_) => {
@@ -2324,10 +2315,9 @@ impl CoreErlangGenerator {
                 if matches!(selector.well_known(), Some(WellKnownSelector::RespondsTo)) {
                     debug_assert_eq!(arguments.len(), 1);
                     // BT-1942: Hoist open-scope receiver + selector (e.g. class method self-sends).
-                    let (preamble, mut docs) =
-                        self.thread_subexprs(&[receiver, &arguments[0]], "RespTo")?;
-                    let recv_doc = docs.remove(0);
-                    let sel_doc = docs.remove(0);
+                    let mut seq = self.sequence_call(&[receiver, &arguments[0]], "RespTo")?;
+                    let recv_doc = seq.next();
+                    let sel_doc = seq.next();
                     let receiver_var = self.fresh_var("Receiver");
                     let selector_var = self.fresh_var("Selector");
 
@@ -2346,7 +2336,7 @@ impl CoreErlangGenerator {
                         leaf::var(selector_var),
                         ")",
                     ];
-                    return Ok(Some(self.close_prelude(&preamble, call_doc, "RespToRes")));
+                    return Ok(Some(seq.close(self, call_doc, "RespToRes")));
                 }
 
                 // BT-2073: `fieldAt:` and `fieldAt:put:` route via the enum so
@@ -2380,10 +2370,9 @@ impl CoreErlangGenerator {
                         }
 
                         // BT-1942: Hoist open-scope receiver + name (e.g. class method self-sends).
-                        let (preamble, mut docs) =
-                            self.thread_subexprs(&[receiver, &arguments[0]], "FAt")?;
-                        let recv_doc = docs.remove(0);
-                        let name_doc = docs.remove(0);
+                        let mut seq = self.sequence_call(&[receiver, &arguments[0]], "FAt")?;
+                        let recv_doc = seq.next();
+                        let name_doc = seq.next();
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let pid_var = self.fresh_var("Pid");
@@ -2454,7 +2443,7 @@ impl CoreErlangGenerator {
                             leaf::var(error_hint),
                             ") end end",
                         ];
-                        Ok(Some(self.close_prelude(&preamble, call_doc, "FAtRes")))
+                        Ok(Some(seq.close(self, call_doc, "FAtRes")))
                     }
                     Some(WellKnownSelector::FieldAtPut) => {
                         debug_assert_eq!(arguments.len(), 2);
@@ -2501,11 +2490,11 @@ impl CoreErlangGenerator {
                         }
 
                         // BT-1942: Hoist open-scope receiver + name + value (e.g. class method self-sends).
-                        let (preamble, mut docs) = self
-                            .thread_subexprs(&[receiver, &arguments[0], &arguments[1]], "FAtPut")?;
-                        let recv_doc = docs.remove(0);
-                        let name_doc = docs.remove(0);
-                        let value_doc = docs.remove(0);
+                        let mut seq = self
+                            .sequence_call(&[receiver, &arguments[0], &arguments[1]], "FAtPut")?;
+                        let recv_doc = seq.next();
+                        let name_doc = seq.next();
+                        let value_doc = seq.next();
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let value_var = self.fresh_var("Value");
@@ -2571,7 +2560,7 @@ impl CoreErlangGenerator {
                             leaf::var(error_hint),
                             ") end",
                         ];
-                        Ok(Some(self.close_prelude(&preamble, call_doc, "FAtPutRes")))
+                        Ok(Some(seq.close(self, call_doc, "FAtPutRes")))
                     }
                     _ => Ok(None),
                 }
@@ -2869,8 +2858,8 @@ impl CoreErlangGenerator {
         // self-sends in sub-expression position (e.g. `Logger info: (self tick)`)
         // thread their class var mutations through to the enclosing scope.
         let arg_exprs: Vec<&Expression> = arguments.iter().collect();
-        let (preamble, mut arg_docs) = self.thread_subexprs(&arg_exprs, "LogArg")?;
-        let raw_msg_doc = arg_docs.remove(0);
+        let mut seq = self.sequence_call(&arg_exprs, "LogArg")?;
+        let raw_msg_doc = seq.next();
         let msg_doc = docvec!["{\"~ts\", [", raw_msg_doc, "]}"];
 
         // Build domain metadata map
@@ -2901,7 +2890,7 @@ impl CoreErlangGenerator {
         let log_call_doc = if has_metadata {
             // With user metadata: merge user map with compiler-injected map
             // BT-1942: user_meta_doc is the hoisted doc for arguments[1].
-            let user_meta_doc = arg_docs.remove(0);
+            let user_meta_doc = seq.next();
             let merge_var = self.fresh_temp_var("LogMeta");
             docvec![
                 "let ",
@@ -2939,7 +2928,7 @@ impl CoreErlangGenerator {
             " in 'nil'"
         ];
 
-        Ok(Some(self.close_prelude(&preamble, call_doc, "LogRes")))
+        Ok(Some(seq.close(self, call_doc, "LogRes")))
     }
 }
 

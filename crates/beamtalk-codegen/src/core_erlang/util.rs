@@ -12,10 +12,11 @@
 
 use std::fmt::Write as _;
 
+use super::sequencing::PrecompiledScope;
 use super::threaded_ir::{
     FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, render, render_value,
 };
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, PrecompiledScope, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::{atom, string_lit};
 use beamtalk_cerl_doc::{Document, join};
