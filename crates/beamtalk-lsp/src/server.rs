@@ -1752,9 +1752,30 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         if let Some(path) = self.resolve_path_for_uri(&uri) {
             if uri.scheme() != "beamtalk-stdlib" {
-                // Keep stdlib files indexed across editor open/close cycles.
+                // Startup preload (BT-2027) indexes every file under each
+                // root's `src/`/`test/`/`_build/deps/*/src` regardless of
+                // whether it is open, so the index is workspace-wide, not
+                // "currently open files". Closing a tab therefore must not
+                // evict the file — that silently removed its classes from
+                // the merged hierarchy, and every other file referencing them
+                // reported `Unresolved class` until the next restart. Revert
+                // to the on-disk content instead (unsaved edits are discarded
+                // on close, so disk is the truth). Files preload never
+                // covered — scratch files outside those dirs, untitled
+                // buffers, files deleted from disk — are still removed.
+                let covered = {
+                    let roots = self
+                        .workspace_roots
+                        .lock()
+                        .expect("workspace_roots lock poisoned");
+                    preload_covers(path.as_std_path(), &roots)
+                };
                 let mut svc = self.service.lock().expect("service lock poisoned");
-                svc.remove_file(&path);
+                let keep = covered || svc.project_index().is_stdlib_file(&path);
+                match keep.then(|| fs::read_to_string(&path).ok()).flatten() {
+                    Some(content) => svc.update_file(path.clone(), content),
+                    None => svc.remove_file(&path),
+                }
             }
             {
                 let mut versions = self.versions.lock().expect("versions lock poisoned");
@@ -4413,6 +4434,20 @@ fn dependency_src_dirs(root: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// Whether `path` lies in a directory [`collect_preload_files`] walks for
+/// some workspace root — `src/`, `test/`, or a fetched dependency's `src/`.
+/// Must stay in lockstep with that walk: it decides which closed files keep
+/// their on-disk index entry in `did_close`.
+fn preload_covers(path: &Path, roots: &[PathBuf]) -> bool {
+    roots.iter().any(|root| {
+        path.starts_with(root.join("src"))
+            || path.starts_with(root.join("test"))
+            || dependency_src_dirs(root)
+                .iter()
+                .any(|dep_src| path.starts_with(dep_src))
+    })
+}
+
 fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
     use beamtalk_core::file_walker::FileWalker;
 
@@ -6405,6 +6440,142 @@ mod tests {
              preload file must not carry an Unresolved class warning against \
              a sibling class preload has since indexed, got {healed:?}"
         );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// Startup preload (BT-2027) indexes every `src/`/`test/` file, so the
+    /// `ProjectIndex` is workspace-wide rather than "currently open files".
+    /// `did_close` used to evict the closed file regardless — correct back
+    /// when files were only ever indexed while open, but after preload it
+    /// silently dropped the file's classes from the merged hierarchy, so
+    /// every other file referencing them reported a false `Unresolved
+    /// class` until the next LSP restart (and restarting only helped until
+    /// the file was opened and closed again). Closing must revert the file
+    /// to its on-disk content instead.
+    #[tokio::test]
+    async fn did_close_keeps_preloaded_file_indexed_from_disk() {
+        let temp = unique_temp_dir("beamtalk_lsp_close_keeps_preloaded");
+        let project_root = temp.join("project");
+        let workflow_dir = project_root.join("src").join("workflow");
+        fs::create_dir_all(&workflow_dir).expect("create workflow dir");
+        fs::write(
+            project_root.join("beamtalk.toml"),
+            "[package]\nname = \"exdura\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write beamtalk.toml");
+
+        let execution_path = workflow_dir.join("workflow_execution.bt");
+        let execution_source = "Object subclass: WorkflowExecution";
+        fs::write(&execution_path, execution_source).expect("write workflow_execution.bt");
+
+        let engine_path = workflow_dir.join("workflow_engine.bt");
+        let engine_source =
+            "Object subclass: WorkflowEngine\n\n  makeExecution => WorkflowExecution new\n";
+        fs::write(&engine_path, engine_source).expect("write workflow_engine.bt");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        // Direct call (not through the `LspService` tower layer) so
+        // `workspace_roots` is recorded for `did_close` while the client
+        // stays uninitialized — its `publish_diagnostics` then no-ops
+        // instead of blocking on the unread capacity-1 socket.
+        backend
+            .initialize(InitializeParams {
+                workspace_folders: Some(vec![tower_lsp::lsp_types::WorkspaceFolder {
+                    uri: Url::from_directory_path(&project_root).expect("root uri"),
+                    name: "project".to_string(),
+                }]),
+                ..InitializeParams::default()
+            })
+            .await
+            .expect("initialize ok");
+        backend
+            .preload_workspace_source_files(PreloadConfig {
+                roots: vec![project_root],
+                stdlib_dirs: vec![],
+            })
+            .await;
+
+        let execution_uri = Url::from_file_path(&execution_path).expect("path -> uri");
+        let engine_uri = Url::from_file_path(&engine_path).expect("path -> uri");
+        real_did_open(backend, execution_uri.clone(), execution_source).await;
+        real_did_open(backend, engine_uri, engine_source).await;
+
+        // The user looks at workflow_execution.bt, then closes the tab.
+        backend
+            .did_close(DidCloseTextDocumentParams {
+                text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri: execution_uri },
+            })
+            .await;
+
+        let engine_utf8 = Utf8PathBuf::from_path_buf(engine_path).expect("temp path is UTF-8");
+        let svc = backend.service.lock().expect("service lock poisoned");
+        assert!(
+            svc.project_index()
+                .hierarchy()
+                .has_class("WorkflowExecution"),
+            "closing a preloaded file's tab must not evict its classes from \
+             the project index"
+        );
+        let diags = svc.diagnostics(&engine_utf8);
+        assert!(
+            !diags.iter().any(|d| d.message.contains("Unresolved class")),
+            "workflow_engine.bt must still resolve WorkflowExecution after \
+             workflow_execution.bt's tab is closed, got {diags:?}"
+        );
+        drop(svc);
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// Counterpart to `did_close_keeps_preloaded_file_indexed_from_disk`:
+    /// a file preload never covers (here, one at the workspace root rather
+    /// than under `src/`/`test/`) was only ever indexed because it was
+    /// open, so closing it still removes it — otherwise a stray scratch
+    /// file's classes would linger in the project index and could shadow
+    /// real ones.
+    #[tokio::test]
+    async fn did_close_removes_file_outside_preload_coverage() {
+        let temp = unique_temp_dir("beamtalk_lsp_close_removes_uncovered");
+        let project_root = temp.join("project");
+        fs::create_dir_all(project_root.join("src")).expect("create src dir");
+        let scratch_path = project_root.join("scratch.bt");
+        let scratch_source = "Object subclass: Scratch";
+        fs::write(&scratch_path, scratch_source).expect("write scratch.bt");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend
+            .initialize(InitializeParams {
+                workspace_folders: Some(vec![tower_lsp::lsp_types::WorkspaceFolder {
+                    uri: Url::from_directory_path(&project_root).expect("root uri"),
+                    name: "project".to_string(),
+                }]),
+                ..InitializeParams::default()
+            })
+            .await
+            .expect("initialize ok");
+
+        let scratch_uri = Url::from_file_path(&scratch_path).expect("path -> uri");
+        real_did_open(backend, scratch_uri.clone(), scratch_source).await;
+        {
+            let svc = backend.service.lock().expect("service lock poisoned");
+            assert!(svc.project_index().hierarchy().has_class("Scratch"));
+        }
+
+        backend
+            .did_close(DidCloseTextDocumentParams {
+                text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri: scratch_uri },
+            })
+            .await;
+
+        let svc = backend.service.lock().expect("service lock poisoned");
+        assert!(
+            !svc.project_index().hierarchy().has_class("Scratch"),
+            "a file outside preload coverage must still be dropped on close"
+        );
+        drop(svc);
 
         let _ = fs::remove_dir_all(&temp);
     }
