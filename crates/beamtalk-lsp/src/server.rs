@@ -225,6 +225,20 @@ pub struct Backend {
     service: Arc<Mutex<SimpleLanguageService>>,
     /// Last known LSP document version by file path.
     versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>>,
+    /// Per-path generation, bumped only by `did_open` (never by `did_change`)
+    /// and read by `did_close` to detect a same-path reopen racing its own
+    /// (I/O-bearing) disk re-index. Deliberately *not* `versions`: an
+    /// ordinary `did_change` also bumps that map's value, and a version
+    /// snapshot/recheck against it can't tell "this path was reopened —
+    /// back off" apart from "this path was merely edited while its close was
+    /// in flight — proceed, the edit is moot, we're closing regardless". A
+    /// dedicated counter that only a genuine reopen touches makes that
+    /// distinction unambiguous. See `did_close`'s doc for the full race.
+    open_generation: Mutex<HashMap<Utf8PathBuf, u64>>,
+    /// Source for `open_generation`'s values — monotonic and global (not
+    /// per-path) is sufficient: `did_close` only ever compares one path's
+    /// before/after value against itself, never across paths.
+    next_open_generation: std::sync::atomic::AtomicU64,
     /// Paths of documents that have received `didChange` notifications since
     /// their last `didSave` / `didOpen`. The editor's in-memory copy is the
     /// source of truth for these — the on-disk bytes are stale and so is the
@@ -330,6 +344,8 @@ impl Backend {
             client,
             service: Arc::new(Mutex::new(SimpleLanguageService::new())),
             versions: Arc::new(Mutex::new(HashMap::new())),
+            open_generation: Mutex::new(HashMap::new()),
+            next_open_generation: std::sync::atomic::AtomicU64::new(0),
             dirty_files: Mutex::new(HashSet::new()),
             diagnostic_generation: Mutex::new(HashMap::new()),
             preload_config: Mutex::new(None),
@@ -1693,6 +1709,16 @@ impl LanguageServer for Backend {
             // ordering, paired with the lock it holds there, is what makes
             // the reopen race-proof rather than just less likely.
             {
+                let generation = self
+                    .next_open_generation
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let mut open_generation = self
+                    .open_generation
+                    .lock()
+                    .expect("open_generation lock poisoned");
+                open_generation.insert(path.clone(), generation);
+            }
+            {
                 let mut versions = self.versions.lock().expect("versions lock poisoned");
                 versions.insert(path.clone(), params.text_document.version);
             }
@@ -1754,20 +1780,44 @@ impl LanguageServer for Backend {
     }
 
     /// Removes a closed document from the index and clears its diagnostics.
+    ///
+    /// The non-stdlib path below does a disk read that is not instantaneous,
+    /// so a `did_open` for the same path (a close immediately followed by a
+    /// reopen) can be dispatched concurrently and complete while this is
+    /// still reading — applying the now-stale disk snapshot afterwards would
+    /// silently clobber that fresher in-memory content. Guarded via
+    /// [`Self::open_generation`]: snapshotted before the I/O-bearing work,
+    /// rechecked inside the critical section that applies the update. A
+    /// mismatch means a genuine reopen raced in and won, so this whole
+    /// handler backs off entirely — leaving `svc`, `versions`, and the
+    /// reopened document's diagnostics to it.
+    ///
+    /// Deliberately keyed on `open_generation`, not `versions`: an ordinary
+    /// `did_change` racing the same close (e.g. a final keystroke, or a
+    /// format-on-save edit, landing right before the tab closes) also bumps
+    /// `versions`, but is not a reopen — the document is still closing
+    /// either way, so its edit is moot and must not make this handler back
+    /// off *permanently* (which would leak the exact eviction bug this
+    /// method exists to fix, plus skip the dirty/diagnostic-generation
+    /// cleanup and the empty-diagnostics publish below, forever). Only
+    /// `did_open` bumps `open_generation`, so it alone can trigger the
+    /// back-off.
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         if let Some(path) = self.resolve_path_for_uri(&uri) {
-            // True when a `did_open`/`did_change` for this same path (a
-            // close immediately followed by a reopen, or an edit landing
-            // mid-close) raced in and won — see the version snapshot/compare
-            // below. When it does, this whole handler must back off
-            // entirely: not touch `svc`, not remove the now-current
-            // `versions` entry, and not clear the reopened document's
-            // diagnostics at the bottom.
-            let mut reopened = false;
-            if uri.scheme() == "beamtalk-stdlib" {
-                let mut versions = self.versions.lock().expect("versions lock poisoned");
-                versions.remove(&path);
+            // Snapshotted *before* any of the (I/O-bearing, for the
+            // non-stdlib branch) work below, so it reflects this document's
+            // open-generation at the instant we started closing it — not a
+            // later one a racing `did_open` on the same path might install.
+            let generation_before = {
+                let open_generation = self
+                    .open_generation
+                    .lock()
+                    .expect("open_generation lock poisoned");
+                open_generation.get(&path).copied()
+            };
+            let disk_content = if uri.scheme() == "beamtalk-stdlib" {
+                None
             } else {
                 // Startup preload (BT-2027) indexes every file under each
                 // root's `src/`/`test/`/`_build/deps/*/src` regardless of
@@ -1780,15 +1830,6 @@ impl LanguageServer for Backend {
                 // on close, so disk is the truth). Files preload never
                 // covered — scratch files outside those dirs, untitled
                 // buffers, files deleted from disk — are still removed.
-                //
-                // Snapshotted *before* any of the (I/O-bearing) work below,
-                // so it reflects this document's version at the instant we
-                // started closing it — not a later one a racing
-                // `did_open`/`did_change` on the same path might install.
-                let version_before = {
-                    let versions = self.versions.lock().expect("versions lock poisoned");
-                    versions.get(&path).copied()
-                };
                 let covered = {
                     let roots = self
                         .workspace_roots
@@ -1801,38 +1842,48 @@ impl LanguageServer for Backend {
                     svc.project_index().is_stdlib_file(&path)
                 };
                 let keep = covered || is_stdlib;
-                // Read with no lock held — `fs::read_to_string` is not
-                // instantaneous, and a reopen can be dispatched concurrently
-                // and complete while we're still reading. Applying our now-
-                // stale disk snapshot afterwards would silently clobber that
-                // fresher in-memory content.
-                let disk_content = keep.then(|| fs::read_to_string(&path).ok()).flatten();
+                // Read with no lock held, per this method's own doc.
+                keep.then(|| fs::read_to_string(&path).ok()).flatten()
+            };
 
-                // Guard against exactly that race: hold `versions` for the
-                // whole check-then-act block below, so nothing can observe or
-                // act on a half-applied state. If the version we snapshotted
-                // above no longer matches, some other handler for this same
-                // path ran (and, being strictly later, is authoritative) —
-                // back off. Note `contains_key` alone can't distinguish this
-                // from the ordinary case (the entry we're *about* to remove
-                // is of course still present); only a value change proves a
-                // race happened.
-                let mut versions = self.versions.lock().expect("versions lock poisoned");
-                reopened = versions.get(&path).copied() != version_before;
-                if reopened {
-                    // Leave `svc` and this `versions` entry alone — they
-                    // belong to whatever raced in.
-                } else {
-                    let mut svc = self.service.lock().expect("service lock poisoned");
-                    match disk_content {
-                        Some(content) => svc.update_file(path.clone(), content),
-                        None => svc.remove_file(&path),
-                    }
-                    versions.remove(&path);
+            // Guard against the reopen race: hold `open_generation` for the
+            // whole check-then-act block below, so nothing can observe or
+            // act on a half-applied state. `did_open` records its path here
+            // *before* touching `svc`/`versions` (see its own comment), so
+            // if a reopen's `did_open` acquired this lock first, the
+            // generation check below is guaranteed to see it and we back off
+            // entirely. If we acquire this lock first instead, `did_open`'s
+            // insert simply blocks until we release it, so its own
+            // `update_file` call is guaranteed to run after — and therefore
+            // win over — ours.
+            let reopened = {
+                let mut open_generation = self
+                    .open_generation
+                    .lock()
+                    .expect("open_generation lock poisoned");
+                let reopened = open_generation.get(&path).copied() != generation_before;
+                if !reopened {
+                    open_generation.remove(&path);
                 }
-            }
+                reopened
+            };
             if reopened {
+                // Leave `svc`, `versions`, and this entry alone — they
+                // belong to the reopen now.
                 return;
+            }
+
+            if uri.scheme() == "beamtalk-stdlib" {
+                let mut versions = self.versions.lock().expect("versions lock poisoned");
+                versions.remove(&path);
+            } else {
+                let mut svc = self.service.lock().expect("service lock poisoned");
+                match disk_content {
+                    Some(content) => svc.update_file(path.clone(), content),
+                    None => svc.remove_file(&path),
+                }
+                let mut versions = self.versions.lock().expect("versions lock poisoned");
+                versions.remove(&path);
             }
             self.clear_dirty(&path);
             {
@@ -6752,6 +6803,121 @@ mod tests {
             versions.get(&engine_utf8).copied(),
             Some(2),
             "did_close must not remove the version entry a racing reopen installed"
+        );
+        drop(versions);
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// Regression for the review Blocker on the `open_generation` design
+    /// itself: a `did_change` racing the same close (not a reopen) must
+    /// *not* make `did_close` back off. `did_change` only bumps `versions`,
+    /// never `open_generation`, so `did_close`'s reopen check stays
+    /// unaffected and it still completes the disk revert — proving the fix
+    /// doesn't just trade one permanent-leak race (reopen) for another
+    /// (any edit racing a close).
+    ///
+    /// Same FIFO technique as `did_close_racing_reopen_does_not_clobber_reopened_content`
+    /// for deterministic interleaving.
+    #[tokio::test]
+    async fn did_close_racing_did_change_still_reverts_to_disk() {
+        let temp = unique_temp_dir("beamtalk_lsp_close_change_race");
+        let project_root = temp.join("project");
+        let src_dir = project_root.join("src");
+        fs::create_dir_all(&src_dir).expect("create src dir");
+
+        let target_path = src_dir.join("target.bt");
+        let mkfifo_status = std::process::Command::new("mkfifo")
+            .arg(&target_path)
+            .status()
+            .expect("run mkfifo");
+        assert!(
+            mkfifo_status.success(),
+            "mkfifo must succeed on this platform"
+        );
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend
+            .initialize(InitializeParams {
+                workspace_folders: Some(vec![tower_lsp::lsp_types::WorkspaceFolder {
+                    uri: Url::from_directory_path(&project_root).expect("root uri"),
+                    name: "project".to_string(),
+                }]),
+                ..InitializeParams::default()
+            })
+            .await
+            .expect("initialize ok");
+
+        let target_uri = Url::from_file_path(&target_path).expect("path -> uri");
+        real_did_open(backend, target_uri.clone(), "Object subclass: Original").await;
+
+        std::thread::scope(|scope| {
+            let close_handle = scope.spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("build runtime")
+                    .block_on(backend.did_close(DidCloseTextDocumentParams {
+                        text_document: tower_lsp::lsp_types::TextDocumentIdentifier {
+                            uri: target_uri.clone(),
+                        },
+                    }));
+            });
+
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            // A plain edit — not a reopen — racing the close in flight (e.g.
+            // a final keystroke, or a format-on-save, right before the tab
+            // closes). Must not be mistaken for a reopen.
+            let change_handle = scope.spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("build runtime")
+                    .block_on(backend.did_change(DidChangeTextDocumentParams {
+                        text_document: tower_lsp::lsp_types::VersionedTextDocumentIdentifier {
+                            uri: target_uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![
+                            tower_lsp::lsp_types::TextDocumentContentChangeEvent {
+                                range: None,
+                                range_length: None,
+                                text: "Object subclass: Edited".to_string(),
+                            },
+                        ],
+                    }));
+            });
+            change_handle.join().expect("change thread panicked");
+
+            // Unblock did_close's read now that the (moot) edit has fully
+            // applied — the disk content below must still win, since we are
+            // genuinely closing.
+            fs::write(&target_path, "Object subclass: FromDisk")
+                .expect("write unblocks the FIFO reader");
+
+            close_handle.join().expect("close thread panicked");
+        });
+
+        let target_utf8 = Utf8PathBuf::from_path_buf(target_path.clone()).expect("utf8 path");
+        let svc = backend.service.lock().expect("service lock poisoned");
+        assert!(
+            svc.project_index().hierarchy().has_class("FromDisk"),
+            "a racing did_change (not a reopen) must not stop did_close from \
+             reverting to on-disk content"
+        );
+        assert!(
+            !svc.project_index().hierarchy().has_class("Edited"),
+            "the moot edit must not survive the close"
+        );
+        drop(svc);
+
+        let versions = backend.versions.lock().expect("versions lock poisoned");
+        assert!(
+            !versions.contains_key(&target_utf8),
+            "a genuinely closing document's version entry must still be removed, \
+             even though a racing did_change bumped it"
         );
         drop(versions);
 
