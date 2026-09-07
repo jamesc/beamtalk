@@ -4699,6 +4699,28 @@ impl TypeChecker {
             }
         }
 
+        // BT-3463: a `Union`-typed receiver (e.g. the `V | T` widened result of
+        // `Dictionary>>at:ifAbsent:`, BT-3408) still has a resolvable method
+        // signature on each of its members — resolve declared `Block(...)`
+        // param types per member and merge them, instead of falling through
+        // to the `Dynamic`-receiver fallback below (which types every block
+        // param `Dynamic(UnannotatedParam)`, a reason the BT-1914 lint does
+        // not filter). Returns `None` when no member contributed anything
+        // useful, in which case we fall through to the existing fallback.
+        if let InferredType::Union { members, .. } = receiver_ty {
+            if let Some(arg_types) = self.resolve_union_block_param_types(
+                members,
+                arguments,
+                selector_name,
+                hierarchy,
+                env,
+                in_abstract_method,
+                is_class_side_send,
+            ) {
+                return arg_types;
+            }
+        }
+
         // Fast path: receiver must be Known to look up method signatures.
         // For non-Known receivers (Dynamic, Never, etc.), we can't resolve block
         // param types from the signature — but we can still propagate a reason-
@@ -4832,6 +4854,213 @@ impl TypeChecker {
         }
 
         arg_types
+    }
+
+    /// BT-3463: resolve declared block-parameter types for each block-typed
+    /// argument in a message sent to a `Union`-typed receiver, mirroring the
+    /// `Known`-receiver push-down above but merged across the union's members.
+    ///
+    /// For each block argument position, every union member that is `Known`,
+    /// resolves the selector to a method, and declares a `Block(...)`
+    /// parameter at that position contributes its (generically-substituted)
+    /// block param types — computed the same way as the `Known`-receiver fast
+    /// path (`class_subst` + `infer_method_local_params`). Members that don't
+    /// resolve (Dynamic, unresolvable, non-responding, `UndefinedObject`/nil)
+    /// simply don't contribute, mirroring `infer_union_message_send`'s
+    /// treatment of those cases for the return type.
+    ///
+    /// Non-block arguments are inferred once here (Phase 1, mirroring the
+    /// `Known`-receiver path) and reused verbatim in the returned vector —
+    /// they don't depend on which union member resolves the block, so
+    /// re-inferring them per member (or in the caller) would double-emit any
+    /// diagnostics their inference produces.
+    ///
+    /// Returns `None` when no block argument could be resolved from any
+    /// member — the caller then falls through to the pre-existing
+    /// `Known`-receiver-only handling (which delegates non-`Known` receivers,
+    /// `Union` included, to [`Self::infer_args_with_dynamic_block_params`]),
+    /// preserving prior behaviour for a union with no block-resolvable
+    /// members. Otherwise returns the final per-argument inferred types.
+    #[allow(clippy::too_many_arguments)] // mirrors infer_args_with_block_context's arg count
+    #[allow(clippy::too_many_lines)] // per-member resolution + merge adds necessary branches
+    fn resolve_union_block_param_types(
+        &mut self,
+        members: &[InferredType],
+        arguments: &[Expression],
+        selector_name: &str,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+        is_class_side_send: bool,
+    ) -> Option<Vec<InferredType>> {
+        // Phase 1 (receiver-independent): infer non-block arguments once so
+        // method-local generic params can be resolved from them per member
+        // below; block arguments get a placeholder, overwritten in Phase 2.
+        let mut arg_types: Vec<InferredType> = Vec::with_capacity(arguments.len());
+        for arg in arguments {
+            if matches!(arg, Expression::Block(_)) {
+                arg_types.push(InferredType::known("Block"));
+            } else {
+                arg_types.push(self.infer_expr(arg, hierarchy, env, in_abstract_method));
+            }
+        }
+
+        // Per block-argument position: the block param type lists
+        // contributed by each participating union member.
+        let mut per_position: Vec<Vec<Vec<InferredType>>> = vec![Vec::new(); arguments.len()];
+        let mut any_contribution = false;
+
+        for member in members {
+            let InferredType::Known {
+                class_name: member_name,
+                type_args,
+                ..
+            } = member
+            else {
+                continue; // Dynamic / other non-Known member: no method to resolve.
+            };
+            // BT-2624: a singleton member (`#foo`) resolves through `Symbol`,
+            // mirroring `infer_union_message_send`'s member resolution.
+            let resolve_name: &str = if member_name.starts_with('#') {
+                "Symbol"
+            } else {
+                member_name.as_str()
+            };
+            // BT-1857: Nil is expected to be guarded by isNil/notNil checks;
+            // it never contributes a block-param resolution here either.
+            if WellKnownClass::from_str(resolve_name).is_some_and(WellKnownClass::is_nil_class) {
+                continue;
+            }
+            if !hierarchy.has_class(resolve_name)
+                || hierarchy.has_instance_dnu_override(resolve_name)
+            {
+                continue;
+            }
+            let method_lookup = if is_class_side_send {
+                hierarchy.find_class_method(resolve_name, selector_name)
+            } else {
+                hierarchy.find_method(resolve_name, selector_name)
+            };
+            let Some(method) = method_lookup else {
+                continue;
+            };
+            let class_subst = Self::build_inherited_substitution_map(
+                hierarchy,
+                resolve_name,
+                type_args,
+                &method.defined_in,
+            );
+            let method_subst = Self::infer_method_local_params(
+                &method,
+                &arg_types,
+                &class_subst,
+                hierarchy,
+                &method.defined_in,
+            );
+
+            for (i, arg) in arguments.iter().enumerate() {
+                if !matches!(arg, Expression::Block(_)) {
+                    continue;
+                }
+                let Some(type_params) = method
+                    .param_types
+                    .get(i)
+                    .and_then(|pt| pt.as_ref())
+                    .and_then(Self::find_block_arm)
+                else {
+                    continue;
+                };
+                let block_param_types: Vec<InferredType> = if type_params.len() >= 2 {
+                    type_params[..type_params.len() - 1]
+                        .iter()
+                        .map(|p| {
+                            Self::resolve_type_param(p, &class_subst, &method_subst, hierarchy)
+                        })
+                        .collect()
+                } else {
+                    // BT-2020: Block(R) — zero-arity block, no params to resolve.
+                    Vec::new()
+                };
+                per_position[i].push(block_param_types);
+                any_contribution = true;
+            }
+        }
+
+        if !any_contribution {
+            return None;
+        }
+
+        // Phase 2: merge each block argument's per-member contributions and
+        // (re-)infer the block body with the merged param types. A position
+        // with no usable merge (no contribution, or members disagreeing on
+        // arity) falls back to plain `infer_expr`, matching the pre-existing
+        // `infer_args_with_dynamic_block_params` behaviour for that argument.
+        for (i, arg) in arguments.iter().enumerate() {
+            if let Expression::Block(block) = arg {
+                match Self::merge_union_block_param_types(&per_position[i]) {
+                    Some(param_types) => {
+                        arg_types[i] = self.infer_block_with_typed_params(
+                            block,
+                            arg.span(),
+                            &param_types,
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        );
+                    }
+                    None => {
+                        arg_types[i] = self.infer_expr(arg, hierarchy, env, in_abstract_method);
+                    }
+                }
+            }
+        }
+
+        Some(arg_types)
+    }
+
+    /// Merge per-member block-param-type contributions for a single block
+    /// argument position (see [`Self::resolve_union_block_param_types`]).
+    ///
+    /// `None` when no member contributed a param list for this position, or
+    /// members disagree on arity (can't merge positionally). Otherwise
+    /// `Some(merged)`, one entry per parameter slot: the single concrete type
+    /// every contributing member agrees on — a `Dynamic` contribution (e.g.
+    /// from BT-3408's `at:ifAbsent: [#()]` widening, whose empty-literal
+    /// fallback member resolves to `Dynamic`) never blocks agreement, since
+    /// it carries no positive information; only two *concrete* types
+    /// disagreeing does. Falls back to `Dynamic(UnannotatedParam)` when no
+    /// member contributed a concrete type, or concrete types genuinely
+    /// disagree.
+    fn merge_union_block_param_types(
+        contributions: &[Vec<InferredType>],
+    ) -> Option<Vec<InferredType>> {
+        let arity = contributions.first()?.len();
+        if contributions.iter().any(|c| c.len() != arity) {
+            return None;
+        }
+        Some(
+            (0..arity)
+                .map(|slot| {
+                    let mut concrete: Option<&InferredType> = None;
+                    let mut disagreement = false;
+                    for c in contributions {
+                        let ty = &c[slot];
+                        if matches!(ty, InferredType::Dynamic(_)) {
+                            continue;
+                        }
+                        match concrete {
+                            None => concrete = Some(ty),
+                            Some(existing) if existing == ty => {}
+                            Some(_) => disagreement = true,
+                        }
+                    }
+                    match concrete {
+                        Some(ty) if !disagreement => ty.clone(),
+                        _ => InferredType::Dynamic(DynamicReason::UnannotatedParam),
+                    }
+                })
+                .collect(),
+        )
     }
 
     /// Fallback variant of [`Self::infer_args_with_block_context`] used when the
