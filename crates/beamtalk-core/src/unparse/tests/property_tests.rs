@@ -16,7 +16,7 @@
 
 use proptest::prelude::*;
 
-use super::{format_source, unparse_module};
+use super::super::{format_source, unparse_module};
 use crate::source_analysis::{lex_with_eof, parse};
 
 // ============================================================================
