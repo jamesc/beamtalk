@@ -468,7 +468,19 @@ handle_term(<<"list-classes">>, Params, _Msg, SessionPid) ->
                                             <<"abstract">> => IsAbstract,
                                             <<"internal">> => IsInternal,
                                             <<"source_file">> => SourceFile,
-                                            <<"actor_count">> => ActorCount
+                                            <<"actor_count">> => ActorCount,
+                                            %% stdlib/project/dependency
+                                            %% classification for the VS Code
+                                            %% Workspace Explorer's class filter.
+                                            %% Reuses the System Browser's
+                                            %% `browse-classes` classifier
+                                            %% (ADR 0096) rather than
+                                            %% re-deriving it from `SourceFile`
+                                            %% client-side.
+                                            <<"source_origin">> =>
+                                                beamtalk_repl_ops_browse:source_origin_of(
+                                                    ModName, SourceFile
+                                                )
                                         }};
                                     false ->
                                         false

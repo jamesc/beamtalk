@@ -213,3 +213,121 @@ describe("WorkspaceTreeDataProvider — Type Aliases section (ADR 0108 Phase 8, 
     expect(await provider.getChildren({ kind: "type-aliases-section" })).toEqual([]);
   });
 });
+
+// ─── Classes section — stdlib/project/dependency filter ───────────────────────
+
+/** Like `respondToInitialFetch`, but with a caller-supplied `list-classes` payload. */
+async function respondToInitialFetchWithClasses(
+  ws: MockWebSocket,
+  classList: unknown[]
+): Promise<void> {
+  respondToOp(ws, "eval", { value: [] });
+  respondToOp(ws, "actors", {});
+  respondToOp(ws, "list-classes", { class_list: classList });
+  respondToOp(ws, "browse-type-aliases", { value: [] });
+  for (let i = 0; i < 5; i++) {
+    await Promise.resolve();
+  }
+}
+
+describe("WorkspaceTreeDataProvider — Classes section origin filter", () => {
+  let provider: InstanceType<typeof WorkspaceTreeDataProvider>;
+
+  const THREE_ORIGIN_CLASSES = [
+    { name: "MyApp", source_file: "/proj/MyApp.bt", actor_count: 0, source_origin: "project" },
+    {
+      name: "Json",
+      source_file: "/deps/json/Json.bt",
+      actor_count: 0,
+      source_origin: "dependency",
+    },
+    { name: "Array", source_file: null, actor_count: 0, source_origin: "stdlib" },
+  ];
+
+  beforeEach(() => {
+    provider = new WorkspaceTreeDataProvider();
+  });
+
+  it("defaults to showing every origin (no filtering)", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, THREE_ORIGIN_CLASSES);
+
+    expect([...provider.classFilter].sort()).toEqual(["dependency", "project", "stdlib"]);
+
+    const children = await provider.getChildren({ kind: "classes-section" });
+    expect(children).toHaveLength(3);
+
+    const sectionItem = provider.getTreeItem({ kind: "classes-section" });
+    expect(sectionItem.description).toBe("(3 loaded)");
+    expect(sectionItem.contextValue).toBe("classes-section");
+
+    client.dispose();
+  });
+
+  it("narrows the Classes section to the selected origins", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, THREE_ORIGIN_CLASSES);
+
+    provider.setClassOriginFilter(new Set(["project"]));
+
+    const children = await provider.getChildren({ kind: "classes-section" });
+    expect(children.map((c) => (c as { info: { name: string } }).info.name)).toEqual(["MyApp"]);
+
+    const sectionItem = provider.getTreeItem({ kind: "classes-section" });
+    expect(sectionItem.description).toBe("(1 of 3)");
+    expect(sectionItem.contextValue).toBe("classes-section-filtered");
+
+    client.dispose();
+  });
+
+  it("fires a classes-section change when the filter changes", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, THREE_ORIGIN_CLASSES);
+
+    const fired: unknown[] = [];
+    provider.onDidChangeTreeData((node) => fired.push(node));
+
+    provider.setClassOriginFilter(new Set(["stdlib"]));
+
+    expect(fired).toEqual([{ kind: "classes-section" }]);
+
+    client.dispose();
+  });
+
+  it("always shows a class with no source_origin, regardless of the filter", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      ...THREE_ORIGIN_CLASSES,
+      { name: "Legacy", source_file: "/proj/Legacy.bt", actor_count: 0, source_origin: null },
+    ]);
+
+    provider.setClassOriginFilter(new Set(["stdlib"]));
+
+    const children = await provider.getChildren({ kind: "classes-section" });
+    const names = children.map((c) => (c as { info: { name: string } }).info.name);
+    expect(names).toEqual(expect.arrayContaining(["Array", "Legacy"]));
+    expect(names).not.toContain("MyApp");
+    expect(names).not.toContain("Json");
+
+    client.dispose();
+  });
+
+  it("treats an empty selection as 'show everything' rather than an empty tree", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, THREE_ORIGIN_CLASSES);
+
+    provider.setClassOriginFilter(new Set(["project"]));
+    expect(await provider.getChildren({ kind: "classes-section" })).toHaveLength(1);
+
+    provider.setClassOriginFilter(new Set());
+    expect(await provider.getChildren({ kind: "classes-section" })).toHaveLength(3);
+    expect([...provider.classFilter].sort()).toEqual(["dependency", "project", "stdlib"]);
+
+    client.dispose();
+  });
+});

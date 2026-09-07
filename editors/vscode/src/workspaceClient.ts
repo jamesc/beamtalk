@@ -22,10 +22,14 @@ export interface ActorStoppedInfo {
   reason: string;
 }
 
+/** Where a class's source comes from — drives the Workspace Explorer's class filter. */
+export type ClassOrigin = "stdlib" | "project" | "dependency";
+
 export interface ClassInfo {
   name: string;
   source_file?: string;
   actor_count?: number;
+  source_origin?: ClassOrigin;
 }
 
 /**
@@ -286,7 +290,9 @@ export class WorkspaceClient {
    * BT-2091: Routes through `list-classes` rather than the deprecated
    * `modules` protocol op (which has been removed). `list-classes` was
    * extended in BT-2091 to include `source_file` and `actor_count` so
-   * the editor's class navigation keeps working.
+   * the editor's class navigation keeps working, and later to include
+   * `source_origin` (stdlib/project/dependency, reusing the System
+   * Browser's `browse-classes` classifier) so the sidebar can filter by it.
    */
   async classes(): Promise<ClassInfo[]> {
     const resp = (await this._request({ op: "list-classes" })) as {
@@ -294,12 +300,14 @@ export class WorkspaceClient {
         name: string;
         source_file?: string | null;
         actor_count?: number;
+        source_origin?: ClassOrigin | null;
       }>;
     };
     return (resp.class_list ?? []).map((c) => ({
       name: c.name,
       source_file: c.source_file ?? undefined,
       actor_count: c.actor_count,
+      source_origin: c.source_origin ?? undefined,
     }));
   }
 

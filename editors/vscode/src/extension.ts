@@ -22,7 +22,7 @@ import {
 import { InspectorPanel } from "./inspectorPanel";
 import { TranscriptViewProvider } from "./transcriptView";
 import { WorkspaceClient } from "./workspaceClient";
-import type { LogEntry } from "./workspaceClient";
+import type { ClassOrigin, LogEntry } from "./workspaceClient";
 import type {
   ActorItemNode,
   BindingItemNode,
@@ -30,7 +30,7 @@ import type {
   MethodItemNode,
   StateVarItemNode,
 } from "./workspaceTreeView";
-import { WorkspaceTreeDataProvider } from "./workspaceTreeView";
+import { ALL_CLASS_ORIGINS, WorkspaceTreeDataProvider } from "./workspaceTreeView";
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.LogOutputChannel | undefined;
@@ -53,6 +53,16 @@ const LOG_LEVELS = [
 type LogLevel = (typeof LOG_LEVELS)[number];
 let workspaceTreeProvider: WorkspaceTreeDataProvider | undefined;
 let transcriptViewProvider: TranscriptViewProvider | undefined;
+
+/** `context.workspaceState` key persisting the "Classes" section's origin filter. */
+const CLASS_FILTER_STATE_KEY = "beamtalk.classOriginFilter";
+
+/** QuickPick label for each class origin (BT-2552 badges), in menu display order. */
+const CLASS_ORIGIN_LABELS: Record<ClassOrigin, string> = {
+  project: "Project",
+  dependency: "Dependencies",
+  stdlib: "Standard Library",
+};
 
 /** The active WorkspaceClient, set when a workspace port file is detected. */
 let workspaceWsClient: WorkspaceClient | undefined;
@@ -983,6 +993,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   workspaceTreeProvider = new WorkspaceTreeDataProvider();
   context.subscriptions.push(workspaceTreeProvider);
 
+  // Restore the "Classes" filter from the last session in this workspace, if any.
+  const persistedClassFilter = context.workspaceState.get<ClassOrigin[]>(CLASS_FILTER_STATE_KEY);
+  const isPersistedFilterActive =
+    !!persistedClassFilter &&
+    persistedClassFilter.length > 0 &&
+    persistedClassFilter.length < ALL_CLASS_ORIGINS.length;
+  if (isPersistedFilterActive) {
+    workspaceTreeProvider.setClassOriginFilter(new Set(persistedClassFilter));
+  }
+  void vscode.commands.executeCommand(
+    "setContext",
+    "beamtalk.classFilterActive",
+    isPersistedFilterActive
+  );
+
   context.subscriptions.push(
     vscode.window.createTreeView("beamtalk.workspaceExplorer", {
       treeDataProvider: workspaceTreeProvider,
@@ -1010,6 +1035,46 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.refreshWorkspace", () => {
       void workspaceTreeProvider?.refresh();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.filterClasses", async () => {
+      if (!workspaceTreeProvider) return;
+      const current = workspaceTreeProvider.classFilter;
+      const picks: Array<vscode.QuickPickItem & { origin: ClassOrigin }> = ALL_CLASS_ORIGINS.map(
+        (origin) => ({
+          label: CLASS_ORIGIN_LABELS[origin],
+          origin,
+          picked: current.has(origin),
+        })
+      );
+      const selected = await vscode.window.showQuickPick(picks, {
+        canPickMany: true,
+        title: "Filter Classes",
+        placeHolder: "Show classes from… (nothing checked shows everything)",
+      });
+      // undefined means the picker was dismissed (Escape) — leave the filter as-is.
+      if (selected === undefined) return;
+      const origins = new Set<ClassOrigin>(selected.map((pick) => pick.origin));
+      workspaceTreeProvider.setClassOriginFilter(origins);
+      await context.workspaceState.update(
+        CLASS_FILTER_STATE_KEY,
+        origins.size > 0 ? [...origins] : undefined
+      );
+      void vscode.commands.executeCommand(
+        "setContext",
+        "beamtalk.classFilterActive",
+        origins.size > 0 && origins.size < ALL_CLASS_ORIGINS.length
+      );
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.clearClassFilter", async () => {
+      workspaceTreeProvider?.setClassOriginFilter(new Set());
+      await context.workspaceState.update(CLASS_FILTER_STATE_KEY, undefined);
+      void vscode.commands.executeCommand("setContext", "beamtalk.classFilterActive", false);
     })
   );
 

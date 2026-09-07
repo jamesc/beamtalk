@@ -145,15 +145,25 @@ describe("WorkspaceClient.classes()", () => {
 
     respondTo(ws, {
       class_list: [
-        { name: "Counter", source_file: "/p/Counter.bt", actor_count: 2 },
-        { name: "Stack", source_file: null, actor_count: 0 },
+        {
+          name: "Counter",
+          source_file: "/p/Counter.bt",
+          actor_count: 2,
+          source_origin: "project",
+        },
+        { name: "Stack", source_file: null, actor_count: 0, source_origin: null },
       ],
     });
 
     const result = await promise;
     expect(result).toEqual([
-      { name: "Counter", source_file: "/p/Counter.bt", actor_count: 2 },
-      { name: "Stack", source_file: undefined, actor_count: 0 },
+      {
+        name: "Counter",
+        source_file: "/p/Counter.bt",
+        actor_count: 2,
+        source_origin: "project",
+      },
+      { name: "Stack", source_file: undefined, actor_count: 0, source_origin: undefined },
     ]);
     client.dispose();
   });
