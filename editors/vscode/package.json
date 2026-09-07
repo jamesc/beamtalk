@@ -72,6 +72,16 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "beamtalk.filterClasses",
+        "title": "Beamtalk: Filter Classes (Stdlib / Project / Dependencies)",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "beamtalk.clearClassFilter",
+        "title": "Clear Class Filter",
+        "icon": "$(close)"
+      },
+      {
         "command": "beamtalk.killActor",
         "title": "Kill Actor",
         "icon": "$(stop)"
@@ -134,6 +144,16 @@
           "group": "navigation"
         },
         {
+          "command": "beamtalk.filterClasses",
+          "when": "view == beamtalk.workspaceExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "beamtalk.clearClassFilter",
+          "when": "view == beamtalk.workspaceExplorer && beamtalk.classFilterActive",
+          "group": "navigation"
+        },
+        {
           "command": "beamtalk.showLogs",
           "when": "view == beamtalk.workspaceExplorer",
           "group": "navigation"
@@ -164,6 +184,11 @@
           "command": "beamtalk.inspectActor",
           "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
           "group": "beamtalk@1"
+        },
+        {
+          "command": "beamtalk.clearClassFilter",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == classes-section-filtered",
+          "group": "inline"
         },
         {
           "command": "beamtalk.inspectBinding",

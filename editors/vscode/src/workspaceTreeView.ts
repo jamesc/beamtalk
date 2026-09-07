@@ -12,6 +12,7 @@ import type {
   ActorInfo,
   BindingsMap,
   ClassInfo,
+  ClassOrigin,
   ConnectionState,
   MethodInfo,
   StateVarInfo,
@@ -19,6 +20,9 @@ import type {
   TypeAliasInfo,
   WorkspaceClient,
 } from "./workspaceClient";
+
+/** Every class origin the Workspace Explorer can filter by (BT-2552 badges). */
+export const ALL_CLASS_ORIGINS: readonly ClassOrigin[] = ["project", "dependency", "stdlib"];
 
 // ─── Node Types ───────────────────────────────────────────────────────────────
 
@@ -159,6 +163,13 @@ export class WorkspaceTreeDataProvider
   private bindings: BindingsMap = {};
   private actors: ActorInfo[] = [];
   private classes: ClassInfo[] = [];
+  /**
+   * Origins the "Classes" section shows. Defaults to all three (no
+   * filtering) — see `setClassOriginFilter`. A class with no `source_origin`
+   * (an older server that predates the field) is always shown regardless of
+   * this filter, so it never silently disappears.
+   */
+  private classOriginFilter: ReadonlySet<ClassOrigin> = new Set(ALL_CLASS_ORIGINS);
   /** ADR 0108 Phase 8 (BT-2903): every loaded package's declared `type` aliases. */
   private typeAliases: TypeAliasInfo[] = [];
   private disposed = false;
@@ -289,6 +300,22 @@ export class WorkspaceTreeDataProvider
     }
   }
 
+  /** The origins currently shown in the "Classes" section. */
+  get classFilter(): ReadonlySet<ClassOrigin> {
+    return this.classOriginFilter;
+  }
+
+  /**
+   * Restrict the "Classes" section to the given origins (stdlib/project/dependency).
+   * An empty set is treated as "no filter" (show everything) rather than an
+   * empty tree — a filter picker with nothing checked is more useful reset to
+   * its default than left showing zero classes.
+   */
+  setClassOriginFilter(origins: ReadonlySet<ClassOrigin>): void {
+    this.classOriginFilter = origins.size > 0 ? new Set(origins) : new Set(ALL_CLASS_ORIGINS);
+    this._onDidChangeTreeData.fire(CLASSES_SECTION);
+  }
+
   /** Refresh all sections by re-fetching actors, classes, and bindings. */
   async refresh(): Promise<void> {
     if (!this.client || this.connectionState !== "connected") {
@@ -375,7 +402,7 @@ export class WorkspaceTreeDataProvider
         return this.actors.map((info) => ({ kind: "actor-item" as const, info }));
 
       case "classes-section":
-        return this.classes.map((info) => ({ kind: "class-item" as const, info }));
+        return this._filteredClasses().map((info) => ({ kind: "class-item" as const, info }));
 
       case "type-aliases-section":
         return this.typeAliases.map((info) => ({ kind: "type-alias-item" as const, info }));
@@ -735,13 +762,34 @@ export class WorkspaceTreeDataProvider
   }
 
   private _classesSectionItem(): vscode.TreeItem {
-    const count = this.classes.length;
+    const total = this.classes.length;
+    const shown = this._filteredClasses().length;
+    const isFiltered = shown !== total;
     // Collapsed by default per ADR 0046 (avoid information overload for newcomers)
     const item = new vscode.TreeItem("Classes", vscode.TreeItemCollapsibleState.Collapsed);
-    item.description = count > 0 ? `(${count} loaded)` : "(none)";
-    item.iconPath = new vscode.ThemeIcon("symbol-class");
-    item.contextValue = "classes-section";
+    if (total === 0) {
+      item.description = "(none)";
+    } else if (isFiltered) {
+      item.description = `(${shown} of ${total})`;
+    } else {
+      item.description = `(${total} loaded)`;
+    }
+    item.iconPath = new vscode.ThemeIcon(isFiltered ? "filter" : "symbol-class");
+    // A distinct contextValue when a filter is active lets view/item/context
+    // menus (package.json) offer a "Clear Filter" action only when there is
+    // one to clear.
+    item.contextValue = isFiltered ? "classes-section-filtered" : "classes-section";
     return item;
+  }
+
+  /** The classes currently visible under "Classes", after `classOriginFilter`. */
+  private _filteredClasses(): ClassInfo[] {
+    if (this.classOriginFilter.size >= ALL_CLASS_ORIGINS.length) {
+      return this.classes;
+    }
+    return this.classes.filter(
+      (c) => c.source_origin === undefined || this.classOriginFilter.has(c.source_origin)
+    );
   }
 
   // ADR 0108 Phase 8 (BT-2903): "Type Aliases (N)" — a sibling section to

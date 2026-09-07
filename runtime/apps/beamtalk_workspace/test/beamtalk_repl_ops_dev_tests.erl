@@ -1776,7 +1776,14 @@ list_classes_op_returns_class() ->
     [Row] = [C || C <- ClassList, maps:get(<<"name">>, C) =:= <<"WidgetDev">>],
     ?assertEqual(<<"A widget for dev tests.">>, maps:get(<<"doc">>, Row)),
     ?assertEqual(<<"WidgetDevBase">>, maps:get(<<"superclass">>, Row)),
-    ?assertEqual(0, maps:get(<<"actor_count">>, Row)).
+    ?assertEqual(0, maps:get(<<"actor_count">>, Row)),
+    %% BT-2552-style classification, reused (not re-derived) from the System
+    %% Browser's `browse-classes` classifier — see `source_origin_of/2`.
+    ?assert(
+        lists:member(
+            maps:get(<<"source_origin">>, Row), [<<"stdlib">>, <<"project">>, <<"dependency">>]
+        )
+    ).
 
 list_classes_filter_stdlib() ->
     %% WidgetDev is registered with a non-stdlib module, so the stdlib filter
@@ -1788,7 +1795,12 @@ list_classes_filter_stdlib() ->
     Decoded = json:decode(Result),
     ClassList = maps:get(<<"class_list">>, Decoded),
     Names = [maps:get(<<"name">>, C) || C <- ClassList],
-    ?assertEqual(false, lists:member(<<"WidgetDev">>, Names)).
+    ?assertEqual(false, lists:member(<<"WidgetDev">>, Names)),
+    %% Everything the "stdlib" filter lets through must carry the matching
+    %% source_origin — the filter and the row-level classification must agree
+    %% (vacuously true if no stdlib classes are loaded in this eunit sandbox).
+    Origins = [maps:get(<<"source_origin">>, C) || C <- ClassList],
+    ?assertEqual([], [O || O <- Origins, O =/= <<"stdlib">>]).
 
 list_classes_superclass_filter() ->
     %% Filtering by superclass WidgetDevBase should include WidgetDev (which
