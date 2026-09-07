@@ -139,13 +139,23 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
             0 -> Request2;
             _ -> Request2#{class_hierarchy => ClassHierarchy}
         end,
+    %% BT-3477: forward the ambient protocol cache alongside `class_hierarchy'
+    %% above — see `beamtalk_compiler_server:handle_call/3`'s
+    %% `{compile_expression, ...}` clause for why both ride the same
+    %% unconditional injection.
+    ProtocolRegistry = maps:get(protocol_registry, Options, #{}),
+    Request3a =
+        case map_size(ProtocolRegistry) of
+            0 -> Request3;
+            _ -> Request3#{protocol_registry => ProtocolRegistry}
+        end,
     %% BT-1670: Forward module_name override for inline class definitions
     %% so package-mode produces consistent module names across all paths.
     ModuleNameOverride = maps:get(module_name, Options, undefined),
     Request4 =
         case ModuleNameOverride of
-            undefined -> Request3;
-            _ -> Request3#{module_name => ModuleNameOverride}
+            undefined -> Request3a;
+            _ -> Request3a#{module_name => ModuleNameOverride}
         end,
     %% ADR 0108 Phase 8 (BT-2902): forward earlier-turn alias declarations.
     KnownTypeAliases = maps:get(known_type_aliases, Options, []),
@@ -236,6 +246,14 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
             0 -> Request2;
             _ -> Request2#{class_hierarchy => ClassHierarchy}
         end,
+    %% BT-3477: forward the ambient protocol cache, mirroring
+    %% `compile_expression/5` above.
+    ProtocolRegistry = maps:get(protocol_registry, Options, #{}),
+    Request3a =
+        case map_size(ProtocolRegistry) of
+            0 -> Request3;
+            _ -> Request3#{protocol_registry => ProtocolRegistry}
+        end,
     %% ADR 0108 Phase 8 (BT-2902), BT-2956: forward earlier-turn/ambient alias
     %% declarations, mirroring `compile_expression/5` above — without this,
     %% `::` annotations in traced expressions can never resolve an alias
@@ -243,8 +261,8 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
     KnownTypeAliases = maps:get(known_type_aliases, Options, []),
     Request =
         case KnownTypeAliases of
-            [] -> Request3;
-            _ -> Request3#{known_type_aliases => KnownTypeAliases}
+            [] -> Request3a;
+            _ -> Request3a#{known_type_aliases => KnownTypeAliases}
         end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of

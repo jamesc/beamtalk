@@ -1309,6 +1309,12 @@ fn load_native_type_registry_from(
 /// aliases need their own re-parse path rather than `pre_class_hierarchy`'s
 /// recover-from-live-BEAM-state mechanism.
 ///
+/// `pre_loaded_protocols` (BT-3473, BT-3477) carries the live image's ambient
+/// protocol cache — see [`extract_protocol_registry`]'s doc. Without it, a
+/// cross-file protocol-typed receiver in a live `compile_expression` (the
+/// REPL's `eval`) hits the same nominal-mismatch/Dnu false positive BT-3473
+/// fixed for `diagnostics/3`.
+///
 /// BT-2952: uses `compute_diagnostics_and_analysis` (the same analysis as
 /// `compute_diagnostics_with_known_vars_classes_and_aliases`, additionally
 /// returning the full `AnalysisResult`) so the REPL-inline
@@ -1321,6 +1327,7 @@ fn parse_and_check_expression(
     source: &str,
     known_vars: &[String],
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_protocols: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
 ) -> Result<
     (
@@ -1340,7 +1347,7 @@ fn parse_and_check_expression(
             parse_diagnostics,
             &known_var_refs,
             pre_class_hierarchy,
-            vec![],
+            pre_loaded_protocols,
             pre_loaded_aliases,
             diagnostics_overrides(),
         );
@@ -1388,12 +1395,14 @@ fn handle_compile_expression(request: &Map) -> Term {
         Err(resp) => return resp,
     };
     let pre_class_hierarchy = extract_class_hierarchy(request);
+    let pre_loaded_protocols = extract_protocol_registry(request);
     let pre_loaded_aliases = extract_known_type_aliases(request);
 
     let (module, warnings, analysis) = match parse_and_check_expression(
         &source,
         &known_vars,
         pre_class_hierarchy.clone(),
+        pre_loaded_protocols,
         pre_loaded_aliases.clone(),
     ) {
         Ok(r) => r,
@@ -1543,6 +1552,7 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
         Err(resp) => return resp,
     };
     let pre_class_hierarchy = extract_class_hierarchy(request);
+    let pre_loaded_protocols = extract_protocol_registry(request);
     let pre_loaded_aliases = extract_known_type_aliases(request);
 
     // Trace mode never defines classes/protocols/aliases (rejected below), so
@@ -1555,6 +1565,7 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
         &source,
         &known_vars,
         pre_class_hierarchy,
+        pre_loaded_protocols,
         pre_loaded_aliases,
     ) {
         Ok(r) => r,
@@ -1892,6 +1903,12 @@ fn handle_compile(request: &Map) -> Term {
         .unwrap_or(true);
 
     let pre_class_hierarchy = extract_class_hierarchy(request);
+    // BT-3477: a class/protocol-defining compile needs the ambient protocol
+    // cache too, not just `diagnostics/3` — see `extract_protocol_registry`'s
+    // doc. Without this, a live REPL `compile` of a class whose method
+    // signature references a cross-file protocol hits the same nominal-
+    // mismatch/Dnu false positive BT-3473 fixed for `diagnostics/3`.
+    let pre_loaded_protocols = extract_protocol_registry(request);
     // BT-2899 (ADR 0108): a class/protocol-defining compile needs session
     // carried-over type aliases too, not just `compile_expression` — see
     // `extract_known_type_aliases`'s doc. Without this, a live REPL
@@ -1921,7 +1938,7 @@ fn handle_compile(request: &Map) -> Term {
             parse_diagnostics,
             &[],
             pre_class_hierarchy.clone(),
-            vec![],
+            pre_loaded_protocols,
             pre_loaded_aliases.clone(),
             diagnostics_overrides(),
         );
@@ -2131,6 +2148,10 @@ fn handle_compile_method(request: &Map) -> Term {
         .and_then(term_to_bool)
         .unwrap_or(true);
     let pre_class_hierarchy = extract_class_hierarchy(request);
+    // BT-3477: see `handle_compile`'s equivalent comment — a `compile_method`
+    // patch is a class-defining/-patching compile too, so it needs the
+    // ambient protocol cache for the same reason.
+    let pre_loaded_protocols = extract_protocol_registry(request);
     // BT-2899 (ADR 0108): see `handle_compile`'s equivalent comment — a
     // `compile_method` patch is a class-defining/-patching compile too, so
     // it needs session carried-over aliases for the same reason.
@@ -2266,7 +2287,7 @@ fn handle_compile_method(request: &Map) -> Term {
             merged_parse_diags,
             &[],
             pre_class_hierarchy.clone(),
-            vec![],
+            pre_loaded_protocols,
             pre_loaded_aliases.clone(),
             diagnostics_overrides(),
         );
@@ -4184,6 +4205,260 @@ mod tests {
                     .unwrap_or_default()
             })
             .collect()
+    }
+
+    /// BT-3477: builds the `class_hierarchy` entry for `NullTimer` used by
+    /// the `compile`/`compile_method` protocol-registry tests below —
+    /// `NullTimer` stands in for the cross-file class the issue describes
+    /// (the ambient cache's actual wire shape for a real compiled class,
+    /// full `method_info` included), so the protocol-conformance check has
+    /// something to structurally match `TimeoutToken`'s required selectors
+    /// against without inlining `NullTimer`'s definition into the source
+    /// under compile — `compile`/`compile_method` (unlike `diagnostics`)
+    /// runs codegen, which enforces BT-1666's one-class-per-file rule.
+    fn null_timer_class_info_term() -> Term {
+        let no_arg_boolean_method = |return_type: &str| {
+            Term::from(Map::from([
+                (atom("arity"), Term::from(eetf::FixInteger::from(0))),
+                (atom("param_types"), Term::from(eetf::List::from(vec![]))),
+                (atom("return_type"), atom(return_type)),
+            ]))
+        };
+        Term::from(Map::from([
+            (atom("superclass"), atom("Value")),
+            (atom("is_sealed"), atom("false")),
+            (atom("is_abstract"), atom("false")),
+            (atom("is_value"), atom("true")),
+            (atom("is_typed"), atom("false")),
+            (atom("fields"), Term::from(eetf::List::from(vec![]))),
+            (atom("field_types"), Term::from(Map::from([]))),
+            (
+                atom("method_info"),
+                Term::from(Map::from([
+                    (atom("cancel"), no_arg_boolean_method("Boolean")),
+                    (atom("isActive"), no_arg_boolean_method("Boolean")),
+                ])),
+            ),
+            (atom("class_method_info"), Term::from(Map::from([]))),
+            (
+                atom("class_variables"),
+                Term::from(eetf::List::from(vec![])),
+            ),
+        ]))
+    }
+
+    /// BT-3477: the `TimeoutToken` `class_hierarchy` entry (mirrors the
+    /// `diagnostics_*_protocol_mismatch` tests' `class_hierarchy_term` above
+    /// — the runtime-seeded checker sees a protocol as a zero-method class
+    /// entry regardless of request kind) and its `protocol_registry` entry
+    /// (BT-3473's real wire shape: selector/arity-only required methods).
+    fn timeout_token_terms() -> (Term, Term) {
+        let class_entry = Term::from(Map::from([
+            (atom("is_sealed"), atom("true")),
+            (atom("is_abstract"), atom("true")),
+        ]));
+        let protocol_entry = Term::from(Map::from([
+            (
+                atom("required_methods"),
+                Term::from(eetf::List::from(vec![
+                    Term::from(Map::from([
+                        (atom("selector"), atom("cancel")),
+                        (atom("arity"), Term::from(eetf::FixInteger::from(0))),
+                    ])),
+                    Term::from(Map::from([
+                        (atom("selector"), atom("isActive")),
+                        (atom("arity"), Term::from(eetf::FixInteger::from(0))),
+                    ])),
+                ])),
+            ),
+            (atom("type_params"), Term::from(eetf::List::from(vec![]))),
+            (atom("extending"), atom("undefined")),
+        ]));
+        (class_entry, protocol_entry)
+    }
+
+    /// BT-3477: extract every string in a `compile`/`compile_method` `ok`
+    /// response's `warnings` field (plain binaries, unlike `diagnostics`'s
+    /// `diagnostic_messages` maps above) for the protocol-registry tests
+    /// below.
+    fn compile_warning_messages(response: &Term) -> Vec<String> {
+        let Term::Map(m) = response else {
+            panic!("Expected map response: {response:?}");
+        };
+        let Some(Term::List(warnings)) = map_get(m, "warnings") else {
+            panic!("Expected warnings list: {response:?}");
+        };
+        warnings
+            .elements
+            .iter()
+            .filter_map(term_to_string)
+            .collect()
+    }
+
+    /// BT-3477: without `protocol_registry`, `compile` (not just
+    /// `diagnostics/3`, which BT-3473 already covers) hits the identical
+    /// false type-mismatch/Dnu for a cross-file protocol-typed receiver —
+    /// `NullTimer` is only known via the ambient `class_hierarchy` here
+    /// (simulating a class compiled in an earlier REPL turn/another file),
+    /// exactly as `beamtalk_repl_eval`'s live `compile` calls see it.
+    #[test]
+    fn compile_class_hierarchy_alone_reproduces_false_protocol_mismatch() {
+        let (timeout_token_class, _) = timeout_token_terms();
+        let class_hierarchy_term = Term::from(Map::from([
+            (atom("NullTimer"), null_timer_class_info_term()),
+            (atom("TimeoutToken"), timeout_token_class),
+        ]));
+
+        let request = Map::from([
+            (atom("command"), atom("compile")),
+            (
+                atom("source"),
+                binary(
+                    "typed Object subclass: Pool\n\
+                     \x20 make -> TimeoutToken => NullTimer new\n\
+                     \x20 use: t :: TimeoutToken -> Boolean => t cancel\n\
+                     \x20 go -> Boolean => self use: NullTimer new\n",
+                ),
+            ),
+            (atom("module_name"), binary("bt@pool")),
+            (atom("class_hierarchy"), class_hierarchy_term),
+        ]);
+
+        let response = handle_compile(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response: {response:?}");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "the false positives are warning/hint severity, not errors: {response:?}"
+        );
+        let warnings = compile_warning_messages(&response);
+        assert!(
+            warnings
+                .iter()
+                .any(|m| m.contains("declares return type TimeoutToken")),
+            "expected the pre-fix false type mismatch, got: {warnings:?}"
+        );
+        assert!(
+            warnings.iter().any(|m| m.contains("does not understand")),
+            "expected the pre-fix false Dnu hint, got: {warnings:?}"
+        );
+    }
+
+    /// BT-3477: the companion fix to the test above — supplying
+    /// `protocol_registry` alongside `class_hierarchy` to `compile` (mirrors
+    /// `diagnostics_protocol_registry_suppresses_false_protocol_mismatch`)
+    /// lets the same BT-2088/BT-3472 filter recognise `TimeoutToken` as a
+    /// protocol, so neither false positive fires.
+    #[test]
+    fn compile_protocol_registry_suppresses_false_protocol_mismatch() {
+        let (timeout_token_class, timeout_token_protocol) = timeout_token_terms();
+        let class_hierarchy_term = Term::from(Map::from([
+            (atom("NullTimer"), null_timer_class_info_term()),
+            (atom("TimeoutToken"), timeout_token_class),
+        ]));
+        let protocol_registry_term =
+            Term::from(Map::from([(atom("TimeoutToken"), timeout_token_protocol)]));
+
+        let request = Map::from([
+            (atom("command"), atom("compile")),
+            (
+                atom("source"),
+                binary(
+                    "typed Object subclass: Pool\n\
+                     \x20 make -> TimeoutToken => NullTimer new\n\
+                     \x20 use: t :: TimeoutToken -> Boolean => t cancel\n\
+                     \x20 go -> Boolean => self use: NullTimer new\n",
+                ),
+            ),
+            (atom("module_name"), binary("bt@pool")),
+            (atom("class_hierarchy"), class_hierarchy_term),
+            (atom("protocol_registry"), protocol_registry_term),
+        ]);
+
+        let response = handle_compile(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response: {response:?}");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "resp: {response:?}"
+        );
+        let warnings = compile_warning_messages(&response);
+        assert!(
+            !warnings
+                .iter()
+                .any(|m| m.contains("declares return type TimeoutToken")),
+            "NullTimer structurally conforms to TimeoutToken — no nominal mismatch \
+             expected, got: {warnings:?}"
+        );
+        assert!(
+            !warnings.iter().any(|m| m.contains("does not understand")),
+            "TimeoutToken's required selectors are known — no Dnu hint expected, \
+             got: {warnings:?}"
+        );
+    }
+
+    /// BT-3477: the `compile_method` sibling of
+    /// `compile_protocol_registry_suppresses_false_protocol_mismatch` — the
+    /// live-image write surface (IDE save / `compile:source:` / REPL `>>`)
+    /// hits the same false positive when patching a method onto an
+    /// already-installed class. `class_source` carries the pre-fix
+    /// type-mismatch (`make`); the patched `method_source` carries the
+    /// pre-fix Dnu (`use:`) — both re-checked together on the merged module.
+    #[test]
+    fn compile_method_protocol_registry_suppresses_false_protocol_mismatch() {
+        let (timeout_token_class, timeout_token_protocol) = timeout_token_terms();
+        let class_hierarchy_term = Term::from(Map::from([
+            (atom("NullTimer"), null_timer_class_info_term()),
+            (atom("TimeoutToken"), timeout_token_class),
+        ]));
+        let protocol_registry_term =
+            Term::from(Map::from([(atom("TimeoutToken"), timeout_token_protocol)]));
+
+        let request = Map::from([
+            (atom("command"), atom("compile_method")),
+            (
+                atom("class_source"),
+                binary(
+                    "typed Object subclass: Pool\n\
+                     \x20 make -> TimeoutToken => NullTimer new\n",
+                ),
+            ),
+            (
+                atom("method_source"),
+                binary("use: t :: TimeoutToken -> Boolean =>\n  t cancel"),
+            ),
+            (atom("is_class_method"), atom("false")),
+            (atom("module_name"), binary("bt@pool")),
+            (atom("class_hierarchy"), class_hierarchy_term),
+            (atom("protocol_registry"), protocol_registry_term),
+        ]);
+
+        let response = handle_compile_method(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response: {response:?}");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "resp: {response:?}"
+        );
+        let warnings = compile_warning_messages(&response);
+        assert!(
+            !warnings
+                .iter()
+                .any(|m| m.contains("declares return type TimeoutToken")),
+            "NullTimer structurally conforms to TimeoutToken — no nominal mismatch \
+             expected, got: {warnings:?}"
+        );
+        assert!(
+            !warnings.iter().any(|m| m.contains("does not understand")),
+            "TimeoutToken's required selectors are known — no Dnu hint expected, \
+             got: {warnings:?}"
+        );
     }
 
     /// ADR 0108 hot-reload re-check trigger (BT-2899): `diagnostics` now
