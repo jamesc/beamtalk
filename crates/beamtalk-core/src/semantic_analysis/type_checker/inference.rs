@@ -4879,9 +4879,18 @@ impl TypeChecker {
     /// once here, in Phase 1, and Phase 2 below is then a no-op for them.
     /// Always returns the final per-argument inferred types — never `None`
     /// — so the caller must not re-infer any argument on top of this.
+    ///
+    /// `pub(super)` so `type_checker::tests` can unit-test the
+    /// class-side/instance-side DNU-override branch directly — a `Union`
+    /// receiver combined with `is_class_side_send: true` isn't reachable
+    /// through today's other type-checker features (a class-side send's
+    /// receiver is always a `ClassReference` or `self`, both of which are
+    /// single, non-`Union` types), but the branch's correctness matters on
+    /// its own regardless of reachability, matching `find_block_arm`'s
+    /// rationale for the same `pub(super)` treatment.
     #[allow(clippy::too_many_arguments)] // mirrors infer_args_with_block_context's arg count
     #[allow(clippy::too_many_lines)] // per-member resolution + merge adds necessary branches
-    fn resolve_union_block_param_types(
+    pub(super) fn resolve_union_block_param_types(
         &mut self,
         members: &[InferredType],
         arguments: &[Expression],

@@ -262,3 +262,151 @@ typed Actor subclass: Watcher
         warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+/// Regression guard (review Suggestion on this PR): the DNU-override check in
+/// `resolve_union_block_param_types` must branch on `is_class_side_send`
+/// (`has_class_dnu_override` vs `has_instance_dnu_override`) — a union member
+/// with only an *instance*-side `doesNotUnderstand:args:` override must still
+/// contribute its *class*-side method's block-param type for a class-side
+/// send, not be wrongly treated as uncertain.
+///
+/// Unit-tests `resolve_union_block_param_types` directly (see its doc
+/// comment for why: a `Union` receiver combined with a class-side send isn't
+/// reachable through today's other type-checker features, since a
+/// class-side send's receiver is always a `ClassReference` or `self` —
+/// both single, non-`Union` types).
+///
+/// Design: the two union members' `spawn:` class methods declare
+/// *disagreeing* concrete block-param types (`Block(String, String)` vs
+/// `Block(Integer, Integer)`). If both are correctly consulted, the merge
+/// conservatively falls back to `Dynamic` (two differing concrete types).
+/// If `WithInstanceOverride` were wrongly skipped (the pre-fix bug — its
+/// *instance*-side override incorrectly suppressed its *class*-side
+/// contribution), only `Plain` would contribute and the result would be the
+/// single concrete type `Integer` instead — so this test would have failed
+/// before the fix.
+#[test]
+#[allow(clippy::too_many_lines)] // test fixture — length is proportional to ClassInfo fields
+fn union_class_side_send_instance_only_dnu_override_still_contributes() {
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    use std::collections::HashMap;
+
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    let with_instance_override = ClassInfo {
+        surface_incomplete: false,
+        name: eco_string("WithInstanceOverride"),
+        superclass: Some(eco_string("Object")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        handle_scope: None,
+        state: vec![],
+        state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
+        methods: vec![MethodInfo {
+            selector: eco_string("doesNotUnderstand:args:"),
+            arity: 2,
+            kind: MethodKind::Primary,
+            defined_in: eco_string("WithInstanceOverride"),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: None,
+            param_types: vec![None, None],
+            doc: None,
+        }],
+        class_methods: vec![MethodInfo {
+            selector: eco_string("spawn:"),
+            arity: 1,
+            kind: MethodKind::Primary,
+            defined_in: eco_string("WithInstanceOverride"),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some(DeclaredType::parse("String")),
+            param_types: vec![Some(DeclaredType::parse("Block(String, String)"))],
+            doc: None,
+        }],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+    let plain = ClassInfo {
+        surface_incomplete: false,
+        name: eco_string("Plain"),
+        superclass: Some(eco_string("Object")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        handle_scope: None,
+        state: vec![],
+        state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
+        methods: vec![],
+        class_methods: vec![MethodInfo {
+            selector: eco_string("spawn:"),
+            arity: 1,
+            kind: MethodKind::Primary,
+            defined_in: eco_string("Plain"),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some(DeclaredType::parse("Integer")),
+            param_types: vec![Some(DeclaredType::parse("Block(Integer, Integer)"))],
+            doc: None,
+        }],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+    hierarchy.add_from_beam_meta(vec![with_instance_override, plain]);
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let members = vec![
+        InferredType::known("WithInstanceOverride"),
+        InferredType::known("Plain"),
+    ];
+    let block_arg = Expression::Block(Block::new(
+        vec![crate::ast::BlockParameter::new("x", span())],
+        vec![bare(var("x"))],
+        span(),
+    ));
+    let arguments = vec![block_arg];
+
+    let arg_types = checker.resolve_union_block_param_types(
+        &members, &arguments, "spawn:", &hierarchy, &mut env, false,
+        true, // is_class_side_send
+    );
+
+    let InferredType::Known {
+        class_name,
+        type_args,
+        ..
+    } = &arg_types[0]
+    else {
+        panic!("expected a Known Block type, got: {:?}", arg_types[0]);
+    };
+    assert_eq!(class_name.as_str(), "Block", "got: {:?}", arg_types[0]);
+    let param_ty = type_args
+        .first()
+        .unwrap_or_else(|| panic!("Block type has no type_args: {:?}", arg_types[0]));
+    assert!(
+        matches!(param_ty, InferredType::Dynamic(_)),
+        "both union members' class-side `spawn:` methods should be consulted for a \
+         class-side send — `WithInstanceOverride`'s instance-only DNU override must \
+         not suppress its contribution — so the disagreeing param types (String vs \
+         Integer) should conservatively merge to Dynamic; got: {param_ty:?} (if this \
+         is `Integer`, `WithInstanceOverride` was wrongly skipped)"
+    );
+}
