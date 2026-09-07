@@ -282,12 +282,18 @@ unregister_protocol(Module) when is_atom(Module) ->
             %% themselves instead of this function's whole body.
             %%
             %% Residual (accepted): `select` and `select_delete` are still
-            %% two independent ETS operations, so a row inserted for `Module`
-            %% in the gap between them would be deleted without ever
-            %% appearing in `Purged` — the compiler server's ambient cache
-            %% would then miss that one removal notification and carry a
-            %% stale entry until the next registration overwrites it. ETS has
-            %% no atomic "select-and-delete-returning-rows" primitive, and a
+            %% two independent ETS operations, so any row change for
+            %% `Module` in the gap between them can desync `Purged` from what
+            %% is actually deleted, in either direction: a row inserted in
+            %% the gap gets deleted without ever appearing in `Purged` (the
+            %% compiler server misses that removal and carries a stale entry
+            %% until the next registration overwrites it), and a row
+            %% re-registered under a *different* module in the gap is
+            %% correctly left in place by `select_delete` but still notified
+            %% as removed via the stale `Purged` snapshot (the compiler
+            %% server can transiently lose a still-live protocol until its
+            %% next registration). ETS has no atomic
+            %% "select-and-delete-returning-rows" primitive, and a
             %% self-healing diagnostics-suppression cache doesn't warrant a
             %% dedicated lock/gen_server serialization point for this
             %% narrower-still race.
