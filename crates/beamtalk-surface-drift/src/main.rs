@@ -33,7 +33,18 @@ use std::process::ExitCode;
 /// Path fragments (relative to repo root) that the checker reads.
 const PARITY_DOC: &str = "docs/development/surface-parity.md";
 const REPL_OPS_DIR: &str = "runtime/apps/beamtalk_workspace/src";
-const MCP_SERVER: &str = "crates/beamtalk-mcp/src/server.rs";
+const MCP_SERVER: &str = "crates/beamtalk-mcp/src/server/tools/";
+/// `#[tool(...)]` definitions live one file per tool family under
+/// `MCP_SERVER`; `scan_mcp_tools` reads and concatenates all of them before
+/// scanning, same as `scan_lsp_caps` does for the LSP's split server files.
+const MCP_SERVER_TOOL_FILES: &[&str] = &[
+    "crates/beamtalk-mcp/src/server/tools/diagnostics.rs",
+    "crates/beamtalk-mcp/src/server/tools/docs.rs",
+    "crates/beamtalk-mcp/src/server/tools/editing.rs",
+    "crates/beamtalk-mcp/src/server/tools/evaluate.rs",
+    "crates/beamtalk-mcp/src/server/tools/flush.rs",
+    "crates/beamtalk-mcp/src/server/tools/traces.rs",
+];
 const REPL_DISPATCH: &str = "crates/beamtalk-cli/src/commands/repl/mod.rs";
 /// BT-3083: the single source of the REPL meta-command vocabulary — every
 /// `":cmd"` name/alias tab-completion offers lives in this table
@@ -446,7 +457,7 @@ impl CodeInventory {
     fn scan(repo_root: &Path) -> Result<Self, String> {
         let mut inv = CodeInventory::default();
         inv.scan_repl_ops(&repo_root.join(REPL_OPS_DIR))?;
-        inv.scan_mcp_tools(&repo_root.join(MCP_SERVER))?;
+        inv.scan_mcp_tools(repo_root)?;
         inv.scan_repl_meta(&repo_root.join(REPL_COMMANDS_TABLE))?;
         inv.scan_repl_command_dispatch(&repo_root.join(REPL_DISPATCH))?;
         inv.scan_lsp_caps(&repo_root.join(LSP_SERVER))?;
@@ -512,10 +523,13 @@ impl CodeInventory {
         Ok(())
     }
 
-    fn scan_mcp_tools(&mut self, path: &Path) -> Result<(), String> {
-        let text = fs::read_to_string(path)
-            .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-        extract_mcp_tools(&text, &mut self.mcp_tools);
+    fn scan_mcp_tools(&mut self, repo_root: &Path) -> Result<(), String> {
+        for file in MCP_SERVER_TOOL_FILES {
+            let path = repo_root.join(file);
+            let text = fs::read_to_string(&path)
+                .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+            extract_mcp_tools(&text, &mut self.mcp_tools);
+        }
         Ok(())
     }
 
@@ -668,7 +682,21 @@ fn extract_mcp_tools(text: &str, out: &mut BTreeSet<String>) {
 
 fn extract_async_fn_name(line: &str) -> Option<String> {
     let trimmed = line.trim_start();
-    let rest = trimmed.strip_prefix("pub ").or(Some(trimmed))?;
+    // Skip an optional visibility modifier: `pub `, or `pub(crate) `/
+    // `pub(super) `/`pub(in ...) ` — a tool fn's minimal-visibility
+    // widening (e.g. bare `async fn` to `pub(crate) async fn` when a split
+    // moves it out of its original file) must not blind this scanner.
+    let rest = if let Some(after_pub) = trimmed.strip_prefix("pub") {
+        let after_paren = if let Some(open) = after_pub.strip_prefix('(') {
+            let close = open.find(')')?;
+            &open[close + 1..]
+        } else {
+            after_pub
+        };
+        after_paren.trim_start()
+    } else {
+        trimmed
+    };
     let rest = rest.strip_prefix("async fn ")?;
     let end = rest
         .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
@@ -1312,6 +1340,14 @@ describe_ops() ->
         assert_eq!(
             extract_async_fn_name("    pub async fn complete<'a>("),
             Some("complete".into())
+        );
+        assert_eq!(
+            extract_async_fn_name("    pub(crate) async fn evaluate("),
+            Some("evaluate".into())
+        );
+        assert_eq!(
+            extract_async_fn_name("    pub(super) async fn flush("),
+            Some("flush".into())
         );
         assert!(extract_async_fn_name("fn not_async() {").is_none());
     }
