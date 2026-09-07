@@ -1846,16 +1846,20 @@ impl LanguageServer for Backend {
                 keep.then(|| fs::read_to_string(&path).ok()).flatten()
             };
 
-            // Guard against the reopen race: hold `open_generation` for the
-            // whole check-then-act block below, so nothing can observe or
-            // act on a half-applied state. `did_open` records its path here
-            // *before* touching `svc`/`versions` (see its own comment), so
-            // if a reopen's `did_open` acquired this lock first, the
-            // generation check below is guaranteed to see it and we back off
-            // entirely. If we acquire this lock first instead, `did_open`'s
-            // insert simply blocks until we release it, so its own
-            // `update_file` call is guaranteed to run after — and therefore
-            // win over — ours.
+            // Guard against the reopen race: hold `open_generation` across
+            // both the check *and* the `svc`/`versions` mutation below, not
+            // just the check — releasing it in between would reopen the
+            // exact same window under a different name (a reopen landing
+            // after we decide "safe to write" but before we actually write
+            // would still get silently clobbered by our stale disk
+            // snapshot). `did_open` records its path here *before* touching
+            // `svc`/`versions` (see its own comment), so if a reopen's
+            // `did_open` acquired this lock first, the generation check
+            // below is guaranteed to see it and we back off entirely,
+            // touching nothing. If we acquire this lock first instead,
+            // `did_open`'s insert simply blocks until we release it (after
+            // our own write below completes), so its own `update_file` call
+            // is guaranteed to run after — and therefore win over — ours.
             let reopened = {
                 let mut open_generation = self
                     .open_generation
@@ -1863,6 +1867,18 @@ impl LanguageServer for Backend {
                     .expect("open_generation lock poisoned");
                 let reopened = open_generation.get(&path).copied() != generation_before;
                 if !reopened {
+                    if uri.scheme() == "beamtalk-stdlib" {
+                        let mut versions = self.versions.lock().expect("versions lock poisoned");
+                        versions.remove(&path);
+                    } else {
+                        let mut svc = self.service.lock().expect("service lock poisoned");
+                        match disk_content {
+                            Some(content) => svc.update_file(path.clone(), content),
+                            None => svc.remove_file(&path),
+                        }
+                        let mut versions = self.versions.lock().expect("versions lock poisoned");
+                        versions.remove(&path);
+                    }
                     open_generation.remove(&path);
                 }
                 reopened
@@ -1871,19 +1887,6 @@ impl LanguageServer for Backend {
                 // Leave `svc`, `versions`, and this entry alone — they
                 // belong to the reopen now.
                 return;
-            }
-
-            if uri.scheme() == "beamtalk-stdlib" {
-                let mut versions = self.versions.lock().expect("versions lock poisoned");
-                versions.remove(&path);
-            } else {
-                let mut svc = self.service.lock().expect("service lock poisoned");
-                match disk_content {
-                    Some(content) => svc.update_file(path.clone(), content),
-                    None => svc.remove_file(&path),
-                }
-                let mut versions = self.versions.lock().expect("versions lock poisoned");
-                versions.remove(&path);
             }
             self.clear_dirty(&path);
             {
