@@ -773,12 +773,7 @@ fn selector_reference_span(selector: &beamtalk_core::ast::MessageSelector) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
-    use beamtalk_core::source_analysis::{lex_with_eof, parse};
-
-    fn parse_source(source: &str) -> Module {
-        let tokens = lex_with_eof(source);
-        parse(tokens).0
-    }
+    use crate::queries::parse_source;
 
     #[test]
     fn find_class_references_in_expressions() {

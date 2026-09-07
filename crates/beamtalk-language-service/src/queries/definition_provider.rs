@@ -1198,13 +1198,8 @@ fn find_definition_in_expr(expr: &Expression, name: &str) -> Option<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::queries::parse_source;
     use beamtalk_core::semantic_analysis::ClassHierarchy;
-    use beamtalk_core::source_analysis::{lex_with_eof, parse};
-
-    fn parse_source(source: &str) -> Module {
-        let tokens = lex_with_eof(source);
-        parse(tokens).0
-    }
 
     #[test]
     fn find_definition_variable_assignment() {
