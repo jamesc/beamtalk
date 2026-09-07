@@ -94,7 +94,7 @@ fn test_compute_auto_slot_methods_no_slots() {
     assert!(auto.keyword_constructor.is_none());
 }
 
-// ─── BT-2998: opaque `native:` representations ──────────────────────────
+// ─── Opaque `native:` representations ────────────────────────────────────
 
 fn parse_one_class(source: &str) -> ClassDefinition {
     beamtalk_core::test_helpers::test_support::parse_bt(source)
@@ -259,7 +259,7 @@ fn test_generate_value_type_module_includes_class_name() {
     );
 }
 
-/// BT-3435 (ADR 0119 step 0): `is_known_stdlib_type` must agree with
+/// ADR 0119 step 0: `is_known_stdlib_type` must agree with
 /// `ClassHierarchy::with_builtins()` — every real built-in class name
 /// registered there (via `generated_builtins.rs::is_generated_builtin_class`,
 /// the `beamtalk build-stdlib`-generated table of *actual* parsed
@@ -293,7 +293,7 @@ fn test_is_known_stdlib_type_matches_builtin_classes() {
     }
 }
 
-// ── ADR 0119 / BT-3436: registry-based `compiled_module_name*` ─────────
+// ── ADR 0119: registry-based `compiled_module_name*` ─────────────────────
 
 #[test]
 fn test_compiled_module_name_registry_hit_takes_precedence_over_heuristic() {

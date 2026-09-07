@@ -5,20 +5,18 @@
 //!
 //! Tests are organized into domain-focused sub-modules:
 //! - [`render_naming`] — `VersionedVar`/`FrameId` naming and `VersionCounter`
-//!   (BT-3131) basics
+//!   basics
 //! - [`verify_walk`] — `verify()`'s clean/silent case, `UnboundVersion`,
 //!   `NonLinearVersion`, `ThreadingModeUnpackMismatch`, and
 //!   `ShadowWriteMissing` (ADR 0110 contract)
 //! - [`lower_and_render_shim`] — the `lower_and_render` test shim's coverage
 //!   of `render()`'s `BindOp`/`ThreadedStmt` variants
-//! - [`tuple_acc`] — BT-3133/BT-3147 (ADR 0111 Phase C) `TupleAcc` unpack
-//!   invariants
-//! - [`class_var_bind`] — `construct_and_verify_class_var_bind` (BT-3135/
-//!   BT-3148, ADR 0110 contract), `verify_simple_bind` (BT-3139), and
-//!   `verify_body_with_opaque_version_gaps` (BT-3148/BT-3164)
-//! - [`dual_run`] — the dual-run byte-parity harness (BT-3144)
-//! - [`close_and_value`] — `ThreadedValue::close` (ADR 0118 §Decision 5,
-//!   BT-3415)
+//! - [`tuple_acc`] — ADR 0111 Phase C `TupleAcc` unpack invariants
+//! - [`class_var_bind`] — `construct_and_verify_class_var_bind` and
+//!   `verify_simple_bind` (ADR 0110 contract), and
+//!   `verify_body_with_opaque_version_gaps`
+//! - [`dual_run`] — the dual-run byte-parity harness
+//! - [`close_and_value`] — `ThreadedValue::close` (ADR 0118 §Decision 5)
 
 use super::*;
 
@@ -34,10 +32,9 @@ fn class_var(version: usize, frame: FrameId) -> VersionedVar {
     VersionedVar::new(VersionPrefix::ClassVars, version, frame)
 }
 
-/// The pre-BT-3144 skeleton-fidelity test shim signature, kept working per
-/// the issue body's point 5: delegates to [`render`] against a throwaway
-/// [`CoreErlangGenerator`] (cheap — no I/O) so every existing
-/// `lower_and_render(&ir).to_pretty_string()` test call survives verbatim.
+/// A stable skeleton-fidelity test shim signature: delegates to [`render`]
+/// against a throwaway [`CoreErlangGenerator`] (cheap — no I/O) so every
+/// `lower_and_render(&ir).to_pretty_string()` test call stays simple.
 ///
 /// Unlike [`render`] itself (which has real production callers — see
 /// [`render`]'s doc comment), every one of those callers builds its own

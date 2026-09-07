@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2734: synthetic value-accessor doc/signature metadata.
+//! Synthetic value-accessor doc/signature metadata.
 
 use super::*;
 use beamtalk_core::ast::{
@@ -86,12 +86,12 @@ fn test_synthetic_keyword_constructor_is_class_side() {
 
 #[test]
 fn test_synthetic_keyword_constructor_long_selector_is_hashed() {
-    // Regression guard alongside BT-1408's `value_many_fields.bt` fixture: a
-    // Value class with enough long field names that the raw keyword-
-    // constructor selector exceeds Erlang's 255-char atom limit must not
-    // surface that raw selector as a `classMethodSignatures`/
-    // `classMethodDocs` map *key* atom (it would blow the limit exactly like
-    // the dispatch function name did before BT-1408). The key must match
+    // Regression guard alongside the `value_many_fields.bt` fixture: a Value
+    // class with enough long field names that the raw keyword-constructor
+    // selector exceeds Erlang's 255-char atom limit must not surface that
+    // raw selector as a `classMethodSignatures`/`classMethodDocs` map *key*
+    // atom (it would blow the limit exactly like the dispatch function name
+    // once did). The key must match
     // `safe_class_method_selector`, the same hash the runtime meta entry and
     // dispatch already use for this selector — the doc/signature *text* still
     // carries the full readable field names since it is a binary, not atom.

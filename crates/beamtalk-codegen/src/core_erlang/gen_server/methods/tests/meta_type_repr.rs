@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0068/BT-3076: `MetaTypeRepr` conversion and rendering.
+//! ADR 0068: `MetaTypeRepr` conversion and rendering.
 
 use super::*;
 use beamtalk_core::ast::{Identifier, TypeAnnotation, TypeParamDecl};
@@ -59,7 +59,7 @@ fn test_meta_type_repr_generic_renders_tagged_tuple() {
 
 #[test]
 fn test_meta_type_repr_union_renders_tagged_tuple() {
-    // BT-3076: `Integer | String` → `{'union', ['Integer', 'String']}`.
+    // `Integer | String` → `{'union', ['Integer', 'String']}`.
     let doc = CoreErlangGenerator::meta_type_repr_doc(&MetaTypeRepr::Union(vec![
         MetaTypeRepr::Atom("Integer".to_string()),
         MetaTypeRepr::Atom("String".to_string()),
@@ -69,7 +69,7 @@ fn test_meta_type_repr_union_renders_tagged_tuple() {
 
 #[test]
 fn test_meta_type_repr_singleton_renders_tagged_tuple() {
-    // BT-3076: `#north` → `{'singleton', 'north'}`.
+    // `#north` → `{'singleton', 'north'}`.
     let doc =
         CoreErlangGenerator::meta_type_repr_doc(&MetaTypeRepr::Singleton("north".to_string()));
     assert_eq!(doc.to_pretty_string(), "{'singleton', 'north'}");
@@ -77,7 +77,7 @@ fn test_meta_type_repr_singleton_renders_tagged_tuple() {
 
 #[test]
 fn test_meta_type_repr_generic_of_union_nests_tagged_tuples() {
-    // BT-3076: `Result(Integer | String, Error)` — Union nested inside
+    // `Result(Integer | String, Error)` — Union nested inside
     // Generic, exercising the shared `meta_type_repr_list_doc` helper.
     let doc = CoreErlangGenerator::meta_type_repr_doc(&MetaTypeRepr::Generic {
         base: "Result".to_string(),
@@ -97,7 +97,7 @@ fn test_meta_type_repr_generic_of_union_nests_tagged_tuples() {
 
 #[test]
 fn test_declared_type_to_meta_repr_union_converts_structurally() {
-    // BT-3076: `declared_type_to_meta_repr` — not the pre-existing
+    // `declared_type_to_meta_repr` — not the pre-existing
     // atom-of-rendered-string fallback — handles `Union` structurally.
     let dt = DeclaredType::Union(vec![
         DeclaredType::simple("Integer"),

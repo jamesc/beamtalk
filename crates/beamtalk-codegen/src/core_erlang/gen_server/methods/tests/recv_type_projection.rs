@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3217 (ADR 0115 Phase 2): `project_recv_type` unit coverage.
+//! ADR 0115 Phase 2: `project_recv_type` unit coverage.
 //!
 //! The codegen fixture matrix (`codegen/core_erlang/tests/recv_type.rs`)
 //! exercises this rule end-to-end through real `.bt` source for every case
@@ -101,8 +101,8 @@ fn project_recv_type_never_coarsens_to_dynamic() {
 
 #[test]
 fn project_recv_type_union_of_resolvable_members_yields_union() {
-    // BT-3215: every member resolves to a clean single name, so the
-    // whole union keys precisely instead of coarsening to `dynamic`.
+    // Every member resolves to a clean single name, so the whole union
+    // keys precisely instead of coarsening to `dynamic`.
     let ty = InferredType::simple_union(&["String", "Integer"]);
     assert!(matches!(
         project_recv_type(&ty),
@@ -129,8 +129,8 @@ fn project_recv_type_union_dedupes_members() {
 
 #[test]
 fn project_recv_type_union_with_unresolvable_member_coarsens_to_dynamic() {
-    // BT-3215: a partial member list would be unsound (Constraint 2) —
-    // one member that can't resolve to a clean name (here, `Dynamic`)
+    // A partial member list would be unsound (Constraint 2) — one member
+    // that can't resolve to a clean name (here, `Dynamic`)
     // must coarsen the *whole* union, not just drop that member.
     let ty = InferredType::Union {
         members: vec![
@@ -159,7 +159,7 @@ fn project_recv_type_union_with_nested_composed_member_coarsens_to_dynamic() {
 
 #[test]
 fn project_recv_type_intersection_of_resolvable_members_yields_intersection() {
-    // BT-3215: ADR 0068 protocol composition
+    // ADR 0068 protocol composition
     // (`Collection(Object) & Comparable`) now keys precisely instead of
     // deferring to `dynamic`.
     let ty = InferredType::Intersection {

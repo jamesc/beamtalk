@@ -8,7 +8,7 @@ use crate::core_erlang::block_analysis::BlockMutationAnalysis;
 
 /// Creates a bare `CoreErlangGenerator` (not inside a class method,
 /// `Actor` context) — used only to exercise `select_hybrid_params`'s
-/// `generator.in_class_method()` guard (BT-3168) in isolation.
+/// `generator.in_class_method()` guard in isolation.
 fn plain_generator() -> CoreErlangGenerator {
     CoreErlangGenerator::new("test")
 }
@@ -589,7 +589,7 @@ fn select_hybrid_params_blocked_by_cond_state_effects() {
 
 #[test]
 fn select_hybrid_params_blocked_by_class_method() {
-    // ADR 0111 Addendum 9 Question 4 Part B (BT-3168): an otherwise-eligible
+    // ADR 0111 Addendum 9 Question 4 Part B: an otherwise-eligible
     // body (identical to `select_hybrid_params_eligible`'s fixture) must be
     // excluded from Hybrid mode once the generator is inside a class method,
     // since Hybrid's per-field pre-extraction doesn't understand ADR 0110's

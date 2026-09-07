@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `VersionedVar`/`FrameId` naming and `VersionCounter` (BT-3131) basics.
+//! `VersionedVar`/`FrameId` naming and `VersionCounter` basics.
 
 use super::*;
 
@@ -24,8 +24,8 @@ fn render_name_nonzero_version_appends_number() {
     assert_eq!(local("Sum", 1, FrameId::ROOT).render_name(), "Sum1");
 }
 
-// ── VersionCounter (BT-3131) ─────────────────────────────────────────
-// Pins the same semantics the pre-BT-3131 `StateThreading` struct
+// ── VersionCounter ────────────────────────────────────────────────────
+// Pins the same semantics the pre-existing `StateThreading` struct
 // (`state_codegen.rs`) pinned, now against the single shared
 // implementation reused for all three prefixes.
 

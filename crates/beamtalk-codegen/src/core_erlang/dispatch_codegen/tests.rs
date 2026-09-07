@@ -16,11 +16,11 @@ fn s() -> Span {
     Span::new(0, 0)
 }
 
-/// BT-2029 / BT-3057: the classifier must stay in sync with the actual
-/// reachable auto-exports on generated class modules. `class_name/0` is
-/// reachable via plain self-send and must short-circuit to a direct call;
-/// `superclass` moved to `class_self_send_reflective_primitive` (BT-3057)
-/// because its raw export returns a bare atom instead of a class object,
+/// The classifier must stay in sync with the actual reachable auto-exports
+/// on generated class modules. `class_name/0` is reachable via plain
+/// self-send and must short-circuit to a direct call; `superclass` moved to
+/// `class_self_send_reflective_primitive` because its raw export returns a
+/// bare atom instead of a class object,
 /// so it must NOT be classified as an auto-export here anymore.
 /// `methods/0` does not exist on the current codegen (an earlier mistaken
 /// inclusion); `method_table/0` and `has_method/1` are codegen-internal
@@ -34,8 +34,8 @@ fn s() -> Span {
 fn is_class_auto_export_selector_matches_reachable_exports() {
     assert!(is_class_auto_export_selector("class_name", 0));
 
-    // BT-3057: superclass now routes through the reflective-primitive
-    // path (its raw export is unwrapped and identity-broken), not here.
+    // `superclass` now routes through the reflective-primitive path (its
+    // raw export is unwrapped and identity-broken), not here.
     assert!(!is_class_auto_export_selector("superclass", 0));
 
     // Codegen-internal, not reachable via Beamtalk self-send.
@@ -58,7 +58,7 @@ fn is_class_auto_export_selector_matches_reachable_exports() {
     assert!(!is_class_auto_export_selector("at:put:", 2));
 }
 
-/// BT-3057: `superclass` and `includesSelector:` must route to their
+/// `superclass` and `includesSelector:` must route to their
 /// real `beamtalk_behaviour_intrinsics` implementations so a
 /// class-method self-send produces the same value non-self-send dispatch
 /// would (a genuine `#beamtalk_object{}` for `superclass`, a proper
@@ -96,7 +96,7 @@ fn class_self_send_reflective_primitive_matches_safe_selectors_only() {
     assert_eq!(class_self_send_reflective_primitive("increment", 0), None);
 }
 
-/// BT-3018 / ADR 0109: `File open:…do:` is lowered at the call site so the
+/// ADR 0109: `File open:…do:` is lowered at the call site so the
 /// user's block runs in the caller rather than the File class `gen_server`.
 /// The interception is keyed on the *unqualified* stdlib `File` — a
 /// package-qualified `mylib@File` is an unrelated class that happens to
@@ -208,7 +208,7 @@ fn test_generate_super_send_uses_beamtalk_dispatch() {
     );
 }
 
-/// BT-2252: in a value/primitive context the generated fun is
+/// In a value/primitive context the generated fun is
 /// `fun(Args, Self) -> Result` with no `State` binding, so `super` must
 /// lower to `super_value/4` rather than the state-threading `super/5`.
 /// Referencing the absent `State` produced invalid Core Erlang
@@ -309,7 +309,7 @@ fn test_generate_cast_send_actor_self_uses_safe_dispatch() {
     );
 }
 
-/// BT-1475: Self-cast inside a block must route through the actor mailbox,
+/// Self-cast inside a block must route through the actor mailbox,
 /// not call `safe_dispatch` directly, because the block may execute in a
 /// different process (Timer callback, cross-actor callback).
 #[test]
@@ -337,7 +337,7 @@ fn test_generate_cast_send_actor_self_in_block_uses_mailbox() {
     );
 }
 
-/// BT-3214: `is_character_typed_receiver` must recognize both syntactic
+/// `is_character_typed_receiver` must recognize both syntactic
 /// shapes that statically produce a Character — a literal (`$A`) and a
 /// `Character value:` factory call — including through any number of
 /// parenthesizations, since `(Character value: 10) asString` parses the
@@ -386,7 +386,7 @@ fn is_character_typed_receiver_matches_literal_and_value_factory() {
     assert!(is_character_typed_receiver(&parenthesized_literal));
 }
 
-/// BT-3214: `uppercase`/`lowercase` also have a declared `-> Character`
+/// `uppercase`/`lowercase` also have a declared `-> Character`
 /// return type (`character.bt`), so a chain like `$a uppercase asString`
 /// hits the identical bug as `(Character value: 10) asString` — the
 /// receiver of `asString` (`$a uppercase`) is statically Character but
@@ -447,7 +447,7 @@ fn is_character_typed_receiver_recurses_through_uppercase_lowercase() {
     )));
 }
 
-/// BT-3214: enforces the invariant `is_character_typed_receiver` depends
+/// Enforces the invariant `is_character_typed_receiver` depends
 /// on — that its hardcoded selector set (`value:` as the class factory,
 /// `uppercase`/`lowercase` as the Character-returning instance methods)
 /// is *exactly* the set of methods `stdlib/src/character.bt` declares
@@ -579,7 +579,7 @@ fn is_character_typed_receiver_rejects_non_character_shapes() {
     assert!(!is_character_typed_receiver(&package_qualified));
 }
 
-/// BT-3214: codegen for `(Character value: 10) asString` must emit a
+/// Codegen for `(Character value: 10) asString` must emit a
 /// direct call to `bt@stdlib@character:dispatch/3`, not fall through to
 /// the generic runtime-dispatch path (which would key on `is_integer/1`
 /// and misroute to `bt@stdlib@integer`, producing `"10"` instead of a

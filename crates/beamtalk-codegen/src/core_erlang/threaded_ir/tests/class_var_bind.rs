@@ -1,14 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `construct_and_verify_class_var_bind` (BT-3135/BT-3148, ADR 0110
-//! contract), `verify_simple_bind` (BT-3139), and
-//! `verify_body_with_opaque_version_gaps` (BT-3148/BT-3164) coverage.
+//! `construct_and_verify_class_var_bind` (ADR 0110 contract),
+//! `verify_simple_bind`, and `verify_body_with_opaque_version_gaps`
+//! coverage.
 
 use super::*;
 
-// ── construct_and_verify_class_var_bind (BT-3135/BT-3148, ADR 0110
-// contract) ─────────────────────────────────────────────────────────
+// ── construct_and_verify_class_var_bind (ADR 0110 contract) ───────────
 // Pins the production replacement/extension covering the two Bind-
 // emission sites named in ADR 0111 §Phase D:
 // `expressions.rs::generate_field_assignment` (Put) and
@@ -89,7 +88,7 @@ fn construct_and_verify_class_var_bind_put_fires_even_without_a_local_nlr_catch_
 fn construct_and_verify_class_var_bind_put_silent_below_top_frame() {
     // A class-var mutation inside a nested block (block_depth > 0) is
     // legitimately shadow_write: false — already discarded on normal
-    // return (BT-1550), not a regression. ADR 0111 Addendum 9: modeled
+    // return, not a regression. ADR 0111 Addendum 9: modeled
     // via `shadow_write_eligible: false` at a nested `frame`, not by
     // `frame` alone. Matches
     // `verify_shadow_write_missing_silent_below_top_frame`.
@@ -114,8 +113,8 @@ fn construct_and_verify_class_var_bind_direct_rebind_silent_never_requires_shado
 
 #[test]
 fn construct_and_verify_class_var_bind_direct_rebind_silent_with_a_nonzero_source_version() {
-    // Regression for a real BT-3148 bug caught by this migration's own
-    // tests, re-pinned under ADR 0111 Addendum 9's widened frame model:
+    // Regression for a real bug caught by this migration's own tests,
+    // re-pinned under ADR 0111 Addendum 9's widened frame model:
     // even at the caller's now-honest `FrameId::ROOT`, `verify()`'s
     // frame stack alone would NOT save this call site from a spurious
     // `UnboundVersion` on a nonzero backfilled version — it is
@@ -147,7 +146,7 @@ fn construct_and_verify_class_var_bind_direct_rebind_silent_with_a_nonzero_sourc
 
 #[test]
 fn construct_and_verify_class_var_bind_uses_the_real_version_numbers_not_a_fixed_0_to_1_step() {
-    // BT-3148: the whole point of the migration off the deleted
+    // The whole point of the migration off the deleted
     // `verify_class_var_bind` — a mutation later in the method (source
     // version 3, minted to 4) must be silent, not spuriously flagged,
     // and the returned Bind must carry those exact versions (never the
@@ -167,7 +166,7 @@ fn construct_and_verify_class_var_bind_uses_the_real_version_numbers_not_a_fixed
     );
 }
 
-// ── verify_simple_bind (BT-3139) ──────────────────────────────────────
+// ── verify_simple_bind ──────────────────────────────────────────────────
 // Pins the new coverage for `generate_field_assignment`'s two previously
 // uninstrumented sibling branches (`Self{N}`/`State{N}`), which — unlike
 // the class-var branch — construct zero `ThreadedIr` fixture on `main`
@@ -192,8 +191,7 @@ fn verify_simple_bind_silent_on_a_method_first_mutation() {
 fn verify_simple_bind_silent_after_several_prior_mutations() {
     // A later mutation in the same method (source_version > 0) must not
     // spuriously fire UnboundVersion — the whole point of this helper's
-    // (and, as of BT-3148, `construct_and_verify_class_var_bind`'s)
-    // backfill chain.
+    // (and `construct_and_verify_class_var_bind`'s) backfill chain.
     assert_eq!(
         verify_simple_bind(VersionPrefix::SelfVt, 4, 5, span()),
         Vec::new()
@@ -211,7 +209,7 @@ fn verify_simple_bind_fires_when_target_reuses_an_already_minted_version() {
     // advancing past it) is a genuine NonLinearVersion collision — this
     // is the within-call shape the backfill chain actually catches (see
     // `verify_simple_bind`'s doc comment's "Scope, honestly stated"
-    // section for how this differs from the cross-call BT-3131 shape).
+    // section for how this differs from the cross-call shape below).
     let errors = verify_simple_bind(VersionPrefix::SelfVt, 2, 1, span());
     assert!(
         errors.iter().any(|e| matches!(
@@ -223,12 +221,11 @@ fn verify_simple_bind_fires_when_target_reuses_an_already_minted_version() {
     );
 }
 
-/// Demonstrates that `verify()` itself *would* catch the historical
-/// BT-3131 `self_version` bug shape (`with_branch_context` briefly reset
+/// Demonstrates that `verify()` itself *would* catch a `self_version`
+/// stale-read bug shape (`with_branch_context` briefly resetting
 /// `self_version` to 0 on branch entry instead of inheriting the outer
-/// version — fixed in commit `d436ad7`, "Fix `self_version` stale-read
-/// regression from branch-entry reset") *if* the two mutation call
-/// sites' `Bind`s were accumulated into one shared history before
+/// version) *if* the two mutation call sites' `Bind`s were accumulated
+/// into one shared history before
 /// verifying — a `self.field := ...` immediately preceding a branch
 /// (minting `Self1`) followed by another `self.field := ...`
 /// immediately *inside* the branch would, under the reset-to-0 policy,
@@ -267,8 +264,8 @@ fn verify_would_catch_the_bt_3131_regression_shape_given_accumulated_history() {
 
 /// Builds the same single-`Bind` IR fragment `verify_simple_bind` would
 /// verify in isolation, but without calling `verify` itself — lets the
-/// BT-3131 regression test above accumulate two call sites' fixtures
-/// into one shared history before verifying, exactly as two real
+/// regression test above accumulate two call sites' fixtures into one
+/// shared history before verifying, exactly as two real
 /// `generate_field_assignment` call sites in the same method would both
 /// contribute `Bind`s toward the same method-wide `Self{N}` sequence.
 fn verify_bind_ir_for_test(
@@ -286,7 +283,7 @@ fn verify_bind_ir_for_test(
     }]
 }
 
-// ── verify_body_with_opaque_version_gaps (BT-3148) ───────────────────
+// ── verify_body_with_opaque_version_gaps ──────────────────────────────
 // Pins the whole-Actor-body verification `lower_body_exprs_with_reply`
 // calls once per body: an opaque Statement standing in for a shared
 // multi-module helper (`generate_self_dispatch_open`, …) may advance
@@ -358,10 +355,10 @@ fn verify_body_with_opaque_version_gaps_still_catches_a_real_non_linear_version(
     );
 }
 
-// ── BT-3164: joint ShadowWriteMissing visibility over a real
-//    class-method-body shape (ClassVars backfill + NlrCatch) ──────────
+// ── Joint ShadowWriteMissing visibility over a real class-method-body
+//    shape (ClassVars backfill + NlrCatch) ─────────────────────────────
 //
-// Before BT-3164, `lower_class_method_body`'s output rode as ONE opaque
+// Before this coverage, `lower_class_method_body`'s output rode as ONE opaque
 // `Statement` next to the real `NlrCatch` `generate_class_method_functions`/
 // `generate_class_method_fun_from_block` prepend — any class-var `Bind`
 // inside that opaque body was invisible to the `verify()` call run over
@@ -421,7 +418,7 @@ fn realistic_class_method_body_ir(shadow_write: bool) -> Vec<ThreadedStmt> {
 #[test]
 fn verify_body_with_opaque_version_gaps_catches_shadow_write_missing_in_realistic_class_method_body()
  {
-    // The previously-invisible case: a real class-var `Bind` (BT-3164's
+    // The previously-invisible case: a real class-var `Bind` (from
     // `lower_class_method_last_class_var_bind`) missing its ADR 0110
     // shadow write, sharing a body with a real `NlrCatch` — both now
     // constructed by production and verified in ONE call, exactly the
@@ -506,7 +503,7 @@ fn verify_body_with_opaque_version_gaps_classvars_backfill_does_not_spuriously_f
 
 #[test]
 fn verify_a_spliced_direct_rebind_never_spuriously_fires_shadow_write_missing() {
-    // ADR 0118 phase 5a (BT-3421): `class doStuff => self bump.
+    // ADR 0118 phase 5a: `class doStuff => self bump.
     // self.total := self.total + 1` where `bump` is one of this
     // class's own `class_method_selectors()` — `lower_class_method_body`
     // now splices the non-last self-send's REAL prelude (produced by

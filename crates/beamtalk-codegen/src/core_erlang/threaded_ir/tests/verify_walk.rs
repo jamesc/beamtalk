@@ -42,7 +42,7 @@ fn verify_silent_on_well_formed_direct_params_fixture() {
 
 #[test]
 fn verify_silent_on_well_formed_conditional_loop_fixture() {
-    // ADR 0111 Addendum 2, Gap 1 / ADR 0118 phase 3 (BT-3419):
+    // ADR 0111 Addendum 2, Gap 1 / ADR 0118 phase 3:
     // `verify()` treats `ConditionalLoop` almost exactly like `Threaded`
     // — push frame/mode once, walk `condition` then `body`, check_use
     // `condition_value` and each `produces` entry, pop — no new
@@ -81,7 +81,7 @@ fn verify_silent_on_well_formed_conditional_loop_fixture() {
 
 #[test]
 fn verify_silent_on_conditional_loop_with_condition_prelude() {
-    // ADR 0118 phase 3 (BT-3419): a condition with a real `Bind` in its
+    // ADR 0118 phase 3: a condition with a real `Bind` in its
     // own prelude (e.g. a self-send's `State` advance) — verified in
     // the SAME frame as `body`, and `condition_value` referencing the
     // version that `Bind` just produced resolves cleanly. This is the
@@ -123,7 +123,7 @@ fn verify_silent_on_conditional_loop_with_condition_prelude() {
 
 #[test]
 fn verify_unbound_version_conditional_loop_condition_references_unbound_version() {
-    // ADR 0118 phase 3 (BT-3419): a `condition_value` referencing a
+    // ADR 0118 phase 3: a `condition_value` referencing a
     // version nothing in `condition` (or an ancestor frame) produced is
     // caught, exactly like any other `check_use` site.
     let frame = FrameId::new(1);
@@ -656,21 +656,19 @@ fn verify_shadow_write_missing_silent_below_top_frame() {
 
 #[test]
 fn verify_shadow_write_missing_fires_on_non_root_eligible_frame() {
-    // BT-3167 (ADR 0111 Addendum 9, Question 1): the exact gap this
-    // issue closes — before the widened frame model, `ShadowWriteMissing`
-    // gated on `target.frame == FrameId::ROOT` alone, so a class-var
-    // mutation inside ANY non-ROOT frame (every loop/fold body's real
-    // `FrameId`, minted fresh by `with_branch_context`) was silently
-    // exempt from the check, regardless of whether it was really
-    // shadow-write-eligible. A "control-flow-only" frame — the shape
-    // BT-3140's amendment describes: a loop body never increments
-    // `block_depth`, so it stays semantically "the method's own top
-    // level" for shadow-write purposes even though it gets a fresh,
-    // non-ROOT `FrameId` for version-linearity scoping — must still be
-    // caught. This synthesizes exactly that: a `Threaded` wrapper at a
-    // non-ROOT `frame`, but `shadow_write_eligible: true` (the
-    // independent signal this issue introduces), containing a class-var
-    // `Bind` with a forgotten shadow write.
+    // ADR 0111 Addendum 9, Question 1: with a narrower frame model,
+    // `ShadowWriteMissing` gating on `target.frame == FrameId::ROOT` alone
+    // would let a class-var mutation inside ANY non-ROOT frame (every
+    // loop/fold body's real `FrameId`, minted fresh by
+    // `with_branch_context`) silently escape the check, regardless of
+    // whether it was really shadow-write-eligible. A "control-flow-only"
+    // frame — a loop body never increments `block_depth`, so it stays
+    // semantically "the method's own top level" for shadow-write purposes
+    // even though it gets a fresh, non-ROOT `FrameId` for
+    // version-linearity scoping — must still be caught. This synthesizes
+    // exactly that: a `Threaded` wrapper at a non-ROOT `frame`, but
+    // `shadow_write_eligible: true` (an independent signal), containing a
+    // class-var `Bind` with a forgotten shadow write.
     let f0 = FrameId::ROOT;
     let control_flow_only = FrameId::new(1);
     let ir = vec![

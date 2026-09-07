@@ -138,7 +138,7 @@ fn test_generate_block_with_param() {
     );
 }
 
-// ── BT-2855 / ADR 0107 Phase A: `Pattern::Type` codegen ─────────────────
+// ── ADR 0107 Phase A: `Pattern::Type` codegen ────────────────────────────
 
 /// Builds a top-level `binding :: class -> body` match arm.
 fn type_arm(binding: &str, class: &str, body: Expression) -> MatchArm {
@@ -405,8 +405,8 @@ fn test_type_pattern_guard_scopes_over_binding() {
 fn test_match_mixes_primitive_type_arm_and_native_arm_in_one_case() {
     // A `match:` with a primitive `Type` arm followed by a plain
     // `Literal`/wildcard arm must compile into a single interleaved
-    // chain (BT-2855 acceptance: dispatch/interleaving layer, not just
-    // each strategy in isolation).
+    // chain (dispatch/interleaving layer, not just each strategy in
+    // isolation).
     let mut generator = CoreErlangGenerator::new("test");
     let value = ident_expr("x");
     let arms = vec![

@@ -99,10 +99,9 @@ fn lower_and_render_return_renders_tuple() {
 
 #[test]
 fn lower_and_render_threaded_direct_params_emits_real_letrec() {
-    // BT-3144: `Threaded { mode: DirectParams, .. }` now renders a real
-    // `letrec` (fresh-named via `fresh_temp_var("Loop")`, hence the
-    // `_Loop1` — see `VariableContext::fresh_var`), not a flattened body
-    // — the pre-BT-3144 skeleton behavior this test used to pin.
+    // `Threaded { mode: DirectParams, .. }` renders a real `letrec`
+    // (fresh-named via `fresh_temp_var("Loop")`, hence the `_Loop1` — see
+    // `VariableContext::fresh_var`), not a flattened body.
     let frame = FrameId::new(1);
     let sum_source = local("sum", 0, frame);
     let ir = vec![ThreadedStmt::Threaded {

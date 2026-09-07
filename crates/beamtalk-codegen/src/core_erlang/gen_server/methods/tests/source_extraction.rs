@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3249: `extract_method_source` must not leak an inference-written
+//! `extract_method_source` must not leak an inference-written
 //! `-> Type` return-type annotation into the image-resident `__source__`
 //! text, while still round-tripping a genuine user-written annotation
 //! untouched. See `clear_return_type_writeback_for_key`'s doc for the

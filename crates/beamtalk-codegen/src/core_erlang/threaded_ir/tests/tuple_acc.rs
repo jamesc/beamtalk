@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3133/BT-3147 (ADR 0111 Phase C) `TupleAcc` unpack invariants: flat
+//! ADR 0111 Phase C `TupleAcc` unpack invariants: flat
 //! unpack-mode-mismatch, early-exit accumulator liveness, the
 //! `select_tuple_acc`/`select_direct_params` structural exclusions, and the
 //! `lower_and_render` shim for `TupleAccUnpack` rendering.
@@ -38,11 +38,11 @@ fn verify_tuple_acc_unpack_invariant(
 /// Compares `use_tuple_acc` against a direct re-check of the same `context`
 /// value `select_tuple_acc` itself already guards on.
 ///
-/// BT-3147: no production call site — `select_tuple_acc`'s own early return
+/// No production call site — `select_tuple_acc`'s own early return
 /// on `matches!(context, CodeGenContext::ValueType)` already makes
 /// `use_tuple_acc && context_is_value_type` unconditionally unreachable by
 /// inspection of that one function (`control_flow/mod.rs`), the same
-/// already-structural shape BT-3154 found for `ThreadingModeUnpackMismatch`
+/// already-structural shape found for `ThreadingModeUnpackMismatch`
 /// — see `threaded_ir`'s module docs §Status. Kept as a regression pin,
 /// exercised directly by hand-built-IR unit tests below (mirrors
 /// `ThreadingModeUnpackMismatch`'s own kept-but-uncalled precedent).
@@ -64,7 +64,7 @@ fn verify_tuple_acc_value_type_exclusion(
 /// (an independently computed recursive scan of the loop body for nested
 /// list ops that need a `StateAcc` fallback).
 ///
-/// BT-3147: no production call site — `select_direct_params`'s own
+/// No production call site — `select_direct_params`'s own
 /// `!effects.has_non_tuple_safe_list_op` conjunct already makes
 /// `direct_params_selected && inner_needs_stateacc_fallback` unconditionally
 /// unreachable by inspection of that one function (`control_flow/mod.rs`) —
@@ -82,8 +82,8 @@ fn verify_nested_list_op_stateacc_compat(
     }
 }
 
-// ── BT-3133 (ADR 0111 Phase C): invariant class 1 — flat
-// positional-unpack accumulator ──────────────────────────────────────
+// ── ADR 0111 Phase C: invariant class 1 — flat positional-unpack
+// accumulator ─────────────────────────────────────────────────────────
 
 #[test]
 fn verify_tuple_acc_unpack_invariant_silent_under_tuple_acc_mode() {
@@ -105,9 +105,9 @@ fn verify_tuple_acc_unpack_mode_mismatch_fires_in_stateacc_fallback_context() {
     // (never legitimate in production — `generate_tuple_unpack_docs` is
     // only ever called from inside `if plan.use_tuple_acc { .. }` — but a
     // regression pin for the invariant `TupleAccUnpackModeMismatch`
-    // exists to catch: BT-3147 dropped `verify_tuple_acc_unpack_invariant`'s
-    // old `use_tuple_acc`/`fallback_reason` params since production has
-    // no such call site anymore, so this constructs the fixture directly,
+    // exists to catch: `verify_tuple_acc_unpack_invariant` dropped its old
+    // `use_tuple_acc`/`fallback_reason` params since production has no
+    // such call site anymore, so this constructs the fixture directly,
     // mirroring `verify_tuple_acc_unpack_mode_mismatch_fires_outside_any_tuple_acc_context`'s
     // `DirectParams` sibling below.
     let frame = FrameId::new(1);
@@ -171,7 +171,7 @@ fn verify_tuple_acc_unpack_mode_mismatch_fires_outside_any_tuple_acc_context() {
     );
 }
 
-// ── BT-3133: invariant class 4 — early-exit accumulator liveness ─────
+// ── Invariant class 4 — early-exit accumulator liveness ───────────────
 
 #[test]
 fn verify_tuple_acc_unpack_invariant_silent_with_gate_slots_for_early_exit_op() {
@@ -188,8 +188,8 @@ fn verify_tuple_acc_unpack_invariant_silent_with_gate_slots_for_early_exit_op() 
 
 #[test]
 fn verify_tuple_acc_unpack_invariant_fires_when_mode_and_node_gate_slots_disagree() {
-    // BT-3147: `mode_gate_slots`/`node_gate_slots` are now two genuinely
-    // independent arguments (previously the same value threaded twice —
+    // `mode_gate_slots`/`node_gate_slots` are two genuinely independent
+    // arguments (not the same value threaded twice —
     // see `build_tuple_acc_unpack`'s doc comment) — a call site whose
     // declared `ListOpKind` disagrees with its own `index_offset` fires
     // for real, exercised here through the actual production helper
@@ -265,8 +265,7 @@ fn verify_tuple_acc_unpack_invariant_distinguishes_gate_slot_shapes() {
     }
 }
 
-// ── BT-3133: invariant class 2 — select_tuple_acc's ValueType-context
-// exclusion ────────────────────────────────────────────────────────────
+// ── Invariant class 2 — select_tuple_acc's ValueType-context exclusion ─
 
 #[test]
 fn verify_tuple_acc_value_type_exclusion_silent_when_tuple_acc_not_selected() {
@@ -296,8 +295,7 @@ fn verify_tuple_acc_value_type_exclusion_fires_when_both_true() {
     );
 }
 
-// ── BT-3133: invariant class 3 — recursive inter-construct StateAcc
-// fallback ─────────────────────────────────────────────────────────────
+// ── Invariant class 3 — recursive inter-construct StateAcc fallback ────
 
 #[test]
 fn verify_nested_list_op_stateacc_compat_silent_when_direct_params_not_selected() {
@@ -329,7 +327,7 @@ fn verify_nested_list_op_stateacc_compat_fires_when_both_true() {
     );
 }
 
-// ── BT-3133: lower_and_render (test shim) for TupleAccUnpack ─────────
+// ── lower_and_render (test shim) for TupleAccUnpack ────────────────────
 
 #[test]
 fn lower_and_render_tuple_acc_unpack_renders_element_chain() {

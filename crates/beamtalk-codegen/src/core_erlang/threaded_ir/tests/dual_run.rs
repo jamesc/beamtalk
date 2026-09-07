@@ -1,17 +1,16 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Dual-run byte-parity harness (BT-3144): pins the lowered-IR render
+//! Dual-run byte-parity harness: pins the lowered-IR render
 //! against the live generator's own hand-built output for the loop/NLR
 //! shapes ADR 0111 Addendum 2 migrated.
 
 use super::*;
 
-// ── Dual-run byte-parity harness (BT-3144) ───────────────────────────
+// ── Dual-run byte-parity harness ───────────────────────────────────────
 //
-// The issue's acceptance criterion: "Dual-run harness proves byte
-// parity for at least direct-params and hybrid while loops against the
-// legacy path." `ThreadedStmt::Threaded` does not model a loop's
+// Proves byte parity for at least direct-params and hybrid while loops
+// against the legacy path. `ThreadedStmt::Threaded` does not model a loop's
 // condition/exit-case (that stays AST-directed — ADR 0111 §Constraints,
 // "everything else in codegen stays AST-directed and unaffected"), so
 // there is no single production function today that emits *only* the
@@ -25,19 +24,19 @@ use super::*;
 // — and asserts `render(lower(..))`'s output against it byte-for-byte
 // on a separately-constructed but identically-seeded generator. This is
 // the harness's own proof that its rendering mechanism reproduces
-// hand-authored `docvec!` output exactly; BT-3145 (the pilot migration)
-// is what first runs it against a real, refactored-to-be-swappable
-// legacy call site.
+// hand-authored `docvec!` output exactly; a later pilot migration is
+// what first runs it against a real, refactored-to-be-swappable legacy
+// call site.
 
 #[test]
 #[allow(clippy::too_many_lines)] // hand-authored dual-run fixture, ADR 0111 Addendum 2 / ADR 0118 phase 3
 fn dual_run_conditional_loop_direct_params_byte_parity() {
     // ADR 0111 Addendum 2, Gap 1's own closing instruction, updated for
-    // ADR 0118 phase 3 (BT-3419): hand-author the condition/case-split
+    // ADR 0118 phase 3: hand-author the condition/case-split
     // shape `render()`'s `ConditionalLoop` arm now produces for a PURE
     // condition (`condition: []`) — the case's scrutinee is
     // `condition_value` inlined directly, no `CondFun` closure/`apply`
-    // indirection (the pre-BT-3419 shape `while_loops.rs`'s
+    // indirection (the older shape `while_loops.rs`'s
     // `generate_while_loop_direct` still emits today, since that
     // production call site is not itself migrated to this IR by this
     // phase — see the module's own §Status doc). This proves `render()`
@@ -183,9 +182,9 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
 }
 
 #[test]
-#[allow(clippy::too_many_lines)] // hand-authored dual-run fixture, ADR 0118 phase 3 (BT-3419)
+#[allow(clippy::too_many_lines)] // hand-authored dual-run fixture, ADR 0118 phase 3
 fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
-    // ADR 0118 phase 3 (BT-3419): the counterpart of the byte-parity
+    // ADR 0118 phase 3: the counterpart of the byte-parity
     // test above for a condition that itself has a prelude (e.g. a
     // self-send's own `State` advance, `while_loops.rs`'s
     // `generate_stateful_while_condition_tail`'s bare-self-send arm) —
@@ -278,7 +277,7 @@ fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
 fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
     // Hybrid-mode counterpart of the direct-params test above: proves
     // BOTH that `ConditionalLoop`'s condition/case-split shape (ADR 0118
-    // phase 3, BT-3419: `condition_value` inlined directly, no `CondFun`
+    // phase 3: `condition_value` inlined directly, no `CondFun`
     // closure) renders correctly under Hybrid loop context, AND
     // (mirroring the pre-Addendum-2 test this replaces) that a
     // `State`-prefixed `Bind` nested in the body (e.g. a nested

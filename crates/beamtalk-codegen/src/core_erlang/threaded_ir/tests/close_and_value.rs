@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `ThreadedValue::close` (ADR 0118 §Decision 5, BT-3415) coverage.
+//! `ThreadedValue::close` (ADR 0118 §Decision 5) coverage.
 
 use super::*;
 
-// ── ThreadedValue::close (ADR 0118 §Decision 5, BT-3415) ─────────────
+// ── ThreadedValue::close (ADR 0118 §Decision 5) ────────────────────────
 
 fn self_send_prelude(dispatch_var: &str) -> Vec<ThreadedStmt> {
     vec![

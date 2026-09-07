@@ -4,18 +4,17 @@
 //! Test suite for `gen_server` method code generation.
 //!
 //! Tests are organized into domain-focused sub-modules:
-//! - [`source_extraction`] — BT-3249: `extract_method_source` return-type
-//!   annotation stripping
-//! - [`recv_type_projection`] — BT-3217 (ADR 0115 Phase 2): `project_recv_type`
-//!   unit coverage
+//! - [`source_extraction`] — `extract_method_source` return-type annotation
+//!   stripping
+//! - [`recv_type_projection`] — ADR 0115 Phase 2: `project_recv_type` unit
+//!   coverage
 //! - [`dispatch_generation`] — `generate_register_class`/
 //!   `generate_method_dispatch`/`generate_class_method_dispatches`/
 //!   `generate_class_method_functions`
-//! - [`meta_type_repr`] — ADR 0068/BT-3076 `MetaTypeRepr` conversion and
-//!   rendering
+//! - [`meta_type_repr`] — ADR 0068 `MetaTypeRepr` conversion and rendering
 //! - [`meta_map`] — ADR 0098 `__beamtalk_meta` map construction (provenance,
 //!   type params, package, kind, visibility)
-//! - [`synthetic_accessors`] — BT-2734 synthetic value-accessor doc/signature
+//! - [`synthetic_accessors`] — synthetic value-accessor doc/signature
 //!   metadata
 
 use super::*;
