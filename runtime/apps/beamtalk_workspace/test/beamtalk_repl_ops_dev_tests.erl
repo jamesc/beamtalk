@@ -1294,6 +1294,8 @@ dev_runtime_test_() ->
             {"context completion: unknown lowercase receiver -> empty",
                 fun context_completion_unknown_lowercase/0},
             {"methods op returns instance + class methods", fun methods_op_returns_methods/0},
+            {"methods op tags a synthetic method's source_status (BT-3444)",
+                fun methods_op_tags_synthetic_source_status/0},
             {"methods op returns state vars", fun methods_op_returns_state_vars/0},
             {"methods op state vars carry a real line when xref-registered",
                 fun methods_op_state_vars_carry_line_when_registered/0},
@@ -1665,6 +1667,48 @@ methods_op_returns_methods() ->
     %% Side tags must distinguish instance from class methods.
     Sides = [maps:get(<<"side">>, M) || M <- Methods, maps:get(<<"name">>, M) =:= <<"create">>],
     ?assertEqual([<<"class">>], Sides).
+
+methods_op_tags_synthetic_source_status() ->
+    %% BT-3444: the VS Code Workspace Explorer sidebar badges a compiler-
+    %% generated method (no user-written declaration anywhere in source) as
+    %% visibly distinct — the same `source_status = synthetic` fact the
+    %% LiveView IDE method list already badges (BT-2714). WidgetDev's
+    %% `render` isn't really synthetic (it's a plain hand-registered test
+    %% fixture method), but xref doesn't know that — tagging its xref row
+    %% `synthetic` here exercises the ws op's tagging path exactly as it
+    %% would run against a real `Value subclass:`'s generated accessor.
+    case whereis(beamtalk_xref) of
+        undefined -> {ok, _} = beamtalk_xref:start_link();
+        _ -> ok
+    end,
+    ok = beamtalk_xref:register_class('WidgetDev', [
+        #{
+            class_side => false,
+            selector => render,
+            line => 7,
+            sends => [],
+            references => [],
+            source_status => synthetic,
+            provenance => class_body
+        }
+    ]),
+    Msg = make_msg(<<"methods">>, <<"mm-4">>, undefined),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    Methods = maps:get(<<"methods">>, Decoded),
+    ByName = maps:from_list([{maps:get(<<"name">>, M), M} || M <- Methods]),
+    RenderRow = maps:get(<<"render">>, ByName),
+    ?assertEqual(<<"synthetic">>, maps:get(<<"source_status">>, RenderRow)),
+    %% `resize` carries no xref row at all — the honest "no source" default,
+    %% never mistaken for `synthetic`.
+    ResizeRow = maps:get(<<"resize">>, ByName),
+    ?assertEqual(<<"unindexed_runtime_fun">>, maps:get(<<"source_status">>, ResizeRow)),
+    %% Clean up so this fixture's xref rows don't leak into other tests that
+    %% share the WidgetDev fixture (mirrors
+    %% methods_op_state_vars_carry_line_when_registered's cleanup).
+    ok = beamtalk_xref:register_class('WidgetDev', []).
 
 methods_op_returns_state_vars() ->
     %% BT-3439: WidgetDev is built directly via beamtalk_object_class:start/2

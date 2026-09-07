@@ -79,6 +79,16 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 %% its source lives. Authorization seam: only `<<"project">>` is writable.
 -export([native_module_editable_target/1]).
 
+%% BT-3444: `info_fields/1` (method_info() -> {Line, SourceStatus, Provenance}),
+%% `row_doc_signature/4` (the BT-2735/BT-2714 synthetic-only doc/signature
+%% resolver), and `side_to_binary/1` (boolean class_side -> `<<"class">>` /
+%% `<<"instance">>`) are the same per-selector shaping op 2 (`browse-protocols`)
+%% already does. Exported so the `methods` ws op (`beamtalk_repl_ops_dev`) — the
+%% VS Code Workspace Explorer sidebar's method-list channel — can badge/hover a
+%% compiler-generated method the same honest way the LiveView IDE method list
+%% already does, instead of a second `source_status`-shaping implementation.
+-export([info_fields/1, row_doc_signature/4, side_to_binary/1]).
+
 %% BT-2732: the ADR 0056 `self delegate` callers of a native module — the
 %% complement of the explicit `(Erlang <module>)` FFI callers
 %% `beamtalk_xref:callers_of_native_module/1` reports. Called by the
