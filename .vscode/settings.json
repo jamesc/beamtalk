@@ -11,6 +11,11 @@
   //     (though the bundled bin/beamtalk-lsp is checked first)
   "beamtalk.binary.path": "${workspaceFolder}/target/debug/beamtalk",
 
+  // Dev builds have no 'share/beamtalk/stdlib/src' sysroot layout, so
+  // 'Go to Definition' on stdlib classes needs this pointed at the repo's
+  // own stdlib sources explicitly.
+  "beamtalk.stdlibSourceDir": "${workspaceFolder}/stdlib/src",
+
   // ELP (Erlang Language Platform) — Erlang code lives under runtime/
   "elp.projectDir": "runtime"
 }

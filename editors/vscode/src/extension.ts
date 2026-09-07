@@ -142,8 +142,7 @@ function lspIsOnPath(): Promise<boolean> {
 async function resolveServerPath(context: vscode.ExtensionContext): Promise<ResolvedServerPath> {
   const config = vscode.workspace.getConfiguration("beamtalk");
   const projectRoot = findProjectRoot();
-  const expandVars = (s: string) =>
-    projectRoot ? s.replace(/\$\{workspaceFolder\}/g, projectRoot) : s;
+  const expandVars = (s: string) => expandWorkspaceFolder(s, projectRoot);
   const override = expandVars(config.get<string>("server.path", "").trim());
   const beamtalkBin = expandVars(config.get<string>("binary.path", "").trim()) || "beamtalk";
   let warning: string | undefined;
@@ -193,6 +192,23 @@ async function resolveServerPath(context: vscode.ExtensionContext): Promise<Reso
 
   // Beamtalk not found
   return null;
+}
+
+/**
+ * Resolve `beamtalk.stdlibSourceDir` for `initializationOptions`.
+ *
+ * Expands a leading `${workspaceFolder}` (the server itself only resolves
+ * bare relative paths against its discovered project roots, so a literal
+ * `${workspaceFolder}` placeholder must be substituted client-side). Empty
+ * when unset, which tells the server to fall back to sysroot auto-discovery.
+ */
+function resolveStdlibSourceDir(): string {
+  const config = vscode.workspace.getConfiguration("beamtalk");
+  const configured = config.get<string>("stdlibSourceDir", "").trim();
+  if (!configured) {
+    return "";
+  }
+  return expandWorkspaceFolder(configured, findProjectRoot());
 }
 
 /**
@@ -385,6 +401,9 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
     outputChannel,
     traceOutputChannel,
     revealOutputChannelOn: RevealOutputChannelOn.Never,
+    initializationOptions: {
+      stdlibSourceDir: resolveStdlibSourceDir(),
+    },
   };
 
   client = new LanguageClient("beamtalk", "Beamtalk Language Server", serverOptions, clientOptions);
@@ -461,6 +480,18 @@ function findProjectRoot(): string | null {
     }
   }
   return folders[0].uri.fsPath;
+}
+
+/**
+ * Expand a literal `${workspaceFolder}` placeholder in a settings value.
+ *
+ * VS Code only expands `${workspaceFolder}` in launch.json/tasks.json, not
+ * in arbitrary settings values, so callers that accept paths like
+ * `${workspaceFolder}/target/debug/beamtalk` must expand it themselves.
+ * Returns `value` unchanged when no project root is found.
+ */
+function expandWorkspaceFolder(value: string, projectRoot: string | null): string {
+  return projectRoot ? value.replace(/\$\{workspaceFolder\}/g, projectRoot) : value;
 }
 
 // ─── Log output formatting (BT-1433) ─────────────────────────────────────────
@@ -732,14 +763,10 @@ function replCommand(): string {
   const ephemeral = config.get<boolean>("repl.ephemeral", false);
   // beamtalk.binary.path lets dev builds point to e.g. ./target/debug/beamtalk
   // so that `beamtalk repl` picks up freshly-compiled Erlang runtime code.
-  let beamtalkBin = config.get<string>("binary.path", "").trim() || "beamtalk";
-  // VS Code does not expand ${workspaceFolder} in settings values, only in
-  // launch.json/tasks.json. Expand it here so users can write paths like
-  // "${workspaceFolder}/target/debug/beamtalk" in their settings.
-  const projectRoot = findProjectRoot();
-  if (projectRoot) {
-    beamtalkBin = beamtalkBin.replace(/\$\{workspaceFolder\}/g, projectRoot);
-  }
+  const beamtalkBin = expandWorkspaceFolder(
+    config.get<string>("binary.path", "").trim() || "beamtalk",
+    findProjectRoot()
+  );
   // Quote the binary path in case it contains spaces (e.g. "/path/to my/beamtalk").
   const quoted = beamtalkBin.includes(" ") ? `"${beamtalkBin}"` : beamtalkBin;
   return ephemeral ? `${quoted} repl -e` : `${quoted} repl`;

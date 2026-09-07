@@ -247,6 +247,11 @@
           "default": "",
           "description": "Override path to the beamtalk-lsp binary. Leave empty to use automatic discovery (sysroot, then PATH)."
         },
+        "beamtalk.stdlibSourceDir": {
+          "type": "string",
+          "default": "",
+          "description": "Directory containing stdlib '.bt' source files, so 'Go to Definition' resolves stdlib classes. Leave empty to auto-discover from the beamtalk-lsp binary's sysroot (a system install of Beamtalk). Set to e.g. '${workspaceFolder}/stdlib/src' when developing against a local build that has no sysroot install."
+        },
         "beamtalk.trace.server": {
           "type": "string",
           "enum": [
