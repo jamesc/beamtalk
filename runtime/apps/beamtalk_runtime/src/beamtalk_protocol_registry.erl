@@ -280,6 +280,17 @@ unregister_protocol(Module) when is_atom(Module) ->
             %% an `ets:select/2` using the identical guard, run immediately
             %% before the delete, narrows that window to the two ETS calls
             %% themselves instead of this function's whole body.
+            %%
+            %% Residual (accepted): `select` and `select_delete` are still
+            %% two independent ETS operations, so a row inserted for `Module`
+            %% in the gap between them would be deleted without ever
+            %% appearing in `Purged` — the compiler server's ambient cache
+            %% would then miss that one removal notification and carry a
+            %% stale entry until the next registration overwrites it. ETS has
+            %% no atomic "select-and-delete-returning-rows" primitive, and a
+            %% self-healing diagnostics-suppression cache doesn't warrant a
+            %% dedicated lock/gen_server serialization point for this
+            %% narrower-still race.
             MatchGuard = [{'=:=', '$1', {const, Module}}],
             Purged = ets:select(?PROTOCOL_TABLE, [{{'$2', #{module => '$1'}}, MatchGuard, ['$2']}]),
             _ = ets:select_delete(?PROTOCOL_TABLE, [
