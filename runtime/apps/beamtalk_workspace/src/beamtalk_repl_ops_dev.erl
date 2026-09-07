@@ -2249,16 +2249,12 @@ method_ws_entry(ClassName, ClassSide, Selector, ClassPid) ->
     #{
         <<"name">> => atom_to_binary(Selector, utf8),
         <<"selector">> => atom_to_binary(Selector, utf8),
-        <<"side">> => side_binary(ClassSide),
+        <<"side">> => beamtalk_repl_ops_browse:side_to_binary(ClassSide),
         <<"line">> => Line,
         <<"source_status">> => atom_to_binary(SourceStatus, utf8),
         <<"signature">> => Signature,
         <<"doc">> => Doc
     }.
-
--spec side_binary(boolean()) -> binary().
-side_binary(true) -> <<"class">>;
-side_binary(false) -> <<"instance">>.
 
 -spec list_state_vars_for_ws(binary()) -> [map()].
 list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
