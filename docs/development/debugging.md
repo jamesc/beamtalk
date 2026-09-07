@@ -163,9 +163,13 @@ State threading — actor/instance `State`, class-var `ClassVars`, value-type
 coordinated only by scattered `debug_assert!`s at each emission site, each
 independently re-deriving the same invariants. `crates/beamtalk-codegen/src/core_erlang/threaded_ir.rs`
 replaces that with a small mid-level IR (`ThreadedIr`/`ThreadedStmt`) that IS
-the `Document` emission for every construct family this table covers,
-including exception handling's `on:do:`/`ensure:` (BT-3165, the last
-holdout), and a single `verify()` pass per construct/method that checks it
+the `Document` emission for every construct family this table covers —
+conditionals, exception handling's `on:do:`/`ensure:`, Actor and
+class-method bodies, Tier 2 stateful-block bodies, the list-op/dict-op
+tuple-accumulator unpack, and ADR 0118's expression-position preludes —
+with loops the one exception, still on the pre-ADR-0111 AST-directed path
+(see ADR 0111 Addendum 15) — and a single `verify()` pass per construct/method
+that checks it
 before `render()` turns it into the `Document` the caller emits. A
 violation is a `threaded_ir::VerifyError`, reported through the
 shared `report_threaded_ir_verify_errors` helper (`control_flow/mod.rs`,
@@ -259,7 +263,8 @@ at the failing construct's emission site.
 checked alongside `Document` emission that happened separately, directly
 from AST + generator state (ADR 0111's own Addendum, "delivered vs.
 designed"). BT-3145 (`while_loops.rs`'s `generate_while_loop_direct`) was
-the first real emission-input call site; BT-3146 (`conditionals.rs`),
+the first real emission-input call site — since deleted (ADR 0111
+Addendum 13); loops remain to migrate (Addendum 15). BT-3146 (`conditionals.rs`),
 BT-3147 (`list_ops/*.rs`/`dict_ops.rs`), BT-3148 (`gen_server/methods.rs`
 Actor method bodies, class-var `Bind`s, `NlrCatch`), BT-3149
 (`expressions.rs`'s `generate_block_stateful`, the Tier 2 stateful-block-body

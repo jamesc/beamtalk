@@ -285,7 +285,7 @@ let lexer = Lexer::builder()
 
 **Test Requirements:**
 - **All new or changed code MUST have tests** - flag missing tests in code review
-- Unit tests go in the same file as the code (`#[cfg(test)] mod tests`)
+- Unit tests go in the same file as the code (`#[cfg(test)] mod tests`). Once a file's inline test module passes roughly 1,000 lines, or the file as a whole passes roughly 3,000, move the tests to a sibling `tests.rs` or `tests/` directory declared with `#[cfg(test)] mod tests;`, split by feature rather than moved wholesale (the pattern `core_erlang/tests/` and `type_checker/tests/` already follow). This is the rustc and standard-library convention for large modules; the test module keeps private-item access through `use super::*`, so nothing needs widening. Test-only helpers defined outside the test module move with it.
 - Use `insta` for snapshot testing of parser output and codegen
 - **After compiler changes, ALWAYS refresh insta snapshots:**
   ```bash
@@ -361,6 +361,17 @@ Following [M-DESIGN-FOR-AI](https://microsoft.github.io/rust-guidelines/guidelin
 4. **Strong types** — Use newtypes and domain types; compiler errors guide AI
 5. **Testable APIs** — Design for unit testing; AI agents iterate via test feedback
 6. **Test coverage** — Good coverage enables AI refactoring with confidence
+
+## Comments
+
+Comments explain what the code cannot say for itself: the contract, the invariant, the non-obvious reason. They do not carry history.
+
+* **State the contract, not the history.** A doc comment says what an item does and what callers may rely on. How it came to be that way, which attempt failed first, and what it replaced belong in the ADR or the commit message.
+* **No issue IDs in code comments.** `BT-1234` in a comment goes stale the moment the issue closes and tells a reader nothing without a browser. Put the reasoning in the comment itself; if it needs more than a few lines, it is an ADR, so link the ADR by number and section instead.
+* **Link ADRs, never reproduce them.** `See ADR 0111 § The verifier` is right. Restating the ADR's rationale, options, or addenda in a module doc is wrong: the copy drifts, and the ADR stays the record.
+* **Never narrate the code.** `// increment the counter` above `counter += 1` is noise. If the code needs a comment to be understood, first try renaming or restructuring so it does not.
+* **Keep it short.** A doc comment on a function is a sentence or a short paragraph. A module doc is a screenful at most: what the module owns, its main entry points, and the one or two invariants that matter. Anything longer is a sign the module needs a design doc or a split.
+* **"Mirrors" is a bug report.** A comment saying one implementation mirrors or must stay in sync with another means there should be one implementation and a conformance test. Do not write the comment; extract the shared leaf module (see CLAUDE.md § No duplicate implementations).
 
 ## Compiler-Specific Patterns
 
