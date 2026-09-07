@@ -75,28 +75,24 @@ pub(super) use build::{
 };
 pub(super) use emit::{RenderCtx, render, render_value};
 pub(super) use ir::{
-    BindOp, FrameId, StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId,
-    ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+    BindOp, FrameId, LoopCounter, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
+    ThreadingMode, TokenId, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use verify::verify;
 
-// `AccParam`/`CloseContext`/`LoopCounter`/`VerifyError` have no production
-// caller by name today (constructed only in tests, or reached only through
-// `verify()`'s inferred return type) — `#[cfg(test)]` keeps the plain build
-// warning-free without narrowing what a future non-test caller can reach:
+// `AccParam`/`CloseContext`/`VerifyError` have no production caller by name
+// today (constructed only in tests, or reached only through `verify()`'s
+// inferred return type) — `#[cfg(test)]` keeps the plain build warning-free
+// without narrowing what a future non-test caller can reach:
 // `threaded_ir::verify::VerifyError` (etc.) stays valid regardless, since
 // each item's own `pub(in crate::core_erlang)` visibility doesn't depend on
-// this re-export.
+// this re-export. `LoopCounter` moved to the unconditional list above — ADR
+// 0111 Addendum 15's Letrec migration gives it a real production
+// constructor (counted loops' `ConditionalLoop::counter`).
 #[cfg(test)]
 pub(super) use ir::{AccParam, CloseContext};
 #[cfg(test)]
 pub(super) use verify::VerifyError;
-// `LoopCounter` has no caller anywhere yet (kept per ADR 0111 § Addendum 15
-// — see `ir`'s module docs); re-exported for path parity with the rest of
-// this list, not because anything reaches it through this path today.
-#[cfg(test)]
-#[allow(unused_imports)]
-pub(super) use ir::LoopCounter;
 
 // Test-only: brings the ambient names `threaded_ir.rs`'s own top-level
 // imports used to provide into scope for `tests`' `use super::*` — the

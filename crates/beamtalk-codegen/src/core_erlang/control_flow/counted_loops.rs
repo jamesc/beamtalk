@@ -9,11 +9,13 @@
 //! variants of `timesRepeat:`, `to:do:`, and `to:by:do:`.
 //! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods (BT-1054).
 
+use super::super::threaded_ir::{
+    self, LoopCounter, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+};
 use super::super::{CoreErlangGenerator, Result};
 use super::plan::ThreadingPlan;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::join;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 
@@ -24,39 +26,38 @@ use beamtalk_core::ast::{Block, Expression};
 /// Each `generate_*_with_mutations` for counted loops becomes a thin wrapper
 /// that builds a `CountedLoopFrame` and calls `generate_counted_stateful_loop`.
 ///
-/// ADR 0118 phase 3 (BT-3419) scope note: this is a plain `Document`-level
-/// struct, unrelated to [`threaded_ir::ThreadedStmt::ConditionalLoop`]'s own
-/// `condition`/`condition_value` fields, despite the field-name overlap
-/// (`continue_header` here vs. that node's own, now-split `continue_arm`) —
-/// `counted_loops.rs` never constructs a `ConditionalLoop` node (no counted
-/// loop does; see that variant's own `#[allow(dead_code)]` status). A
-/// counted loop's `continue_header` is always a pure counter compare (e.g.
-/// `Counter =&lt; N`) built once from the receiver/limit/step, captured
-/// before the letrec — never itself state-effecting — so had this frame
-/// been unified onto `ConditionalLoop`, its `condition` would always be
-/// empty and `condition_value` the bare compare, exactly the "pure counter
-/// compare" case that variant's own field docs already name.
+/// ADR 0111 Addendum 15: `condition_prelude`/`condition_value` split out of
+/// what was one opaque `continue_header` Document (`case <compare> of
+/// <'true'> when 'true' -> `) so `generate_counted_stateful_loop*` can feed
+/// them into a real `ThreadedStmt::ConditionalLoop` node — empty prelude and
+/// a bare compare for `timesRepeat:`/`to:do:`/`to:by:do:`'s `Continue`-free
+/// cases, the `let Continue = case ... end in ` sequence plus `Continue`
+/// itself for `to:by:do:`. The continue arm itself (`<'true'> when 'true' ->
+/// `) is always the same literal across every counted-loop kind (counted
+/// loops never negate), so it is not a frame field.
 pub(super) struct CountedLoopFrame {
     /// Variable bindings emitted before the `letrec` (e.g. `let N = recv in`).
     pub preamble: Document<'static>,
     /// Name of the letrec function (e.g. `"repeat"` or `"loop"`).
     pub fn_name: String,
-    /// The condition header up to `<'true'> when 'true' ->` for the continue arm.
-    pub continue_header: Document<'static>,
+    /// Statements that must run before `condition_value` is read — empty for
+    /// `timesRepeat:`/`to:do:`/`to:by:do:` without a step sign check;
+    /// `to:by:do:`'s `let Continue = case ... end in ` sequence otherwise.
+    pub condition_prelude: Document<'static>,
+    /// The condition's own scrutinee (a bare counter compare, or `Continue`).
+    pub condition_value: Document<'static>,
     /// Expression used as the next counter in the recursive call
     /// (e.g. `"call 'erlang':'+'(I, 1)"`).
     pub next_counter: Document<'static>,
     /// Initial counter argument for the first `apply` call: an integer literal
     /// (e.g. `1`) for `timesRepeat:`, or a variable (e.g. `StartVar`) for `to:do:`.
     pub initial_counter: Document<'static>,
-    /// The `false` arm and `end` (e.g. `"<'false'> when 'true' -> {'nil', StateAcc} end"`).
-    pub false_arm: Document<'static>,
     /// Optional Beamtalk block-parameter name to bind to the gensym'd counter.
     pub body_param: Option<String>,
     /// BT-2354: gensym'd Core Erlang counter variable name (e.g. `_loopidx3`).
     ///
     /// Used as the loop fun's first parameter and threaded through
-    /// `continue_header`/`next_counter`. Produced by `fresh_temp_var` (leading
+    /// `condition_value`/`next_counter`. Produced by `fresh_temp_var` (leading
     /// underscore + a monotonic counter), so it does not collide with the common
     /// case of a user local named `i`, which maps to `I` via `to_core_var`. The
     /// unique suffix also keeps it distinct from underscore-prefixed user
@@ -69,6 +70,17 @@ pub(super) struct CountedLoopFrame {
     /// the letrec fun's extra trailing formal parameter and the initial
     /// `apply`'s trailing argument — see [`class_var_arg_doc`].
     pub class_var_param: Option<String>,
+}
+
+impl CountedLoopFrame {
+    /// ADR 0111 Addendum 15: builds this frame's `ThreadedStmt::ConditionalLoop::counter`.
+    fn loop_counter(&self) -> LoopCounter {
+        LoopCounter::new(
+            self.counter.clone(),
+            self.initial_counter.clone(),
+            self.next_counter.clone(),
+        )
+    }
 }
 
 /// BT-3168 (ADR 0111 Addendum 9, Question 3): renders `", <name>"` for a
@@ -133,7 +145,6 @@ impl CoreErlangGenerator {
         // `class_var_version`, so this is both the letrec fun's own extra
         // trailing formal parameter and the exit arm's reference to it.
         let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
-        let cv_arg = class_var_arg_doc(class_var_param.as_ref());
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -144,22 +155,16 @@ impl CoreErlangGenerator {
                 " in"
             ],
             fn_name: "repeat".to_string(),
-            continue_header: docvec![
-                "case call 'erlang':'=<'(",
+            condition_prelude: Document::Nil,
+            condition_value: docvec![
+                "call 'erlang':'=<'(",
                 leaf::var(counter.clone()),
                 ", ",
                 leaf::var(n_var),
-                ") of ",
-                "<'true'> when 'true' -> ",
+                ")",
             ],
             next_counter: docvec!["call 'erlang':'+'(", leaf::var(counter.clone()), ", 1)"],
             initial_counter: leaf::int_lit(1),
-            false_arm: docvec![
-                "<'false'> when 'true' -> {'nil', StateAcc",
-                cv_arg,
-                "} ",
-                "end "
-            ],
             body_param: None,
             counter,
             class_var_param,
@@ -190,7 +195,6 @@ impl CoreErlangGenerator {
         // BT-3168 (ADR 0111 Addendum 9, Question 3): see the analogous
         // comment in `generate_times_repeat_with_mutations`.
         let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
-        let cv_arg = class_var_arg_doc(class_var_param.as_ref());
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -205,22 +209,16 @@ impl CoreErlangGenerator {
                 " in",
             ],
             fn_name: "loop".to_string(),
-            continue_header: docvec![
-                "case call 'erlang':'=<'(",
+            condition_prelude: Document::Nil,
+            condition_value: docvec![
+                "call 'erlang':'=<'(",
                 leaf::var(counter.clone()),
                 ", ",
                 leaf::var(end_var),
-                ") of ",
-                "<'true'> when 'true' -> ",
+                ")",
             ],
             next_counter: docvec!["call 'erlang':'+'(", leaf::var(counter.clone()), ", 1)"],
             initial_counter: leaf::var(start_var),
-            false_arm: docvec![
-                "<'false'> when 'true' -> {'nil', StateAcc",
-                cv_arg,
-                "} ",
-                "end "
-            ],
             body_param,
             counter,
             class_var_param,
@@ -253,7 +251,6 @@ impl CoreErlangGenerator {
         // BT-3168 (ADR 0111 Addendum 9, Question 3): see the analogous
         // comment in `generate_times_repeat_with_mutations`.
         let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
-        let cv_arg = class_var_arg_doc(class_var_param.as_ref());
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -272,7 +269,7 @@ impl CoreErlangGenerator {
                 " in",
             ],
             fn_name: "loop".to_string(),
-            continue_header: docvec![
+            condition_prelude: docvec![
                 "let Continue = case call 'erlang':'>'(",
                 leaf::var(step_var.clone()),
                 ", 0) of ",
@@ -292,9 +289,9 @@ impl CoreErlangGenerator {
                 ") ",
                 "<'false'> when 'true' -> 'false' ",
                 "end ",
-                "end in case Continue of ",
-                "<'true'> when 'true' -> ",
+                "end in ",
             ],
+            condition_value: Document::Str("Continue"),
             next_counter: docvec![
                 "call 'erlang':'+'(",
                 leaf::var(counter.clone()),
@@ -303,12 +300,6 @@ impl CoreErlangGenerator {
                 ")"
             ],
             initial_counter: leaf::var(start_var),
-            false_arm: docvec![
-                "<'false'> when 'true' -> {'nil', StateAcc",
-                cv_arg,
-                "} ",
-                "end "
-            ],
             body_param,
             counter,
             class_var_param,
@@ -325,6 +316,13 @@ impl CoreErlangGenerator {
     /// In standard mode the fun signature is `(I, StateAcc)`.
     /// In direct-params mode (BT-1275, no field mutations) it is `(I, Var1, ..., VarN)`
     /// eliminating per-iteration `maps:get` / `maps:put` calls.
+    ///
+    /// ADR 0111 Addendum 15: lowers to one `ThreadedStmt::ConditionalLoop`
+    /// node — `produces` is `[State@0]` plus `ClassVars` (at its own live
+    /// version, since `class_var_version` never resets across
+    /// `with_branch_context`) when `frame.class_var_param` is set;
+    /// `counter` carries `frame`'s own gensym'd index name plus its
+    /// initial/next expressions (ADR 0111 Addendum 2 Gap 1).
     pub(super) fn generate_counted_stateful_loop(
         &mut self,
         frame: &CountedLoopFrame,
@@ -339,31 +337,8 @@ impl CoreErlangGenerator {
         }
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
-
-        // BT-3168 (ADR 0111 Addendum 9, Question 3): an extra, explicit
-        // trailing fun parameter when the body threads `ClassVars` — the
-        // arity grows to 3 (`counter, StateAcc, ClassVars`) instead of 2.
-        // `frame.class_var_param` was captured pre-loop by the
-        // `counted_loops.rs` constructor that built this frame.
-        let arity = if frame.class_var_param.is_some() {
-            3
-        } else {
-            2
-        };
         let cv_param_doc = class_var_arg_doc(frame.class_var_param.as_ref());
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-        docs.push(pack_doc);
-        docs.push(frame.preamble.clone());
-        docs.push(docvec![
-            " letrec ",
-            leaf::fname(frame.fn_name.clone(), arity),
-            " = fun (",
-            leaf::var(frame.counter.clone()),
-            ", StateAcc",
-            cv_param_doc.clone(),
-            ") -> ",
-        ]);
+        let class_var_seed_version = self.class_var_version();
 
         self.push_scope();
 
@@ -372,86 +347,117 @@ impl CoreErlangGenerator {
             self.bind_var(bt_name, &frame.counter);
         }
 
-        // Unpack threaded locals at the top of each iteration
+        // Unpack threaded locals at the top of each iteration. BT-3470 (ADR
+        // 0111 Addendum 15): the returned docs are real
+        // `let I = call 'maps':'get'(...) in` text that must render at the
+        // top of the letrec fun's own body, before the condition — legacy
+        // pushed them into the fun-body `docs` vec immediately before
+        // `frame.continue_header` (see `Self::generate_counted_stateful_loop`'s
+        // pre-ADR-0111-Addendum-15 history); dropping this return value
+        // leaves a threaded local's condition read wired to its PRE-LOOP
+        // identity forever, never advancing across iterations.
         let unpack_docs = plan.generate_unpack_at_iteration_start(self);
-        docs.extend(unpack_docs);
 
-        // Condition + true arm
-        docs.push(frame.continue_header.clone());
+        let condition_stmt = ThreadedStmt::Statement(frame.condition_prelude.clone(), body.span);
+        let condition_value = ValueRef::Doc(frame.condition_value.clone());
+        let condition: Vec<ThreadedStmt> = unpack_docs
+            .into_iter()
+            .map(|doc| ThreadedStmt::Statement(doc, body.span))
+            .chain(std::iter::once(condition_stmt))
+            .collect();
 
-        // Body
-        let (body_doc, final_state_version) =
-            self.generate_threaded_loop_body(body, plan, &super::list_ops::BodyKind::Letrec)?;
-        let final_class_var = self.last_loop_class_var.take();
-        docs.push(body_doc);
-        let final_state_var = super::super::util::versioned_var("StateAcc", final_state_version);
-        let recur_cv_doc = final_class_var
-            .as_ref()
-            .map_or(Document::Nil, |v| docvec![", ", leaf::var(v.clone())]);
+        let (mut body_stmts, ir_frame) = self.generate_letrec_body_ir(body, plan)?;
 
         self.pop_scope();
 
-        // Recursive call + false arm + initial apply
-        docs.push(docvec![
-            " apply ",
-            leaf::fname(frame.fn_name.clone(), arity),
-            " (",
-            frame.next_counter.clone(),
-            ", ",
-            leaf::var(final_state_var),
-            recur_cv_doc,
-            ") ",
-            frame.false_arm.clone(),
-            docvec![
-                "in apply ",
-                leaf::fname(frame.fn_name.clone(), arity),
-                " (",
-                frame.initial_counter.clone(),
-                ", ",
-                leaf::var(init_state),
-                cv_param_doc,
-                ")",
-            ],
-        ]);
+        let exit_arm = docvec![
+            "<'false'> when 'true' -> {'nil', StateAcc",
+            cv_param_doc,
+            "} end "
+        ];
 
-        Ok(Document::Vec(docs))
+        let mut produces = vec![VersionedVar::new(VersionPrefix::State, 0, ir_frame)];
+        if let Some(cv_name) = &frame.class_var_param {
+            // ADR 0111 Addendum 15: see `Self::rebase_class_var_seed`'s doc
+            // comment for why this loop's own `ClassVars` `produces` entry
+            // must be `Gensym`-seeded, not the method's live (possibly
+            // nonzero) `ClassVars` version.
+            let real_seed =
+                VersionedVar::new(VersionPrefix::ClassVars, class_var_seed_version, ir_frame);
+            let gensym_seed =
+                VersionedVar::new(VersionPrefix::Gensym(cv_name.clone()), 0, ir_frame);
+            Self::rebase_class_var_seed(&mut body_stmts, &real_seed, &gensym_seed);
+            produces.push(gensym_seed);
+        }
+        // See `ConditionalLoop::outer_args`'s doc comment: the value
+        // actually live at the call site for `produces[0]` is whatever
+        // `generate_pack_prefix` produced above, never necessarily the
+        // generic ambient-context "State" spelling its own derivation would
+        // otherwise fall back to. A trailing `ClassVars` `produces` entry
+        // (index 1, when present) needs no such override — it is already
+        // `Gensym`-seeded above, and `Gensym` renders identically in every
+        // context, so leaving `outer_args` one element short here
+        // deliberately falls through to the SAME generic per-entry
+        // derivation `render_loop_skeleton` uses for every other entry.
+        let outer_args = vec![leaf::var(init_state)];
+
+        let shadow_write_eligible = self.block_depth == 0;
+        let ir = vec![ThreadedStmt::ConditionalLoop {
+            fn_name: frame.fn_name.clone(),
+            mode: ThreadingMode::StateAcc(plan.fallback_reason.clone()),
+            frame: ir_frame,
+            shadow_write_eligible,
+            counter: Some(frame.loop_counter()),
+            condition,
+            condition_value,
+            continue_arm: Document::Str("<'true'> when 'true' -> "),
+            body: body_stmts,
+            produces,
+            outer_args: Some(outer_args),
+            exit_arm,
+            span: body.span,
+        }];
+        let errors = threaded_ir::verify(&ir);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "counted StateAcc ConditionalLoop",
+            body.span,
+        );
+        let rendered = {
+            let mut ctx = threaded_ir::RenderCtx::new(self);
+            threaded_ir::render(&ir, &mut ctx)
+        };
+
+        Ok(docvec![pack_doc, frame.preamble.clone(), " ", rendered])
     }
 
     /// BT-1275: Direct-params variant of `generate_counted_stateful_loop`.
     ///
     /// Uses `fun (I, Var1, ..., VarN)` instead of `fun (I, StateAcc)`.
     /// The `StateAcc` map is rebuilt only once in the false (exit) arm.
+    ///
+    /// ADR 0111 Addendum 15: lowers to one `ThreadedStmt::ConditionalLoop`
+    /// node — `produces` is each threaded local's `VersionPrefix::Local`
+    /// seed; `counter` carries `frame`'s own gensym'd index.
     fn generate_counted_stateful_loop_direct(
         &mut self,
         frame: &CountedLoopFrame,
         body: &Block,
         plan: &ThreadingPlan,
     ) -> Result<Document<'static>> {
-        // Collect initial arg values from the outer scope (before push_scope overwrites them).
-        let initial_direct_args = plan.initial_direct_args(self);
-
         // Build the fun parameter list: (<counter>, Var1, ..., VarN)
         let param_names: Vec<String> = plan
             .threaded_locals
             .iter()
             .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
             .collect();
-        let arity = 1 + param_names.len();
-        let param_list_doc = join(
-            std::iter::once(leaf::var(frame.counter.clone()))
-                .chain(param_names.iter().map(|v| leaf::var(v.clone()))),
-            &Document::Str(", "),
-        );
 
-        let mut docs: Vec<Document<'static>> = Vec::new();
-        docs.push(frame.preamble.clone());
-        docs.push(docvec![
-            " letrec ",
-            leaf::fname(frame.fn_name.clone(), arity),
-            " = fun (",
-            param_list_doc,
-            ") -> ",
-        ]);
+        // Captured BEFORE `push_scope`/`generate_unpack_at_iteration_start`
+        // rebind each threaded local to its generic fun-parameter name —
+        // see `ThreadingPlan::initial_direct_args`'s doc comment for why the
+        // OUTER call's own argument can differ from that generic name (e.g.
+        // a method parameter's own gensym'd `Args`-pattern binding).
+        let initial_direct_args = plan.initial_direct_args(self);
 
         self.push_scope();
 
@@ -466,63 +472,56 @@ impl CoreErlangGenerator {
         // `if !use_direct_params && !use_hybrid_params` guard).
         plan.generate_unpack_at_iteration_start(self);
 
-        // Condition + true arm
-        docs.push(frame.continue_header.clone());
+        let condition_stmt = ThreadedStmt::Statement(frame.condition_prelude.clone(), body.span);
+        let condition_value = ValueRef::Doc(frame.condition_value.clone());
 
         // Body — set in_direct_params_loop so nested list ops skip StateAcc repack (BT-1329).
         let prev_direct_params_loop = self.in_direct_params_loop;
         self.in_direct_params_loop = true;
-        let (body_doc, _) =
-            self.generate_threaded_loop_body(body, plan, &super::list_ops::BodyKind::Letrec)?;
+        let (body_stmts, ir_frame) = self.generate_letrec_body_ir(body, plan)?;
         self.in_direct_params_loop = prev_direct_params_loop;
-        docs.push(body_doc);
-
-        // Collect final var names after body execution (updated bindings inside scope).
-        let final_args: Vec<String> = plan
-            .threaded_locals
-            .iter()
-            .map(|v| {
-                self.lookup_var(v)
-                    .cloned()
-                    .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v))
-            })
-            .collect();
 
         // Build exit StateAcc using the INITIAL param names (current iteration values).
         let exit_stateacc = plan.generate_exit_stateacc(&param_names, self);
 
         self.pop_scope();
 
-        // Build Document arg lists for the recursive call and the initial apply.
-        let recursive_args_doc = join(
-            std::iter::once(frame.next_counter.clone())
-                .chain(final_args.into_iter().map(leaf::var)),
-            &Document::Str(", "),
-        );
-        let initial_args_doc = join(
-            std::iter::once(frame.initial_counter.clone())
-                .chain(initial_direct_args.into_iter().map(leaf::var)),
-            &Document::Str(", "),
-        );
+        let exit_arm = docvec!["<'false'> when 'true' -> ", exit_stateacc, " end "];
 
-        // Recursive call + false arm (with rebuilt StateAcc) + initial apply.
-        docs.push(docvec![
-            " apply ",
-            leaf::fname(frame.fn_name.clone(), arity),
-            " (",
-            recursive_args_doc,
-            ") ",
-            "<'false'> when 'true' -> ",
-            exit_stateacc,
-            " end ",
-            "in apply ",
-            leaf::fname(frame.fn_name.clone(), arity),
-            " (",
-            initial_args_doc,
-            ")",
-        ]);
+        let produces: Vec<VersionedVar> = plan
+            .threaded_locals
+            .iter()
+            .map(|name| VersionedVar::new(VersionPrefix::Local(name.clone()), 0, ir_frame))
+            .collect();
 
-        Ok(Document::Vec(docs))
+        let shadow_write_eligible = self.block_depth == 0;
+        let ir = vec![ThreadedStmt::ConditionalLoop {
+            fn_name: frame.fn_name.clone(),
+            mode: ThreadingMode::DirectParams,
+            frame: ir_frame,
+            shadow_write_eligible,
+            counter: Some(frame.loop_counter()),
+            condition: vec![condition_stmt],
+            condition_value,
+            continue_arm: Document::Str("<'true'> when 'true' -> "),
+            body: body_stmts,
+            produces,
+            outer_args: Some(initial_direct_args.into_iter().map(leaf::var).collect()),
+            exit_arm,
+            span: body.span,
+        }];
+        let errors = threaded_ir::verify(&ir);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "counted direct-params ConditionalLoop",
+            body.span,
+        );
+        let rendered = {
+            let mut ctx = threaded_ir::RenderCtx::new(self);
+            threaded_ir::render(&ir, &mut ctx)
+        };
+
+        Ok(docvec![frame.preamble.clone(), " ", rendered])
     }
 
     /// BT-1326/BT-1342: Full-extract variant of `generate_counted_stateful_loop`.
@@ -533,14 +532,17 @@ impl CoreErlangGenerator {
     /// Field reads resolve to direct parameters. Field writes become simple variable
     /// rebindings (no `maps:put` per iteration). At loop exit, mutated fields are repacked
     /// into the initial State map.
+    ///
+    /// ADR 0111 Addendum 15: lowers to one `ThreadedStmt::ConditionalLoop`
+    /// node — `produces` is locals then readonly then mutated fields
+    /// (matching the param-list ordering below); `counter` carries `frame`'s
+    /// own gensym'd index.
     fn generate_counted_stateful_loop_hybrid(
         &mut self,
         frame: &CountedLoopFrame,
         body: &Block,
         plan: &ThreadingPlan,
     ) -> Result<Document<'static>> {
-        // Collect initial arg values from the outer scope (before push_scope overwrites them).
-        let initial_local_args = plan.initial_direct_args(self);
         let initial_state = plan.initial_state_var.clone();
 
         // Pre-extract ALL fields (readonly + mutated) before the letrec.
@@ -555,32 +557,24 @@ impl CoreErlangGenerator {
             .iter()
             .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
             .collect();
-        let readonly_param_names: Vec<String> =
-            readonly_params.iter().map(|(_, v)| v.clone()).collect();
         let mutated_param_names: Vec<String> =
             mutated_params.iter().map(|(_, v)| v.clone()).collect();
-        let arity =
-            1 + local_param_names.len() + readonly_param_names.len() + mutated_param_names.len();
 
-        // Build param list doc: (<counter>, Var1, ..., VarN, RField1, ..., MField1, ...)
-        let param_list_doc = join(
-            std::iter::once(leaf::var(frame.counter.clone()))
-                .chain(local_param_names.iter().map(|v| leaf::var(v.clone())))
-                .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
-                .chain(mutated_param_names.iter().map(|v| leaf::var(v.clone()))),
-            &Document::Str(", "),
-        );
+        let all_field_params: std::collections::HashMap<String, String> = readonly_params
+            .iter()
+            .cloned()
+            .chain(mutated_params.iter().cloned())
+            .collect();
 
-        let mut docs: Vec<Document<'static>> = Vec::new();
-        docs.push(frame.preamble.clone());
-        docs.extend(pre_extract_docs);
-        docs.push(docvec![
-            " letrec ",
-            leaf::fname(frame.fn_name.clone(), arity),
-            " = fun (",
-            param_list_doc,
-            ") -> ",
-        ]);
+        // Captured BEFORE `push_scope`/`generate_unpack_at_iteration_start`
+        // rebind each threaded local to its generic fun-parameter name —
+        // see `ThreadingPlan::initial_direct_args`'s doc comment for why the
+        // OUTER call's own argument can differ from that generic name (e.g.
+        // a method parameter's own gensym'd `Args`-pattern binding). The
+        // readonly/mutated field params need no such correction — their
+        // fun-parameter name IS the pre-extracted temp var already, both
+        // inside the loop and at the outer call site.
+        let initial_local_args = plan.initial_direct_args(self);
 
         self.push_scope();
 
@@ -594,16 +588,12 @@ impl CoreErlangGenerator {
         // own `if !use_direct_params && !use_hybrid_params` guard).
         plan.generate_unpack_at_iteration_start(self);
 
-        // Condition + true arm
-        docs.push(frame.continue_header.clone());
+        let condition_stmt = ThreadedStmt::Statement(frame.condition_prelude.clone(), body.span);
+        let condition_value = ValueRef::Doc(frame.condition_value.clone());
 
-        // BT-1326/BT-1342: Run body with hybrid field params active; pop scope on error.
-        let (body_doc, final_mutated_field_args) =
-            self.run_counted_hybrid_body(body, plan, &readonly_params, &mutated_params)?;
-        docs.push(body_doc);
-
-        // Final local var args after body (updated bindings from scope).
-        let final_local_args = self.collect_final_local_args(plan);
+        // BT-1326/BT-1342: Run body with hybrid field params active.
+        let (body_stmts, ir_frame) =
+            self.generate_letrec_hybrid_body_ir(body, plan, &all_field_params)?;
 
         // Exit StateAcc: uses initial param names (current iteration's starting values).
         // In the exit arm (false branch), the body hasn't executed, so params are unchanged.
@@ -616,129 +606,56 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
 
-        Self::append_counted_hybrid_loop_tail(
-            &mut docs,
-            frame,
-            arity,
-            final_local_args,
-            &readonly_param_names,
-            &mutated_param_names,
-            initial_local_args,
-            final_mutated_field_args,
-            exit_stateacc,
-        );
+        let exit_arm = docvec!["<'false'> when 'true' -> ", exit_stateacc, " end "];
 
-        Ok(Document::Vec(docs))
-    }
+        let produces: Vec<VersionedVar> =
+            plan.threaded_locals
+                .iter()
+                .map(|name| VersionedVar::new(VersionPrefix::Local(name.clone()), 0, ir_frame))
+                .chain(readonly_params.iter().map(|(_, var)| {
+                    VersionedVar::new(VersionPrefix::Gensym(var.clone()), 0, ir_frame)
+                }))
+                .chain(mutated_params.iter().map(|(_, var)| {
+                    VersionedVar::new(VersionPrefix::Gensym(var.clone()), 0, ir_frame)
+                }))
+                .collect();
 
-    /// Appends the recursive call, exit arm, and initial apply call to the counted hybrid loop docs.
-    /// Executes the counted hybrid loop body with hybrid-mode field params active.
-    ///
-    /// Sets up `hybrid_readonly_field_params` and `hybrid_mutated_fields` from the
-    /// pre-extracted params, runs the threaded body, captures final mutated field arg names,
-    /// and restores all hybrid state. Calls `pop_scope` and returns an error if body fails.
-    fn run_counted_hybrid_body(
-        &mut self,
-        body: &Block,
-        plan: &ThreadingPlan,
-        readonly_params: &[(String, String)],
-        mutated_params: &[(String, String)],
-    ) -> Result<(Document<'static>, Vec<String>)> {
-        let prev_hybrid = self.in_hybrid_loop;
-        let prev_direct_params_loop = self.in_direct_params_loop;
-        let mut all_field_params: std::collections::HashMap<String, String> =
-            readonly_params.iter().cloned().collect();
-        for (field, var) in mutated_params {
-            all_field_params.insert(field.clone(), var.clone());
-        }
-        let prev_readonly_field_params =
-            std::mem::replace(&mut self.hybrid_readonly_field_params, all_field_params);
-        let prev_mutated_fields = std::mem::replace(
-            &mut self.hybrid_mutated_fields,
-            plan.mutated_fields.iter().cloned().collect(),
-        );
-        self.in_hybrid_loop = true;
-        self.in_direct_params_loop = true; // BT-1329: nested list ops skip StateAcc repack
-        let body_result =
-            self.generate_threaded_loop_body(body, plan, &super::list_ops::BodyKind::Letrec);
-
-        // BT-1342: Capture final mutated field var names BEFORE restoring maps.
-        let final_mutated_field_args: Vec<String> = plan
-            .mutated_fields
-            .iter()
-            .map(|field| {
-                self.hybrid_readonly_field_params
-                    .get(field)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        mutated_params
-                            .iter()
-                            .find(|(f, _)| f == field)
-                            .map(|(_, v)| v.clone())
-                            .unwrap_or_default()
-                    })
-            })
-            .collect();
-
-        self.hybrid_mutated_fields = prev_mutated_fields;
-        self.hybrid_readonly_field_params = prev_readonly_field_params;
-        self.in_hybrid_loop = prev_hybrid;
-        self.in_direct_params_loop = prev_direct_params_loop;
-        let (body_doc, _) = match body_result {
-            Ok(result) => result,
-            Err(err) => {
-                self.pop_scope();
-                return Err(err);
-            }
+        let shadow_write_eligible = self.block_depth == 0;
+        let ir = vec![ThreadedStmt::ConditionalLoop {
+            fn_name: frame.fn_name.clone(),
+            mode: ThreadingMode::Hybrid,
+            frame: ir_frame,
+            shadow_write_eligible,
+            counter: Some(frame.loop_counter()),
+            condition: vec![condition_stmt],
+            condition_value,
+            continue_arm: Document::Str("<'true'> when 'true' -> "),
+            body: body_stmts,
+            produces,
+            outer_args: Some(
+                initial_local_args
+                    .into_iter()
+                    .chain(readonly_params.iter().map(|(_, var)| var.clone()))
+                    .chain(mutated_param_names.clone())
+                    .map(leaf::var)
+                    .collect(),
+            ),
+            exit_arm,
+            span: body.span,
+        }];
+        let errors = threaded_ir::verify(&ir);
+        self.report_threaded_ir_verify_errors(&errors, "counted hybrid ConditionalLoop", body.span);
+        let rendered = {
+            let mut ctx = threaded_ir::RenderCtx::new(self);
+            threaded_ir::render(&ir, &mut ctx)
         };
-        Ok((body_doc, final_mutated_field_args))
-    }
 
-    #[allow(clippy::too_many_arguments)]
-    fn append_counted_hybrid_loop_tail(
-        docs: &mut Vec<Document<'static>>,
-        frame: &CountedLoopFrame,
-        arity: usize,
-        final_local_args: Vec<String>,
-        readonly_param_names: &[String],
-        mutated_param_names: &[String],
-        initial_local_args: Vec<String>,
-        final_mutated_field_args: Vec<String>,
-        exit_stateacc: Document<'static>,
-    ) {
-        // Recursive call args: next_counter, updated locals, readonly fields (unchanged), updated mutated fields
-        let recursive_args_doc = join(
-            std::iter::once(frame.next_counter.clone())
-                .chain(final_local_args.into_iter().map(leaf::var))
-                .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
-                .chain(final_mutated_field_args.into_iter().map(leaf::var)),
-            &Document::Str(", "),
-        );
-
-        // Initial apply args: initial_counter, initial locals, initial readonly vals, initial mutated vals
-        let initial_args_doc = join(
-            std::iter::once(frame.initial_counter.clone())
-                .chain(initial_local_args.into_iter().map(leaf::var))
-                .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
-                .chain(mutated_param_names.iter().map(|v| leaf::var(v.clone()))),
-            &Document::Str(", "),
-        );
-
-        docs.push(docvec![
-            " apply ",
-            leaf::fname(frame.fn_name.clone(), arity),
-            " (",
-            recursive_args_doc,
-            ") ",
-            "<'false'> when 'true' -> ",
-            exit_stateacc,
-            " end ",
-            "in apply ",
-            leaf::fname(frame.fn_name.clone(), arity),
-            " (",
-            initial_args_doc,
-            ")",
-        ]);
+        Ok(docvec![
+            frame.preamble.clone(),
+            Document::Vec(pre_extract_docs),
+            " ",
+            rendered,
+        ])
     }
 }
 

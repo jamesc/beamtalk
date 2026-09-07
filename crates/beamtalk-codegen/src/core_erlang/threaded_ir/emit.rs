@@ -8,7 +8,8 @@
 
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
-    AccParam, BindOp, FrameId, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    AccParam, BindOp, FrameId, LoopCounter, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix,
+    VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -208,23 +209,26 @@ pub(in crate::core_erlang) fn render(
                 mode,
                 frame,
                 shadow_write_eligible: _, // rendering-irrelevant: verify()-only, see the field's doc comment
-                counter: _counter, // counted-loop rendering: a later migration wires a real counted-loop call site (BT-3182: the while-direct pilot that used `ConditionalLoop` for its own `mode`/`counter: None` shape was deleted — see ADR 0111 Addendum 13)
+                counter,
                 condition,
                 condition_value,
                 continue_arm,
                 body,
                 produces,
+                outer_args,
                 exit_arm,
                 span: _,
             } => docs.push(render_conditional_loop(
                 fn_name,
                 mode,
                 *frame,
+                counter.as_ref(),
                 condition,
                 condition_value,
                 continue_arm,
                 body,
                 produces,
+                outer_args.as_deref(),
                 exit_arm,
                 ctx,
             )),
@@ -252,15 +256,17 @@ fn render_threaded(
     match mode {
         ThreadingMode::DirectParams => {
             let fn_name = ctx.fresh_temp_var("Loop");
-            render_loop_skeleton(fn_name, frame, body, produces, ctx, None, None)
+            render_loop_skeleton(fn_name, frame, None, body, produces, None, ctx, None, None)
         }
         ThreadingMode::Hybrid => {
             let fn_name = ctx.fresh_temp_var("Loop");
             render_loop_skeleton(
                 fn_name,
                 frame,
+                None,
                 body,
                 produces,
+                None,
                 ctx,
                 Some(LoopContextFlags {
                     in_loop_body: true,
@@ -366,26 +372,48 @@ struct ConditionalLoopHeader<'a> {
 /// reproduces that; the bare shape's body is a synthetic, condition-free
 /// fixture with no such production twin, so it keeps rendering via plain
 /// [`render`].
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)] // shared param_list/outer_args/body/final_args plumbing for both bare Threaded loops and real ConditionalLoop nodes
 fn render_loop_skeleton(
     fn_name: String,
     frame: FrameId,
+    counter: Option<&LoopCounter>,
     body: &[ThreadedStmt],
     produces: &[VersionedVar],
+    outer_args_override: Option<&[Document<'static>]>,
     ctx: &mut RenderCtx,
     loop_context: Option<LoopContextFlags>,
     header: Option<ConditionalLoopHeader<'_>>,
 ) -> Document<'static> {
-    let arity = produces.len();
+    let arity = produces.len() + usize::from(counter.is_some());
 
     // The OUTER initial call's arguments — this is the calling scope's own
     // reference to `produces` at version 0, so it must resolve under
     // whatever context was already ambient *before* this node, never the
     // loop's own context (that would rename a var the caller never bound
-    // under).
+    // under). `counter` (a counted loop's own extra leading parameter,
+    // never a `produces` entry — see its own doc comment) supplies its
+    // OUTER value directly via `initial`, opaque to this resolution.
+    //
+    // `produces`' generic per-entry derivation is overridden wholesale by
+    // `outer_args_override` when present — see
+    // [`ThreadedStmt::ConditionalLoop::outer_args`]'s doc comment for why
+    // the generic (version-0, ambient-context) spelling can never be
+    // trusted for the caller's own live value.
     let outer_args = join(
-        produces
-            .iter()
-            .map(|v| leaf::var(ctx.resolve_prefix(&VersionedVar::new(v.prefix.clone(), 0, frame)))),
+        counter
+            .map(|c| c.initial.clone())
+            .into_iter()
+            .chain(produces.iter().enumerate().map(|(i, v)| {
+                match outer_args_override.and_then(|overrides| overrides.get(i)) {
+                    Some(overridden) => overridden.clone(),
+                    None => leaf::var(ctx.resolve_prefix(&VersionedVar::new(
+                        v.prefix.clone(),
+                        0,
+                        frame,
+                    ))),
+                }
+            })),
         &Document::Str(", "),
     );
 
@@ -403,9 +431,12 @@ fn render_loop_skeleton(
     // call.
     let render_in_loop_body = |ctx: &mut RenderCtx| {
         let param_list = join(
-            produces.iter().map(|v| {
-                leaf::var(ctx.resolve_prefix(&VersionedVar::new(v.prefix.clone(), 0, frame)))
-            }),
+            counter
+                .map(|c| leaf::var(c.name.clone()))
+                .into_iter()
+                .chain(produces.iter().map(|v| {
+                    leaf::var(ctx.resolve_prefix(&VersionedVar::new(v.prefix.clone(), 0, frame)))
+                })),
             &Document::Str(", "),
         );
         // ADR 0118 phase 3 (BT-3419): the condition prelude renders INSIDE
@@ -429,9 +460,11 @@ fn render_loop_skeleton(
         };
         let final_args = if header.is_some() {
             join(
-                final_loop_arg_identities(body, produces)
-                    .iter()
-                    .map(|v| leaf::var(ctx.resolve_prefix(v))),
+                counter.map(|c| c.next.clone()).into_iter().chain(
+                    final_loop_arg_identities(body, produces)
+                        .iter()
+                        .map(|v| leaf::var(ctx.resolve_prefix(v))),
+                ),
                 &Document::Str(", "),
             )
         } else {
@@ -558,11 +591,13 @@ fn render_conditional_loop(
     fn_name: &str,
     mode: &ThreadingMode,
     frame: FrameId,
+    counter: Option<&LoopCounter>,
     condition: &[ThreadedStmt],
     condition_value: &ValueRef,
     continue_arm: &Document<'static>,
     body: &[ThreadedStmt],
     produces: &[VersionedVar],
+    outer_args_override: Option<&[Document<'static>]>,
     exit_arm: &Document<'static>,
     ctx: &mut RenderCtx,
 ) -> Document<'static> {
@@ -571,15 +606,29 @@ fn render_conditional_loop(
             in_loop_body: true,
             in_hybrid_loop: true,
         }),
-        ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_) | ThreadingMode::StateAcc(_) => {
-            None
-        }
+        // ADR 0111 Addendum 15: a `StateAcc`-mode loop's param_list/body_doc/
+        // final_args must resolve `VersionPrefix::State` under LOOP context
+        // (`StateAcc`/`StateAccN`, matching the fun's own literal `StateAcc`
+        // parameter every real `StateAcc`-mode call site declares) — the
+        // same reasoning `Hybrid` above already documents, minus
+        // `in_hybrid_loop` (a `StateAcc`-mode loop is not a `Hybrid` one).
+        // `outer_args` is always overridden wholesale by
+        // `outer_args_override` for every real lowering (this toggle never
+        // affects it) — see
+        // [`ThreadedStmt::ConditionalLoop::outer_args`]'s doc comment.
+        ThreadingMode::StateAcc(_) => Some(LoopContextFlags {
+            in_loop_body: true,
+            in_hybrid_loop: false,
+        }),
+        ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_) => None,
     };
     render_loop_skeleton(
         fn_name.to_string(),
         frame,
+        counter,
         body,
         produces,
+        outer_args_override,
         ctx,
         loop_context,
         Some(ConditionalLoopHeader {

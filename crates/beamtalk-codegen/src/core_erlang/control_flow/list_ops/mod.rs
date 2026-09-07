@@ -38,12 +38,14 @@ use beamtalk_core::ast::{Block, Expression};
 // ─── BodyKind ─────────────────────────────────────────────────────────────────
 
 /// Controls how `generate_threaded_loop_body` handles the final expression.
+///
+/// ADR 0111 Addendum 15: `Letrec` (the only non-`Foldl*` variant) was
+/// deleted — `while_loops.rs`/`counted_loops.rs` now lower onto
+/// `ThreadedStmt::ConditionalLoop` via `generate_letrec_body_ir` instead of
+/// this enum's own dispatch — leaving every remaining variant a `Foldl*`
+/// shape by construction, not a naming accident.
+#[allow(clippy::enum_variant_names)]
 pub(super) enum BodyKind {
-    /// Letrec loop body: document ends with a trailing ` in `; caller appends
-    /// the recursive `apply` call.  The last non-assignment expression uses the
-    /// nested-state-extraction pattern when there are no direct field assignments.
-    Letrec,
-
     /// Foldl `do:` body: final accumulator is `StateAcc{N}`.
     FoldlDo,
 
