@@ -6,556 +6,78 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! ## Status (as of BT-3144 — see ADR 0111 §Addendum)
+//! A migrated construct's mutation sequence lowers to a `Vec<ThreadedStmt>`,
+//! checked once by [`verify`], then turned into the `Document` codegen
+//! emits by [`render`] — for everything this module covers, the rendered
+//! `Document` IS the emission; there is no separate hand-built path beside
+//! it. This replaces what used to be scattered `debug_assert!`s at each
+//! emission site, each re-deriving the same state-threading invariants by
+//! hand.
 //!
-//! `ThreadedIr` is still a **verification-only side channel** at every
-//! production `verify_*` call site — none of them route their fixture into
-//! `Document` construction; that remains directly from AST + generator
-//! state, on a separate, unconnected path (ADR 0111's own Alternative 1b
-//! (§B2) shape, delivered under Option A's name — the honest accounting
-//! lives in the ADR's Addendum, not here). [BT-3141](https://linear.app/beamtalk/issue/BT-3141)
-//! is the epic re-scoped to complete Option A (`ThreadedIr` as real emission
-//! input, single renderer, verifier on the true IR).
+//! ## Coverage
 //!
-//! BT-3144 (this issue) lands that epic's renderer *foundation*: [`render`]
-//! is a **full-fidelity** `&[ThreadedStmt] -> Document` function for the
-//! while-loop family's `DirectParams`/`Hybrid` `Threaded` modes and for
-//! `NlrCatch` — real `letrec` scaffolding, real try/catch scaffolding (the
-//! latter by directly reusing [`super::CoreErlangGenerator::wrap_body_with_nlr_catch`],
-//! not a re-derivation), via [`RenderCtx`] — the narrow borrow of generator
-//! rendering services the ADR's Addendum sketches. `TupleAcc` (list-ops) and
-//! the generic `StateAcc` fallback mode still render at the pre-BT-3144
-//! skeleton fidelity (flattened body, no letrec wrapper) — no production
-//! call site or dual-run proof needs them yet; a later migration issue
-//! extends `render` to them when it does (issue body point 3: "extend node
-//! types only where fidelity requires it").
+//! Lowered through this IR: conditional branch arms (`ifTrue:`/`ifFalse:`/
+//! `ifTrue:ifFalse:`/`ifNotNil:`/`match:`), `on:do:`/`ensure:` arms, Actor
+//! and class-method bodies (including NLR relay via `NlrCatch`), Tier 2
+//! stateful-block bodies, the list-op/dict-op per-iteration
+//! tuple-accumulator unpack ([`build_tuple_acc_unpack`]), and
+//! expression-position state effects via [`ThreadedValue`] preludes (ADR
+//! 0118).
 //!
-//! ## Status (as of BT-3145 — see ADR 0111 Addendum 2)
+//! **Not yet lowered:** the loop skeleton and body-statement sequence for
+//! while/counted loops, and the fold accumulator for list-op/dict-op bodies
+//! (`control_flow/mod.rs`'s `generate_threaded_loop_body_inner`) — both
+//! stay on the pre-ADR-0111 AST-directed path. `ConditionalLoop`,
+//! `ThreadingMode::DirectParams`, and `VersionPrefix::Local` are the shapes
+//! that migration will construct; they carry `#[allow(dead_code)]` until it
+//! lands. See ADR 0111 Addendum 15 for the design.
 //!
-//! BT-3145 (the pilot migration) adds [`ThreadedStmt::ConditionalLoop`] (the
-//! real condition/case-split loop skeleton, Addendum 2's "Gap 1") and
-//! [`VersionPrefix::Gensym`] (a pre-minted, verbatim Core Erlang name,
-//! Addendum 2's "Gap 2"), and points the FIRST real (non-test) emission site
-//! at [`render`]: `while_loops.rs`'s `generate_while_loop_direct`, gated
-//! behind the `BEAMTALK_THREADED_IR_WHILE_DIRECT=1` env flag (off by
-//! default). Coverage is deliberately narrow — only straight-line,
-//! `Bind`-representable loop bodies (`while_loops.rs`'s
-//! `while_direct_body_is_bind_representable`) route through this module;
-//! anything else falls back to the legacy path untouched. A real
-//! implementation attempt surfaced a third, smaller-but-real gap beyond
-//! Addendum 2's own two (an opaque-RHS-value need, closed here via
-//! [`ValueRef::Doc`], plus a `BodyKind::Letrec` inter-statement whitespace
-//! quirk, confirmed against real compiled output) — recorded on the BT-3145
-//! Linear issue rather than silently folded into "done." The default stays
-//! the legacy path (this pilot's own measurement gate did not clear
-//! deleting it) — see BT-3145's Linear issue for the full evidentiary trail
-//! and the ≤3% gate's outcome.
+//! ## Layout
 //!
-//! ## Status (as of BT-3148 re-attempt — see ADR 0111 Addendum 4)
+//! - Identity/value types: [`FrameId`], [`VersionPrefix`], [`VersionedVar`],
+//!   [`AccParam`], [`LoopCounter`], [`ValueRef`].
+//! - Statements: [`ThreadedStmt`], [`BindOp`], [`ThreadingMode`],
+//!   [`ThreadedValue`].
+//! - Checker: [`verify`], [`VerifyError`] — see `docs/development/debugging.md`
+//!   § `ThreadedIr` verifier for the variant-by-variant reference.
+//! - Emitter: [`render`], [`RenderCtx`].
+//! - Builders: [`build_tuple_acc_unpack`], [`construct_and_verify_class_var_bind`],
+//!   [`verify_body_with_opaque_version_gaps`], [`backfill_opaque_version_gap`].
 //!
-//! BT-3148 ("the deepest slice") targeted four sub-tasks: (1) unify
-//! `gen_server/methods.rs`'s upfront `classify_body_expr` routing
-//! classification with `threaded_expr.rs`'s downstream recheck into one IR
-//! construction, deleting the `verify_routing_invariant` debug-assert
-//! replacements; (2) give `wrap_body_with_nlr_catch` a production `NlrCatch`
-//! node instead of the deliberately-IR-free side channel it still is
-//! (`mod.rs`, doc comment on [`super::CoreErlangGenerator::wrap_body_with_nlr_catch`]);
-//! (3) the two class-var `Bind` producer sites
-//! (`expressions.rs::generate_field_assignment`,
-//! `dispatch_codegen.rs::emit_class_var_result_unwrap`) emit through real
-//! [`ThreadedStmt::Bind`] nodes rendered by [`render`], not a hand-rolled
-//! `Document` that mirrors it; (4) `threaded_expr.rs`'s `ThreadingBoundary`
-//! adapter absorbed into or replaced by the IR path.
+//! ## Invariants
 //!
-//! **(3) landed first** (as above). A first re-attempt at (1)/(2)/(4) found
-//! them blocked on a real gap — no `ThreadedStmt` node existed for "an
-//! ordinary AST-directed statement, sitting in a straight-line body next to
-//! real `Bind`s, that this pass doesn't need to understand" (~15 of
-//! `classify_body_expr`'s `BodyExprKind` variants: message sends, dispatch,
-//! Tier 2 calls, `EarlyReturn`, …) — split out and designed separately as
-//! [`ThreadedStmt::Statement`] (BT-3156, ADR 0111 Addendum 4).
-//!
-//! **This re-attempt lands (1), (2), and (4).**
-//! `gen_server/methods.rs::lower_body_exprs_with_reply` builds one real
-//! `Vec<ThreadedStmt>` per Actor method body: mutating `BodyExprKind`
-//! variants construct real `Bind`s (generalizing (3)'s
-//! `construct_and_verify_class_var_bind` pattern to the `State` prefix, via
-//! `BindOp::Put` for static field names and the `Direct(ValueRef::Doc(...))`
-//! two-hop idiom for computed map sources); every other variant is a
-//! [`ThreadedStmt::Statement`]. [`verify_body_with_opaque_version_gaps`]
-//! verifies the real sequence **once** per body (backfilling the `State`
-//! version steps hidden inside shared multi-module helpers —
-//! `generate_self_dispatch_open`, `emit_super_send_open`,
-//! `generate_tier2_self_send_open`, `generate_field_assignment_open`,
-//! `generate_self_field_at_put_open` — whose own internal `next_state_var`
-//! calls have no `Bind` node in this body's IR), replacing every
-//! per-call-site fixture-and-discard `verify_*` wrapper this slice had.
-//! `RoutingMismatch` is deleted along with both `verify_routing_invariant`
-//! call sites: `classify_body_expr` is now the *only* computation deciding
-//! whether a construct routes through the Actor threaded emitter
-//! (`threaded_expr.rs`'s `emit_actor_threaded_last_stmts`/
-//! `emit_actor_threaded_assign_rhs_stmts`, which never decline), so the "two
-//! independently-computed decisions must agree" shape the check existed for
-//! is unrepresentable by construction. `generate_method_dispatch`'s real
-//! NLR call site now mints its token before lowering (production's real
-//! order, per Addendum 4 §Gap 3) and prepends a real
-//! `ThreadedStmt::NlrCatch` to the body's own sequence rather than rendering
-//! the body first and wrapping the `Document` after; the class-method NLR
-//! call site (`generate_class_method_functions`) does the same, with its
-//! own (still hand-written, not `BodyExprKind`-classified)
-//! `generate_class_method_body` output riding as one opaque `Statement`
-//! after the real `NlrCatch`. `ThreadingBoundary` (4) survives, audited and
-//! narrowed to its pure per-context reply-shape adapter duty — see
-//! `threaded_expr.rs`'s module doc, "BT-3148 task 4" — now that
-//! `classify_body_expr` is the sole routing decision it no longer also
-//! rechecks `control_flow_has_mutations` to redirect.
-//!
-//! **Not attempted in this pass:** the class-method body pipeline
-//! (`generate_class_method_body` and its helpers) is a separate,
-//! hand-written `Document` builder that predates `BodyExprKind`/
-//! `classify_body_expr` entirely — it was never in task 1's scope (which is
-//! Actor-body routing specifically) and converting it to produce its own
-//! `Vec<ThreadedStmt>` would be a peer migration of comparable size to this
-//! one, not a subtask of it; the 5 other `wrap_body_with_nlr_catch` call
-//! sites beyond the two ADR 0111 Addendum 4 §"concretely" names
-//! (`gen_server/dispatch.rs`, `gen_server/extensions.rs` ×2,
-//! `value_type_codegen.rs`, `actor_codegen.rs`,
-//! `generate_class_method_fun_from_block`) likewise still wrap a rendered
-//! `Document` rather than carrying a real `NlrCatch` node.
-//!
-//! ## Status (as of BT-3149 — ADR 0111 close-out)
-//!
-//! BT-3149 migrates the last real production caller of
-//! [`check_branch_frame_linearity`]'s
-//! scalar-synthesis scaffolding that BT-3146 didn't already cover:
-//! `expressions.rs`'s `generate_block_stateful` (the Tier 2
-//! stateful-block-body threading for list-op/message-send block
-//! arguments) now builds its single arm's real mutation sequence as
-//! `Bind`/`Statement` nodes — reusing `conditionals.rs`'s
-//! `lower_field_assignment_bind`/`lower_local_var_assignment_bind`
-//! (widened from `conditionals.rs`-private to
-//! `pub(in crate::core_erlang)`, since the C1/C2 shapes those
-//! helpers build are exactly what this single-arm case needs too — the
-//! only difference is this call site's own is-last/non-last result
-//! wrapping, which stays local since it predates and differs from
-//! `conditionals.rs`'s C1/C2 arm closer), wraps them via
-//! `conditionals.rs`'s `verify_and_render_branch_arm` (similarly widened),
-//! `verify()`s, and `render()`s — byte-identical by construction (every
-//! shape reuses the exact pre-migration codegen calls and mint order,
-//! confirmed against the full snapshot corpus and `stdlib`/`BUnit` suites).
-//!
-//! **Confirmed genuinely NOT the last caller**: grepping after this
-//! migration (per this issue's own task list) found
-//! `exception_handling.rs`'s `on:do:`/`ensure:` still on the scaffolding —
-//! two call sites BT-3146's issue description named in scope but whose
-//! shipped PR covered `conditionals.rs` only (its own doc comment already
-//! said so; see the accounting below and BT-3165's own "Status" section
-//! further down). `check_branch_frame_linearity` and
-//! `verify_branch_frame_linearity` therefore both remain live code —
-//! not residue — until BT-3165 lands (see the BT-3165 status section for
-//! their eventual deletion).
-//!
-//! **Dead-code allowances**: reduced from twelve `#[allow(dead_code)]`s to
-//! four, each now scoped to one enum variant or one function instead of a
-//! whole type, with a doc comment naming exactly which future migration
-//! would give it a production constructor: [`LoopCounter::new`] (counted
-//! loops never migrated — only `while_loops.rs`'s `DirectParams` path
-//! did, BT-3145), [`ThreadingMode::Hybrid`] (hybrid loops never migrated —
-//! same gap), [`ValueRef::Version`] (no current `Bind`/`Return` producer
-//! needs a second, value-position version reference alongside `Bind`'s
-//! own dedicated `source` field), and [`BindOp::Unpack`] (the `StateAcc`-
-//! mode per-iteration unpack never migrated — only `TupleAcc` mode's did,
-//! BT-3147). The eight others became either genuinely reachable in
-//! production (the `VersionPrefix`/`ThreadingMode`/`ValueRef`/`BindOp`/
-//! `ThreadedStmt` enum-level allowances — every variant these five types
-//! need for BT-3145-3149's coverage now has a real constructor) or
-//! honestly `#[cfg(test)]` (`lower_and_render`,
-//! `verify_tuple_acc_unpack_invariant`, `verify_tuple_acc_value_type_exclusion`,
-//! `verify_nested_list_op_stateacc_compat`, and the two `VerifyError`
-//! variants only those last two ever construct) — test-only code the
-//! `dead_code` lint should never have been asked to look past in the
-//! first place.
-//!
-//! ## Status (as of BT-3164 — the class-method body pipeline)
-//!
-//! BT-3164 migrates the class-method body pipeline BT-3148's own "Not
-//! attempted in this pass" note (above) named as a peer migration:
-//! `gen_server/methods.rs::generate_class_method_body` is now
-//! `lower_class_method_body`, returning a real `Vec<ThreadedStmt>` instead
-//! of a hand-rolled `Document`. Unlike the Actor pipeline (whose ONLY
-//! version-threaded prefix is `State`), a class method's only
-//! version-threaded prefix is `ClassVars` — there is no `State` counter in
-//! class-method context at all — so [`verify_body_with_opaque_version_gaps`]
-//! is generalized to backfill BOTH prefixes' gaps (previously `State`-only;
-//! see [`backfill_opaque_version_gap`]), not a second, parallel function.
-//! Mirroring BT-3148's own precedent exactly (its Actor pipeline only
-//! promotes `BodyExprKind::FieldAssignment` to a real `Bind` in its
-//! `is_last`/implicit-return arm, leaving every other position's field
-//! mutation opaque inside a shared helper), `lower_class_method_body` only
-//! promotes a class method's own direct `self.classVar := value` to a real
-//! `Bind` when it is the body's last statement
-//! (`lower_class_method_last_class_var_bind`) — every other position, every
-//! local-var/destructure/self-send/`^`-return statement, and any class-var
-//! rebind hidden inside `emit_class_var_result_unwrap` (the class-method
-//! analogue of the Actor pipeline's `generate_self_dispatch_open` et al.)
-//! stays an opaque `Statement`, unchanged AST-directed codegen.
-//!
-//! Both class-method NLR call sites this issue's scope named
-//! (`generate_class_method_functions`, already minting its token before
-//! lowering and already prepending a real `NlrCatch` as of BT-3148;
-//! `generate_class_method_fun_from_block`, migrated by this issue from the
-//! Document-wrapping `wrap_class_method_body_with_nlr_catch` — deleted, its
-//! sole caller — to the same real-`NlrCatch`-prepend pattern) now run their
-//! real class-var `Bind` (when the last statement produces one) and their
-//! real `NlrCatch` through the SAME `verify_and_render_body_stmts` call —
-//! closing the ADR 0110 joint-visibility gap ADR 0111 Addendum 6 left open:
-//! [`VerifyError::ShadowWriteMissing`] can now see a real class-var `Bind`
-//! jointly with a real class-method `NlrCatch`, not just the isolated,
-//! synthetic-marker fixture [`construct_and_verify_class_var_bind`] has
-//! always checked (kept, not replaced — see
-//! `lower_class_method_last_class_var_bind`'s own doc comment for why both
-//! checks are complementary, not redundant).
-//!
-//! **Audit of the other 5 `wrap_body_with_nlr_catch`-family call sites**
-//! (this issue's own task list): `gen_server/dispatch.rs`'s
-//! `generate_legacy_method_clause`, `gen_server/extensions.rs`'s
-//! `generate_actor_extension_fun`, and `actor_codegen.rs`'s sealed-method
-//! generator all call `wrap_actor_body_with_nlr_catch` around an
-//! already-migrated (BT-3148) `Vec<ThreadedStmt>`-sourced `Document` —
-//! structurally the same "render, then wrap" shape this issue closes for
-//! class methods, but for the `State` prefix, which never carries the ADR
-//! 0110 `ShadowWriteMissing` obligation `Bind`s land here; joint visibility
-//! has no counterfactual to close for them the way it did for `ClassVars`.
-//! Migrating them is real, well-understood follow-up work (each needs a
-//! `lower_*`-only sibling of its `generate_*_with_reply` call, exactly the
-//! `lower_method_definition_body_with_reply`/`lower_class_method_body`
-//! precedent this issue and BT-3148 established) but is not required to
-//! satisfy this issue's acceptance criteria and is out of its scope —
-//! tracked separately (BT-3171) rather than folded in, mirroring how BT-3149
-//! deferred `exception_handling.rs` as BT-3165 instead of rushing a second
-//! differently-shaped migration into one issue.
-//! `gen_server/extensions.rs`'s OTHER NLR-wrap call site
-//! (`generate_value_extension_fun`, `wrap_value_type_body_with_nlr_catch`)
-//! is not the same shape at all — it never renders a body `Document` and
-//! wraps it after; its catch scaffolding is built from `NlrCatchVars`
-//! directly, integrated inline into the streaming
-//! `generate_vt_body_exprs`/`emit_vt_*` construction (`value_type_codegen.rs`,
-//! the vt-conditional family's own permanent ADR-documented exception to
-//! this migration) — audited, not applicable.
-//!
-//! ## Status (as of BT-3171 — the remaining Actor-boundary call sites)
-//!
-//! BT-3171 migrates the 3 Actor-boundary call sites the BT-3164 audit above
-//! named as real, well-understood follow-up: `gen_server/dispatch.rs`'s
-//! `generate_legacy_method_clause`, `gen_server/extensions.rs`'s
-//! `generate_actor_extension_fun`, and `actor_codegen.rs`'s sealed-method
-//! generator. Each now lowers its body (via
-//! `gen_server/methods.rs::lower_method_definition_body_with_reply` — widened
-//! from `gen_server::methods`-private to `pub(in
-//! crate::core_erlang)`, mirroring `generate_method_dispatch`'s own
-//! caller — or the new Block-based sibling `lower_method_body_with_reply`,
-//! for `dispatch.rs`'s Block-shaped legacy clause), prepends a real
-//! `ThreadedStmt::NlrCatch` when NLR was detected, and runs the whole
-//! sequence through the SAME `verify_and_render_body_stmts` call — replacing
-//! the "render body, then `wrap_actor_body_with_nlr_catch` the rendered
-//! `Document`" shape. The three call sites' shared tail (prepend + verify +
-//! render + the `needs_letrec`-gated `letrec` wrapper) is itself extracted
-//! once as `gen_server/methods.rs::prepend_nlr_catch_and_render`, reused by
-//! `generate_method_dispatch`'s own (BT-3148) NLR call site too rather than
-//! left duplicated inline.
-//!
-//! As the BT-3164 audit noted, none of these three carry the ADR 0110
-//! `ShadowWriteMissing` joint-visibility gap that migration closed for class
-//! methods — they are all `State`-prefix (Actor) bodies, and that check only
-//! fires for `VersionPrefix::ClassVars` `Bind`s — so this migration is
-//! architectural consistency cleanup, not a verification-gap closure.
-//!
-//! With all Actor- and class-method-boundary callers migrated,
-//! `wrap_actor_body_with_nlr_catch` had no callers left and was deleted
-//! (`mod.rs`), the same way BT-3164 deleted
-//! `wrap_class_method_body_with_nlr_catch`. `wrap_body_with_nlr_catch`
-//! itself remains live: [`render`]'s `NlrCatch` arm (this module) still
-//! calls it directly to build the real try/catch scaffolding. The
-//! now-unused rendering-only wrappers these three call sites left behind
-//! (`generate_method_definition_body_with_reply`, `generate_method_body_with_reply`,
-//! and their shared `generate_body_exprs_with_reply` helper — all in
-//! `gen_server/methods.rs`) were deleted once they had zero remaining
-//! callers, the same way BT-3164 renamed away
-//! `generate_class_method_body` rather than leaving a dead rendering path
-//! beside the lowering one.
-//!
-//! `gen_server/extensions.rs`'s OTHER NLR-wrap call site
-//! (`generate_value_extension_fun`, `wrap_value_type_body_with_nlr_catch`)
-//! remains explicitly out of scope, per the BT-3164 audit above — it is not
-//! the same shape at all.
-//!
-//! This module lands the IR types, the [`verify`] checker, and the
-//! [`lower_and_render`] test shim (BT-3129), the unified `VersionedVar`/
-//! `VersionCounter` production path (BT-3131). BT-3132 originally added a
-//! per-loop [`ThreadedIr`]-fixture wrapper (`verify_loop_unpack_invariant`)
-//! checking `while_loops.rs`'s and `counted_loops.rs`'s (via
-//! `control_flow/mod.rs`) direct-params/hybrid loop generators' "optimized
-//! mode implies no `StateAcc` unpack" invariant, plus a Phase A0 measurement
-//! prototype (`prototype_direct_params_ir`, gated behind
-//! `BEAMTALK_THREADED_IR_WHILE=1`); BT-3154 deleted both, since the invariant
-//! both were checking already holds structurally —
-//! `ThreadingPlan::generate_unpack_at_iteration_start`'s own
-//! `if !use_direct_params && !use_hybrid_params` guard means an optimized
-//! mode can never reach the unpack-emitting branch in the first place.
-//! [`VerifyError::ThreadingModeUnpackMismatch`] and [`verify`]'s general
-//! check for it remain, exercised directly by hand-built-IR unit tests.
-//!
-//! As of BT-3133, every `list_ops/*.rs` and `dict_ops.rs` foldl call site —
-//! `do:`, `collect:`, `select:`/`reject:`, `inject:into:`, `anySatisfy:`/
-//! `allSatisfy:`, `detect:`, `takeWhile:`/`dropWhile:`, and dictionary `do:`
-//! — constructed and [`verify`]d a real `ThreadedIr` fragment for its
-//! per-iteration tuple unpack, introducing [`AccParam`] (the unversioned
-//! foldl-accumulator lambda parameter, distinct from [`VersionedVar`]) and
-//! [`ThreadedStmt::TupleAccUnpack`] (the flat positional-unpack accumulator
-//! shape) to model it — but only as a verification-only side channel: a
-//! *second*, hand-Document-built copy of the same unpack loop was what
-//! `generate_tuple_unpack_docs` actually emitted, and the fixture's mode and
-//! node `gate_slots` were literally the same argument threaded twice, making
-//! [`VerifyError::EarlyExitGateSlotMismatch`] a tautology by construction.
-//!
-//! ## Status (as of BT-3147 — ADR 0111 Phase C completion)
-//!
-//! BT-3147 promotes the `TupleAcc`-mode per-iteration unpack to genuine
-//! emission input: [`build_tuple_acc_unpack`] is now what
-//! `ThreadingPlan::generate_tuple_unpack_docs` (`control_flow/mod.rs`)
-//! actually [`render`]s, for every list-op/dict-op call site named above —
-//! no parallel hand-Document-built duplicate remains. Two changes made this
-//! byte-identical to the pre-BT-3147 hand-rolled loop: each unpack target
-//! is now a [`VersionPrefix::Gensym`] (BT-3145's real-name precedent,
-//! reused here for the real bare `to_core_erlang_var` name production
-//! actually binds — never [`VersionPrefix::Local`]'s `prefix{version}`
-//! scheme, which would have rendered `Sum1` where production emits bare
-//! `Sum`); and `mode_gate_slots`/`node_gate_slots` are now genuinely
-//! independent (the former from `control_flow::ListOpKind::gate_slots`, a
-//! canonical per-op-family table fixed at `ThreadingPlan` construction; the
-//! latter from each call site's own already-existing `index_offset - 1`) —
-//! [`VerifyError::EarlyExitGateSlotMismatch`] is a live check now, not
-//! scaffolding. `TupleAccInValueTypeContext`/`NestedStateAccFallbackUnderDirectParams`
-//! (invariant classes 2 + 3) are unaffected by this migration — they were
-//! already self-admittedly regression-pinning, not counterfactual detection
-//! (see their own doc comments) — but their production call sites are
-//! deleted in this same issue: `select_tuple_acc`'s `ValueType` exclusion
-//! and `select_direct_params`'s nested-`StateAcc`-fallback exclusion are
-//! each already unconditionally guaranteed by the selecting function's own
-//! early-return/`&&`-chain (`control_flow/mod.rs`), exactly the "already
-//! holds structurally" shape BT-3154 found for `ThreadingModeUnpackMismatch`
-//! below — the `VerifyError` variants, [`verify_tuple_acc_value_type_exclusion`]/
-//! [`verify_nested_list_op_stateacc_compat`], and their hand-built-IR unit
-//! tests all remain as regression pins, exercised directly rather than from
-//! a live call site.
-//!
-//! The block-body statements between the unpack and the fold call (arbitrary
-//! Beamtalk block code — field assignments, self-sends, nested control flow,
-//! per-`BodyKind` case-split accumulator logic for `select:`/`detect:`/
-//! `takeWhile:`/`partition:`/`groupBy:`/etc.) remain AST-directed,
-//! `generate_threaded_loop_body`'s existing (unmigrated) responsibility —
-//! the same "materially larger, different body model" scope BT-3145 named
-//! and deferred for loop bodies applies here with even more shape variety
-//! (BT-3145's own `ConditionalLoop`/Bind-representable-body gap, times the
-//! ~10 list-op `BodyKind` accumulator shapes); closing it is out of this
-//! issue's scope (see the BT-3147 Linear issue for the full accounting).
-//!
-//! As of BT-3134, `conditionals.rs`'s mutation-carrying `ifTrue:`/
-//! `ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:` inliners and
-//! `exception_handling.rs`'s `on:do:`/`ensure:` mutation-threading
-//! generators each construct and [`verify`] a
-//! `verify_branch_frame_linearity` `ThreadedIr` fixture — one [`FrameId`]
-//! per `with_branch_context` arm (branch bodies for conditionals; try/
-//! handler bodies for `on:do:`; try/success-cleanup/error-cleanup bodies
-//! for `ensure:`) — checking that sibling arms independently minting the
-//! same `StateAcc` version number in disjoint frames never trips
-//! [`VerifyError::NonLinearVersion`]. This is the first production call
-//! site to exercise [`FrameId`]'s sibling-frame discipline: BT-3132's loop
-//! migration never branches, so it never allocated more than one non-root
-//! frame per `verify()` call. The rest of these generators' state (field
-//! mutations, NLR relay, shadow writes) does not yet construct `ThreadedIr`
-//! — later phases (BT-3135 onward) extend coverage.
-//!
-//! ## Status (as of BT-3146 — ADR 0111 Addendum 5, `conditionals.rs` slice)
-//!
-//! `conditionals.rs`'s `generate_conditional_branch_inline` — the single
-//! shared body-loop behind all seven `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`/
-//! `ifNotNil:`/REPL-inline/`match:`-arm call sites — now builds each branch
-//! arm's REAL mutation sequence as [`ThreadedStmt::Bind`]/[`Statement`]
-//! nodes (Addendum 5's C1–C13 per-shape decomposition table), wraps it in
-//! one [`ThreadedStmt::Threaded`] node (`mode: StateAcc(None)`, a fresh
-//! [`FrameId`] minted by [`super::CoreErlangGenerator::current_branch_frame`]
-//! — a new monotonic per-`with_branch_context`-entry counter), [`verify`]s
-//! it, and [`render`]s it — the `render()`ed `Document` **is** this
-//! function's emission, byte-identical by construction (every shape reuses
-//! the exact pre-migration codegen calls and mint order). `NonLinearVersion`/
-//! `UnboundVersion` are live checks against real per-arm IR for the first
-//! time (previously [`check_branch_frame_linearity`] scaffolding could
-//! never trip either, by construction — see its doc comment). The six
-//! `check_branch_frame_linearity` call sites that only ever exercised this
-//! body loop (`conditionals.rs`'s four, `intrinsics.rs`'s REPL-mode
-//! inlining, `expressions.rs`'s `match:`-arm inlining) are deleted; the
-//! scalar-synthesis scaffolding itself stays for its three remaining
-//! callers (`exception_handling.rs`'s `on:do:`/`ensure:`, and
-//! `expressions.rs`'s unrelated `generate_block_stateful_body` — see
-//! `check_branch_frame_linearity`'s doc comment for why that ninth site is
-//! permanently out of this migration's scope).
-//!
-//! **C4** (`LocalAssign*`'s BT-1397 open-scope sub-branch) has no compilable
-//! repro reaching these arms — a class-method self-send routes through
-//! `value_type_codegen.rs`'s vt-conditional path instead (a separate,
-//! already-filed bug, BT-3159) — but decomposes with the same idiom as the
-//! plain case, so it is modeled as real `Bind`s for completeness rather than
-//! left opaque.
-//!
-//! **Not attempted in this pass**: `exception_handling.rs`'s `on:do:`/
-//! `ensure:` mutation-threading generators (ADR 0111 Addendum 5's E1–E7
-//! per-shape table) — the addendum's own recommended PR sequencing splits
-//! `exception_handling.rs` into a separate PR from `conditionals.rs`; this
-//! migration covers `conditionals.rs` only. `exception_handling.rs` stays on
-//! the pre-BT-3146 hand-rolled `Document` path, unaffected.
-//!
-//! ## Status (as of BT-3165 — ADR 0111 Addendum 5, `exception_handling.rs`
-//! slice, closing the gap)
-//!
-//! `exception_handling.rs`'s `generate_exception_body_with_threading_inner`
-//! — the single shared body loop behind both `on:do:`'s try/handler bodies
-//! and `ensure:`'s try/success-cleanup/error-cleanup bodies — now builds
-//! each arm's REAL mutation sequence as [`ThreadedStmt::Bind`]/[`Statement`]
-//! nodes (Addendum 5's E1–E7 per-shape table), wraps it in one
-//! [`ThreadedStmt::Threaded`] node via `conditionals.rs`'s
-//! `verify_and_render_branch_arm` (`mode: StateAcc(None)`, this arm's own
-//! [`FrameId`] minted by [`super::CoreErlangGenerator::current_branch_frame`]
-//! — the same mechanism BT-3146 introduced), [`verify`]s it, and [`render`]s
-//! it. E1 (field assignment) and E3 (local-var assignment) reuse
-//! `conditionals.rs`'s `lower_field_assignment_bind`/
-//! `lower_local_var_assignment_bind` directly — the identical C1/C2-C4
-//! `Bind` decomposition and mint order, no re-derivation. E2 (actor
-//! self-send) required one small factoring:
-//! `dispatch_codegen.rs::generate_self_dispatch_open` used to bake its
-//! state-version bump into the same opaque `Document` as its dispatch call,
-//! so `generate_self_dispatch_call_doc` now exposes the call-only half,
-//! letting the state bump become a real `Bind` (`Direct`, `element(2,
-//! _SD)`) instead of hiding inside `Statement` text — `generate_self_dispatch_open`
-//! itself is unchanged for its other five call sites, just now a thin
-//! wrapper. E4 (destructure assignment) is exempt from `Bind` modeling,
-//! same as C5. E5 (last expression, nested control-flow-with-mutations)
-//! reuses C10-last's shape with `ExResult` naming.
-//!
-//! **This file's one gluing difference from `conditionals.rs`, resolved
-//! without a new render path**: `generate_exception_body_with_threading_inner`
-//! has always inserted a literal `" "` between *source-level* statements
-//! (Rule 2), unlike `conditionals.rs`'s no-separator arms. Rather than
-//! routing the flat per-shape `ThreadedStmt` sequence through
-//! `render_loop_body_statements` (which separates every RAW entry in the
-//! list — spurious for any shape spanning more than one entry, e.g. E1's
-//! Statement+Bind pair, which would gain an extra space it never had), the
-//! lowering pushes that literal space as its own `ThreadedStmt::Statement`
-//! at each source-statement boundary and renders the whole arm through
-//! plain [`render`] (the same no-separator function `conditionals.rs` uses)
-//! — the manually-placed `Statement`s supply the only separators that end
-//! up in the output, at exactly the positions this same per-statement
-//! `if i > 0 { ... }` loop has always put them (it is not a deleted
-//! predecessor being matched — the loop is still live, unchanged in
-//! shape, just now pushing an IR node instead of a `Document` fragment
-//! directly; see `exception_handling.rs`'s own copy of this loop).
-//!
-//! `control_flow/mod.rs`'s `check_branch_frame_linearity` and this file's
-//! `verify_branch_frame_linearity` — the scalar-synthesis scaffolding these
-//! two call sites were the last production users of anywhere in the
-//! codebase (confirmed by grep: zero live callers remained once these two
-//! sites migrated) — are deleted along with their now-dead call sites and
-//! test coverage; the regression coverage proving `NonLinearVersion`/
-//! `UnboundVersion` are live against real exception-arm IR now lives in
-//! `exception_handling.rs`'s own test module
-//! (`test_bt3165_nonlinear_version_detected_via_production_lowering_types`/
-//! `test_bt3165_unbound_version_detected_via_production_lowering_types`),
-//! mirroring `conditionals.rs`'s BT-3146 regression tests for the same
-//! shapes. Byte-identical over the full snapshot corpus + `stdlib`/`BUnit`/
-//! REPL-protocol suites, confirmed before and after.
-//!
-//! ## Status (as of BT-3182 — ADR 0111 Addendum 13: while-direct pilot deleted)
-//!
-//! The BT-3145 `BEAMTALK_THREADED_IR_WHILE_DIRECT` pilot described in the
-//! BT-3145 status entry above has been deleted: `control_flow::while_loops`'s
-//! `threaded_ir_while_direct_enabled`, `try_render_while_direct_via_threaded_ir`,
-//! `while_direct_body_is_bind_representable`, `is_simple_threaded_rhs`, and
-//! the `dual_run_*`/byte-identity test suite are gone, and
-//! `generate_while_loop_direct` no longer gates on the env flag — while/
-//! counted loops stay on BT-3132's side-channel `ThreadedIr` verification
-//! only, same as before BT-3145. The gate's own measurement never cleared
-//! (Addendum 3: wall-clock and CPU-time deltas disagreed by an order of
-//! magnitude on a shared/virtualized runner) and closing the remaining
-//! "gap three" body-shape coverage had no concrete trigger — carrying an
-//! env-flag-gated dual path indefinitely for an architecture-purity win
-//! alone conflicts with CLAUDE.md's "don't use feature flags when you can
-//! just change the code." See ADR 0111 Addendum 13 for the full decision.
-//!
-//! [`ThreadedStmt::ConditionalLoop`], [`ThreadingMode::DirectParams`], and
-//! [`VersionPrefix::Local`] — the IR shapes that pilot's lowering built —
-//! are kept, not deleted, and marked `#[allow(dead_code)]` rather than
-//! removed: `ConditionalLoop`'s own doc comment already named a second,
-//! not-yet-attempted consumer (a real counted-loop migration) at the time
-//! it was designed (Addendum 2), so this is retained, already-scoped
-//! infrastructure ahead of its second use, not the vague "might be useful
-//! later" CLAUDE.md's no-speculative-code rule targets. If a counted-loop
-//! migration is never attempted, revisit deleting these too.
-//!
-//! ## Status (as of BT-3419 — ADR 0118 phase 3: the condition as IR)
-//!
-//! [`ThreadedStmt::ConditionalLoop`] no longer treats its condition as an
-//! opaque, outside-the-frame `Document` — the pre-BT-3419 `continue_header`
-//! field (BT-3145/Addendum 2's own "sound opacity: the condition body is
-//! ordinary AST-directed expression codegen with no state-threading content
-//! of its own" claim, falsified once a self-send or inline-threaded
-//! `and:`/`or:` sat inside the condition) is replaced by `condition:
-//! Vec<ThreadedStmt>` (the condition block's own prelude) and
-//! `condition_value: ValueRef` (its pure final boolean), verified in the
-//! SAME frame as `body`. `render_conditional_loop` emits `condition`'s
-//! prelude inside the loop's own `fun`, directly ahead of the `case` —
-//! dropping the `let CondFun = fun (Params) -> … in case apply CondFun
-//! (Params) of …` closure/`apply` indirection the opaque field's real
-//! producer (`while_loops.rs`) still used, in favor of inlining the
-//! condition's `Bind`s and value directly, the same shape a Bind already
-//! gets inside `body`. Still `#[allow(dead_code)]`: this node's own
-//! production constructor remains unbuilt (BT-3182 deleted the one pilot
-//! call site that ever constructed it — see the BT-3182 status entry
-//! above) — `while_loops.rs`'s own fix for a state-effecting
-//! `whileTrue:`/`whileFalse:` condition (closing the two `#[should_panic]`
-//! regressions BT-3414 pinned) is a parallel, `Document`-level change to
-//! `generate_while_loop_with_mutations`'s condition-application site
-//! (`generate_stateful_while_condition`/`_tail`), not a switch onto this
-//! IR node — this file's `ConditionalLoop` stays the verification-only
-//! side channel BT-3144/BT-3145 established, now with the condition
-//! honestly modeled rather than opaque.
+//! - A statement that advances a threaded version is a `Bind`; `Statement`
+//!   and `ValueRef::Doc` are opaque and carry no threading of their own.
+//! - Versions are linear within one [`FrameId`]; sibling branch/handler arms
+//!   get distinct frames so independently-minted versions never collide.
+//! - A class-var `Bind` at a shadow-write-eligible point, in a method whose
+//!   body can relay a foreign NLR, must set `shadow_write` (the ADR 0110
+//!   contract).
+//! - A body with version steps hidden inside a shared multi-module helper is
+//!   verified after [`backfill_opaque_version_gap`] closes those gaps.
 //!
 //! ## Scope
 //!
 //! Covers state-version bindings (with frame identity), threading-mode
-//! selection, shadow-write emission (the ADR 0110 contract), and NLR relay
-//! boundaries. Everything else in codegen stays AST-directed and unaffected —
-//! see ADR 0111 §Decision / §Constraints for the full narrow-scope rationale.
+//! selection, shadow-write emission, and NLR relay boundaries. Everything
+//! else in codegen stays AST-directed and unaffected — see ADR 0111
+//! §Decision / §Constraints for the full narrow-scope rationale.
 //!
-//! ## Deviations from the ADR's illustrative pseudocode
+//! ## Deviations from ADR 0111's illustrative IR
 //!
-//! The ADR's `## The IR` code block is deliberately abbreviated for
-//! readability; two additions were necessary to make the types real and
-//! source-attributable:
+//! - `Span` fields on `ThreadedStmt`'s `Bind`, `Threaded`, `NlrCatch`, and
+//!   `Return` variants, so [`VerifyError`] can carry a source-attributed
+//!   location.
+//! - [`VersionPrefix`]'s `Local` variant, a fourth prefix beyond the ADR's
+//!   `State | ClassVars | SelfVt` sketch, for named loop locals that never
+//!   go through any of those three counters.
+//! - [`ValueRef`]'s `Doc` variant and [`ThreadedStmt`]'s `Statement`
+//!   variant, the opaque AST-directed escape hatches Addenda 3 and 4 added
+//!   once the migration found real value and statement positions this IR
+//!   does not need to understand.
 //!
-//! 1. **`Span` fields** on [`ThreadedStmt::Bind`], [`ThreadedStmt::Threaded`],
-//!    [`ThreadedStmt::NlrCatch`], and [`ThreadedStmt::Return`] — required so
-//!    [`VerifyError`] can carry a Beamtalk-source-attributed location, which
-//!    is the entire diagnosis-quality point of the verifier (§The verifier).
-//! 2. **[`VersionPrefix::Local`]**, a fourth prefix beyond the ADR's
-//!    `State | ClassVars | SelfVt` sketch. The three original prefixes name
-//!    the counters this ADR *unifies* (`next_state_var`/`next_class_var`/
-//!    `next_self_var`); `whileTrue:`/`whileFalse:` direct-params mode (BT-1275
-//!    — this issue's Phase A0 target) threads *named loop locals*
-//!    (`Sum`/`Sum1`/…) that never go through any of those three counters at
-//!    all — they come from `ThreadingPlan::threaded_locals` and ordinary
-//!    scope binding. `Local` models that identity uniformly so the verifier's
-//!    frame/linearity checks apply to it too, without touching the three
-//!    counters' unification story.
+//! Migration history — what shipped when, what was tried and rejected —
+//! lives in ADR 0111's addenda, not here.
 
 use std::collections::HashMap;
 

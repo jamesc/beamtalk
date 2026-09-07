@@ -4165,6 +4165,8 @@ to these three issues' scope.
 
 ## Addendum 13 (2026-08-14): BT-3182 — `BEAMTALK_THREADED_IR_WHILE_DIRECT` decided: deleted
 
+(superseded in part by Addendum 15)
+
 Addendum 3 left `BEAMTALK_THREADED_IR_WHILE_DIRECT` (the BT-3145 pilot
 routing `generate_while_loop_direct` through `ThreadedIr`) parked in an
 explicitly unresolved state: off by default, not flipped, not deleted,
@@ -4295,3 +4297,78 @@ only ones at statement-top-level. See `docs/development/debugging.md`'s
 `StateEffectEscapesExpression` row and "Emission-input coverage" paragraph,
 and ADR 0118 itself, for the full design and its own final ≤3% measurement
 against the pre-epic baseline.
+
+## Addendum 15 (2026-09-07): Loops reopened — Addendum 13's premise corrected, gap three closed by `ThreadedStmt::Statement`, Phases B and C resumed under [BT-3447](https://linear.app/beamtalk/issue/BT-3447)
+
+**1. What Addendum 13 got wrong.** It rejected finishing the pilot on the
+ground that "[BT-3132](https://linear.app/beamtalk/issue/BT-3132)'s
+side-channel checks already run real `ThreadedIr` verification against
+every while/counted loop body today." [BT-3154](https://linear.app/beamtalk/issue/BT-3154)
+(#3344), which landed *before* Addendum 13 was written, deleted those four
+`check_loop_unpack_invariant` call sites and `verify_loop_unpack_invariant`
+because they tested a structurally guaranteed condition (§Addendum 13's own
+account of BT-3154 already says this, but did not follow the implication
+through). After BT-3154, the loop skeleton and body-statement sequence had
+no verification at all — Addendum 13's central premise for rejecting option
+1 ("Finish it") no longer held at the time it was written. Confirmed by
+grep: zero `threaded_ir`/`ThreadedStmt`/`verify` references in
+`while_loops.rs`, `counted_loops.rs`, `dict_ops.rs`, and all of `list_ops/`
+except two `ThreadedStmt` prelude references in `transform_ops.rs`.
+
+**2. What changed after the pilot was parked.** Addendum 3 deferred "gap
+three" (plain-let temporaries, destructuring, and list-op RHS values all
+needed an opaque, non-`Bind` body statement this IR had no node for).
+[BT-3156](https://linear.app/beamtalk/issue/BT-3156) (Addendum 4) added
+`ThreadedStmt::Statement` for exactly that gap, now at over 130 production
+call sites. Addendum 13 did not revisit the pilot against it. ADR 0118 then
+added `ThreadedValue` preludes inside loop bodies (`control_flow/mod.rs`,
+roughly lines 2039, 3252, 4431, and 4470 build `Vec<ThreadedStmt>` and
+splice it into `Document`s), so loop bodies are already half IR today, not
+the all-AST-directed picture Addendum 13 described.
+
+**3. Current state, precisely.** Verified as fragments: `TupleAccUnpack`
+(via `generate_tuple_unpack_docs`) and the ADR 0118 preludes above.
+Unverified: the `ConditionalLoop`-shaped skeleton (`while_loops.rs`,
+`counted_loops.rs`, `CountedLoopFrame`), the body-statement sequence and the
+eight `Foldl*` accumulator epilogues in
+`generate_threaded_loop_body_inner`, the six last-expression emitters,
+`emit_non_assign_expr`, and `generate_local_var_assignment_in_loop`.
+[BT-3168](https://linear.app/beamtalk/issue/BT-3168)/[BT-3169](https://linear.app/beamtalk/issue/BT-3169)'s
+`ClassVars` threading through loops was implemented on this same
+unverified, legacy path.
+
+**4. Design.** Letrec bodies (`whileTrue:`/`timesRepeat:`/`to:do:`/`to:by:do:`):
+lower each body to `ConditionalLoop { condition, condition_value, produces,
+body, shadow_write_eligible, counter }`, with `Bind` for threaded-local and
+class-var rebinds and `Statement` for everything else —
+`render_conditional_loop` already renders this shape; the inter-statement
+separator follows `render_loop_body_statements`'s existing rule. Foldl
+bodies: extend `render`'s `TupleAcc`/`StateAcc` arms past skeleton fidelity
+to the real `fun (Elem, Acc) -> ... end` shape, lowering each fold body as
+`TupleAccUnpack` + body + a per-`BodyKind` epilogue expressed as
+`Statement`/`Return`; the `{ClassVars, StateAcc}` 2-tuple shape Addendum 9
+introduced is a `produces` variant of the existing node, not a new one.
+Mode selection (`ThreadingPlan`) is unchanged — it still feeds
+`ThreadingMode` into the node it always did. NLR: loops inside `NlrCatch`
+bodies need no new handling; the enclosing frame already covers them.
+
+**5. Gate.** ≤3% user-CPU build-time delta, the same methodology Addenda
+6/7/10 used (two release binaries, cold `ebin/`, 8 alternating runs). The
+pilot's inconclusive wall-clock result (Addendum 3) is not a precedent
+against this design: Addenda 6, 7, and 10, and ADR 0118 in full, all
+cleared the same gate with the same method after Addendum 3 was written.
+
+**6. Sequencing.** Prerequisites: [BT-3459](https://linear.app/beamtalk/issue/BT-3459)
+(moves `ThreadingPlan`, the counted-loop driver, and list-op accumulators
+out of `control_flow/mod.rs`) and [BT-3460](https://linear.app/beamtalk/issue/BT-3460)
+(splits `threaded_ir.rs` into `ir`/`verify`/`emit`/`build` modules), so the
+new lowering has a home to land in. Then: Letrec (one issue), Foldl (one
+issue), close-out (delete the legacy path, remove the `#[allow(dead_code)]`
+markers this addendum's predecessor left, take the final measurement, fix
+the docs this issue drafted). Letrec and Foldl are gated on byte-identity
+over the snapshot corpus and `just verify-threaded-ir`; the close-out issue
+is the only one of the three allowed to change emitted output, and only by
+deleting the now-dead legacy path.
+
+**7. Out of scope.** Addendum 11's value-type conditional family — it
+needs its own design pass, not a slot in this one.
