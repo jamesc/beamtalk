@@ -4,6 +4,7 @@
 //! Transitive native-dependency detection (ADR 0072), class-header generation, and `validate_native_class_references` checks.
 
 use super::*;
+use crate::commands::manifest::{self, NativeDependencyMap};
 
 // ---- Transitive native dependency detection tests (ADR 0072) ----
 

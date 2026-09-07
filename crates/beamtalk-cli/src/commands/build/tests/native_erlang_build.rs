@@ -4,6 +4,7 @@
 //! ADR 0072 Phase 1: native Erlang compilation during build, and native-module collision detection across the root package and its dependencies.
 
 use super::*;
+use crate::commands::build_layout::BuildLayout;
 
 #[test]
 fn test_rebar3_path_returns_bundled_when_exists() {
