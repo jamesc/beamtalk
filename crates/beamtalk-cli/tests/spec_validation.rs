@@ -19,8 +19,11 @@ fn validate_specs_script() -> PathBuf {
 }
 
 /// Compile a `.bt` file and return the path to the build directory containing `.core` files.
-fn compile_bt_to_core(bt_source: &str, work_dir: &Path) -> PathBuf {
-    let bt_path = work_dir.join("test_input.bt");
+///
+/// `class_name` must match the class declared in `bt_source` — the compiler
+/// requires the file name to agree with the class it declares.
+fn compile_bt_to_core(bt_source: &str, class_name: &str, work_dir: &Path) -> PathBuf {
+    let bt_path = work_dir.join(format!("{class_name}.bt"));
     std::fs::write(&bt_path, bt_source).expect("write .bt file");
 
     let output = Command::new(cli_common::beamtalk_binary())
@@ -75,7 +78,7 @@ Object subclass: SpecRoundTrip
     self new
 ";
     let tmp = tempfile::tempdir().expect("create temp dir");
-    let core_dir = compile_bt_to_core(source, tmp.path());
+    let core_dir = compile_bt_to_core(source, "SpecRoundTrip", tmp.path());
     assert!(core_dir.exists(), "build directory should exist");
 
     // Verify .core files were generated
@@ -122,7 +125,7 @@ Object subclass: TypeMappingTest
   listMethod: x :: List -> List => x
 ";
     let tmp = tempfile::tempdir().expect("create temp dir");
-    let core_dir = compile_bt_to_core(source, tmp.path());
+    let core_dir = compile_bt_to_core(source, "TypeMappingTest", tmp.path());
 
     let core_files: Vec<_> = std::fs::read_dir(&core_dir)
         .expect("read core dir")
