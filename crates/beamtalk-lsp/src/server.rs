@@ -6699,6 +6699,13 @@ mod tests {
     /// closes the write end, giving a fixed point at which to run the
     /// concurrent `did_open` and observe its effect *before* letting the close
     /// proceed.
+    ///
+    /// Unix-only: relies on a POSIX FIFO actually blocking `fs::read_to_string`
+    /// until written to. On Windows, `mkfifo` (via Git's bundled coreutils)
+    /// creates the path but native `ReadFile` does not block on it the way a
+    /// POSIX pipe does, so the read returns immediately and the deterministic
+    /// interleaving this test depends on never happens.
+    #[cfg(unix)]
     #[tokio::test]
     async fn did_close_racing_reopen_does_not_clobber_reopened_content() {
         let temp = unique_temp_dir("beamtalk_lsp_close_reopen_race");
@@ -6821,7 +6828,9 @@ mod tests {
     /// (any edit racing a close).
     ///
     /// Same FIFO technique as `did_close_racing_reopen_does_not_clobber_reopened_content`
-    /// for deterministic interleaving.
+    /// for deterministic interleaving — Unix-only for the same reason (see
+    /// that test's doc comment).
+    #[cfg(unix)]
     #[tokio::test]
     async fn did_close_racing_did_change_still_reverts_to_disk() {
         let temp = unique_temp_dir("beamtalk_lsp_close_change_race");
