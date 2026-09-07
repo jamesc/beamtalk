@@ -4,6 +4,8 @@
 //! ADR 0072 Phase 2: rebar3 config generation (including locked/partial-locked versions), ebin-path collection, native-dependency aggregation, and package-corpus generation.
 
 use super::*;
+use crate::commands::build_layout::BuildLayout;
+use crate::commands::manifest::{self, NativeDependencyMap};
 
 // ---- ADR 0072 Phase 2: rebar3 integration tests ----
 
