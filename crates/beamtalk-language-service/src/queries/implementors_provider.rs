@@ -95,12 +95,7 @@ pub fn find_implementors<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use beamtalk_core::source_analysis::{lex_with_eof, parse};
-
-    fn parse_source(source: &str) -> Module {
-        let tokens = lex_with_eof(source);
-        parse(tokens).0
-    }
+    use crate::queries::parse_source;
 
     #[test]
     fn finds_single_implementor_in_one_file() {

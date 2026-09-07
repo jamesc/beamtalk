@@ -134,3 +134,15 @@ pub(crate) fn enrich_hierarchy_with_inferred_returns_and_aliases(
     };
     (enriched, type_map)
 }
+
+/// Parse Beamtalk source into a [`Module`], discarding diagnostics.
+///
+/// Shared test helper for the query provider test suites. Lives here so
+/// sibling providers can import it as `use crate::queries::parse_source` without
+/// each defining an identical 3-line copy (architecture-principles §6).
+#[cfg(test)]
+pub(crate) fn parse_source(source: &str) -> beamtalk_core::ast::Module {
+    use beamtalk_core::source_analysis::{lex_with_eof, parse};
+    let tokens = lex_with_eof(source);
+    parse(tokens).0
+}
