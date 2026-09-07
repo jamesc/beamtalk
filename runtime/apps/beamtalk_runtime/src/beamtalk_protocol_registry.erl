@@ -229,6 +229,7 @@ register_protocol(#{name := Name} = Info) ->
         #{domain => [beamtalk, runtime]}
     ),
     maybe_create_protocol_class(Name, Info),
+    notify_compiler_server(Name, Info),
     ok;
 register_protocol(BadInfo) ->
     ?LOG_WARNING(
@@ -261,9 +262,21 @@ unregister_protocol(Module) when is_atom(Module) ->
         undefined ->
             ok;
         _ ->
+            %% BT-3473: Capture the names being purged *before* deleting them,
+            %% so the compiler server's ambient `protocols` cache (mirroring
+            %% `classes`' own register/remove pair) can be told which entries
+            %% no longer exist — otherwise a purged protocol's stale entry
+            %% would linger there forever, the same gap BT-3105 closed for
+            %% `classes` via `remove_class/1`.
+            Purged = [
+                Name
+             || {Name, #{module := Mod}} <- ets:tab2list(?PROTOCOL_TABLE),
+                Mod =:= Module
+            ],
             _ = ets:select_delete(?PROTOCOL_TABLE, [
                 {{'_', #{module => '$1'}}, [{'=:=', '$1', {const, Module}}], [true]}
             ]),
+            lists:foreach(fun notify_compiler_server_removed/1, Purged),
             ok
     end,
     %% BT-3222: Unconditional, not just on an actual match — this is also the
@@ -273,6 +286,55 @@ unregister_protocol(Module) when is_atom(Module) ->
     %% cache entries even when the removed class's own module defined no
     %% protocol.
     invalidate_conforms_cache().
+
+-doc """
+Notify the compiler server of a protocol (re-)registration (BT-3473).
+
+Mirrors `beamtalk_object_class`'s own `register_class/2` notification: a
+fire-and-forget cast, silently dropped if `beamtalk_compiler` is not running
+(non-REPL compilation, test runs, or a deployment without that app). Without
+this, the runtime-seeded (image `recheckImage`) diagnostics path has no way
+to tell a protocol apart from an ordinary class — `Name` reaches the checker
+as a zero-method `ClassInfo` in `class_hierarchy` alone, which defeats the
+nominal-mismatch escape hatch and makes every selector on a
+`Name`-typed receiver look unresolved (the false positives this issue
+tracks). `Info` is threaded through verbatim; `beamtalk-compiler-port`
+degrades gracefully on any field it doesn't recognise.
+""".
+-spec notify_compiler_server(atom(), map()) -> ok.
+notify_compiler_server(Name, Info) ->
+    try
+        beamtalk_compiler_server:register_protocol(Name, Info)
+    catch
+        error:undef ->
+            ok
+    end,
+    ok.
+
+-doc """
+Notify the compiler server that `Name` is no longer a registered protocol
+(BT-3473), mirroring `notify_compiler_server/2`'s degrade-silently contract.
+
+Unlike `notify_compiler_server/2` above, this bypasses
+`beamtalk_compiler_server:remove_protocol/1`'s own exported wrapper in favour
+of a raw `gen_server:cast` naming the process — the same choice
+`beamtalk_class_lifecycle:purge_compiler_cache/1` makes for `remove_class/1`,
+and for the identical reason documented on that function: avoid a
+compile-time dependency in the wrong direction (`beamtalk_runtime` must not
+depend on `beamtalk_compiler`). `register_protocol/1` above already crosses
+that line the same way `beamtalk_object_class`'s own registration path does
+(an earlier, already-accepted precedent this module doesn't re-litigate) —
+but there is no established precedent for doing so on removal, so this
+follows the more careful convention instead of adding a second one.
+""".
+-spec notify_compiler_server_removed(atom()) -> ok.
+notify_compiler_server_removed(Name) ->
+    try
+        gen_server:cast(beamtalk_compiler_server, {remove_protocol, Name})
+    catch
+        _:_ -> ok
+    end,
+    ok.
 
 %%% ============================================================================
 %%% Query API

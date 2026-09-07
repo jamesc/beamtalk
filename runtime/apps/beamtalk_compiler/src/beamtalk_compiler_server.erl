@@ -35,6 +35,9 @@ to avoid temp files on disk (BT-48).
     register_class/2,
     remove_class/1,
     get_classes/0,
+    register_protocol/2,
+    remove_protocol/1,
+    get_protocols/0,
     register_aliases/1,
     get_aliases/0,
     resolve_completion_type/1,
@@ -80,6 +83,25 @@ to avoid temp files on disk (BT-48).
     %% cache and shares this exact limitation (BT-2916); see its doc for the
     %% full rationale, which applies here unchanged.
     classes = #{} :: #{atom() => map()},
+    %% BT-3473: Accumulated protocol metadata cache, mirroring `classes`
+    %% above but populated via `register_protocol/2`/`remove_protocol/1`
+    %% casts from `beamtalk_protocol_registry:register_protocol/1` /
+    %% `unregister_protocol/1` instead of class (de)registration. Maps
+    %% protocol name atom -> its `register_protocol/1` `Info` map (`name`,
+    %% `required_methods`, `type_params`, `extending`, ...). Threaded into
+    %% `diagnostics/3` alongside `classes` (same `class_hierarchy => true`
+    %% opt-in — see that function's moduledoc) so the runtime-seeded checker
+    %% path can recognise a cross-file protocol instead of only ever seeing
+    %% its synthetic zero-method class-cache entry, which used to defeat the
+    %% BT-2088/BT-3472 nominal-mismatch escape hatch and made every selector
+    %% on a protocol-typed receiver look unresolved. Not recovered on init —
+    %% unlike `classes`' `recover_from_beam_modules/0`, there is no equivalent
+    %% "enumerate every registered protocol in the live image" recovery path
+    %% today, so a compiler-server restart starts with an empty cache until
+    %% the next protocol (re-)registration repopulates it. Shares `classes`'
+    %% no-removal-on-session-disconnect limitation (BT-2916) for the same
+    %% reason: this is a single node-global accumulator, not per-session.
+    protocols = #{} :: #{atom() => map()},
     %% ADR 0108 hot-reload re-check trigger (BT-2899): ambient session type
     %% alias cache, keyed by alias name -> its reparseable `type Name =
     %% <expansion>` source line. Mirrors `classes` above: threaded into
@@ -259,6 +281,16 @@ Options:
   writing to `beamtalk_compiler_server' state, so a hypothetical signature
   never becomes visible to any other request. See
   `beamtalk_recheck:trigger_pending/5', the one caller that needs this.
+
+  BT-3473: the ambient protocol-registry cache (`register_protocol/2`'s
+  accumulator) rides this same opt-in — whenever the ambient class cache is
+  threaded (the `true' case; a map() overlay only ever replaces the class
+  side), `State#state.protocols' is threaded alongside it as the request's
+  `protocol_registry'. Without this, a protocol registered in another file
+  reaches the checker only as a zero-method class-cache entry (see
+  `beamtalk_protocol_registry:create_protocol_class/2'), which defeats the
+  BT-2088/BT-3472 nominal-mismatch escape hatch and makes every selector on
+  a protocol-typed receiver look unresolved.
 """.
 -spec diagnostics(binary(), binary(), map()) ->
     {ok, [map()]} | {error, [binary()]}.
@@ -773,6 +805,59 @@ get_classes() ->
     end.
 
 -doc """
+Register a protocol with its metadata in the compiler server cache
+(BT-3473), mirroring `register_class/2`.
+
+Fire-and-forget cast. Silently dropped if the server is not running.
+Production caller: `beamtalk_protocol_registry:register_protocol/1` (in
+`beamtalk_runtime`), called on every protocol (re-)registration.
+""".
+-spec register_protocol(atom(), map()) -> ok.
+register_protocol(ProtocolName, Info) ->
+    try
+        gen_server:cast(?MODULE, {register_protocol, ProtocolName, Info})
+    catch
+        _:_ -> ok
+    end,
+    ok.
+
+-doc """
+Remove a protocol from the compiler server's ambient protocol cache
+(BT-3473), mirroring `remove_class/1`.
+
+Not called from production code: `beamtalk_protocol_registry:unregister_protocol/1`
+(the real caller, in `beamtalk_runtime`) intentionally bypasses this wrapper
+with a raw `gen_server:cast(beamtalk_compiler_server, {remove_protocol, ProtocolName})`,
+for the identical wrong-direction-dependency reason documented on
+`remove_class/1`. This exported function exists for same-app callers and is
+exercised directly by its own tests.
+""".
+-spec remove_protocol(atom()) -> ok.
+remove_protocol(ProtocolName) ->
+    try
+        gen_server:cast(?MODULE, {remove_protocol, ProtocolName})
+    catch
+        _:_ -> ok
+    end,
+    ok.
+
+-doc """
+Return the current ambient protocol cache map (`register_protocol/2`'s
+accumulator, BT-3473), mirroring `get_classes/0`.
+
+Used directly by tests. Returns an empty map (not an error) if the server is
+not running, mirroring `register_class/2`'s degrade-silently contract.
+""".
+-spec get_protocols() -> #{atom() => map()}.
+get_protocols() ->
+    try
+        gen_server:call(?MODULE, get_protocols, 5000)
+    catch
+        exit:{noproc, _} -> #{};
+        exit:{timeout, _} -> #{}
+    end.
+
+-doc """
 Merge `AliasSources` — one reparseable `type Name = <expansion>` line per
 currently-known alias in *this caller's own session* — into the ambient
 session type-alias cache (ADR 0108 hot-reload re-check trigger, BT-2899),
@@ -1001,13 +1086,23 @@ handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
     %% this request's class hierarchy instead of `State#state.classes` — the
     %% overlay never gets written into `State`, so it is visible to this one
     %% request only, never to any other caller of this gen_server.
-    {Classes, Aliases} =
+    %%
+    %% BT-3473: the ambient protocol cache rides the same opt-in as `Aliases`
+    %% above — an overlay only ever replaces the *class* hierarchy (BT-3109's
+    %% "splice a pending signature" use case has no protocol-side
+    %% equivalent), so `State#state.protocols` is used verbatim in both the
+    %% `true` and `Overlay` arms.
+    {Classes, Aliases, Protocols} =
         case maps:get(class_hierarchy, Options, false) of
-            true -> {State#state.classes, alias_source_list(State#state.aliases)};
-            false -> {#{}, []};
-            Overlay when is_map(Overlay) -> {Overlay, alias_source_list(State#state.aliases)}
+            true ->
+                {State#state.classes, alias_source_list(State#state.aliases),
+                    State#state.protocols};
+            false ->
+                {#{}, [], #{}};
+            Overlay when is_map(Overlay) ->
+                {Overlay, alias_source_list(State#state.aliases), State#state.protocols}
         end,
-    Result = do_diagnostics(State#state.port, Source, Mode, Classes, Aliases),
+    Result = do_diagnostics(State#state.port, Source, Mode, Classes, Aliases, Protocols),
     {reply, Result, State};
 handle_call({find_senders_in_source, Source, Selector}, _From, State) ->
     Result = beamtalk_compiler_port:find_senders_in_source(
@@ -1094,13 +1189,15 @@ handle_call(version, _From, State) ->
     Result = do_version(State#state.port),
     {reply, Result, State};
 handle_call(clear_classes, _From, State) ->
-    {reply, ok, State#state{classes = #{}, aliases = #{}}};
+    {reply, ok, State#state{classes = #{}, aliases = #{}, protocols = #{}}};
 handle_call({inject_diagnostics_failure, Reason}, _From, State) ->
     {reply, ok, State#state{diagnostics_fault = Reason}};
 handle_call(inject_diagnostics_exit, _From, State) ->
     {reply, ok, State#state{diagnostics_exit_fault = true}};
 handle_call(get_classes, _From, State) ->
     {reply, State#state.classes, State};
+handle_call(get_protocols, _From, State) ->
+    {reply, State#state.protocols, State};
 handle_call(get_aliases, _From, State) ->
     {reply, alias_source_list(State#state.aliases), State};
 handle_call({register_aliases, AliasSources}, _From, State) ->
@@ -1127,6 +1224,16 @@ handle_cast({remove_class, ClassName}, State) ->
     %% BT-3105: Drop a removed class from the ambient cache.
     NewClasses = maps:remove(ClassName, State#state.classes),
     {noreply, State#state{classes = NewClasses}};
+handle_cast({register_protocol, ProtocolName, Info}, State) ->
+    %% BT-3473: Accumulate protocol metadata; overwrite on re-registration,
+    %% mirroring register_class/2's cast handler above.
+    NewProtocols = maps:put(ProtocolName, Info, State#state.protocols),
+    {noreply, State#state{protocols = NewProtocols}};
+handle_cast({remove_protocol, ProtocolName}, State) ->
+    %% BT-3473: Drop an unregistered protocol from the ambient cache,
+    %% mirroring remove_class/1's cast handler above.
+    NewProtocols = maps:remove(ProtocolName, State#state.protocols),
+    {noreply, State#state{protocols = NewProtocols}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -1456,13 +1563,16 @@ do_compile_method(Port, ClassSource, MethodSource, Options) ->
 %% `"method"' mode, which stays class-context-free by design. `Aliases' is
 %% the ambient session type-alias cache (ADR 0108 hot-reload re-check
 %% trigger, BT-2899), same opt-in and same `"method"'-mode exclusion.
-do_diagnostics(Port, Source, Mode, Classes, Aliases) ->
+%% `Protocols' is the ambient protocol-registry cache (BT-3473), same opt-in
+%% and same `"method"'-mode exclusion as `Classes'/`Aliases'.
+do_diagnostics(Port, Source, Mode, Classes, Aliases, Protocols) ->
     Request = #{
         command => diagnostics,
         source => Source,
         mode => Mode,
         class_hierarchy => Classes,
-        known_type_aliases => Aliases
+        known_type_aliases => Aliases,
+        protocol_registry => Protocols
     },
     case send_port_request(Port, Request, 30000) of
         {ok, Response} ->
