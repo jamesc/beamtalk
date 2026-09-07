@@ -81,11 +81,76 @@
 
 use std::collections::HashMap;
 
-use super::control_flow::StateAccFallbackReason;
 use super::{CoreErlangGenerator, NlrBoundary};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
-use beamtalk_core::source_analysis::Span;
+use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+
+// ─── StateAccFallbackReason ─────────────────────────────────────────────────
+
+/// BT-1343: Reason why a loop fell back to `StateAcc` threading instead of an optimized mode.
+///
+/// BT-3129: `PartialEq`/`Eq` added so [`ThreadingMode`] (which wraps this in
+/// its `StateAcc` variant) can derive them too — needed for verifier
+/// unit-test assertions comparing [`VerifyError`]s.
+///
+/// BT-3459: moved here (out of `control_flow/mod.rs`) together with
+/// [`CoreErlangGenerator::report_threaded_ir_verify_errors`] to remove a
+/// `threaded_ir → control_flow` import cycle — `control_flow` code that
+/// needs either now imports from `threaded_ir` instead.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum StateAccFallbackReason {
+    /// No fallback — an optimized convention was selected.
+    None,
+    /// Body contains self-sends (async dispatch requires `gen_server` state).
+    SelfSendInBody,
+    /// Nested list op with cross-scope mutations incompatible with direct-params.
+    NestedListOpCrossScope,
+    /// Tier-2 value call on a threaded local (returns `{Result, StateAcc}` tuple).
+    Tier2ValueCallOnThreaded,
+    /// Inline conditional writes to a threaded local.
+    InlineConditionalThreadedWrite,
+    /// Condition block has state effects.
+    ConditionStateEffects,
+    /// Control-flow sub-expression with mutations (e.g. `ifTrue:` with field writes).
+    ControlFlowMutations,
+    /// No threaded locals (nothing to optimize).
+    NoThreadedLocals,
+    /// `ValueType` context (no actor State to thread).
+    ValueTypeContext,
+    /// Not a letrec loop (foldl loops don't support direct-params).
+    NotLetrec,
+    /// Destructure assignment as last expression (incompatible with tuple-acc).
+    DestructureAsLastExpr,
+}
+
+impl std::fmt::Display for StateAccFallbackReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "none"),
+            Self::SelfSendInBody => write!(f, "self-send in loop body"),
+            Self::NestedListOpCrossScope => {
+                write!(f, "nested list op with cross-scope mutation")
+            }
+            Self::Tier2ValueCallOnThreaded => {
+                write!(f, "tier-2 value call on threaded local")
+            }
+            Self::InlineConditionalThreadedWrite => {
+                write!(f, "inline conditional writing to threaded local")
+            }
+            Self::ConditionStateEffects => write!(f, "condition has state effects"),
+            Self::ControlFlowMutations => {
+                write!(f, "control-flow sub-expression with mutations")
+            }
+            Self::NoThreadedLocals => write!(f, "no threaded locals"),
+            Self::ValueTypeContext => write!(f, "ValueType context"),
+            Self::NotLetrec => write!(f, "not a letrec loop"),
+            Self::DestructureAsLastExpr => {
+                write!(f, "destructure assignment as last expression")
+            }
+        }
+    }
+}
 
 // ─── Frame identity ─────────────────────────────────────────────────────────
 
@@ -2549,6 +2614,47 @@ pub(super) fn verify_simple_bind(
         span,
     });
     verify(&ir)
+}
+
+impl CoreErlangGenerator {
+    /// Shared failure-reporting path for every `ThreadedIr` production
+    /// invariant check (ADR 0111 §The verifier / CLAUDE.md's "never panic
+    /// on user input" rule): hard-fails in debug/CI via `debug_assert!`,
+    /// exactly as the deleted `debug_assert!`s this migration's checks
+    /// replace did; in release builds (where `debug_assert!` is compiled
+    /// out), degrades to an internal-error diagnostic on the compile result
+    /// instead of silently doing nothing — the compile still succeeds with
+    /// the generator's (unverified) output. Shared by every BT-3132/BT-3133/
+    /// BT-3134/BT-3135 check in `control_flow`, `expressions.rs`,
+    /// `dispatch_codegen.rs`, and `gen_server/methods.rs` — BT-3134 and
+    /// BT-3135 each deliberately dropped their own independently-added copy
+    /// of this helper (CLAUDE.md's no-duplicate-implementations rule) in
+    /// favor of this one, already on `main` from BT-3133.
+    ///
+    /// BT-3459: moved here (out of `control_flow/mod.rs`) together with
+    /// [`StateAccFallbackReason`] to remove a `threaded_ir → control_flow`
+    /// import cycle — this crate's `control_flow` module previously defined
+    /// both and `threaded_ir.rs` imported `StateAccFallbackReason` from it;
+    /// now `threaded_ir.rs` defines both and `control_flow` imports from
+    /// here instead.
+    pub(super) fn report_threaded_ir_verify_errors(
+        &mut self,
+        errors: &[VerifyError],
+        invariant_label: &str,
+        span: Span,
+    ) {
+        if errors.is_empty() {
+            return;
+        }
+        debug_assert!(
+            false,
+            "ThreadedIr verify found a {invariant_label}: {errors:?}"
+        );
+        self.add_codegen_warning(
+            Diagnostic::error(format!("internal: {invariant_label}: {errors:?}"), span)
+                .with_category(DiagnosticCategory::Type),
+        );
+    }
 }
 
 #[cfg(test)]
