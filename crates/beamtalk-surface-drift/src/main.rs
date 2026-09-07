@@ -34,17 +34,6 @@ use std::process::ExitCode;
 const PARITY_DOC: &str = "docs/development/surface-parity.md";
 const REPL_OPS_DIR: &str = "runtime/apps/beamtalk_workspace/src";
 const MCP_SERVER: &str = "crates/beamtalk-mcp/src/server/tools/";
-/// `#[tool(...)]` definitions live one file per tool family under
-/// `MCP_SERVER`; `scan_mcp_tools` reads and concatenates all of them before
-/// scanning, same as `scan_lsp_caps` does for the LSP's split server files.
-const MCP_SERVER_TOOL_FILES: &[&str] = &[
-    "crates/beamtalk-mcp/src/server/tools/diagnostics.rs",
-    "crates/beamtalk-mcp/src/server/tools/docs.rs",
-    "crates/beamtalk-mcp/src/server/tools/editing.rs",
-    "crates/beamtalk-mcp/src/server/tools/evaluate.rs",
-    "crates/beamtalk-mcp/src/server/tools/flush.rs",
-    "crates/beamtalk-mcp/src/server/tools/traces.rs",
-];
 const REPL_DISPATCH: &str = "crates/beamtalk-cli/src/commands/repl/mod.rs";
 /// BT-3083: the single source of the REPL meta-command vocabulary — every
 /// `":cmd"` name/alias tab-completion offers lives in this table
@@ -457,7 +446,7 @@ impl CodeInventory {
     fn scan(repo_root: &Path) -> Result<Self, String> {
         let mut inv = CodeInventory::default();
         inv.scan_repl_ops(&repo_root.join(REPL_OPS_DIR))?;
-        inv.scan_mcp_tools(repo_root)?;
+        inv.scan_mcp_tools(&repo_root.join(MCP_SERVER))?;
         inv.scan_repl_meta(&repo_root.join(REPL_COMMANDS_TABLE))?;
         inv.scan_repl_command_dispatch(&repo_root.join(REPL_DISPATCH))?;
         inv.scan_lsp_caps(&repo_root.join(LSP_SERVER))?;
@@ -523,9 +512,18 @@ impl CodeInventory {
         Ok(())
     }
 
-    fn scan_mcp_tools(&mut self, repo_root: &Path) -> Result<(), String> {
-        for file in MCP_SERVER_TOOL_FILES {
-            let path = repo_root.join(file);
+    fn scan_mcp_tools(&mut self, dir: &Path) -> Result<(), String> {
+        let entries =
+            fs::read_dir(dir).map_err(|e| format!("failed to read {}: {e}", dir.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("dir entry error: {e}"))?;
+            let path = entry.path();
+            let is_rs = path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("rs"));
+            if !is_rs {
+                continue;
+            }
             let text = fs::read_to_string(&path)
                 .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
             extract_mcp_tools(&text, &mut self.mcp_tools);
