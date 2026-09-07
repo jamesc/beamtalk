@@ -2187,7 +2187,9 @@ Return a list of method descriptors for a class by name (BT-1026).
 
 Collects local instance methods and local class-side methods for the named
 class. Returns an empty list if the class name is unknown or not loaded.
-Each entry is a map with <<"name">>, <<"selector">>, and <<"side">> keys.
+Each entry is a map with <<"name">>, <<"selector">>, <<"side">>, <<"line">>,
+<<"source_status">>, <<"signature">>, and <<"doc">> keys — see
+`method_ws_entry/4`.
 """.
 -spec list_class_methods_for_ws(binary()) -> [map()].
 list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
@@ -2205,21 +2207,11 @@ list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
                     ),
                     ClassSelectors = lists:sort(beamtalk_runtime_api:local_class_methods(Pid)),
                     InstanceEntries = [
-                        #{
-                            <<"name">> => atom_to_binary(S, utf8),
-                            <<"selector">> => atom_to_binary(S, utf8),
-                            <<"side">> => <<"instance">>,
-                            <<"line">> => ws_method_line(ClassName, false, S)
-                        }
+                        method_ws_entry(ClassName, false, S, Pid)
                      || S <- InstanceSelectors
                     ],
                     ClassEntries = [
-                        #{
-                            <<"name">> => atom_to_binary(S, utf8),
-                            <<"selector">> => atom_to_binary(S, utf8),
-                            <<"side">> => <<"class">>,
-                            <<"line">> => ws_method_line(ClassName, true, S)
-                        }
+                        method_ws_entry(ClassName, true, S, Pid)
                      || S <- ClassSelectors
                     ],
                     InstanceEntries ++ ClassEntries
@@ -2227,21 +2219,42 @@ list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
     end.
 
 -doc """
-Resolve a method's declaration line for the `\"methods\"` ws op (BT-3439), or
-`null` when unregistered (e.g. a `ClassBuilder`-built class compiled before
-this feature landed).
+Build one method descriptor for the `\"methods\"` ws op (BT-1026, BT-3439,
+BT-3444).
 
-A direct `beamtalk_xref:method_info/3` ETS lookup — reuses the same cheap,
-already-populated index the LiveView `browse-protocols` op and the LSP
-`nav-query` op read from, instead of leaving `beamtalk.navigateToMethod` (VS
-Code Workspace Explorer sidebar) to guess the position via source-text regex.
+`line` is the real declaration line from `beamtalk_xref:method_info/3`, or
+`null` when unregistered (e.g. a `ClassBuilder`-built class compiled before
+BT-3439 landed) — the same lookup the LiveView `browse-protocols` op and the
+LSP `nav-query` op read from, instead of leaving `beamtalk.navigateToMethod`
+(VS Code Workspace Explorer sidebar) to guess the position via source-text
+regex.
+
+`source_status` is the xref tag verbatim (`indexed` | `synthetic` |
+`unindexed_runtime_fun`) via the shared `info_fields/1` helper op 2/3 already
+use (`beamtalk_repl_ops_browse`) — so the sidebar can badge a `synthetic`
+row (a `Value subclass:`'s compiler-generated field accessor) as visibly
+distinct, the same honest fact the LiveView IDE method list already badges
+(BT-2714), instead of a second `source_status`-shaping implementation.
+`signature`/`doc` are resolved for `synthetic` rows only via the shared
+`row_doc_signature/4` helper (BT-2735) — a value accessor's sidebar hover
+shows its generated signature instead of a blank tooltip.
 """.
--spec ws_method_line(atom(), boolean(), atom()) -> pos_integer() | null.
-ws_method_line(ClassName, ClassSide, Selector) ->
-    case beamtalk_xref:method_info(ClassName, ClassSide, Selector) of
-        undefined -> null;
-        #{line := Line} -> Line
-    end.
+-spec method_ws_entry(atom(), boolean(), atom(), pid()) -> map().
+method_ws_entry(ClassName, ClassSide, Selector, ClassPid) ->
+    Info = beamtalk_xref:method_info(ClassName, ClassSide, Selector),
+    {Line, SourceStatus, _Provenance} = beamtalk_repl_ops_browse:info_fields(Info),
+    {Doc, Signature} = beamtalk_repl_ops_browse:row_doc_signature(
+        ClassPid, ClassSide, Selector, SourceStatus
+    ),
+    #{
+        <<"name">> => atom_to_binary(Selector, utf8),
+        <<"selector">> => atom_to_binary(Selector, utf8),
+        <<"side">> => beamtalk_repl_ops_browse:side_to_binary(ClassSide),
+        <<"line">> => Line,
+        <<"source_status">> => atom_to_binary(SourceStatus, utf8),
+        <<"signature">> => Signature,
+        <<"doc">> => Doc
+    }.
 
 -spec list_state_vars_for_ws(binary()) -> [map()].
 list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
