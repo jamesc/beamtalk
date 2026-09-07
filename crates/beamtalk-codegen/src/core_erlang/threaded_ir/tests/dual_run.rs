@@ -167,6 +167,7 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
         continue_arm: ir_continue_arm,
         body: ir_body,
         produces: vec![sum_v0],
+        outer_args: None,
         exit_arm: ir_exit_arm,
         span: span(),
     }];
@@ -250,6 +251,7 @@ fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
         continue_arm: Document::Str("<'true'> when 'true' -> "),
         body,
         produces: vec![sum_v0],
+        outer_args: None,
         exit_arm,
         span: span(),
     }];
@@ -416,6 +418,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
         continue_arm: ir_continue_arm,
         body: ir_body,
         produces: vec![sum_v0],
+        outer_args: None,
         exit_arm: ir_exit_arm,
         span: span(),
     }];

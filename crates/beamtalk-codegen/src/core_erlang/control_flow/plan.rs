@@ -930,10 +930,22 @@ impl ThreadingPlan {
         ]
     }
 
-    /// Returns the initial argument values for a direct-params loop call (BT-1275).
-    ///
-    /// These are the current bindings of each threaded local in the generator's
-    /// outer scope (before `push_scope` has been called for the loop).
+    /// Resolves each threaded local's REAL, currently-bound Core Erlang
+    /// variable name in the AMBIENT (pre-loop) scope — e.g. a method
+    /// parameter unpacked from `Args` under a gensym'd pattern name like
+    /// `_startFlag1`, never the generic `to_core_erlang_var` spelling
+    /// (`StartFlag`) a plain `:=`-declared local would get. Needed for a
+    /// `DirectParams`/`Hybrid`-mode loop's OUTER initial `apply` argument
+    /// list: `param_list`/`body`/`final_args` all correctly use the generic
+    /// spelling (the fun's own parameter, always freshly bound to that
+    /// name), but the value actually LIVE at the call site is whatever this
+    /// Beamtalk name currently resolves to via `lookup_var` — which only
+    /// coincides with the generic spelling when the local was itself
+    /// declared by a plain `:=` (never a parameter). Falls back to the
+    /// generic spelling when `lookup_var` has no entry (never observed in
+    /// practice — every threaded local is bound by the time a loop
+    /// references it — kept as defense-in-depth, matching this method's own
+    /// pre-ADR-0111-Addendum-15 behavior).
     pub fn initial_direct_args(&self, generator: &CoreErlangGenerator) -> Vec<String> {
         self.threaded_locals
             .iter()

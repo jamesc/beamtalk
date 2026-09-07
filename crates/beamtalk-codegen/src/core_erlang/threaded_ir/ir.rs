@@ -13,13 +13,14 @@
 //! - Expression-position state effects (ADR 0118): [`ThreadedValue`],
 //!   [`CloseContext`].
 //!
-//! Five variants below (`VersionPrefix::Local`, `ThreadingMode::DirectParams`,
-//! `ThreadingMode::Hybrid`, [`LoopCounter`], `ThreadedStmt::ConditionalLoop`)
-//! carry `#[allow(dead_code)]`/have no production constructor yet: their
-//! render/verify paths are real and exercised by tests, but no lowering pass
-//! constructs them today. They stay pending the Letrec/Foldl loop migration
-//! ADR 0111 § Addendum 15 describes; its close-out step removes these
-//! markers once that lands.
+//! `VersionPrefix::Local`, `ThreadingMode::DirectParams`,
+//! `ThreadingMode::Hybrid`, [`LoopCounter`], and `ThreadedStmt::ConditionalLoop`
+//! get their first production constructors from ADR 0111 § Addendum 15's
+//! Letrec migration (`while_loops.rs`/`counted_loops.rs` lowering onto
+//! `ConditionalLoop`) — the Foldl migration (a later issue in the same
+//! addendum) is what still leaves `ThreadingMode::TupleAcc`'s real
+//! `fun (Elem, Acc) -> ...` shape and the `Foldl*` accumulator epilogues
+//! render-only.
 
 use super::super::NlrBoundary;
 use beamtalk_cerl_doc::Document;
@@ -159,9 +160,7 @@ pub(in crate::core_erlang) enum VersionPrefix {
     /// A directly-named loop-threaded local (`Sum`, `Count`, …) as produced
     /// by `ThreadingPlan::threaded_locals` in direct-params / hybrid mode.
     /// See module docs §Deviations for why this exists beyond the ADR's
-    /// three-prefix sketch. Unconstructed in production — see the module
-    /// docs' loop-migration-shapes note.
-    #[allow(dead_code)]
+    /// three-prefix sketch.
     Local(String),
     /// A pre-minted, verbatim Core Erlang name (e.g. `_Sum7`), ADR 0111
     /// Addendum 2 "Gap 2" (`docs/ADR/0111-...md` §Addendum 2, "naming-scheme
@@ -273,27 +272,45 @@ impl AccParam {
 
 /// A counted loop's (`to:do:`/`to:by:do:`/`timesRepeat:`/`repeat`) gensym'd
 /// loop *index* fun parameter (`frame.counter`, `fresh_temp_var("loopidx")`
-/// in production, `control_flow/mod.rs`'s `CountedLoopFrame::counter`) — an
+/// in production, `counted_loops.rs`'s `CountedLoopFrame::counter`) — an
 /// extra [`ThreadedStmt::ConditionalLoop`] fun parameter that is never a
-/// `Bind` target or source, threaded instead by a raw "next value"
-/// expression (e.g. `call 'erlang':'+'(Counter, 1)`). Mirrors [`AccParam`]'s
-/// existing precedent for an unversioned, generator-allocated identity kept
-/// outside [`VersionedVar`]'s producer/consumer bookkeeping — see Addendum
-/// 2's Gap 1 evidence (`docs/ADR/0111-...md` §Addendum 2). `None` for
-/// while/`whileFalse:` loops, which have no counter; counted loops are a
-/// later call site (BT-3145 wires only `generate_while_loop_direct` first).
+/// `Bind` target or source: `initial`/`next` carry its own opaque, non-`Bind`
+/// threading (a literal `1` or the receiver's value for `initial`; `call
+/// 'erlang':'+'(Counter, Step)` for `next`) — the same accepted opacity class
+/// [`ThreadedStmt::ConditionalLoop`]'s own `exit_arm` field documents.
+/// Mirrors [`AccParam`]'s existing precedent for an unversioned,
+/// generator-allocated identity kept outside [`VersionedVar`]'s
+/// producer/consumer bookkeeping — see Addendum 2's Gap 1 evidence
+/// (`docs/ADR/0111-...md` §Addendum 2). `None` for while/`whileFalse:`
+/// loops, which have no counter.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::core_erlang) struct LoopCounter(pub(in crate::core_erlang) String);
+pub(in crate::core_erlang) struct LoopCounter {
+    /// The gensym'd counter name — the fun's own extra leading parameter,
+    /// and every reference to it inside `condition`/`body`.
+    pub(in crate::core_erlang) name: String,
+    /// The value passed for this parameter by the OUTER (pre-loop) `apply`
+    /// call — an integer literal for `timesRepeat:`, the receiver's value
+    /// for `to:do:`/`to:by:do:`.
+    pub(in crate::core_erlang) initial: Document<'static>,
+    /// The expression passed for this parameter by the loop's own
+    /// RECURSIVE `apply` call (e.g. `call 'erlang':'+'(Counter, 1)`).
+    pub(in crate::core_erlang) next: Document<'static>,
+}
 
 impl LoopCounter {
-    /// Unconstructed in production (counted loops don't lower onto
-    /// `ThreadedIr` yet) — see the module docs' loop-migration-shapes note.
-    /// Kept because `ConditionalLoop::counter`'s `Option<LoopCounter>` field
-    /// is real production IR shape; a `LoopCounter` with no way to construct
-    /// one would document an unreachable state.
-    #[allow(dead_code)]
-    pub(in crate::core_erlang) fn new(name: impl Into<String>) -> Self {
-        Self(name.into())
+    /// Constructed by `counted_loops.rs`'s Letrec lowering (ADR 0111
+    /// Addendum 15) for every counted loop's `ConditionalLoop::counter` —
+    /// `None` for while/`whileFalse:` loops, which have no counter.
+    pub(in crate::core_erlang) fn new(
+        name: impl Into<String>,
+        initial: Document<'static>,
+        next: Document<'static>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            initial,
+            next,
+        }
     }
 }
 
@@ -374,9 +391,6 @@ impl VersionCounter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum ThreadingMode {
     /// `fun (Var1, ..., VarN)` — no `StateAcc` map at all (BT-1275).
-    /// Unconstructed in production — see the module docs'
-    /// loop-migration-shapes note.
-    #[allow(dead_code)]
     DirectParams,
     /// A flat `{Gate1, ..., GateG, Var1, ..., VarN}` positional-unpack
     /// accumulator (foldl list-ops, BT-1276). The `usize` is `gate_slots` —
@@ -401,9 +415,6 @@ pub(in crate::core_erlang) enum ThreadingMode {
     TupleAcc(usize),
     /// `fun (Var1, ..., VarN, RField1, ..., MField1, ...)` — locals plus
     /// pre-extracted read-only/mutated fields as direct params (BT-1326/BT-1342).
-    /// Unconstructed in production — see the module docs'
-    /// loop-migration-shapes note.
-    #[allow(dead_code)]
     Hybrid,
     /// Fallback: threading rides a `StateAcc` map, unpacked at iteration
     /// start. `reason` records why an optimized mode was not selected
@@ -629,9 +640,9 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// derive `param_list`/`outer_args` from the SAME field would not recover
     /// the fun's plain parameter name from a Gensym'd final identity.
     ///
-    /// Unconstructed in production — see the module docs'
-    /// loop-migration-shapes note.
-    #[allow(dead_code)]
+    /// Constructed by `while_loops.rs`/`counted_loops.rs`'s Letrec lowering
+    /// (ADR 0111 Addendum 15) for every `whileTrue:`/`whileFalse:`/
+    /// `timesRepeat:`/`to:do:`/`to:by:do:`/`repeat` loop.
     ConditionalLoop {
         /// Static per-construct function name — `"while"`, `"loop"`,
         /// `"repeat"` — never gensym'd by `render` (ADR 0111 Addendum 2's
@@ -677,6 +688,48 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         continue_arm: Document<'static>,
         body: Vec<ThreadedStmt>,
         produces: Vec<VersionedVar>,
+        /// Overrides the OUTER call's argument list wholesale (`param_list`,
+        /// `body`, and the recursive `final_args` are unaffected — they keep
+        /// resolving `produces` exactly as documented above). Every real
+        /// `while_loops.rs`/`counted_loops.rs` lowering passes `Some` — see
+        /// below for why the generic per-entry derivation can never be
+        /// trusted for an outer call; `None` exists only for hand-built
+        /// `ConditionalLoop` test fixtures that don't exercise outer-call
+        /// correctness (a bare counter/local-only loop whose caller happens
+        /// to already hold the generic spelling).
+        ///
+        /// `param_list` renders each `produces` entry under LOOP context, as
+        /// the fixed convention name every hand-rolled reference inside
+        /// `body` hardcodes (`StateAcc` for the `VersionPrefix::State` entry
+        /// — e.g. `generate_unpack_at_iteration_start`'s `maps:get` prelude
+        /// — or a fun parameter's own generic `to_core_erlang_var` spelling
+        /// for a `VersionPrefix::Local` entry). The value actually LIVE at
+        /// the call site, immediately before the loop, does not always match
+        /// that spelling:
+        /// - a `VersionPrefix::Local` entry (`DirectParams`/`Hybrid` mode's
+        ///   threaded locals) is a METHOD PARAMETER's Core Erlang binding
+        ///   whenever the local was never reassigned by a plain `:=` before
+        ///   the loop — bound to a gensym'd pattern name (e.g. `_startFlag1`
+        ///   from unpacking `Args`), not the generic `StartFlag` spelling —
+        ///   see [`ThreadingPlan::initial_direct_args`]'s doc comment;
+        /// - a `VersionPrefix::State` entry (`StateAcc` mode) is whatever
+        ///   [`ThreadingPlan::generate_pack_prefix`] produced: `self`'s own
+        ///   ambient `State`/`StateN` only when `threaded_locals` is empty
+        ///   and the method already had a live actor state (never true for a
+        ///   class method or `ValueType` method, which pack from a fresh
+        ///   `maps:new()` instead — BT-1053/BT-3055), and a fresh `PackedN`
+        ///   temp whenever any threaded local is packed.
+        ///
+        /// `produces`' own generic (version-0, ambient-context) derivation
+        /// can only ever spell the generic-parameter case above, so it is
+        /// wrong whenever a threaded local is a method parameter, packing
+        /// occurred, or the method's ambient state version was already
+        /// nonzero — this field carries the real values instead, mirroring
+        /// legacy's own direct use of `ThreadingPlan::initial_direct_args`/
+        /// `generate_pack_prefix`'s returned `init_state` in the initial
+        /// `apply` (pre-ADR-0111-Addendum-15 `while_loops.rs`/
+        /// `counted_loops.rs`).
+        outer_args: Option<Vec<Document<'static>>>,
         /// Opaque exit arm: pattern + exit value + `"end "` — e.g.
         /// `"<'false'> when 'true' -> {'nil', _ExitSA8} end "` (built by
         /// `generate_exit_stateacc`). ORDERING CONSTRAINT (load-bearing for

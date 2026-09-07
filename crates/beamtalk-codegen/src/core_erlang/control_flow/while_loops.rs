@@ -33,8 +33,11 @@
 //! (removing the `letrec`/`apply` boundary), reconsider this note.
 
 use super::super::intrinsics::{STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact};
+use super::super::threaded_ir::{
+    self, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+};
 use super::super::{CoreErlangGenerator, Result, block_analysis};
-use super::{BodyKind, ThreadingPlan};
+use super::ThreadingPlan;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{Block, Expression};
@@ -257,37 +260,36 @@ impl CoreErlangGenerator {
         // `ClassVars` mutation through the loop's own recursive tail call,
         // the letrec fun grows an extra, explicit trailing parameter —
         // `fun (StateAcc, ClassVars)`, never folded into `StateAcc`'s own
-        // map. Captured before `generate_threaded_loop_body` runs:
-        // `with_branch_context` inherits (never resets) the outer
-        // `class_var_version`, so whatever name `current_class_var()`
-        // reports here (bare "ClassVars" the first time a method mutates
-        // one, "ClassVarsN" otherwise) is both the fun's own formal
-        // parameter identifier and the initial `apply`'s argument.
+        // map. Captured before the body's own lowering runs: `current_class_var()`/
+        // `class_var_version()` name/version the method's own LIVE class-var
+        // identity at loop entry (bare "ClassVars"/`0` the first time a
+        // method mutates one, "ClassVarsN"/`N` otherwise) — `class_var_param`
+        // is both the fun's own formal parameter identifier and the exit
+        // arm's reference to it; `class_var_seed_version` names the identity
+        // the loop body's own first class-var `Bind` sources from, needed
+        // below to rebase it onto the `produces` seed
+        // (`Self::rebase_class_var_seed`'s own doc comment has the full
+        // "why").
         let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
-        let arity = if class_var_param.is_some() { 2 } else { 1 };
+        let class_var_seed_version = self.class_var_version();
         let cv_param_doc = super::class_var_arg_doc(class_var_param.as_ref());
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-        docs.push(pack_doc);
-        docs.push(docvec![
-            "letrec ",
-            leaf::fname("while".to_string(), arity),
-            " = fun (StateAcc",
-            cv_param_doc.clone(),
-            ") -> ",
-        ]);
 
         // BT-598: At the start of each loop iteration, read threaded locals from StateAcc.
         // Use push_scope so bindings don't leak to caller after the letrec.
         self.push_scope();
+        // BT-3470 (ADR 0111 Addendum 15): the returned unpack docs are real
+        // `let I = call 'maps':'get'(...) in` text that must render at the
+        // top of the letrec fun's own body — legacy pushed them into the
+        // SAME `docs` vec the fun-body text itself accumulated into,
+        // immediately before `CondFun`'s own definition, so `CondFun`'s
+        // closure captures the FRESHLY unpacked value on every iteration
+        // (never a stale value the loop's own recursive rebinds never
+        // reach). Prepended below to `condition_stmts`, the ThreadedIr
+        // node's own "renders first, inside the fun body" slot — dropping
+        // this return value (as every call site here did before this fix)
+        // leaves a threaded local's condition read wired to its PRE-LOOP
+        // identity forever, never advancing across iterations.
         let unpack_docs = plan.generate_unpack_at_iteration_start(self);
-        docs.extend(unpack_docs);
-
-        docs.push(docvec![
-            "let ",
-            leaf::var(cond_var.clone()),
-            " = fun (StateAcc) -> ",
-        ]);
 
         // Generate condition inside branch context
         let cond_doc = self.with_branch_context(|this| {
@@ -309,7 +311,6 @@ impl CoreErlangGenerator {
                 this.generate_expression(condition)
             }
         })?;
-        docs.push(cond_doc);
 
         // Condition application and true/false arm headers
         let cond_apply_arm = if negate {
@@ -317,96 +318,124 @@ impl CoreErlangGenerator {
         } else {
             "<'true'> when 'true' -> "
         };
-        if cond_effects {
+        let (condition_stmts, condition_value) = if cond_effects {
             // ADR 0118 phase 3 (BT-3419): `CondFun` evaluates to
             // `{Bool, FinalStateAcc}` (see `generate_stateful_while_condition`),
             // never a bare boolean — unpack it and REBIND the literal name
             // `StateAcc` (shadowing the fun's own incoming parameter, the
-            // same idiom `generate_while_loop_with_mutations`'s own
-            // `and:`-with-mutations codegen already uses for
-            // `let StateAcc = StateAcc in`) so the body compile below, the
-            // recursive tail call, and the exit arm all transparently see
-            // the condition's own state-effecting mutation under the SAME
-            // name they already reference, with no further plumbing.
+            // same idiom this loop's own `and:`-with-mutations codegen
+            // already uses for `let StateAcc = StateAcc in`) so the body
+            // compile below, the recursive tail call, and the exit arm all
+            // transparently see the condition's own state-effecting
+            // mutation under the SAME name they already reference, with no
+            // further plumbing. Kept as one opaque `Statement`: the shadow
+            // rebind is a lexical shadow of the BARE `StateAcc` name, not a
+            // `VersionedVar` version step (`self.state_version()` is
+            // untouched by it) — the body's own `State`-prefixed `Bind`s
+            // still correctly resolve against the shadowed value, since
+            // `render` places this text immediately before them.
             let cond_pair_var = self.fresh_temp_var("CondPair");
             let cond_bool_var = self.fresh_temp_var("CondBool");
-            docs.push(docvec![
-                " in let ",
-                leaf::var(cond_pair_var.clone()),
-                " = apply ",
-                leaf::var(cond_var),
-                " (StateAcc) in let ",
-                leaf::var(cond_bool_var.clone()),
-                " = call 'erlang':'element'(1, ",
-                leaf::var(cond_pair_var.clone()),
-                ") in let StateAcc = call 'erlang':'element'(2, ",
-                leaf::var(cond_pair_var),
-                ") in case ",
-                leaf::var(cond_bool_var),
-                " of ",
-                cond_apply_arm,
-            ]);
+            let stmt = ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(cond_var.clone()),
+                    " = fun (StateAcc) -> ",
+                    cond_doc,
+                    " in let ",
+                    leaf::var(cond_pair_var.clone()),
+                    " = apply ",
+                    leaf::var(cond_var),
+                    " (StateAcc) in let ",
+                    leaf::var(cond_bool_var.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(cond_pair_var.clone()),
+                    ") in let StateAcc = call 'erlang':'element'(2, ",
+                    leaf::var(cond_pair_var),
+                    ") in ",
+                ],
+                condition.span(),
+            );
+            (vec![stmt], ValueRef::Doc(leaf::var(cond_bool_var)))
         } else {
-            docs.push(docvec![
-                " in case apply ",
-                leaf::var(cond_var),
-                " (StateAcc) of ",
-                cond_apply_arm,
-            ]);
-        }
+            let stmt = ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(cond_var.clone()),
+                    " = fun (StateAcc) -> ",
+                    cond_doc,
+                    " in ",
+                ],
+                condition.span(),
+            );
+            let value = ValueRef::Doc(docvec!["apply ", leaf::var(cond_var), " (StateAcc)"]);
+            (vec![stmt], value)
+        };
+        let condition_stmts: Vec<ThreadedStmt> = unpack_docs
+            .into_iter()
+            .map(|doc| ThreadedStmt::Statement(doc, body.span))
+            .chain(condition_stmts)
+            .collect();
 
-        let (body_doc, final_state_version) =
-            self.generate_threaded_loop_body(body, &plan, &BodyKind::Letrec)?;
-        let final_class_var = self.last_loop_class_var.take();
-        docs.push(body_doc);
-        let final_state_var = super::super::util::versioned_var("StateAcc", final_state_version);
-        let recur_cv_doc = final_class_var
-            .as_ref()
-            .map_or(Document::Nil, |v| docvec![", ", leaf::var(v.clone())]);
+        let (mut body_stmts, frame) = self.generate_letrec_body_ir(body, &plan)?;
+
+        self.pop_scope();
 
         // BT-3168: the exit arm is reached WITHOUT running the body this
         // round (the condition check failed) — it must reference the fun's
         // own incoming `ClassVars` parameter (`class_var_param`, the SAME
-        // text as the fun signature above), never the post-body
-        // `final_class_var`.
-        let exit_arm = if negate {
-            docvec![
-                "<'true'> when 'true' -> {'nil', StateAcc",
-                cv_param_doc.clone(),
-                "} "
-            ]
+        // text as the fun signature), never a post-body identity.
+        let exit_arm_atom = if negate {
+            "<'true'> when 'true' -> "
         } else {
-            docvec![
-                "<'false'> when 'true' -> {'nil', StateAcc",
-                cv_param_doc.clone(),
-                "} "
-            ]
+            "<'false'> when 'true' -> "
         };
-        docs.push(docvec![
-            " apply ",
-            leaf::fname("while".to_string(), arity),
-            " (",
-            leaf::var(final_state_var),
-            recur_cv_doc,
-            ") ",
+        let exit_arm = docvec![exit_arm_atom, "{'nil', StateAcc", cv_param_doc, "} end ",];
+
+        let mut produces = vec![VersionedVar::new(VersionPrefix::State, 0, frame)];
+        if let Some(cv_name) = &class_var_param {
+            let real_seed =
+                VersionedVar::new(VersionPrefix::ClassVars, class_var_seed_version, frame);
+            let gensym_seed = VersionedVar::new(VersionPrefix::Gensym(cv_name.clone()), 0, frame);
+            Self::rebase_class_var_seed(&mut body_stmts, &real_seed, &gensym_seed);
+            produces.push(gensym_seed);
+        }
+
+        let shadow_write_eligible = self.block_depth == 0;
+        let ir = vec![ThreadedStmt::ConditionalLoop {
+            fn_name: "while".to_string(),
+            mode: ThreadingMode::StateAcc(plan.fallback_reason.clone()),
+            frame,
+            shadow_write_eligible,
+            counter: None,
+            condition: condition_stmts,
+            condition_value,
+            continue_arm: Document::Str(cond_apply_arm),
+            body: body_stmts,
+            produces,
+            // See `ConditionalLoop::outer_args`'s doc comment: the value
+            // actually live at the call site for `produces[0]` is whatever
+            // `generate_pack_prefix` produced above, never necessarily the
+            // generic ambient-context "State" spelling its own derivation
+            // would otherwise fall back to. A trailing `ClassVars` entry
+            // (index 1, when present) needs no such override — it is
+            // already `Gensym`-seeded above, and `Gensym` renders
+            // identically in every context, so leaving this one element
+            // short deliberately falls through to the SAME generic
+            // per-entry derivation `render_loop_skeleton` uses for every
+            // other entry.
+            outer_args: Some(vec![leaf::var(init_state)]),
             exit_arm,
-            "end ",
-        ]);
+            span: body.span,
+        }];
+        let errors = threaded_ir::verify(&ir);
+        self.report_threaded_ir_verify_errors(&errors, "while StateAcc ConditionalLoop", body.span);
+        let rendered = {
+            let mut ctx = threaded_ir::RenderCtx::new(self);
+            threaded_ir::render(&ir, &mut ctx)
+        };
 
-        // Pop scope to restore original bindings (before the letrec)
-        self.pop_scope();
-
-        // Initial call with packed state
-        docs.push(docvec![
-            "in apply ",
-            leaf::fname("while".to_string(), arity),
-            " (",
-            leaf::var(init_state),
-            cv_param_doc,
-            ")",
-        ]);
-
-        Ok(Document::Vec(docs))
+        Ok(docvec![pack_doc, rendered])
     }
 
     /// ADR 0118 phase 3 (BT-3419): compiles a `whileTrue:`/`whileFalse:`
@@ -533,6 +562,17 @@ impl CoreErlangGenerator {
     ///
     /// Uses `fun (Var1, ..., VarN)` instead of `fun (StateAcc)`.
     /// The `StateAcc` map is rebuilt only once in the false (exit) arm.
+    ///
+    /// ADR 0111 Addendum 15: lowers to one `ThreadedStmt::ConditionalLoop`
+    /// node — `condition` is a single opaque `Statement` reproducing the
+    /// `let CondFun = fun (...) -> ... in ` closure this loop family still
+    /// builds (see `generate_while_true_simple`'s doc comment on
+    /// `generate_while_simple` for why the condition stays a closure rather
+    /// than an inlined ADR 0118 phase-3 shape — out of this issue's scope),
+    /// `condition_value` its `apply CondFun (...)` call; `body` comes from
+    /// [`Self::generate_letrec_body_ir`]; `produces` is each threaded
+    /// local's `VersionPrefix::Local` seed, matching `param_list_doc`'s own
+    /// bare `to_core_erlang_var` naming.
     #[allow(clippy::too_many_lines)] // direct-params state-threading codegen, BT-1275
     fn generate_while_loop_direct(
         &mut self,
@@ -541,21 +581,11 @@ impl CoreErlangGenerator {
         plan: &ThreadingPlan,
         negate: bool,
     ) -> Result<Document<'static>> {
-        // BT-3182: the `BEAMTALK_THREADED_IR_WHILE_DIRECT` pilot that used to
-        // route eligible bodies through `ThreadedIr` here was deleted — see
-        // ADR 0111 Addendum 13. This construct stays on side-channel
-        // `ThreadedIr` verification only (BT-3132's checks still run against
-        // every while/counted loop body below), same as before BT-3145.
-
-        // Collect initial arg values from the outer scope (before push_scope).
-        let initial_direct_args = plan.initial_direct_args(self);
-
         let param_names: Vec<String> = plan
             .threaded_locals
             .iter()
             .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
             .collect();
-        let arity = param_names.len();
         let param_list_doc = || {
             join(
                 param_names.iter().map(|v| leaf::var(v.clone())),
@@ -563,16 +593,14 @@ impl CoreErlangGenerator {
             )
         };
 
-        let cond_var = self.fresh_temp_var("CondFun");
+        // Captured BEFORE `push_scope`/`generate_unpack_at_iteration_start`
+        // rebind each threaded local to its generic fun-parameter name —
+        // see `ThreadingPlan::initial_direct_args`'s doc comment for why the
+        // OUTER call's own argument can differ from that generic name (e.g.
+        // a method parameter's own gensym'd `Args`-pattern binding).
+        let initial_direct_args = plan.initial_direct_args(self);
 
-        let mut docs: Vec<Document<'static>> = Vec::new();
-        docs.push(docvec![
-            "letrec ",
-            leaf::fname("while", arity),
-            " = fun (",
-            param_list_doc(),
-            ") -> ",
-        ]);
+        let cond_var = self.fresh_temp_var("CondFun");
 
         self.push_scope();
         // Register var bindings — no unpack docs in direct-params mode
@@ -582,73 +610,77 @@ impl CoreErlangGenerator {
 
         // The condition closure captures the current vars from scope.
         // We pass only the params (not StateAcc) since there is no StateAcc.
-        docs.push(docvec![
-            "let ",
-            leaf::var(cond_var.clone()),
-            " = fun (",
+        let cond_body_doc = self.generate_loop_condition_body(condition)?;
+        let condition_stmt = ThreadedStmt::Statement(
+            docvec![
+                "let ",
+                leaf::var(cond_var.clone()),
+                " = fun (",
+                param_list_doc(),
+                ") -> ",
+                cond_body_doc,
+                " in ",
+            ],
+            condition.span(),
+        );
+        let condition_value = ValueRef::Doc(docvec![
+            "apply ",
+            leaf::var(cond_var),
+            " (",
             param_list_doc(),
-            ") -> ",
+            ")",
         ]);
 
-        let cond_doc = self.generate_loop_condition_body(condition)?;
-        docs.push(cond_doc);
-
-        // Apply condition with current params.
         let case_arm = if negate {
             "<'false'> when 'true' -> "
         } else {
             "<'true'> when 'true' -> "
         };
-        docs.push(docvec![
-            " in case apply ",
-            leaf::var(cond_var),
-            " (",
-            param_list_doc(),
-            ") of ",
-            case_arm,
-        ]);
 
-        let (body_doc, _) = self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
-        docs.push(body_doc);
-
-        // Collect final var names after body execution.
-        let final_args = self.collect_final_local_args(plan);
+        let (body_stmts, frame) = self.generate_letrec_body_ir(body, plan)?;
 
         // Build exit StateAcc using the CURRENT iteration's param names.
         let exit_stateacc = plan.generate_exit_stateacc(&param_names, self);
 
-        let final_args_doc = join(final_args.into_iter().map(leaf::var), &Document::Str(", "));
-        let exit_arm = if negate {
+        self.pop_scope();
+
+        let exit_atom = if negate {
             "<'true'> when 'true' -> "
         } else {
             "<'false'> when 'true' -> "
         };
-        docs.push(docvec![
-            " apply ",
-            leaf::fname("while", arity),
-            " (",
-            final_args_doc,
-            ") ",
+        let exit_arm = docvec![exit_atom, exit_stateacc, " end "];
+
+        let produces: Vec<VersionedVar> = plan
+            .threaded_locals
+            .iter()
+            .map(|name| VersionedVar::new(VersionPrefix::Local(name.clone()), 0, frame))
+            .collect();
+
+        let shadow_write_eligible = self.block_depth == 0;
+        let ir = vec![ThreadedStmt::ConditionalLoop {
+            fn_name: "while".to_string(),
+            mode: ThreadingMode::DirectParams,
+            frame,
+            shadow_write_eligible,
+            counter: None,
+            condition: vec![condition_stmt],
+            condition_value,
+            continue_arm: Document::Str(case_arm),
+            body: body_stmts,
+            produces,
+            outer_args: Some(initial_direct_args.into_iter().map(leaf::var).collect()),
             exit_arm,
-            exit_stateacc,
-            " end ",
-        ]);
-
-        self.pop_scope();
-
-        let initial_args_doc = join(
-            initial_direct_args.into_iter().map(leaf::var),
-            &Document::Str(", "),
+            span: body.span,
+        }];
+        let errors = threaded_ir::verify(&ir);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "while direct-params ConditionalLoop",
+            body.span,
         );
-        docs.push(docvec![
-            "in apply ",
-            leaf::fname("while", arity),
-            " (",
-            initial_args_doc,
-            ")",
-        ]);
-
-        Ok(Document::Vec(docs))
+        let mut ctx = threaded_ir::RenderCtx::new(self);
+        Ok(threaded_ir::render(&ir, &mut ctx))
     }
 
     /// BT-1326/BT-1342: Full-extract variant of `generate_while_loop_with_mutations`.
@@ -659,6 +691,13 @@ impl CoreErlangGenerator {
     /// Field reads resolve to direct parameters. Field writes become simple variable
     /// rebindings (no `maps:put` per iteration). At loop exit, mutated fields are repacked
     /// into the initial State map.
+    ///
+    /// ADR 0111 Addendum 15: lowers to one `ThreadedStmt::ConditionalLoop`
+    /// node — `produces` is locals (`VersionPrefix::Local`) then readonly
+    /// then mutated fields (`VersionPrefix::Gensym` of each field's
+    /// pre-extracted param name, matching `build_hybrid_param_list`'s own
+    /// ordering); `body` comes from [`Self::generate_letrec_hybrid_body_ir`].
+    #[allow(clippy::too_many_lines)] // hybrid state-threading codegen, BT-1326/BT-1342
     fn generate_while_loop_hybrid(
         &mut self,
         condition: &Expression,
@@ -666,7 +705,6 @@ impl CoreErlangGenerator {
         plan: &ThreadingPlan,
         negate: bool,
     ) -> Result<Document<'static>> {
-        let initial_local_args = plan.initial_direct_args(self);
         let initial_state = plan.initial_state_var.clone();
 
         // Pre-extract ALL fields (readonly + mutated) before the letrec.
@@ -682,8 +720,6 @@ impl CoreErlangGenerator {
             readonly_params.iter().map(|(_, v)| v.clone()).collect();
         let mutated_param_names: Vec<String> =
             mutated_params.iter().map(|(_, v)| v.clone()).collect();
-        let arity =
-            local_param_names.len() + readonly_param_names.len() + mutated_param_names.len();
 
         let param_list_doc = || {
             Self::build_hybrid_param_list(
@@ -697,15 +733,15 @@ impl CoreErlangGenerator {
 
         let all_field_params = Self::build_field_params_map(&readonly_params, &mutated_params);
 
-        let mut docs: Vec<Document<'static>> = Vec::new();
-        docs.extend(pre_extract_docs);
-        docs.push(docvec![
-            "letrec ",
-            leaf::fname("while", arity),
-            " = fun (",
-            param_list_doc(),
-            ") -> ",
-        ]);
+        // Captured BEFORE `push_scope`/`generate_unpack_at_iteration_start`
+        // rebind each threaded local to its generic fun-parameter name —
+        // see `ThreadingPlan::initial_direct_args`'s doc comment for why the
+        // OUTER call's own argument can differ from that generic name (e.g.
+        // a method parameter's own gensym'd `Args`-pattern binding). The
+        // readonly/mutated field params need no such correction — their
+        // fun-parameter name IS the pre-extracted temp var already, both
+        // inside the loop and at the outer call site.
+        let initial_local_args = plan.initial_direct_args(self);
 
         self.push_scope();
         // Register var bindings — no unpack docs in hybrid mode (structurally
@@ -713,36 +749,36 @@ impl CoreErlangGenerator {
         // `if !use_direct_params && !use_hybrid_params` guard).
         plan.generate_unpack_at_iteration_start(self);
 
-        docs.push(docvec![
-            "let ",
-            leaf::var(cond_var.clone()),
-            " = fun (",
+        let cond_body_doc = self.generate_hybrid_condition(condition, plan, &all_field_params)?;
+        let condition_stmt = ThreadedStmt::Statement(
+            docvec![
+                "let ",
+                leaf::var(cond_var.clone()),
+                " = fun (",
+                param_list_doc(),
+                ") -> ",
+                cond_body_doc,
+                " in ",
+            ],
+            condition.span(),
+        );
+        let condition_value = ValueRef::Doc(docvec![
+            "apply ",
+            leaf::var(cond_var),
+            " (",
             param_list_doc(),
-            ") -> ",
+            ")",
         ]);
-
-        let cond_doc = self.generate_hybrid_condition(condition, plan, &all_field_params)?;
-        docs.push(cond_doc);
 
         let case_arm = if negate {
             "<'false'> when 'true' -> "
         } else {
             "<'true'> when 'true' -> "
         };
-        docs.push(docvec![
-            " in case apply ",
-            leaf::var(cond_var),
-            " (",
-            param_list_doc(),
-            ") of ",
-            case_arm,
-        ]);
 
-        let (body_doc, final_mutated_field_args) =
-            self.generate_hybrid_loop_body(body, plan, &all_field_params, &mutated_params)?;
-        docs.push(body_doc);
+        let (body_stmts, frame) =
+            self.generate_letrec_hybrid_body_ir(body, plan, &all_field_params)?;
 
-        let final_local_args = self.collect_final_local_args(plan);
         let exit_stateacc = plan.generate_exit_stateacc_full_extract(
             &local_param_names,
             &mutated_param_names,
@@ -750,26 +786,60 @@ impl CoreErlangGenerator {
             self,
         );
 
-        Self::append_hybrid_loop_tail(
-            &mut docs,
-            negate,
-            arity,
-            &final_local_args,
-            &readonly_param_names,
-            final_mutated_field_args,
-            exit_stateacc,
-        );
-
         self.pop_scope();
 
-        Self::append_hybrid_initial_call(
-            &mut docs,
-            "while",
-            arity,
-            initial_local_args,
-            &readonly_param_names,
-            &mutated_param_names,
-        );
+        let exit_atom = if negate {
+            "<'true'> when 'true' -> "
+        } else {
+            "<'false'> when 'true' -> "
+        };
+        let exit_arm = docvec![exit_atom, exit_stateacc, " end "];
+
+        let produces: Vec<VersionedVar> =
+            plan.threaded_locals
+                .iter()
+                .map(|name| VersionedVar::new(VersionPrefix::Local(name.clone()), 0, frame))
+                .chain(readonly_params.iter().map(|(_, var)| {
+                    VersionedVar::new(VersionPrefix::Gensym(var.clone()), 0, frame)
+                }))
+                .chain(mutated_params.iter().map(|(_, var)| {
+                    VersionedVar::new(VersionPrefix::Gensym(var.clone()), 0, frame)
+                }))
+                .collect();
+
+        let shadow_write_eligible = self.block_depth == 0;
+        let ir = vec![ThreadedStmt::ConditionalLoop {
+            fn_name: "while".to_string(),
+            mode: ThreadingMode::Hybrid,
+            frame,
+            shadow_write_eligible,
+            counter: None,
+            condition: vec![condition_stmt],
+            condition_value,
+            continue_arm: Document::Str(case_arm),
+            body: body_stmts,
+            produces,
+            outer_args: Some(
+                initial_local_args
+                    .into_iter()
+                    .chain(readonly_param_names.clone())
+                    .chain(mutated_param_names.clone())
+                    .map(leaf::var)
+                    .collect(),
+            ),
+            exit_arm,
+            span: body.span,
+        }];
+        let errors = threaded_ir::verify(&ir);
+        self.report_threaded_ir_verify_errors(&errors, "while hybrid ConditionalLoop", body.span);
+        let rendered = {
+            let mut ctx = threaded_ir::RenderCtx::new(self);
+            threaded_ir::render(&ir, &mut ctx)
+        };
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.extend(pre_extract_docs);
+        docs.push(rendered);
 
         Ok(Document::Vec(docs))
     }
@@ -892,112 +962,6 @@ impl CoreErlangGenerator {
         self.hybrid_readonly_field_params = prev_readonly_field_params;
         self.hybrid_mutated_fields = prev_mutated_fields;
         cond_result
-    }
-
-    /// Generates the body of a hybrid loop and captures final mutated field var names.
-    ///
-    /// Returns the body document and the final mutated field argument names.
-    /// Saves and restores all hybrid loop state (`in_hybrid_loop`, `in_direct_params_loop`,
-    /// `hybrid_readonly_field_params`, `hybrid_mutated_fields`).
-    pub(super) fn generate_hybrid_loop_body(
-        &mut self,
-        body: &Block,
-        plan: &ThreadingPlan,
-        all_field_params: &std::collections::HashMap<String, String>,
-        mutated_params: &[(String, String)],
-    ) -> Result<(Document<'static>, Vec<String>)> {
-        let prev_hybrid = self.in_hybrid_loop;
-        let prev_direct_params_loop = self.in_direct_params_loop;
-        let prev_readonly_field_params = std::mem::replace(
-            &mut self.hybrid_readonly_field_params,
-            all_field_params.clone(),
-        );
-        let prev_mutated_fields = std::mem::replace(
-            &mut self.hybrid_mutated_fields,
-            plan.mutated_fields.iter().cloned().collect(),
-        );
-        self.in_hybrid_loop = true;
-        self.in_direct_params_loop = true;
-        let body_result = self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec);
-
-        // BT-1342: Capture final mutated field var names BEFORE restoring maps.
-        let final_mutated_field_args: Vec<String> = plan
-            .mutated_fields
-            .iter()
-            .map(|field| {
-                self.hybrid_readonly_field_params
-                    .get(field)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        mutated_params.iter().find(|(f, _)| f == field).map_or_else(
-                            || {
-                                unreachable!(
-                                    "hybrid while: missing mutated field mapping for `{field}`"
-                                )
-                            },
-                            |(_, v)| v.clone(),
-                        )
-                    })
-            })
-            .collect();
-
-        self.hybrid_readonly_field_params = prev_readonly_field_params;
-        self.hybrid_mutated_fields = prev_mutated_fields;
-        self.in_hybrid_loop = prev_hybrid;
-        self.in_direct_params_loop = prev_direct_params_loop;
-        let (body_doc, _) = body_result?;
-        Ok((body_doc, final_mutated_field_args))
-    }
-
-    /// Collects the current Core Erlang variable names for each threaded local after the body executes.
-    ///
-    /// Uses the current scope bindings; falls back to the canonical `to_core_erlang_var` name
-    /// if the variable has not been rebound in this iteration.
-    pub(super) fn collect_final_local_args(&self, plan: &ThreadingPlan) -> Vec<String> {
-        plan.threaded_locals
-            .iter()
-            .map(|v| {
-                self.lookup_var(v)
-                    .cloned()
-                    .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v))
-            })
-            .collect()
-    }
-
-    /// Appends the recursive call and exit arm to the while loop docs.
-    #[allow(clippy::too_many_arguments)]
-    fn append_hybrid_loop_tail(
-        docs: &mut Vec<Document<'static>>,
-        negate: bool,
-        arity: usize,
-        final_local_args: &[String],
-        readonly_param_names: &[String],
-        final_mutated_field_args: Vec<String>,
-        exit_stateacc: Document<'static>,
-    ) {
-        let final_args_doc = join(
-            final_local_args
-                .iter()
-                .map(|v| leaf::var(v.clone()))
-                .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
-                .chain(final_mutated_field_args.into_iter().map(leaf::var)),
-            &Document::Str(", "),
-        );
-        let exit_arm = if negate {
-            "<'true'> when 'true' -> "
-        } else {
-            "<'false'> when 'true' -> "
-        };
-        docs.push(docvec![
-            " apply ",
-            leaf::fname("while", arity),
-            " (",
-            final_args_doc,
-            ") ",
-            exit_arm,
-            exit_stateacc,
-            " end ",
-        ]);
     }
 
     /// BT-2908: Generates the fallback method body for `whileTrue`/`whileFalse`
@@ -1169,32 +1133,6 @@ impl CoreErlangGenerator {
             placeholder_branch,
             " end end",
         ]
-    }
-
-    /// Appends the initial call to a hybrid loop function.
-    pub(super) fn append_hybrid_initial_call(
-        docs: &mut Vec<Document<'static>>,
-        fn_name: &str,
-        arity: usize,
-        initial_local_args: Vec<String>,
-        readonly_param_names: &[String],
-        mutated_param_names: &[String],
-    ) {
-        let initial_args_doc = join(
-            initial_local_args
-                .into_iter()
-                .map(leaf::var)
-                .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
-                .chain(mutated_param_names.iter().map(|v| leaf::var(v.clone()))),
-            &Document::Str(", "),
-        );
-        docs.push(docvec![
-            "in apply ",
-            leaf::fname(fn_name.to_string(), arity),
-            " (",
-            initial_args_doc,
-            ")",
-        ]);
     }
 }
 
