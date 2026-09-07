@@ -29,10 +29,95 @@ mod transform_ops;
 mod tests;
 
 use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+use super::plan::ThreadingPlan;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
+
+// ─── BodyKind ─────────────────────────────────────────────────────────────────
+
+/// Controls how `generate_threaded_loop_body` handles the final expression.
+pub(super) enum BodyKind {
+    /// Letrec loop body: document ends with a trailing ` in `; caller appends
+    /// the recursive `apply` call.  The last non-assignment expression uses the
+    /// nested-state-extraction pattern when there are no direct field assignments.
+    Letrec,
+
+    /// Foldl `do:` body: final accumulator is `StateAcc{N}`.
+    FoldlDo,
+
+    /// Foldl `collect:` body: final accumulator is `{[Result | AccList], StateAcc{N}}`.
+    FoldlCollect,
+
+    /// Foldl `select:`/`reject:` body: last expression becomes a predicate;
+    /// a `case` expression conditionally includes the item.
+    FoldlFilter {
+        /// The item variable used to include in the result list.
+        item_var: String,
+        /// When `true`, negates the predicate (for `reject:`).
+        negate: bool,
+    },
+
+    /// Foldl `inject:into:` body: final accumulator is `{NewAcc, StateAcc{N}}`.
+    FoldlInject,
+
+    /// Foldl `anySatisfy:`/`allSatisfy:` body: last expression becomes a predicate;
+    /// a `case` expression updates a boolean accumulator.
+    /// Accumulator is `{BoolAcc, StateAcc{N}}`.
+    FoldlBoolPredicate {
+        /// When `true`, semantics = `allSatisfy:` (start `true`, set `false` on failure).
+        /// When `false`, semantics = `anySatisfy:` (start `false`, set `true` on match).
+        is_all: bool,
+    },
+
+    /// BT-1486: Foldl `detect:` / `detect:ifNone:` body: last expression becomes a predicate;
+    /// a `case` expression updates the found-item accumulator on first match.
+    /// Accumulator is `{FoundItem, FoundFlag, StateAcc{N}}`.
+    FoldlDetect {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1486: Foldl `count:` body: last expression becomes a predicate;
+    /// a `case` expression increments the count accumulator on match.
+    /// Accumulator is `{Count, StateAcc{N}}`.
+    FoldlCount,
+
+    /// BT-1487: Foldl `takeWhile:` body: last expression becomes a predicate;
+    /// a `case` expression includes the item only while the predicate holds.
+    /// Once the predicate returns false, all subsequent elements are excluded.
+    /// Accumulator is `{ResultList, StillTaking, StateVars...}`.
+    FoldlTakeWhile {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1487: Foldl `dropWhile:` body: last expression becomes a predicate;
+    /// a `case` expression drops elements while the predicate holds.
+    /// Once the predicate returns false, all subsequent elements are included.
+    /// Accumulator is `{ResultList, StillDropping, StateVars...}`.
+    FoldlDropWhile {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1487: Foldl `partition:` body: last expression becomes a predicate;
+    /// a `case` expression routes the item to one of two lists.
+    /// Accumulator is `{MatchList, NoMatchList, StateVars...}`.
+    FoldlPartition {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1487: Foldl `groupBy:` body: last expression is the key function result;
+    /// each element is grouped by its key into a map.
+    /// Accumulator is `{Map, StateVars...}`.
+    FoldlGroupBy {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+}
 
 /// Emits the Core Erlang preamble that binds a receiver to a guaranteed-list
 /// variable (BT-524 `is_list` guard):
@@ -288,5 +373,29 @@ impl CoreErlangGenerator {
             ")"
         ];
         (binding, out_var)
+    }
+
+    // ── Compat shim ───────────────────────────────────────────────────────────
+
+    /// Generates the foldl lambda body for a `do:` loop with state threading.
+    ///
+    /// This is a forwarding shim used by `value_type_codegen::generate_value_type_do_open`,
+    /// which manages its own pack/extract prefix/suffix independently.
+    pub(in crate::core_erlang) fn generate_list_do_body_with_threading(
+        &mut self,
+        body: &Block,
+        item_var: &str,
+    ) -> Result<Document<'static>> {
+        let plan = ThreadingPlan::new(self, body, None);
+        self.emit_loop_convention_diagnostic(&plan, body.span);
+        self.push_scope();
+        if let Some(param) = body.parameters.first() {
+            self.bind_var(&param.name, item_var);
+        }
+        let mut docs = plan.generate_unpack_at_iteration_start(self);
+        let (body_doc, _) = self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+        docs.push(body_doc);
+        self.pop_scope();
+        Ok(Document::Vec(docs))
     }
 }

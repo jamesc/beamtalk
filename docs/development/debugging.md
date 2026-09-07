@@ -161,7 +161,7 @@ expected to produce the same wording for the same malformed input.
 State threading — actor/instance `State`, class-var `ClassVars`, value-type
 `Self`, loop-local threading, and non-local-return (NLR) relay — used to be
 coordinated only by scattered `debug_assert!`s at each emission site, each
-independently re-deriving the same invariants. `crates/beamtalk-codegen/src/core_erlang/threaded_ir.rs`
+independently re-deriving the same invariants. `crates/beamtalk-codegen/src/core_erlang/threaded_ir/`
 replaces that with a small mid-level IR (`ThreadedIr`/`ThreadedStmt`) that IS
 the `Document` emission for every construct family this table covers —
 conditionals, exception handling's `on:do:`/`ensure:`, Actor and

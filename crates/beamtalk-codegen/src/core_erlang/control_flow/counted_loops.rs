@@ -10,11 +10,77 @@
 //! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods (BT-1054).
 
 use super::super::{CoreErlangGenerator, Result};
-use super::{CountedLoopFrame, ThreadingPlan, class_var_arg_doc};
+use super::plan::ThreadingPlan;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::join;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
+
+// ─── CountedLoopFrame ─────────────────────────────────────────────────────────
+
+/// Describes the loop-type-specific structure of a counted (`letrec`-based) loop.
+///
+/// Each `generate_*_with_mutations` for counted loops becomes a thin wrapper
+/// that builds a `CountedLoopFrame` and calls `generate_counted_stateful_loop`.
+///
+/// ADR 0118 phase 3 (BT-3419) scope note: this is a plain `Document`-level
+/// struct, unrelated to [`threaded_ir::ThreadedStmt::ConditionalLoop`]'s own
+/// `condition`/`condition_value` fields, despite the field-name overlap
+/// (`continue_header` here vs. that node's own, now-split `continue_arm`) —
+/// `counted_loops.rs` never constructs a `ConditionalLoop` node (no counted
+/// loop does; see that variant's own `#[allow(dead_code)]` status). A
+/// counted loop's `continue_header` is always a pure counter compare (e.g.
+/// `Counter =&lt; N`) built once from the receiver/limit/step, captured
+/// before the letrec — never itself state-effecting — so had this frame
+/// been unified onto `ConditionalLoop`, its `condition` would always be
+/// empty and `condition_value` the bare compare, exactly the "pure counter
+/// compare" case that variant's own field docs already name.
+pub(super) struct CountedLoopFrame {
+    /// Variable bindings emitted before the `letrec` (e.g. `let N = recv in`).
+    pub preamble: Document<'static>,
+    /// Name of the letrec function (e.g. `"repeat"` or `"loop"`).
+    pub fn_name: String,
+    /// The condition header up to `<'true'> when 'true' ->` for the continue arm.
+    pub continue_header: Document<'static>,
+    /// Expression used as the next counter in the recursive call
+    /// (e.g. `"call 'erlang':'+'(I, 1)"`).
+    pub next_counter: Document<'static>,
+    /// Initial counter argument for the first `apply` call: an integer literal
+    /// (e.g. `1`) for `timesRepeat:`, or a variable (e.g. `StartVar`) for `to:do:`.
+    pub initial_counter: Document<'static>,
+    /// The `false` arm and `end` (e.g. `"<'false'> when 'true' -> {'nil', StateAcc} end"`).
+    pub false_arm: Document<'static>,
+    /// Optional Beamtalk block-parameter name to bind to the gensym'd counter.
+    pub body_param: Option<String>,
+    /// BT-2354: gensym'd Core Erlang counter variable name (e.g. `_loopidx3`).
+    ///
+    /// Used as the loop fun's first parameter and threaded through
+    /// `continue_header`/`next_counter`. Produced by `fresh_temp_var` (leading
+    /// underscore + a monotonic counter), so it does not collide with the common
+    /// case of a user local named `i`, which maps to `I` via `to_core_var`. The
+    /// unique suffix also keeps it distinct from underscore-prefixed user
+    /// identifiers (which `to_core_var` passes through verbatim).
+    pub counter: String,
+    /// BT-3168 (ADR 0111 Addendum 9, Question 3): the pre-loop `ClassVars`
+    /// name (`current_class_var()`, captured before body generation runs),
+    /// when the body threads a `ClassVars` mutation through the loop's own
+    /// recursive tail call. `None` when it doesn't. Used, verbatim, as both
+    /// the letrec fun's extra trailing formal parameter and the initial
+    /// `apply`'s trailing argument — see [`class_var_arg_doc`].
+    pub class_var_param: Option<String>,
+}
+
+/// BT-3168 (ADR 0111 Addendum 9, Question 3): renders `", <name>"` for a
+/// threaded `ClassVars` fun-argument slot, or nothing when the loop doesn't
+/// thread class vars. Shared by `while_loops.rs`'s and `counted_loops.rs`'s
+/// (via `generate_counted_stateful_loop`) Letrec base-path `ClassVars`
+/// plumbing — the letrec fun signature, both `apply` call sites, and the
+/// exit arm all need the identical "extra trailing arg, or nothing" shape,
+/// so it is written once rather than copy-evolved per call site.
+pub(super) fn class_var_arg_doc(name: Option<&String>) -> Document<'static> {
+    name.map_or(Document::Nil, |v| docvec![", ", leaf::var(v.clone())])
+}
 
 impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn generate_repeat(
@@ -249,6 +315,430 @@ impl CoreErlangGenerator {
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
+    }
+
+    /// Generates a stateful counted loop using a `letrec`.
+    ///
+    /// Handles `timesRepeat:`, `to:do:`, and `to:by:do:` by accepting a `CountedLoopFrame`
+    /// that captures the loop-type-specific preamble, condition, and step expression.
+    ///
+    /// In standard mode the fun signature is `(I, StateAcc)`.
+    /// In direct-params mode (BT-1275, no field mutations) it is `(I, Var1, ..., VarN)`
+    /// eliminating per-iteration `maps:get` / `maps:put` calls.
+    pub(super) fn generate_counted_stateful_loop(
+        &mut self,
+        frame: &CountedLoopFrame,
+        body: &Block,
+        plan: &ThreadingPlan,
+    ) -> Result<Document<'static>> {
+        if plan.use_direct_params {
+            return self.generate_counted_stateful_loop_direct(frame, body, plan);
+        }
+        if plan.use_hybrid_params {
+            return self.generate_counted_stateful_loop_hybrid(frame, body, plan);
+        }
+
+        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
+
+        // BT-3168 (ADR 0111 Addendum 9, Question 3): an extra, explicit
+        // trailing fun parameter when the body threads `ClassVars` — the
+        // arity grows to 3 (`counter, StateAcc, ClassVars`) instead of 2.
+        // `frame.class_var_param` was captured pre-loop by the
+        // `counted_loops.rs` constructor that built this frame.
+        let arity = if frame.class_var_param.is_some() {
+            3
+        } else {
+            2
+        };
+        let cv_param_doc = class_var_arg_doc(frame.class_var_param.as_ref());
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.push(pack_doc);
+        docs.push(frame.preamble.clone());
+        docs.push(docvec![
+            " letrec ",
+            leaf::fname(frame.fn_name.clone(), arity),
+            " = fun (",
+            leaf::var(frame.counter.clone()),
+            ", StateAcc",
+            cv_param_doc.clone(),
+            ") -> ",
+        ]);
+
+        self.push_scope();
+
+        // Bind the block counter param if any (e.g. to:do: [:i | ...] → bind "i" → counter)
+        if let Some(ref bt_name) = frame.body_param {
+            self.bind_var(bt_name, &frame.counter);
+        }
+
+        // Unpack threaded locals at the top of each iteration
+        let unpack_docs = plan.generate_unpack_at_iteration_start(self);
+        docs.extend(unpack_docs);
+
+        // Condition + true arm
+        docs.push(frame.continue_header.clone());
+
+        // Body
+        let (body_doc, final_state_version) =
+            self.generate_threaded_loop_body(body, plan, &super::list_ops::BodyKind::Letrec)?;
+        let final_class_var = self.last_loop_class_var.take();
+        docs.push(body_doc);
+        let final_state_var = super::super::util::versioned_var("StateAcc", final_state_version);
+        let recur_cv_doc = final_class_var
+            .as_ref()
+            .map_or(Document::Nil, |v| docvec![", ", leaf::var(v.clone())]);
+
+        self.pop_scope();
+
+        // Recursive call + false arm + initial apply
+        docs.push(docvec![
+            " apply ",
+            leaf::fname(frame.fn_name.clone(), arity),
+            " (",
+            frame.next_counter.clone(),
+            ", ",
+            leaf::var(final_state_var),
+            recur_cv_doc,
+            ") ",
+            frame.false_arm.clone(),
+            docvec![
+                "in apply ",
+                leaf::fname(frame.fn_name.clone(), arity),
+                " (",
+                frame.initial_counter.clone(),
+                ", ",
+                leaf::var(init_state),
+                cv_param_doc,
+                ")",
+            ],
+        ]);
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// BT-1275: Direct-params variant of `generate_counted_stateful_loop`.
+    ///
+    /// Uses `fun (I, Var1, ..., VarN)` instead of `fun (I, StateAcc)`.
+    /// The `StateAcc` map is rebuilt only once in the false (exit) arm.
+    fn generate_counted_stateful_loop_direct(
+        &mut self,
+        frame: &CountedLoopFrame,
+        body: &Block,
+        plan: &ThreadingPlan,
+    ) -> Result<Document<'static>> {
+        // Collect initial arg values from the outer scope (before push_scope overwrites them).
+        let initial_direct_args = plan.initial_direct_args(self);
+
+        // Build the fun parameter list: (<counter>, Var1, ..., VarN)
+        let param_names: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
+            .collect();
+        let arity = 1 + param_names.len();
+        let param_list_doc = join(
+            std::iter::once(leaf::var(frame.counter.clone()))
+                .chain(param_names.iter().map(|v| leaf::var(v.clone()))),
+            &Document::Str(", "),
+        );
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.push(frame.preamble.clone());
+        docs.push(docvec![
+            " letrec ",
+            leaf::fname(frame.fn_name.clone(), arity),
+            " = fun (",
+            param_list_doc,
+            ") -> ",
+        ]);
+
+        self.push_scope();
+
+        // Bind the block counter param if any (e.g. to:do: [:i | ...] → bind "i" → counter)
+        if let Some(ref bt_name) = frame.body_param {
+            self.bind_var(bt_name, &frame.counter);
+        }
+
+        // Register var → param bindings (no unpack docs emitted in
+        // direct-params mode — structurally guaranteed by
+        // `generate_unpack_at_iteration_start`'s own
+        // `if !use_direct_params && !use_hybrid_params` guard).
+        plan.generate_unpack_at_iteration_start(self);
+
+        // Condition + true arm
+        docs.push(frame.continue_header.clone());
+
+        // Body — set in_direct_params_loop so nested list ops skip StateAcc repack (BT-1329).
+        let prev_direct_params_loop = self.in_direct_params_loop;
+        self.in_direct_params_loop = true;
+        let (body_doc, _) =
+            self.generate_threaded_loop_body(body, plan, &super::list_ops::BodyKind::Letrec)?;
+        self.in_direct_params_loop = prev_direct_params_loop;
+        docs.push(body_doc);
+
+        // Collect final var names after body execution (updated bindings inside scope).
+        let final_args: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| {
+                self.lookup_var(v)
+                    .cloned()
+                    .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v))
+            })
+            .collect();
+
+        // Build exit StateAcc using the INITIAL param names (current iteration values).
+        let exit_stateacc = plan.generate_exit_stateacc(&param_names, self);
+
+        self.pop_scope();
+
+        // Build Document arg lists for the recursive call and the initial apply.
+        let recursive_args_doc = join(
+            std::iter::once(frame.next_counter.clone())
+                .chain(final_args.into_iter().map(leaf::var)),
+            &Document::Str(", "),
+        );
+        let initial_args_doc = join(
+            std::iter::once(frame.initial_counter.clone())
+                .chain(initial_direct_args.into_iter().map(leaf::var)),
+            &Document::Str(", "),
+        );
+
+        // Recursive call + false arm (with rebuilt StateAcc) + initial apply.
+        docs.push(docvec![
+            " apply ",
+            leaf::fname(frame.fn_name.clone(), arity),
+            " (",
+            recursive_args_doc,
+            ") ",
+            "<'false'> when 'true' -> ",
+            exit_stateacc,
+            " end ",
+            "in apply ",
+            leaf::fname(frame.fn_name.clone(), arity),
+            " (",
+            initial_args_doc,
+            ")",
+        ]);
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// BT-1326/BT-1342: Full-extract variant of `generate_counted_stateful_loop`.
+    ///
+    /// Uses `fun (I, Var1, ..., VarN, RField1, ..., MField1, ...)` — locals, read-only fields,
+    /// AND mutated fields as direct fun parameters. No `State` parameter.
+    ///
+    /// Field reads resolve to direct parameters. Field writes become simple variable
+    /// rebindings (no `maps:put` per iteration). At loop exit, mutated fields are repacked
+    /// into the initial State map.
+    fn generate_counted_stateful_loop_hybrid(
+        &mut self,
+        frame: &CountedLoopFrame,
+        body: &Block,
+        plan: &ThreadingPlan,
+    ) -> Result<Document<'static>> {
+        // Collect initial arg values from the outer scope (before push_scope overwrites them).
+        let initial_local_args = plan.initial_direct_args(self);
+        let initial_state = plan.initial_state_var.clone();
+
+        // Pre-extract ALL fields (readonly + mutated) before the letrec.
+        // Each field is read once from the outer state via maps:get.
+        // The leading space before "let" matches the surrounding Core Erlang formatting.
+        let (pre_extract_docs, readonly_params, mutated_params) =
+            self.pre_extract_hybrid_fields(plan, &initial_state, (" ", ""));
+
+        // Fun param names: locals + readonly fields + mutated fields (NO State param).
+        let local_param_names: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
+            .collect();
+        let readonly_param_names: Vec<String> =
+            readonly_params.iter().map(|(_, v)| v.clone()).collect();
+        let mutated_param_names: Vec<String> =
+            mutated_params.iter().map(|(_, v)| v.clone()).collect();
+        let arity =
+            1 + local_param_names.len() + readonly_param_names.len() + mutated_param_names.len();
+
+        // Build param list doc: (<counter>, Var1, ..., VarN, RField1, ..., MField1, ...)
+        let param_list_doc = join(
+            std::iter::once(leaf::var(frame.counter.clone()))
+                .chain(local_param_names.iter().map(|v| leaf::var(v.clone())))
+                .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
+                .chain(mutated_param_names.iter().map(|v| leaf::var(v.clone()))),
+            &Document::Str(", "),
+        );
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.push(frame.preamble.clone());
+        docs.extend(pre_extract_docs);
+        docs.push(docvec![
+            " letrec ",
+            leaf::fname(frame.fn_name.clone(), arity),
+            " = fun (",
+            param_list_doc,
+            ") -> ",
+        ]);
+
+        self.push_scope();
+
+        // Bind block counter param if any (e.g. to:do: [:i | ...] → bind "i" → counter)
+        if let Some(ref bt_name) = frame.body_param {
+            self.bind_var(bt_name, &frame.counter);
+        }
+
+        // Register local var bindings (no unpack docs emitted in hybrid mode
+        // — structurally guaranteed by `generate_unpack_at_iteration_start`'s
+        // own `if !use_direct_params && !use_hybrid_params` guard).
+        plan.generate_unpack_at_iteration_start(self);
+
+        // Condition + true arm
+        docs.push(frame.continue_header.clone());
+
+        // BT-1326/BT-1342: Run body with hybrid field params active; pop scope on error.
+        let (body_doc, final_mutated_field_args) =
+            self.run_counted_hybrid_body(body, plan, &readonly_params, &mutated_params)?;
+        docs.push(body_doc);
+
+        // Final local var args after body (updated bindings from scope).
+        let final_local_args = self.collect_final_local_args(plan);
+
+        // Exit StateAcc: uses initial param names (current iteration's starting values).
+        // In the exit arm (false branch), the body hasn't executed, so params are unchanged.
+        let exit_stateacc = plan.generate_exit_stateacc_full_extract(
+            &local_param_names,
+            &mutated_param_names,
+            &initial_state,
+            self,
+        );
+
+        self.pop_scope();
+
+        Self::append_counted_hybrid_loop_tail(
+            &mut docs,
+            frame,
+            arity,
+            final_local_args,
+            &readonly_param_names,
+            &mutated_param_names,
+            initial_local_args,
+            final_mutated_field_args,
+            exit_stateacc,
+        );
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// Appends the recursive call, exit arm, and initial apply call to the counted hybrid loop docs.
+    /// Executes the counted hybrid loop body with hybrid-mode field params active.
+    ///
+    /// Sets up `hybrid_readonly_field_params` and `hybrid_mutated_fields` from the
+    /// pre-extracted params, runs the threaded body, captures final mutated field arg names,
+    /// and restores all hybrid state. Calls `pop_scope` and returns an error if body fails.
+    fn run_counted_hybrid_body(
+        &mut self,
+        body: &Block,
+        plan: &ThreadingPlan,
+        readonly_params: &[(String, String)],
+        mutated_params: &[(String, String)],
+    ) -> Result<(Document<'static>, Vec<String>)> {
+        let prev_hybrid = self.in_hybrid_loop;
+        let prev_direct_params_loop = self.in_direct_params_loop;
+        let mut all_field_params: std::collections::HashMap<String, String> =
+            readonly_params.iter().cloned().collect();
+        for (field, var) in mutated_params {
+            all_field_params.insert(field.clone(), var.clone());
+        }
+        let prev_readonly_field_params =
+            std::mem::replace(&mut self.hybrid_readonly_field_params, all_field_params);
+        let prev_mutated_fields = std::mem::replace(
+            &mut self.hybrid_mutated_fields,
+            plan.mutated_fields.iter().cloned().collect(),
+        );
+        self.in_hybrid_loop = true;
+        self.in_direct_params_loop = true; // BT-1329: nested list ops skip StateAcc repack
+        let body_result =
+            self.generate_threaded_loop_body(body, plan, &super::list_ops::BodyKind::Letrec);
+
+        // BT-1342: Capture final mutated field var names BEFORE restoring maps.
+        let final_mutated_field_args: Vec<String> = plan
+            .mutated_fields
+            .iter()
+            .map(|field| {
+                self.hybrid_readonly_field_params
+                    .get(field)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        mutated_params
+                            .iter()
+                            .find(|(f, _)| f == field)
+                            .map(|(_, v)| v.clone())
+                            .unwrap_or_default()
+                    })
+            })
+            .collect();
+
+        self.hybrid_mutated_fields = prev_mutated_fields;
+        self.hybrid_readonly_field_params = prev_readonly_field_params;
+        self.in_hybrid_loop = prev_hybrid;
+        self.in_direct_params_loop = prev_direct_params_loop;
+        let (body_doc, _) = match body_result {
+            Ok(result) => result,
+            Err(err) => {
+                self.pop_scope();
+                return Err(err);
+            }
+        };
+        Ok((body_doc, final_mutated_field_args))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn append_counted_hybrid_loop_tail(
+        docs: &mut Vec<Document<'static>>,
+        frame: &CountedLoopFrame,
+        arity: usize,
+        final_local_args: Vec<String>,
+        readonly_param_names: &[String],
+        mutated_param_names: &[String],
+        initial_local_args: Vec<String>,
+        final_mutated_field_args: Vec<String>,
+        exit_stateacc: Document<'static>,
+    ) {
+        // Recursive call args: next_counter, updated locals, readonly fields (unchanged), updated mutated fields
+        let recursive_args_doc = join(
+            std::iter::once(frame.next_counter.clone())
+                .chain(final_local_args.into_iter().map(leaf::var))
+                .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
+                .chain(final_mutated_field_args.into_iter().map(leaf::var)),
+            &Document::Str(", "),
+        );
+
+        // Initial apply args: initial_counter, initial locals, initial readonly vals, initial mutated vals
+        let initial_args_doc = join(
+            std::iter::once(frame.initial_counter.clone())
+                .chain(initial_local_args.into_iter().map(leaf::var))
+                .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
+                .chain(mutated_param_names.iter().map(|v| leaf::var(v.clone()))),
+            &Document::Str(", "),
+        );
+
+        docs.push(docvec![
+            " apply ",
+            leaf::fname(frame.fn_name.clone(), arity),
+            " (",
+            recursive_args_doc,
+            ") ",
+            "<'false'> when 'true' -> ",
+            exit_stateacc,
+            " end ",
+            "in apply ",
+            leaf::fname(frame.fn_name.clone(), arity),
+            " (",
+            initial_args_doc,
+            ")",
+        ]);
     }
 }
 
