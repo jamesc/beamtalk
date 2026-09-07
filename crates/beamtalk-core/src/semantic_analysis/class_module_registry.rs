@@ -255,6 +255,31 @@ pub fn validate_stdlib_module_name(
 /// Wraps two inverse maps so both directions of the question — "what module
 /// is class X in" and "what class does module Y back" — are O(1) lookups
 /// rather than a re-derivation.
+///
+/// # Invariant: always fresh, never cached (BT-3443, ADR 0119 Open Questions)
+///
+/// This type has no built-in invalidation — no version counter, no
+/// generation stamp, nothing that would notice a class was renamed out from
+/// under it. It MUST be constructed fresh from current source data on every
+/// use. Every construction site today follows this already: `beamtalk-
+/// compiler-port`'s `derive_class_module_name` calls [`Self::new`] on every
+/// request, and `beamtalk-repl`'s `CoreErlangGenerator::set_class_module_index`
+/// rebuilds one from the `class_module_index` wire map (ADR 0050) on every
+/// request. Neither persists an instance across requests, so there is
+/// nothing here for ADR 0114's live `renameTo:`/`moveClass:to:` to leave
+/// stale — the Erlang side's live class registry (what those primitives
+/// mutate directly) is exactly what gets re-read to build the next
+/// request's fresh registry.
+///
+/// A future caller that introduces cross-request or cross-compile caching
+/// of a `ClassModuleRegistry` instance (or its backing maps) — e.g. an
+/// "avoid rebuilding this every request" perf optimization — MUST also hook
+/// ADR 0114's rename/move mutations to rebuild or invalidate that cache.
+/// Skipping that would silently reintroduce the BT-3081/BT-3431/BT-3432
+/// stale-name bug shape this registry exists to prevent. See this issue
+/// (BT-3443) and ADR 0119's Open Questions for the full discussion; no such
+/// caching exists yet, so no invalidation hook exists yet either (CLAUDE.md:
+/// don't add handling for scenarios that can't currently happen).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClassModuleRegistry {
     class_to_module: HashMap<(PackageId, String), ModuleName>,
@@ -700,6 +725,73 @@ mod tests {
                 &ModuleName::Generated("bt@stdlib@ordered_collection".to_string())
             )
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn bt_3443_new_instances_share_no_hidden_state_across_construction() {
+        // BT-3443 (ADR 0119 Open Questions): pins the "always fresh, never
+        // cached" invariant documented on `ClassModuleRegistry` itself —
+        // `ClassModuleRegistry::new()` must produce a genuinely independent
+        // instance every time, with no hidden shared/static state (a
+        // thread-local, a `once_cell`, anything module-scoped) that a class
+        // rename could leave stale between two separate constructions.
+        //
+        // Two registries are built from DIFFERENT inputs for the SAME class
+        // name — modelling the exact "next request already sees the
+        // rename" shape today's fresh-per-request construction sites rely
+        // on (`derive_class_module_name`'s `ClassModuleRegistry::new()` per
+        // call; `set_class_module_index`'s rebuild from the wire map per
+        // call) — and each must answer only for its own assigned module,
+        // never leaking the other's.
+        let mut first = ClassModuleRegistry::new();
+        let first_module = first.assign(
+            &PackageId::Stdlib,
+            "Bt3443Widget",
+            &ModuleNamingScheme::Stdlib,
+        );
+        assert_eq!(
+            first_module,
+            ModuleName::Generated("bt@stdlib@bt3443widget".to_string())
+        );
+
+        // A second, independent registry resolving the SAME class name to a
+        // DIFFERENT module — the shape a live `renameTo:` produces between
+        // two requests (old module gone, new module assigned).
+        let mut second = ClassModuleRegistry::new();
+        second.insert(
+            PackageId::Stdlib,
+            "Bt3443Widget",
+            ModuleName::Generated("bt@stdlib@bt3443widget_renamed".to_string()),
+        );
+
+        // Each instance answers only for what IT was built from — no
+        // leakage of `first`'s entry into `second`, or vice versa, that
+        // hidden shared state would cause.
+        assert_eq!(
+            first.module_for_class(&PackageId::Stdlib, "Bt3443Widget"),
+            Some(&first_module)
+        );
+        assert_eq!(
+            second.module_for_class(&PackageId::Stdlib, "Bt3443Widget"),
+            Some(&ModuleName::Generated(
+                "bt@stdlib@bt3443widget_renamed".to_string()
+            ))
+        );
+        assert_ne!(
+            first.module_for_class(&PackageId::Stdlib, "Bt3443Widget"),
+            second.module_for_class(&PackageId::Stdlib, "Bt3443Widget"),
+            "two independently-constructed registries must never agree on a \
+             stale answer for the same class name — each is built fresh \
+             from its own input, with no shared state to go stale between them"
+        );
+
+        // A brand-new, empty registry must never inherit anything from
+        // either prior instance either.
+        let fresh = ClassModuleRegistry::new();
+        assert_eq!(
+            fresh.module_for_class(&PackageId::Stdlib, "Bt3443Widget"),
+            None
         );
     }
 
