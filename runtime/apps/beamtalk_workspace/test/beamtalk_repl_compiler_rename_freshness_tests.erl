@@ -22,17 +22,16 @@ this same "always fresh, never cached" contract — that side has no live
 registry to poll at all, so its own regression test is a from-scratch
 per-instance independence check instead of this rename-freshness check.
 
-Uses a freestanding dynamic class (`beamtalk_class_builder:register/1`,
-mirroring `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s own
-`register_dynamic_class/1` helper) rather than a real `.bt` file: this test
-only cares whether `build_class_module_index/0`'s snapshot is fresh, not
-about `classRenameTo/2`'s reference-site-rewrite machinery (already
-covered by that other module), so no `beamtalk_workspace_meta`/project
-directory is needed here.
+Uses a freestanding dynamic class (`beamtalk_test_dynamic_class:register/1`,
+BT-3443's own extraction of `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s
+originally-copied `register_dynamic_class/1` helper) rather than a real
+`.bt` file: this test only cares whether `build_class_module_index/0`'s
+snapshot is fresh, not about `classRenameTo/2`'s reference-site-rewrite
+machinery (already covered by that other module), so no
+`beamtalk_workspace_meta`/project directory is needed here.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%====================================================================
 %% Fixture: one freestanding dynamic class, no source file, no project.
@@ -45,7 +44,7 @@ setup() ->
         {error, {already_started, _}} -> ok
     end,
     application:ensure_all_started(beamtalk_runtime),
-    {ClassObj, _Pid} = register_dynamic_class('Bt3443RenameFreshnessSource'),
+    {ClassObj, _Pid} = beamtalk_test_dynamic_class:register('Bt3443RenameFreshnessSource'),
     ClassObj.
 
 teardown(_ClassObj) ->
@@ -61,19 +60,6 @@ teardown(_ClassObj) ->
         ['Bt3443RenameFreshnessSource', 'Bt3443RenameFreshnessTarget']
     ),
     ok.
-
-register_dynamic_class(ClassName) ->
-    State = #{
-        className => ClassName,
-        superclassRef => 'Object',
-        fieldSpecs => #{},
-        methodSpecs => #{}
-    },
-    {ok, Pid} = beamtalk_class_builder:register(State),
-    Tag = beamtalk_class_registry:class_object_tag(ClassName),
-    Module = beamtalk_object_class:module_name(Pid),
-    ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = Pid},
-    {ClassObj, Pid}.
 
 %%====================================================================
 %% The invariant itself.
