@@ -304,12 +304,12 @@ version() ->
 
 -ifdef(TEST).
 -doc """
-Clear all cached class metadata *and* the ambient alias cache (test use
-only).
+Clear all cached class metadata, the ambient protocol cache, and the
+ambient alias cache (test use only).
 
-ADR 0050 Phase 3 / ADR 0108 (BT-2899): used for test isolation — call before
-tests that need a clean ambient cache. Synchronous so the next compile sees
-both caches empty.
+ADR 0050 Phase 3 / ADR 0108 (BT-2899) / BT-3473: used for test isolation —
+call before tests that need a clean ambient cache. Synchronous so the next
+compile sees all three caches empty.
 """.
 -spec clear_classes() -> ok.
 clear_classes() ->

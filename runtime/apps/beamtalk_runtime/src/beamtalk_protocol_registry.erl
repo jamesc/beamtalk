@@ -262,19 +262,28 @@ unregister_protocol(Module) when is_atom(Module) ->
         undefined ->
             ok;
         _ ->
-            %% BT-3473: Capture the names being purged *before* deleting them,
-            %% so the compiler server's ambient `protocols` cache (mirroring
-            %% `classes`' own register/remove pair) can be told which entries
-            %% no longer exist — otherwise a purged protocol's stale entry
-            %% would linger there forever, the same gap BT-3105 closed for
-            %% `classes` via `remove_class/1`.
-            Purged = [
-                Name
-             || {Name, #{module := Mod}} <- ets:tab2list(?PROTOCOL_TABLE),
-                Mod =:= Module
-            ],
+            %% BT-3473: Capture the names being purged via the *same* match
+            %% condition `select_delete` below uses, immediately before
+            %% deleting them, so the compiler server's ambient `protocols`
+            %% cache (mirroring `classes`' own register/remove pair) is told
+            %% about exactly the rows actually removed — otherwise a purged
+            %% protocol's stale entry would linger there forever, the same
+            %% gap BT-3105 closed for `classes` via `remove_class/1`.
+            %%
+            %% Code-review finding: an earlier version computed `Purged` from
+            %% an independent `ets:tab2list/1` scan, then ran `select_delete`
+            %% as a second, separate scan — a protocol re-registered under a
+            %% different module in between would have its (now
+            %% differently-owned) row correctly left in place by
+            %% `select_delete`, but the stale `Purged` snapshot would still
+            %% notify the compiler server to remove it. Deriving `Purged` from
+            %% an `ets:select/2` using the identical guard, run immediately
+            %% before the delete, narrows that window to the two ETS calls
+            %% themselves instead of this function's whole body.
+            MatchGuard = [{'=:=', '$1', {const, Module}}],
+            Purged = ets:select(?PROTOCOL_TABLE, [{{'$2', #{module => '$1'}}, MatchGuard, ['$2']}]),
             _ = ets:select_delete(?PROTOCOL_TABLE, [
-                {{'_', #{module => '$1'}}, [{'=:=', '$1', {const, Module}}], [true]}
+                {{'_', #{module => '$1'}}, MatchGuard, [true]}
             ]),
             lists:foreach(fun notify_compiler_server_removed/1, Purged),
             ok
