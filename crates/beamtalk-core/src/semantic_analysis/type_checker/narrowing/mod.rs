@@ -15,9 +15,13 @@
 //! AST visitors used by the narrowing machinery (divergence checks,
 //! reassignment scans) live in [`visitors`]. Variable-name extraction
 //! (including `self.field` synthetic keys) lives in [`extract`].
+//!
+//! Refinement — resolving a detected shape against the current `TypeEnv`
+//! to compute concrete branch types — lives in [`refine`] (BT-3461).
 
 pub(crate) mod extract;
 pub(crate) mod info;
+mod refine;
 pub(crate) mod refinement;
 pub(crate) mod rules;
 pub(crate) mod visitors;
