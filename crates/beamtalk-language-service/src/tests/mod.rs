@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `beamtalk-language-service` tests, split by feature per BT-3450
-//! (mirroring `beamtalk-core`'s `type_checker/tests/` layout from BT-2061).
+//! `beamtalk-language-service` tests, split by feature (mirroring
+//! `beamtalk-core`'s `type_checker/tests/` layout).
 //!
 //! Shared fixtures live in `common`. Each feature module is kept well under
 //! the ~2000-line guideline in `rust-guidelines.md` § Testing so parallel PRs

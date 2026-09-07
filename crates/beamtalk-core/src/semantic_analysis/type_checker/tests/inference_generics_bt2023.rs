@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! BT-2023 generic-argument inference: nullable-union unification, nested-generic
-//! block params, and FFI polymorphic return-type substitution (moved from
-//! `inference.rs` per BT-3450).
+//! block params, and FFI polymorphic return-type substitution.
 
 use super::super::*;
 use super::common::*;

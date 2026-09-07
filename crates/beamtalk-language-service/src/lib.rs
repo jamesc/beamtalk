@@ -67,8 +67,8 @@ mod project_index;
 // `beamtalk_language_service::queries::`.
 pub mod queries;
 pub mod runtime_delegate;
-// All test code lives in `tests/`, split by feature (BT-3450): per-feature
-// modules plus the property-based (`property_tests`) suite.
+// All test code lives in `tests/`, split by feature: per-feature modules
+// plus the property-based (`property_tests`) suite.
 #[cfg(test)]
 mod tests;
 mod value_objects;

@@ -3,7 +3,7 @@
 
 //! `NativeTypeRegistry`-backed completions and protocol registration/
 //! visibility in the project index, including cross-file protocol
-//! go-to-definition and find-references (moved from `lib.rs` per BT-3450).
+//! go-to-definition and find-references.
 
 use super::common::*;
 

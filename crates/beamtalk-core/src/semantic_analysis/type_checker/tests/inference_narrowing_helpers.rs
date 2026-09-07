@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `detect_narrowing`, `non_nil_type`, `extract_variable_name`, and
-//! `block_has_return` inference helpers (moved from `inference.rs` per BT-3450).
+//! `block_has_return` inference helpers.
 
 use super::common::*;
 use crate::semantic_analysis::type_checker::narrowing::extract::extract_variable_name;

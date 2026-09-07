@@ -4,7 +4,7 @@
 //! Assignment/return/message-send unparsing, synthesized methods, blank-line
 //! preservation (BT-987), method-body comment indentation, class-side method
 //! prefix placement, file trailing comments, match-expression formatting, and
-//! map-literal formatting (moved from `unparse/mod.rs` per BT-3450).
+//! map-literal formatting.
 
 use super::common::*;
 

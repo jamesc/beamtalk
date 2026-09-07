@@ -3,7 +3,7 @@
 
 //! BT-2242 type-hierarchy queries (`type_hierarchy_prepare_at`, `supertypes_of`,
 //! `subtypes_of`) and BT-2317 protocol/class shadowing on the type-hierarchy
-//! path (moved from `lib.rs` per BT-3450).
+//! path.
 
 use super::common::*;
 

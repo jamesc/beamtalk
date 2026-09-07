@@ -3,7 +3,7 @@
 
 //! `find_references` from method-definition headers (unary/keyword/binary,
 //! cross-file, class/standalone methods) and the click-target rejection
-//! matrix for non-name header tokens (moved from `lib.rs` per BT-3450).
+//! matrix for non-name header tokens.
 
 use super::common::*;
 

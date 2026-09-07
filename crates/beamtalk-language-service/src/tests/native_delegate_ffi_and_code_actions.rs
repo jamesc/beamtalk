@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Native-delegate/FFI-call detection and `code_actions` (annotation
-//! suggestions, range filtering, cursor-boundary matching) (moved from
-//! `lib.rs` per BT-3450).
+//! suggestions, range filtering, cursor-boundary matching).
 
 use super::common::*;
 

@@ -381,7 +381,7 @@ pub(super) fn eco_string(s: &str) -> ecow::EcoString {
 /// Helper: build a `MethodInfo` with the given param types and return type.
 ///
 /// Shared by the `inference_method_local_params` and `inference_generics_bt2023`
-/// feature modules (BT-3450) — both exercise `TypeChecker::infer_method_local_params`
+/// feature modules — both exercise `TypeChecker::infer_method_local_params`
 /// against fixture `MethodInfo`s.
 pub(super) fn method_info(
     selector: &str,

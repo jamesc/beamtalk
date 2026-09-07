@@ -3,8 +3,7 @@
 
 //! `format_source`, `matchExhaustive:` round-tripping, difference/intersection/
 //! grouped type-annotation unparsing, comment unparsing, expression-statement
-//! comments, method definitions, and literal round-trips (moved from
-//! `unparse/mod.rs` per BT-3450).
+//! comments, method definitions, and literal round-trips.
 
 use super::common::*;
 

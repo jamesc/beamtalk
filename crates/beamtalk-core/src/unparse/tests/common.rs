@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared test fixtures for `unparse` per-feature tests (BT-3450).
+//! Shared test fixtures for `unparse` per-feature tests.
 //!
 //! These helpers were previously inlined at the top (and middle) of the
 //! monolithic `mod.rs` test module. They are re-exported into every child

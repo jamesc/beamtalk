@@ -3,8 +3,7 @@
 
 //! Keyword-message block-argument formatting (BT-1064), 3+/4-keyword
 //! always-break rules (BT-1294), protocol definition round-trips (BT-1618),
-//! and type-alias round-trips (ADR 0108 Phase 1, BT-2894) (moved from
-//! `unparse/mod.rs` per BT-3450).
+//! and type-alias round-trips (ADR 0108 Phase 1, BT-2894).
 
 use super::common::*;
 

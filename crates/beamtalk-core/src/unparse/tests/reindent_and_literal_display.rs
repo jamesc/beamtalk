@@ -3,7 +3,7 @@
 
 //! `escape_string_literal`, `reindent_method_source` (BT-2584), the
 //! `unparse_method` round-trip, and `unparse_literal_display` (BT-3088)
-//! (moved from `unparse/mod.rs` per BT-3450).
+//!.
 
 use super::common::*;
 

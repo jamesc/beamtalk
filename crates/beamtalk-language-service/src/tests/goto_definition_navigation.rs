@@ -3,8 +3,7 @@
 
 //! `goto_definition` navigation: cross-file classes/methods, stdlib classes,
 //! superclass/type-annotation/constructor-pattern targets, receiver-context
-//! resolution, and header-to-parent-override navigation (moved from
-//! `lib.rs` per BT-3450).
+//! resolution, and header-to-parent-override navigation.
 
 use super::common::*;
 

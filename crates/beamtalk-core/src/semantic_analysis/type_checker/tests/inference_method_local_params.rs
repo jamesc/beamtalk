@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `infer_method_local_params`, block-inference regressions, and
-//! `substitute_return_type` with method-local params (moved from
-//! `inference.rs` per BT-3450).
+//! `substitute_return_type` with method-local params.
 
 use super::super::*;
 use super::common::*;

@@ -2149,8 +2149,8 @@ fn join_docs_vec(docs: Vec<Document<'static>>, sep: &'static str) -> Vec<Documen
 
 // --- Tests ---
 //
-// All test code lives in `tests/`, split by feature (BT-3450): the
-// per-feature files above, plus the property-based (`property_tests`) and
-// corpus-wide conformance (`corpus_conformance_tests`) suites.
+// All test code lives in `tests/`, split by feature: the per-feature files
+// above, plus the property-based (`property_tests`) and corpus-wide
+// conformance (`corpus_conformance_tests`) suites.
 #[cfg(test)]
 mod tests;

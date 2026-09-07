@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Core `infer_expr` expression-type inference, `Pattern::Nil`/`Pattern::Type`
-//! narrowing, `build_substitution_map`, and `infer_stmts` (moved from
-//! `inference.rs` per BT-3450).
+//! narrowing, `build_substitution_map`, and `infer_stmts`.
 
 use super::common::*;
 use crate::ast::BlockParameter;

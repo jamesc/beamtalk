@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `split_type_params`, `extract_ffi_function_info`, `resolve_type_string`
-//! substitution, and `set_param_types` (moved from `inference.rs` per BT-3450).
+//! substitution, and `set_param_types`.
 
 use super::super::*;
 use super::common::*;

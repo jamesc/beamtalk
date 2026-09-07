@@ -4,8 +4,7 @@
 //! Class-definition header trailing comments (BT-2933), `handleScope:` unparse
 //! emission (BT-2942), doc-comment/type-alias interactions (BT-2924),
 //! top-level declaration order (BT-2907), and blank-line preservation between
-//! top-level declarations and section boundaries (BT-2929, BT-2945) (moved
-//! from `unparse/mod.rs` per BT-3450).
+//! top-level declarations and section boundaries (BT-2929, BT-2945).
 
 use super::common::*;
 

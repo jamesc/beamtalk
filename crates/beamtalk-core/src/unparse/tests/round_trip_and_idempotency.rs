@@ -3,8 +3,7 @@
 
 //! Parse → unparse → parse round-tripping, idempotency (including against the
 //! `getting-started` examples and `fixtures/` corpus), and identity
-//! (already-canonical source is a formatting no-op) tests (moved from
-//! `unparse/mod.rs` per BT-3450).
+//! (already-canonical source is a formatting no-op) tests.
 
 use super::common::*;
 

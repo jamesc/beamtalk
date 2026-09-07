@@ -3,7 +3,7 @@
 
 //! `SimpleLanguageService` smoke tests (diagnostics, completions, hover,
 //! go-to-definition) and the BT-2243 call-hierarchy prepare classifier
-//! (moved from `lib.rs` per BT-3450).
+//!.
 
 use super::common::*;
 

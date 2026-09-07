@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `unparse` tests, split by feature per BT-3450 (mirroring the
-//! `type_checker/tests/` layout from BT-2061).
+//! `unparse` tests, split by feature (mirroring the `type_checker/tests/`
+//! layout).
 //!
 //! Shared fixtures live in `common`. Each feature module is kept well under
 //! the ~2000-line guideline in `rust-guidelines.md` § Testing so parallel PRs

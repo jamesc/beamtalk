@@ -4,7 +4,7 @@
 //! Type-alias visibility in the project-wide registry (completions,
 //! go-to-definition, find-references, hover) and cross-file diagnostics
 //! resolution (classes, protocols, extensions, severity overrides, stdlib
-//! shadowing) (moved from `lib.rs` per BT-3450).
+//! shadowing).
 
 use super::common::*;
 

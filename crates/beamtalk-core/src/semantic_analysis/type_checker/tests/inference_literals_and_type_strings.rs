@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Literal-index tuple `at:`, `infer_literal`, `resolve_type_annotation`, and
-//! plain `resolve_type_string` inference (moved from `inference.rs` per BT-3450).
+//! plain `resolve_type_string` inference.
 
 use super::super::*;
 use super::common::*;
