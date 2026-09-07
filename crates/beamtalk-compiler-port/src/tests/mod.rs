@@ -32,7 +32,23 @@
 //!   fidelity across the compiler-port wire protocol
 
 use super::*;
+// The compiler port's crate-root `main.rs` no longer imports the full ETF
+// helper surface directly, nor the split-out `decode`/`respond`/`registry`/
+// `handlers` internals it dispatches to (they moved with the code that
+// needed them), so this test-support module re-exports what the test
+// submodules reach for via their own `use super::*;`.
+pub(crate) use beamtalk_etf::{
+    atom, binary_from_str as binary, map_get, term_to_atom, term_to_string, term_to_string_list,
+    term_to_usize,
+};
+pub(crate) use eetf::{List, Map, Term};
 pub(crate) use proptest::prelude::*;
+
+pub(crate) use crate::decode::parse_class_hierarchy_from_term;
+pub(crate) use crate::handlers::completion::resolve_completion_type_response;
+pub(crate) use crate::handlers::inline_definitions::derive_class_module_name;
+pub(crate) use crate::registry::{load_diagnostics_overrides_from, load_native_type_registry_from};
+pub(crate) use crate::respond::method_definition_ok_response;
 
 /// Fixture source for the ADR 0082 Phase 1 (BT-2283) span-resolution
 /// commands, shared with the class-module-index and categorization tests
