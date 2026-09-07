@@ -562,12 +562,30 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // includes synthetic protocol class entries from prior loads; injecting
     // them into the hierarchy would cause a spurious "namespace collision"
     // error when `register_module` sees the protocol name as an existing class.
-    let pre_loaded_classes = if !module.protocols.is_empty() && !pre_loaded_classes.is_empty() {
-        let current_protocol_names: std::collections::HashSet<&ecow::EcoString> =
-            module.protocols.iter().map(|p| &p.name.name).collect();
+    //
+    // The same goes for entries named like a *pre-loaded* (cross-file)
+    // protocol: the language service registers every protocol as a synthetic
+    // class entry (`register_protocol_classes`, BT-1933) and hands those along
+    // with the real cross-file classes, so a protocol defined in another file
+    // would reach the hierarchy as a plain class. `has_class` then defeats
+    // `is_type_compatible`'s "unknown type → compatible" escape hatch and the
+    // nominal walk flags a false "declares return type P, but body returns C"
+    // / "expects P, got C" for a class that structurally conforms. `beamtalk
+    // build` never has such entries — protocols live only in the registry —
+    // and the registry seeding below is what makes the name resolve, so
+    // dropping them keeps LSP diagnostics identical to the CLI.
+    let pre_loaded_classes = if !pre_loaded_classes.is_empty()
+        && (!module.protocols.is_empty() || !pre_loaded_protocols.is_empty())
+    {
+        let protocol_names: std::collections::HashSet<&ecow::EcoString> = module
+            .protocols
+            .iter()
+            .map(|p| &p.name.name)
+            .chain(pre_loaded_protocols.iter().map(|p| &p.name))
+            .collect();
         pre_loaded_classes
             .into_iter()
-            .filter(|ci| !current_protocol_names.contains(&ci.name))
+            .filter(|ci| !protocol_names.contains(&ci.name))
             .collect()
     } else {
         pre_loaded_classes
