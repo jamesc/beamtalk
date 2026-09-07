@@ -4577,6 +4577,88 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
     );
 }
 
+// The language service registers every protocol as a synthetic class entry
+// (`register_protocol_classes`, BT-1933) and hands those to the checker along
+// with the real cross-file classes. A protocol defined in *another* file thus
+// reached `analyse_full` as a plain `pre_loaded_classes` entry: `has_class`
+// became true, `is_type_compatible`'s "unknown type → compatible" escape hatch
+// no longer applied, and the nominal walk flagged a false "declares return
+// type P, but body returns C" (and "expects P, got C" for params) for a class
+// that structurally conforms — while `beamtalk build`, which never has such
+// entries, stayed silent. BT-2088 already drops entries named like a protocol
+// in the *current* module; cross-file protocols must be dropped the same way.
+#[test]
+fn pre_loaded_synthetic_protocol_class_entry_does_not_shadow_protocol() {
+    use crate::semantic_analysis::{ClassHierarchy, ProtocolRegistry};
+
+    // The protocol lives in another file — exactly what the language
+    // service does per file: build the hierarchy, then register the
+    // protocol as a synthetic class entry, then extract its ProtocolInfo.
+    let protocol_src =
+        "Protocol define: TimeoutToken\n  cancel -> Boolean\n  isActive -> Boolean\n";
+    let (protocol_module, _) =
+        crate::source_analysis::parse(crate::source_analysis::lex_with_eof(protocol_src));
+    let (hierarchy, _) = ClassHierarchy::build(&protocol_module);
+    let mut hierarchy = hierarchy.expect("protocol file hierarchy builds");
+    hierarchy.register_protocol_classes(&protocol_module);
+    let synthetic_entry = hierarchy
+        .classes()
+        .get("TimeoutToken")
+        .cloned()
+        .expect("register_protocol_classes adds a synthetic class entry");
+    assert!(hierarchy.is_protocol_class("TimeoutToken"));
+    let protocol_infos = ProtocolRegistry::extract_protocol_infos(&protocol_module);
+
+    // This file: a conforming class, returned from a `-> TimeoutToken`
+    // method and passed to a `:: TimeoutToken` parameter.
+    let src = "Value subclass: NullTimer\n\
+               \x20 cancel -> Boolean => false\n\
+               \x20 isActive -> Boolean => true\n\
+               \n\
+               typed Object subclass: Pool\n\
+               \x20 make -> TimeoutToken => NullTimer new\n\
+               \x20 use: t :: TimeoutToken -> Boolean => t cancel\n\
+               \x20 go -> Boolean => self use: NullTimer new\n";
+    let (module, parse_diags) =
+        crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
+    assert!(
+        parse_diags.is_empty(),
+        "fixture must parse cleanly: {parse_diags:?}"
+    );
+
+    let options = crate::CompilerOptions::default();
+    let result =
+        analyse_full(
+            &module,
+            AnalysisContext::default()
+                .with_options(&options)
+                .with_pre_loaded_classes(vec![synthetic_entry])
+                .with_pre_loaded_protocols(protocol_infos)
+                .with_cross_file_extensions(
+                    &crate::compilation::extension_index::ExtensionIndex::new(),
+                ),
+        );
+
+    let false_mismatches: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            d.message.contains("declares return type TimeoutToken")
+                || (d.message.contains("expects TimeoutToken") && d.message.contains("got"))
+        })
+        .map(|d| d.message.clone())
+        .collect();
+    assert!(
+        false_mismatches.is_empty(),
+        "NullTimer structurally conforms to the cross-file protocol TimeoutToken — \
+         no nominal mismatch expected (the CLI reports none), got: {false_mismatches:?}"
+    );
+    assert!(
+        !result.class_hierarchy.has_class("TimeoutToken"),
+        "a cross-file protocol's synthetic class entry must not reach the checker as a class"
+    );
+}
+
 // BT-2898 (ADR 0108 Phase 5): pre-loaded aliases must be seeded into the
 // alias registry the same way pre-loaded protocols are (BT-2006), with
 // current-module definitions winning and cross-package `internal` entries
