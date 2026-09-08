@@ -244,6 +244,61 @@ Counter spawnWith: #{#count => 0}
     );
 }
 
+/// BT-3469: `self spawnWith:` inside a class method (not a class-reference
+/// receiver) also gets literal-map key checking. The class-reference and
+/// `Meta`-typed-receiver branches of `infer_message_send_with_receiver_ty`
+/// already ran this check; the self-in-class-method branch was the one
+/// class-side shape missing it — a gap uncovered while unifying the cascade
+/// continuation loop onto this same shared send path.
+#[test]
+fn spawn_with_self_in_class_method_unknown_key_warns_with_suggestion() {
+    let source = "\
+Actor subclass: Counter
+  state: count = 0
+
+  class make -> Counter =>
+    self spawnWith: #{#cuont => 0}
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let key_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("state key"))
+        .collect();
+    assert_eq!(
+        key_diags.len(),
+        1,
+        "expected one unknown-key warning for `self spawnWith:` in a class \
+         method: {diags:?}"
+    );
+    assert!(
+        key_diags[0].message.contains("cuont") && key_diags[0].message.contains("did you mean"),
+        "warning must name the unknown key and suggest the nearest slot: {}",
+        key_diags[0].message
+    );
+}
+
+/// Negative control: a correctly-spelled key on the same `self spawnWith:`
+/// shape produces no warning.
+#[test]
+fn spawn_with_self_in_class_method_known_key_is_clean() {
+    let source = "\
+Actor subclass: Counter
+  state: count = 0
+
+  class make -> Counter =>
+    self spawnWith: #{#count => 0}
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    assert!(
+        diags.iter().all(|d| !d.message.contains("state key")),
+        "a declared slot key must not warn: {diags:?}"
+    );
+}
+
 // ── Edge 4: `withTimeout:` transparency + cross-process DNU ──────────────────
 
 /// Positive: a forwarded call through the timeout proxy
