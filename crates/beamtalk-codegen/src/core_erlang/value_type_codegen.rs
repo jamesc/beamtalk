@@ -14,6 +14,7 @@ use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
 
 use super::control_flow::{BodyKind, ThreadingPlan};
+use super::dispatch_spec::{self, DispatchSpec};
 use super::intrinsics::validate_block_arity_exact;
 use super::spec_codegen;
 use super::util::ClassIdentity;
@@ -3367,28 +3368,6 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// Returns true if `class` defines `doesNotUnderstand:args:` with a
-    /// structural (unquoted) intrinsic body (BT-1763).
-    ///
-    /// Such a definition acts as a catch-all DNU handler (e.g. `ErlangModule`,
-    /// `Erlang`) rather than the error-raising default in `ProtoObject`
-    /// (`@primitive "doesNotUnderstand:args:"`).  Both the dispatch function
-    /// and the `has_method` function need this same predicate, so it lives
-    /// here to avoid drift between the two sites.
-    fn class_has_catch_all_dnu(class: &ClassDefinition) -> bool {
-        class.methods.iter().any(|m| {
-            m.selector.name() == "doesNotUnderstand:args:"
-                && m.body.len() == 1
-                && matches!(
-                    &m.body[0].expression,
-                    Expression::Primitive {
-                        is_quoted: false,
-                        ..
-                    }
-                )
-        })
-    }
-
     /// Computes the compiled module name for a class (ADR 0016 / ADR 0026 /
     /// BT-794; registry lookup per ADR 0119 / BT-3436).
     ///
@@ -3465,7 +3444,10 @@ impl CoreErlangGenerator {
     ///
     /// For user-defined classes in package mode, uses `bt@{package}@{snake_case}`
     /// prefix (BT-794).
-    fn superclass_module_name(&self, superclass: &str) -> Option<String> {
+    ///
+    /// `pub(super)`: also used by `gen_server::dispatch`'s actor `has_method/1`
+    /// emission (BT-3467), which builds the same `DispatchSpec.superclass`.
+    pub(super) fn superclass_module_name(&self, superclass: &str) -> Option<String> {
         if superclass == "ProtoObject" {
             return None;
         }
@@ -3528,7 +3510,7 @@ impl CoreErlangGenerator {
         let method_branches = self.generate_dispatch_method_branches(class, &mod_name);
 
         // BT-1763: Check whether this class has a catch-all DNU handler.
-        let has_catch_all_dnu = Self::class_has_catch_all_dnu(class);
+        let has_catch_all_dnu = dispatch_spec::class_has_catch_all_dnu(class);
 
         // Default case: extension fallback, then superclass delegation (or DNU)
         let not_found_branch: Document<'static> = if has_catch_all_dnu {
@@ -4009,13 +3991,18 @@ impl CoreErlangGenerator {
 
         // BT-1763: If the class has a catch-all DNU handler, it accepts any
         // selector — return true unconditionally.
-        let has_catch_all_dnu = Self::class_has_catch_all_dnu(class);
+        let has_catch_all_dnu = dispatch_spec::class_has_catch_all_dnu(class);
         if has_catch_all_dnu {
-            return Ok(docvec![
-                "'has_method'/1 = fun (_Selector) ->\n",
-                "    'true'\n",
-                "\n",
-            ]);
+            return Ok(dispatch_spec::generate_has_method_from_spec(
+                &[],
+                &DispatchSpec {
+                    reflection: &[],
+                    class_name: &class_name,
+                    superclass: None,
+                    dnu: true,
+                    auto_slots: None,
+                },
+            ));
         }
 
         // BT-447: Class-methods-only classes delegate directly to superclass —
@@ -4026,18 +4013,18 @@ impl CoreErlangGenerator {
             return self.generate_minimal_has_method(class);
         }
 
-        // Build list of all known selectors
-        let mut selectors: Vec<Document<'static>> = vec![
-            Document::Str("'class'"),
-            Document::Str("'respondsTo:'"),
-            Document::Str("'fieldNames'"),
-            Document::Str("'fieldAt:'"),
-            Document::Str("'fieldAt:put:'"),
-            Document::Str("'perform:'"),
-            Document::Str("'perform:withArguments:'"),
+        // Build the reflection selector list — the seven hard-coded
+        // dispatch/3 arms, plus the default `asString` dispatch/3 generates
+        // for classes that don't define it themselves.
+        let mut reflection: Vec<&'static str> = vec![
+            "class",
+            "respondsTo:",
+            "fieldNames",
+            "fieldAt:",
+            "fieldAt:put:",
+            "perform:",
+            "perform:withArguments:",
         ];
-
-        // Include default asString if dispatch/3 generates one
         let has_explicit_as_string = self
             .semantic_facts
             .class_facts(&class_name)
@@ -4048,55 +4035,25 @@ impl CoreErlangGenerator {
                 "True" | "False" | "UndefinedObject" | "Block"
             )
         {
-            selectors.push(Document::Str("'asString'"));
+            reflection.push("asString");
         }
 
-        // Add class-defined methods
-        for method in &class.methods {
-            let mangled = method.selector.name().to_string();
-            selectors.push(leaf::atom(mangled));
-        }
+        let own_methods: Vec<String> = class
+            .methods
+            .iter()
+            .map(|m| m.selector.name().to_string())
+            .collect();
 
-        // BT-923: Add auto-generated getter and with*: setter selectors
-        if let Some(auto) = auto_methods {
-            for field in &auto.getters {
-                selectors.push(leaf::atom(field.clone()));
-            }
-            for field in &auto.setters {
-                let with_sel = AutoSlotMethods::with_star_selector(field);
-                selectors.push(leaf::atom(with_sel));
-            }
-        }
-
-        let false_branch: Document<'static> = if let Some(ref super_mod) = superclass_mod {
-            docvec![
-                "<'false'> when 'true' -> call ",
-                leaf::atom(super_mod.clone()),
-                ":'has_method'(Selector)\n",
-            ]
-        } else {
-            Document::Str("<'false'> when 'true' -> 'false'\n")
-        };
-
-        let doc = docvec![
-            "'has_method'/1 = fun (Selector) ->\n",
-            "    case call 'lists':'member'(Selector, [",
-            join(selectors, &Document::Str(", ")),
-            "]) of\n",
-            "        <'true'> when 'true' -> 'true'\n",
-            "        <'false'> when 'true' ->\n",
-            "            case call 'beamtalk_extensions':'has'(",
-            leaf::atom(class_name),
-            ", Selector) of\n",
-            "                <'true'> when 'true' -> 'true'\n",
-            "                ",
-            false_branch,
-            "            end\n",
-            "    end\n",
-            "\n",
-        ];
-
-        Ok(doc)
+        Ok(dispatch_spec::generate_has_method_from_spec(
+            &own_methods,
+            &DispatchSpec {
+                reflection: &reflection,
+                class_name: &class_name,
+                superclass: superclass_mod.as_deref(),
+                dnu: false,
+                auto_slots: auto_methods,
+            },
+        ))
     }
 
     /// BT-447: Generates a minimal `dispatch/3` for classes with no instance methods.
@@ -4176,24 +4133,16 @@ impl CoreErlangGenerator {
             .superclass_module_name(class.superclass_name())
             .expect("minimal has_method requires superclass");
 
-        let doc = docvec![
-            "'has_method'/1 = fun (Selector) ->\n",
-            "    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'perform:', 'perform:withArguments:']) of\n",
-            "        <'true'> when 'true' -> 'true'\n",
-            "        <'false'> when 'true' ->\n",
-            "            case call 'beamtalk_extensions':'has'(",
-            leaf::atom(class_name),
-            ", Selector) of\n",
-            "                <'true'> when 'true' -> 'true'\n",
-            "                <'false'> when 'true' -> call ",
-            leaf::atom(super_mod),
-            ":'has_method'(Selector)\n",
-            "            end\n",
-            "    end\n",
-            "\n",
-        ];
-
-        Ok(doc)
+        Ok(dispatch_spec::generate_has_method_from_spec(
+            &[],
+            &DispatchSpec {
+                reflection: &["class", "respondsTo:", "perform:", "perform:withArguments:"],
+                class_name: &class_name,
+                superclass: Some(&super_mod),
+                dnu: false,
+                auto_slots: None,
+            },
+        ))
     }
 }
 

@@ -6056,24 +6056,30 @@ fn test_generate_has_method_from_expression_based_module() {
     );
 }
 
-// ── BT-3467 pinning tests: actor vs. value-type has_method/1 divergence ────
+// ── BT-3467: actor has_method/1 matches value-type has_method/1 ────────────
 //
 // `gen_server::dispatch::generate_has_method` (actor) and
 // `value_type_codegen::generate_primitive_has_method` (value type) implement
 // the same reflection surface — "does this class understand `Selector`,
-// locally, via a foreign extension, or via an ancestor?" — but had drifted:
+// locally, via a foreign extension, or via an ancestor?" — and had drifted:
 // the actor version never checked the extension registry, never delegated
 // to its superclass, and never short-circuited for a catch-all-DNU class,
 // so `respondsTo:` answered differently for an actor than for a value type
-// given the identical situation. These three tests pin that divergence
-// *before* BT-3467 unifies both behind one `DispatchSpec`-driven emitter —
-// see the same assertions' subsequent revision for the fix.
+// given the identical situation. Both now render through the same
+// `DispatchSpec`-driven emitter (`dispatch_spec::generate_has_method_from_spec`).
+// These three tests — an extension method, an inherited method, and a
+// DNU-catch-all class — pinned the pre-fix divergence in an earlier revision
+// of this same file; they now assert the corrected, unified behavior.
 
-/// A minimal actor `ClassDefinition` for has_method pinning tests — same
+/// A minimal actor `ClassDefinition` for `has_method` pinning tests — same
 /// shape as the literal built in `test_generate_has_method_lists_primary_class_methods`
 /// above, factored out since three tests below each need one with a
 /// different method list.
-fn actor_class_def(name: &str, superclass: &str, methods: Vec<MethodDefinition>) -> ClassDefinition {
+fn actor_class_def(
+    name: &str,
+    superclass: &str,
+    methods: Vec<MethodDefinition>,
+) -> ClassDefinition {
     ClassDefinition {
         name: Identifier::new(name, Span::new(0, 0)),
         superclass: Some(Identifier::new(superclass, Span::new(0, 0))),
@@ -6116,7 +6122,10 @@ fn unary_method(name: &str) -> MethodDefinition {
     MethodDefinition {
         selector: MessageSelector::Unary(name.into()),
         parameters: vec![],
-        body: vec![bare(Expression::Literal(Literal::Integer(0), Span::new(0, 0)))],
+        body: vec![bare(Expression::Literal(
+            Literal::Integer(0),
+            Span::new(0, 0),
+        ))],
         return_type: None,
         is_sealed: false,
         is_internal: false,
@@ -6175,56 +6184,55 @@ fn test_generate_has_method_actor_checks_extension_registry() {
     // a selector it doesn't recognize locally (`generate_primitive_has_method`),
     // so `anActor respondsTo: #anExtensionMethod` and `aValue respondsTo:
     // #anExtensionMethod` must answer the same way for the identical
-    // situation. Pinning current (pre-BT-3467) behavior: actor has_method/1
-    // does not check the extension registry at all.
+    // situation. BT-3467: actor has_method/1 now consults the extension
+    // registry too, via the shared `DispatchSpec` emitter.
     let class = actor_class_def("Counter", "Actor", vec![unary_method("increment")]);
     let module = module_with_class(class);
     let generator = CoreErlangGenerator::new("counter");
     let doc = generator.generate_has_method(&module).unwrap();
     let output = doc.to_pretty_string();
     assert!(
-        !output.contains("beamtalk_extensions"),
-        "pinning pre-BT-3467 behavior: actor has_method/1 does not consult \
-         the extension registry, unlike value-type has_method/1. Got:\n{output}"
+        output.contains("call 'beamtalk_extensions':'has'('Counter', Selector)"),
+        "actor has_method/1 must consult the extension registry, matching \
+         value-type has_method/1. Got:\n{output}"
     );
 }
 
 #[test]
-fn test_generate_has_method_actor_does_not_delegate_to_superclass() {
+fn test_generate_has_method_actor_delegates_to_superclass() {
     // Value-type has_method/1 delegates to its superclass module for a
     // selector it doesn't recognize locally, so an inherited method reports
-    // `respondsTo:` true. Pinning current (pre-BT-3467) behavior: actor
-    // has_method/1 has no such delegation — only its own primary methods.
+    // `respondsTo:` true. BT-3467: actor has_method/1 now does the same,
+    // via the shared `DispatchSpec` emitter — a subclass no longer answers
+    // `respondsTo:` false for a selector only an ancestor defines.
     let class = actor_class_def("Counter", "Actor", vec![unary_method("increment")]);
     let module = module_with_class(class);
     let generator = CoreErlangGenerator::new("counter");
     let doc = generator.generate_has_method(&module).unwrap();
     let output = doc.to_pretty_string();
     assert!(
-        !output.contains(":'has_method'(Selector)"),
-        "pinning pre-BT-3467 behavior: actor has_method/1 does not delegate \
-         to a superclass module, unlike value-type has_method/1. Got:\n{output}"
+        output.contains(":'has_method'(Selector)"),
+        "actor has_method/1 must delegate to its superclass module, \
+         matching value-type has_method/1. Got:\n{output}"
     );
 }
 
 #[test]
-fn test_generate_has_method_actor_ignores_catch_all_dnu() {
+fn test_generate_has_method_actor_honors_catch_all_dnu() {
     // A class whose doesNotUnderstand:args: is a structural (unquoted)
     // intrinsic (BT-1763, e.g. Erlang/ErlangModule) accepts every selector —
     // value-type has_method/1 short-circuits to `true` unconditionally for
-    // such a class. Pinning current (pre-BT-3467) behavior: actor
-    // has_method/1 has no such check, so it would answer `false` for an
-    // unlisted selector even on a catch-all-DNU actor class.
+    // such a class. BT-3467: actor has_method/1 now does the same, via the
+    // shared `DispatchSpec` emitter.
     let class = actor_class_def("Proxy", "Actor", vec![catch_all_dnu_method()]);
     let module = module_with_class(class);
     let generator = CoreErlangGenerator::new("proxy");
     let doc = generator.generate_has_method(&module).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        !output.contains("fun (_Selector) ->"),
-        "pinning pre-BT-3467 behavior: actor has_method/1 does not \
-         short-circuit to true for a catch-all-DNU class, unlike \
-         value-type has_method/1. Got:\n{output}"
+    assert_eq!(
+        output, "'has_method'/1 = fun (_Selector) ->\n    'true'\n\n",
+        "actor has_method/1 must short-circuit to true for a catch-all-DNU \
+         class, matching value-type has_method/1. Got:\n{output}"
     );
 }
 
