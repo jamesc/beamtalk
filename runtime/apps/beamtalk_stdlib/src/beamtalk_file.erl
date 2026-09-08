@@ -1104,16 +1104,33 @@ consistent contract across platforms.
         end,
     unicode:characters_to_binary(strip_trailing_separator(Dir)).
 
-%% Strips a single trailing `/` or `\` from Dir, leaving a lone root
-%% separator (e.g. `"/"`) untouched.
+%% Strips a single trailing `/` or `\` from Dir, leaving a root untouched:
+%% either a lone Unix root separator (e.g. `"/"`) or a Windows drive root
+%% (e.g. `"C:\"`) — stripping the latter's separator would leave `"C:"`,
+%% which names the current directory on that drive, not its root, so it is
+%% not an equivalent path.
 -spec strip_trailing_separator(string()) -> string().
 strip_trailing_separator(Dir) ->
     case lists:reverse(Dir) of
         [Sep | Rest] when Rest =/= [], Sep =:= $/ orelse Sep =:= $\\ ->
-            lists:reverse(Rest);
+            case is_drive_root(Rest) of
+                true -> Dir;
+                false -> lists:reverse(Rest)
+            end;
         _ ->
             Dir
     end.
+
+%% `Rest` is Dir reversed with its trailing separator already dropped —
+%% true when what remains is exactly a drive letter followed by `:`
+%% (reversed: `:` then the letter), i.e. Dir was a Windows drive root.
+-spec is_drive_root(string()) -> boolean().
+is_drive_root([$:, Letter]) when
+    (Letter >= $A andalso Letter =< $Z) orelse (Letter >= $a andalso Letter =< $z)
+->
+    true;
+is_drive_root(_) ->
+    false.
 
 %%% ============================================================================
 %%% FFI Shims

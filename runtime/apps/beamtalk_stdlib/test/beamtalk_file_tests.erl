@@ -2318,6 +2318,37 @@ temp_directory_strips_trailing_slash_test() ->
         end
     end.
 
+%% PR #3786 review: a bare Unix root (`"/"`) is correctly left untouched by
+%% `strip_trailing_separator/1`, since stripping it would leave `""`, not an
+%% equivalent path.
+temp_directory_preserves_unix_root_test() ->
+    OrigTmpdir = os:getenv("TMPDIR"),
+    try
+        os:putenv("TMPDIR", "/"),
+        ?assertEqual(<<"/">>, beamtalk_file:'tempDirectory'())
+    after
+        case OrigTmpdir of
+            false -> os:unsetenv("TMPDIR");
+            V -> os:putenv("TMPDIR", V)
+        end
+    end.
+
+%% PR #3786 review: a Windows drive root (`"C:\"`) must also be left
+%% untouched — stripping its trailing separator would leave `"C:"`, which
+%% names the current directory on that drive, not the drive's root, i.e. a
+%% different path, not merely a differently-formatted equivalent one.
+temp_directory_preserves_windows_drive_root_test() ->
+    OrigTmpdir = os:getenv("TMPDIR"),
+    try
+        os:putenv("TMPDIR", "C:\\"),
+        ?assertEqual(<<"C:\\">>, beamtalk_file:'tempDirectory'())
+    after
+        case OrigTmpdir of
+            false -> os:unsetenv("TMPDIR");
+            V -> os:putenv("TMPDIR", V)
+        end
+    end.
+
 temp_directory_falls_back_to_TMP_test() ->
     %% Unset TMPDIR, set TMP, expect TMP's value.
     OrigTmpdir = os:getenv("TMPDIR"),
