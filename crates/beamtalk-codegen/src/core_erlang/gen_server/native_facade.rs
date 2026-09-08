@@ -491,7 +491,7 @@ impl CoreErlangGenerator {
         backing_module: &str,
         include_standalone: bool,
         package_name: Option<&str>,
-        provenance: super::methods::MetaProvenance<'_>,
+        provenance: super::super::class_meta::MetaProvenance<'_>,
     ) -> Document<'static> {
         let native_entries = docvec![
             ",\n      'native' => 'true'",

@@ -94,6 +94,8 @@
 mod actor_codegen;
 mod block_analysis;
 mod class_builder_source;
+mod class_meta;
+mod class_registry;
 mod control_flow;
 mod dispatch_codegen;
 pub mod erlang_types;
@@ -112,8 +114,10 @@ mod supervisor_codegen;
 mod threaded_expr;
 mod threaded_ir;
 mod util;
+mod value_accessors;
 mod value_type_codegen;
 mod variable_context;
+mod xref;
 
 // Re-export utility functions for IDE queries
 pub use beamtalk_cerl_doc::escape::{escape_atom_chars, escape_erlang_string};
@@ -1997,8 +2001,8 @@ impl CoreErlangGenerator {
     /// ADR 0098 Phase 3: the producing-toolchain identity to bake into
     /// `__beamtalk_meta`. Borrows the generator's version fields; both are `None`
     /// unless the CLI supplied them via [`CodegenOptions::with_provenance`].
-    pub(super) fn meta_provenance(&self) -> gen_server::MetaProvenance<'_> {
-        gen_server::MetaProvenance {
+    pub(super) fn meta_provenance(&self) -> class_meta::MetaProvenance<'_> {
+        class_meta::MetaProvenance {
             beamtalk_version: self.beamtalk_version.as_deref(),
             otp_release: self.otp_release.as_deref(),
         }
