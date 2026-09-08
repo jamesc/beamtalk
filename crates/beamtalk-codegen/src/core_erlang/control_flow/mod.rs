@@ -30,6 +30,7 @@
 //! - [`counted_loops`] — Counted loop constructs (and `CountedLoopFrame`)
 //! - [`conditionals`] — `ifTrue:`/`ifFalse:`/`match:` etc.
 //! - [`exception_handling`] — `on:do:`/`ensure:`
+//! - [`loop_mode`] — [`LoopMode`], the generator's own loop-body context field
 
 mod analysis;
 mod body;
@@ -39,6 +40,7 @@ mod dict_ops;
 mod exception_handling;
 mod list_ops;
 mod local_assign;
+mod loop_mode;
 mod plan;
 mod util;
 mod while_loops;
@@ -60,4 +62,9 @@ use plan::ListOpKind;
 // `generate_list_do_body_with_threading` compat shim's inlined replacement)
 // — `pub(super)`, matching `ThreadingPlan`'s own cross-module visibility.
 pub(super) use list_ops::BodyKind;
+// `LoopMode` is a field on `CoreErlangGenerator` (`generator/mod.rs`) and is
+// read/written across the whole `core_erlang` tree (`dispatch_codegen.rs`,
+// `expressions.rs`, `threaded_ir/`, ...) — `pub(super)`, matching
+// `BodyKind`/`ThreadingPlan`'s own cross-module visibility.
+pub(super) use loop_mode::LoopMode;
 pub(super) use plan::{ThreadingPlan, condition_has_state_effects};

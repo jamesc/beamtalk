@@ -77,7 +77,7 @@ impl<'g> RenderCtx<'g> {
     fn resolve_prefix(&self, var: &VersionedVar) -> String {
         match &var.prefix {
             VersionPrefix::State => super::super::render_state_prefix(
-                self.generator.in_hybrid_loop,
+                self.generator.loop_mode.in_hybrid_loop,
                 self.generator.in_loop_body,
                 var.version,
             ),
@@ -127,10 +127,10 @@ impl<'a, 'g> LoopContextGuard<'a, 'g> {
     fn enter(ctx: &'a mut RenderCtx<'g>, flags: LoopContextFlags) -> Self {
         let saved = LoopContextFlags {
             in_loop_body: ctx.generator.in_loop_body,
-            in_hybrid_loop: ctx.generator.in_hybrid_loop,
+            in_hybrid_loop: ctx.generator.loop_mode.in_hybrid_loop,
         };
         ctx.generator.in_loop_body = flags.in_loop_body;
-        ctx.generator.in_hybrid_loop = flags.in_hybrid_loop;
+        ctx.generator.loop_mode.in_hybrid_loop = flags.in_hybrid_loop;
         Self { ctx, saved }
     }
 }
@@ -138,7 +138,7 @@ impl<'a, 'g> LoopContextGuard<'a, 'g> {
 impl Drop for LoopContextGuard<'_, '_> {
     fn drop(&mut self) {
         self.ctx.generator.in_loop_body = self.saved.in_loop_body;
-        self.ctx.generator.in_hybrid_loop = self.saved.in_hybrid_loop;
+        self.ctx.generator.loop_mode.in_hybrid_loop = self.saved.in_hybrid_loop;
     }
 }
 

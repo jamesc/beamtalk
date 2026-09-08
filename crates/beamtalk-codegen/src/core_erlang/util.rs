@@ -439,10 +439,10 @@ impl CoreErlangGenerator {
         span: beamtalk_core::source_analysis::Span,
         prelude: &mut Vec<ThreadedStmt>,
     ) -> Result<ValueRef> {
-        self.direct_params_do_open_chain = false;
+        self.loop_mode.direct_params_do_open_chain = false;
         let doc = self.generate_expression(expr)?;
-        if self.direct_params_do_open_chain {
-            self.direct_params_do_open_chain = false;
+        if self.loop_mode.direct_params_do_open_chain {
+            self.loop_mode.direct_params_do_open_chain = false;
             prelude.push(ThreadedStmt::Statement(doc, span));
             return Ok(ValueRef::Literal("'nil'"));
         }
@@ -877,7 +877,7 @@ impl CoreErlangGenerator {
                 _ => None,
             })
             .unwrap_or(version_before);
-        super::render_state_prefix(self.in_hybrid_loop, self.in_loop_body, version)
+        super::render_state_prefix(self.loop_mode.in_hybrid_loop, self.in_loop_body, version)
     }
 
     /// A child the sequencing rule never compiles ahead of its parent: a

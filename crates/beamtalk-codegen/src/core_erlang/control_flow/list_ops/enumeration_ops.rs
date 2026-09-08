@@ -141,7 +141,7 @@ impl CoreErlangGenerator {
     /// different fold shapes, and a fold nested in a direct-params loop yields an open
     /// let-chain rather than a tuple, so those keep the plain fold result.
     pub(in crate::core_erlang) fn enumeration_threads_actor_state(&self) -> bool {
-        matches!(self.context, CodeGenContext::Actor) && !self.in_direct_params_loop
+        matches!(self.context, CodeGenContext::Actor) && !self.loop_mode.in_direct_params_loop
     }
 
     /// Lowers a synthetic `inject:into:` send (already threading state) to the value

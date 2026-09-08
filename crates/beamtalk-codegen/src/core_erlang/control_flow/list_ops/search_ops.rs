@@ -214,8 +214,8 @@ impl CoreErlangGenerator {
             let bool_result = self.fresh_temp_var("BoolResult");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(bool_result.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(bool_result.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -627,7 +627,7 @@ impl CoreErlangGenerator {
             let none_result = self.fresh_temp_var("NoneResult");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            if self.in_direct_params_loop {
+            if self.loop_mode.in_direct_params_loop {
                 // BT-3151: direct-params loops are a value-type-only
                 // optimization with no actor `State` to thread through the
                 // `ifNone:` handler in the first place (see
@@ -635,7 +635,7 @@ impl CoreErlangGenerator {
                 // compiled as an ordinary closure, unaffected by BT-3420.
                 self.check_bare_list_op_block_self_sends(if_none)?;
                 let none_code = self.expression_doc(if_none)?;
-                self.direct_params_list_op_result = Some(final_result.clone());
+                self.loop_mode.direct_params_list_op_result = Some(final_result.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -872,8 +872,8 @@ impl CoreErlangGenerator {
             let class_var = self.fresh_temp_var("DetectRecvClass");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(found_result.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(found_result.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),

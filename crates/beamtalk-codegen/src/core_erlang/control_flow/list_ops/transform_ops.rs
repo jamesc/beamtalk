@@ -134,8 +134,8 @@ impl CoreErlangGenerator {
             let count_result = self.fresh_temp_var("CountResult");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(count_result.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(count_result.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -371,8 +371,8 @@ impl CoreErlangGenerator {
             let final_list = self.fresh_temp_var("FinalList");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(final_list.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(final_list.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -697,10 +697,10 @@ impl CoreErlangGenerator {
 
             // Extract each updated local var from tuple positions 2..N.
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&result_var, 2, self);
-            if self.in_direct_params_loop {
+            if self.loop_mode.in_direct_params_loop {
                 // BT-1329: Skip StateAcc repack. Emit open let-chain so variable rebindings
                 // escape to the outer scope. Store the result var for the caller.
-                self.direct_params_list_op_result = Some(acc_out.clone());
+                self.loop_mode.direct_params_list_op_result = Some(acc_out.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(result_var.clone()),
@@ -951,8 +951,8 @@ impl CoreErlangGenerator {
             let final_list = self.fresh_temp_var("FinalList");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(final_list.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(final_list.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -1209,8 +1209,8 @@ impl CoreErlangGenerator {
             let final_list = self.fresh_temp_var("FinalList");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(final_list.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(final_list.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -1472,8 +1472,8 @@ impl CoreErlangGenerator {
             let result_tuple = self.fresh_temp_var("PartResult");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(result_tuple.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(result_tuple.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -1775,8 +1775,8 @@ impl CoreErlangGenerator {
             let final_map = self.fresh_temp_var("FinalMap");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(final_map.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(final_map.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),

@@ -921,7 +921,12 @@ impl CoreErlangGenerator {
         // sites can't drift out of sync.
         self.reject_class_var_field_assignment(expr, field)?;
 
-        if self.in_hybrid_loop && self.hybrid_mutated_fields.contains(field.name.as_str()) {
+        if self.loop_mode.in_hybrid_loop
+            && self
+                .loop_mode
+                .hybrid_mutated_fields
+                .contains(field.name.as_str())
+        {
             let (doc, val_var) = self.generate_field_assignment_open(expr)?;
             stmts.push(ThreadedStmt::Statement(doc, span));
             return Ok(val_var);
