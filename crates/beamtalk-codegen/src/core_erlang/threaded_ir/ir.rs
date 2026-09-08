@@ -599,7 +599,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// BT-3133 (ADR 0111 Phase C): the `TupleAcc` mode's per-iteration
     /// positional destructure of a flat `{Gate1, .., GateG, Var1, .., VarN}`
     /// accumulator into fresh per-iteration versions of each threaded local —
-    /// `generate_tuple_unpack_docs`'s `element(idx, source)` chain. `param`
+    /// `generate_foldl_loop_body`'s `element(idx, source)` chain. `param`
     /// is the unversioned fold-lambda parameter the tuple is read from (an
     /// [`AccParam`], never a [`VersionedVar`] — see its doc comment);
     /// `gate_slots` is the number of leading tuple positions this node skips

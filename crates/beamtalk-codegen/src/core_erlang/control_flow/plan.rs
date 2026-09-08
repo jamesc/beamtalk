@@ -33,8 +33,8 @@ pub(in crate::core_erlang) enum KeyStyle {
 /// state. This is the "per-op declaration" / lowering-time source
 /// [`threaded_ir::VerifyError::EarlyExitGateSlotMismatch`] cross-checks
 /// against the unpack node's own rendering-time `gate_slots` (each call
-/// site's own `index_offset - 1`, passed to
-/// [`ThreadingPlan::generate_tuple_unpack_docs`] unchanged since BT-3133) —
+/// site's own `index_offset - 1`, passed as `generate_foldl_loop_body`'s
+/// `node_gate_slots` parameter) —
 /// see [`threaded_ir::build_tuple_acc_unpack`]'s doc comment for the full
 /// independent-derivation rationale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,7 +104,7 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     /// declared at lowering time from the constructing call site's
     /// [`ListOpKind`] (`0` for plain `Do`; see [`ListOpKind::gate_slots`]).
     /// Only meaningful when `use_tuple_acc` is `true`; independent of each
-    /// unpack call's own `index_offset - 1` (`generate_tuple_unpack_docs`'s
+    /// unpack call's own `index_offset - 1` (`generate_foldl_loop_body`'s
     /// `node_gate_slots`) — see
     /// [`threaded_ir::build_tuple_acc_unpack`]'s doc comment.
     pub tuple_acc_gate_slots: usize,
@@ -342,8 +342,8 @@ impl ThreadingPlan {
     ///
     /// BT-3147: `kind` declares this call site's canonical `TupleAcc` gate-slot
     /// count ([`ListOpKind::gate_slots`]) at construction time — independent
-    /// of whatever `index_offset` the caller later passes to
-    /// [`Self::generate_tuple_unpack_docs`], see that method's doc comment.
+    /// of whatever `index_offset` the caller later passes as
+    /// `generate_foldl_loop_body`'s `node_gate_slots`.
     pub fn new_for_foldl_list_op(
         generator: &mut CoreErlangGenerator,
         body: &beamtalk_core::ast::Block,
@@ -471,7 +471,7 @@ impl ThreadingPlan {
 
         // BT-3147: the mode's canonical gate-slot count, declared here at
         // lowering time from the caller's `ListOpKind` — independent of
-        // whatever `index_offset` a later `generate_tuple_unpack_docs` call
+        // whatever `index_offset` a later `generate_foldl_loop_body` call
         // computes its own `node_gate_slots` from.
         let tuple_acc_gate_slots = tuple_acc_kind.map_or(0, ListOpKind::gate_slots);
 

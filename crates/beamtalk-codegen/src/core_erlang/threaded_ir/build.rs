@@ -25,12 +25,11 @@ use beamtalk_core::source_analysis::Span;
 /// per-iteration positional unpack step — the single production emitter of
 /// this unpack shape across every list-op and dict-op call site
 /// (`basic_ops.rs`, `filter_ops.rs`, `search_ops.rs`, `transform_ops.rs`,
-/// `dict_ops.rs`, all via `ThreadingPlan::generate_tuple_unpack_docs`,
-/// `control_flow/mod.rs`).
+/// `dict_ops.rs`, all via `generate_foldl_loop_body`, `control_flow/body.rs`).
 ///
 /// BT-3147: promoted from a verification-only side channel (BT-3133) to
 /// genuine emission input — [`render`]ing this exact `ThreadedStmt` IS how
-/// `generate_tuple_unpack_docs` now produces its `Document` output, not a
+/// `generate_foldl_loop_body` now produces its `Document` output, not a
 /// second, independently hand-Document-built duplicate of it. Each target's
 /// identity is a [`VersionPrefix::Gensym`] (never [`VersionPrefix::Local`]):
 /// the real per-iteration unpack binds the BARE `to_core_erlang_var` name

@@ -813,7 +813,7 @@ impl CoreErlangGenerator {
                 // it does NOT rebind the specific local vars it threads. Both
                 // StateAcc (map) mode and tuple-acc mode bind each threaded local
                 // to a FIXED Core Erlang variable once per iteration (see
-                // `generate_unpack_at_iteration_start`/`generate_tuple_unpack_docs`),
+                // `generate_unpack_at_iteration_start`/`generate_foldl_loop_body`),
                 // not via a live re-lookup through the state pointer — so without
                 // this, any read of the var later in the SAME block invocation
                 // (e.g. the next statement) would see the stale pre-statement
