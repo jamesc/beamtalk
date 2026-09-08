@@ -4372,3 +4372,152 @@ deleting the now-dead legacy path.
 
 **7. Out of scope.** Addendum 11's value-type conditional family — it
 needs its own design pass, not a slot in this one.
+
+## Addendum 16 (2026-09-08): BT-3476 close-out — Epic BT-3447 implementation tracking, measurement, and a corrected premise
+
+**Epic:** [BT-3447](https://linear.app/beamtalk/issue/BT-3447) — Loops onto ThreadedIr (reopen ADR 0111 Phases B and C)
+**Status:** Done
+
+| Issue | Description | Size | PR |
+|---|---|---|---|
+| [BT-3459](https://linear.app/beamtalk/issue/BT-3459) / [BT-3460](https://linear.app/beamtalk/issue/BT-3460) | Prerequisite split: `ThreadingPlan`/counted-loop driver/list-op accumulators out of `control_flow/mod.rs`; `threaded_ir.rs` into `ir`/`verify`/`emit`/`build` — gives the new lowering a home | M | [#3772](https://github.com/jamesc/beamtalk/pull/3772) |
+| [BT-3470](https://linear.app/beamtalk/issue/BT-3470) | Phase B: lower `Letrec` (`whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`) loop bodies through a single `ThreadedStmt::ConditionalLoop` node | L | [#3777](https://github.com/jamesc/beamtalk/pull/3777) |
+| [BT-3475](https://linear.app/beamtalk/issue/BT-3475) | Phase C: lower `Foldl*` (list-op/dict-op fold) bodies through a single merged `Threaded` node — unpack + body + accumulator epilogue, `verify()`d once | L | [#3788](https://github.com/jamesc/beamtalk/pull/3788) |
+| [BT-3476](https://linear.app/beamtalk/issue/BT-3476) | Close-out: confirm no legacy dual path remains, `#[allow(dead_code)]` audit, final measurement, docs, this addendum | M | this PR |
+
+**1. What this close-out actually found, by grep — correcting this
+addendum's own predecessor's premise.** Addendum 15 §3 listed five things
+as "unverified, legacy": `generate_threaded_loop_body_inner`, the six
+last-expression emitters, `emit_non_assign_expr`, and
+`generate_local_var_assignment_in_loop`, and §6 sketched the close-out as
+"delete the legacy path." That sketch predates BT-3470/BT-3475's actual
+implementation choices and turned out to be only half right:
+
+- `generate_threaded_loop_body` / `generate_threaded_loop_body_inner` —
+  **confirmed gone.** No function by either name exists in the tree today
+  (`grep -rn "fn generate_threaded_loop_body"` — zero matches). BT-3470's
+  own PR description is explicit about the mechanism: it "deletes the
+  `Letrec` arm of `generate_threaded_loop_body_inner` (and every
+  last-expression emitter / `generate_local_var_assignment_in_loop` path
+  reachable **only from it**)." BT-3475 then rewrote what remained of the
+  Foldl-only dispatch as `control_flow::body::lower_foldl_body` — a
+  different function, not a renamed survivor of the deleted one. "No dual
+  codegen path remains for either loop family" (BT-3475's own PR
+  description) is correct and confirmed.
+- The six last-expression emitters (`emit_field_assign_last_expr`,
+  `emit_self_send_last_expr`, `emit_tier2_value_call_last_expr`,
+  `emit_local_assign_last_expr`, `emit_destructure_last_expr`,
+  `bind_closed_expr_threading_class_vars`) and `emit_non_assign_expr` —
+  **not dead; not deletable.** All seven are live production code with
+  real callers today, every one of them inside `lower_foldl_body`
+  (`control_flow/body.rs`, under its own "── Body finalizer helpers
+  (called from `lower_foldl_body`) ──" section marker). They build each
+  `BodyKind`'s per-iteration accumulator epilogue (`FoldlDo`/
+  `FoldlCollect`/`FoldlFilter`/…) as an opaque `ThreadedStmt::Statement` —
+  a deliberate design choice BT-3475 documented inline as the same
+  "verifier-honesty" opacity precedent `ThreadedStmt::ConditionalLoop`'s
+  own `exit_arm` already established (this ADR's §Verifier honesty): a
+  fold's per-`BodyKind` exit shape is exactly as legitimately opaque as a
+  loop's exit repack, not a residue of an incomplete migration. These
+  functions were never "reachable only from" the deleted Letrec dispatch
+  — BT-3470's own deletion already excised the sub-paths that were —
+  so they survived that deletion and remain the FoldI family's permanent
+  implementation.
+- `generate_local_var_assignment_in_loop` — **not dead; not deletable,**
+  for a different reason: its two remaining callers are outside the
+  loop/fold **body** dispatch entirely, and were never in scope of
+  Addendum 15 §4's design (which covers `ConditionalLoop`/`Threaded` loop
+  and fold **bodies** only). `while_loops.rs`'s
+  `generate_stateful_while_condition` calls it for a non-tail local-var
+  assignment inside a `whileTrue:`/`whileFalse:` **condition** block (a
+  different construct from the loop body `ConditionalLoop.body` covers);
+  `list_ops/transform_ops.rs`'s `sort:` comparator-fun body calls it for
+  the same reason its own inline comment already gives — "can't use
+  `generate_threaded_loop_body` for sort" — a `sort:` comparator is a
+  bare `fun (A, B) -> ...` closure over process-dictionary state, not a
+  `ConditionalLoop`/`Threaded` node, and was never part of this epic's
+  scope.
+
+**2. Consequence for the acceptance criteria as literally written.**
+`control_flow/body.rs` and `local_assign.rs` are **not removed** — both
+hold genuinely live, necessary production code (confirmed by `cargo
+build` staying clean with zero new `dead_code` warnings when nothing is
+deleted from either file). Deleting any of the seven `body.rs` functions
+or `generate_local_var_assignment_in_loop` would not "delete a dead
+legacy path" — the design in §6 that authorized changing emitted output
+was scoped to exactly that ("only by deleting the now-dead legacy path"),
+and grep shows there is no dead legacy path left to delete. This issue
+therefore ships **zero codegen changes** — it is a verification and
+documentation close-out, not a deletion one, which is itself the honest
+proof that BT-3470/BT-3475 already finished the deletion work Addendum 15
+anticipated for this issue.
+
+**3. `#[allow(dead_code)]` audit.** `grep -rn '#\[allow(dead_code)\]'
+crates/beamtalk-codegen/src/core_erlang/threaded_ir/` finds seven markers,
+none of them loop-shape-related: `ValueRef::Version` and `BindOp::Unpack`
+(`ir.rs`) still await an unrelated future constructor each (documented
+inline, unchanged since Addendum 7); `CloseContext` and
+`ThreadedValue::pure`/`close()` (`ir.rs`/`build.rs`) are ADR 0118's own
+still-unattempted `close()` production caller (unchanged since ADR 0118's
+own close-out); `VerifyError::StateEffectEscapesExpression` (`verify.rs`)
+is the same still-open BT-3430 follow-up named there since ADR 0118.
+`ConditionalLoop`, `ThreadingMode::DirectParams`/`Hybrid`,
+`VersionPrefix::Local`, and `LoopCounter` — the loop-shape allowances
+Addendum 13 left and BT-3470/BT-3475 were expected to clear — **carry no
+`#[allow(dead_code)]` today**: BT-3470's PR description confirms it
+removed all five, each now having a real production constructor
+(`ConditionalLoop`'s six loop constructors, `DirectParams`/`Hybrid` mode
+selection, `Local`-prefix threaded-local rebinds, and counted loops'
+`ConditionalLoop::counter` respectively). No new allowance was added by
+this issue.
+
+**4. Docs.** `docs/development/debugging.md`'s "ThreadedIr verifier"
+section carried a stale sentence — "with loops the one exception, still
+on the pre-ADR-0111 AST-directed path" — left over from before Addendum
+15 landed (BT-3475's own PR already updated a *later* paragraph in the
+same section to describe the completed loop migration, but missed this
+earlier one); corrected by this issue to name loop bodies as migrated
+alongside every other construct family the section covers. CLAUDE.md's
+"State-threading codegen" bullet was checked, not assumed: it already
+reads "Loops, conditionals, exception handling (`on:do:`/`ensure:`),
+list-op accumulators, ... all lower through `ThreadedIr`" with no
+"loops are the exception" caveat — accurate as written, no change
+needed. `threaded_ir/mod.rs`'s module header "Not yet lowered" paragraph
+(added by BT-3448) is already absent — confirmed via `git log` that
+BT-3448's own header-compaction pass already removed it, and the current
+header's "## Coverage" section already lists both loop families as
+migrated. Both of these were already-completed prerequisites this issue
+confirmed rather than performed.
+
+**5. Measurement.** ≤3% user-CPU build-time delta, the Addenda 6/7/10
+methodology: two separate release binaries, cold `ebin/` each run,
+`beamtalk build-stdlib --quiet --warnings-as-errors`, 8 runs per side,
+alternating baseline/HEAD per round. Baseline is `4b7083ae3` (`main`
+immediately before [#3772](https://github.com/jamesc/beamtalk/pull/3772),
+epic BT-3447's first commit); "this epic" is this issue's own branch
+HEAD, carrying every codegen change BT-3470/BT-3475 shipped to `main`
+(this issue's own changes are docs/ADR-only — no codegen — confirmed by
+`git diff --stat` against `b7b9cce54`):
+
+| | wall-clock (s) | user CPU (s) |
+|---|---|---|
+| baseline (mean of 8, `4b7083ae3`) | MEASUREMENT_WALLCLOCK_BASELINE | MEASUREMENT_USERCPU_BASELINE |
+| this epic (mean of 8, HEAD) | MEASUREMENT_WALLCLOCK_HEAD | MEASUREMENT_USERCPU_HEAD |
+| Δ | MEASUREMENT_WALLCLOCK_DELTA | **MEASUREMENT_USERCPU_DELTA** |
+
+MEASUREMENT_NARRATIVE
+
+**6. Close-out.** Phases B and C of ADR 0111 (loop and fold bodies as
+real `ThreadedIr` emission input) are complete as designed, with one
+correction to the original design sketch: Addendum 15 §6 anticipated the
+close-out issue would delete a residual legacy path; the actual, shipped
+design (documented in `body.rs`'s own comments, §1 above) deliberately
+keeps the per-`BodyKind` epilogue emitters and
+`generate_local_var_assignment_in_loop` as shared, permanent helpers —
+opaque `Statement`-producing code the Foldl migration reuses rather than
+decomposes further, and a plain local-var-assignment builder the loop
+**condition** and `sort:` comparator (both outside this epic's scope)
+still need. Every construct family `docs/development/debugging.md`'s
+"ThreadedIr verifier" section describes is now migrated; no
+loop-shape-specific `#[allow(dead_code)]` marker remains; the measurement
+gate is cleared. Epic BT-3447 is Done.
