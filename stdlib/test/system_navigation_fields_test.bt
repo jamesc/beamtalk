@@ -104,10 +104,14 @@ TestCase subclass: SystemNavigationFieldsTest
   // than silently returning `[]`. `Circle` declares `radius`, so `#notASlot`
   // is a typo.
   testReadersRaisesOnUnknownSlot =>
-    self should: [self.nav fieldReadersOf: #notASlot in: Circle] raise: #user_error
+    self should: [
+      self.nav fieldReadersOf: #notASlot in: Circle
+    ] raise: #user_error
 
   testWritersRaisesOnUnknownSlot =>
-    self should: [self.nav fieldWritersOf: #notASlot in: Circle] raise: #user_error
+    self should: [
+      self.nav fieldWritersOf: #notASlot in: Circle
+    ] raise: #user_error
 
   // A declared instance slot returns a List (empty under BUnit since the port
   // is off) WITHOUT raising — the validation gate must accept a real slot. This
