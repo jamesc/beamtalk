@@ -2176,7 +2176,7 @@ impl CoreErlangGenerator {
                 // Foldl body, conditional, or block literal (all of which
                 // still hit `reject_class_var_field_assignment` below,
                 // unchanged).
-                if self.is_class_var_assignment(expr) && self.loop_threads_class_vars {
+                if self.is_class_var_assignment(expr) && self.loop_mode.loop_threads_class_vars {
                     let frame = self.current_branch_frame();
                     let (preamble_doc, bind, val_var) =
                         self.lower_class_var_field_assignment_bind(&field.name, value, frame)?;
@@ -2191,18 +2191,24 @@ impl CoreErlangGenerator {
                 // When the field is in hybrid_mutated_fields, the field has been extracted
                 // to a direct fun parameter. We rebind it to a fresh variable and update
                 // the readonly params map so subsequent reads use the new variable.
-                if self.in_hybrid_loop && self.hybrid_mutated_fields.contains(field.name.as_str()) {
+                if self.loop_mode.in_hybrid_loop
+                    && self
+                        .loop_mode
+                        .hybrid_mutated_fields
+                        .contains(field.name.as_str())
+                {
                     let val_var = self.fresh_temp_var("Val");
                     // Snapshot field params before evaluating RHS so nested field
                     // assignments (e.g. `self.x := (self.y := 42)`) don't leak
                     // inner updates past the outer assignment.
-                    let saved_field_params = self.hybrid_readonly_field_params.clone();
+                    let saved_field_params = self.loop_mode.hybrid_readonly_field_params.clone();
                     let val_doc = self.expression_doc(value)?;
-                    self.hybrid_readonly_field_params = saved_field_params;
+                    self.loop_mode.hybrid_readonly_field_params = saved_field_params;
                     let new_field_var = self
                         .fresh_temp_var(&format!("{}Field", Self::to_core_erlang_var(&field.name)));
                     // Update the param map so subsequent reads use the new var.
-                    self.hybrid_readonly_field_params
+                    self.loop_mode
+                        .hybrid_readonly_field_params
                         .insert(field.name.to_string(), new_field_var.clone());
                     return Ok((
                         docvec![

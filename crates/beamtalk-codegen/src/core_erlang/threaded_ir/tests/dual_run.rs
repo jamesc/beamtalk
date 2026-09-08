@@ -291,7 +291,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
     // matches live generator behavior bit-for-bit even when interleaved
     // with the condition/exit scaffolding.
     let mut legacy_gen = CoreErlangGenerator::new("dual_run_conditional_loop_hybrid");
-    legacy_gen.in_hybrid_loop = true;
+    legacy_gen.loop_mode.in_hybrid_loop = true;
     legacy_gen.in_loop_body = true;
     let cond_doc = docvec![
         "call 'erlang':'<'(",
@@ -319,7 +319,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
         leaf::var(state_source_name),
         " in ",
     ];
-    legacy_gen.in_hybrid_loop = false;
+    legacy_gen.loop_mode.in_hybrid_loop = false;
     legacy_gen.in_loop_body = false;
     let exit_sa = legacy_gen.fresh_temp_var("ExitSA");
     let exit_arm = docvec![
@@ -480,7 +480,7 @@ fn render_loop_letrec_param_list_and_final_args_use_hybrid_context_even_when_nes
     // computed `param_list`/`final_args` under exactly this (wrong)
     // ambient.
     render_gen.in_loop_body = true;
-    render_gen.in_hybrid_loop = false;
+    render_gen.loop_mode.in_hybrid_loop = false;
     let mut ctx = RenderCtx::new(&mut render_gen);
     let rendered = render(&ir, &mut ctx).to_pretty_string();
 

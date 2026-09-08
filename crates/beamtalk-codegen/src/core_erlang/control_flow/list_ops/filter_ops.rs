@@ -167,10 +167,10 @@ impl CoreErlangGenerator {
             let (str_binding, str_result) =
                 self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
-            if self.in_direct_params_loop {
+            if self.loop_mode.in_direct_params_loop {
                 // BT-1329: Skip StateAcc repack. Emit open let-chain so variable rebindings
                 // escape to the outer scope. Store the result var for the caller.
-                self.direct_params_list_op_result = Some(str_result);
+                self.loop_mode.direct_params_list_op_result = Some(str_result);
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),

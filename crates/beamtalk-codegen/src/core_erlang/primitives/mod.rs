@@ -24,6 +24,7 @@ mod dictionary;
 mod error_handling;
 mod float;
 mod integer;
+pub(in crate::core_erlang) mod intrinsic_bodies;
 mod list;
 mod protocol;
 mod reflection;

@@ -937,16 +937,16 @@ impl CoreErlangGenerator {
         all_field_params: &std::collections::HashMap<String, String>,
     ) -> Result<Document<'static>> {
         let prev_readonly_field_params = std::mem::replace(
-            &mut self.hybrid_readonly_field_params,
+            &mut self.loop_mode.hybrid_readonly_field_params,
             all_field_params.clone(),
         );
         let prev_mutated_fields = std::mem::replace(
-            &mut self.hybrid_mutated_fields,
+            &mut self.loop_mode.hybrid_mutated_fields,
             plan.mutated_fields.iter().cloned().collect(),
         );
         let cond_result = self.with_branch_context(|this| {
-            let prev_hybrid = this.in_hybrid_loop;
-            this.in_hybrid_loop = true;
+            let prev_hybrid = this.loop_mode.in_hybrid_loop;
+            this.loop_mode.in_hybrid_loop = true;
             let result = if let Expression::Block(cond_block) = condition {
                 // BT-3151: see the analogous check in `generate_while_loop`.
                 let analysis = crate::core_erlang::block_analysis::analyze_block(cond_block);
@@ -955,12 +955,12 @@ impl CoreErlangGenerator {
             } else {
                 this.generate_expression(condition)
             };
-            this.in_hybrid_loop = prev_hybrid;
+            this.loop_mode.in_hybrid_loop = prev_hybrid;
             result
         });
 
-        self.hybrid_readonly_field_params = prev_readonly_field_params;
-        self.hybrid_mutated_fields = prev_mutated_fields;
+        self.loop_mode.hybrid_readonly_field_params = prev_readonly_field_params;
+        self.loop_mode.hybrid_mutated_fields = prev_mutated_fields;
         cond_result
     }
 

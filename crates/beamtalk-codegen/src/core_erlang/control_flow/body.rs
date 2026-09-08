@@ -166,11 +166,11 @@ impl CoreErlangGenerator {
         plan: &ThreadingPlan,
     ) -> Result<(Vec<ThreadedStmt>, FrameId)> {
         self.with_branch_context(|this| {
-            this.loop_threads_class_vars = plan.threads_class_vars;
+            this.loop_mode.loop_threads_class_vars = plan.threads_class_vars;
             let frame = this.current_branch_frame();
             let result = this.lower_letrec_body(body, plan, frame);
             if plan.threads_class_vars {
-                this.last_loop_class_var = Some(this.current_class_var());
+                this.loop_mode.last_loop_class_var = Some(this.current_class_var());
             }
             result.map(|stmts| (stmts, frame))
         })
@@ -191,23 +191,23 @@ impl CoreErlangGenerator {
         plan: &ThreadingPlan,
         all_field_params: &std::collections::HashMap<String, String>,
     ) -> Result<(Vec<ThreadedStmt>, FrameId)> {
-        let prev_hybrid = self.in_hybrid_loop;
-        let prev_direct_params_loop = self.in_direct_params_loop;
+        let prev_hybrid = self.loop_mode.in_hybrid_loop;
+        let prev_direct_params_loop = self.loop_mode.in_direct_params_loop;
         let prev_readonly_field_params = std::mem::replace(
-            &mut self.hybrid_readonly_field_params,
+            &mut self.loop_mode.hybrid_readonly_field_params,
             all_field_params.clone(),
         );
         let prev_mutated_fields = std::mem::replace(
-            &mut self.hybrid_mutated_fields,
+            &mut self.loop_mode.hybrid_mutated_fields,
             plan.mutated_fields.iter().cloned().collect(),
         );
-        self.in_hybrid_loop = true;
-        self.in_direct_params_loop = true;
+        self.loop_mode.in_hybrid_loop = true;
+        self.loop_mode.in_direct_params_loop = true;
         let result = self.generate_letrec_body_ir(body, plan);
-        self.hybrid_readonly_field_params = prev_readonly_field_params;
-        self.hybrid_mutated_fields = prev_mutated_fields;
-        self.in_hybrid_loop = prev_hybrid;
-        self.in_direct_params_loop = prev_direct_params_loop;
+        self.loop_mode.hybrid_readonly_field_params = prev_readonly_field_params;
+        self.loop_mode.hybrid_mutated_fields = prev_mutated_fields;
+        self.loop_mode.in_hybrid_loop = prev_hybrid;
+        self.loop_mode.in_direct_params_loop = prev_direct_params_loop;
         result
     }
 
@@ -310,7 +310,7 @@ impl CoreErlangGenerator {
                 let tv = self.threaded_expression(expr, frame)?;
                 stmts.extend(tv.prelude);
             } else if self.is_class_method_self_send(expr) {
-                if self.loop_threads_class_vars {
+                if self.loop_mode.loop_threads_class_vars {
                     let tv = self.threaded_expression(expr, frame)?;
                     stmts.extend(tv.prelude);
                 } else {
@@ -380,7 +380,7 @@ impl CoreErlangGenerator {
             unreachable!("is_field_assignment guarantees a FieldAccess target");
         };
 
-        if self.is_class_var_assignment(expr) && self.loop_threads_class_vars {
+        if self.is_class_var_assignment(expr) && self.loop_mode.loop_threads_class_vars {
             let branch_frame = self.current_branch_frame();
             let (preamble_doc, bind, _val_var) =
                 self.lower_class_var_field_assignment_bind(&field.name, value, branch_frame)?;
@@ -389,7 +389,12 @@ impl CoreErlangGenerator {
             return Ok(());
         }
 
-        if self.in_hybrid_loop && self.hybrid_mutated_fields.contains(field.name.as_str()) {
+        if self.loop_mode.in_hybrid_loop
+            && self
+                .loop_mode
+                .hybrid_mutated_fields
+                .contains(field.name.as_str())
+        {
             // Mirrors `generate_field_assignment_open`'s hybrid branch
             // (`let Val = <value> in let NewFieldVar = Val in`, rebinding
             // `hybrid_readonly_field_params`), decomposed into a real `Bind`
@@ -397,10 +402,11 @@ impl CoreErlangGenerator {
             // `produces` seed (`VersionPrefix::Gensym` of the pre-extracted
             // param name).
             let val_var = self.fresh_temp_var("Val");
-            let saved_field_params = self.hybrid_readonly_field_params.clone();
+            let saved_field_params = self.loop_mode.hybrid_readonly_field_params.clone();
             let val_doc = self.expression_doc(value)?;
-            self.hybrid_readonly_field_params = saved_field_params;
+            self.loop_mode.hybrid_readonly_field_params = saved_field_params;
             let current_field_var = self
+                .loop_mode
                 .hybrid_readonly_field_params
                 .get(field.name.as_str())
                 .cloned()
@@ -408,7 +414,8 @@ impl CoreErlangGenerator {
             let source = VersionedVar::new(VersionPrefix::Gensym(current_field_var), 0, frame);
             let new_field_var =
                 self.fresh_temp_var(&format!("{}Field", Self::to_core_erlang_var(&field.name)));
-            self.hybrid_readonly_field_params
+            self.loop_mode
+                .hybrid_readonly_field_params
                 .insert(field.name.to_string(), new_field_var.clone());
             stmts.push(ThreadedStmt::Statement(
                 docvec!["let ", leaf::var(val_var.clone()), " = ", val_doc, " in ",],
@@ -477,7 +484,7 @@ impl CoreErlangGenerator {
         let hoisted_anything = !prelude_stmts.is_empty();
         stmts.extend(prelude_stmts);
 
-        if self.in_direct_params_loop {
+        if self.loop_mode.in_direct_params_loop {
             // BT-1329: see `emit_non_assign_expr`'s identical branch — a
             // nested list op's own open let-chain, emitted verbatim so its
             // variable rebindings escape to the outer (this loop's) scope.

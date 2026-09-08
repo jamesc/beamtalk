@@ -476,10 +476,10 @@ impl CoreErlangGenerator {
         let condition_value = ValueRef::Doc(frame.condition_value.clone());
 
         // Body — set in_direct_params_loop so nested list ops skip StateAcc repack (BT-1329).
-        let prev_direct_params_loop = self.in_direct_params_loop;
-        self.in_direct_params_loop = true;
+        let prev_direct_params_loop = self.loop_mode.in_direct_params_loop;
+        self.loop_mode.in_direct_params_loop = true;
         let (body_stmts, ir_frame) = self.generate_letrec_body_ir(body, plan)?;
-        self.in_direct_params_loop = prev_direct_params_loop;
+        self.loop_mode.in_direct_params_loop = prev_direct_params_loop;
 
         // Build exit StateAcc using the INITIAL param names (current iteration values).
         let exit_stateacc = plan.generate_exit_stateacc(&param_names, self);

@@ -94,12 +94,12 @@ impl CoreErlangGenerator {
 
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
-            let result_doc = if self.in_direct_params_loop {
+            let result_doc = if self.loop_mode.in_direct_params_loop {
                 // BT-1329/BT-3053: see the identical branch in
                 // `control_flow/list_ops/basic_ops.rs`'s `do:` — same shape here for a
                 // dictionary iteration: multiple rebound accumulator vars, no single
                 // "result" value, so signal open-with-no-value rather than naming one.
-                self.direct_params_do_open_chain = true;
+                self.loop_mode.direct_params_do_open_chain = true;
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -303,12 +303,12 @@ impl CoreErlangGenerator {
 
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
-            let result_doc = if self.in_direct_params_loop {
+            let result_doc = if self.loop_mode.in_direct_params_loop {
                 // BT-1329/BT-3053: see the identical branch in
                 // `control_flow/list_ops/basic_ops.rs`'s `do:` — same shape here for a
                 // dictionary iteration: multiple rebound accumulator vars, no single
                 // "result" value, so signal open-with-no-value rather than naming one.
-                self.direct_params_do_open_chain = true;
+                self.loop_mode.direct_params_do_open_chain = true;
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),

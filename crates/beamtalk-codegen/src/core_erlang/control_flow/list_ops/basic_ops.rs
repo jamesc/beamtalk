@@ -90,7 +90,7 @@ impl CoreErlangGenerator {
             // After foldl: extract vars from result tuple, repack into StateAcc.
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
-            let result_doc = if self.in_direct_params_loop {
+            let result_doc = if self.loop_mode.in_direct_params_loop {
                 // BT-1329: In direct-params loop context, skip StateAcc repack and omit
                 // trailing 'nil'. The extracted vars are left as open let-bindings so they
                 // escape to the outer scope (the caller chains the next expression directly).
@@ -101,7 +101,7 @@ impl CoreErlangGenerator {
                 // [annotation] )`, and `threaded_expression`'s generic fallback
                 // (`generate_expression_as_value`) substitutes `do:`'s own `nil` contract
                 // instead of referencing a nonexistent variable.
-                self.direct_params_do_open_chain = true;
+                self.loop_mode.direct_params_do_open_chain = true;
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -311,10 +311,10 @@ impl CoreErlangGenerator {
             let (str_binding, str_result) =
                 self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
-            if self.in_direct_params_loop {
+            if self.loop_mode.in_direct_params_loop {
                 // BT-1329: Skip StateAcc repack. Emit open let-chain so variable rebindings
                 // escape to the outer scope. Store the result var for the caller.
-                self.direct_params_list_op_result = Some(str_result);
+                self.loop_mode.direct_params_list_op_result = Some(str_result);
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),

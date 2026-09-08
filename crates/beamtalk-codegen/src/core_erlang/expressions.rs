@@ -355,9 +355,11 @@ impl CoreErlangGenerator {
                 } else {
                     // BT-1326: In hybrid mode, check if this is a read-only field
                     // accessed implicitly (bare name without self. prefix).
-                    if self.in_hybrid_loop {
-                        if let Some(param_var) =
-                            self.hybrid_readonly_field_params.get(id.name.as_str())
+                    if self.loop_mode.in_hybrid_loop {
+                        if let Some(param_var) = self
+                            .loop_mode
+                            .hybrid_readonly_field_params
+                            .get(id.name.as_str())
                         {
                             return Ok(leaf::var(param_var.clone()));
                         }
@@ -372,7 +374,7 @@ impl CoreErlangGenerator {
                         super::CodeGenContext::Actor | super::CodeGenContext::Repl => {
                             // BT-153: Use StateAcc when inside loop body
                             // BT-1326: Hybrid loops use State* naming, not StateAcc*
-                            if self.in_hybrid_loop {
+                            if self.loop_mode.in_hybrid_loop {
                                 self.current_state_var()
                             } else if self.in_loop_body {
                                 super::util::versioned_var("StateAcc", self.state_version())
@@ -578,9 +580,11 @@ impl CoreErlangGenerator {
             if recv_id.name == "self" {
                 // BT-1326: In hybrid mode, read-only fields are pre-extracted before the letrec.
                 // Use the direct parameter variable instead of generating maps:get every iteration.
-                if self.in_hybrid_loop {
-                    if let Some(param_var) =
-                        self.hybrid_readonly_field_params.get(field.name.as_str())
+                if self.loop_mode.in_hybrid_loop {
+                    if let Some(param_var) = self
+                        .loop_mode
+                        .hybrid_readonly_field_params
+                        .get(field.name.as_str())
                     {
                         return Ok(leaf::var(param_var.clone()));
                     }
@@ -1256,7 +1260,7 @@ impl CoreErlangGenerator {
         // handlers and scoped inside the fun, so the block as a whole MUST
         // NOT propagate an open scope to its outer context. Clear the
         // side-channel in case the body's last statement left it set.
-        self.direct_params_do_open_chain = false;
+        self.loop_mode.direct_params_do_open_chain = false;
         Ok(docvec![header, body_result?])
     }
 
@@ -1375,7 +1379,7 @@ impl CoreErlangGenerator {
         // BT-1937: Stateful blocks are also closed `fun (...) -> {Result, NewStateAcc}`
         // expressions and must not propagate an open scope from their body to
         // the outer context.
-        self.direct_params_do_open_chain = false;
+        self.loop_mode.direct_params_do_open_chain = false;
 
         let (body_doc, _branch_final) = result?;
 
