@@ -4227,20 +4227,21 @@ impl CoreErlangGenerator {
         indent: &str,
     ) -> Document<'static> {
         let hint = format!("Expected {expected_arity} argument(s) for {selector}");
-        let indent_doc = || leaf::var(indent.to_string());
-        let selector_doc = || leaf::var(selector.to_string());
+        let sep = docvec!["\n", leaf::var(indent.to_string())];
         docvec![
-            indent_doc(),
-            "let <ArErr0> = call 'beamtalk_error':'new'('arity_mismatch', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n",
-            indent_doc(),
-            "let <ArErr1> = call 'beamtalk_error':'with_selector'(ArErr0, ",
-            selector_doc(),
-            ") in\n",
-            indent_doc(),
-            "let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, ",
-            leaf::binary_lit(hint),
-            ") in\n",
-            indent_doc(),
+            leaf::var(indent.to_string()),
+            super::errors::beamtalk_error_doc(
+                Document::Str("<ArErr0>"),
+                Document::Str("ArErr0"),
+                Document::Str("<ArErr1>"),
+                Document::Str("ArErr1"),
+                Document::Str("<ArErr2>"),
+                "arity_mismatch",
+                Document::Str("call 'beamtalk_tagged_map':'class_of'(State, 'Object')"),
+                leaf::var(selector.to_string()),
+                leaf::binary_lit(hint),
+                sep,
+            ),
             "{'error', ArErr2, State}",
         ]
     }
@@ -4253,20 +4254,21 @@ impl CoreErlangGenerator {
         hint_msg: &str,
         indent: &str,
     ) -> Document<'static> {
-        let indent_doc = || leaf::var(indent.to_string());
-        let selector_doc = || leaf::var(selector.to_string());
+        let sep = docvec!["\n", leaf::var(indent.to_string())];
         docvec![
-            indent_doc(),
-            "let <TyErr0> = call 'beamtalk_error':'new'('type_error', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n",
-            indent_doc(),
-            "let <TyErr1> = call 'beamtalk_error':'with_selector'(TyErr0, ",
-            selector_doc(),
-            ") in\n",
-            indent_doc(),
-            "let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, ",
-            leaf::binary_lit(hint_msg),
-            ") in\n",
-            indent_doc(),
+            leaf::var(indent.to_string()),
+            super::errors::beamtalk_error_doc(
+                Document::Str("<TyErr0>"),
+                Document::Str("TyErr0"),
+                Document::Str("<TyErr1>"),
+                Document::Str("TyErr1"),
+                Document::Str("<TyErr2>"),
+                "type_error",
+                Document::Str("call 'beamtalk_tagged_map':'class_of'(State, 'Object')"),
+                leaf::var(selector.to_string()),
+                leaf::binary_lit(hint_msg),
+                sep,
+            ),
             "{'error', TyErr2, State}",
         ]
     }
