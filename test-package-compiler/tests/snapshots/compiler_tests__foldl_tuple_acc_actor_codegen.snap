@@ -343,7 +343,7 @@ module 'foldl_tuple_acc_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
         <'false'> when 'true' ->
             case call 'beamtalk_extensions':'has'('FoldTupleAccCtr', Selector) of
                 <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'bt@stdlib@actor':'has_method'(Selector)
+                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
             end
     end
 

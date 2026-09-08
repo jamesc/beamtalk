@@ -76,7 +76,7 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, 'has_metho
         <'false'> when 'true' ->
             case call 'beamtalk_extensions':'has'('NativeWorker', Selector) of
                 <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'bt@stdlib@actor':'has_method'(Selector)
+                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
             end
     end
 

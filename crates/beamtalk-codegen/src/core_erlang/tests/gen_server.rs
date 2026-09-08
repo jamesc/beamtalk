@@ -6202,18 +6202,24 @@ fn test_generate_has_method_actor_checks_extension_registry() {
 fn test_generate_has_method_actor_delegates_to_superclass() {
     // Value-type has_method/1 delegates to its superclass module for a
     // selector it doesn't recognize locally, so an inherited method reports
-    // `respondsTo:` true. BT-3467: actor has_method/1 now does the same,
-    // via the shared `DispatchSpec` emitter — a subclass no longer answers
-    // `respondsTo:` false for a selector only an ancestor defines.
+    // `respondsTo:` true. BT-3467: actor has_method/1 now does the same
+    // reflection — an inherited selector answers `respondsTo:` true — but
+    // *dynamically*, via `beamtalk_dispatch:responds_to/2`'s live
+    // class-registry walk (the same mechanism actor message dispatch and
+    // `respondsTo:` already use), not a compile-time module reference — see
+    // `SuperclassDelegation`'s doc comment. A subclass no longer answers
+    // `respondsTo:` false for a selector only an ancestor defines, and stays
+    // correct across a hot-reloaded ancestor (BT-845).
     let class = actor_class_def("Counter", "Actor", vec![unary_method("increment")]);
     let module = module_with_class(class);
     let generator = CoreErlangGenerator::new("counter");
     let doc = generator.generate_has_method(&module).unwrap();
     let output = doc.to_pretty_string();
     assert!(
-        output.contains(":'has_method'(Selector)"),
-        "actor has_method/1 must delegate to its superclass module, \
-         matching value-type has_method/1. Got:\n{output}"
+        output.contains("call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')"),
+        "actor has_method/1 must delegate to its superclass *by class name*, \
+         through beamtalk_dispatch:responds_to/2's live registry walk, not a \
+         compiled module reference. Got:\n{output}"
     );
 }
 

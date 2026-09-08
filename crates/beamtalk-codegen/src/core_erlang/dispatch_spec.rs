@@ -29,6 +29,41 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{ClassDefinition, Expression};
 
+/// How `has_method/1` delegates to its superclass when `Selector` isn't
+/// found locally or in the extension registry.
+///
+/// The two kinds render different Core Erlang, not just a different name:
+/// - [`Static`](SuperclassDelegation::Static) calls the superclass's
+///   *compiled module* directly (`call Module:'has_method'(Selector)`),
+///   resolved once at this class's own compile time.
+/// - [`Dynamic`](SuperclassDelegation::Dynamic) calls
+///   `beamtalk_dispatch:'responds_to'(Selector, ClassName)` — the runtime,
+///   class-registry-keyed hierarchy walk (ADR 0006, ADR 0032 Phase 3) —
+///   which re-resolves the superclass from the live registry on every call.
+///
+/// Value types use `Static`: `beamtalk_primitive:value_type_responds_to/2`
+/// calls a value type's compiled `has_method/1` directly with no dynamic
+/// hierarchy-walk fallback, so `has_method/1` itself must walk statically
+/// (unchanged by BT-3467 — byte-for-byte the prior hand-written output).
+///
+/// Actors use `Dynamic`: actor message dispatch (`dispatch/4`'s default
+/// case) and `respondsTo:` (`beamtalk_primitive:responds_to/2`) already
+/// delegate to a superclass via the live registry, not a compiled module
+/// reference — a `Static` actor `has_method/1` would answer from the
+/// module compiled at *this* class's compile time even after the named
+/// ancestor is hot-reloaded (BT-845) to a different method set or
+/// superclass, diverging from what `dispatch/4` (and a fresh `respondsTo:`
+/// walk) would actually resolve — exactly the actor/dispatch mismatch
+/// BT-3467 exists to eliminate, just reintroduced via hot reload instead of
+/// a missing extension/superclass check.
+pub(in crate::core_erlang) enum SuperclassDelegation<'a> {
+    /// A compiled module name (e.g. `bt@stdlib@actor`).
+    Static(&'a str),
+    /// A class name (e.g. `Bt3467Base`), looked up in the live class
+    /// registry at call time.
+    Dynamic(&'a str),
+}
+
 /// The kind-specific inputs that drive `has_method/1` emission.
 ///
 /// The emitted shape is always the same (selector-membership check, then
@@ -45,10 +80,10 @@ pub(in crate::core_erlang) struct DispatchSpec<'a> {
     pub(in crate::core_erlang) reflection: &'a [&'static str],
     /// The class name for the `beamtalk_extensions:has/2` foreign-extension check.
     pub(in crate::core_erlang) class_name: &'a str,
-    /// Compiled module name to delegate `has_method/1` to when `Selector`
+    /// How to delegate `has_method/1` to the superclass when `Selector`
     /// isn't found locally or in the extension registry. `None` at the root
     /// of the hierarchy (no further delegation).
-    pub(in crate::core_erlang) superclass: Option<&'a str>,
+    pub(in crate::core_erlang) superclass: Option<SuperclassDelegation<'a>>,
     /// True when the class defines a catch-all `doesNotUnderstand:args:`
     /// handler (BT-1763) — such a class accepts every selector, so
     /// `has_method/1` short-circuits to `true` unconditionally.
@@ -127,14 +162,18 @@ pub(in crate::core_erlang) fn generate_has_method_from_spec(
         }
     }
 
-    let false_branch: Document<'static> = if let Some(super_mod) = spec.superclass {
-        docvec![
+    let false_branch: Document<'static> = match spec.superclass {
+        Some(SuperclassDelegation::Static(super_mod)) => docvec![
             "<'false'> when 'true' -> call ",
             leaf::atom(super_mod.to_string()),
             ":'has_method'(Selector)\n",
-        ]
-    } else {
-        Document::Str("<'false'> when 'true' -> 'false'\n")
+        ],
+        Some(SuperclassDelegation::Dynamic(super_class)) => docvec![
+            "<'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, ",
+            leaf::atom(super_class.to_string()),
+            ")\n",
+        ],
+        None => Document::Str("<'false'> when 'true' -> 'false'\n"),
     };
 
     docvec![

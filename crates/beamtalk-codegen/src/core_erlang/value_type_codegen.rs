@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
 
 use super::control_flow::{BodyKind, ThreadingPlan};
-use super::dispatch_spec::{self, DispatchSpec};
+use super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::intrinsics::validate_block_arity_exact;
 use super::spec_codegen;
 use super::util::ClassIdentity;
@@ -4049,7 +4049,7 @@ impl CoreErlangGenerator {
             &DispatchSpec {
                 reflection: &reflection,
                 class_name: &class_name,
-                superclass: superclass_mod.as_deref(),
+                superclass: superclass_mod.as_deref().map(SuperclassDelegation::Static),
                 dnu: false,
                 auto_slots: auto_methods,
             },
@@ -4138,7 +4138,7 @@ impl CoreErlangGenerator {
             &DispatchSpec {
                 reflection: &["class", "respondsTo:", "perform:", "perform:withArguments:"],
                 class_name: &class_name,
-                superclass: Some(&super_mod),
+                superclass: Some(SuperclassDelegation::Static(&super_mod)),
                 dnu: false,
                 auto_slots: None,
             },

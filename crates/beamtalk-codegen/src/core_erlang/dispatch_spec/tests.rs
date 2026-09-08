@@ -1,7 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{DispatchSpec, class_has_catch_all_dnu, generate_has_method_from_spec};
+use super::{
+    DispatchSpec, SuperclassDelegation, class_has_catch_all_dnu, generate_has_method_from_spec,
+};
 use crate::core_erlang::value_accessors::AutoSlotMethods;
 use beamtalk_core::ast::{
     ClassDefinition, ClassKind, CommentAttachment, Expression, ExpressionStatement, Identifier,
@@ -131,7 +133,7 @@ fn dnu_spec_short_circuits_regardless_of_other_fields() {
         &DispatchSpec {
             reflection: &["class"],
             class_name: "Proxy",
-            superclass: Some("bt@stdlib@actor"),
+            superclass: Some(SuperclassDelegation::Static("bt@stdlib@actor")),
             dnu: true,
             auto_slots: None,
         },
@@ -175,7 +177,7 @@ fn subclass_delegates_to_superclass_module_on_false() {
         &DispatchSpec {
             reflection: &[],
             class_name: "Counter",
-            superclass: Some("bt@stdlib@actor"),
+            superclass: Some(SuperclassDelegation::Static("bt@stdlib@actor")),
             dnu: false,
             auto_slots: None,
         },
@@ -184,6 +186,33 @@ fn subclass_delegates_to_superclass_module_on_false() {
     assert!(
         output.contains("call 'bt@stdlib@actor':'has_method'(Selector)"),
         "Got:\n{output}"
+    );
+}
+
+#[test]
+fn subclass_delegates_dynamically_by_class_name_on_false() {
+    // Actors delegate through beamtalk_dispatch:responds_to/2's live
+    // class-registry walk instead of a compile-time module reference, so a
+    // hot-reloaded ancestor (BT-845) is seen immediately — see
+    // SuperclassDelegation's doc comment.
+    let doc = generate_has_method_from_spec(
+        &["shout".to_string()],
+        &DispatchSpec {
+            reflection: &[],
+            class_name: "Bt3467Child",
+            superclass: Some(SuperclassDelegation::Dynamic("Bt3467Base")),
+            dnu: false,
+            auto_slots: None,
+        },
+    );
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("call 'beamtalk_dispatch':'responds_to'(Selector, 'Bt3467Base')"),
+        "Got:\n{output}"
+    );
+    assert!(
+        !output.contains(":'has_method'(Selector)"),
+        "dynamic delegation must not emit a compiled has_method/1 module call. Got:\n{output}"
     );
 }
 

@@ -8,7 +8,7 @@
 //! Generates the method table, `has_method/1`, `safe_dispatch/3`, and
 //! `dispatch/4` functions for runtime message routing.
 
-use super::super::dispatch_spec::{self, DispatchSpec};
+use super::super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::super::value_accessors;
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
@@ -116,6 +116,14 @@ impl CoreErlangGenerator {
     /// selector-membership form, since it has no class hierarchy or DNU
     /// handler to consult.
     ///
+    /// Superclass delegation is [`SuperclassDelegation::Dynamic`], not
+    /// `Static`: an actor's `dispatch/4` and `respondsTo:` already resolve
+    /// an inherited selector via `beamtalk_dispatch`'s live class-registry
+    /// walk (ADR 0006, ADR 0032 Phase 3), so `has_method/1` delegates the
+    /// same way — a hot-reloaded ancestor (BT-845) is seen immediately,
+    /// instead of `has_method/1` alone still answering from the module
+    /// compiled at this class's own compile time.
+    ///
     /// # Generated Code
     ///
     /// ```erlang
@@ -125,7 +133,7 @@ impl CoreErlangGenerator {
     ///         <'false'> when 'true' ->
     ///             case call 'beamtalk_extensions':'has'('Counter', Selector) of
     ///                 <'true'> when 'true' -> 'true'
-    ///                 <'false'> when 'true' -> call 'bt@stdlib@actor':'has_method'(Selector)
+    ///                 <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Object')
     ///             end
     ///     end
     /// ```
@@ -160,7 +168,16 @@ impl CoreErlangGenerator {
             ));
         }
 
-        let superclass_mod = self.superclass_module_name(class.superclass_name());
+        // BT-3467 follow-up: delegate dynamically (by class name, through
+        // beamtalk_dispatch:responds_to/2's live registry walk), not via a
+        // module name resolved at this class's own compile time — see
+        // SuperclassDelegation's doc comment. ProtoObject is the hierarchy
+        // root with no further module to delegate to (mirrors
+        // superclass_module_name's own ProtoObject special case), so no
+        // superclass delegation is emitted for it.
+        let superclass_name = class.superclass_name();
+        let superclass = (superclass_name != "ProtoObject")
+            .then_some(SuperclassDelegation::Dynamic(superclass_name));
         let auto_methods = value_accessors::compute_auto_slot_methods(class);
 
         Ok(dispatch_spec::generate_has_method_from_spec(
@@ -171,7 +188,7 @@ impl CoreErlangGenerator {
                 // delegation below, not listed locally.
                 reflection: &[],
                 class_name: &class_name,
-                superclass: superclass_mod.as_deref(),
+                superclass,
                 dnu: false,
                 auto_slots: auto_methods.as_ref(),
             },
