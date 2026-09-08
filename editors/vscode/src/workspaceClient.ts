@@ -104,6 +104,7 @@ export type PushEvent =
   | { channel: "actors"; event: "spawned"; data: ActorInfo }
   | { channel: "actors"; event: "stopped"; data: ActorStoppedInfo }
   | { channel: "classes"; event: "loaded"; data: { class: string } }
+  | { channel: "classes"; event: "removed"; data: { class: string } }
   | { channel: "bindings"; event: "changed"; data: { session: string } }
   | { channel: "transcript"; text: string }
   | { channel: "logs"; event: "entry"; data: LogEntry };
@@ -619,6 +620,16 @@ export class WorkspaceClient {
       this._emitPush({
         channel: "classes",
         event: "loaded",
+        data: { class: String(data.class ?? "") },
+      });
+    } else if (channel === "classes" && event === "removed" && data) {
+      // BT-2531 (server-side): the runtime already announces this whenever a
+      // class's process shuts down (e.g. `removeFromSystem`) — the sidebar
+      // just never consumed it, so a removed/unloaded class lingered in the
+      // tree until a manual "Refresh Workspace".
+      this._emitPush({
+        channel: "classes",
+        event: "removed",
         data: { class: String(data.class ?? "") },
       });
     } else if (channel === "bindings" && event === "changed" && data) {

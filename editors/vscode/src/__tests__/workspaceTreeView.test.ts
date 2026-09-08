@@ -28,6 +28,7 @@ vi.mock("vscode", () => buildVscodeModule({ executeCommandMock, openTextDocument
 
 import type { WebSocketCallbacks, WebSocketFactory } from "../workspaceClient";
 import { WorkspaceClient } from "../workspaceClient";
+import type { MethodGroupNode } from "../workspaceTreeView";
 import { WorkspaceTreeDataProvider } from "../workspaceTreeView";
 
 // ─── Mock WebSocket (mirrors workspaceClient.test.ts) ──────────────────────────
@@ -185,6 +186,40 @@ describe("WorkspaceTreeDataProvider — Type Aliases section (ADR 0108 Phase 8, 
     client.dispose();
   });
 
+  it("an alias item with a source file wires up Go to Definition", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetch(ws, [
+      { name: "Timeout", expansion: "Integer | #infinity", source_file: "src/timeout.bt" },
+    ]);
+
+    const [aliasNode] = await provider.getChildren({ kind: "type-aliases-section" });
+    const item = provider.getTreeItem(aliasNode);
+
+    expect(item.contextValue).toBe("type-alias-item");
+    expect(item.command).toEqual({
+      command: "beamtalk.navigateToTypeAlias",
+      title: "Go to Definition",
+      arguments: [aliasNode],
+    });
+
+    client.dispose();
+  });
+
+  it("an alias item with no source file does not wire up Go to Definition", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetch(ws, [{ name: "LogLevel", expansion: "#info | #warning" }]);
+
+    const [aliasNode] = await provider.getChildren({ kind: "type-aliases-section" });
+    const item = provider.getTreeItem(aliasNode);
+
+    expect(item.contextValue).toBe("type-alias-item-no-source");
+    expect(item.command).toBeUndefined();
+
+    client.dispose();
+  });
+
   it("section is empty (with a '(none)' description) when no aliases are declared", async () => {
     const { client, ws } = makeConnectedClient();
     provider.setClient(client);
@@ -328,6 +363,277 @@ describe("WorkspaceTreeDataProvider — Classes section origin filter", () => {
     expect(await provider.getChildren({ kind: "classes-section" })).toHaveLength(3);
     expect([...provider.classFilter].sort()).toEqual(["dependency", "project", "stdlib"]);
 
+    client.dispose();
+  });
+});
+
+// ─── Stale-write races, "classes/removed", and refresh-signal hygiene ─────────
+
+function methodGroup(
+  children: Awaited<ReturnType<WorkspaceTreeDataProvider["getChildren"]>>,
+  side: "instance" | "class"
+): MethodGroupNode["methods"] {
+  const group = children.find((c) => c.kind === "method-group" && c.side === side) as
+    | MethodGroupNode
+    | undefined;
+  if (!group) throw new Error(`no ${side} method-group in ${JSON.stringify(children)}`);
+  return group.methods;
+}
+
+describe("WorkspaceTreeDataProvider — stale-write races (methods/inspect caches)", () => {
+  let provider: InstanceType<typeof WorkspaceTreeDataProvider>;
+
+  beforeEach(() => {
+    provider = new WorkspaceTreeDataProvider();
+  });
+
+  it("discards a class-item methods() fetch that resolves after a classes/loaded push invalidated it", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+    ]);
+
+    const [classItem] = await provider.getChildren({ kind: "classes-section" });
+
+    // Start the first (soon-to-be-stale) fetch — don't await yet.
+    const firstFetch = provider.getChildren(classItem);
+    await Promise.resolve(); // let the `methods` request actually get sent
+
+    // A reload arrives while that fetch is still in flight: invalidates the
+    // cache for "Foo" and kicks off its own re-fetch of the class list.
+    ws.receive({
+      type: "push",
+      channel: "classes",
+      event: "loaded",
+      data: { class: "Foo" },
+    });
+    respondToOp(ws, "list-classes", {
+      class_list: [{ name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 }],
+    });
+
+    // The original request now resolves — with data that is stale relative
+    // to the invalidation that already happened.
+    respondToOp(ws, "methods", {
+      methods: [{ name: "stale", selector: "stale", side: "instance" }],
+      state_vars: [],
+    });
+
+    // The stale result must be discarded, not written into the cache.
+    expect(await firstFetch).toEqual([]);
+
+    // A fresh fetch (cache is still empty) gets the real data.
+    const secondFetch = provider.getChildren(classItem);
+    respondToOp(ws, "methods", {
+      methods: [{ name: "fresh", selector: "fresh", side: "instance" }],
+      state_vars: [],
+    });
+    const fresh = await secondFetch;
+    expect(methodGroup(fresh, "instance").map((m) => m.method.selector)).toEqual(["fresh"]);
+
+    client.dispose();
+  });
+
+  it("discards an actor-item inspect() fetch that resolves after a stopped/spawned push invalidated it", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetch(ws);
+
+    // Introduce the actor via a "spawned" push (mirrors real usage — actors
+    // aren't part of the initial fetch fixture here).
+    ws.receive({
+      type: "push",
+      channel: "actors",
+      event: "spawned",
+      data: { pid: "<0.1.0>", class: "Foo" },
+    });
+    const [actorItem] = await provider.getChildren({ kind: "actors-section" });
+
+    const firstFetch = provider.getChildren(actorItem);
+    await Promise.resolve();
+
+    // The actor stops (e.g. crashed) while inspect() is still in flight.
+    ws.receive({
+      type: "push",
+      channel: "actors",
+      event: "stopped",
+      data: { pid: "<0.1.0>", class: "Foo", reason: "normal" },
+    });
+
+    respondToOp(ws, "inspect", { state: { stale: 1 } });
+    expect(await firstFetch).toEqual([]);
+
+    client.dispose();
+  });
+
+  it("a wholesale refresh() discards any per-item fetch already in flight", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+    ]);
+
+    const [classItem] = await provider.getChildren({ kind: "classes-section" });
+    const firstFetch = provider.getChildren(classItem);
+    await Promise.resolve();
+
+    const refreshDone = provider.refresh();
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+    ]);
+    await refreshDone;
+
+    respondToOp(ws, "methods", {
+      methods: [{ name: "stale", selector: "stale", side: "instance" }],
+      state_vars: [],
+    });
+    expect(await firstFetch).toEqual([]);
+
+    client.dispose();
+  });
+});
+
+describe("WorkspaceTreeDataProvider — classes/removed push (BT-2531 wiring)", () => {
+  let provider: InstanceType<typeof WorkspaceTreeDataProvider>;
+
+  beforeEach(() => {
+    provider = new WorkspaceTreeDataProvider();
+  });
+
+  it("removes the class from the tree immediately, no re-fetch needed", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+      { name: "Bar", source_file: "/proj/Bar.bt", actor_count: 0 },
+    ]);
+
+    expect(await provider.getChildren({ kind: "classes-section" })).toHaveLength(2);
+
+    const sentBefore = ws.sent.length;
+    ws.receive({
+      type: "push",
+      channel: "classes",
+      event: "removed",
+      data: { class: "Foo" },
+    });
+
+    const children = await provider.getChildren({ kind: "classes-section" });
+    expect(children.map((c) => (c as { info: { name: string } }).info.name)).toEqual(["Bar"]);
+    // No re-fetch: the event alone is enough to update the list.
+    expect(ws.sent.length).toBe(sentBefore);
+
+    client.dispose();
+  });
+
+  it("fires a classes-section change", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+    ]);
+
+    const fired: unknown[] = [];
+    provider.onDidChangeTreeData((node) => fired.push(node));
+
+    ws.receive({
+      type: "push",
+      channel: "classes",
+      event: "removed",
+      data: { class: "Foo" },
+    });
+
+    expect(fired).toEqual([{ kind: "classes-section" }]);
+
+    client.dispose();
+  });
+
+  it("clears the removed class's cached methods so a stale entry can't resurface", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+    ]);
+
+    const [classItem] = await provider.getChildren({ kind: "classes-section" });
+    const fetch1 = provider.getChildren(classItem);
+    respondToOp(ws, "methods", {
+      methods: [{ name: "m", selector: "m", side: "instance" }],
+      state_vars: [],
+    });
+    await fetch1;
+
+    ws.receive({
+      type: "push",
+      channel: "classes",
+      event: "removed",
+      data: { class: "Foo" },
+    });
+
+    // If the cache weren't cleared, this would resolve instantly from the
+    // stale cache instead of sending a new request.
+    const sentBefore = ws.sent.length;
+    const fetch2 = provider.getChildren(classItem);
+    expect(ws.sent.length).toBeGreaterThan(sentBefore);
+    respondToOp(ws, "methods", { methods: [], state_vars: [] });
+    await fetch2;
+
+    client.dispose();
+  });
+});
+
+describe("WorkspaceTreeDataProvider — refresh-signal hygiene", () => {
+  let provider: InstanceType<typeof WorkspaceTreeDataProvider>;
+
+  beforeEach(() => {
+    provider = new WorkspaceTreeDataProvider();
+  });
+
+  it("an unexpected disconnect (reconnecting) refreshes only the root node, not the whole tree", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetch(ws);
+
+    const fired: unknown[] = [];
+    provider.onDidChangeTreeData((node) => fired.push(node));
+
+    // Simulate an unexpected drop (not client.dispose()) — the client
+    // schedules a reconnect and reports "reconnecting".
+    ws.close();
+
+    expect(fired).toEqual([{ kind: "connected-root" }]);
+
+    client.dispose();
+  });
+
+  it("does not double-fire a full reset when setClient(null) follows a dispose() that already reset", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetch(ws);
+
+    const fired: unknown[] = [];
+    provider.onDidChangeTreeData((node) => fired.push(node));
+
+    // Mirrors connectWorkspace/disconnectWorkspace: dispose() first (which
+    // synchronously drives this client's still-registered onConnectionChange
+    // to "disconnected", already resetting), then setClient(null).
+    client.dispose();
+    provider.setClient(null);
+
+    expect(fired.filter((n) => n === undefined)).toHaveLength(1);
+  });
+
+  it("still fully resets when setClient(null) is called without a prior dispose()", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetch(ws);
+
+    const fired: unknown[] = [];
+    provider.onDidChangeTreeData((node) => fired.push(node));
+
+    provider.setClient(null);
+
+    expect(fired.filter((n) => n === undefined)).toHaveLength(1);
     client.dispose();
   });
 });

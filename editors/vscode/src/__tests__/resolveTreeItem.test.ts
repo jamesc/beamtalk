@@ -16,8 +16,8 @@ const { executeCommandMock, openTextDocumentMock } = vi.hoisted(() => ({
 
 vi.mock("vscode", () => buildVscodeModule({ executeCommandMock, openTextDocumentMock }));
 
-import { WorkspaceTreeDataProvider } from "../workspaceTreeView";
 import type { ClassItemNode, MethodItemNode } from "../workspaceTreeView";
+import { WorkspaceTreeDataProvider } from "../workspaceTreeView";
 
 /** A blank TreeItem, as `getTreeItem` produces before `resolveTreeItem` fills in the tooltip. */
 function blankItem(): vscode.TreeItem {
@@ -47,15 +47,16 @@ const SOURCE = [
   "",
 ].join("\n");
 
-// BT-3439: `findMethodDeclaration`'s regex doesn't understand this codebase's
-// `::` typed-parameter syntax (`deposit: amount :: Integer =>`), so this is
-// real source shaped specifically to defeat the text-search fast path and
-// force the document-symbol-provider fallback.
+// `findMethodDeclaration`'s regex understands a generic type argument with
+// one level of nesting (`List(Foo)`) but not two (`Dictionary(String,
+// List(Dictionary(String, Foo)))`), so this is real source shaped
+// specifically to defeat the text-search fast path and force the
+// document-symbol-provider fallback.
 const SOURCE_TYPED_PARAM = [
   "class Account",
   "  state: balance :: Integer = 0",
   "",
-  "  deposit: amount :: Integer =>",
+  "  deposit: amount :: Dictionary(String, List(Dictionary(String, Integer))) =>",
   "    balance := balance + amount",
   "",
 ].join("\n");
@@ -297,6 +298,41 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
       };
       const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
       expect((resolved?.tooltip as { value: string }).value).toContain("withBalance:");
+    });
+  });
+
+  // Reproduces the reported bug: HTTPClient class>>supervisionSpec (a
+  // native method injected for every Actor subclass) has `source_status:
+  // "unindexed_runtime_fun"` — the backend's own doc calls this "no openable
+  // source" — but the sidebar only special-cased `synthetic`, so this row
+  // got a normal "Go to Definition" command that always silently failed to
+  // find anything (HTTPClient.bt has no `supervisionSpec` text at all).
+  describe("unindexed_runtime_fun methods (native/runtime-only, no openable source)", () => {
+    const unindexedNode: MethodItemNode = {
+      kind: "method-item",
+      method: {
+        name: "supervisionSpec",
+        selector: "supervisionSpec",
+        side: "class",
+        source_status: "unindexed_runtime_fun",
+      },
+      classInfo,
+    };
+
+    it("badges the tree item without a navigable command", () => {
+      const item = provider.getTreeItem(unindexedNode);
+      expect(item.contextValue).toBe("method-item-unindexed");
+      expect(item.command).toBeUndefined();
+      expect((item.iconPath as { id: string }).id).toBe("gear");
+    });
+
+    it("never attempts a file read or LSP round trip for its tooltip", async () => {
+      const resolved = await provider.resolveTreeItem(blankItem(), unindexedNode, noToken);
+      const tooltip = (resolved?.tooltip as { value: string }).value;
+      expect(tooltip).toContain("supervisionSpec");
+      expect(tooltip).toContain("no source available");
+      expect(openTextDocumentMock).not.toHaveBeenCalled();
+      expect(executeCommandMock).not.toHaveBeenCalled();
     });
   });
 });

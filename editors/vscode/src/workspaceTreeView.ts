@@ -2,11 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
+import { GenerationTracker } from "./generationTracker";
+import {
+  type DeclarationRef,
+  findSymbolPosition,
+  resolveDeclarationOffsetSync,
+} from "./symbolLookup";
 import {
   extractMethodDocComment,
+  extractStateVarDocComment,
   extractStateVarInfo,
-  findMethodDeclaration,
-  offsetForDeclarationLine,
 } from "./textUtils";
 import type {
   ActorInfo,
@@ -15,14 +20,27 @@ import type {
   ClassOrigin,
   ConnectionState,
   MethodInfo,
-  StateVarInfo,
   PushEvent,
+  StateVarInfo,
   TypeAliasInfo,
   WorkspaceClient,
 } from "./workspaceClient";
 
 /** Every class origin the Workspace Explorer can filter by (BT-2552 badges). */
 export const ALL_CLASS_ORIGINS: readonly ClassOrigin[] = ["project", "dependency", "stdlib"];
+
+/**
+ * True for a `source_status` that the backend documents as having no
+ * openable source at all — `synthetic` (a compiler-generated accessor) or
+ * `unindexed_runtime_fun` (a native/runtime-only method, e.g. one injected
+ * for every `Actor subclass:` to support supervision — see
+ * beamtalk_repl_ops_browse.erl's own "no openable source" doc comment).
+ * Neither can be hovered or navigated to via source-text search: there is
+ * no declaration anywhere to find.
+ */
+function hasNoOpenableSource(status: MethodInfo["source_status"]): boolean {
+  return status === "synthetic" || status === "unindexed_runtime_fun";
+}
 
 // ─── Node Types ───────────────────────────────────────────────────────────────
 
@@ -178,12 +196,20 @@ export class WorkspaceTreeDataProvider
 
   /** Cached inspect results keyed by "actor:<pid>". */
   private readonly inspectCache = new Map<string, Record<string, unknown>>();
+  /**
+   * Guards `inspectCache` against a stale-write race: a `getChildren`
+   * `inspect()` fetch in flight when a "spawned"/"stopped" push invalidates
+   * the same pid must not overwrite that invalidation once it resolves.
+   */
+  private readonly inspectGen = new GenerationTracker();
 
   /** Cached methods+stateVars results keyed by class name. */
   private readonly methodsCache = new Map<
     string,
     { methods: MethodInfo[]; stateVars: StateVarInfo[] }
   >();
+  /** Guards `methodsCache` against the same stale-write race, keyed by class name. */
+  private readonly methodsGen = new GenerationTracker();
 
   private readonly disposeHandlers: Array<() => void> = [];
 
@@ -234,7 +260,14 @@ export class WorkspaceTreeDataProvider
 
     if (!client) {
       this.sessionId = null;
-      this._resetState("disconnected");
+      // Skip a redundant full-tree fire if we're already disconnected — e.g.
+      // `connectWorkspace`/`disconnectWorkspace` call `workspaceWsClient.dispose()`
+      // (which synchronously drives this same client's still-registered
+      // `onConnectionChange("disconnected")` below, already firing a reset)
+      // immediately followed by `setClient(null)` on the very next line.
+      if (this.connectionState !== "disconnected") {
+        this._resetState("disconnected");
+      }
       return;
     }
 
@@ -246,8 +279,10 @@ export class WorkspaceTreeDataProvider
       } else if (state === "disconnected") {
         this._resetState("disconnected");
       } else {
-        // reconnecting — keep stale data visible but fire to update description
-        this._onDidChangeTreeData.fire(undefined);
+        // reconnecting — keep stale data visible, but only the root item's
+        // description ("Reconnecting…") actually changed, so refresh just
+        // that node rather than forcing every expanded node to re-fetch.
+        this._onDidChangeTreeData.fire(CONNECTED_ROOT);
       }
     });
     this.disposeHandlers.push(disposeConn);
@@ -323,6 +358,11 @@ export class WorkspaceTreeDataProvider
     }
     this.inspectCache.clear();
     this.methodsCache.clear();
+    // Discard any per-item fetch (actor inspect / class methods) still in
+    // flight from before this wholesale clear — without this, one resolving
+    // afterward would repopulate the cache with a pre-refresh result.
+    this.inspectGen.bumpAll();
+    this.methodsGen.bumpAll();
     await this._fetchInitialData(this.client);
   }
 
@@ -417,10 +457,16 @@ export class WorkspaceTreeDataProvider
         if (!activeClient || this.connectionState !== "connected") {
           return [];
         }
+        // Captured before the request so a "spawned"/"stopped" push that
+        // invalidates this same pid while inspect() is in flight is detected
+        // once it resolves, instead of overwriting the invalidation.
+        const token = this.inspectGen.token(cacheKey);
         try {
           const state = await activeClient.inspect(element.info.pid);
-          // Guard: client may have changed while inspect was in-flight
+          // Guard: client may have changed, or this pid's cache entry may
+          // have been invalidated, while inspect() was in-flight.
           if (this.client !== activeClient) return [];
+          if (!this.inspectGen.isCurrent(cacheKey, token)) return [];
           this.inspectCache.set(cacheKey, state);
           return this._inspectFields(state, cacheKey);
         } catch {
@@ -437,10 +483,17 @@ export class WorkspaceTreeDataProvider
         if (!activeClient || this.connectionState !== "connected") {
           return [];
         }
+        // Captured before the request so a "classes/loaded" or
+        // "classes/removed" push that invalidates this same class while
+        // methods() is in flight is detected once it resolves, instead of
+        // overwriting the invalidation with a stale pre-reload result.
+        const token = this.methodsGen.token(element.info.name);
         try {
           const result = await activeClient.methods(element.info.name);
-          // Guard: client may have changed while methods() was in-flight
+          // Guard: client may have changed, or this class's cache entry may
+          // have been invalidated, while methods() was in-flight.
           if (this.client !== activeClient) return [];
+          if (!this.methodsGen.isCurrent(element.info.name, token)) return [];
           this.methodsCache.set(element.info.name, result);
           return this._classChildren(result, element.info);
         } catch {
@@ -473,14 +526,18 @@ export class WorkspaceTreeDataProvider
       return item;
     }
     if (element.kind === "method-item") {
-      // BT-3444: a `synthetic` method has no declaration anywhere in
+      // BT-3444: a `synthetic` method (a compiler-generated accessor) or an
+      // `unindexed_runtime_fun` one (a native/runtime-only method the
+      // backend explicitly documents as having "no openable source" —
+      // beamtalk_repl_ops_browse.erl) has no declaration anywhere in
       // source, so the LSP-hover / doc-comment lookups below would only
       // ever fail (there is nothing at any position to hover over or read
       // a `///` comment from) — go straight to the wire-supplied
-      // signature/doc (BT-2735's synthetic-only resolution) instead of
-      // paying for two guaranteed-empty lookups.
-      if (element.method.source_status === "synthetic") {
-        item.tooltip = this._syntheticMethodTooltip(element.method);
+      // signature/doc (BT-2735's synthetic-only resolution — always empty
+      // for `unindexed_runtime_fun`, hence the fallback wording below)
+      // instead of paying for two guaranteed-empty lookups.
+      if (hasNoOpenableSource(element.method.source_status)) {
+        item.tooltip = this._noSourceMethodTooltip(element.method);
         return item;
       }
       item.tooltip =
@@ -533,7 +590,7 @@ export class WorkspaceTreeDataProvider
       const docSymbols = await vscode.commands.executeCommand<
         vscode.DocumentSymbol[] | vscode.SymbolInformation[]
       >("vscode.executeDocumentSymbolProvider", uri);
-      const pos = this._findSymbolPosition(docSymbols ?? [], symbol, kind);
+      const pos = findSymbolPosition(docSymbols ?? [], symbol, kind);
       if (!pos) return undefined;
       return await this._hoverAt(uri, pos);
     } catch {
@@ -543,10 +600,11 @@ export class WorkspaceTreeDataProvider
 
   /**
    * Resolve a class/method declaration to a text offset via source search —
-   * no LSP round trip. State-var hover ("field") never reaches here: the
-   * `state-item` case in `resolveTreeItem` goes through `_stateVarTooltip`
-   * instead, which reads source text directly, so this only ever needs to
-   * handle the two kinds `_lspHoverTooltip` is actually called with.
+   * no LSP round trip (see `resolveDeclarationOffsetSync`). State-var hover
+   * ("field") never reaches here: the `state-item` case in `resolveTreeItem`
+   * goes through `_stateVarTooltip` instead, which reads source text
+   * directly, so this only ever needs to handle the two kinds
+   * `_lspHoverTooltip` is actually called with.
    */
   private _declarationOffset(
     text: string,
@@ -554,20 +612,15 @@ export class WorkspaceTreeDataProvider
     symbol: string,
     decl?: { side?: "instance" | "class"; declaredLine?: number }
   ): number {
-    if (kind === "method" || kind === "class-method") {
-      const side = decl?.side ?? (kind === "class-method" ? "class" : "instance");
-      const line = decl?.declaredLine;
-      // The full joined selector never appears verbatim in source when it has
-      // keyword parts — validate the real-line path against just its first
-      // keyword instead (see offsetForDeclarationLine's doc).
-      let offset =
-        line !== undefined ? offsetForDeclarationLine(text, line, symbol.split(":")[0]) : -1;
-      if (offset === -1) offset = findMethodDeclaration(text, symbol, side);
-      return offset;
-    }
-    // "class": no declared-line metadata is tracked for classes (ClassInfo
-    // carries no `line` field), so fall through to the document-symbol path.
-    return -1;
+    const ref: DeclarationRef =
+      kind === "class"
+        ? { kind: "class", name: symbol }
+        : {
+            kind: "method",
+            side: decl?.side ?? (kind === "class-method" ? "class" : "instance"),
+            selector: symbol,
+          };
+    return resolveDeclarationOffsetSync(text, ref, decl?.declaredLine);
   }
 
   /** Run the hover provider at a position and flatten the result into one MarkdownString. */
@@ -592,41 +645,6 @@ export class WorkspaceTreeDataProvider
     return md.value ? md : undefined;
   }
 
-  /** Find the position of a class, method, or field symbol from document symbols. */
-  private _findSymbolPosition(
-    symbols: vscode.DocumentSymbol[] | vscode.SymbolInformation[],
-    name: string,
-    kind: "class" | "method" | "class-method" | "field"
-  ): vscode.Position | undefined {
-    const targetKind =
-      kind === "class"
-        ? [vscode.SymbolKind.Class]
-        : kind === "field"
-          ? [vscode.SymbolKind.Field]
-          : [vscode.SymbolKind.Method, vscode.SymbolKind.Function];
-
-    for (const sym of symbols) {
-      // Class symbols are named "ClassName (class)" per ADR 0013 — strip the suffix for matching.
-      const symBaseName =
-        sym.kind === vscode.SymbolKind.Class ? sym.name.replace(/ \(class\)$/, "") : sym.name;
-      if (targetKind.includes(sym.kind) && symBaseName === name) {
-        if ("range" in sym) {
-          // DocumentSymbol
-          return sym.selectionRange.start;
-        } else {
-          // SymbolInformation
-          return sym.location.range.start;
-        }
-      }
-      // Recurse into children (DocumentSymbol only)
-      if ("children" in sym && sym.children.length > 0) {
-        const found = this._findSymbolPosition(sym.children, name, kind);
-        if (found) return found;
-      }
-    }
-    return undefined;
-  }
-
   private _classTooltipFallback(info: ClassInfo): vscode.MarkdownString {
     const md = new vscode.MarkdownString(`**${info.name}**`);
     if (info.actor_count !== undefined && info.actor_count > 0) {
@@ -644,16 +662,20 @@ export class WorkspaceTreeDataProvider
   }
 
   /**
-   * BT-3444: tooltip for a `synthetic` method (a compiler-generated row with
-   * no user-written source anywhere). Built entirely from the `methods` ws
-   * op's wire-supplied `signature`/`doc` (resolved server-side for
-   * `synthetic` rows only, BT-2735) — never a file read or LSP round trip,
-   * since there is no declaration in source to read one from.
+   * BT-3444: tooltip for a method with no openable source — `synthetic` (a
+   * compiler-generated accessor) or `unindexed_runtime_fun` (a
+   * native/runtime-only method). Built entirely from the `methods` ws op's
+   * wire-supplied `signature`/`doc` (resolved server-side for `synthetic`
+   * rows only, BT-2735 — always absent for `unindexed_runtime_fun`) — never
+   * a file read or LSP round trip, since there is no declaration in source
+   * to read one from.
    */
-  private _syntheticMethodTooltip(method: MethodInfo): vscode.MarkdownString {
+  private _noSourceMethodTooltip(method: MethodInfo): vscode.MarkdownString {
     const md = new vscode.MarkdownString(`**${method.signature ?? method.selector}**`);
+    const reason =
+      method.source_status === "synthetic" ? "compiler-generated" : "no source available";
     md.appendMarkdown(
-      `\n\n_${method.side === "instance" ? "instance-side" : "class-side"} · compiler-generated, no source_`
+      `\n\n_${method.side === "instance" ? "instance-side" : "class-side"} · ${reason}_`
     );
     if (method.doc) {
       md.appendMarkdown(`\n\n${method.doc}`);
@@ -696,13 +718,17 @@ export class WorkspaceTreeDataProvider
     try {
       const uri = vscode.Uri.file(classInfo.source_file);
       const doc = await vscode.workspace.openTextDocument(uri);
-      const info = extractStateVarInfo(doc.getText(), stateVar.name);
-      if (!info) return fallback;
+      const text = doc.getText();
+      const info = extractStateVarInfo(text, stateVar.name);
+      const docComment = extractStateVarDocComment(text, stateVar.name);
+      if (!info && !docComment) return fallback;
       const md = new vscode.MarkdownString(`**${stateVar.name}**`);
-      if (info.defaultValue !== undefined) {
+      if (info?.defaultValue !== undefined) {
         md.appendMarkdown(`\n\nDefault: \`${info.defaultValue}\``);
       }
-      if (info.comment) {
+      if (docComment) {
+        md.appendMarkdown(`\n\n${docComment}`);
+      } else if (info?.comment) {
         md.appendMarkdown(`\n\n${info.comment}`);
       }
       return md;
@@ -855,7 +881,15 @@ export class WorkspaceTreeDataProvider
   private _typeAliasItem(node: TypeAliasItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.info.name, vscode.TreeItemCollapsibleState.None);
     item.iconPath = new vscode.ThemeIcon("symbol-interface");
-    item.contextValue = "type-alias-item";
+    const hasSource = !!node.info.source_file && node.info.source_file !== "unknown";
+    item.contextValue = hasSource ? "type-alias-item" : "type-alias-item-no-source";
+    if (hasSource) {
+      item.command = {
+        command: "beamtalk.navigateToTypeAlias",
+        title: "Go to Definition",
+        arguments: [node],
+      };
+    }
     if (node.info.expansion) {
       item.description = `= ${node.info.expansion}`;
     }
@@ -891,17 +925,28 @@ export class WorkspaceTreeDataProvider
   private _methodItem(node: MethodItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.method.selector, vscode.TreeItemCollapsibleState.None);
     // BT-3444: a `synthetic` method (e.g. a `Value subclass:`'s
-    // compiler-generated field accessor) has no user-written declaration
-    // anywhere in the class's source file, unlike every other row here —
-    // badge it visibly distinct (gear icon + muted description) and never
-    // wire up "Go to Definition", which would otherwise fail to find the
-    // selector in source and surface a "not found" message (BT-3439's
-    // navigateToMethod). Mirrors the LiveView IDE method list's `derived`
-    // badge for the same `source_status = synthetic` fact (BT-2714).
+    // compiler-generated field accessor) or an `unindexed_runtime_fun` one
+    // (a native/runtime-only method — e.g. HTTPClient class>>supervisionSpec,
+    // injected for every Actor subclass to support supervision, with no
+    // corresponding text anywhere in HTTPClient.bt) has no user-written
+    // declaration anywhere in the class's source file, unlike every other
+    // row here — badge it visibly distinct (gear icon + muted description)
+    // and never wire up "Go to Definition", which would otherwise fail to
+    // find the selector in source and surface a "not found" message
+    // (BT-3439's navigateToMethod) — previously only `synthetic` got this
+    // treatment, so an `unindexed_runtime_fun` row looked like a normal,
+    // clickable method that silently did nothing useful. Mirrors the
+    // LiveView IDE method list's `derived` badge for the same fact (BT-2714).
     if (node.method.source_status === "synthetic") {
       item.iconPath = new vscode.ThemeIcon("gear");
       item.description = "compiler-generated";
       item.contextValue = "method-item-synthetic";
+      return item;
+    }
+    if (node.method.source_status === "unindexed_runtime_fun") {
+      item.iconPath = new vscode.ThemeIcon("gear");
+      item.description = "no source available";
+      item.contextValue = "method-item-unindexed";
       return item;
     }
     item.iconPath = new vscode.ThemeIcon("symbol-method");
@@ -1027,6 +1072,8 @@ export class WorkspaceTreeDataProvider
     this.typeAliases = [];
     this.inspectCache.clear();
     this.methodsCache.clear();
+    this.inspectGen.bumpAll();
+    this.methodsGen.bumpAll();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -1089,15 +1136,18 @@ export class WorkspaceTreeDataProvider
           this.actors.push(event.data);
         }
         this.inspectCache.delete(`actor:${event.data.pid}`);
+        this.inspectGen.bump(`actor:${event.data.pid}`);
         this._onDidChangeTreeData.fire(ACTORS_SECTION);
       } else if (event.event === "stopped") {
         this.actors = this.actors.filter((a) => a.pid !== event.data.pid);
         this.inspectCache.delete(`actor:${event.data.pid}`);
+        this.inspectGen.bump(`actor:${event.data.pid}`);
         this._onDidChangeTreeData.fire(ACTORS_SECTION);
       }
     } else if (event.channel === "classes" && event.event === "loaded") {
       // Invalidate cached methods for the reloaded class — its methods may have changed.
       this.methodsCache.delete(event.data.class);
+      this.methodsGen.bump(event.data.class);
       // Re-fetch the full class list — the event only carries the new class name,
       // not the complete list with actor_count metadata.
       // Use a generation counter to discard stale responses when multiple
@@ -1118,6 +1168,16 @@ export class WorkspaceTreeDataProvider
         .catch(() => {
           // Transient failure: next class-loaded event will retry.
         });
+    } else if (event.channel === "classes" && event.event === "removed") {
+      // BT-2531 (server-side) fires this when a class's process shuts down
+      // (e.g. `removeFromSystem`/unload) — remove it immediately rather than
+      // waiting for a "loaded" event that will never come for this class.
+      // Unlike "loaded", no re-fetch is needed: the removed class is simply
+      // absent from the list, no new metadata to read.
+      this.classes = this.classes.filter((c) => c.name !== event.data.class);
+      this.methodsCache.delete(event.data.class);
+      this.methodsGen.bump(event.data.class);
+      this._onDidChangeTreeData.fire(CLASSES_SECTION);
     }
   }
 }

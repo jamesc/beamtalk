@@ -512,7 +512,18 @@ fn parameter_name_span_in_signature(span: Span, source: &str) -> Span {
 ///
 /// For keyword selectors, spans are taken directly from `KeywordPart` metadata.
 /// For unary/binary selectors, we find the selector lexeme in the method header slice.
-fn selector_span_in_method_signature(method: &MethodDefinition, source: &str) -> Option<Span> {
+///
+/// `pub(crate)` so `document_symbols_provider` can reuse it for `name_span`
+/// instead of falling back to `method.span`'s start — which, for a class-side
+/// (or `sealed`/`internal`) method, sits on the modifier keyword rather than
+/// the selector (`parse_method_definition` captures `span` before consuming
+/// modifiers). A second, independent span-finding implementation there would
+/// only reintroduce the kind of "can't parse this shape" gap this function
+/// already exists to avoid.
+pub(crate) fn selector_span_in_method_signature(
+    method: &MethodDefinition,
+    source: &str,
+) -> Option<Span> {
     match &method.selector {
         MessageSelector::Keyword(parts) => {
             let first = parts.first()?;
