@@ -2303,7 +2303,9 @@ inherited_ws_entries(ClassName, ClassSide, Flattened) ->
                         undefined ->
                             Acc;
                         DefiningPid ->
-                            Entry = method_ws_entry(DefiningClass, ClassSide, Selector, DefiningPid),
+                            Entry = method_ws_entry(
+                                DefiningClass, ClassSide, Selector, DefiningPid
+                            ),
                             [
                                 Entry#{
                                     <<"defining_class">> => atom_to_binary(DefiningClass, utf8)
