@@ -236,6 +236,61 @@ pub(in crate::semantic_analysis) fn resolve_declared_type_with_alias_deps(
     (resolved, touched)
 }
 
+/// Bundles a resolution call's alias state — [`AliasRegistry`] (ADR 0108)
+/// and the accumulating `referenced_aliases` dependency set (ADR 0108
+/// hot-reload re-check trigger) — as one value.
+///
+/// Every call site that needs *both* fields previously reached
+/// `self.alias_registry.as_ref()` and `&mut self.referenced_aliases` (or
+/// `self.referenced_aliases.extend(deps)`) as two separate `TypeChecker`
+/// field accesses; `TypeChecker::resolution_context` hands back one value
+/// instead, and [`Self::resolve_type_annotation`] collapses the
+/// "resolve, then extend" two-step into a single call. Kept to the sites
+/// that pair the two fields together (`inference/`'s `Simple` annotation +
+/// declared-state-type resolution sites); the many call sites that only
+/// ever needed `alias_registry` alone (never tracking deps) are unaffected
+/// and keep passing `Option<&AliasRegistry>` directly.
+pub(in crate::semantic_analysis) struct ResolutionContext<'a> {
+    alias_registry: Option<&'a AliasRegistry>,
+    referenced_aliases: &'a mut std::collections::HashSet<EcoString>,
+}
+
+impl<'a> ResolutionContext<'a> {
+    /// Constructs a context from disjoint borrows of the two fields it
+    /// bundles. Callers reach this through
+    /// `TypeChecker::resolution_context`, not directly — see that method's
+    /// doc for why the two borrows stay disjoint from the rest of `self`.
+    pub(in crate::semantic_analysis) fn new(
+        alias_registry: Option<&'a AliasRegistry>,
+        referenced_aliases: &'a mut std::collections::HashSet<EcoString>,
+    ) -> Self {
+        Self {
+            alias_registry,
+            referenced_aliases,
+        }
+    }
+
+    /// [`resolve_type_annotation`], recording every alias name touched into
+    /// this context's `referenced_aliases` — the single-call replacement for
+    /// calling [`resolve_type_annotation_with_alias_deps`] and then manually
+    /// extending `self.referenced_aliases` with its returned `Vec`.
+    pub(in crate::semantic_analysis) fn resolve_type_annotation(
+        &mut self,
+        ann: &TypeAnnotation,
+        subst: &SubstitutionMap,
+        protocol_registry: Option<&ProtocolRegistry>,
+    ) -> InferredType {
+        let (ty, deps) = resolve_type_annotation_with_alias_deps(
+            ann,
+            subst,
+            protocol_registry,
+            self.alias_registry,
+        );
+        self.referenced_aliases.extend(deps);
+        ty
+    }
+}
+
 /// Resolve a [`DeclaredType`] into a fully-parameterised [`InferredType`]
 /// (BT-3076) — the canonical, span-free recursion that
 /// [`resolve_type_annotation`] now delegates to (via `DeclaredType::from`)

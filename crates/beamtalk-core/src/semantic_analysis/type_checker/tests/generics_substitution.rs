@@ -160,8 +160,7 @@ fn set_param_types_resolves_generic_annotation() {
         &mut env,
         &params,
         None,
-        None,
-        &mut std::collections::HashSet::new(),
+        &mut type_resolver::ResolutionContext::new(None, &mut std::collections::HashSet::new()),
     );
 
     let r_type = env.get_local("r").expect("r should be in env");
