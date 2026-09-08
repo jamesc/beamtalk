@@ -312,7 +312,14 @@ in apply '__nlr_body'/0 ()
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, ['applyBlock:', 'findOver:in:'])
+    case call 'lists':'member'(Selector, ['applyBlock:', 'findOver:in:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('RelayCtr', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'bt@stdlib@actor':'has_method'(Selector)
+            end
+    end
 
 
 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->

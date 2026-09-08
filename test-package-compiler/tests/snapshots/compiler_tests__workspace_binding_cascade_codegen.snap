@@ -291,7 +291,14 @@ module 'workspace_binding_cascade' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, ['run'])
+    case call 'lists':'member'(Selector, ['run']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('Logger', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'bt@stdlib@actor':'has_method'(Selector)
+            end
+    end
 
 
 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->

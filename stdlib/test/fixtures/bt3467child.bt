@@ -5,4 +5,5 @@
 // Defines its own method (shout) and inherits greet without overriding it.
 
 Bt3467Base subclass: Bt3467Child
+
   shout => "HI"

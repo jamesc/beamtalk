@@ -20030,7 +20030,7 @@
         "protocol",
         "subclassing"
       ],
-      "source": "// BT-3467: Test fixture — base of a two-level actor inheritance chain (see\n// bt3467_actor_child.bt). Bt3467Child does not override greet, so\n// `respondsTo: #greet` on a Bt3467Child instance only answers true if actor\n// has_method/1 delegates to its superclass module — the exact divergence\n// BT-3467 fixes.\n\nActor subclass: Bt3467Base\n  greet => \"hi\"",
+      "source": "// BT-3467: Test fixture — base of a two-level actor inheritance chain (see\n// bt3467_actor_child.bt). Bt3467Child does not override greet, so\n// `respondsTo: #greet` on a Bt3467Child instance only answers true if actor\n// has_method/1 delegates to its superclass module — the exact divergence\n// BT-3467 fixes.\n\nActor subclass: Bt3467Base\n\n  greet => \"hi\"",
       "explanation": "BT-3467: Test fixture — base of a two-level actor inheritance chain (see bt3467_actor_child.bt). Bt3467Child does not override greet, so `respondsTo: #greet` on a Bt3467Child instance only answers true if actor has_method/1 delegates to its superclass module — the exact divergence BT-3467 fixes."
     },
     {
@@ -20053,7 +20053,7 @@
         "shout",
         "subclassing"
       ],
-      "source": "// BT-3467: Test fixture — subclass of bt3467_actor_base.bt's Bt3467Base.\n// Defines its own method (shout) and inherits greet without overriding it.\n\nBt3467Base subclass: Bt3467Child\n  shout => \"HI\"",
+      "source": "// BT-3467: Test fixture — subclass of bt3467_actor_base.bt's Bt3467Base.\n// Defines its own method (shout) and inherits greet without overriding it.\n\nBt3467Base subclass: Bt3467Child\n\n  shout => \"HI\"",
       "explanation": "BT-3467: Test fixture — subclass of bt3467_actor_base.bt's Bt3467Base. Defines its own method (shout) and inherits greet without overriding it."
     },
     {

@@ -8,4 +8,5 @@
 // BT-3467 fixes.
 
 Actor subclass: Bt3467Base
+
   greet => "hi"

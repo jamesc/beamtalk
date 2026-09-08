@@ -304,7 +304,14 @@ module 'logging_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, ['increment', 'getLogCount'])
+    case call 'lists':'member'(Selector, ['increment', 'getLogCount']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('LoggingCounter', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'bt@counter':'has_method'(Selector)
+            end
+    end
 
 
 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
