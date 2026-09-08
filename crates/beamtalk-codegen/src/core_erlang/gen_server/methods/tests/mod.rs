@@ -6,16 +6,15 @@
 //! Tests are organized into domain-focused sub-modules:
 //! - [`source_extraction`] — `extract_method_source` return-type annotation
 //!   stripping
-//! - [`recv_type_projection`] — ADR 0115 Phase 2: `project_recv_type` unit
-//!   coverage
-//! - [`dispatch_generation`] — `generate_register_class`/
-//!   `generate_method_dispatch`/`generate_class_method_dispatches`/
-//!   `generate_class_method_functions`
-//! - [`meta_type_repr`] — ADR 0068 `MetaTypeRepr` conversion and rendering
-//! - [`meta_map`] — ADR 0098 `__beamtalk_meta` map construction (provenance,
-//!   type params, package, kind, visibility)
-//! - [`synthetic_accessors`] — synthetic value-accessor doc/signature
-//!   metadata
+//! - [`dispatch_generation`] — `generate_method_dispatch`/
+//!   `generate_class_method_dispatches`/`generate_class_method_functions`
+//!
+//! `project_recv_type` (formerly `recv_type_projection`), `__beamtalk_meta`
+//! map construction (formerly `meta_map`/`meta_type_repr`), synthetic
+//! value-accessor metadata (formerly `synthetic_accessors`), and
+//! `generate_register_class` moved with their production code to
+//! `xref::tests`, `class_meta::tests`, `value_accessors::tests`, and
+//! `class_registry::tests` respectively.
 
 use super::*;
 use beamtalk_core::ast::{
@@ -41,8 +40,4 @@ pub(crate) fn simple_unary_method(selector: &str) -> MethodDefinition {
 }
 
 mod dispatch_generation;
-mod meta_map;
-mod meta_type_repr;
-mod recv_type_projection;
 mod source_extraction;
-mod synthetic_accessors;

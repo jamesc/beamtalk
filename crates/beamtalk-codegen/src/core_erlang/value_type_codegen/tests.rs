@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::core_erlang::CoreErlangGenerator;
-use crate::core_erlang::value_type_codegen::{AutoSlotMethods, compute_auto_slot_methods};
 use beamtalk_core::ast::{
     ClassDefinition, ClassKind, DeclaredKeyword, Identifier, Literal, Module, StateDeclaration,
 };
 use beamtalk_core::source_analysis::Span;
-use beamtalk_core::test_helpers::test_support::make_actor_class;
 
 fn s() -> Span {
     Span::new(0, 0)
@@ -42,57 +40,9 @@ fn make_value_class(name: &str, slots: &[&str]) -> ClassDefinition {
     class
 }
 
-#[test]
-fn test_with_star_selector_single_char() {
-    assert_eq!(AutoSlotMethods::with_star_selector("x"), "withX:");
-}
-
-#[test]
-fn test_with_star_selector_multi_char() {
-    assert_eq!(
-        AutoSlotMethods::with_star_selector("firstName"),
-        "withFirstName:"
-    );
-}
-
-#[test]
-fn test_compute_auto_slot_methods_actor_returns_none() {
-    let class = make_actor_class("Counter");
-    assert!(
-        compute_auto_slot_methods(&class).is_none(),
-        "actor classes should not get auto slot methods"
-    );
-}
-
-#[test]
-fn test_compute_auto_slot_methods_value_class_returns_getters_setters() {
-    let class = make_value_class("Point", &["x", "y"]);
-    let auto = compute_auto_slot_methods(&class).unwrap();
-    assert!(auto.getters.contains(&"x".to_string()));
-    assert!(auto.getters.contains(&"y".to_string()));
-    assert!(auto.setters.contains(&"x".to_string()));
-    assert!(auto.setters.contains(&"y".to_string()));
-}
-
-#[test]
-fn test_compute_auto_slot_methods_keyword_constructor() {
-    let class = make_value_class("Point", &["x", "y"]);
-    let auto = compute_auto_slot_methods(&class).unwrap();
-    assert_eq!(
-        auto.keyword_constructor,
-        Some("x:y:".to_string()),
-        "should generate keyword constructor selector from slot names"
-    );
-}
-
-#[test]
-fn test_compute_auto_slot_methods_no_slots() {
-    let class = make_value_class("Empty", &[]);
-    let auto = compute_auto_slot_methods(&class).unwrap();
-    assert!(auto.getters.is_empty());
-    assert!(auto.setters.is_empty());
-    assert!(auto.keyword_constructor.is_none());
-}
+// `with_star_selector`/`compute_auto_slot_methods`/
+// `has_opaque_native_representation` coverage moved to
+// `value_accessors::tests` alongside their production code.
 
 // ─── Opaque `native:` representations ────────────────────────────────────
 
@@ -102,29 +52,6 @@ fn parse_one_class(source: &str) -> ClassDefinition {
         .into_iter()
         .next()
         .expect("source should declare a class")
-}
-
-#[test]
-fn test_bt_2998_has_opaque_native_representation() {
-    use super::has_opaque_native_representation;
-
-    // `native:` + no declared fields — nothing for `basicNew` to build.
-    assert!(has_opaque_native_representation(&parse_one_class(
-        "Value subclass: Uuid native: beamtalk_uuid\n  version -> Integer => self delegate\n"
-    )));
-    // `native:` but carrying its own fields (`Package`, `SupervisionNode`).
-    assert!(!has_opaque_native_representation(&parse_one_class(
-        "Value subclass: Package native: beamtalk_package\n  field: name = nil\n"
-    )));
-    // Plain value type — the ordinary `basicNew` case.
-    assert!(!has_opaque_native_representation(&parse_one_class(
-        "Value subclass: Point\n  field: x = 0\n"
-    )));
-    // Fieldless *non*-native class: `~{'$beamtalk_class' => 'X'}~` is its
-    // complete and correct instance, so it stays constructible.
-    assert!(!has_opaque_native_representation(&parse_one_class(
-        "Value subclass: Marker\n  isMarker -> Boolean => true\n"
-    )));
 }
 
 #[test]

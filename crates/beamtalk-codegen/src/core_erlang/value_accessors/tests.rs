@@ -1,17 +1,37 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Synthetic value-accessor doc/signature metadata.
+//! Synthetic value-accessor doc/signature metadata (BT-2734), auto-slot-method
+//! rule (ADR 0042/BT-923), and the opaque-`native:` `basicNew` guard (BT-2998).
 
 use super::*;
 use beamtalk_core::ast::{
-    ClassDefinition, DeclaredKeyword, Identifier, KeywordPart, MessageSelector, MethodDefinition,
-    ParameterDefinition, StateDeclaration, TypeAnnotation,
+    ClassDefinition as AstClassDefinition, DeclaredKeyword, Expression, ExpressionStatement,
+    Identifier, KeywordPart, Literal, MessageSelector, MethodDefinition, ParameterDefinition,
+    StateDeclaration as AstStateDeclaration,
 };
+use beamtalk_core::source_analysis::Span;
 use beamtalk_core::test_helpers::test_support::make_actor_class;
 
-fn slot(name: &str, ty: Option<&str>) -> StateDeclaration {
-    StateDeclaration {
+fn s() -> Span {
+    Span::new(0, 0)
+}
+
+fn bare(expr: Expression) -> ExpressionStatement {
+    ExpressionStatement::bare(expr)
+}
+
+fn simple_unary_method(selector: &str) -> MethodDefinition {
+    MethodDefinition::new(
+        MessageSelector::Unary(selector.into()),
+        vec![],
+        vec![bare(Expression::Literal(Literal::Integer(42), s()))],
+        s(),
+    )
+}
+
+fn slot(name: &str, ty: Option<&str>) -> AstStateDeclaration {
+    AstStateDeclaration {
         name: Identifier::new(name, s()),
         type_annotation: ty.map(|t| TypeAnnotation::Simple(Identifier::new(t, s()))),
         default_value: None,
@@ -23,8 +43,8 @@ fn slot(name: &str, ty: Option<&str>) -> StateDeclaration {
     }
 }
 
-fn value_class(name: &str, slots: Vec<StateDeclaration>) -> ClassDefinition {
-    ClassDefinition::new(
+fn value_class(name: &str, slots: Vec<AstStateDeclaration>) -> AstClassDefinition {
+    AstClassDefinition::new(
         Identifier::new(name, s()),
         Identifier::new("Value", s()),
         slots,
@@ -32,6 +52,93 @@ fn value_class(name: &str, slots: Vec<StateDeclaration>) -> ClassDefinition {
         s(),
     )
 }
+
+// ─── ADR 0042/BT-923: which accessors get auto-generated ──────────────────
+
+#[test]
+fn test_with_star_selector_single_char() {
+    assert_eq!(AutoSlotMethods::with_star_selector("x"), "withX:");
+}
+
+#[test]
+fn test_with_star_selector_multi_char() {
+    assert_eq!(
+        AutoSlotMethods::with_star_selector("firstName"),
+        "withFirstName:"
+    );
+}
+
+#[test]
+fn test_compute_auto_slot_methods_actor_returns_none() {
+    let class = make_actor_class("Counter");
+    assert!(
+        compute_auto_slot_methods(&class).is_none(),
+        "actor classes should not get auto slot methods"
+    );
+}
+
+#[test]
+fn test_compute_auto_slot_methods_value_class_returns_getters_setters() {
+    let class = value_class("Point", vec![slot("x", None), slot("y", None)]);
+    let auto = compute_auto_slot_methods(&class).unwrap();
+    assert!(auto.getters.contains(&"x".to_string()));
+    assert!(auto.getters.contains(&"y".to_string()));
+    assert!(auto.setters.contains(&"x".to_string()));
+    assert!(auto.setters.contains(&"y".to_string()));
+}
+
+#[test]
+fn test_compute_auto_slot_methods_keyword_constructor() {
+    let class = value_class("Point", vec![slot("x", None), slot("y", None)]);
+    let auto = compute_auto_slot_methods(&class).unwrap();
+    assert_eq!(
+        auto.keyword_constructor,
+        Some("x:y:".to_string()),
+        "should generate keyword constructor selector from slot names"
+    );
+}
+
+#[test]
+fn test_compute_auto_slot_methods_no_slots() {
+    let class = value_class("Empty", vec![]);
+    let auto = compute_auto_slot_methods(&class).unwrap();
+    assert!(auto.getters.is_empty());
+    assert!(auto.setters.is_empty());
+    assert!(auto.keyword_constructor.is_none());
+}
+
+// ─── BT-2998: Opaque `native:` representations ─────────────────────────────
+
+fn parse_one_class(source: &str) -> AstClassDefinition {
+    beamtalk_core::test_helpers::test_support::parse_bt(source)
+        .classes
+        .into_iter()
+        .next()
+        .expect("source should declare a class")
+}
+
+#[test]
+fn test_bt_2998_has_opaque_native_representation() {
+    // `native:` + no declared fields — nothing for `basicNew` to build.
+    assert!(has_opaque_native_representation(&parse_one_class(
+        "Value subclass: Uuid native: beamtalk_uuid\n  version -> Integer => self delegate\n"
+    )));
+    // `native:` but carrying its own fields (`Package`, `SupervisionNode`).
+    assert!(!has_opaque_native_representation(&parse_one_class(
+        "Value subclass: Package native: beamtalk_package\n  field: name = nil\n"
+    )));
+    // Plain value type — the ordinary `basicNew` case.
+    assert!(!has_opaque_native_representation(&parse_one_class(
+        "Value subclass: Point\n  field: x = 0\n"
+    )));
+    // Fieldless *non*-native class: `~{'$beamtalk_class' => 'X'}~` is its
+    // complete and correct instance, so it stays constructible.
+    assert!(!has_opaque_native_representation(&parse_one_class(
+        "Value subclass: Marker\n  isMarker -> Boolean => true\n"
+    )));
+}
+
+// ─── BT-2734: synthetic accessor doc/signature metadata ────────────────────
 
 fn find_entry<'a>(
     entries: &'a [SyntheticAccessorEntry],
@@ -97,7 +204,7 @@ fn test_synthetic_keyword_constructor_long_selector_is_hashed() {
     // carries the full readable field names since it is a binary, not atom.
     let long_field = "a".repeat(60);
     let field_names: Vec<String> = (0..5).map(|i| format!("{long_field}{i}")).collect();
-    let slots: Vec<StateDeclaration> = field_names
+    let slots: Vec<AstStateDeclaration> = field_names
         .iter()
         .map(|n| slot(n, Some("Integer")))
         .collect();
