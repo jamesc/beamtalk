@@ -9,7 +9,7 @@
 //! Phase A / BT-2855, BT-2870, BT-2882). [`CoreErlangGenerator::generate_type_pattern`]
 //! picks and applies one of eight per-class runtime-test shapes — see its
 //! own doc comment for the full strategy breakdown — dispatched from
-//! [`super::match_lowering::generate_match_chain`].
+//! `generate_match_chain` (`patterns::match_lowering`).
 
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
@@ -53,7 +53,7 @@ impl CoreErlangGenerator {
     ///   `'undefined'` for `Dictionary` (a bare map has no
     ///   `'$beamtalk_class'` key) or the class name atom for a tagged class
     ///   (generalizing `generate_constructor_pattern` (`patterns::match_lowering`)'s map-key
-    ///   check, hardcoded to `Result` via [`sealed_constructor_fields`], to
+    ///   check, hardcoded to `Result` via `sealed_constructor_fields`, to
     ///   the pattern's `class` field), falling through to `rest` on any
     ///   other class tag.
     /// - **`Block`**: `is_function` — a Beamtalk block compiles to a plain

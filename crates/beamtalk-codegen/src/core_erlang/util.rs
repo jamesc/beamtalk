@@ -126,7 +126,7 @@ pub(super) fn collect_body_exprs(body: &[ExpressionStatement]) -> Vec<&Expressio
 
 /// Renders a `usize` index, arity, or size as a Core Erlang integer leaf.
 ///
-/// Wraps [`leaf::int_lit`] for the many positional-index call sites in
+/// Wraps [`int_lit`] for the many positional-index call sites in
 /// destructuring and pattern-match codegen (`patterns::destructure`,
 /// `patterns::match_lowering`) and block-body array destructuring
 /// (`blocks::generate_block_array_destructure`), where the value comes from

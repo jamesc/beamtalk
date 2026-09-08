@@ -33,8 +33,8 @@ use beamtalk_core::ast::MapPatternKey;
 /// Symbol keys emit an atom: `'key'`.
 /// String keys emit a Core Erlang binary literal via the Document pipeline.
 ///
-/// Shared by [`match_lowering::generate_pattern`]'s `Pattern::Map` case and
-/// [`destructure::generate_pattern_extractions_from_var`]'s `Pattern::Map`
+/// Shared by `match_lowering::generate_pattern`'s `Pattern::Map` case and
+/// `destructure::generate_pattern_extractions_from_var`'s `Pattern::Map`
 /// case (CLAUDE.md's no-duplicate-implementations rule) — a plain free
 /// function (not a `CoreErlangGenerator` associated function) since neither
 /// caller needs generator state to compute it.
