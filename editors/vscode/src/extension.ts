@@ -1,34 +1,31 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-import * as crypto from "node:crypto";
 import { execFile } from "node:child_process";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { planDocumentRetarget, type DocumentMovedParams } from "./documentMoved";
-import {
-  findMethodDeclaration,
-  findStateVarDeclaration,
-  offsetForDeclarationLine,
-} from "./textUtils";
 import {
   LanguageClient,
   type LanguageClientOptions,
   RevealOutputChannelOn,
   type ServerOptions,
 } from "vscode-languageclient/node";
+import { type DocumentMovedParams, planDocumentRetarget } from "./documentMoved";
 import { InspectorPanel } from "./inspectorPanel";
+import { resolveDeclarationOffset } from "./symbolLookup";
 import { TranscriptViewProvider } from "./transcriptView";
-import { WorkspaceClient } from "./workspaceClient";
 import type { ClassOrigin, LogEntry } from "./workspaceClient";
+import { WorkspaceClient } from "./workspaceClient";
 import type {
   ActorItemNode,
   BindingItemNode,
   ClassItemNode,
   MethodItemNode,
   StateVarItemNode,
+  TypeAliasItemNode,
 } from "./workspaceTreeView";
 import { ALL_CLASS_ORIGINS, WorkspaceTreeDataProvider } from "./workspaceTreeView";
 
@@ -766,8 +763,6 @@ async function captureSessionId(
   }
 }
 
-export { findMethodDeclaration, findStateVarDeclaration } from "./textUtils";
-
 function replCommand(): string {
   const config = vscode.workspace.getConfiguration("beamtalk");
   const ephemeral = config.get<boolean>("repl.ephemeral", false);
@@ -1135,30 +1130,60 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const className = node?.info.name;
       if (!className) return;
 
-      // Find the class declaration position via regex.
-      // Note: executeDocumentSymbolProvider is not used here because openTextDocument
-      // does not trigger textDocument/didOpen to the LSP — symbols are only available
-      // for files already open in an editor. The regex is the reliable primary approach.
-      let position: vscode.Position | undefined;
-      const text = document.getText();
-      const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      // Beamtalk class declarations use `SuperClass subclass: ClassName` syntax.
-      const pattern = new RegExp(`\\bsubclass:\\s+(${escaped})(?=\\s|$)`, "g");
-      let classMatch = pattern.exec(text);
-      while (classMatch !== null) {
-        const lineStart = text.lastIndexOf("\n", classMatch.index) + 1;
-        const linePrefix = text.slice(lineStart, classMatch.index).trimStart();
-        if (!linePrefix.startsWith("//")) {
-          position = document.positionAt(classMatch.index + classMatch[0].indexOf(className));
-          break;
-        }
-        classMatch = pattern.exec(text);
-      }
+      // Same three-tier resolver as navigateToMethod/navigateToStateVar/hover
+      // (regex first — cheap, no LSP round trip needed for the common case —
+      // then the document-symbol-provider fallback for whatever shape defeats it).
+      const declOffset = await resolveDeclarationOffset(document, {
+        kind: "class",
+        name: className,
+      });
+      const position = declOffset === -1 ? undefined : document.positionAt(declOffset);
 
       await vscode.window.showTextDocument(document, {
         selection: position ? new vscode.Range(position, position) : undefined,
       });
     })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "beamtalk.navigateToTypeAlias",
+      async (node?: TypeAliasItemNode) => {
+        const sourceFile = node?.info.source_file;
+        if (!sourceFile || sourceFile === "unknown") {
+          await vscode.window.showInformationMessage("Source not available for this type alias.");
+          return;
+        }
+        const uri = vscode.Uri.file(sourceFile);
+        let document: vscode.TextDocument;
+        try {
+          document = await vscode.workspace.openTextDocument(uri);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await vscode.window.showErrorMessage(`Could not open source: ${sourceFile}: ${msg}`);
+          return;
+        }
+
+        const aliasName = node?.info.name;
+        if (!aliasName) return;
+
+        // Same resolver as openClassSource — no xref line is tracked for
+        // aliases (ADR 0108 Phase 8: `TypeAliasInfo` carries no `line`), and
+        // no document-symbol fallback exists yet either (the Rust
+        // document-symbols provider doesn't emit alias symbols), so this is
+        // regex-only in practice today; the resolver still tries the
+        // document-symbol tier for forward compatibility if that changes.
+        const declOffset = await resolveDeclarationOffset(document, {
+          kind: "type-alias",
+          name: aliasName,
+        });
+        const position = declOffset === -1 ? undefined : document.positionAt(declOffset);
+
+        await vscode.window.showTextDocument(document, {
+          selection: position ? new vscode.Range(position, position) : undefined,
+        });
+      }
+    )
   );
 
   context.subscriptions.push(
@@ -1216,27 +1241,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       // BT-3439: prefer the real declaration line from beamtalk_xref's
       // compiled index over guessing via source-text regex/search — the
-      // regex (methodHeadPattern) doesn't understand this codebase's `::`
-      // typed-parameter syntax, and the regex-miss fallback (a bare
-      // text.indexOf of the joined selector) essentially never matches real
-      // source, so navigation could land on an unrelated identifier
-      // elsewhere in the file (see BT-3439's investigation). Only fall back
-      // to the regex/text-search path when no real line is available (a
-      // class compiled before this field existed, or a ClassBuilder-built
-      // class with no compiler to derive one from) or the line is stale
-      // (the file was edited since the class was last compiled/reloaded).
-      // LSP go-to-definition is used *after* showTextDocument below for
-      // precise navigation either way.
+      // regex (methodHeadPattern) can miss syntax it doesn't understand yet,
+      // so only fall back to the regex/text-search path when no real line is
+      // available (a class compiled before this field existed, or a
+      // ClassBuilder-built class with no compiler to derive one from) or the
+      // line is stale (the file was edited since the class was last
+      // compiled/reloaded). LSP go-to-definition is used *after*
+      // showTextDocument below for precise navigation either way.
       const text = document.getText();
-      // The full joined selector never appears verbatim in source (that's
-      // exactly the original bug), so validate the real-line path against
-      // just its first keyword (or the whole thing, for a unary/binary
-      // selector, since split(":")[0] is a no-op without a colon).
-      let declOffset =
-        method.line !== undefined
-          ? offsetForDeclarationLine(text, method.line, method.selector.split(":")[0])
-          : -1;
-      if (declOffset === -1) declOffset = findMethodDeclaration(text, method.selector, method.side);
+      let declOffset = await resolveDeclarationOffset(
+        document,
+        { kind: "method", side: method.side, selector: method.selector },
+        method.line
+      );
+      // Last resort: a bare substring search, which can land on an unrelated
+      // mention (e.g. a doc-comment usage example) — only reached if the
+      // real line, regex, and document-symbol provider all came up empty.
       if (declOffset === -1) declOffset = text.indexOf(method.selector);
       if (declOffset === -1) {
         await vscode.window.showInformationMessage(
@@ -1301,16 +1321,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         // BT-3439: prefer the real declaration line from beamtalk_xref's
         // compiled index — see the analogous comment in navigateToMethod.
-        // findStateVarDeclaration's regex additionally requires a trailing
-        // `= default`, so it always misses a defaultless typed declaration
-        // like `state: engine :: WorkflowEngine`; the real-line path covers
-        // that case even when it isn't a `::`-syntax problem.
         const text = document.getText();
-        let declOffset =
-          stateVar.line !== undefined
-            ? offsetForDeclarationLine(text, stateVar.line, stateVar.name)
-            : -1;
-        if (declOffset === -1) declOffset = findStateVarDeclaration(text, stateVar.name);
+        let declOffset = await resolveDeclarationOffset(
+          document,
+          { kind: "field", name: stateVar.name },
+          stateVar.line
+        );
+        // Last resort: a bare substring search.
         if (declOffset === -1) declOffset = text.indexOf(stateVar.name);
         if (declOffset === -1) {
           await vscode.window.showInformationMessage(

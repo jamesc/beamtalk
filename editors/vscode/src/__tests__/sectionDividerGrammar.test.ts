@@ -21,8 +21,8 @@
 
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
-import * as oniguruma from "vscode-oniguruma";
 import { beforeAll, describe, expect, it } from "vitest";
+import * as oniguruma from "vscode-oniguruma";
 
 const GRAMMAR_PATH = path.resolve(__dirname, "../../syntaxes/beamtalk.tmLanguage.json");
 const FIXTURE_PATH = path.resolve(

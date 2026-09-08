@@ -16,8 +16,8 @@ const { executeCommandMock, openTextDocumentMock } = vi.hoisted(() => ({
 
 vi.mock("vscode", () => buildVscodeModule({ executeCommandMock, openTextDocumentMock }));
 
-import { WorkspaceTreeDataProvider } from "../workspaceTreeView";
 import type { ClassItemNode, MethodItemNode } from "../workspaceTreeView";
+import { WorkspaceTreeDataProvider } from "../workspaceTreeView";
 
 /** A blank TreeItem, as `getTreeItem` produces before `resolveTreeItem` fills in the tooltip. */
 function blankItem(): vscode.TreeItem {
@@ -47,15 +47,16 @@ const SOURCE = [
   "",
 ].join("\n");
 
-// BT-3439: `findMethodDeclaration`'s regex doesn't understand this codebase's
-// `::` typed-parameter syntax (`deposit: amount :: Integer =>`), so this is
-// real source shaped specifically to defeat the text-search fast path and
-// force the document-symbol-provider fallback.
+// `findMethodDeclaration`'s regex understands a generic type argument with
+// one level of nesting (`List(Foo)`) but not two (`Dictionary(String,
+// List(Dictionary(String, Foo)))`), so this is real source shaped
+// specifically to defeat the text-search fast path and force the
+// document-symbol-provider fallback.
 const SOURCE_TYPED_PARAM = [
   "class Account",
   "  state: balance :: Integer = 0",
   "",
-  "  deposit: amount :: Integer =>",
+  "  deposit: amount :: Dictionary(String, List(Dictionary(String, Integer))) =>",
   "    balance := balance + amount",
   "",
 ].join("\n");

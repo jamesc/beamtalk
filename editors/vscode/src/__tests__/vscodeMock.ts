@@ -80,7 +80,7 @@ export function buildVscodeModule(handles: VscodeMockHandles) {
     TreeItem,
     EventEmitter,
     Uri: { file: (p: string) => ({ fsPath: p, path: p, toString: () => p }) },
-    SymbolKind: { Class: 4, Method: 5, Field: 7 },
+    SymbolKind: { Class: 4, Method: 5, Field: 7, Interface: 10 },
     commands: { executeCommand: handles.executeCommandMock },
     window: {},
     workspace: { openTextDocument: handles.openTextDocumentMock },

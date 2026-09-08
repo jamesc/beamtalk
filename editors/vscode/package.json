@@ -117,6 +117,11 @@
         "icon": "$(go-to-file)"
       },
       {
+        "command": "beamtalk.navigateToTypeAlias",
+        "title": "Go to Definition",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "beamtalk.setLogLevel",
         "title": "Beamtalk: Set Log Level"
       },
@@ -233,6 +238,16 @@
         {
           "command": "beamtalk.navigateToStateVar",
           "when": "view == beamtalk.workspaceExplorer && viewItem == state-item",
+          "group": "beamtalk@1"
+        },
+        {
+          "command": "beamtalk.navigateToTypeAlias",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == type-alias-item",
+          "group": "inline"
+        },
+        {
+          "command": "beamtalk.navigateToTypeAlias",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == type-alias-item",
           "group": "beamtalk@1"
         }
       ]
