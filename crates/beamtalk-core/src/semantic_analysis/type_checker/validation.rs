@@ -234,6 +234,7 @@ impl TypeChecker {
                     hierarchy,
                     true,
                     Severity::Hint,
+                    None,
                 );
             }
         }
@@ -584,6 +585,7 @@ impl TypeChecker {
                             hierarchy,
                             false,
                             Severity::Hint,
+                            None,
                         );
                     }
                 }
@@ -612,6 +614,7 @@ impl TypeChecker {
                 hierarchy,
                 false,
                 Severity::Hint,
+                None,
             );
         }
     }
@@ -3035,7 +3038,13 @@ impl TypeChecker {
     /// `Hint`. Reusing this method, rather than a second copy, is what keeps
     /// the message shape and "did you mean" suggestion identical between a
     /// bare receiver's DNU and a union's single-culprit DNU.
-    #[allow(clippy::too_many_arguments)] // display/lookup name split (BT-2679) + severity (BT-3469)
+    ///
+    /// `context_suffix`, when `Some`, is appended verbatim after the "does
+    /// not understand '<selector>'" clause — the union call site (BT-3469)
+    /// uses it for `" (in union A | B)"` so a union's single-culprit DNU
+    /// keeps the same receiver context every other union DNU carries; every
+    /// other caller passes `None`.
+    #[allow(clippy::too_many_arguments)] // display/lookup name split (BT-2679) + severity/context (BT-3469)
     pub(super) fn emit_unknown_selector_warning(
         &mut self,
         display_name: &EcoString,
@@ -3045,10 +3054,12 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         is_class_side: bool,
         severity: Severity,
+        context_suffix: Option<&str>,
     ) {
         let side = if is_class_side { " class" } else { "" };
+        let suffix = context_suffix.unwrap_or("");
         let message: EcoString =
-            format!("{display_name}{side} does not understand '{selector}'").into();
+            format!("{display_name}{side} does not understand '{selector}'{suffix}").into();
 
         let mut diag = match severity {
             Severity::Warning => Diagnostic::warning(message, span),

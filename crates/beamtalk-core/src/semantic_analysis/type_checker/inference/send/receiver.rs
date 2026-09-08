@@ -1171,15 +1171,26 @@ impl TypeChecker {
                 Severity::Hint
             };
 
+            // BT-2066: render `UndefinedObject` as `Nil` for the union
+            // display, shared by both branches below — every union DNU,
+            // single- or multi-culprit, names the full union it was sent
+            // to, not just the non-responding member(s).
+            let member_names: Vec<String> = members
+                .iter()
+                .filter_map(|m| m.display_for_diagnostic().map(|n| n.to_string()))
+                .collect();
+            let union_display = member_names.join(" | ");
+
             if let [only_missing] = missing_names.as_slice() {
                 // BT-3469: the common one-culprit shape reuses the same
                 // diagnostic builder a bare receiver's DNU uses
                 // (`emit_unknown_selector_warning`) — identical message
-                // shape, and, new for unions, the same "did you mean"
-                // suggestion lookup. A singleton member (`#foo`) resolves
-                // its suggestions through `Symbol` — the same
-                // singleton-as-Symbol convention `resolve_name` above (and
-                // `resolve_class` elsewhere in this file) applies.
+                // shape (plus the `(in union ...)` suffix every union DNU
+                // carries, via `context_suffix`), and, new for unions, the
+                // same "did you mean" suggestion lookup. A singleton member
+                // (`#foo`) resolves its suggestions through `Symbol` — the
+                // same singleton-as-Symbol convention `resolve_name` above
+                // (and `resolve_class` elsewhere in this file) applies.
                 let suggestion_class = if only_missing.starts_with('#') {
                     EcoString::from("Symbol")
                 } else {
@@ -1194,20 +1205,15 @@ impl TypeChecker {
                     hierarchy,
                     false,
                     severity,
+                    Some(&format!(" (in union {union_display})")),
                 );
             } else {
                 // Multiple non-responding members: `emit_unknown_selector_warning`
                 // has no multi-subject mode — a per-member "did you mean"
                 // can't compose into that diagnostic's single hint field —
                 // so this stays its own combined-message construction.
-                // BT-2066: render `UndefinedObject` as `Nil`, and map every
-                // name (union display + missing list) through the same
-                // diagnostic rewriter.
-                let member_names: Vec<String> = members
-                    .iter()
-                    .filter_map(|m| m.display_for_diagnostic().map(|n| n.to_string()))
-                    .collect();
-                let union_display = member_names.join(" | ");
+                // BT-2066: map the missing list through the same diagnostic
+                // rewriter as the union display above.
                 let missing_display: Vec<EcoString> = missing_names
                     .iter()
                     .map(|n| InferredType::class_name_for_diagnostic(n.as_str()))

@@ -338,8 +338,14 @@ fn union_receiver_nullable_hint_with_non_nil_missing() {
 /// `respondsTo:` hint, never a per-selector suggestion. `String | Nil`
 /// collapses to a single checked member (Nil is skipped), so this exercises
 /// the reused single-subject path, not the multi-member combined message.
+///
+/// Pins the exact message shape: reusing `emit_unknown_selector_warning`
+/// must not silently drop the `(in union ...)` context suffix every union
+/// DNU carried before this change (and that the multi-culprit branch still
+/// builds) — a code-review finding on the PR that introduced this reuse.
+/// Both the union context and the new suggestion must be present together.
 #[test]
-fn union_receiver_single_culprit_dnu_reuses_did_you_mean_suggestion() {
+fn union_receiver_single_culprit_dnu_keeps_union_context_and_did_you_mean() {
     let module = Module::new(
         vec![ExpressionStatement::bare(msg_send(
             Expression::Identifier(ident("x")),
@@ -375,10 +381,12 @@ fn union_receiver_single_culprit_dnu_reuses_did_you_mean_suggestion() {
         "expected exactly one DNU diagnostic, got: {:?}",
         checker.diagnostics()
     );
-    assert!(
-        dnu[0].message.contains("String"),
-        "should name String as the culprit: {}",
-        dnu[0].message
+    assert_eq!(
+        dnu[0].message.as_str(),
+        "String does not understand 'reverssed' (in union String | Nil)",
+        "the single-culprit message must keep the same union-context \
+         suffix every union DNU carries — see the multi-culprit branch's \
+         message shape just below in the same function"
     );
     assert!(
         dnu[0].hint.is_some(),
@@ -550,8 +558,18 @@ fn bt3469_union_member_with_cross_file_parent_downgrades_to_open() {
         "expected exactly one DNU diagnostic (for String only), got: {:?}",
         checker.diagnostics()
     );
+    // PartialA legitimately appears in the trailing `(in union ...)`
+    // context (it's still a real member of the union type), but the
+    // *subject* — who is being accused of not responding — must name only
+    // String; PartialA's surface is unresolved, so it must not be listed as
+    // a non-responder.
+    let subject = dnu[0]
+        .message
+        .split("does not understand")
+        .next()
+        .unwrap_or("");
     assert!(
-        dnu[0].message.contains("String") && !dnu[0].message.contains("PartialA"),
+        subject.contains("String") && !subject.contains("PartialA"),
         "PartialA's surface is unresolved — it must not be named as a \
          non-responder: {}",
         dnu[0].message
