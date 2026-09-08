@@ -62,6 +62,14 @@ use plan::ListOpKind;
 // `generate_list_do_body_with_threading` compat shim's inlined replacement)
 // — `pub(super)`, matching `ThreadingPlan`'s own cross-module visibility.
 pub(super) use list_ops::BodyKind;
+// BT-3466: `FieldWriteSite`/`Closure` name the two axes
+// `CoreErlangGenerator::lower_field_write` unifies field-assignment lowering
+// behind; consumed outside `control_flow` by `expressions.rs`'s
+// `generate_field_assignment` and `dispatch_codegen.rs`'s
+// `generate_field_assignment_open`, both now thin wrappers around it —
+// `pub(super)`, matching `BodyKind`/`ThreadingPlan`'s own cross-module
+// visibility.
+pub(super) use conditionals::{Closure, FieldWriteSite};
 // `LoopMode` is a field on `CoreErlangGenerator` (`generator/mod.rs`) and is
 // read/written across the whole `core_erlang` tree (`dispatch_codegen.rs`,
 // `expressions.rs`, `threaded_ir/`, ...) — `pub(super)`, matching

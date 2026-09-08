@@ -55,13 +55,250 @@ use super::super::threaded_ir::{
     self, BindOp, FrameId, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef, VersionPrefix,
     VersionedVar,
 };
-use super::super::{CodeGenError, CoreErlangGenerator, Result};
+use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use super::StateAccFallbackReason;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression, MessageSelector};
 use beamtalk_core::source_analysis::Span;
+
+// ─── FieldWriteSite / Closure (BT-3466) ────────────────────────────────────
+//
+// `self.field := value` emission existed three times before this issue —
+// `expressions.rs`'s `generate_field_assignment` (a complete, "closed"
+// `Document`), `dispatch_codegen.rs`'s `generate_field_assignment_open` (an
+// "open" `Document`, caller supplies the continuation), and this module's own
+// `lower_field_assignment_bind` (pushes a real, un-rendered `ThreadedStmt::Bind`
+// into a `Vec<ThreadedStmt>` body under construction) — one axis (which
+// storage family: `State`/`Self`/`ClassVars`) encoded ad hoc, differently, in
+// each; the other (whether the caller wants a self-contained expression or an
+// open one) not named at all. `FieldWriteSite`/`Closure` name both axes once;
+// [`CoreErlangGenerator::lower_field_write`] is the single lowering core all
+// three sites above now call through (directly, or via
+// [`CoreErlangGenerator::lower_simple_field_write_bind`] for the
+// un-rendered-`Bind` consumption style). Missing the `ValueType` arm on the
+// "open"/threaded shapes was the BT-3140/BT-3159/BT-3172 bug family's root
+// cause (ADR 0110/0111): a value-type field write reaching either shape
+// silently threaded through the actor `State`/`StateAcc` map — a variable
+// that does not exist in a value-type method — instead of `Self`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum FieldWriteSite {
+    /// Actor/instance field: threads through `State`/`StateAcc` (ADR 0043).
+    Actor,
+    /// Value-type field: threads through `Self` (BT-833).
+    ValueType,
+    /// Class variable: threads through `ClassVars`, with ADR 0110's shadow
+    /// write and its own `frame`/`block_depth` eligibility rules —
+    /// [`CoreErlangGenerator::lower_field_write`] delegates this variant
+    /// wholesale to
+    /// [`CoreErlangGenerator::lower_class_var_field_assignment_bind`], the
+    /// single pre-existing implementation of that considerably more involved
+    /// contract, rather than re-deriving it here.
+    ClassVar,
+}
+
+impl FieldWriteSite {
+    /// The `Actor`/`ValueType` split every plain (non-class-var)
+    /// `self.field := value` write site shares — `ValueType` in
+    /// `CodeGenContext::ValueType`, `Actor` otherwise (also covers
+    /// `CodeGenContext::Repl`, matching every pre-existing call site's
+    /// implicit default before BT-3466). Never returns `ClassVar` — a
+    /// caller that may be in a class method decides that axis itself
+    /// (`in_class_method()`) before falling back to this for the plain
+    /// case, since `context` alone can't distinguish a class method's
+    /// `ClassVars` write from an ordinary instance write (BT-412: a class
+    /// method's own `context` is `Actor`, not a fourth variant).
+    ///
+    /// The single implementation behind what were three independent
+    /// `if matches!(context, CodeGenContext::ValueType) { .. } else { .. }`
+    /// copies (`expressions.rs`'s `generate_field_assignment`,
+    /// `dispatch_codegen.rs`'s `generate_field_assignment_open`, and this
+    /// module's own `lower_field_assignment_bind`) — CLAUDE.md's
+    /// no-duplicate-implementations rule applied to the very axis this
+    /// issue unifies.
+    pub(in crate::core_erlang) fn for_context(context: CodeGenContext) -> Self {
+        if matches!(context, CodeGenContext::ValueType) {
+            Self::ValueType
+        } else {
+            Self::Actor
+        }
+    }
+}
+
+/// Whether a [`CoreErlangGenerator::lower_field_write`] caller wants the
+/// mutation as a fully self-contained expression (`Closed` —
+/// `generate_field_assignment`'s historical shape: the assigned value is the
+/// `Document`'s own trailing result) or wants the `Bind`'s render left open
+/// for the caller's own continuation glue (`Open` —
+/// `generate_field_assignment_open`'s historical shape: the `Document` ends
+/// with `"in "`, no trailing value). Orthogonal to [`FieldWriteSite`] — every
+/// site supports both — except that it also selects which RHS compile a
+/// `FieldWriteSite::Actor`/`ValueType` write uses, matching the two
+/// historical shapes' pre-existing, deliberately different choice there:
+/// `Open` reuses [`CoreErlangGenerator::generate_field_assignment_value_doc`]'s
+/// BT-2797 Tier-2 stateful-block RHS special case (every pre-existing "open"/
+/// threaded call site already did); `Closed` always compiles the RHS via
+/// plain `expression_doc` (a method's own last-statement field write never
+/// got that optimization). Changing this split is out of this issue's scope
+/// (BT-3466's acceptance criteria: byte-identical output for every
+/// currently-passing program).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum Closure {
+    /// Caller supplies the continuation; the returned `Document` ends with
+    /// `"in "`, no trailing value.
+    Open,
+    /// The returned `Document` is a complete expression whose value is the
+    /// field write's assigned value (Smalltalk `:=` semantics).
+    Closed,
+}
+
+impl FieldWriteSite {
+    /// The label [`CoreErlangGenerator::check_simple_field_bind_invariant`]
+    /// reports on a verify failure — cosmetic only (diagnostic text, never
+    /// emitted Core Erlang), kept distinct per (site, closure) purely to
+    /// match each historical call site's own wording.
+    fn invariant_label(self, closure: Closure) -> &'static str {
+        match (self, closure) {
+            (Self::Actor, Closure::Closed) => "actor State field-assignment version bind",
+            (Self::Actor, Closure::Open) => "actor State open field-assignment version bind",
+            (Self::ValueType, Closure::Closed) => "value-type Self field-assignment version bind",
+            (Self::ValueType, Closure::Open) => {
+                "value-type Self open field-assignment version bind"
+            }
+            (Self::ClassVar, _) => {
+                unreachable!("ClassVar sites verify through lower_class_var_field_assignment_bind")
+            }
+        }
+    }
+}
+
+impl CoreErlangGenerator {
+    /// BT-3466: builds the real, un-rendered `Bind` (plus its `"let Val =
+    /// <value> in "` preamble) for an `Actor`/`ValueType` field write — never
+    /// `ClassVar`, which keeps its own [`Self::lower_class_var_field_assignment_bind`].
+    /// `span` is the constructed `Bind`'s own span (only ever observed by a
+    /// `verify()` diagnostic on the node, never by rendering); callers that
+    /// already have a `ThreadedStmt`-level span (this module's
+    /// `lower_field_assignment_bind`) pass that one, matching its pre-BT-3466
+    /// hand-rolled `Bind` exactly, while [`Self::lower_field_write`] passes
+    /// `value.span()`, matching `generate_field_assignment`'s/
+    /// `generate_field_assignment_open`'s pre-existing
+    /// `check_simple_field_bind_invariant` call (which always used
+    /// `value.span()`, never the whole assignment's).
+    pub(in crate::core_erlang) fn lower_simple_field_write_bind(
+        &mut self,
+        site: FieldWriteSite,
+        closure: Closure,
+        field_name: &str,
+        value: &Expression,
+        frame: FrameId,
+        span: Span,
+    ) -> Result<(Document<'static>, ThreadedStmt, String)> {
+        debug_assert!(
+            !matches!(site, FieldWriteSite::ClassVar),
+            "ClassVar sites must go through lower_class_var_field_assignment_bind"
+        );
+        let prefix = match site {
+            FieldWriteSite::ValueType => VersionPrefix::SelfVt,
+            // `ClassVar` is unreachable here (see the `debug_assert!` above)
+            // — folded into the same arm as `Actor` rather than duplicated,
+            // since it's never actually read for that variant.
+            FieldWriteSite::Actor | FieldWriteSite::ClassVar => VersionPrefix::State,
+        };
+        let val_var = self.fresh_temp_var("Val");
+        // Capture the source version BEFORE generating the value expression —
+        // the RHS may itself read the field being assigned (`self.x := self.x
+        // + 1`) and must see the pre-assignment snapshot.
+        let source_version = match site {
+            FieldWriteSite::ValueType => self.self_version(),
+            FieldWriteSite::Actor | FieldWriteSite::ClassVar => self.state_version(),
+        };
+        let value_doc = match closure {
+            Closure::Open => self.generate_field_assignment_value_doc(value)?,
+            Closure::Closed => self.expression_doc(value)?,
+        };
+        let target_version = match site {
+            FieldWriteSite::ValueType => {
+                self.next_self_var();
+                self.self_version()
+            }
+            FieldWriteSite::Actor | FieldWriteSite::ClassVar => {
+                self.next_state_var();
+                self.state_version()
+            }
+        };
+        // BT-3139/BT-3180: isolated-verify this mint against a synthetic,
+        // backfilled fixture — see the helper's own doc comment.
+        self.check_simple_field_bind_invariant(
+            prefix.clone(),
+            source_version,
+            target_version,
+            site.invariant_label(closure),
+            value.span(),
+        );
+        let preamble = docvec!["let ", leaf::var(val_var.clone()), " = ", value_doc, " in ",];
+        let bind = ThreadedStmt::Bind {
+            target: VersionedVar::new(prefix.clone(), target_version, frame),
+            source: VersionedVar::new(prefix, source_version, frame),
+            op: BindOp::Put {
+                field: field_name.to_string(),
+                value: ValueRef::Var(val_var.clone()),
+                class_tag: ValueRef::Literal("'nil'"),
+            },
+            shadow_write: false,
+            span,
+        };
+        Ok((preamble, bind, val_var))
+    }
+
+    /// BT-3466: the single lowering core for `self.field := value`,
+    /// parameterized over [`FieldWriteSite`] (which storage family) and
+    /// [`Closure`] (self-contained vs. open `Document`) — see both enums'
+    /// doc comments for the full contract. Always constructs the real
+    /// [`ThreadedStmt::Bind`] and renders it through the same
+    /// [`threaded_ir::render`] every spliced `Bind` goes through (never a
+    /// second, hand-rolled `maps:put` fragment), so a `Closed` result is
+    /// byte-identical to `generate_field_assignment`'s pre-BT-3466 hand-built
+    /// `Document` and an `Open` result is byte-identical to
+    /// `generate_field_assignment_open`'s.
+    ///
+    /// `frame` is the constructed `Bind`'s real [`FrameId`] — the caller's
+    /// own `current_branch_frame()` for a loop/fold-body class-var mutation
+    /// (see `lower_class_var_field_assignment_bind`'s doc comment), or
+    /// [`FrameId::ROOT`] otherwise; `Actor`/`ValueType` writes reached
+    /// through this function are always rendered immediately (never spliced
+    /// into a larger, independently-verified `ThreadedIr` tree), so `frame`
+    /// is inert for them — passed through only so `FieldWriteSite::ClassVar`
+    /// can share this one signature.
+    pub(in crate::core_erlang) fn lower_field_write(
+        &mut self,
+        site: FieldWriteSite,
+        closure: Closure,
+        field_name: &str,
+        value: &Expression,
+        frame: FrameId,
+    ) -> Result<(Document<'static>, String)> {
+        let span = value.span();
+        let (preamble, bind, val_var) = match site {
+            FieldWriteSite::ClassVar => {
+                self.lower_class_var_field_assignment_bind(field_name, value, frame)?
+            }
+            FieldWriteSite::Actor | FieldWriteSite::ValueType => {
+                self.lower_simple_field_write_bind(site, closure, field_name, value, frame, span)?
+            }
+        };
+        let bind_doc = {
+            let mut ctx = threaded_ir::RenderCtx::new(self);
+            threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
+        };
+        let doc = docvec![preamble, bind_doc];
+        Ok(match closure {
+            Closure::Open => (doc, val_var),
+            Closure::Closed => (docvec![doc, leaf::var(val_var.clone())], val_var),
+        })
+    }
+}
 
 impl CoreErlangGenerator {
     /// BT-2355: Seeds the `__local__` keys for the outer locals a conditional's
@@ -886,10 +1123,11 @@ impl CoreErlangGenerator {
     /// ADR 0111 Addendum 5 §C1: lowers a `self.field := value`
     /// conditional-branch/block-body statement to its real `Bind` sequence,
     /// appending it to `stmts` and returning the assigned value's temp var
-    /// name. Mirrors `generate_field_assignment_open`'s normal (non
-    /// hybrid-full-extract) branch exactly — same helper calls, same mint
-    /// order — but models the state mutation as a [`ThreadedStmt::Bind`]
-    /// instead of a hand-rolled `maps:put` `Document` fragment.
+    /// name. Mirrors [`CoreErlangGenerator::generate_field_assignment_open`]'s
+    /// normal (non hybrid-full-extract) branch exactly — same helper calls,
+    /// same mint order, same [`FieldWriteSite`] dispatch (BT-3466) — but
+    /// models the state mutation as a [`ThreadedStmt::Bind`] instead of a
+    /// hand-rolled `maps:put` `Document` fragment.
     ///
     /// `generate_field_assignment_open`'s hybrid full-extract sub-branch
     /// (`in_hybrid_loop && hybrid_mutated_fields.contains(field)`) produces
@@ -939,28 +1177,19 @@ impl CoreErlangGenerator {
         // state and the RHS compile that follows is pure (the exact call
         // site BT-3382's reverted version-bump-on-compile prototype
         // desynced).
+        let site = FieldWriteSite::for_context(self.context);
         let thread_scope = self.thread_ahead(value, stmts, frame)?;
-        let val_var = self.fresh_temp_var("Val");
-        let source_version = self.state_version();
-        let value_str = self.generate_field_assignment_value_doc(value)?;
+        let (preamble, bind, val_var) = self.lower_simple_field_write_bind(
+            site,
+            Closure::Open,
+            &field.name,
+            value,
+            frame,
+            span,
+        )?;
         self.finish_precompiled_scope(thread_scope)?;
-        stmts.push(ThreadedStmt::Statement(
-            docvec!["let ", leaf::var(val_var.clone()), " = ", value_str, " in ",],
-            span,
-        ));
-        let _ = self.next_state_var();
-        let target_version = self.state_version();
-        stmts.push(ThreadedStmt::Bind {
-            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-            op: BindOp::Put {
-                field: field.name.to_string(),
-                value: ValueRef::Var(val_var.clone()),
-                class_tag: ValueRef::Literal("'nil'"),
-            },
-            shadow_write: false,
-            span,
-        });
+        stmts.push(ThreadedStmt::Statement(preamble, span));
+        stmts.push(bind);
         Ok(val_var)
     }
 
