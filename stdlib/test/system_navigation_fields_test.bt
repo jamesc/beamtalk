@@ -30,6 +30,9 @@
 // and `InheritedChild` (subclass of InheritedParent).
 
 TestCase subclass: SystemNavigationFieldsTest
+  field: nav = nil
+
+  setUp => self.nav := SystemNavigation default
 
   // --- selector existence ---
   testIncludesSelectorFieldReadersOf =>
@@ -71,15 +74,13 @@ TestCase subclass: SystemNavigationFieldsTest
   // and a built `List` is rejected as badarg — so it stays `#Circle`. Both guards
   // raise `#user_error`, so the kind can't disambiguate them.)
   testReadersRequiresSymbolSlotName =>
-    nav := SystemNavigation default
     self should: [
-      nav perform: #fieldReadersOf:in: withArguments: #(42, #Circle)
+      self.nav perform: #fieldReadersOf:in: withArguments: #(42, #Circle)
     ] raise: #user_error
 
   testWritersRequiresSymbolSlotName =>
-    nav := SystemNavigation default
     self should: [
-      nav perform: #fieldWritersOf:in: withArguments: #(42, #Circle)
+      self.nav perform: #fieldWritersOf:in: withArguments: #(42, #Circle)
     ] raise: #user_error
 
   // `aClass` must be a class object. Passing a Symbol (the most common
@@ -87,15 +88,13 @@ TestCase subclass: SystemNavigationFieldsTest
   // `requireClassName:selector:` guard. A typed `:: Behaviour` parameter
   // rejects a Symbol at compile time, so dispatch dynamically via `perform:`.
   testReadersRejectsSymbolScope =>
-    nav := SystemNavigation default
     self should: [
-      nav perform: #fieldReadersOf:in: withArguments: #(#radius, #Circle)
+      self.nav perform: #fieldReadersOf:in: withArguments: #(#radius, #Circle)
     ] raise: #user_error
 
   testWritersRejectsSymbolScope =>
-    nav := SystemNavigation default
     self should: [
-      nav perform: #fieldWritersOf:in: withArguments: #(#radius, #Circle)
+      self.nav perform: #fieldWritersOf:in: withArguments: #(#radius, #Circle)
     ] raise: #user_error
 
   // --- slot validation (decided by allFieldNames, not the compiler port) ---
@@ -105,25 +104,25 @@ TestCase subclass: SystemNavigationFieldsTest
   // than silently returning `[]`. `Circle` declares `radius`, so `#notASlot`
   // is a typo.
   testReadersRaisesOnUnknownSlot =>
-    nav := SystemNavigation default
-    self should: [nav fieldReadersOf: #notASlot in: Circle] raise: #user_error
+    self should: [
+      self.nav fieldReadersOf: #notASlot in: Circle
+    ] raise: #user_error
 
   testWritersRaisesOnUnknownSlot =>
-    nav := SystemNavigation default
-    self should: [nav fieldWritersOf: #notASlot in: Circle] raise: #user_error
+    self should: [
+      self.nav fieldWritersOf: #notASlot in: Circle
+    ] raise: #user_error
 
   // A declared instance slot returns a List (empty under BUnit since the port
   // is off) WITHOUT raising — the validation gate must accept a real slot. This
   // confirms the "declared-but-untouched slot returns []" contract on the path
   // that does not need the compiler port.
   testReadersDeclaredSlotDoesNotRaise =>
-    nav := SystemNavigation default
-    result := nav fieldReadersOf: #radius in: Circle
+    result := self.nav fieldReadersOf: #radius in: Circle
     self assert: result isEmpty
 
   testWritersDeclaredSlotDoesNotRaise =>
-    nav := SystemNavigation default
-    result := nav fieldWritersOf: #radius in: Circle
+    result := self.nav fieldWritersOf: #radius in: Circle
     self assert: result isEmpty
 
   // The slot validation reads `allFieldNames`, which includes INHERITED slots.
@@ -131,8 +130,7 @@ TestCase subclass: SystemNavigationFieldsTest
   // scoped to the parent for `#x` must validate (not raise) and return a List.
   testInheritedSlotValidatesAgainstAllFieldNames =>
     self assert: (InheritedParent allFieldNames includes: #x)
-    nav := SystemNavigation default
-    result := nav fieldReadersOf: #x in: InheritedParent
+    result := self.nav fieldReadersOf: #x in: InheritedParent
     self assert: result isEmpty
 
   // --- class-side scope primitives (BT-2208) ---
@@ -161,11 +159,9 @@ TestCase subclass: SystemNavigationFieldsTest
   // WITHOUT raising. Before BT-2238 this raised a false typo error because the
   // port-disabled scan found no class-side hit to attest the slot's existence.
   testReadersDeclaredClassSlotDoesNotRaise =>
-    nav := SystemNavigation default
-    result := nav fieldReadersOf: #counter in: InheritedParent
+    result := self.nav fieldReadersOf: #counter in: InheritedParent
     self assert: result isEmpty
 
   testWritersDeclaredClassSlotDoesNotRaise =>
-    nav := SystemNavigation default
-    result := nav fieldWritersOf: #counter in: InheritedParent
+    result := self.nav fieldWritersOf: #counter in: InheritedParent
     self assert: result isEmpty
