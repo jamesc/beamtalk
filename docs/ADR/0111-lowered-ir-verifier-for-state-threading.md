@@ -4421,7 +4421,7 @@ implementation choices and turned out to be only half right:
   loop's exit repack, not a residue of an incomplete migration. These
   functions were never "reachable only from" the deleted Letrec dispatch
   — BT-3470's own deletion already excised the sub-paths that were —
-  so they survived that deletion and remain the FoldI family's permanent
+  so they survived it and remain the `Foldl*` family's permanent
   implementation.
 - `generate_local_var_assignment_in_loop` — **not dead; not deletable,**
   for a different reason: its two remaining callers are outside the
@@ -4465,11 +4465,10 @@ is the same still-open BT-3430 follow-up named there since ADR 0118.
 `VersionPrefix::Local`, and `LoopCounter` — the loop-shape allowances
 Addendum 13 left and BT-3470/BT-3475 were expected to clear — **carry no
 `#[allow(dead_code)]` today**: BT-3470's PR description confirms it
-removed all five, each now having a real production constructor
-(`ConditionalLoop`'s six loop constructors, `DirectParams`/`Hybrid` mode
-selection, `Local`-prefix threaded-local rebinds, and counted loops'
-`ConditionalLoop::counter` respectively). No new allowance was added by
-this issue.
+removed all five, each now having a real production constructor:
+`ConditionalLoop`'s six loop constructors; `DirectParams`/`Hybrid` mode
+selection; `Local`-prefix threaded-local rebinds; and counted loops'
+`ConditionalLoop::counter`. No new allowance was added by this issue.
 
 **4. Docs.** `docs/development/debugging.md`'s "ThreadedIr verifier"
 section carried a stale sentence — "with loops the one exception, still
