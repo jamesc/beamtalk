@@ -36,6 +36,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     superclass/1,
     method/2,
     has_method/2,
+    has_method_local/2,
     put_method/3,
     put_method/4,
     put_class_method/3,
@@ -502,21 +503,75 @@ in the compiled module but may not be tracked in the gen_server instance_methods
 """.
 -spec has_method(pid(), selector()) -> boolean().
 has_method(ClassPid, Selector) ->
+    probe_local_method(ClassPid, Selector, false, fun(_ModuleName) -> has_method end).
+
+-doc """
+Check if a class has a method **locally** — like `has_method/2`, but never
+follows a compiled `has_method/1`'s own superclass delegation (BT-3482).
+
+`has_method/2`'s module fallback answers via the class's compiled
+`has_method/1`, which — for an actor class (BT-3467's
+`SuperclassDelegation::Dynamic`) — itself walks the live hierarchy and
+answers `true` for any *inherited* selector too, not just one this exact
+class defines. That breaks `beamtalk_dispatch:class_chain_step/6`'s
+per-node-probe contract: `class_chain_step` does its own node-by-node
+ancestor walk on top of the per-level answer, and expects that answer to mean
+"does *this* class define `Selector`" so it can attribute `MethodOwner`
+correctly and invoke the right class's `dispatch/4`. Calling `has_method/2`
+there made every level stop at the first ancestor's *dynamic* self-answer,
+so `invoke_method` dispatched to the wrong owner, which fell through to its
+own default case and re-entered the walk one level up via `super/5` —
+compounding the hierarchy walk into O(depth²) for the common
+unoverridden-selector case instead of the documented O(depth).
+
+Falls back to `ModuleName:has_method/1` when the module has no
+`has_method_local/1` export (compiled before BT-3482, or a hand-written
+runtime class) — correctness is unaffected (a class's `has_method/1` is
+always a superset of what it should answer locally), only the O(depth²)
+compounding for such a class isn't avoided.
+""".
+-spec has_method_local(pid(), selector()) -> boolean().
+has_method_local(ClassPid, Selector) ->
+    probe_local_method(ClassPid, Selector, true, fun(ModuleName) ->
+        case erlang:function_exported(ModuleName, has_method_local, 1) of
+            true -> has_method_local;
+            false -> has_method
+        end
+    end).
+
+%% Shared body behind has_method/2 and has_method_local/2: a hit in the
+%% gen_server's own dynamic method table (instance_methods, compiled or
+%% hot-patched) means "locally installed" for both; otherwise fall back to a
+%% module-level probe whose function name `ResolveFun` picks — `has_method/2`
+%% always probes `has_method/1`, `has_method_local/2` prefers
+%% `has_method_local/1` when the module exports it (BT-3482). `EnsureLoaded`
+%% preserves `has_method/2`'s pre-BT-3482 behavior of not force-loading the
+%% module — only `has_method_local/2` needs it loaded up front, since it must
+%% see whether the newer `has_method_local/1` export exists before deciding
+%% which function to probe.
+-spec probe_local_method(pid(), selector(), boolean(), fun((atom()) -> atom())) ->
+    boolean().
+probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
     case gen_server:call(ClassPid, {method, Selector}) of
         nil ->
             case module_name(ClassPid) of
                 undefined ->
                     false;
                 ModuleName ->
-                    case erlang:function_exported(ModuleName, has_method, 1) of
+                    case EnsureLoaded of
+                        true -> _ = code:ensure_loaded(ModuleName);
+                        false -> ok
+                    end,
+                    Fun = ResolveFun(ModuleName),
+                    case erlang:function_exported(ModuleName, Fun, 1) of
                         true ->
                             try
-                                ModuleName:has_method(Selector)
+                                ModuleName:Fun(Selector)
                             catch
                                 Kind:Reason:ST ->
                                     ?LOG_DEBUG(
-                                        "has_method check failed for ~p:~p: ~p:~p",
-                                        [ModuleName, Selector, Kind, Reason],
+                                        "~p check failed for ~p:~p: ~p:~p",
+                                        [Fun, ModuleName, Selector, Kind, Reason],
                                         #{stacktrace => ST, domain => [beamtalk, runtime]}
                                     ),
                                     false

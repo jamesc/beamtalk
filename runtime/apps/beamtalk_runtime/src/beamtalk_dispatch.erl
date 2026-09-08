@@ -291,6 +291,15 @@ advance to its superclass. Always resolves to `{found, dispatch_result()}` —
 this module never lets the generic walker's bare `not_found` escape, since
 every "not found here" branch already knows how to build a structured
 `#beamtalk_error{}`.
+
+BT-3482: probes via `beamtalk_object_class:has_method_local/2`, not
+`has_method/2` — this walk supplies its own node-by-node hierarchy traversal,
+so the per-node answer must mean "does *this exact class* define `Selector`
+locally", never "does this class or any ancestor". `has_method/2` (through a
+compiled actor class's `has_method/1`, which delegates dynamically per
+BT-3467) answers the latter, which made this walk stop at the wrong node and
+`invoke_method` dispatch to the wrong owner — see `invoke_method/6`'s
+`IsUnoverriddenActorMethod` doc for the mechanism this fixes.
 """.
 -spec class_chain_step(selector(), args(), bt_self(), state(), class_name(), non_neg_integer()) ->
     beamtalk_hierarchy:step_result(dispatch_result()).
@@ -299,7 +308,7 @@ class_chain_step(Selector, Args, Self, State, ClassName, _Depth) ->
         undefined ->
             {found, {error, beamtalk_error:new(class_not_found, ClassName, Selector)}};
         ClassPid ->
-            case beamtalk_object_class:has_method(ClassPid, Selector) of
+            case beamtalk_object_class:has_method_local(ClassPid, Selector) of
                 true ->
                     %% Found the method - invoke it
                     invoke_step(ClassName, ClassPid, Selector, Args, Self, State);
@@ -404,26 +413,35 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
                     %% display selectors onto the runtime renderer.
                     %%
                     %% For actors, an unoverridden printString/displayString/inspect
-                    %% resolves with MethodOwner = 'Object': actor-class codegen only
-                    %% reports `has_method` true for locally-declared selectors, so the
-                    %% hierarchy walk (`class_chain_step`) keeps advancing until it
-                    %% reaches Object itself.
+                    %% resolves with MethodOwner = 'Object': class_chain_step/6 probes
+                    %% each level with beamtalk_object_class:has_method_local/2
+                    %% (BT-3482), which for a compiled actor class answers via
+                    %% `has_method_local/1` — a strictly local own-methods-or-extension
+                    %% check that never delegates to a superclass, unlike `has_method/1`
+                    %% itself ([`SuperclassDelegation::Dynamic`], BT-3467). So the
+                    %% hierarchy walk keeps advancing one class at a time until it
+                    %% reaches Object itself, same outcome BT-3467 briefly regressed
+                    %% (see class_chain_step/6's own doc for the O(depth²) it caused
+                    %% in between).
                     %%
                     %% For supervisors it's different (BT-3082): `Supervisor`/
                     %% `DynamicSupervisor` are plain "Value" classes (`Object
-                    %% subclass: Supervisor`), and value-type codegen's `has_method/1`
-                    %% *delegates* to its superclass for any selector it doesn't
-                    %% locally list (see `value_type_codegen.rs`
+                    %% subclass: Supervisor`), whose codegen never sets
+                    %% `DispatchSpec.emit_local_probe` (BT-3482 scoped the local-probe
+                    %% fix to the actor regression BT-3467 introduced) — they export no
+                    %% `has_method_local/1`, so `has_method_local/2` falls back to their
+                    %% `has_method/1`, which *delegates* to its superclass for any
+                    %% selector it doesn't locally list (see `value_type_codegen.rs`
                     %% `generate_primitive_has_method`/`generate_minimal_has_method`).
-                    %% That delegation makes `beamtalk_object_class:has_method/2`
-                    %% report `true` as soon as it reaches `Supervisor`/
-                    %% `DynamicSupervisor` — the walk never actually visits a node
-                    %% named `'Object'` for an unoverridden supervisor, it stops one
-                    %% level short. So an unoverridden supervisor's MethodOwner is
-                    %% `'Supervisor'` or `'DynamicSupervisor'`, never `'Object'` —
-                    %% before this fix, that meant `aSupervisor printString` fell
-                    %% through to the compiled Object method's bare class name
-                    %% instead of matching the REPL's kind-headed label.
+                    %% That delegation makes the per-node probe report `true` as soon as
+                    %% it reaches `Supervisor`/`DynamicSupervisor` — the walk never
+                    %% actually visits a node named `'Object'` for an unoverridden
+                    %% supervisor, it stops one level short. So an unoverridden
+                    %% supervisor's MethodOwner is `'Supervisor'` or
+                    %% `'DynamicSupervisor'`, never `'Object'` — before this fix, that
+                    %% meant `aSupervisor printString` fell through to the compiled
+                    %% Object method's bare class name instead of matching the REPL's
+                    %% kind-headed label.
                     %%
                     %% This also avoids the displayString deadlock: the compiled
                     %% Object displayString sends a message back to Self

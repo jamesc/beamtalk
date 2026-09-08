@@ -136,6 +136,7 @@ fn dnu_spec_short_circuits_regardless_of_other_fields() {
             superclass: Some(SuperclassDelegation::Static("bt@stdlib@actor")),
             dnu: true,
             auto_slots: None,
+            emit_local_probe: false,
         },
     );
     let output = doc.to_pretty_string();
@@ -155,6 +156,7 @@ fn root_class_with_no_superclass_falls_through_to_false() {
             superclass: None,
             dnu: false,
             auto_slots: None,
+            emit_local_probe: false,
         },
     );
     let output = doc.to_pretty_string();
@@ -180,6 +182,7 @@ fn subclass_delegates_to_superclass_module_on_false() {
             superclass: Some(SuperclassDelegation::Static("bt@stdlib@actor")),
             dnu: false,
             auto_slots: None,
+            emit_local_probe: false,
         },
     );
     let output = doc.to_pretty_string();
@@ -203,6 +206,7 @@ fn subclass_delegates_dynamically_by_class_name_on_false() {
             superclass: Some(SuperclassDelegation::Dynamic("Bt3467Base")),
             dnu: false,
             auto_slots: None,
+            emit_local_probe: false,
         },
     );
     let output = doc.to_pretty_string();
@@ -226,6 +230,7 @@ fn always_checks_extension_registry_before_delegating() {
             superclass: None,
             dnu: false,
             auto_slots: None,
+            emit_local_probe: false,
         },
     );
     let output = doc.to_pretty_string();
@@ -250,6 +255,7 @@ fn auto_slot_getters_and_setters_are_listed() {
             superclass: None,
             dnu: false,
             auto_slots: Some(&auto),
+            emit_local_probe: false,
         },
     );
     let output = doc.to_pretty_string();
@@ -260,5 +266,96 @@ fn auto_slot_getters_and_setters_are_listed() {
     assert!(
         output.contains("'withY:'"),
         "with*: setter selector missing. Got:\n{output}"
+    );
+}
+
+// ── emit_local_probe (BT-3482) ──────────────────────────────────────────
+
+#[test]
+fn local_probe_off_by_default_emits_only_has_method() {
+    let doc = generate_has_method_from_spec(
+        &["increment".to_string()],
+        &DispatchSpec {
+            reflection: &[],
+            class_name: "Counter",
+            superclass: Some(SuperclassDelegation::Dynamic("Bt3467Base")),
+            dnu: false,
+            auto_slots: None,
+            emit_local_probe: false,
+        },
+    );
+    let output = doc.to_pretty_string();
+    assert!(
+        !output.contains("has_method_local"),
+        "emit_local_probe: false must not emit has_method_local/1. Got:\n{output}"
+    );
+}
+
+#[test]
+fn local_probe_emits_has_method_local_that_never_delegates() {
+    // BT-3482: has_method_local/1 checks the same own-methods/extension
+    // membership as has_method/1, but must never delegate to the superclass
+    // (Dynamic or Static) on a false — class_chain_step's own walk is the
+    // hierarchy traversal, not this function's.
+    let doc = generate_has_method_from_spec(
+        &["shout".to_string()],
+        &DispatchSpec {
+            reflection: &[],
+            class_name: "Bt3467Child",
+            superclass: Some(SuperclassDelegation::Dynamic("Bt3467Base")),
+            dnu: false,
+            auto_slots: None,
+            emit_local_probe: true,
+        },
+    );
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'has_method_local'/1 = fun (Selector) ->"),
+        "Got:\n{output}"
+    );
+    let local_fn = output
+        .split("'has_method_local'/1")
+        .nth(1)
+        .expect("has_method_local/1 not found");
+    assert!(
+        local_fn.contains("'shout'"),
+        "local variant must still check own methods. Got:\n{local_fn}"
+    );
+    assert!(
+        local_fn.contains("call 'beamtalk_extensions':'has'('Bt3467Child', Selector)"),
+        "local variant must still check the extension registry. Got:\n{local_fn}"
+    );
+    assert!(
+        !local_fn.contains("beamtalk_dispatch':'responds_to'"),
+        "local variant must never delegate dynamically. Got:\n{local_fn}"
+    );
+    assert!(
+        local_fn.contains("<'false'> when 'true' -> 'false'"),
+        "local variant must fall through to plain false. Got:\n{local_fn}"
+    );
+}
+
+#[test]
+fn local_probe_dnu_short_circuits_to_true_too() {
+    // A catch-all-DNU class handles every selector locally (via its own
+    // dispatch/4), so has_method_local/1 must also short-circuit to true —
+    // class_chain_step should stop right there, not advance further.
+    let doc = generate_has_method_from_spec(
+        &[],
+        &DispatchSpec {
+            reflection: &[],
+            class_name: "ErlangModule",
+            superclass: Some(SuperclassDelegation::Dynamic("Object")),
+            dnu: true,
+            auto_slots: None,
+            emit_local_probe: true,
+        },
+    );
+    let output = doc.to_pretty_string();
+    assert_eq!(
+        output,
+        "'has_method'/1 = fun (_Selector) ->\n    'true'\n\n\
+         'has_method_local'/1 = fun (_Selector) ->\n    'true'\n\n",
+        "Got:\n{output}"
     );
 }
