@@ -140,6 +140,7 @@ mod completion_and_native_types;
 mod diagnostics_class_hierarchy;
 mod dispatch_and_hierarchy_meta;
 mod module_naming_and_misc;
+mod source_queries;
 mod span_resolution;
 mod type_alias_declarations;
 mod type_aliases;
