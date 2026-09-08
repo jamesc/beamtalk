@@ -92,7 +92,7 @@ pub struct FlushEvent {
 pub struct FlushedFile {
     /// Absolute or workspace-relative path as `ChangeEntry.sourceFile`
     /// carried it — resolved against the LSP's workspace roots by
-    /// `resolve_flushed_path` (`crates/beamtalk-lsp/src/server.rs`).
+    /// `resolve_flushed_path` (`crates/beamtalk-lsp/src/server/flush.rs`).
     pub path: String,
     /// The per-file operation kind from the wire's `fileKinds` companion
     /// list (`beamtalk_workspace_changelog:entry_kind/1`'s own enum value,
