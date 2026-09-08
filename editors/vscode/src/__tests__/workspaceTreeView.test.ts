@@ -28,7 +28,11 @@ vi.mock("vscode", () => buildVscodeModule({ executeCommandMock, openTextDocument
 
 import type { WebSocketCallbacks, WebSocketFactory } from "../workspaceClient";
 import { WorkspaceClient } from "../workspaceClient";
-import type { MethodGroupNode } from "../workspaceTreeView";
+import type {
+  InheritedMethodGroupNode,
+  MethodGroupNode,
+  MethodItemNode,
+} from "../workspaceTreeView";
 import { WorkspaceTreeDataProvider } from "../workspaceTreeView";
 
 // ─── Mock WebSocket (mirrors workspaceClient.test.ts) ──────────────────────────
@@ -634,6 +638,165 @@ describe("WorkspaceTreeDataProvider — refresh-signal hygiene", () => {
     provider.setClient(null);
 
     expect(fired.filter((n) => n === undefined)).toHaveLength(1);
+    client.dispose();
+  });
+});
+
+// ─── Inherited methods (BT-3478) ────────────────────────────────────────────
+
+function inheritedGroup(
+  children: Awaited<ReturnType<WorkspaceTreeDataProvider["getChildren"]>>,
+  side: "instance" | "class"
+): InheritedMethodGroupNode {
+  const group = children.find((c) => c.kind === "inherited-method-group" && c.side === side) as
+    | InheritedMethodGroupNode
+    | undefined;
+  if (!group) throw new Error(`no ${side} inherited-method-group in ${JSON.stringify(children)}`);
+  return group;
+}
+
+describe("WorkspaceTreeDataProvider — inherited methods (BT-3478)", () => {
+  let provider: InstanceType<typeof WorkspaceTreeDataProvider>;
+
+  beforeEach(() => {
+    provider = new WorkspaceTreeDataProvider();
+  });
+
+  it("a class item's children include two flat, collapsed 'Inherited' groups without fetching them eagerly", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+    ]);
+    const [classItem] = await provider.getChildren({ kind: "classes-section" });
+
+    const fetch = provider.getChildren(classItem);
+    respondToOp(ws, "methods", { methods: [], state_vars: [] });
+    const children = await fetch;
+
+    expect(children.map((c) => c.kind)).toEqual([
+      "state-group",
+      "method-group",
+      "method-group",
+      "inherited-method-group",
+      "inherited-method-group",
+    ]);
+    // Same tree depth as the local groups — no nested per-superclass level,
+    // and never auto-expanded (the count isn't known until fetched).
+    const instanceGroupItem = provider.getTreeItem(inheritedGroup(children, "instance"));
+    expect(instanceGroupItem.label).toBe("Inherited Instance Methods");
+    expect(instanceGroupItem.collapsibleState).toBe(1); // vscode.TreeItemCollapsibleState.Collapsed
+    // The eager class-item fetch above only ever requested "methods" — the
+    // whole point of the separate op.
+    expect(ws.sent.some((m) => m.op === "inherited-methods")).toBe(false);
+
+    client.dispose();
+  });
+
+  it("expanding one side's group lazily fetches both sides once, split and attributed by defining class", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+      { name: "Actor", source_file: "/stdlib/Actor.bt", actor_count: 0 },
+    ]);
+    const [classItem] = await provider.getChildren({ kind: "classes-section" });
+    const fetch = provider.getChildren(classItem);
+    respondToOp(ws, "methods", { methods: [], state_vars: [] });
+    const children = await fetch;
+
+    const instanceFetch = provider.getChildren(inheritedGroup(children, "instance"));
+    respondToOp(ws, "inherited-methods", {
+      methods: [
+        {
+          name: "spawn",
+          selector: "spawn",
+          side: "instance",
+          defining_class: "Actor",
+        },
+        {
+          name: "supervisionSpec",
+          selector: "supervisionSpec",
+          side: "class",
+          defining_class: "Actor",
+        },
+      ],
+    });
+    const instanceItems = (await instanceFetch) as MethodItemNode[];
+
+    expect(instanceItems.map((n) => n.method.selector)).toEqual(["spawn"]);
+    expect(instanceItems[0].definingClass).toBe("Actor");
+    // Defining class's own loaded ClassInfo is used (real source_file), not
+    // the receiving class Foo's — so "Go to Definition" opens Actor.bt.
+    expect(instanceItems[0].classInfo).toEqual(
+      expect.objectContaining({ name: "Actor", source_file: "/stdlib/Actor.bt" })
+    );
+
+    // The class-side group reuses the same cached fetch — no second request.
+    const classItems = (await provider.getChildren(
+      inheritedGroup(children, "class")
+    )) as MethodItemNode[];
+    expect(classItems.map((n) => n.method.selector)).toEqual(["supervisionSpec"]);
+    expect(ws.sent.filter((m) => m.op === "inherited-methods")).toHaveLength(1);
+
+    client.dispose();
+  });
+
+  it("falls back to a source-less stub ClassInfo when the defining class isn't loaded", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+    ]);
+    const [classItem] = await provider.getChildren({ kind: "classes-section" });
+    const fetch = provider.getChildren(classItem);
+    respondToOp(ws, "methods", { methods: [], state_vars: [] });
+    const children = await fetch;
+
+    const instanceFetch = provider.getChildren(inheritedGroup(children, "instance"));
+    respondToOp(ws, "inherited-methods", {
+      methods: [
+        { name: "class", selector: "class", side: "instance", defining_class: "ProtoObject" },
+      ],
+    });
+    const [item] = (await instanceFetch) as MethodItemNode[];
+
+    expect(item.classInfo).toEqual({ name: "ProtoObject" });
+    const treeItem = provider.getTreeItem(item);
+    expect(treeItem.contextValue).toBe("method-item-no-source");
+
+    client.dispose();
+  });
+
+  it("discards an inherited-methods fetch that resolves after a classes/loaded push invalidated it", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+    ]);
+    const [classItem] = await provider.getChildren({ kind: "classes-section" });
+    const classFetch = provider.getChildren(classItem);
+    respondToOp(ws, "methods", { methods: [], state_vars: [] });
+    const children = await classFetch;
+
+    const firstFetch = provider.getChildren(inheritedGroup(children, "instance"));
+    await Promise.resolve();
+
+    ws.receive({
+      type: "push",
+      channel: "classes",
+      event: "loaded",
+      data: { class: "Foo" },
+    });
+    respondToOp(ws, "list-classes", {
+      class_list: [{ name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 }],
+    });
+
+    respondToOp(ws, "inherited-methods", {
+      methods: [{ name: "stale", selector: "stale", side: "instance", defining_class: "Actor" }],
+    });
+    expect(await firstFetch).toEqual([]);
+
     client.dispose();
   });
 });

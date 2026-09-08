@@ -56,6 +56,7 @@ leak compiler/runtime internals.
 | docs | `{docs, binary()}` | `erlang-help`, `hover` |
 | codegen | `{codegen, CoreErlang, Warnings}` | `show-codegen` |
 | methods | `{methods, Methods, StateVars}` | `methods` |
+| inherited_methods | `{inherited_methods, Methods}` | `inherited-methods` |
 | class_list | `{class_list, [ClassInfo]}` | `list-classes` |
 | test_results | `{test_results, TestResult}` | `test`, `test-all` |
 | describe | `{describe, Ops, Versions}` | `describe` |
@@ -114,6 +115,7 @@ tagged terms; `encode/2` is the only thing that turns them into JSON.
     | {docs, binary()}
     | {codegen, CoreErlang :: binary(), Warnings :: [binary()]}
     | {methods, Methods :: [map()], StateVars :: [binary()]}
+    | {inherited_methods, Methods :: [map()]}
     | {class_list, [map()]}
     | {test_results, map()}
     | {describe, Ops :: map(), Versions :: map()}
@@ -165,6 +167,9 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"diagnostics">>;
     Op =:= <<"describe">>;
     Op =:= <<"methods">>;
+    %% BT-3478: lazy per-defining-class inherited method listing, backing
+    %% the sidebar's "Inherited" tree groups.
+    Op =:= <<"inherited-methods">>;
     Op =:= <<"list-classes">>;
     Op =:= <<"list-tests">>;
     Op =:= <<"load-tests">>;
@@ -276,6 +281,8 @@ encode({codegen, CoreErlang, Warnings}, Msg) ->
     beamtalk_repl_protocol:encode_codegen(CoreErlang, Warnings, Msg);
 encode({methods, Methods, StateVars}, Msg) ->
     beamtalk_repl_protocol:encode_methods(Methods, StateVars, Msg);
+encode({inherited_methods, Methods}, Msg) ->
+    beamtalk_repl_protocol:encode_inherited_methods(Methods, Msg);
 encode({class_list, ClassList}, Msg) ->
     beamtalk_repl_protocol:encode_class_list(ClassList, Msg);
 encode({test_results, TestResult}, Msg) ->

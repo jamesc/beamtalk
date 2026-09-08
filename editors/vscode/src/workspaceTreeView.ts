@@ -19,6 +19,7 @@ import type {
   ClassInfo,
   ClassOrigin,
   ConnectionState,
+  InheritedMethodInfo,
   MethodInfo,
   PushEvent,
   StateVarInfo,
@@ -106,6 +107,28 @@ export interface MethodItemNode {
   readonly kind: "method-item";
   readonly method: MethodInfo;
   readonly classInfo: ClassInfo;
+  /**
+   * BT-3478: set only for an entry under an `InheritedMethodGroupNode` — the
+   * ancestor class that actually declares the method (shown in the item's
+   * description/tooltip). `classInfo` above is that same defining class's
+   * info (so "Go to Definition" opens its real source, not the receiving
+   * subclass's), not the class the "Inherited" group is nested under.
+   */
+  readonly definingClass?: string;
+}
+
+/**
+ * One of the two collapsed-by-default "Inherited" groups (BT-3478), sibling
+ * to the existing `MethodGroupNode`s — same tree depth, not a per-superclass
+ * sub-tree. Unlike `MethodGroupNode`, this carries no embedded methods: its
+ * children are fetched lazily, only when the group itself is expanded, via
+ * the `inherited-methods` op (kept off the eager per-class-item `methods`
+ * fetch on purpose).
+ */
+export interface InheritedMethodGroupNode {
+  readonly kind: "inherited-method-group";
+  readonly side: "instance" | "class";
+  readonly classInfo: ClassInfo;
 }
 
 export interface StateGroupNode {
@@ -142,6 +165,7 @@ export type WorkspaceNode =
   | StateVarItemNode
   | MethodGroupNode
   | MethodItemNode
+  | InheritedMethodGroupNode
   | InspectFieldNode;
 
 // ─── Singleton section nodes (stable references for onDidChangeTreeData) ─────
@@ -210,6 +234,16 @@ export class WorkspaceTreeDataProvider
   >();
   /** Guards `methodsCache` against the same stale-write race, keyed by class name. */
   private readonly methodsGen = new GenerationTracker();
+
+  /**
+   * Cached inherited-methods results keyed by class name (BT-3478). Holds
+   * both instance- and class-side entries together — the two
+   * `InheritedMethodGroupNode`s for the same class share one fetch, split by
+   * `side` when building each group's children.
+   */
+  private readonly inheritedMethodsCache = new Map<string, InheritedMethodInfo[]>();
+  /** Guards `inheritedMethodsCache` against the same stale-write race as `methodsGen`. */
+  private readonly inheritedMethodsGen = new GenerationTracker();
 
   private readonly disposeHandlers: Array<() => void> = [];
 
@@ -358,11 +392,13 @@ export class WorkspaceTreeDataProvider
     }
     this.inspectCache.clear();
     this.methodsCache.clear();
+    this.inheritedMethodsCache.clear();
     // Discard any per-item fetch (actor inspect / class methods) still in
     // flight from before this wholesale clear — without this, one resolving
     // afterward would repopulate the cache with a pre-refresh result.
     this.inspectGen.bumpAll();
     this.methodsGen.bumpAll();
+    this.inheritedMethodsGen.bumpAll();
     await this._fetchInitialData(this.client);
   }
 
@@ -409,6 +445,8 @@ export class WorkspaceTreeDataProvider
         return this._methodGroupItem(element);
       case "method-item":
         return this._methodItem(element);
+      case "inherited-method-group":
+        return this._inheritedMethodGroupItem(element);
       case "inspect-field":
         return this._inspectFieldItem(element);
     }
@@ -507,6 +545,31 @@ export class WorkspaceTreeDataProvider
       case "method-group":
         return element.methods;
 
+      case "inherited-method-group": {
+        const className = element.classInfo.name;
+        const cached = this.inheritedMethodsCache.get(className);
+        if (cached) {
+          return this._inheritedMethodItems(cached, element.side);
+        }
+        const activeClient = this.client;
+        if (!activeClient || this.connectionState !== "connected") {
+          return [];
+        }
+        // Same in-flight-invalidation guard as the local "class-item" fetch
+        // above, keyed by class name (shared by both sides' groups, since
+        // one fetch covers both).
+        const token = this.inheritedMethodsGen.token(className);
+        try {
+          const result = await activeClient.inheritedMethods(className);
+          if (this.client !== activeClient) return [];
+          if (!this.inheritedMethodsGen.isCurrent(className, token)) return [];
+          this.inheritedMethodsCache.set(className, result);
+          return this._inheritedMethodItems(result, element.side);
+        } catch {
+          return [];
+        }
+      }
+
       default:
         return [];
     }
@@ -537,18 +600,23 @@ export class WorkspaceTreeDataProvider
       // for `unindexed_runtime_fun`, hence the fallback wording below)
       // instead of paying for two guaranteed-empty lookups.
       if (hasNoOpenableSource(element.method.source_status)) {
-        item.tooltip = this._noSourceMethodTooltip(element.method);
+        item.tooltip = this._appendDefiningClass(
+          this._noSourceMethodTooltip(element.method),
+          element.definingClass
+        );
         return item;
       }
-      item.tooltip =
+      item.tooltip = this._appendDefiningClass(
         (await this._lspHoverTooltip(
           element.classInfo.source_file,
           element.method.selector,
           element.method.side === "class" ? "class-method" : "method",
           { side: element.method.side, declaredLine: element.method.line }
         )) ??
-        (await this._methodDocCommentTooltip(element)) ??
-        this._methodTooltipFallback(element.method);
+          (await this._methodDocCommentTooltip(element)) ??
+          this._methodTooltipFallback(element.method),
+        element.definingClass
+      );
       return item;
     }
     if (element.kind === "state-item") {
@@ -653,6 +721,20 @@ export class WorkspaceTreeDataProvider
       );
     }
     return md;
+  }
+
+  /**
+   * BT-3478: append the defining-class attribution line to an inherited
+   * method's tooltip. A no-op (returns `tooltip` unchanged) for a local
+   * method, where `definingClass` is `undefined`.
+   */
+  private _appendDefiningClass(
+    tooltip: vscode.MarkdownString,
+    definingClass: string | undefined
+  ): vscode.MarkdownString {
+    if (!definingClass) return tooltip;
+    tooltip.appendMarkdown(`\n\n_Inherited from ${definingClass}_`);
+    return tooltip;
   }
 
   private _methodTooltipFallback(method: MethodInfo): vscode.MarkdownString {
@@ -922,6 +1004,22 @@ export class WorkspaceTreeDataProvider
     return item;
   }
 
+  /**
+   * BT-3478: collapsed-by-default sibling to `_methodGroupItem` — the count
+   * isn't known until expanded (lazy fetch), unlike the local groups, so
+   * this never auto-expands even when non-empty.
+   */
+  private _inheritedMethodGroupItem(node: InheritedMethodGroupNode): vscode.TreeItem {
+    const label =
+      node.side === "instance" ? "Inherited Instance Methods" : "Inherited Class Methods";
+    const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
+    item.iconPath = new vscode.ThemeIcon(
+      node.side === "instance" ? "symbol-method" : "symbol-namespace"
+    );
+    item.contextValue = "inherited-method-group";
+    return item;
+  }
+
   private _methodItem(node: MethodItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.method.selector, vscode.TreeItemCollapsibleState.None);
     // BT-3444: a `synthetic` method (e.g. a `Value subclass:`'s
@@ -937,21 +1035,27 @@ export class WorkspaceTreeDataProvider
     // treatment, so an `unindexed_runtime_fun` row looked like a normal,
     // clickable method that silently did nothing useful. Mirrors the
     // LiveView IDE method list's `derived` badge for the same fact (BT-2714).
+    // BT-3478: for an inherited entry, attribute the defining class as a
+    // label (never a tree level — the "Inherited" groups stay flat).
+    const definingSuffix = node.definingClass ? ` · ${node.definingClass}` : "";
     if (node.method.source_status === "synthetic") {
       item.iconPath = new vscode.ThemeIcon("gear");
-      item.description = "compiler-generated";
+      item.description = `compiler-generated${definingSuffix}`;
       item.contextValue = "method-item-synthetic";
       return item;
     }
     if (node.method.source_status === "unindexed_runtime_fun") {
       item.iconPath = new vscode.ThemeIcon("gear");
-      item.description = "no source available";
+      item.description = `no source available${definingSuffix}`;
       item.contextValue = "method-item-unindexed";
       return item;
     }
     item.iconPath = new vscode.ThemeIcon("symbol-method");
     const hasSource = !!node.classInfo.source_file && node.classInfo.source_file !== "unknown";
     item.contextValue = hasSource ? "method-item" : "method-item-no-source";
+    if (node.definingClass) {
+      item.description = node.definingClass;
+    }
     if (hasSource) {
       item.command = {
         command: "beamtalk.navigateToMethod",
@@ -1027,7 +1131,42 @@ export class WorkspaceTreeDataProvider
         classInfo,
         methods: toMethodItems(classSide),
       },
+      // BT-3478: flat sibling groups, same depth as the two above — lazily
+      // fetched only when expanded (see getChildren's "inherited-method-group"
+      // case), not eagerly built here like the local groups.
+      { kind: "inherited-method-group" as const, side: "instance", classInfo },
+      { kind: "inherited-method-group" as const, side: "class", classInfo },
     ];
+  }
+
+  /**
+   * Build inherited method-item nodes for one side of an
+   * `InheritedMethodGroupNode` (BT-3478), from the full (both-sides) fetch
+   * result cached per receiving class.
+   *
+   * `classInfo` on each node is the *defining* class's info, looked up from
+   * the already-loaded "Classes" section — not the receiving class the
+   * group is nested under — so `beamtalk.navigateToMethod` opens the real
+   * declaration (and correctly finds no source, matching the local-method
+   * "no source" affordance, if the defining class isn't loaded/known).
+   */
+  private _inheritedMethodItems(
+    all: InheritedMethodInfo[],
+    side: "instance" | "class"
+  ): MethodItemNode[] {
+    return all
+      .filter((m) => m.side === side)
+      .map((m) => ({
+        kind: "method-item" as const,
+        method: m,
+        classInfo: this._findClassInfo(m.definingClass),
+        definingClass: m.definingClass,
+      }));
+  }
+
+  /** Look up a loaded class's info by name, falling back to a source-less stub. */
+  private _findClassInfo(name: string): ClassInfo {
+    return this.classes.find((c) => c.name === name) ?? { name };
   }
 
   private _inspectFields(state: Record<string, unknown>, parentId: string): InspectFieldNode[] {
@@ -1072,8 +1211,10 @@ export class WorkspaceTreeDataProvider
     this.typeAliases = [];
     this.inspectCache.clear();
     this.methodsCache.clear();
+    this.inheritedMethodsCache.clear();
     this.inspectGen.bumpAll();
     this.methodsGen.bumpAll();
+    this.inheritedMethodsGen.bumpAll();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -1148,6 +1289,13 @@ export class WorkspaceTreeDataProvider
       // Invalidate cached methods for the reloaded class — its methods may have changed.
       this.methodsCache.delete(event.data.class);
       this.methodsGen.bump(event.data.class);
+      // BT-3478: also invalidate its own inherited-methods entry. Known gap
+      // (shared with the local-methods cache above): reloading an ancestor
+      // does not invalidate a subclass's cached inherited view — a full
+      // hierarchy walk on every reload wasn't justified for this op's
+      // initial ship; `refresh()` / reconnect always sees the current state.
+      this.inheritedMethodsCache.delete(event.data.class);
+      this.inheritedMethodsGen.bump(event.data.class);
       // Re-fetch the full class list — the event only carries the new class name,
       // not the complete list with actor_count metadata.
       // Use a generation counter to discard stale responses when multiple
@@ -1177,6 +1325,8 @@ export class WorkspaceTreeDataProvider
       this.classes = this.classes.filter((c) => c.name !== event.data.class);
       this.methodsCache.delete(event.data.class);
       this.methodsGen.bump(event.data.class);
+      this.inheritedMethodsCache.delete(event.data.class);
+      this.inheritedMethodsGen.bump(event.data.class);
       this._onDidChangeTreeData.fire(CLASSES_SECTION);
     }
   }
