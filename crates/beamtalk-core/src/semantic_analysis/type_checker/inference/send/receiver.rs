@@ -1177,8 +1177,9 @@ impl TypeChecker {
                 // (`emit_unknown_selector_warning`) — identical message
                 // shape, and, new for unions, the same "did you mean"
                 // suggestion lookup. A singleton member (`#foo`) resolves
-                // its suggestions through `Symbol`, mirroring the
-                // resolve_name mapping the classification loop above uses.
+                // its suggestions through `Symbol` — the same
+                // singleton-as-Symbol convention `resolve_name` above (and
+                // `resolve_class` elsewhere in this file) applies.
                 let suggestion_class = if only_missing.starts_with('#') {
                     EcoString::from("Symbol")
                 } else {
