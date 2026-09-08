@@ -6056,6 +6056,192 @@ fn test_generate_has_method_from_expression_based_module() {
     );
 }
 
+// ── BT-3467: actor has_method/1 matches value-type has_method/1 ────────────
+//
+// `gen_server::dispatch::generate_has_method` (actor) and
+// `value_type_codegen::generate_primitive_has_method` (value type) implement
+// the same reflection surface — "does this class understand `Selector`,
+// locally, via a foreign extension, or via an ancestor?" — and had drifted:
+// the actor version never checked the extension registry, never delegated
+// to its superclass, and never short-circuited for a catch-all-DNU class,
+// so `respondsTo:` answered differently for an actor than for a value type
+// given the identical situation. Both now render through the same
+// `DispatchSpec`-driven emitter (`dispatch_spec::generate_has_method_from_spec`).
+// These three tests — an extension method, an inherited method, and a
+// DNU-catch-all class — pinned the pre-fix divergence in an earlier revision
+// of this same file; they now assert the corrected, unified behavior.
+
+/// A minimal actor `ClassDefinition` for `has_method` pinning tests — same
+/// shape as the literal built in `test_generate_has_method_lists_primary_class_methods`
+/// above, factored out since three tests below each need one with a
+/// different method list.
+fn actor_class_def(
+    name: &str,
+    superclass: &str,
+    methods: Vec<MethodDefinition>,
+) -> ClassDefinition {
+    ClassDefinition {
+        name: Identifier::new(name, Span::new(0, 0)),
+        superclass: Some(Identifier::new(superclass, Span::new(0, 0))),
+        superclass_package: None,
+        class_kind: ClassKind::Actor,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: None,
+        state: vec![],
+        methods,
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        span: Span::new(0, 0),
+    }
+}
+
+fn module_with_class(class: ClassDefinition) -> Module {
+    Module {
+        classes: vec![class],
+        type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
+        expressions: vec![],
+        method_definitions: Vec::new(),
+        protocols: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    }
+}
+
+fn unary_method(name: &str) -> MethodDefinition {
+    MethodDefinition {
+        selector: MessageSelector::Unary(name.into()),
+        parameters: vec![],
+        body: vec![bare(Expression::Literal(
+            Literal::Integer(0),
+            Span::new(0, 0),
+        ))],
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        is_class_method: false,
+        kind: MethodKind::Primary,
+        expect: None,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: Span::new(0, 0),
+    }
+}
+
+/// A `doesNotUnderstand:args:` method whose body is a structural (unquoted)
+/// intrinsic (BT-1763) — the shape `class_has_catch_all_dnu` recognizes as a
+/// catch-all DNU handler (e.g. `Erlang`/`ErlangModule` in stdlib), as
+/// opposed to a regular Beamtalk-body DNU override (e.g. `TimeoutProxy`),
+/// which does *not* count.
+fn catch_all_dnu_method() -> MethodDefinition {
+    MethodDefinition {
+        selector: MessageSelector::Keyword(vec![
+            KeywordPart::new("doesNotUnderstand:", Span::new(0, 0)),
+            KeywordPart::new("args:", Span::new(0, 0)),
+        ]),
+        parameters: vec![
+            ParameterDefinition {
+                name: Identifier::new("selector", Span::new(0, 0)),
+                type_annotation: None,
+            },
+            ParameterDefinition {
+                name: Identifier::new("args", Span::new(0, 0)),
+                type_annotation: None,
+            },
+        ],
+        body: vec![bare(Expression::Primitive {
+            name: "erlangModuleLookup".into(),
+            is_quoted: false,
+            is_intrinsic: true,
+            is_inferred: false,
+            span: Span::new(0, 0),
+        })],
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        is_class_method: false,
+        kind: MethodKind::Primary,
+        expect: None,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: Span::new(0, 0),
+    }
+}
+
+#[test]
+fn test_generate_has_method_actor_checks_extension_registry() {
+    // Value-type has_method/1 always checks `beamtalk_extensions:has/2` for
+    // a selector it doesn't recognize locally (`generate_primitive_has_method`),
+    // so `anActor respondsTo: #anExtensionMethod` and `aValue respondsTo:
+    // #anExtensionMethod` must answer the same way for the identical
+    // situation. BT-3467: actor has_method/1 now consults the extension
+    // registry too, via the shared `DispatchSpec` emitter.
+    let class = actor_class_def("Counter", "Actor", vec![unary_method("increment")]);
+    let module = module_with_class(class);
+    let generator = CoreErlangGenerator::new("counter");
+    let doc = generator.generate_has_method(&module).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("call 'beamtalk_extensions':'has'('Counter', Selector)"),
+        "actor has_method/1 must consult the extension registry, matching \
+         value-type has_method/1. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_generate_has_method_actor_delegates_to_superclass() {
+    // Value-type has_method/1 delegates to its superclass module for a
+    // selector it doesn't recognize locally, so an inherited method reports
+    // `respondsTo:` true. BT-3467: actor has_method/1 now does the same
+    // reflection — an inherited selector answers `respondsTo:` true — but
+    // *dynamically*, via `beamtalk_dispatch:responds_to/2`'s live
+    // class-registry walk (the same mechanism actor message dispatch and
+    // `respondsTo:` already use), not a compile-time module reference — see
+    // `SuperclassDelegation`'s doc comment. A subclass no longer answers
+    // `respondsTo:` false for a selector only an ancestor defines, and stays
+    // correct across a hot-reloaded ancestor (BT-845).
+    let class = actor_class_def("Counter", "Actor", vec![unary_method("increment")]);
+    let module = module_with_class(class);
+    let generator = CoreErlangGenerator::new("counter");
+    let doc = generator.generate_has_method(&module).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')"),
+        "actor has_method/1 must delegate to its superclass *by class name*, \
+         through beamtalk_dispatch:responds_to/2's live registry walk, not a \
+         compiled module reference. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_generate_has_method_actor_honors_catch_all_dnu() {
+    // A class whose doesNotUnderstand:args: is a structural (unquoted)
+    // intrinsic (BT-1763, e.g. Erlang/ErlangModule) accepts every selector —
+    // value-type has_method/1 short-circuits to `true` unconditionally for
+    // such a class. BT-3467: actor has_method/1 now does the same, via the
+    // shared `DispatchSpec` emitter.
+    let class = actor_class_def("Proxy", "Actor", vec![catch_all_dnu_method()]);
+    let module = module_with_class(class);
+    let generator = CoreErlangGenerator::new("proxy");
+    let doc = generator.generate_has_method(&module).unwrap();
+    let output = doc.to_pretty_string();
+    assert_eq!(
+        output, "'has_method'/1 = fun (_Selector) ->\n    'true'\n\n",
+        "actor has_method/1 must short-circuit to true for a catch-all-DNU \
+         class, matching value-type has_method/1. Got:\n{output}"
+    );
+}
+
 #[test]
 fn test_generate_safe_dispatch_structure() {
     // safe_dispatch/3 must wrap dispatch/4 in a try/catch that returns the

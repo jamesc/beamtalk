@@ -289,7 +289,14 @@ module 'class_var_multi_field_mutations' ['start_link'/1, 'start_link'/2, 'init'
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, [])
+    case call 'lists':'member'(Selector, []) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('MultiFieldClassVarCtr', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
+            end
+    end
 
 
 'class_resetAndBump'/2 = fun (ClassSelf, ClassVars) ->

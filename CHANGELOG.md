@@ -97,6 +97,7 @@
 - Fix a `whileTrue:`/`whileFalse:` condition containing a self-send or an inline-threaded `and:`/`or:` panicking the compiler or silently dropping the mutation at runtime — the condition block now threads actor state correctly (BT-3419, #3723).
 - Fix a mutation-threaded conditional (`ifTrue:ifFalse:`, `and:`/`or:`, the `ifNil:` family, `match:`) leaking a raw internal tuple when used in expression position — as an argument, nested inside another branch, in a `match:` arm, or inside a `sort:`/`detect:ifNone:` block — instead of its value (BT-3420, #3722).
 - `beamtalk lint` now also detects `with<Field>:` sends and `with*:` cascades (not just `self.field :=`) as field-mutating statements in `TestCase>>setUp`, warning when one isn't the trailing statement (BT-3395, #3690).
+- Fix `respondsTo:` on actor instances disagreeing with value types given the identical situation — an actor's `has_method/1` never checked the foreign-extension registry, never delegated to its superclass, and never short-circuited for a class with a catch-all `doesNotUnderstand:args:` handler, so e.g. `anActor respondsTo: #anExtensionMethod` or `respondsTo: #anInheritedMethod` incorrectly answered `false`. Actor and value-type `has_method/1` now render through one shared `DispatchSpec`-driven emitter (ADR 0006) (BT-3467).
 
 ### Standard Library
 

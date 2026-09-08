@@ -295,7 +295,14 @@ module 'state_and_self_sequential_mutations' ['start_link'/1, 'start_link'/2, 'i
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, ['incrementTwice', 'resetAndBump'])
+    case call 'lists':'member'(Selector, ['incrementTwice', 'resetAndBump']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('SeqStateCtr', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
+            end
+    end
 
 
 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->

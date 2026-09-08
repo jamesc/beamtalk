@@ -8,6 +8,8 @@
 //! Generates the method table, `has_method/1`, `safe_dispatch/3`, and
 //! `dispatch/4` functions for runtime message routing.
 
+use super::super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
+use super::super::value_accessors;
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
@@ -99,28 +101,106 @@ impl CoreErlangGenerator {
     /// Generates the `has_method/1` function for runtime reflection.
     ///
     /// This function enables the `respondsTo:` reflection method to check
-    /// if an actor class implements a particular method. It returns `true`
-    /// if the method exists, `false` otherwise.
+    /// if an actor class implements a particular message selector. It
+    /// returns `true` if the method exists — locally, via a foreign
+    /// extension, via superclass delegation, or unconditionally for a
+    /// catch-all-DNU class — `false` otherwise.
+    ///
+    /// BT-3467 (ADR 0006): renders through the same [`DispatchSpec`]-driven
+    /// emitter as `value_type_codegen::generate_primitive_has_method`, so an
+    /// actor's `respondsTo:` answers consistently with a value type's given
+    /// the identical situation. Only class-based modules get the full
+    /// extension/superclass/DNU-aware form (`spec` built from the class's
+    /// own `ClassDefinition`); a script/workspace module (no class
+    /// definition — top-level `name := [block]` methods) keeps the simple
+    /// selector-membership form, since it has no class hierarchy or DNU
+    /// handler to consult.
+    ///
+    /// Superclass delegation is [`SuperclassDelegation::Dynamic`], not
+    /// `Static`: an actor's `dispatch/4` and `respondsTo:` already resolve
+    /// an inherited selector via `beamtalk_dispatch`'s live class-registry
+    /// walk (ADR 0006, ADR 0032 Phase 3), so `has_method/1` delegates the
+    /// same way — a hot-reloaded ancestor (BT-845) is seen immediately,
+    /// instead of `has_method/1` alone still answering from the module
+    /// compiled at this class's own compile time.
     ///
     /// # Generated Code
     ///
     /// ```erlang
     /// 'has_method'/1 = fun (Selector) ->
-    ///     call 'lists':'member'(Selector, ['increment', 'decrement', 'getValue', 'setValue:'])
+    ///     case call 'lists':'member'(Selector, ['increment', 'decrement']) of
+    ///         <'true'> when 'true' -> 'true'
+    ///         <'false'> when 'true' ->
+    ///             case call 'beamtalk_extensions':'has'('Counter', Selector) of
+    ///                 <'true'> when 'true' -> 'true'
+    ///                 <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Object')
+    ///             end
+    ///     end
     /// ```
-    #[allow(clippy::unused_self)] // method on impl for API consistency
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_has_method(
         &self,
         module: &Module,
     ) -> Result<Document<'static>> {
-        let methods: Vec<String> = collect_primary_method_names_and_arities(module)
+        let own_methods: Vec<String> = collect_primary_method_names_and_arities(module)
             .into_iter()
             .map(|(name, _)| name)
             .collect();
 
-        // ADR 0006 Phase 1b: Reflection methods are inherited from Object.
+        let Some(class) = module.classes.first() else {
+            // Script/workspace module: no class hierarchy, extensions, or DNU
+            // handler to consult — keep the plain membership-check form.
+            return Ok(Self::generate_has_method_script(&own_methods));
+        };
 
+        let class_name = self.class_name();
+
+        if dispatch_spec::class_has_catch_all_dnu(class) {
+            return Ok(dispatch_spec::generate_has_method_from_spec(
+                &[],
+                &DispatchSpec {
+                    reflection: &[],
+                    class_name: &class_name,
+                    superclass: None,
+                    dnu: true,
+                    auto_slots: None,
+                },
+            ));
+        }
+
+        // BT-3467 follow-up: delegate dynamically (by class name, through
+        // beamtalk_dispatch:responds_to/2's live registry walk), not via a
+        // module name resolved at this class's own compile time — see
+        // SuperclassDelegation's doc comment. ProtoObject is the hierarchy
+        // root with no further module to delegate to (mirrors
+        // superclass_module_name's own ProtoObject special case), so no
+        // superclass delegation is emitted for it.
+        let superclass_name = class.superclass_name();
+        let superclass = (superclass_name != "ProtoObject")
+            .then_some(SuperclassDelegation::Dynamic(superclass_name));
+        let auto_methods = value_accessors::compute_auto_slot_methods(class);
+
+        Ok(dispatch_spec::generate_has_method_from_spec(
+            &own_methods,
+            &DispatchSpec {
+                // ADR 0006 Phase 1b: an actor's reflection selectors (`class`,
+                // `respondsTo:`, …) are inherited from Object via superclass
+                // delegation below, not listed locally.
+                reflection: &[],
+                class_name: &class_name,
+                superclass,
+                dnu: false,
+                auto_slots: auto_methods.as_ref(),
+            },
+        ))
+    }
+
+    /// The pre-BT-3467 `has_method/1` shape for script/workspace modules —
+    /// a plain selector-membership check, no extension/superclass/DNU
+    /// awareness. Kept only for expression-based modules, which have no
+    /// class definition to build a [`DispatchSpec`] from.
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface across call sites
+    fn generate_has_method_script(methods: &[String]) -> Document<'static> {
         let mut method_list_docs: Vec<Document<'static>> = Vec::with_capacity(methods.len());
         for (i, name) in methods.iter().enumerate() {
             if i > 0 {
@@ -130,7 +210,7 @@ impl CoreErlangGenerator {
         }
         let method_list_doc = Document::Vec(method_list_docs);
 
-        let doc = docvec![
+        docvec![
             "'has_method'/1 = fun (Selector) ->",
             nest(
                 INDENT,
@@ -142,9 +222,7 @@ impl CoreErlangGenerator {
                 ]
             ),
             "\n\n",
-        ];
-
-        Ok(doc)
+        ]
     }
 
     /// Generates the `class_name/0` function for runtime class identity.

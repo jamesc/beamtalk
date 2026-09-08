@@ -69,6 +69,8 @@
 //!
 //! - [`control_flow`] - Control flow compilation (iteration, loops, mutation analysis)
 //! - [`dispatch_codegen`] - Message sending and dispatch (the core Beamtalk operation)
+//! - [`dispatch_spec`] - BT-3467: `DispatchSpec`, the shared `has_method/1` emitter
+//!   for both actor (`gen_server`) and value-type classes (ADR 0006)
 //! - [`variable_context`] - Variable binding and scope management aggregate
 //! - [`threaded_ir`] - BT-3131: `VersionCounter`, the single implementation behind
 //!   the state/class-var/self-type-threaded version counters (formerly `state_codegen`)
@@ -117,6 +119,7 @@ mod class_meta;
 mod class_registry;
 mod control_flow;
 mod dispatch_codegen;
+mod dispatch_spec;
 mod driver;
 pub mod erlang_types;
 mod error;

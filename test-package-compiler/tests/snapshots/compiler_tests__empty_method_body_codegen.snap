@@ -294,7 +294,14 @@ module 'empty_method_body' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_co
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, ['doNothing', 'getValue'])
+    case call 'lists':'member'(Selector, ['doNothing', 'getValue']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('EmptyActor', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
+            end
+    end
 
 
 'class_classEmpty'/2 = fun (ClassSelf, ClassVars) ->

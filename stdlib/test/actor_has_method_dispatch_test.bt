@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3467: actor has_method/1 now renders through the same DispatchSpec
+// emitter as value-type has_method/1, so respondsTo: answers consistently
+// between an actor and a value type given the identical situation — a
+// foreign extension method, an inherited method, or a class whose
+// doesNotUnderstand:args: is a catch-all. See fixtures/bt3467base.bt and
+// fixtures/bt3467child.bt for the inheritance chain these tests exercise.
+
+TestCase subclass: ActorHasMethodDispatchTest
+
+  testRespondsToOwnActorMethod =>
+    child := Bt3467Child spawn
+    self assert: (child respondsTo: #shout)
+    self assert: child shout equals: "HI"
+
+  // Bt3467Child does not define greet itself — only Bt3467Base does.
+  // respondsTo: must delegate through the superclass module's has_method/1
+  // for this to answer true.
+  testRespondsToInheritedActorMethod =>
+    child := Bt3467Child spawn
+    self assert: (child respondsTo: #greet)
+    self assert: child greet equals: "hi"
+
+  testDoesNotRespondToUnknownSelector =>
+    child := Bt3467Child spawn
+    self deny: (child respondsTo: #bt3467BogusSelector)
+
+  // A foreign extension registered directly on the actor's class must be
+  // visible to respondsTo:, matching a value type's has_method/1 behavior.
+  testRespondsToActorExtensionMethod =>
+    extFun := [:args :recv | 42]
+    Erlang beamtalk_extensions
+      register: #Bt3467Child
+      selector: #bt3467ExtensionMethod
+      fun: extFun
+      owner: #test
+    child := Bt3467Child spawn
+    self assert: (child respondsTo: #bt3467ExtensionMethod)
+    extKey := Erlang erlang list_to_tuple: #(#Bt3467Child, #bt3467ExtensionMethod)
+    Erlang ets delete: #beamtalk_extensions key: extKey
+    self deny: (child respondsTo: #bt3467ExtensionMethod)

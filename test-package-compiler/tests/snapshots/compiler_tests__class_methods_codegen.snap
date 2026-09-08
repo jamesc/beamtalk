@@ -296,7 +296,14 @@ module 'class_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, ['increment', 'getCount'])
+    case call 'lists':'member'(Selector, ['increment', 'getCount']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('ClassVarCounter', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
+            end
+    end
 
 
 'class_create'/2 = fun (ClassSelf, ClassVars) ->

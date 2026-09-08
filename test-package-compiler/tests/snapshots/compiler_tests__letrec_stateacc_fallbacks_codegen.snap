@@ -311,7 +311,14 @@ module 'letrec_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, ['bump', 'shouldContinue', 'selfSendFallback', 'conditionStateEffectsFallback', 'controlFlowMutationsFallback:', 'nestedListOpCrossScopeFallback:'])
+    case call 'lists':'member'(Selector, ['bump', 'shouldContinue', 'selfSendFallback', 'conditionStateEffectsFallback', 'controlFlowMutationsFallback:', 'nestedListOpCrossScopeFallback:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('LetrecFallbackCtr', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
+            end
+    end
 
 
 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->

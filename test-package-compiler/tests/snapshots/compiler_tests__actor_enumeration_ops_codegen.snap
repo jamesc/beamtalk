@@ -308,7 +308,14 @@ module 'actor_enumeration_ops' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, ['sumWithIndex:', 'joinSum:', 'gapCount:'])
+    case call 'lists':'member'(Selector, ['sumWithIndex:', 'joinSum:', 'gapCount:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('EnumerationActor', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
+            end
+    end
 
 
 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
