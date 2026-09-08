@@ -16,6 +16,7 @@ use ecow::EcoString;
 
 use crate::ast::{Expression, Literal, MessageSelector};
 use crate::semantic_analysis::type_checker::{DynamicReason, EnvKey, InferredType};
+use crate::source_analysis::equality_operator_is_negated;
 
 use super::super::extract::extract_variable_name;
 use super::super::info::{NarrowingInfo, SingletonEqInfo, SingletonName};
@@ -73,11 +74,11 @@ pub(crate) fn detect_binary(
     // (`1 == 1.0`), which never applies to atoms — so treating them the same
     // here is sound, and matches `/=` (loose ineq) already being accepted
     // below.
-    let negated = match op.as_str() {
-        "=:=" | "==" => false,
-        "/=" | "=/=" => true,
-        _ => return None,
-    };
+    //
+    // BT-3462: `equality_operator_is_negated` is the single source for this
+    // eq/ineq split, shared with the parser's own precedence table and the
+    // type checker's universal equality-operator handling in `inference.rs`.
+    let negated = equality_operator_is_negated(op.as_str())?;
     let rhs_expr = arguments.first()?;
     // Accept either `x =:= #foo` or `#foo =:= x`; reject `#a =:= #b` (two
     // literals) and any test where neither side is a singleton literal.

@@ -24,6 +24,11 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
     else {
         return None;
     };
+    // BT-3462: deliberately narrower than the shared four-operator equality
+    // set (`crate::source_analysis::is_equality_operator`) — class identity
+    // narrowing only recognises strict `=:=`, not the loose `==` spelling
+    // `singleton_eq.rs` also accepts (BT-3369), so this stays a literal
+    // comparison rather than routing through that broader predicate.
     if op.as_str() != "=:=" {
         return None;
     }

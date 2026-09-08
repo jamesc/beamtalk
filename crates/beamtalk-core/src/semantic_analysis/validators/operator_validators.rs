@@ -42,15 +42,7 @@
 //! bodies for the same reason it ignores every other one. They are exempt.
 
 use crate::ast::{Expression, MessageSelector, MethodDefinition, Module};
-use crate::source_analysis::{Diagnostic, Span};
-
-/// The operators codegen lowers directly to Erlang BIFs, with no message
-/// dispatch, and which therefore cannot be overridden per-class (ADR 0002).
-///
-/// Deliberately excludes `+ - * /` and `< > <= >=`: those *are* dispatchable
-/// (BT-2709/BT-2710), which is why value types like `Duration` and `DateTime`
-/// can and do override them.
-const NON_OVERRIDABLE_OPERATORS: &[&str] = &["=:=", "=/=", "==", "/="];
+use crate::source_analysis::{Diagnostic, Span, is_equality_operator};
 
 /// BT-2997: Reject method declarations for operators that codegen never
 /// dispatches, so they cannot be written as silently-dead code.
@@ -74,11 +66,18 @@ pub(crate) fn check_non_overridable_operator_methods(
 
 /// Emits a diagnostic if `method` declares a non-dispatchable operator with a
 /// real (non-pragma) body.
+///
+/// BT-3462: "non-dispatchable operator" and "equality/identity comparison
+/// operator" (ADR 0002) are the same four-operator set — `=:=`, `=/=`, `==`,
+/// `/=` — so this reuses [`is_equality_operator`] rather than a second
+/// hardcoded copy. Deliberately excludes `+ - * /` and `< > <= >=`: those
+/// *are* dispatchable (BT-2709/BT-2710), which is why value types like
+/// `Duration` and `DateTime` can and do override them.
 fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
     let MessageSelector::Binary(op) = &method.selector else {
         return;
     };
-    if !NON_OVERRIDABLE_OPERATORS.contains(&op.as_str()) || is_primitive_declaration(method) {
+    if !is_equality_operator(op) || is_primitive_declaration(method) {
         return;
     }
 

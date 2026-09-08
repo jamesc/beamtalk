@@ -74,8 +74,8 @@ pub use method_category::{
 };
 pub use method_span::{MethodSide, SpanResolveError, resolve_method_span};
 pub use parser::{
-    Diagnostic, DiagnosticCategory, DiagnosticNote, Severity, is_input_complete,
-    needs_blank_line_to_complete, parse, parse_method,
+    Diagnostic, DiagnosticCategory, DiagnosticNote, Severity, equality_operator_is_negated,
+    is_equality_operator, is_input_complete, needs_blank_line_to_complete, parse, parse_method,
 };
 // `Span` is defined in the shared leaf module `crate::span` (ADR 0117, Decision
 // step 4) — beneath both `ast` and `source_analysis` — and re-exported here so
