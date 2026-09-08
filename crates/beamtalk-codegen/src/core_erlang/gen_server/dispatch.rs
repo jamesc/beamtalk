@@ -164,6 +164,7 @@ impl CoreErlangGenerator {
                     superclass: None,
                     dnu: true,
                     auto_slots: None,
+                    emit_local_probe: true,
                 },
             ));
         }
@@ -191,6 +192,7 @@ impl CoreErlangGenerator {
                 superclass,
                 dnu: false,
                 auto_slots: auto_methods.as_ref(),
+                emit_local_probe: true,
             },
         ))
     }

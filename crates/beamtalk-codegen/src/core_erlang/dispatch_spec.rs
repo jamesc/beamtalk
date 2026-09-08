@@ -92,6 +92,30 @@ pub(in crate::core_erlang) struct DispatchSpec<'a> {
     /// Only ever populated for `Value subclass:` classes — always `None` for
     /// actors and `ClassKind::Object` classes.
     pub(in crate::core_erlang) auto_slots: Option<&'a AutoSlotMethods>,
+    /// BT-3482: also emit a strictly-local `has_method_local/1` alongside
+    /// `has_method/1` — same own-methods-or-extension check, but the false
+    /// branch always answers `'false'`, regardless of `superclass`, instead
+    /// of delegating.
+    ///
+    /// `beamtalk_dispatch.erl`'s `class_chain_step/6` (the per-node probe
+    /// behind `lookup_in_class_chain/5`) relies on a class's `has_method/1`
+    /// answering "does *this exact class* define `Selector`", advancing to
+    /// the superclass itself on `false` — its own node-by-node walk is
+    /// already the hierarchy traversal. `has_method/1`'s
+    /// [`SuperclassDelegation::Dynamic`] breaks that contract: it answers
+    /// `true` as soon as *any* ancestor has `Selector`, so `class_chain_step`
+    /// stops at the wrong node and `invoke_method` redispatches one level at
+    /// a time via `super/5`, each hop repeating the same dynamic walk —
+    /// turning an O(depth) walk into O(depth²). `has_method_local/1` gives
+    /// `class_chain_step` a probe that matches its contract again.
+    ///
+    /// Only actor classes set this (`gen_server::dispatch::generate_has_method`,
+    /// the only [`SuperclassDelegation::Dynamic`] call site) — value-type
+    /// `has_method/1` uses [`SuperclassDelegation::Static`], a
+    /// compile-time-resolved direct module call with no live registry walk,
+    /// so it doesn't compound the same way (BT-3482 scoped the fix to the
+    /// actor regression BT-3467 introduced).
+    pub(in crate::core_erlang) emit_local_probe: bool,
 }
 
 /// Returns true if `class` defines `doesNotUnderstand:args:` with a
@@ -141,11 +165,23 @@ pub(in crate::core_erlang) fn generate_has_method_from_spec(
     spec: &DispatchSpec<'_>,
 ) -> Document<'static> {
     if spec.dnu {
-        return docvec![
+        let has_method = docvec![
             "'has_method'/1 = fun (_Selector) ->\n",
             "    'true'\n",
             "\n",
         ];
+        if !spec.emit_local_probe {
+            return has_method;
+        }
+        // A catch-all-DNU class handles every selector at its own dispatch/4
+        // (its `doesNotUnderstand:args:` intrinsic), so it's a local `true`
+        // too — class_chain_step should stop here, not advance further.
+        let has_method_local = docvec![
+            "'has_method_local'/1 = fun (_Selector) ->\n",
+            "    'true'\n",
+            "\n",
+        ];
+        return docvec![has_method, has_method_local];
     }
 
     let mut selectors: Vec<Document<'static>> =
@@ -176,15 +212,45 @@ pub(in crate::core_erlang) fn generate_has_method_from_spec(
         None => Document::Str("<'false'> when 'true' -> 'false'\n"),
     };
 
+    let has_method = render_has_method_fn("has_method", &selectors, spec.class_name, false_branch);
+
+    if !spec.emit_local_probe {
+        return has_method;
+    }
+
+    // BT-3482: the local-only variant never delegates on a false membership
+    // check — it always answers `'false'`, so class_chain_step's own walk
+    // (not this function's) is what advances to the superclass.
+    let local_false_branch = Document::Str("<'false'> when 'true' -> 'false'\n");
+    let has_method_local = render_has_method_fn(
+        "has_method_local",
+        &selectors,
+        spec.class_name,
+        local_false_branch,
+    );
+
+    docvec![has_method, has_method_local]
+}
+
+/// Shared body renderer for `has_method/1` and `has_method_local/1` (BT-3482)
+/// — both check `Selector` against `selectors` then the extension registry;
+/// they differ only in `fn_name` and what happens when neither matches.
+fn render_has_method_fn(
+    fn_name: &'static str,
+    selectors: &[Document<'static>],
+    class_name: &str,
+    false_branch: Document<'static>,
+) -> Document<'static> {
     docvec![
-        "'has_method'/1 = fun (Selector) ->\n",
+        leaf::fname(fn_name, 1),
+        " = fun (Selector) ->\n",
         "    case call 'lists':'member'(Selector, [",
-        join(selectors, &Document::Str(", ")),
+        join(selectors.to_vec(), &Document::Str(", ")),
         "]) of\n",
         "        <'true'> when 'true' -> 'true'\n",
         "        <'false'> when 'true' ->\n",
         "            case call 'beamtalk_extensions':'has'(",
-        leaf::atom(spec.class_name.to_string()),
+        leaf::atom(class_name.to_string()),
         ", Selector) of\n",
         "                <'true'> when 'true' -> 'true'\n",
         "                ",

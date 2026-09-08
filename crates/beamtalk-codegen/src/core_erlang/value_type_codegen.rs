@@ -4001,6 +4001,11 @@ impl CoreErlangGenerator {
                     superclass: None,
                     dnu: true,
                     auto_slots: None,
+                    // BT-3482: value types delegate via SuperclassDelegation::Static
+                    // (a compile-time module call, not a live registry walk),
+                    // so they don't have the class_chain_step re-entrant-walk
+                    // cost the local probe exists to avoid — out of scope here.
+                    emit_local_probe: false,
                 },
             ));
         }
@@ -4052,6 +4057,7 @@ impl CoreErlangGenerator {
                 superclass: superclass_mod.as_deref().map(SuperclassDelegation::Static),
                 dnu: false,
                 auto_slots: auto_methods,
+                emit_local_probe: false,
             },
         ))
     }
@@ -4141,6 +4147,7 @@ impl CoreErlangGenerator {
                 superclass: Some(SuperclassDelegation::Static(&super_mod)),
                 dnu: false,
                 auto_slots: None,
+                emit_local_probe: false,
             },
         ))
     }

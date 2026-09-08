@@ -6229,14 +6229,20 @@ fn test_generate_has_method_actor_honors_catch_all_dnu() {
     // intrinsic (BT-1763, e.g. Erlang/ErlangModule) accepts every selector —
     // value-type has_method/1 short-circuits to `true` unconditionally for
     // such a class. BT-3467: actor has_method/1 now does the same, via the
-    // shared `DispatchSpec` emitter.
+    // shared `DispatchSpec` emitter. BT-3482: actor has_method/1 also emits
+    // a has_method_local/1 sibling — the strictly-local probe used by
+    // beamtalk_dispatch:class_chain_step/6 — which short-circuits to true
+    // too, since a catch-all-DNU class handles every selector at its own
+    // dispatch/4.
     let class = actor_class_def("Proxy", "Actor", vec![catch_all_dnu_method()]);
     let module = module_with_class(class);
     let generator = CoreErlangGenerator::new("proxy");
     let doc = generator.generate_has_method(&module).unwrap();
     let output = doc.to_pretty_string();
     assert_eq!(
-        output, "'has_method'/1 = fun (_Selector) ->\n    'true'\n\n",
+        output,
+        "'has_method'/1 = fun (_Selector) ->\n    'true'\n\n\
+         'has_method_local'/1 = fun (_Selector) ->\n    'true'\n\n",
         "actor has_method/1 must short-circuit to true for a catch-all-DNU \
          class, matching value-type has_method/1. Got:\n{output}"
     );

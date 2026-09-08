@@ -112,6 +112,18 @@ impl CoreErlangGenerator {
             Document::Nil
         };
 
+        // BT-3482: has_method_local/1 (the strictly-local probe used by
+        // beamtalk_dispatch:class_chain_step/6) is only ever emitted for a
+        // class-definition module (generate_has_method's DispatchSpec path,
+        // emit_local_probe: true) — an expression-based script/workspace
+        // module falls through to generate_has_method_script instead, which
+        // has no local/dynamic distinction to make.
+        let has_method_local_export: Document<'static> = if has_classes {
+            Document::Str(", 'has_method_local'/1")
+        } else {
+            Document::Nil
+        };
+
         let base_exports: Document<'static> = docvec![
             "'start_link'/1, 'start_link'/2, 'init'/1, 'handle_continue'/2, \
              'handle_cast'/2, 'handle_call'/3, \
@@ -122,6 +134,7 @@ impl CoreErlangGenerator {
              'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
              'superclass'/0",
             meta_export,
+            has_method_local_export,
         ];
 
         let mut docs: Vec<Document<'static>> = Vec::new();

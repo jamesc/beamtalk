@@ -119,12 +119,16 @@ impl CoreErlangGenerator {
         };
 
         // Native facade exports: spawn, new errors, reflection, dispatch, class methods, registration
+        // BT-3482: has_method_local/1 is only emitted alongside has_method/1
+        // for a class-definition module (generate_has_method's
+        // emit_local_probe: true path) — see actor_codegen.rs's identical
+        // has_method_local_export.
         let base_exports: Document<'static> = docvec![
             "'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
              'has_method'/1, 'method_table'/0, 'class_name'/0, 'superclass'/0",
             dispatch_exports,
             if has_classes {
-                Document::Str(", '__beamtalk_meta'/0")
+                Document::Str(", '__beamtalk_meta'/0, 'has_method_local'/1")
             } else {
                 Document::Nil
             },
