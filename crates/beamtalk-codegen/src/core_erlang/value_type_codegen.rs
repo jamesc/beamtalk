@@ -3444,10 +3444,7 @@ impl CoreErlangGenerator {
     ///
     /// For user-defined classes in package mode, uses `bt@{package}@{snake_case}`
     /// prefix (BT-794).
-    ///
-    /// `pub(super)`: also used by `gen_server::dispatch`'s actor `has_method/1`
-    /// emission (BT-3467), which builds the same `DispatchSpec.superclass`.
-    pub(super) fn superclass_module_name(&self, superclass: &str) -> Option<String> {
+    fn superclass_module_name(&self, superclass: &str) -> Option<String> {
         if superclass == "ProtoObject" {
             return None;
         }
