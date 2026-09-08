@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
 
-use super::control_flow::ThreadingPlan;
+use super::control_flow::{BodyKind, ThreadingPlan};
 use super::intrinsics::validate_block_arity_exact;
 use super::spec_codegen;
 use super::util::ClassIdentity;
@@ -2563,8 +2563,22 @@ impl CoreErlangGenerator {
             ],
         ];
 
-        // Phase 3: generate foldl lambda body (reuses existing threading helper).
-        let body_doc = self.generate_list_do_body_with_threading(body, &item_var)?;
+        // Phase 3: generate foldl lambda body — ADR 0111 Addendum 15 (Foldl
+        // migration): inlined replacement for the deleted
+        // `generate_list_do_body_with_threading` compat shim, which built
+        // its own second, throwaway `ThreadingPlan::new(self, body, None)`
+        // (documented above as pure and computed identically to `cv_plan`)
+        // purely to pass to `emit_loop_convention_diagnostic` — reusing
+        // `cv_plan` here instead avoids that duplication while keeping the
+        // diagnostic emitted exactly once, at this same relative point.
+        self.emit_loop_convention_diagnostic(&cv_plan, body.span);
+        self.push_scope();
+        if let Some(param) = body.parameters.first() {
+            self.bind_var(&param.name, &item_var);
+        }
+        let (body_doc, _) =
+            self.generate_foldl_loop_body(body, &cv_plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
+        self.pop_scope();
         docs.push(body_doc);
 
         // Phase 4: call foldl, then extract each local as an open `let X = ... in `.

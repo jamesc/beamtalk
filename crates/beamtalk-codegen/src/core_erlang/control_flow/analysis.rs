@@ -36,7 +36,11 @@ impl CoreErlangGenerator {
     /// Reports which optimization mode was selected (direct-params, tuple-acc, hybrid,
     /// or `StateAcc` fallback with reason). Also emits a large-arity warning when >8 params
     /// are extracted. Gated by `BEAMTALK_CODEGEN_DIAGNOSTICS=1`.
-    pub(super) fn emit_loop_convention_diagnostic(&mut self, plan: &ThreadingPlan, span: Span) {
+    pub(in crate::core_erlang) fn emit_loop_convention_diagnostic(
+        &mut self,
+        plan: &ThreadingPlan,
+        span: Span,
+    ) {
         if !self.codegen_diagnostics_enabled {
             return;
         }

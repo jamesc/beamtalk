@@ -87,10 +87,8 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.push(plan.generate_tuple_unpack_docs(self, "StateAcc", 1));
-
             let (body_doc, _) =
-                self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
             docs.push(body_doc);
             self.pop_scope();
 
@@ -184,9 +182,8 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+        let (body_doc, _) =
+            self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
         docs.push(body_doc);
         self.pop_scope();
 
@@ -299,10 +296,8 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.get(1) {
                 self.bind_var(&param.name, &val_var);
             }
-            docs.push(plan.generate_tuple_unpack_docs(self, "StateAcc", 1));
-
             let (body_doc, _) =
-                self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
             docs.push(body_doc);
             self.pop_scope();
 
@@ -408,9 +403,8 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.get(1) {
             self.bind_var(&param.name, &val_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+        let (body_doc, _) =
+            self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
         docs.push(body_doc);
         self.pop_scope();
 

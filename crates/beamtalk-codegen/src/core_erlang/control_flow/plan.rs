@@ -9,12 +9,11 @@
 //!
 //! BT-3459: split out of `control_flow/mod.rs`, no logic changes.
 
-use super::super::threaded_ir::{self, StateAccFallbackReason};
+use super::super::threaded_ir::StateAccFallbackReason;
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::Expression;
-use beamtalk_core::source_analysis::Span;
 
 // ─── ThreadingPlan ────────────────────────────────────────────────────────────
 
@@ -1140,58 +1139,6 @@ impl ThreadingPlan {
             return Document::Str("{}");
         }
         docvec!["{", self.current_vars_doc(generator), "}"]
-    }
-
-    /// Generates `let V = call 'erlang':'element'(idx, src) in` docs for each
-    /// threaded local, and registers the bindings in the generator scope.
-    ///
-    /// `source_var` — the lambda parameter holding the tuple (e.g. `"StateAcc"` or
-    ///   the `acc_state_var` name for `collect:`/`inject:`).
-    /// `index_offset` — 1-based index of the first threaded var:
-    ///   - 1 for `do:` (whole tuple is the vars)
-    ///   - 2 for `collect:` / `filter:` / `inject:` (slot 1 is `AccList` or `Acc`)
-    ///
-    /// BT-3147: real `ThreadedIr` emission input now — this builds
-    /// [`threaded_ir::build_tuple_acc_unpack`]'s `ThreadedStmt`, `verify()`s
-    /// it, and [`threaded_ir::render`]s it directly; the pre-BT-3147
-    /// hand-rolled `let`-chain loop and the separate verification-only
-    /// fixture it sat alongside are both gone (see `threaded_ir`'s module
-    /// docs §Status). `self.tuple_acc_gate_slots` (declared at
-    /// `ThreadingPlan` construction, from the caller's [`ListOpKind`]) and
-    /// `index_offset - 1` (this call's own, unchanged) are genuinely
-    /// independent sources for [`VerifyError::EarlyExitGateSlotMismatch`]
-    /// to cross-check — no span is available at this call depth
-    /// (`ThreadingPlan` carries none); this is a compiler-internal
-    /// invariant, not user-facing, so `Span::default()` is an acceptable
-    /// diagnostic-location gap here (mirrors `verify`'s own `produces`
-    /// check, which does the same).
-    pub fn generate_tuple_unpack_docs(
-        &self,
-        generator: &mut CoreErlangGenerator,
-        source_var: &str,
-        index_offset: usize,
-    ) -> Document<'static> {
-        let (stmt, targets) = threaded_ir::build_tuple_acc_unpack(
-            source_var,
-            self.tuple_acc_gate_slots,
-            index_offset.saturating_sub(1),
-            &self.threaded_locals,
-            Span::default(),
-        );
-
-        let errors = threaded_ir::verify(std::slice::from_ref(&stmt));
-        generator.report_threaded_ir_verify_errors(
-            &errors,
-            "tuple-acc positional-unpack mode/shape mismatch",
-            Span::default(),
-        );
-
-        for (var_name, target) in self.threaded_locals.iter().zip(&targets) {
-            generator.bind_var(var_name, &target.render_name());
-        }
-
-        let mut ctx = threaded_ir::RenderCtx::new(generator);
-        threaded_ir::render(std::slice::from_ref(&stmt), &mut ctx)
     }
 
     /// Returns element-extraction code after foldl completes for tuple mode as a `Document`.

@@ -1,19 +1,25 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! The unified per-statement body generator for state-threaded loop and
-//! fold bodies ([`generate_threaded_loop_body`]), plus its last-expression
-//! finalizer helpers.
+//! The unified per-statement body generator for state-threaded `Letrec`
+//! loop bodies ([`CoreErlangGenerator::generate_letrec_body_ir`]) and
+//! `Foldl*` fold bodies ([`CoreErlangGenerator::generate_foldl_loop_body`]),
+//! plus their last-expression finalizer helpers.
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! BT-3459: split out of `control_flow/mod.rs`, no logic changes.
-//! `generate_threaded_loop_body_inner` is moved wholesale (not
-//! decomposed) — it threads six mutable variables through one pass and is
-//! slated for full deletion by a later epic (BT-3447/BT-3470).
+//! BT-3459: split out of `control_flow/mod.rs`, no logic changes. ADR 0111
+//! Addendum 15 then migrated both families onto real `ThreadedIr`: the
+//! Letrec migration deleted the `BodyKind::Letrec` arm of the original
+//! `generate_threaded_loop_body_inner` (BT-3470); the Foldl migration
+//! converted what remained (`lower_foldl_body`, this file) from a
+//! `Document`-returning per-statement dispatch into a `Vec<ThreadedStmt>`
+//! one, merged with the fold's own unpack into one verified `Threaded` node
+//! by [`CoreErlangGenerator::generate_foldl_loop_body`] — no legacy dual
+//! path remains for either family.
 
 use super::super::threaded_ir::{
-    BindOp, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
+    self, BindOp, FrameId, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::list_ops::BodyKind;
@@ -24,65 +30,136 @@ use beamtalk_core::ast::{Block, Expression};
 use beamtalk_core::source_analysis::Span;
 
 impl CoreErlangGenerator {
-    /// Generates the per-statement body for a stateful loop with state threading.
+    /// ADR 0111 Addendum 15 (Foldl migration): merges the fold's own
+    /// per-iteration unpack (`TupleAccUnpack` in tuple-acc mode; the
+    /// `StateAcc` map's `maps:get` prelude in map mode) and its
+    /// per-statement body into ONE `ThreadedStmt::Threaded` node,
+    /// `verify()`s it once, and renders it — the Foldl counterpart of
+    /// [`Self::generate_letrec_body_ir`] (which returns statements for the
+    /// caller's own `ConditionalLoop` node instead, since a fold's
+    /// accumulator — unlike a letrec's — has no sibling node shape to
+    /// return into: `lists:foldl`'s callback is an ordinary Core Erlang
+    /// `fun`, not a recursive `letrec`).
     ///
-    /// This is the **single, unified body generator** replacing 7+
-    /// `generate_*_body_with_threading` copies.  All per-statement dispatch
-    /// (field / self-send / local var / block-local / Tier 2 / nested construct)
-    /// lives here exactly once.
+    /// Replaces the pre-migration two-step call sites made (a standalone
+    /// tuple unpack — verified and rendered alone, via what was
+    /// `ThreadingPlan::generate_tuple_unpack_docs` — or
+    /// `generate_unpack_at_iteration_start`, immediately followed by the old
+    /// `generate_threaded_loop_body`) — every call site now makes ONE call
+    /// here instead, so the unpack and the body share one verified node
+    /// (acceptance criterion: "`verify()` runs once per fold").
     ///
-    /// # Caller responsibilities
-    ///
-    /// - Push any necessary scope **before** calling this function (for block params
-    ///   and/or threaded-local unpack bindings).
-    /// - Pop the scope **after** this function returns.
-    /// - Emit the unpack bindings via `plan.generate_unpack_at_iteration_start`
-    ///   before the body (for list ops) or as part of the loop preamble (for letrec loops).
-    ///
-    /// # Returns
-    ///
-    /// `(body_doc, final_state_version)` — body document and the `StateAcc` version
-    /// number in effect at the end of the body.
-    ///
-    /// BT-3168: also scopes `loop_threads_class_vars` to this exact frame —
-    /// set from `plan.threads_class_vars` right after `with_branch_context`
-    /// resets it to `false` on entry (mirroring `state_version`'s
-    /// reset-on-entry discipline, not `class_var_version`'s
-    /// restore-without-reset one), so a nested construct that calls
-    /// `generate_threaded_loop_body` again (or any other `with_branch_context`
-    /// user — a conditional, `sort:`'s manually-inlined body, …) always sees
-    /// the flag correctly reflecting ITS OWN body, never a leaked `true` from
-    /// an enclosing Letrec loop. On success, also stashes the loop's final
-    /// in-body `current_class_var()` name into `last_loop_class_var` — read
-    /// by `while_loops.rs`/`counted_loops.rs` right after this call returns
-    /// (`with_branch_context`'s guard restores `class_var_version` to the
-    /// pre-loop value on drop, so this is the only chance to capture it).
-    /// Callers now pass only `Foldl*` kinds — `BodyKind::Letrec` was deleted
-    /// (ADR 0111 Addendum 15): `while_loops.rs`/`counted_loops.rs` call
-    /// [`Self::generate_letrec_body_ir`] instead. `loop_threads_class_vars`/
-    /// `last_loop_class_var` were exclusively that deleted shape's own
-    /// consumer-facing signals, so this no longer sets either — a `Foldl*`
-    /// body's own `ClassVars` threading is the `{ClassVars, StateAcc}`
-    /// accumulator wrap in `generate_threaded_loop_body_inner` instead.
-    pub(super) fn generate_threaded_loop_body(
+    /// `acc_param_name`/`node_gate_slots` carry the same meaning
+    /// [`threaded_ir::build_tuple_acc_unpack`]'s own `param_name`/
+    /// `node_gate_slots` parameters always have (ignored in map/`StateAcc`
+    /// mode, where the unpack instead reads
+    /// `plan.generate_unpack_at_iteration_start`). The unpack step itself
+    /// still runs BEFORE `with_branch_context` is entered (mint order
+    /// unchanged from the pre-migration two-step sequence — `fresh_temp_var`
+    /// draws from one global counter shared across both steps); only the
+    /// body lowering, verification, and rendering happen inside it, so
+    /// every `VersionPrefix::State` reference the body's own real `Bind`s
+    /// produce resolves under the SAME `in_loop_body` render-time context
+    /// live production always used.
+    pub(in crate::core_erlang) fn generate_foldl_loop_body(
         &mut self,
         body: &beamtalk_core::ast::Block,
         plan: &ThreadingPlan,
         kind: &BodyKind,
+        acc_param_name: &str,
+        node_gate_slots: usize,
     ) -> Result<(Document<'static>, usize)> {
-        self.with_branch_context(|this| this.generate_threaded_loop_body_inner(body, plan, kind))
+        let span = body.span;
+        let mut unpack_stmts: Vec<ThreadedStmt> = Vec::new();
+        let mode = if plan.use_tuple_acc {
+            let (unpack_node, targets) = threaded_ir::build_tuple_acc_unpack(
+                acc_param_name,
+                plan.tuple_acc_gate_slots,
+                node_gate_slots,
+                &plan.threaded_locals,
+                span,
+            );
+            for (var_name, target) in plan.threaded_locals.iter().zip(&targets) {
+                self.bind_var(var_name, &target.render_name());
+            }
+            let ThreadedStmt::Threaded {
+                body: unpack_body, ..
+            } = unpack_node
+            else {
+                unreachable!("build_tuple_acc_unpack always returns a Threaded node")
+            };
+            unpack_stmts = unpack_body;
+            ThreadingMode::TupleAcc(plan.tuple_acc_gate_slots)
+        } else {
+            for doc in plan.generate_unpack_at_iteration_start(self) {
+                unpack_stmts.push(ThreadedStmt::Statement(doc, span));
+            }
+            ThreadingMode::StateAcc(plan.fallback_reason.clone())
+        };
+
+        self.with_branch_context(|this| {
+            let frame = this.current_branch_frame();
+            // ADR 0111 Addendum 9, Question 1: read fresh from live generator
+            // state at construction time — see `ThreadedStmt::Threaded`'s own
+            // doc comment.
+            let shadow_write_eligible = this.block_depth == 0;
+            let mut stmts = unpack_stmts;
+            stmts.extend(this.lower_foldl_body(body, plan, kind, frame)?);
+            let final_state_version = this.state_version();
+            let node = ThreadedStmt::Threaded {
+                mode: mode.clone(),
+                frame,
+                shadow_write_eligible,
+                body: stmts,
+                produces: Vec::new(),
+                span,
+            };
+            // ADR 0111 Addendum 4/BT-3148 technique (`backfill_opaque_version_gaps`,
+            // generalized off `FrameId::ROOT` for this non-ROOT frame by
+            // BT-3475): a self-send, Tier 2 call, or inline-conditional-with-
+            // mutations statement bumps `next_state_var()` inside its own
+            // opaque `Statement` text (no real `Bind` for that step) — a
+            // following real `Bind` (e.g. a field assignment) reading that
+            // already-advanced `state_version()` as its `source` would
+            // otherwise fail `UnboundVersion`/`NonLinearVersion` against a
+            // version this body's own IR never produced. Verification-fixture
+            // only, built from a CLONE of `node`'s own body — `render` below
+            // still renders the untouched real `node`.
+            let ThreadedStmt::Threaded {
+                body: real_body, ..
+            } = &node
+            else {
+                unreachable!("node is always a Threaded node, constructed just above")
+            };
+            let backfilled_body = threaded_ir::backfill_opaque_version_gaps(real_body, frame);
+            let fixture = ThreadedStmt::Threaded {
+                mode,
+                frame,
+                shadow_write_eligible,
+                body: backfilled_body,
+                produces: Vec::new(),
+                span,
+            };
+            let errors = threaded_ir::verify(std::slice::from_ref(&fixture));
+            this.report_threaded_ir_verify_errors(&errors, "foldl body mode/shape mismatch", span);
+            let mut ctx = threaded_ir::RenderCtx::new(this);
+            let doc = threaded_ir::render(std::slice::from_ref(&node), &mut ctx);
+            Ok((doc, final_state_version))
+        })
     }
 
     /// ADR 0111 Addendum 15: lowers a `whileTrue:`/`whileFalse:`/
     /// `timesRepeat:`/`to:do:`/`to:by:do:`/`repeat` body directly to a
     /// `Vec<ThreadedStmt>` for the caller's own `ThreadedStmt::ConditionalLoop`
-    /// node — the Letrec counterpart of [`Self::generate_threaded_loop_body`]
-    /// (which stays Foldl-only after this migration). Mirrors that function's
-    /// own `with_branch_context`/`loop_threads_class_vars`/`last_loop_class_var`
-    /// bookkeeping exactly; `while_loops.rs`/`counted_loops.rs` call this
-    /// instead of `generate_threaded_loop_body` and build/`verify`/`render`
-    /// their own `ConditionalLoop` node around the returned statements and
-    /// `FrameId`.
+    /// node — the Letrec counterpart of [`Self::generate_foldl_loop_body`]
+    /// (the `Foldl*` family's own merged-node builder). Mirrors that
+    /// function's `with_branch_context` wrapping, plus its own
+    /// `loop_threads_class_vars`/`last_loop_class_var` bookkeeping (a
+    /// Letrec-only concern — `Foldl*` threads `ClassVars` via the
+    /// `{ClassVars, StateAcc}` accumulator wrap instead, entirely inside
+    /// `lower_foldl_body`); `while_loops.rs`/`counted_loops.rs` call this and
+    /// build/`verify`/`render` their own `ConditionalLoop` node around the
+    /// returned statements and `FrameId`.
     pub(super) fn generate_letrec_body_ir(
         &mut self,
         body: &Block,
@@ -456,18 +533,37 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Inner implementation of `generate_threaded_loop_body`, called inside
-    /// `with_branch_context` so that `in_loop_body = true` and `state_version = 0`.
+    /// ADR 0111 Addendum 15 (Foldl migration): the `Vec<ThreadedStmt>`-
+    /// producing sibling of [`Self::lower_letrec_body`], covering the
+    /// `Foldl*` per-statement dispatch [`Self::generate_foldl_loop_body`]
+    /// (its only caller, always inside `with_branch_context` so
+    /// `in_loop_body = true` and `state_version = 0`) merges with the
+    /// fold's own unpack into one verified `Threaded` node. Field
+    /// assignment and local-var assignment lower through the SAME shared
+    /// `Bind` producers [`Self::lower_letrec_field_assignment`]/
+    /// [`Self::lower_letrec_local_var_assignment`] already reuse
+    /// (`lower_field_assignment_bind`/`lower_local_var_assignment_bind`/
+    /// `lower_direct_var_update_in_loop_bind` — each documented as
+    /// byte-identical to the hand-rolled `Document` producer it replaces);
+    /// every other statement shape (self-send, Tier 2 value call,
+    /// destructure, inline-conditional-with-mutations, the generic
+    /// fallback) and the per-`BodyKind` accumulator epilogue keep their
+    /// existing hand-built `Document` text, now embedded as opaque
+    /// [`ThreadedStmt::Statement`] entries — mirroring
+    /// [`ThreadedStmt::ConditionalLoop`]'s own `exit_arm` precedent (ADR
+    /// 0111 §Verifier-honesty: a fold's per-`BodyKind` exit shape is
+    /// exactly as legitimately opaque as a loop's exit repack).
     #[allow(clippy::too_many_lines)]
-    fn generate_threaded_loop_body_inner(
+    fn lower_foldl_body(
         &mut self,
         body: &beamtalk_core::ast::Block,
         plan: &ThreadingPlan,
         kind: &BodyKind,
-    ) -> Result<(Document<'static>, usize)> {
+        frame: FrameId,
+    ) -> Result<Vec<ThreadedStmt>> {
         let filtered_body = super::super::util::collect_body_exprs(&body.body);
 
-        let mut docs: Vec<Document<'static>> = Vec::new();
+        let mut stmts: Vec<ThreadedStmt> = Vec::new();
         let mut has_mutations = false;
         let mut has_plain_lets = false;
 
@@ -490,6 +586,7 @@ impl CoreErlangGenerator {
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
+            let span = expr.span();
 
             // BT-3172: `expr` is a top-level statement of THIS loop/fold's
             // own body — if it's itself a nested loop/fold whose own body
@@ -529,47 +626,34 @@ impl CoreErlangGenerator {
 
             if Self::is_field_assignment(expr) {
                 has_mutations = true;
-                // ADR 0118 phase 2b (BT-3418): thread every state-effecting
-                // sub-expression nested in the RHS ahead of
-                // `generate_field_assignment_open`'s own compile of it —
-                // `self.count := self.count + (self bump)` no longer
-                // silently drops `bump`'s mutation. Mirrors
-                // `lower_field_assignment_bind`'s identical `thread_ahead`
-                // step (`conditionals.rs`), and is safe to run unconditionally
-                // ahead of every one of `generate_field_assignment_open`'s
-                // own three internal branches (plain, hybrid-full-extract,
-                // class-var) — all three eventually compile `value` via
-                // `expression_doc`, which is exactly the route
-                // `precompiled_subexprs` substitution reaches, so a `value`
-                // that needs no threading (the overwhelmingly common case)
-                // leaves this a no-op.
-                let Expression::Assignment { value, .. } = expr else {
-                    unreachable!("is_field_assignment guarantees an Assignment expr");
-                };
-                let frame = self.current_frame();
-                let mut prelude_stmts: Vec<ThreadedStmt> = Vec::new();
-                let thread_scope = self.thread_ahead(value, &mut prelude_stmts, frame)?;
-                if !prelude_stmts.is_empty() {
-                    docs.push(self.threaded_prelude_doc(&prelude_stmts));
-                }
-                let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
-                self.finish_precompiled_scope(thread_scope)?;
-                docs.push(doc);
+                // ADR 0111 Addendum 15: reuses the SAME `Bind` producer
+                // `lower_letrec_field_assignment`'s own non-class-var branch
+                // calls — `lower_field_assignment_bind`'s doc comment
+                // documents it as byte-identical to
+                // `generate_field_assignment_open`'s hand-rolled `Document`
+                // (same helper calls, same mint order, including its own
+                // `thread_ahead` step for BT-3418). A direct class-var write
+                // never reaches here (`reject_class_var_field_assignment`,
+                // called internally, rejects it at compile time — unchanged
+                // by this migration; only a same-class self-send can mutate
+                // a class var inside a `Foldl*` body, handled below).
+                self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
                 if is_last {
-                    self.emit_field_assign_last_expr(&mut docs, kind, pred_var.as_ref());
+                    self.emit_field_assign_last_expr(&mut stmts, kind, pred_var.as_ref(), span);
                 }
             } else if self.is_actor_self_send(expr) {
                 has_mutations = true;
                 // BT-1343: Emit diagnostic for synchronous self-send in loop body.
                 self.emit_self_send_in_loop_diagnostic(expr, expr.span());
                 let (doc, dispatch_var) = self.generate_self_dispatch_open(expr)?;
-                docs.push(doc);
+                stmts.push(ThreadedStmt::Statement(doc, span));
                 if is_last {
                     self.emit_self_send_last_expr(
-                        &mut docs,
+                        &mut stmts,
                         kind,
                         pred_var.as_ref(),
                         &dispatch_var,
+                        span,
                     );
                 }
             } else if self.is_tier2_value_call(expr) {
@@ -591,23 +675,27 @@ impl CoreErlangGenerator {
                 let tuple_var = self.fresh_temp_var("T2LoopTuple");
                 let expr_doc = self.generate_tier2_value_call_doc(expr)?;
                 let new_state = self.next_state_var();
-                docs.push(docvec![
-                    "let ",
-                    leaf::var(tuple_var.clone()),
-                    " = ",
-                    expr_doc,
-                    " in let ",
-                    leaf::var(new_state),
-                    " = call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var.clone()),
-                    ") in ",
-                ]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "let ",
+                        leaf::var(tuple_var.clone()),
+                        " = ",
+                        expr_doc,
+                        " in let ",
+                        leaf::var(new_state),
+                        " = call 'erlang':'element'(2, ",
+                        leaf::var(tuple_var.clone()),
+                        ") in ",
+                    ],
+                    span,
+                ));
                 if is_last {
                     self.emit_tier2_value_call_last_expr(
-                        &mut docs,
+                        &mut stmts,
                         kind,
                         pred_var.as_ref(),
                         &tuple_var,
+                        span,
                     );
                 }
             } else if Self::is_local_var_assignment(expr) {
@@ -615,35 +703,59 @@ impl CoreErlangGenerator {
                     self.try_generate_block_local_plain_let(expr, is_last, &plan.threaded_locals)?
                 {
                     has_plain_lets = true;
-                    docs.push(doc);
+                    stmts.push(ThreadedStmt::Statement(doc, span));
                 } else if plan.use_direct_params || plan.use_tuple_acc || plan.use_hybrid_params {
-                    // BT-1275/BT-1276/BT-1326: Direct-params, tuple-acc, or hybrid mode —
-                    // emit `let NewVar = value in` without a StateAcc map. The var binding
-                    // is updated so the final repack references the latest version.
+                    // BT-1275/BT-1276/BT-1326: Direct-params, tuple-acc, or
+                    // hybrid mode. ADR 0111 Addendum 15: reuses the SAME
+                    // `Bind` producer `lower_letrec_local_var_assignment`'s
+                    // own direct-params/hybrid branch calls
+                    // (`lower_direct_var_update_in_loop_bind`, documented as
+                    // byte-identical to `generate_direct_var_update_in_loop`'s
+                    // hand-rolled `Document`). That producer binds the local
+                    // in generator scope exactly as its `Document`-returning
+                    // sibling does, so the newly-bound name is recovered via
+                    // `lookup_var` for the epilogue below instead of a
+                    // direct return value.
                     has_mutations = true;
-                    let (assign_doc, new_var) = self.generate_direct_var_update_in_loop(expr)?;
-                    docs.push(assign_doc);
+                    self.lower_direct_var_update_in_loop_bind(expr, frame, span, &mut stmts)?;
+                    let new_var = if let Expression::Assignment { target, .. } = expr
+                        && let Expression::Identifier(id) = target.as_ref()
+                    {
+                        self.lookup_var(&id.name).cloned()
+                    } else {
+                        None
+                    };
                     if is_last {
                         self.emit_local_assign_last_expr(
-                            &mut docs,
+                            &mut stmts,
                             kind,
                             pred_var.as_ref(),
                             plan,
                             new_var.as_deref(),
+                            span,
                         );
                     }
                 } else {
+                    // ADR 0111 Addendum 15: reuses the SAME `Bind` producer
+                    // `lower_letrec_local_var_assignment`'s own `StateAcc`
+                    // branch calls (`lower_local_var_assignment_bind`,
+                    // documented as byte-identical to
+                    // `generate_local_var_assignment_in_loop`'s hand-rolled
+                    // `Document`). The returned value var name is discarded
+                    // here too, matching the pre-migration call site
+                    // (`emit_local_assign_last_expr` always receives `None`
+                    // on this path — its `plan.use_tuple_acc` branch, the
+                    // only one that reads it, is unreachable here).
                     has_mutations = true;
-                    let (assign_doc, _val_var) =
-                        self.generate_local_var_assignment_in_loop(expr)?;
-                    docs.push(assign_doc);
+                    self.lower_local_var_assignment_bind(expr, frame, span, &mut stmts)?;
                     if is_last {
                         self.emit_local_assign_last_expr(
-                            &mut docs,
+                            &mut stmts,
                             kind,
                             pred_var.as_ref(),
                             plan,
                             None,
+                            span,
                         );
                     }
                 }
@@ -651,14 +763,15 @@ impl CoreErlangGenerator {
                 has_plain_lets = true;
                 let binding_docs = self.generate_destructure_bindings(pattern, value)?;
                 for d in binding_docs {
-                    docs.push(d);
+                    stmts.push(ThreadedStmt::Statement(d, span));
                 }
                 if is_last {
                     self.emit_destructure_last_expr(
-                        &mut docs,
+                        &mut stmts,
                         kind,
                         pred_var.as_ref(),
                         has_mutations,
+                        span,
                     );
                 }
             } else if self.control_flow_has_mutations(expr)
@@ -681,17 +794,20 @@ impl CoreErlangGenerator {
                 let inner_threaded_vars = self.get_control_flow_threaded_vars(expr);
                 let doc = self.generate_expression(expr)?;
                 let new_state = self.next_state_var();
-                docs.push(docvec![
-                    "let ",
-                    leaf::var(tuple_var.clone()),
-                    " = ",
-                    doc,
-                    " in let ",
-                    leaf::var(new_state.clone()),
-                    " = call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var.clone()),
-                    ") in ",
-                ]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "let ",
+                        leaf::var(tuple_var.clone()),
+                        " = ",
+                        doc,
+                        " in let ",
+                        leaf::var(new_state.clone()),
+                        " = call 'erlang':'element'(2, ",
+                        leaf::var(tuple_var.clone()),
+                        ") in ",
+                    ],
+                    span,
+                ));
                 // BT-3173: a non-last (or last) ensure:/on:do:/ifNotNil:/nested-loop
                 // statement here only bumps the StateAcc *version pointer* above —
                 // it does NOT rebind the specific local vars it threads. Both
@@ -706,28 +822,36 @@ impl CoreErlangGenerator {
                 // `push_control_flow_threaded_var_rereads`, which does the same
                 // rebind for the `ThreadedIr`-rendered conditional-arm path.
                 if let Some(inner_vars) = inner_threaded_vars {
-                    docs.extend(self.rebind_threaded_vars_from_state(&inner_vars, &new_state));
+                    for d in self.rebind_threaded_vars_from_state(&inner_vars, &new_state) {
+                        stmts.push(ThreadedStmt::Statement(d, span));
+                    }
                 }
                 if is_last {
                     match kind {
                         BodyKind::FoldlDo => {
                             // do: discards the result value, returns state only
-                            docs.push(leaf::var(self.current_state_var()));
+                            stmts.push(ThreadedStmt::Statement(
+                                leaf::var(self.current_state_var()),
+                                span,
+                            ));
                         }
                         BodyKind::FoldlCollect => {
                             // collect: needs the result value for the list
                             let result_var = self.fresh_temp_var("CondVal");
-                            docs.push(docvec![
-                                "let ",
-                                leaf::var(result_var.clone()),
-                                " = call 'erlang':'element'(1, ",
-                                leaf::var(tuple_var),
-                                ") in {[",
-                                leaf::var(result_var),
-                                " | AccList], ",
-                                leaf::var(self.current_state_var()),
-                                "}",
-                            ]);
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec![
+                                    "let ",
+                                    leaf::var(result_var.clone()),
+                                    " = call 'erlang':'element'(1, ",
+                                    leaf::var(tuple_var),
+                                    ") in {[",
+                                    leaf::var(result_var),
+                                    " | AccList], ",
+                                    leaf::var(self.current_state_var()),
+                                    "}",
+                                ],
+                                span,
+                            ));
                         }
                         BodyKind::FoldlFilter { .. }
                         | BodyKind::FoldlBoolPredicate { .. }
@@ -740,40 +864,46 @@ impl CoreErlangGenerator {
                             // predicate-based selectors — bind predicate result
                             if let Some(pv) = pred_var.as_ref() {
                                 let result_var = self.fresh_temp_var("CondVal");
-                                docs.push(docvec![
-                                    "let ",
-                                    leaf::var(result_var.clone()),
-                                    " = call 'erlang':'element'(1, ",
-                                    leaf::var(tuple_var),
-                                    ") in let ",
-                                    leaf::var(pv.clone()),
-                                    " = ",
-                                    leaf::var(result_var),
-                                    " in ",
-                                ]);
+                                stmts.push(ThreadedStmt::Statement(
+                                    docvec![
+                                        "let ",
+                                        leaf::var(result_var.clone()),
+                                        " = call 'erlang':'element'(1, ",
+                                        leaf::var(tuple_var),
+                                        ") in let ",
+                                        leaf::var(pv.clone()),
+                                        " = ",
+                                        leaf::var(result_var),
+                                        " in ",
+                                    ],
+                                    span,
+                                ));
                             }
                         }
                         BodyKind::FoldlInject => {
                             // inject:into: — result is the new accumulator
                             let result_var = self.fresh_temp_var("CondVal");
-                            docs.push(docvec![
-                                "let ",
-                                leaf::var(result_var.clone()),
-                                " = call 'erlang':'element'(1, ",
-                                leaf::var(tuple_var),
-                                ") in {",
-                                leaf::var(result_var),
-                                ", ",
-                                leaf::var(self.current_state_var()),
-                                "}",
-                            ]);
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec![
+                                    "let ",
+                                    leaf::var(result_var.clone()),
+                                    " = call 'erlang':'element'(1, ",
+                                    leaf::var(tuple_var),
+                                    ") in {",
+                                    leaf::var(result_var),
+                                    ", ",
+                                    leaf::var(self.current_state_var()),
+                                    "}",
+                                ],
+                                span,
+                            ));
                         }
                     }
                 }
             } else {
                 // Non-assignment expression: handling depends on BodyKind.
                 self.emit_non_assign_expr(
-                    &mut docs,
+                    &mut stmts,
                     expr,
                     i,
                     is_last,
@@ -786,6 +916,12 @@ impl CoreErlangGenerator {
             }
         }
 
+        // The eight per-`BodyKind` accumulator epilogue blocks below all
+        // push exactly one opaque `Statement` — same hand-built `Document`
+        // text as before this migration (ADR 0111 §Verifier-honesty: this
+        // mirrors `ConditionalLoop`'s own `exit_arm` opacity precedent).
+        let epilogue_span = body.span;
+
         // FoldlFilter: append the predicate case expression after all statements.
         if let BodyKind::FoldlFilter { item_var, negate } = kind {
             if let Some(pv) = &pred_var {
@@ -797,34 +933,40 @@ impl CoreErlangGenerator {
                 if plan.use_tuple_acc {
                     // BT-1276: Tuple mode — repack current var bindings into the result tuple.
                     let vars_doc = plan.current_vars_doc(self);
-                    docs.push(docvec![
-                        "case ",
-                        condition_doc,
-                        " of <'true'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], ",
-                        vars_doc.clone(),
-                        "} <'false'> when 'true' -> {AccList, ",
-                        vars_doc,
-                        "} end",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "case ",
+                            condition_doc,
+                            " of <'true'> when 'true' -> {[",
+                            leaf::var(item_var.clone()),
+                            " | AccList], ",
+                            vars_doc.clone(),
+                            "} <'false'> when 'true' -> {AccList, ",
+                            vars_doc,
+                            "} end",
+                        ],
+                        epilogue_span,
+                    ));
                 } else {
                     let final_state = if has_mutations {
                         self.current_state_var()
                     } else {
                         "StateAcc".to_string()
                     };
-                    docs.push(docvec![
-                        "case ",
-                        condition_doc,
-                        " of <'true'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], ",
-                        leaf::var(final_state.clone()),
-                        "} <'false'> when 'true' -> {AccList, ",
-                        leaf::var(final_state),
-                        "} end",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "case ",
+                            condition_doc,
+                            " of <'true'> when 'true' -> {[",
+                            leaf::var(item_var.clone()),
+                            " | AccList], ",
+                            leaf::var(final_state.clone()),
+                            "} <'false'> when 'true' -> {AccList, ",
+                            leaf::var(final_state),
+                            "} end",
+                        ],
+                        epilogue_span,
+                    ));
                 }
             }
         }
@@ -837,26 +979,32 @@ impl CoreErlangGenerator {
                     let vars_doc = plan.current_vars_doc(self);
                     if *is_all {
                         // allSatisfy: pred=false → set BoolAcc to false; pred=true → keep
-                        docs.push(docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'false'> when 'true' -> {'false', ",
-                            vars_doc.clone(),
-                            "} <'true'> when 'true' -> {BoolAcc, ",
-                            vars_doc,
-                            "} end",
-                        ]);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "case ",
+                                leaf::var(pv.clone()),
+                                " of <'false'> when 'true' -> {'false', ",
+                                vars_doc.clone(),
+                                "} <'true'> when 'true' -> {BoolAcc, ",
+                                vars_doc,
+                                "} end",
+                            ],
+                            epilogue_span,
+                        ));
                     } else {
                         // anySatisfy: pred=true → set BoolAcc to true; pred=false → keep
-                        docs.push(docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {'true', ",
-                            vars_doc.clone(),
-                            "} <'false'> when 'true' -> {BoolAcc, ",
-                            vars_doc,
-                            "} end",
-                        ]);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "case ",
+                                leaf::var(pv.clone()),
+                                " of <'true'> when 'true' -> {'true', ",
+                                vars_doc.clone(),
+                                "} <'false'> when 'true' -> {BoolAcc, ",
+                                vars_doc,
+                                "} end",
+                            ],
+                            epilogue_span,
+                        ));
                     }
                 } else {
                     let final_state = if has_mutations {
@@ -865,25 +1013,31 @@ impl CoreErlangGenerator {
                         "StateAcc".to_string()
                     };
                     if *is_all {
-                        docs.push(docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'false'> when 'true' -> {'false', ",
-                            leaf::var(final_state.clone()),
-                            "} <'true'> when 'true' -> {BoolAcc, ",
-                            leaf::var(final_state),
-                            "} end",
-                        ]);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "case ",
+                                leaf::var(pv.clone()),
+                                " of <'false'> when 'true' -> {'false', ",
+                                leaf::var(final_state.clone()),
+                                "} <'true'> when 'true' -> {BoolAcc, ",
+                                leaf::var(final_state),
+                                "} end",
+                            ],
+                            epilogue_span,
+                        ));
                     } else {
-                        docs.push(docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {'true', ",
-                            leaf::var(final_state.clone()),
-                            "} <'false'> when 'true' -> {BoolAcc, ",
-                            leaf::var(final_state),
-                            "} end",
-                        ]);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "case ",
+                                leaf::var(pv.clone()),
+                                " of <'true'> when 'true' -> {'true', ",
+                                leaf::var(final_state.clone()),
+                                "} <'false'> when 'true' -> {BoolAcc, ",
+                                leaf::var(final_state),
+                                "} end",
+                            ],
+                            epilogue_span,
+                        ));
                     }
                 }
             }
@@ -896,38 +1050,44 @@ impl CoreErlangGenerator {
             if let Some(pv) = &pred_var {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
-                    docs.push(docvec![
-                        "case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> case FoundFlag of <'false'> when 'true' -> {",
-                        leaf::var(item_var.clone()),
-                        ", 'true', ",
-                        vars_doc.clone(),
-                        "} <'true'> when 'true' -> {FoundItem, 'true', ",
-                        vars_doc.clone(),
-                        "} end <'false'> when 'true' -> {FoundItem, FoundFlag, ",
-                        vars_doc,
-                        "} end",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "case ",
+                            leaf::var(pv.clone()),
+                            " of <'true'> when 'true' -> case FoundFlag of <'false'> when 'true' -> {",
+                            leaf::var(item_var.clone()),
+                            ", 'true', ",
+                            vars_doc.clone(),
+                            "} <'true'> when 'true' -> {FoundItem, 'true', ",
+                            vars_doc.clone(),
+                            "} end <'false'> when 'true' -> {FoundItem, FoundFlag, ",
+                            vars_doc,
+                            "} end",
+                        ],
+                        epilogue_span,
+                    ));
                 } else {
                     let final_state = if has_mutations {
                         self.current_state_var()
                     } else {
                         "StateAcc".to_string()
                     };
-                    docs.push(docvec![
-                        "case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> case FoundFlag of <'false'> when 'true' -> {",
-                        leaf::var(item_var.clone()),
-                        ", 'true', ",
-                        leaf::var(final_state.clone()),
-                        "} <'true'> when 'true' -> {FoundItem, 'true', ",
-                        leaf::var(final_state.clone()),
-                        "} end <'false'> when 'true' -> {FoundItem, FoundFlag, ",
-                        leaf::var(final_state),
-                        "} end",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "case ",
+                            leaf::var(pv.clone()),
+                            " of <'true'> when 'true' -> case FoundFlag of <'false'> when 'true' -> {",
+                            leaf::var(item_var.clone()),
+                            ", 'true', ",
+                            leaf::var(final_state.clone()),
+                            "} <'true'> when 'true' -> {FoundItem, 'true', ",
+                            leaf::var(final_state.clone()),
+                            "} end <'false'> when 'true' -> {FoundItem, FoundFlag, ",
+                            leaf::var(final_state),
+                            "} end",
+                        ],
+                        epilogue_span,
+                    ));
                 }
             }
         }
@@ -938,30 +1098,36 @@ impl CoreErlangGenerator {
             if let Some(pv) = &pred_var {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
-                    docs.push(docvec![
-                        "case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
-                        vars_doc.clone(),
-                        "} <'false'> when 'true' -> {CountAcc, ",
-                        vars_doc,
-                        "} end",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "case ",
+                            leaf::var(pv.clone()),
+                            " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
+                            vars_doc.clone(),
+                            "} <'false'> when 'true' -> {CountAcc, ",
+                            vars_doc,
+                            "} end",
+                        ],
+                        epilogue_span,
+                    ));
                 } else {
                     let final_state = if has_mutations {
                         self.current_state_var()
                     } else {
                         "StateAcc".to_string()
                     };
-                    docs.push(docvec![
-                        "case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
-                        leaf::var(final_state.clone()),
-                        "} <'false'> when 'true' -> {CountAcc, ",
-                        leaf::var(final_state),
-                        "} end",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "case ",
+                            leaf::var(pv.clone()),
+                            " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
+                            leaf::var(final_state.clone()),
+                            "} <'false'> when 'true' -> {CountAcc, ",
+                            leaf::var(final_state),
+                            "} end",
+                        ],
+                        epilogue_span,
+                    ));
                 }
             }
         }
@@ -973,40 +1139,46 @@ impl CoreErlangGenerator {
             if let Some(pv) = &pred_var {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
-                    docs.push(docvec![
-                        "case StillTaking of \
-                         <'false'> when 'true' -> {AccList, 'false', ",
-                        vars_doc.clone(),
-                        "} <'true'> when 'true' -> case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], 'true', ",
-                        vars_doc.clone(),
-                        "} <'false'> when 'true' -> {AccList, 'false', ",
-                        vars_doc,
-                        "} end end",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "case StillTaking of \
+                             <'false'> when 'true' -> {AccList, 'false', ",
+                            vars_doc.clone(),
+                            "} <'true'> when 'true' -> case ",
+                            leaf::var(pv.clone()),
+                            " of <'true'> when 'true' -> {[",
+                            leaf::var(item_var.clone()),
+                            " | AccList], 'true', ",
+                            vars_doc.clone(),
+                            "} <'false'> when 'true' -> {AccList, 'false', ",
+                            vars_doc,
+                            "} end end",
+                        ],
+                        epilogue_span,
+                    ));
                 } else {
                     let final_state = if has_mutations {
                         self.current_state_var()
                     } else {
                         "StateAcc".to_string()
                     };
-                    docs.push(docvec![
-                        "case StillTaking of \
-                         <'false'> when 'true' -> {AccList, 'false', ",
-                        leaf::var(final_state.clone()),
-                        "} <'true'> when 'true' -> case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], 'true', ",
-                        leaf::var(final_state.clone()),
-                        "} <'false'> when 'true' -> {AccList, 'false', ",
-                        leaf::var(final_state),
-                        "} end end",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "case StillTaking of \
+                             <'false'> when 'true' -> {AccList, 'false', ",
+                            leaf::var(final_state.clone()),
+                            "} <'true'> when 'true' -> case ",
+                            leaf::var(pv.clone()),
+                            " of <'true'> when 'true' -> {[",
+                            leaf::var(item_var.clone()),
+                            " | AccList], 'true', ",
+                            leaf::var(final_state.clone()),
+                            "} <'false'> when 'true' -> {AccList, 'false', ",
+                            leaf::var(final_state),
+                            "} end end",
+                        ],
+                        epilogue_span,
+                    ));
                 }
             }
         }
@@ -1018,44 +1190,50 @@ impl CoreErlangGenerator {
             if let Some(pv) = &pred_var {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
-                    docs.push(docvec![
-                        "case StillDropping of \
-                         <'false'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], 'false', ",
-                        vars_doc.clone(),
-                        "} <'true'> when 'true' -> case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {AccList, 'true', ",
-                        vars_doc.clone(),
-                        "} <'false'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], 'false', ",
-                        vars_doc,
-                        "} end end",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "case StillDropping of \
+                             <'false'> when 'true' -> {[",
+                            leaf::var(item_var.clone()),
+                            " | AccList], 'false', ",
+                            vars_doc.clone(),
+                            "} <'true'> when 'true' -> case ",
+                            leaf::var(pv.clone()),
+                            " of <'true'> when 'true' -> {AccList, 'true', ",
+                            vars_doc.clone(),
+                            "} <'false'> when 'true' -> {[",
+                            leaf::var(item_var.clone()),
+                            " | AccList], 'false', ",
+                            vars_doc,
+                            "} end end",
+                        ],
+                        epilogue_span,
+                    ));
                 } else {
                     let final_state = if has_mutations {
                         self.current_state_var()
                     } else {
                         "StateAcc".to_string()
                     };
-                    docs.push(docvec![
-                        "case StillDropping of \
-                         <'false'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], 'false', ",
-                        leaf::var(final_state.clone()),
-                        "} <'true'> when 'true' -> case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {AccList, 'true', ",
-                        leaf::var(final_state.clone()),
-                        "} <'false'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], 'false', ",
-                        leaf::var(final_state),
-                        "} end end",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "case StillDropping of \
+                             <'false'> when 'true' -> {[",
+                            leaf::var(item_var.clone()),
+                            " | AccList], 'false', ",
+                            leaf::var(final_state.clone()),
+                            "} <'true'> when 'true' -> case ",
+                            leaf::var(pv.clone()),
+                            " of <'true'> when 'true' -> {AccList, 'true', ",
+                            leaf::var(final_state.clone()),
+                            "} <'false'> when 'true' -> {[",
+                            leaf::var(item_var.clone()),
+                            " | AccList], 'false', ",
+                            leaf::var(final_state),
+                            "} end end",
+                        ],
+                        epilogue_span,
+                    ));
                 }
             }
         }
@@ -1066,38 +1244,44 @@ impl CoreErlangGenerator {
             if let Some(pv) = &pred_var {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
-                    docs.push(docvec![
-                        "case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | MatchList], NoMatchList, ",
-                        vars_doc.clone(),
-                        "} <'false'> when 'true' -> {MatchList, [",
-                        leaf::var(item_var.clone()),
-                        " | NoMatchList], ",
-                        vars_doc,
-                        "} end",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "case ",
+                            leaf::var(pv.clone()),
+                            " of <'true'> when 'true' -> {[",
+                            leaf::var(item_var.clone()),
+                            " | MatchList], NoMatchList, ",
+                            vars_doc.clone(),
+                            "} <'false'> when 'true' -> {MatchList, [",
+                            leaf::var(item_var.clone()),
+                            " | NoMatchList], ",
+                            vars_doc,
+                            "} end",
+                        ],
+                        epilogue_span,
+                    ));
                 } else {
                     let final_state = if has_mutations {
                         self.current_state_var()
                     } else {
                         "StateAcc".to_string()
                     };
-                    docs.push(docvec![
-                        "case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | MatchList], NoMatchList, ",
-                        leaf::var(final_state.clone()),
-                        "} <'false'> when 'true' -> {MatchList, [",
-                        leaf::var(item_var.clone()),
-                        " | NoMatchList], ",
-                        leaf::var(final_state),
-                        "} end",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "case ",
+                            leaf::var(pv.clone()),
+                            " of <'true'> when 'true' -> {[",
+                            leaf::var(item_var.clone()),
+                            " | MatchList], NoMatchList, ",
+                            leaf::var(final_state.clone()),
+                            "} <'false'> when 'true' -> {MatchList, [",
+                            leaf::var(item_var.clone()),
+                            " | NoMatchList], ",
+                            leaf::var(final_state),
+                            "} end",
+                        ],
+                        epilogue_span,
+                    ));
                 }
             }
         }
@@ -1114,29 +1298,32 @@ impl CoreErlangGenerator {
                     let existing_var = self.fresh_temp_var("ExistingList");
                     let new_list_var = self.fresh_temp_var("NewList");
                     let new_map_var = self.fresh_temp_var("NewMap");
-                    docs.push(docvec![
-                        "let ",
-                        leaf::var(existing_var.clone()),
-                        " = call 'maps':'get'(",
-                        leaf::var(key_var.clone()),
-                        ", GroupMap, []) in let ",
-                        leaf::var(new_list_var.clone()),
-                        " = [",
-                        leaf::var(item_var.clone()),
-                        " | ",
-                        leaf::var(existing_var),
-                        "] in let ",
-                        leaf::var(new_map_var.clone()),
-                        " = call 'maps':'put'(",
-                        leaf::var(key_var.clone()),
-                        ", ",
-                        leaf::var(new_list_var),
-                        ", GroupMap) in {",
-                        leaf::var(new_map_var),
-                        ", ",
-                        vars_doc,
-                        "}",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "let ",
+                            leaf::var(existing_var.clone()),
+                            " = call 'maps':'get'(",
+                            leaf::var(key_var.clone()),
+                            ", GroupMap, []) in let ",
+                            leaf::var(new_list_var.clone()),
+                            " = [",
+                            leaf::var(item_var.clone()),
+                            " | ",
+                            leaf::var(existing_var),
+                            "] in let ",
+                            leaf::var(new_map_var.clone()),
+                            " = call 'maps':'put'(",
+                            leaf::var(key_var.clone()),
+                            ", ",
+                            leaf::var(new_list_var),
+                            ", GroupMap) in {",
+                            leaf::var(new_map_var),
+                            ", ",
+                            vars_doc,
+                            "}",
+                        ],
+                        epilogue_span,
+                    ));
                 } else {
                     let final_state = if has_mutations {
                         self.current_state_var()
@@ -1146,34 +1333,35 @@ impl CoreErlangGenerator {
                     let existing_var = self.fresh_temp_var("ExistingList");
                     let new_list_var = self.fresh_temp_var("NewList");
                     let new_map_var = self.fresh_temp_var("NewMap");
-                    docs.push(docvec![
-                        "let ",
-                        leaf::var(existing_var.clone()),
-                        " = call 'maps':'get'(",
-                        leaf::var(key_var.clone()),
-                        ", GroupMap, []) in let ",
-                        leaf::var(new_list_var.clone()),
-                        " = [",
-                        leaf::var(item_var.clone()),
-                        " | ",
-                        leaf::var(existing_var),
-                        "] in let ",
-                        leaf::var(new_map_var.clone()),
-                        " = call 'maps':'put'(",
-                        leaf::var(key_var.clone()),
-                        ", ",
-                        leaf::var(new_list_var),
-                        ", GroupMap) in {",
-                        leaf::var(new_map_var),
-                        ", ",
-                        leaf::var(final_state),
-                        "}",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "let ",
+                            leaf::var(existing_var.clone()),
+                            " = call 'maps':'get'(",
+                            leaf::var(key_var.clone()),
+                            ", GroupMap, []) in let ",
+                            leaf::var(new_list_var.clone()),
+                            " = [",
+                            leaf::var(item_var.clone()),
+                            " | ",
+                            leaf::var(existing_var),
+                            "] in let ",
+                            leaf::var(new_map_var.clone()),
+                            " = call 'maps':'put'(",
+                            leaf::var(key_var.clone()),
+                            ", ",
+                            leaf::var(new_list_var),
+                            ", GroupMap) in {",
+                            leaf::var(new_map_var),
+                            ", ",
+                            leaf::var(final_state),
+                            "}",
+                        ],
+                        epilogue_span,
+                    ));
                 }
             }
         }
-
-        let final_state_version = self.state_version();
 
         // BT-3169 (ADR 0111 Addendum 9, Question 6): whenever this fold body
         // threads `ClassVars`, wrap its returned TAIL VALUE — regardless of
@@ -1225,32 +1413,47 @@ impl CoreErlangGenerator {
             // doc comment for why a naive post-fold `next_class_var()` call
             // would otherwise mint an already-used name.
             self.set_foldl_class_var_peak(self.class_var_version());
-            let tail = docs
+            let ThreadedStmt::Statement(tail, tail_span) = stmts
                 .pop()
-                .expect("a Foldl* body must push at least one tail-expression Document");
-            docs.push(docvec!["{", leaf::var(cv), ", ", tail, "}"]);
+                .expect("a Foldl* body must push at least one tail-expression Statement")
+            else {
+                unreachable!(
+                    "every Foldl* body push above is a ThreadedStmt::Statement by construction"
+                );
+            };
+            stmts.push(ThreadedStmt::Statement(
+                docvec!["{", leaf::var(cv), ", ", tail, "}"],
+                tail_span,
+            ));
         }
-        Ok((Document::Vec(docs), final_state_version))
+        Ok(stmts)
     }
 
-    // ── Body finalizer helpers (called from generate_threaded_loop_body) ─────
+    // ── Body finalizer helpers (called from lower_foldl_body) ────────────────
 
     fn emit_field_assign_last_expr(
         &self,
-        docs: &mut Vec<Document<'static>>,
+        stmts: &mut Vec<ThreadedStmt>,
         kind: &BodyKind,
         pred_var: Option<&String>,
+        span: Span,
     ) {
         match kind {
             BodyKind::FoldlDo => {
-                docs.push(leaf::var(self.current_state_var()));
+                stmts.push(ThreadedStmt::Statement(
+                    leaf::var(self.current_state_var()),
+                    span,
+                ));
             }
             BodyKind::FoldlCollect => {
-                docs.push(docvec![
-                    "{[_Val | AccList], ",
-                    leaf::var(self.current_state_var()),
-                    "}",
-                ]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "{[_Val | AccList], ",
+                        leaf::var(self.current_state_var()),
+                        "}",
+                    ],
+                    span,
+                ));
             }
             BodyKind::FoldlFilter { .. }
             | BodyKind::FoldlBoolPredicate { .. }
@@ -1261,40 +1464,53 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlPartition { .. }
             | BodyKind::FoldlGroupBy { .. } => {
                 if let Some(pv) = pred_var {
-                    docs.push(docvec!["let ", leaf::var(pv.clone()), " = _Val in ",]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec!["let ", leaf::var(pv.clone()), " = _Val in ",],
+                        span,
+                    ));
                 }
             }
             BodyKind::FoldlInject => {
-                docs.push(docvec!["{_Val, ", leaf::var(self.current_state_var()), "}",]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec!["{_Val, ", leaf::var(self.current_state_var()), "}",],
+                    span,
+                ));
             }
         }
     }
 
     fn emit_self_send_last_expr(
         &mut self,
-        docs: &mut Vec<Document<'static>>,
+        stmts: &mut Vec<ThreadedStmt>,
         kind: &BodyKind,
         pred_var: Option<&String>,
         dispatch_var: &str,
+        span: Span,
     ) {
         match kind {
             BodyKind::FoldlDo => {
-                docs.push(leaf::var(self.current_state_var()));
+                stmts.push(ThreadedStmt::Statement(
+                    leaf::var(self.current_state_var()),
+                    span,
+                ));
             }
             BodyKind::FoldlCollect => {
                 let fs = self.current_state_var();
                 let ir = self.fresh_temp_var("ItemResult");
-                docs.push(docvec![
-                    "let ",
-                    leaf::var(ir.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(dispatch_var.to_string()),
-                    ") in {[",
-                    leaf::var(ir),
-                    " | AccList], ",
-                    leaf::var(fs),
-                    "}",
-                ]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "let ",
+                        leaf::var(ir.clone()),
+                        " = call 'erlang':'element'(1, ",
+                        leaf::var(dispatch_var.to_string()),
+                        ") in {[",
+                        leaf::var(ir),
+                        " | AccList], ",
+                        leaf::var(fs),
+                        "}",
+                    ],
+                    span,
+                ));
             }
             BodyKind::FoldlFilter { .. }
             | BodyKind::FoldlBoolPredicate { .. }
@@ -1305,29 +1521,35 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlPartition { .. }
             | BodyKind::FoldlGroupBy { .. } => {
                 if let Some(pv) = pred_var {
-                    docs.push(docvec![
-                        "let ",
-                        leaf::var(pv.clone()),
-                        " = call 'erlang':'element'(1, ",
-                        leaf::var(dispatch_var.to_string()),
-                        ") in ",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "let ",
+                            leaf::var(pv.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            leaf::var(dispatch_var.to_string()),
+                            ") in ",
+                        ],
+                        span,
+                    ));
                 }
             }
             BodyKind::FoldlInject => {
                 let fs = self.current_state_var();
                 let ar = self.fresh_temp_var("AccResult");
-                docs.push(docvec![
-                    "let ",
-                    leaf::var(ar.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(dispatch_var.to_string()),
-                    ") in {",
-                    leaf::var(ar),
-                    ", ",
-                    leaf::var(fs),
-                    "}",
-                ]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "let ",
+                        leaf::var(ar.clone()),
+                        " = call 'erlang':'element'(1, ",
+                        leaf::var(dispatch_var.to_string()),
+                        ") in {",
+                        leaf::var(ar),
+                        ", ",
+                        leaf::var(fs),
+                        "}",
+                    ],
+                    span,
+                ));
             }
         }
     }
@@ -1339,29 +1561,36 @@ impl CoreErlangGenerator {
     /// caller before this is invoked). Mirrors `emit_self_send_last_expr`.
     fn emit_tier2_value_call_last_expr(
         &mut self,
-        docs: &mut Vec<Document<'static>>,
+        stmts: &mut Vec<ThreadedStmt>,
         kind: &BodyKind,
         pred_var: Option<&String>,
         tuple_var: &str,
+        span: Span,
     ) {
         match kind {
             BodyKind::FoldlDo => {
-                docs.push(leaf::var(self.current_state_var()));
+                stmts.push(ThreadedStmt::Statement(
+                    leaf::var(self.current_state_var()),
+                    span,
+                ));
             }
             BodyKind::FoldlCollect => {
                 let fs = self.current_state_var();
                 let ir = self.fresh_temp_var("T2LoopVal");
-                docs.push(docvec![
-                    "let ",
-                    leaf::var(ir.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var.to_string()),
-                    ") in {[",
-                    leaf::var(ir),
-                    " | AccList], ",
-                    leaf::var(fs),
-                    "}",
-                ]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "let ",
+                        leaf::var(ir.clone()),
+                        " = call 'erlang':'element'(1, ",
+                        leaf::var(tuple_var.to_string()),
+                        ") in {[",
+                        leaf::var(ir),
+                        " | AccList], ",
+                        leaf::var(fs),
+                        "}",
+                    ],
+                    span,
+                ));
             }
             BodyKind::FoldlFilter { .. }
             | BodyKind::FoldlBoolPredicate { .. }
@@ -1372,40 +1601,47 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlPartition { .. }
             | BodyKind::FoldlGroupBy { .. } => {
                 if let Some(pv) = pred_var {
-                    docs.push(docvec![
-                        "let ",
-                        leaf::var(pv.clone()),
-                        " = call 'erlang':'element'(1, ",
-                        leaf::var(tuple_var.to_string()),
-                        ") in ",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "let ",
+                            leaf::var(pv.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            leaf::var(tuple_var.to_string()),
+                            ") in ",
+                        ],
+                        span,
+                    ));
                 }
             }
             BodyKind::FoldlInject => {
                 let fs = self.current_state_var();
                 let ar = self.fresh_temp_var("T2LoopVal");
-                docs.push(docvec![
-                    "let ",
-                    leaf::var(ar.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var.to_string()),
-                    ") in {",
-                    leaf::var(ar),
-                    ", ",
-                    leaf::var(fs),
-                    "}",
-                ]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "let ",
+                        leaf::var(ar.clone()),
+                        " = call 'erlang':'element'(1, ",
+                        leaf::var(tuple_var.to_string()),
+                        ") in {",
+                        leaf::var(ar),
+                        ", ",
+                        leaf::var(fs),
+                        "}",
+                    ],
+                    span,
+                ));
             }
         }
     }
 
     fn emit_local_assign_last_expr(
         &self,
-        docs: &mut Vec<Document<'static>>,
+        stmts: &mut Vec<ThreadedStmt>,
         kind: &BodyKind,
         pred_var: Option<&String>,
         plan: &ThreadingPlan,
         last_val: Option<&str>,
+        span: Span,
     ) {
         if plan.use_tuple_acc {
             // BT-1276: Tuple mode — repack current bindings as tuple accumulator.
@@ -1416,16 +1652,19 @@ impl CoreErlangGenerator {
             let vars_doc = plan.current_vars_doc(self);
             match kind {
                 BodyKind::FoldlDo => {
-                    docs.push(docvec![" {", vars_doc, "}"]);
+                    stmts.push(ThreadedStmt::Statement(docvec![" {", vars_doc, "}"], span));
                 }
                 BodyKind::FoldlCollect => {
-                    docs.push(docvec![
-                        " {[",
-                        leaf::var(val.to_string()),
-                        " | AccList], ",
-                        vars_doc,
-                        "}",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            " {[",
+                            leaf::var(val.to_string()),
+                            " | AccList], ",
+                            vars_doc,
+                            "}",
+                        ],
+                        span,
+                    ));
                 }
                 BodyKind::FoldlFilter { .. }
                 | BodyKind::FoldlBoolPredicate { .. }
@@ -1436,37 +1675,43 @@ impl CoreErlangGenerator {
                 | BodyKind::FoldlPartition { .. }
                 | BodyKind::FoldlGroupBy { .. } => {
                     if let Some(pv) = pred_var {
-                        docs.push(docvec![
-                            " let ",
-                            leaf::var(pv.clone()),
-                            " = ",
-                            leaf::var(val.to_string()),
-                            " in ",
-                        ]);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                " let ",
+                                leaf::var(pv.clone()),
+                                " = ",
+                                leaf::var(val.to_string()),
+                                " in ",
+                            ],
+                            span,
+                        ));
                     }
                 }
                 BodyKind::FoldlInject => {
-                    docs.push(docvec![
-                        " {",
-                        leaf::var(val.to_string()),
-                        ", ",
-                        vars_doc,
-                        "}",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![" {", leaf::var(val.to_string()), ", ", vars_doc, "}",],
+                        span,
+                    ));
                 }
             }
             return;
         }
         match kind {
             BodyKind::FoldlDo => {
-                docs.push(docvec![" ", leaf::var(self.current_state_var())]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![" ", leaf::var(self.current_state_var())],
+                    span,
+                ));
             }
             BodyKind::FoldlCollect => {
-                docs.push(docvec![
-                    " {[_Val | AccList], ",
-                    leaf::var(self.current_state_var()),
-                    "}",
-                ]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        " {[_Val | AccList], ",
+                        leaf::var(self.current_state_var()),
+                        "}",
+                    ],
+                    span,
+                ));
             }
             BodyKind::FoldlFilter { .. }
             | BodyKind::FoldlBoolPredicate { .. }
@@ -1477,29 +1722,35 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlPartition { .. }
             | BodyKind::FoldlGroupBy { .. } => {
                 if let Some(pv) = pred_var {
-                    docs.push(docvec![" let ", leaf::var(pv.clone()), " = _Val in ",]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![" let ", leaf::var(pv.clone()), " = _Val in ",],
+                        span,
+                    ));
                 }
             }
             BodyKind::FoldlInject => {
-                docs.push(docvec![
-                    " {_Val, ",
-                    leaf::var(self.current_state_var()),
-                    "}",
-                ]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![" {_Val, ", leaf::var(self.current_state_var()), "}",],
+                    span,
+                ));
             }
         }
     }
 
     fn emit_destructure_last_expr(
         &self,
-        docs: &mut Vec<Document<'static>>,
+        stmts: &mut Vec<ThreadedStmt>,
         kind: &BodyKind,
         pred_var: Option<&String>,
         has_mutations: bool,
+        span: Span,
     ) {
         match kind {
             BodyKind::FoldlDo => {
-                docs.push(leaf::var(self.current_state_var()));
+                stmts.push(ThreadedStmt::Statement(
+                    leaf::var(self.current_state_var()),
+                    span,
+                ));
             }
             BodyKind::FoldlCollect => {
                 let fs = if has_mutations {
@@ -1507,7 +1758,10 @@ impl CoreErlangGenerator {
                 } else {
                     "StateAcc".to_string()
                 };
-                docs.push(docvec!["{['nil' | AccList], ", leaf::var(fs), "}",]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec!["{['nil' | AccList], ", leaf::var(fs), "}",],
+                    span,
+                ));
             }
             BodyKind::FoldlFilter { .. }
             | BodyKind::FoldlBoolPredicate { .. }
@@ -1518,7 +1772,10 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlPartition { .. }
             | BodyKind::FoldlGroupBy { .. } => {
                 if let Some(pv) = pred_var {
-                    docs.push(docvec!["let ", leaf::var(pv.clone()), " = 'false' in ",]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec!["let ", leaf::var(pv.clone()), " = 'false' in ",],
+                        span,
+                    ));
                 }
             }
             BodyKind::FoldlInject => {
@@ -1527,7 +1784,10 @@ impl CoreErlangGenerator {
                 } else {
                     "StateAcc".to_string()
                 };
-                docs.push(docvec!["{'nil', ", leaf::var(fs), "}"]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec!["{'nil', ", leaf::var(fs), "}"],
+                    span,
+                ));
             }
         }
     }
@@ -1583,7 +1843,7 @@ impl CoreErlangGenerator {
     )]
     fn emit_non_assign_expr(
         &mut self,
-        docs: &mut Vec<Document<'static>>,
+        stmts: &mut Vec<ThreadedStmt>,
         expr: &Expression,
         _i: usize,
         is_last: bool,
@@ -1593,6 +1853,7 @@ impl CoreErlangGenerator {
         pred_var: Option<&String>,
         plan: &ThreadingPlan,
     ) -> Result<()> {
+        let span = expr.span();
         // ADR 0118 phase 2b (BT-3418): thread every state-effecting
         // sub-expression nested in `expr` (e.g. `1 + (self bumpCount)`)
         // ahead of `expr`'s own compile, via the sequencing rule
@@ -1617,7 +1878,7 @@ impl CoreErlangGenerator {
         let thread_scope = self.thread_ahead(expr, &mut prelude_stmts, frame)?;
         let hoisted_anything = !prelude_stmts.is_empty();
         if hoisted_anything {
-            docs.push(self.threaded_prelude_doc(&prelude_stmts));
+            stmts.extend(prelude_stmts);
             *has_mutations = true;
         }
         let has_mutations = *has_mutations;
@@ -1660,29 +1921,36 @@ impl CoreErlangGenerator {
                     // an `erlc` "unbound variable" regression confirmed empirically.
                     let threads_here = has_mutations || has_plain_lets || plan.threads_class_vars;
                     if threads_here {
-                        docs.push(self.bind_closed_expr_threading_class_vars(expr, "_", plan)?);
+                        let doc = self.bind_closed_expr_threading_class_vars(expr, "_", plan)?;
+                        stmts.push(ThreadedStmt::Statement(doc, span));
                     } else {
                         let doc = self.expression_doc(expr)?;
-                        docs.push(doc);
+                        stmts.push(ThreadedStmt::Statement(doc, span));
                     }
                     if threads_here {
                         if plan.use_tuple_acc {
                             // BT-1276: Repack threaded locals as tuple.
-                            docs.push(docvec!["{", plan.current_vars_doc(self), "}"]);
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec!["{", plan.current_vars_doc(self), "}"],
+                                span,
+                            ));
                         } else {
                             let fs = if has_mutations {
                                 self.current_state_var()
                             } else {
                                 "StateAcc".to_string()
                             };
-                            docs.push(leaf::var(fs));
+                            stmts.push(ThreadedStmt::Statement(leaf::var(fs), span));
                         }
                     }
                 } else {
                     // BT-2350: ClassVars-visible discard for non-last statements
                     // (a class self-send leaves an open let-chain whose ClassVarsN
                     // must stay visible to following statements).
-                    docs.push(docvec!["let _ = ", self.expression_doc(expr)?, " in "]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec!["let _ = ", self.expression_doc(expr)?, " in "],
+                        span,
+                    ));
                 }
             }
             BodyKind::FoldlCollect => {
@@ -1692,10 +1960,10 @@ impl CoreErlangGenerator {
                     // forward past this `let` boundary when
                     // `plan.threads_class_vars` — see
                     // `bind_closed_expr_threading_class_vars`'s doc comment.
-                    // BT-3169: pushed as its OWN `docs` entry, separate from
+                    // BT-3169: pushed as its OWN `stmts` entry, separate from
                     // the tuple-construction push below — this function's
                     // own final `{ClassVars, tail}` wrap only pops the LAST
-                    // `docs` entry, so a self-send's `ClassVarsN` rebind
+                    // `stmts` entry, so a self-send's `ClassVarsN` rebind
                     // inside `bind_doc` (an open, not-yet-closed chain) must
                     // stay a strictly EARLIER entry, not fused into the same
                     // one as the tuple it precedes — fusing them would place
@@ -1703,40 +1971,41 @@ impl CoreErlangGenerator {
                     // BEFORE the `let` that defines it (confirmed empirically
                     // — `erlc` "unbound variable", the same failure mode this
                     // whole helper exists to avoid).
-                    docs.push(self.bind_closed_expr_threading_class_vars(
-                        expr,
-                        &result_var,
-                        plan,
-                    )?);
+                    let bind_doc =
+                        self.bind_closed_expr_threading_class_vars(expr, &result_var, plan)?;
+                    stmts.push(ThreadedStmt::Statement(bind_doc, span));
                     if plan.use_tuple_acc {
                         // BT-1276: Tuple mode — repack current vars.
                         let vars_doc = plan.current_vars_doc(self);
-                        docs.push(docvec![
-                            "{[",
-                            leaf::var(result_var),
-                            " | AccList], ",
-                            vars_doc,
-                            "}",
-                        ]);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec!["{[", leaf::var(result_var), " | AccList], ", vars_doc, "}",],
+                            span,
+                        ));
                     } else {
                         let fs = if has_mutations {
                             self.current_state_var()
                         } else {
                             "StateAcc".to_string()
                         };
-                        docs.push(docvec![
-                            "{[",
-                            leaf::var(result_var),
-                            " | AccList], ",
-                            leaf::var(fs),
-                            "}",
-                        ]);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "{[",
+                                leaf::var(result_var),
+                                " | AccList], ",
+                                leaf::var(fs),
+                                "}",
+                            ],
+                            span,
+                        ));
                     }
                 } else {
                     // BT-2350: a non-last statement may be a class self-send that
                     // emits an open let-chain; close it (keeping ClassVarsN visible)
                     // so the surrounding sequencing does not dangle a second `in`.
-                    docs.push(docvec!["let _ = ", self.expression_doc(expr)?, " in "]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec!["let _ = ", self.expression_doc(expr)?, " in "],
+                        span,
+                    ));
                 }
             }
             BodyKind::FoldlFilter { .. }
@@ -1755,39 +2024,54 @@ impl CoreErlangGenerator {
                         // `bind_closed_expr_threading_class_vars`'s doc
                         // comment. This is the exact shape a `select:`
                         // predicate self-send needs (BT-3151's own repro).
-                        docs.push(self.bind_closed_expr_threading_class_vars(expr, pv, plan)?);
+                        let doc = self.bind_closed_expr_threading_class_vars(expr, pv, plan)?;
+                        stmts.push(ThreadedStmt::Statement(doc, span));
                     }
                 } else {
                     // BT-2350: see FoldlCollect — close a non-last open scope while
                     // keeping ClassVarsN visible for following statements.
-                    docs.push(docvec!["let _ = ", self.expression_doc(expr)?, " in "]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec!["let _ = ", self.expression_doc(expr)?, " in "],
+                        span,
+                    ));
                 }
             }
             BodyKind::FoldlInject => {
                 if is_last {
                     let acc_var = self.fresh_temp_var("AccOut");
-                    // BT-3169: pushed as its OWN `docs` entry, separate from
+                    // BT-3169: pushed as its OWN `stmts` entry, separate from
                     // the tuple-construction push below — see the identical
                     // `FoldlCollect` comment above for why fusing them is
                     // wrong (confirmed empirically, `erlc` "unbound
                     // variable").
-                    docs.push(self.bind_closed_expr_threading_class_vars(expr, &acc_var, plan)?);
+                    let bind_doc =
+                        self.bind_closed_expr_threading_class_vars(expr, &acc_var, plan)?;
+                    stmts.push(ThreadedStmt::Statement(bind_doc, span));
                     if plan.use_tuple_acc {
                         // BT-1276: Tuple mode — repack current vars.
                         let vars_doc = plan.current_vars_doc(self);
-                        docs.push(docvec!["{", leaf::var(acc_var), ", ", vars_doc, "}",]);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec!["{", leaf::var(acc_var), ", ", vars_doc, "}",],
+                            span,
+                        ));
                     } else {
                         let fs = if has_mutations {
                             self.current_state_var()
                         } else {
                             "StateAcc".to_string()
                         };
-                        docs.push(docvec!["{", leaf::var(acc_var), ", ", leaf::var(fs), "}",]);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec!["{", leaf::var(acc_var), ", ", leaf::var(fs), "}",],
+                            span,
+                        ));
                     }
                 } else {
                     // BT-2350: see FoldlCollect — close a non-last open scope while
                     // keeping ClassVarsN visible for following statements.
-                    docs.push(docvec!["let _ = ", self.expression_doc(expr)?, " in "]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec!["let _ = ", self.expression_doc(expr)?, " in "],
+                        span,
+                    ));
                 }
             }
         }

@@ -93,86 +93,17 @@ impl CoreErlangGenerator {
         Ok(Some(doc))
     }
 
-    /// BT-1275: Generate a local variable assignment in a direct-params loop body.
-    ///
-    /// In direct-params mode, threaded locals are fun parameters — no `StateAcc` map needed.
-    /// Generates `let NewVar = <value> in` and updates the binding so subsequent
-    /// uses and the recursive `apply` pick up the latest version.
-    ///
-    /// ```erlang
-    /// %% Old StateAcc pattern:
-    /// let _Val5 = Sum + I in let StateAcc1 = maps:put('__local__sum', _Val5, StateAcc) in
-    ///
-    /// %% Direct params pattern (this function):
-    /// let Sum1 = Sum + I in
-    /// ```
-    ///
-    /// Returns `(doc, Some(new_var_name))` so callers (e.g. `emit_local_assign_last_expr`)
-    /// can reference the newly-bound variable by name (e.g. for FoldlCollect/FoldlInject).
-    ///
-    /// BT-3150 review follow-up: unlike `try_generate_block_local_plain_let`, `value`
-    /// here never needs open-scope handling for a class-method self-send RHS
-    /// (`x := self bump`) — `use_direct_params`/`use_tuple_acc`/`use_hybrid_params`
-    /// (this function's only callers, see `generate_threaded_loop_body_inner`) are
-    /// all unconditionally disabled whenever the block has *any* self-send
-    /// (`BlockMutationAnalysis::has_state_effects`/`has_self_sends`, checked by
-    /// `select_direct_params`/`select_tuple_acc`/`select_hybrid_params`), so `value`
-    /// can never be, or contain at this level, one.
-    pub(super) fn generate_direct_var_update_in_loop(
-        &mut self,
-        expr: &Expression,
-    ) -> Result<(Document<'static>, Option<String>)> {
-        if let Expression::Assignment { target, value, .. } = expr {
-            if let Expression::Identifier(id) = target.as_ref() {
-                // BT-1329: Clear any pending list op result before generating the value.
-                self.direct_params_list_op_result = None;
-                let value_code = self.expression_doc(value)?;
-
-                // BT-1329: If the value expression was a list op in direct-params mode,
-                // it produced an open let-chain and stored the result variable name.
-                // We emit the chain directly (so variable rebindings escape to outer scope),
-                // then bind the assigned variable to the stored result.
-                if let Some(result_var) = self.direct_params_list_op_result.take() {
-                    let new_var =
-                        self.fresh_temp_var(&CoreErlangGenerator::to_core_erlang_var(&id.name));
-                    self.bind_var(&id.name, &new_var);
-                    let doc = docvec![
-                        value_code,
-                        "let ",
-                        leaf::var(new_var.clone()),
-                        " = ",
-                        leaf::var(result_var),
-                        " in ",
-                    ];
-                    return Ok((doc, Some(new_var)));
-                }
-
-                // Allocate a fresh versioned name (e.g. Sum1, Sum2 ...) and rebind.
-                let new_var =
-                    self.fresh_temp_var(&CoreErlangGenerator::to_core_erlang_var(&id.name));
-                self.bind_var(&id.name, &new_var);
-                let doc = docvec![
-                    "let ",
-                    leaf::var(new_var.clone()),
-                    " = ",
-                    value_code,
-                    " in ",
-                ];
-                return Ok((doc, Some(new_var)));
-            }
-        }
-        Ok((Document::Nil, None))
-    }
-
-    /// ADR 0111 Addendum 15: `Bind`-producing sibling of
-    /// [`Self::generate_direct_var_update_in_loop`], for the Letrec-onto-
-    /// `ThreadedIr` body lowering (`control_flow::body::lower_letrec_body`).
-    /// Reproduces that function's own two shapes — the common rebind and the
-    /// BT-1329 open-let-chain list-op-result case — as a `ThreadedStmt::Bind`
+    /// ADR 0111 Addendum 15: `Bind`-producing local-var-update lowering shared
+    /// by both `Letrec` (`control_flow::body::lower_letrec_body`) and `Foldl*`
+    /// (`control_flow::body::lower_foldl_body`) direct-params/tuple-acc/
+    /// hybrid-mode bodies — the sole surviving implementation of this shape
+    /// since both migrations' hand-built `Document` predecessor
+    /// (`generate_direct_var_update_in_loop`, BT-1275) was deleted once every
+    /// call site converted to this `ThreadedStmt::Bind` producer
     /// (`render_bind`'s `Direct` arm renders `"let NewVar = <rhs> in "`,
-    /// byte-identical to the sibling's own `docvec!`) instead of a hand-built
-    /// `Document`, so `render`'s `final_loop_arg_identities` can trace this
-    /// local's own rebind chain from its `produces` seed.
+    /// byte-identical to the deleted function's own `docvec!`), so `render`'s
+    /// `final_loop_arg_identities` can trace this local's own rebind chain
+    /// from its `produces` seed.
     ///
     /// `source` is the local's identity BEFORE this rebind — [`VersionPrefix::Local`]
     /// at the loop's own `produces` seed until the first rebind,

@@ -310,6 +310,25 @@ pub(in crate::core_erlang) fn construct_and_verify_class_var_bind(
 pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
     ir: &[ThreadedStmt],
 ) -> Vec<VerifyError> {
+    verify(&backfill_opaque_version_gaps(ir, FrameId::ROOT))
+}
+
+/// The fixture-building half of [`verify_body_with_opaque_version_gaps`]:
+/// walks `ir` inserting a synthetic backfill `Bind` chain ahead of any real
+/// `Bind` whose source version an opaque `Statement` advanced past
+/// unrecorded, at `frame`. Split out (BT-3475, ADR 0111 Addendum 15's Foldl
+/// migration) so a caller that must WRAP the backfilled body in its own
+/// node before verifying — `control_flow::body::generate_foldl_loop_body`'s
+/// merged `Threaded` node, whose body lives at its own non-`ROOT` frame, not
+/// a flat method-level fixture — can reuse the identical technique instead
+/// of re-deriving it at a hardcoded [`FrameId::ROOT`] (CLAUDE.md's
+/// no-duplicate-implementations rule). `verify_body_with_opaque_version_gaps`
+/// itself is unchanged in behavior: `frame: FrameId::ROOT` reproduces
+/// exactly what it always built inline.
+pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
+    ir: &[ThreadedStmt],
+    frame: FrameId,
+) -> Vec<ThreadedStmt> {
     let mut fixture: Vec<ThreadedStmt> = Vec::with_capacity(ir.len());
     let mut last_state_version = 0usize;
     let mut last_class_var_version = 0usize;
@@ -320,6 +339,7 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
                 &VersionPrefix::State,
                 target,
                 source,
+                frame,
                 &mut last_state_version,
             );
             backfill_opaque_version_gap(
@@ -327,16 +347,17 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
                 &VersionPrefix::ClassVars,
                 target,
                 source,
+                frame,
                 &mut last_class_var_version,
             );
         }
         fixture.push(stmt.clone());
     }
-    verify(&fixture)
+    fixture
 }
 
 /// Shared backfill step for one `VersionPrefix` inside
-/// [`verify_body_with_opaque_version_gaps`]'s per-`Bind` scan — extracted so
+/// [`backfill_opaque_version_gaps`]'s per-`Bind` scan — extracted so
 /// the identical technique isn't hand-duplicated once per prefix (CLAUDE.md's
 /// no-duplicate-implementations rule). The synthetic `Bind`s this inserts
 /// always carry `shadow_write: true` (BT-3164, fixing a real bug this
@@ -352,9 +373,10 @@ fn backfill_opaque_version_gap(
     prefix: &VersionPrefix,
     target: &VersionedVar,
     source: &VersionedVar,
+    frame: FrameId,
     last_version: &mut usize,
 ) {
-    if source.prefix == *prefix && source.frame == FrameId::ROOT && source.version > *last_version {
+    if source.prefix == *prefix && source.frame == frame && source.version > *last_version {
         // BT-3164: `shadow_write: true`, not `false` — same reasoning
         // `construct_and_verify_class_var_bind`'s own backfill chain (above)
         // already documents for its synthetic steps: this stands in for a
@@ -375,7 +397,7 @@ fn backfill_opaque_version_gap(
         // not a claim of compliance either way.
         fixture.extend(backfill_version_chain(
             prefix,
-            FrameId::ROOT,
+            frame,
             *last_version,
             source.version,
             true,
@@ -383,7 +405,7 @@ fn backfill_opaque_version_gap(
         ));
         *last_version = source.version;
     }
-    if target.prefix == *prefix && target.frame == FrameId::ROOT {
+    if target.prefix == *prefix && target.frame == frame {
         *last_version = (*last_version).max(target.version);
     }
 }

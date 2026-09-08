@@ -15,12 +15,14 @@
 //!
 //! `VersionPrefix::Local`, `ThreadingMode::DirectParams`,
 //! `ThreadingMode::Hybrid`, [`LoopCounter`], and `ThreadedStmt::ConditionalLoop`
-//! get their first production constructors from ADR 0111 § Addendum 15's
+//! got their first production constructors from ADR 0111 § Addendum 15's
 //! Letrec migration (`while_loops.rs`/`counted_loops.rs` lowering onto
-//! `ConditionalLoop`) — the Foldl migration (a later issue in the same
-//! addendum) is what still leaves `ThreadingMode::TupleAcc`'s real
-//! `fun (Elem, Acc) -> ...` shape and the `Foldl*` accumulator epilogues
-//! render-only.
+//! `ConditionalLoop`); the Foldl migration (the same addendum's next issue)
+//! merges each fold's own per-iteration unpack (`TupleAccUnpack`, or a
+//! `StateAcc`-map `Statement` prelude) and per-statement body into ONE
+//! `Threaded` node (`control_flow::body::generate_foldl_loop_body`),
+//! `verify()`d and rendered once — `ThreadingMode::TupleAcc`/`StateAcc`
+//! are now full-fidelity, not render-only skeletons.
 
 use super::super::NlrBoundary;
 use beamtalk_cerl_doc::Document;
