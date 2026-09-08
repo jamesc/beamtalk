@@ -139,6 +139,12 @@ impl BindingPower {
 /// "|" => Some(BindingPower::left_assoc(25)),
 /// ```
 pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
+    // Equality (ADR 0002: Erlang comparison operators) routes through
+    // `is_equality_operator` rather than its own match arm — see that
+    // function's doc comment for why it's the single source for this set.
+    if is_equality_operator(op) {
+        return Some(BindingPower::left_assoc(10));
+    }
     match op {
         // Association creation: `key -> value` (ADR 0047, lowest binary precedence)
         "->" => Some(BindingPower::left_assoc(3)),
@@ -146,11 +152,6 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
         // Method lookup
         // `Counter >> #increment` returns CompiledMethod object
         ">>" => Some(BindingPower::left_assoc(5)),
-
-        // Equality (ADR 0002: Erlang comparison operators)
-        // `=:=` strict equality, `=/=` strict inequality
-        // `/=` loose inequality, `==` loose equality
-        "==" | "/=" | "=:=" | "=/=" => Some(BindingPower::left_assoc(10)),
 
         // Comparison
         "<" | ">" | "<=" | ">=" => Some(BindingPower::left_assoc(20)),
@@ -165,6 +166,42 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
         "**" => Some(BindingPower::right_assoc(50)),
 
         // Unknown operator - return None to stop binary expression parsing
+        _ => None,
+    }
+}
+
+/// The four equality / identity comparison binary-operator tokens (ADR 0002:
+/// Erlang comparison operators) — `==` (loose eq), `/=` (loose ineq), `=:=`
+/// (strict eq), `=/=` (strict ineq).
+///
+/// Single source for every place in the compiler that must recognise one of
+/// these operators: this precedence table's own precedence-10 bucket above,
+/// the type checker's universal `Object`/`ProtoObject` comparison handling
+/// and class-equality / singleton-equality narrowing
+/// (`semantic_analysis::type_checker::inference`,
+/// `narrowing::rules::singleton_eq`), and the non-overridable-operator
+/// validator (`semantic_analysis::validators::operator_validators`, which
+/// documents the same ADR 0002 rationale for why these four bypass message
+/// dispatch). BT-3462 replaced four independent hardcoded copies of this set
+/// with this one function plus [`equality_operator_is_negated`].
+#[must_use]
+pub fn is_equality_operator(op: &str) -> bool {
+    equality_operator_is_negated(op).is_some()
+}
+
+/// For one of the four equality/identity comparison operators above,
+/// returns whether it is the *negated* form (`/=`, `=/=`) rather than the
+/// *positive* form (`==`, `=:=`). Returns `None` for any other operator —
+/// callers that only need membership should use [`is_equality_operator`].
+///
+/// Used by `narrowing::rules::singleton_eq::detect_binary` (BT-2617/BT-3369)
+/// to recover whether a detected `x =:= #foo` / `x /= #foo` comparison is a
+/// match or a mismatch test, without re-deriving the operator set itself.
+#[must_use]
+pub fn equality_operator_is_negated(op: &str) -> Option<bool> {
+    match op {
+        "==" | "=:=" => Some(false),
+        "/=" | "=/=" => Some(true),
         _ => None,
     }
 }

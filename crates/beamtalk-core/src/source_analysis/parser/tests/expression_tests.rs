@@ -1552,3 +1552,35 @@ fn bare_equals_is_not_an_operator() {
         )
     );
 }
+
+/// BT-3462 conformance test: the parser's own precedence-10 bucket and
+/// [`is_equality_operator`] must agree for every operator this file's own
+/// `binary_binding_power` table recognises — both known operators (whether
+/// or not they're equality operators) and one unknown string. This is what
+/// lets `is_equality_operator` be the single source for "is this one of the
+/// four equality operators" everywhere else in the compiler (type checker
+/// narrowing rules, the non-overridable-operator validator) without a
+/// "mirrors the parser" comment: if a future edit ever adds an operator to
+/// the precedence-10 bucket by hand instead of through
+/// `is_equality_operator`, or vice versa, this test fails.
+#[test]
+fn equality_operator_set_matches_precedence_ten_bucket() {
+    let known_operators = [
+        "->", ">>", "==", "/=", "=:=", "=/=", "<", ">", "<=", ">=", "+", "-", "++", "*", "/", "%",
+        "**",
+    ];
+    for op in known_operators {
+        let bp = binary_binding_power(op)
+            .unwrap_or_else(|| panic!("`{op}` should have a binding power"));
+        let is_precedence_ten = bp.left == 10;
+        assert_eq!(
+            is_precedence_ten,
+            is_equality_operator(op),
+            "operator `{op}`: precedence-10 bucket ({is_precedence_ten}) and \
+             is_equality_operator disagree"
+        );
+    }
+    // An unknown operator is not an equality operator and has no binding power.
+    assert!(binary_binding_power("~=").is_none());
+    assert!(!is_equality_operator("~="));
+}

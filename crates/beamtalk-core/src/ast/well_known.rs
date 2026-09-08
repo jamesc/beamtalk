@@ -127,6 +127,22 @@ pub enum WellKnownSelector {
     PerformWithArgs,
     /// `performLocally:withArguments:` — execute a class method in the caller's process.
     PerformLocallyWithArgs,
+
+    // --- Actor timeout ---
+    /// `withTimeout:` — BT-3462: an `Actor` (or subclass) send wrapped with an
+    /// explicit reply timeout. Only the type checker's transparency rule
+    /// (`inference.rs`) special-cases this selector by name today; it is not
+    /// codegen-intrinsified.
+    WithTimeout,
+
+    // --- Indexed access ---
+    /// `at:` — BT-3462: indexed/keyed element access. Recognised by the type
+    /// checker for `Tuple`'s literal-index element-type narrowing
+    /// (`infer_literal_index_tuple_at`); every receiver class implements its
+    /// own `at:` primitive in codegen (`List`, `Dictionary`, `String`, …), so
+    /// this variant only classifies the selector *name*, not a single
+    /// universal codegen lowering.
+    At,
 }
 
 impl WellKnownSelector {
@@ -167,6 +183,8 @@ impl WellKnownSelector {
             Self::Perform => "perform:",
             Self::PerformWithArgs => "perform:withArguments:",
             Self::PerformLocallyWithArgs => "performLocally:withArguments:",
+            Self::WithTimeout => "withTimeout:",
+            Self::At => "at:",
         }
     }
 
@@ -209,6 +227,8 @@ impl WellKnownSelector {
             "perform:" => Some(Self::Perform),
             "perform:withArguments:" => Some(Self::PerformWithArgs),
             "performLocally:withArguments:" => Some(Self::PerformLocallyWithArgs),
+            "withTimeout:" => Some(Self::WithTimeout),
+            "at:" => Some(Self::At),
             _ => None,
         }
     }
@@ -243,7 +263,9 @@ impl WellKnownSelector {
             | Self::Ensure
             | Self::Error
             | Self::FieldAt
-            | Self::Perform => 1,
+            | Self::Perform
+            | Self::WithTimeout
+            | Self::At => 1,
             Self::IfNilIfNotNil
             | Self::IfNotNilIfNil
             | Self::IfTrueIfFalse
@@ -362,6 +384,8 @@ mod tests {
         WellKnownSelector::Perform,
         WellKnownSelector::PerformWithArgs,
         WellKnownSelector::PerformLocallyWithArgs,
+        WellKnownSelector::WithTimeout,
+        WellKnownSelector::At,
     ];
 
     #[test]

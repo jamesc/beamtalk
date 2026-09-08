@@ -450,7 +450,11 @@ mod tests {
                 | WellKnownSelector::FieldNames
                 | WellKnownSelector::Perform
                 | WellKnownSelector::PerformWithArgs
-                | WellKnownSelector::PerformLocallyWithArgs => &[],
+                | WellKnownSelector::PerformLocallyWithArgs
+                // BT-3462: neither carries a block-literal argument —
+                // `withTimeout:`'s argument is a duration, `at:`'s an index/key.
+                | WellKnownSelector::WithTimeout
+                | WellKnownSelector::At => &[],
             }
         }
 
@@ -494,6 +498,8 @@ mod tests {
             WellKnownSelector::Perform,
             WellKnownSelector::PerformWithArgs,
             WellKnownSelector::PerformLocallyWithArgs,
+            WellKnownSelector::WithTimeout,
+            WellKnownSelector::At,
         ];
 
         for &sel in ALL_VARIANTS {

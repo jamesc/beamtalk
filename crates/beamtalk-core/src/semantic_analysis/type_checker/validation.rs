@@ -30,6 +30,36 @@ use super::type_resolver;
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
+/// Outcome of walking a `Union`-typed argument's members against one
+/// expected simple type, via [`TypeChecker::classify_union_members`] +
+/// [`TypeChecker::is_type_compatible`].
+///
+/// BT-3462: shared by [`TypeChecker::check_argument_types`] and
+/// [`TypeChecker::check_ffi_argument_types`] (`inference.rs`) — before this,
+/// both independently re-derived the same "skip if unclassifiable, skip if
+/// every member is compatible, otherwise report the incompatible members"
+/// decision from a raw `classify_union_members` call, with a "mirrors
+/// `check_argument_types`'s Union handling" comment standing in for a shared
+/// implementation (CLAUDE.md § No duplicate implementations). Diagnostic
+/// *message* text still differs per call site (an FFI signature vs. a
+/// declared Beamtalk method), so only the classification — not the
+/// diagnostic construction — is shared here.
+pub(super) enum UnionArgCompat {
+    /// Every member is compatible with the expected type — no diagnostic.
+    AllCompatible,
+    /// The union contains a member `classify_union_members` can't reason
+    /// about conservatively (Dynamic/Union/Meta/Never) — skip.
+    Unclassifiable,
+    /// `compat` members were compatible; `incompatible` names the rest, for
+    /// the diagnostic hint text. `compat == 0` distinguishes "no member
+    /// compatible" (a `warning`) from "some members compatible" (a `hint`)
+    /// at both call sites.
+    SomeIncompatible {
+        compat: usize,
+        incompatible: Vec<EcoString>,
+    },
+}
+
 impl TypeChecker {
     /// Classify how well a union's known members match a predicate.
     ///
@@ -65,6 +95,28 @@ impl TypeChecker {
         let incompatible: Vec<EcoString> =
             member_names.iter().filter(|m| !pred(m)).cloned().collect();
         Some((compatible, member_names.len(), incompatible))
+    }
+
+    /// Classifies a `Union` argument's members against `expected`, per
+    /// [`UnionArgCompat`].
+    pub(super) fn classify_union_arg_compat(
+        members: &[InferredType],
+        expected: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) -> UnionArgCompat {
+        let Some((compat, total, incompatible)) = Self::classify_union_members(members, |m| {
+            Self::is_type_compatible(m, expected, hierarchy)
+        }) else {
+            return UnionArgCompat::Unclassifiable;
+        };
+        if compat == total {
+            UnionArgCompat::AllCompatible
+        } else {
+            UnionArgCompat::SomeIncompatible {
+                compat,
+                incompatible,
+            }
+        }
     }
 
     /// Collect deduplicated missing protocol methods across union members.
@@ -1353,17 +1405,20 @@ impl TypeChecker {
                     }
                 }
                 InferredType::Union { members, .. } => {
-                    // BT-1832: Check all union members against the expected type.
-                    let Some((compat, total, incompatible)) =
-                        Self::classify_union_members(members, |m| {
-                            Self::is_type_compatible(m, &expected_structural, hierarchy)
-                        })
-                    else {
-                        continue; // Contains Dynamic — skip
+                    // BT-1832 / BT-3462: check every union member against the
+                    // expected type via the shared classification.
+                    let (compat, incompatible) = match Self::classify_union_arg_compat(
+                        members,
+                        &expected_structural,
+                        hierarchy,
+                    ) {
+                        UnionArgCompat::AllCompatible | UnionArgCompat::Unclassifiable => continue,
+                        UnionArgCompat::SomeIncompatible {
+                            compat,
+                            incompatible,
+                            ..
+                        } => (compat, incompatible),
                     };
-                    if compat == total {
-                        continue; // All match → pass
-                    }
                     let param_pos = i + 1;
                     let union_display = arg_ty
                         .display_for_diagnostic()

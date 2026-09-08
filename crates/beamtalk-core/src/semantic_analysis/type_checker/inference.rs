@@ -15,10 +15,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
     Expression, ExpressionStatement, Literal, MessageSelector, Module, Pattern, TypeAnnotation,
+    WellKnownSelector,
 };
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span, is_equality_operator};
 use ecow::{EcoString, eco_format};
 
 use super::narrowing::NarrowingInfo;
@@ -26,6 +27,7 @@ use super::narrowing::extract::extract_variable_name;
 use super::narrowing::refinement::RefinementLayer;
 use super::narrowing::visitors::{block_has_any_return, block_has_return, block_may_reassign};
 use super::type_resolver;
+use super::validation::UnionArgCompat;
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv, narrowing};
 
@@ -899,9 +901,11 @@ impl TypeChecker {
                         // `check_argument_types` and `check_spawn_with_map_keys`.
                         let is_equality = matches!(
                             msg.selector,
-                            MessageSelector::Binary(ref op) if is_equality_comparison_op(op)
+                            MessageSelector::Binary(ref op) if is_equality_operator(op)
                         );
-                        if !is_equality && selector_name != "class" {
+                        if !is_equality
+                            && msg.selector.well_known() != Some(WellKnownSelector::Class)
+                        {
                             self.check_argument_types(
                                 meta_class,
                                 &selector_name,
@@ -1493,8 +1497,12 @@ impl TypeChecker {
         // type-testing patterns in the receiver and narrow variable types inside
         // block arguments.
         let narrowing = if matches!(
-            selector_name.as_str(),
-            "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:"
+            selector.well_known(),
+            Some(
+                WellKnownSelector::IfTrue
+                    | WellKnownSelector::IfFalse
+                    | WellKnownSelector::IfTrueIfFalse
+            )
         ) {
             Self::detect_narrowing(receiver)
                 .map(|info| self.refine_responds_to_narrowing(info))
@@ -1529,14 +1537,19 @@ impl TypeChecker {
                 env,
                 in_abstract_method,
             )
-        } else if selector_name == "on:do:" {
+        } else if selector.well_known() == Some(WellKnownSelector::OnDo) {
             // BT-2045: Exception handler block parameter inference.
             // `[...] on: SomeException do: [:e | ...]` — infer `e` as `SomeException`
             // when the first argument is a class reference.
             self.infer_args_for_on_do(arguments, hierarchy, env, in_abstract_method)
         } else if matches!(
-            selector_name.as_str(),
-            "ifNil:" | "ifNotNil:" | "ifNil:ifNotNil:" | "ifNotNil:ifNil:"
+            selector.well_known(),
+            Some(
+                WellKnownSelector::IfNil
+                    | WellKnownSelector::IfNotNil
+                    | WellKnownSelector::IfNilIfNotNil
+                    | WellKnownSelector::IfNotNilIfNil
+            )
         ) {
             // BT-2046: Narrow block parameter of `ifNotNil: [:x | ...]` to the
             // non-nil branch of the receiver's type. Dual of the receiver-side
@@ -1555,6 +1568,12 @@ impl TypeChecker {
                 in_abstract_method,
             )
         } else if let (true, Some(var_key), Some(arg)) = (
+            // BT-3462: `and:` stays a string comparison rather than a
+            // `WellKnownSelector` variant, matching `state_threading_selectors`'s
+            // module doc — `and:`/`or:` are ordinary self-hosted `Boolean`
+            // methods (`boolean.bt`), not selectors the type checker or
+            // codegen intrinsify, so adding a lone `And` variant (with no
+            // `Or` counterpart) would misrepresent that boundary.
             selector_name == "and:",
             Self::detect_not_nil_and_narrowing(receiver),
             arguments.first(),
@@ -1599,6 +1618,12 @@ impl TypeChecker {
 
         // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
         // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
+        //
+        // BT-3462: stays a string comparison rather than a `WellKnownSelector`
+        // variant — `beamtalk-codegen`'s `expr_shape::selector_dispatches_via_self`
+        // already documents `asType:` (alongside `yourself`) as a
+        // "class-specific or compile-time-only construct that does not
+        // warrant universal selector classification".
         if selector_name == "asType:" {
             if let Some(Expression::ClassReference { name, .. }) = arguments.first() {
                 return InferredType::known(name.name.clone());
@@ -1622,13 +1647,16 @@ impl TypeChecker {
         let is_class_side_receiver = Self::is_class_side_receiver(receiver, env);
         if !is_class_side_receiver {
             if matches!(
-                selector_name.as_str(),
-                "ifNil:ifNotNil:" | "ifNotNil:ifNil:"
+                selector.well_known(),
+                Some(WellKnownSelector::IfNilIfNotNil | WellKnownSelector::IfNotNilIfNil)
             ) {
                 if let Some(ty) = Self::if_nil_branch_union_ret_ty(arguments, &arg_types) {
                     return ty;
                 }
-            } else if matches!(selector_name.as_str(), "ifNil:" | "ifNotNil:") {
+            } else if matches!(
+                selector.well_known(),
+                Some(WellKnownSelector::IfNil | WellKnownSelector::IfNotNil)
+            ) {
                 // BT-2824: Solo `ifNil:` / `ifNotNil:` on a `T | Nil` union
                 // receiver infer as `T | R` / `R | Nil` — the union of the
                 // "self" branch (executed when the nil-check doesn't match)
@@ -1774,14 +1802,14 @@ impl TypeChecker {
             // class-side / tower lookup (and DNU if unresolved); typing
             // `SomeClass + 1` as Boolean would be wrong and suppress the DNU.
             if let MessageSelector::Binary(op) = selector {
-                if is_equality_comparison_op(op) {
+                if is_equality_operator(op) {
                     return InferredType::known("Boolean");
                 }
             }
             // `aClass class` is the metaclass of the class object. The static
             // hierarchy doesn't track per-class metaclasses precisely, so fall
             // back to the `Metaclass` tower class (BT-1952 parity).
-            if selector_name == "class" {
+            if selector.well_known() == Some(WellKnownSelector::Class) {
                 return InferredType::known("Metaclass");
             }
             self.check_argument_types(
@@ -1963,7 +1991,7 @@ impl TypeChecker {
                     // being inaccessible from user code (a user
                     // `withTimeout: -> TimeoutProxy` on a non-Actor class would
                     // otherwise be silently retyped).
-                    if selector_name == "withTimeout:"
+                    if selector.well_known() == Some(WellKnownSelector::WithTimeout)
                         && matches!(ret_ty, DeclaredType::Simple(n) if n == "TimeoutProxy")
                         && hierarchy.is_actor_subclass(&resolve_class)
                     {
@@ -2116,7 +2144,10 @@ impl TypeChecker {
                 // predating this fix) keep the pre-existing `DynamicReceiver`
                 // reason so they don't newly start firing the BT-1914
                 // warning as a side effect of this narrower fix.
-                if matches!(selector_name.as_str(), "ifTrue:" | "ifFalse:") {
+                if matches!(
+                    selector.well_known(),
+                    Some(WellKnownSelector::IfTrue | WellKnownSelector::IfFalse)
+                ) {
                     known_method_unannotated_return = true;
                 }
             }
@@ -2127,8 +2158,13 @@ impl TypeChecker {
             if WellKnownClass::from_str(class_name) == Some(WellKnownClass::Block)
                 && !type_args.is_empty()
                 && matches!(
-                    selector_name.as_str(),
-                    "value" | "value:" | "value:value:" | "value:value:value:"
+                    selector.well_known(),
+                    Some(
+                        WellKnownSelector::Value
+                            | WellKnownSelector::ValueColon
+                            | WellKnownSelector::ValueValue
+                            | WellKnownSelector::ValueValueValue
+                    )
                 )
             {
                 return type_args.last().unwrap().clone();
@@ -2220,7 +2256,9 @@ impl TypeChecker {
         type_args: &[InferredType],
         arguments: &[Expression],
     ) -> Option<InferredType> {
-        if class_name != "Tuple" || selector_name != "at:" {
+        if class_name != "Tuple"
+            || WellKnownSelector::from_name(selector_name) != Some(WellKnownSelector::At)
+        {
             return None;
         }
         if type_args.is_empty() || arguments.len() != 1 {
@@ -2405,22 +2443,24 @@ impl TypeChecker {
                     .with_category(DiagnosticCategory::Type));
                 }
                 InferredType::Union { members, .. } => {
-                    // BT-2846: mirrors check_argument_types's Union handling
-                    // (BT-1832) — every member of the argument's union is
-                    // checked against the declared FFI parameter type.
+                    // BT-2846 / BT-3462: every member of the argument's union
+                    // is checked against the declared FFI parameter type,
+                    // via the same classification `check_argument_types`
+                    // uses (`UnionArgCompat`) — not a re-derived copy.
                     if expected_is_object {
                         continue;
                     }
-                    let Some((compat, total, incompatible)) =
-                        Self::classify_union_members(members, |m| {
-                            Self::is_type_compatible(m, expected, hierarchy)
-                        })
-                    else {
-                        continue; // Contains Dynamic/Union/Meta/Never member — skip conservatively
-                    };
-                    if compat == total {
-                        continue; // All members compatible → pass
-                    }
+                    let (compat, incompatible) =
+                        match Self::classify_union_arg_compat(members, expected, hierarchy) {
+                            UnionArgCompat::AllCompatible | UnionArgCompat::Unclassifiable => {
+                                continue;
+                            }
+                            UnionArgCompat::SomeIncompatible {
+                                compat,
+                                incompatible,
+                                ..
+                            } => (compat, incompatible),
+                        };
                     let union_display = arg_ty
                         .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));
@@ -2773,7 +2813,7 @@ impl TypeChecker {
         // operator. This also keeps the idiomatic `unionVar =:= #singleton`
         // narrowing guard (BT-2617) warning-free. These selectors always
         // return `Boolean`.
-        if is_equality_comparison_op(selector) {
+        if is_equality_operator(selector) {
             return InferredType::known("Boolean");
         }
 
@@ -3113,9 +3153,9 @@ impl TypeChecker {
         let non_nil_ty = Self::non_nil_type(receiver_ty);
 
         // Positions of the `ifNotNil:` block in the argument list per selector.
-        let not_nil_index: Option<usize> = match selector_name {
-            "ifNil:ifNotNil:" => Some(1),
-            "ifNotNil:" | "ifNotNil:ifNil:" => Some(0),
+        let not_nil_index: Option<usize> = match WellKnownSelector::from_name(selector_name) {
+            Some(WellKnownSelector::IfNilIfNotNil) => Some(1),
+            Some(WellKnownSelector::IfNotNil | WellKnownSelector::IfNotNilIfNil) => Some(0),
             _ => None,
         };
 
@@ -3339,19 +3379,25 @@ impl TypeChecker {
             type_args.last().cloned()?
         };
 
-        let self_branch = match selector_name {
-            "ifNil:" => {
+        let self_branch = match WellKnownSelector::from_name(selector_name) {
+            Some(WellKnownSelector::IfNil) => {
                 let ret_ty = hierarchy
-                    .find_method(WellKnownClass::Object.as_str(), "ifNil:")?
+                    .find_method(
+                        WellKnownClass::Object.as_str(),
+                        WellKnownSelector::IfNil.as_str(),
+                    )?
                     .return_type?;
                 if !matches!(ret_ty, DeclaredType::SelfType) {
                     return None;
                 }
                 non_nil_ty
             }
-            "ifNotNil:" => {
+            Some(WellKnownSelector::IfNotNil) => {
                 let ret_ty = hierarchy
-                    .find_method(WellKnownClass::UndefinedObject.as_str(), "ifNotNil:")?
+                    .find_method(
+                        WellKnownClass::UndefinedObject.as_str(),
+                        WellKnownSelector::IfNotNil.as_str(),
+                    )?
                     .return_type?;
                 let is_nil_class = matches!(&ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n).is_some_and(WellKnownClass::is_nil_class));
                 if !is_nil_class {
@@ -3413,7 +3459,10 @@ impl TypeChecker {
         arg_types: &[InferredType],
         hierarchy: &ClassHierarchy,
     ) -> Option<InferredType> {
-        if !matches!(selector_name, "ifTrue:" | "ifFalse:") {
+        if !matches!(
+            WellKnownSelector::from_name(selector_name),
+            Some(WellKnownSelector::IfTrue | WellKnownSelector::IfFalse)
+        ) {
             return None;
         }
         if WellKnownClass::from_str(class_name) != Some(WellKnownClass::Boolean) {
@@ -3481,8 +3530,8 @@ impl TypeChecker {
     ) -> Vec<InferredType> {
         let mut arg_types = Vec::new();
 
-        match selector_name {
-            "ifTrue:" => {
+        match WellKnownSelector::from_name(selector_name) {
+            Some(WellKnownSelector::IfTrue) => {
                 // Single argument: narrow in the true branch
                 if let Some(arg) = arguments.first() {
                     let ty = self.infer_block_with_narrowing(
@@ -3496,7 +3545,7 @@ impl TypeChecker {
                     arg_types.push(ty);
                 }
             }
-            "ifFalse:" => {
+            Some(WellKnownSelector::IfFalse) => {
                 // Single argument: narrow in the false branch (complement)
                 if let Some(arg) = arguments.first() {
                     if let Some(ref false_ty) = info.false_type {
@@ -3558,7 +3607,7 @@ impl TypeChecker {
                     }
                 }
             }
-            "ifTrue:ifFalse:" => {
+            Some(WellKnownSelector::IfTrueIfFalse) => {
                 // Two arguments: true block then false block
                 if let Some(true_arg) = arguments.first() {
                     let ty = self.infer_block_with_narrowing(
@@ -3783,7 +3832,10 @@ impl TypeChecker {
         // with `Boolean`, since the generic `Known`-only fast path below is
         // skipped for a `Union` receiver. Mirrors the zero-arg `Block(R)`
         // handling in the `Known`-receiver path further down.
-        if matches!(selector_name, "ifTrue:" | "ifFalse:") {
+        if matches!(
+            WellKnownSelector::from_name(selector_name),
+            Some(WellKnownSelector::IfTrue | WellKnownSelector::IfFalse)
+        ) {
             if let InferredType::Union { .. } = receiver_ty {
                 return arguments
                     .iter()
@@ -4606,17 +4658,16 @@ impl TypeChecker {
         // variable accordingly.
         let Expression::MessageSend {
             receiver,
-            selector: MessageSelector::Keyword(parts),
+            selector: selector @ MessageSelector::Keyword(_),
             arguments,
             ..
         } = expr
         else {
             return;
         };
-        let is_if_true = parts.len() == 1 && parts[0].keyword == "ifTrue:";
-        let is_if_false = parts.len() == 1 && parts[0].keyword == "ifFalse:";
-        let is_if_true_if_false =
-            parts.len() == 2 && parts[0].keyword == "ifTrue:" && parts[1].keyword == "ifFalse:";
+        let is_if_true = selector.well_known() == Some(WellKnownSelector::IfTrue);
+        let is_if_false = selector.well_known() == Some(WellKnownSelector::IfFalse);
+        let is_if_true_if_false = selector.well_known() == Some(WellKnownSelector::IfTrueIfFalse);
         if !(is_if_true || is_if_false || is_if_true_if_false) {
             return;
         }
@@ -5168,17 +5219,4 @@ impl TypeChecker {
 /// also use, to keep this behaviour consistent everywhere (BT-1880).
 fn is_class_protocol_selector(selector: &str) -> bool {
     crate::ffi_receiver::is_class_protocol_selector(selector)
-}
-
-/// Returns `true` for the equality / identity comparison binary operators —
-/// the universal value/identity comparisons every object (including a class
-/// object) supports via `Object` / `ProtoObject`.
-///
-/// These mirror the equality operators in the parser's binding-power table
-/// (`==`, `/=`, `=:=`, `=/=` at precedence 10). They are the same comparison
-/// forms `x class =:= Foo` narrowing recognises
-/// (`narrowing/rules/class_eq.rs`). All other binary selectors are NOT
-/// comparisons and must fall through to normal class-side / tower lookup.
-fn is_equality_comparison_op(op: &str) -> bool {
-    matches!(op, "==" | "=:=" | "/=" | "=/=")
 }
