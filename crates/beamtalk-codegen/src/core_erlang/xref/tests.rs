@@ -15,7 +15,12 @@
 
 use super::*;
 use beamtalk_core::semantic_analysis::{DynamicReason, InferredType, TypeProvenance};
+use beamtalk_core::source_analysis::Span;
 use ecow::EcoString;
+
+fn s() -> Span {
+    Span::new(0, 0)
+}
 
 fn known(class_name: &str, provenance: TypeProvenance) -> InferredType {
     InferredType::Known {

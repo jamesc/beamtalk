@@ -108,6 +108,8 @@
 mod actor_codegen;
 mod block_analysis;
 mod class_builder_source;
+mod class_meta;
+mod class_registry;
 mod control_flow;
 mod dispatch_codegen;
 mod driver;
@@ -132,8 +134,10 @@ mod threaded_expr;
 mod threaded_ir;
 mod threading_analysis;
 mod util;
+mod value_accessors;
 mod value_type_codegen;
 mod variable_context;
+mod xref;
 
 // Re-export utility functions for IDE queries
 pub use beamtalk_cerl_doc::escape::{escape_atom_chars, escape_erlang_string};
