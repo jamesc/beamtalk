@@ -1362,7 +1362,14 @@ dev_runtime_test_() ->
             {"single-colon keyword-selector prefix is not annotation position",
                 fun single_colon_not_annotation_position/0},
             {"collect_all_methods dedups an overridden inherited selector",
-                fun collect_all_methods_dedups_override/0}
+                fun collect_all_methods_dedups_override/0},
+            {"inherited-methods op returns only non-local methods, attributed to their class",
+                fun inherited_methods_excludes_local_attributes_defining_class/0},
+            {"inherited-methods op excludes a locally-overridden selector entirely",
+                fun inherited_methods_excludes_shadowed_override/0},
+            {"inherited-methods op on a root class (no superclass) returns nothing",
+                fun inherited_methods_root_class_empty/0},
+            {"inherited-methods ws op end-to-end via handle/4", fun inherited_methods_op_handle/0}
         ]
     end}.
 
@@ -1379,6 +1386,48 @@ collect_all_methods_dedups_override() ->
     %% Sanity: non-overridden local and inherited methods are still present.
     ?assert(lists:member('render', Result)),
     ?assert(lists:member('next', Result)).
+
+inherited_methods_excludes_local_attributes_defining_class() ->
+    %% BT-3478: WidgetDev's own methods (render/resize/next/inheritedGreet
+    %% instance-side, create class-side) must not appear — only WidgetDevBase's
+    %% never-shadowed baseOnly/baseClassOnly, each carrying its defining class.
+    Result = beamtalk_repl_ops_dev:list_inherited_methods_for_ws(<<"WidgetDev">>),
+    Names = [maps:get(<<"name">>, M) || M <- Result],
+    ?assertEqual([<<"baseClassOnly">>, <<"baseOnly">>], lists:sort(Names)),
+    lists:foreach(
+        fun(Local) -> ?assertNot(lists:member(Local, Names)) end,
+        [<<"render">>, <<"resize">>, <<"next">>, <<"inheritedGreet">>, <<"create">>]
+    ),
+    [InstanceRow] = [M || M <- Result, maps:get(<<"name">>, M) =:= <<"baseOnly">>],
+    ?assertEqual(<<"instance">>, maps:get(<<"side">>, InstanceRow)),
+    ?assertEqual(<<"WidgetDevBase">>, maps:get(<<"defining_class">>, InstanceRow)),
+    [ClassRow] = [M || M <- Result, maps:get(<<"name">>, M) =:= <<"baseClassOnly">>],
+    ?assertEqual(<<"class">>, maps:get(<<"side">>, ClassRow)),
+    ?assertEqual(<<"WidgetDevBase">>, maps:get(<<"defining_class">>, ClassRow)).
+
+inherited_methods_excludes_shadowed_override() ->
+    %% BT-3087-style regression, for the new op: WidgetDev overrides
+    %% WidgetDevBase's inheritedGreet, so it is local now, not inherited —
+    %% it must not appear in the inherited-methods result at all (neither
+    %% attributed to WidgetDev nor, incorrectly, to WidgetDevBase).
+    Result = beamtalk_repl_ops_dev:list_inherited_methods_for_ws(<<"WidgetDev">>),
+    Names = [maps:get(<<"name">>, M) || M <- Result],
+    ?assertNot(lists:member(<<"inheritedGreet">>, Names)).
+
+inherited_methods_root_class_empty() ->
+    %% WidgetDevBase has no superclass — nothing to inherit.
+    ?assertEqual([], beamtalk_repl_ops_dev:list_inherited_methods_for_ws(<<"WidgetDevBase">>)).
+
+inherited_methods_op_handle() ->
+    Msg = make_msg(<<"inherited-methods">>, <<"im-1">>, undefined),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"inherited-methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+    Methods = maps:get(<<"methods">>, Decoded),
+    Names = [maps:get(<<"name">>, M) || M <- Methods],
+    ?assertEqual([<<"baseClassOnly">>, <<"baseOnly">>], lists:sort(Names)).
 
 context_completion_expression_empty_prefix() ->
     %% "WidgetDev create " — resolved instance receiver with empty prefix returns
@@ -1494,7 +1543,15 @@ setup_dev_runtime() ->
         module => 'bt@test@widget_dev_base',
         superclass => none,
         instance_methods => #{
-            'inheritedGreet' => #{block => fun(_, _) -> ok end, arity => 0}
+            'inheritedGreet' => #{block => fun(_, _) -> ok end, arity => 0},
+            %% BT-3478: a genuinely-inherited (never shadowed) instance
+            %% method, so `list_inherited_methods_for_ws('WidgetDev')` has
+            %% something real to attribute back to WidgetDevBase.
+            'baseOnly' => #{block => fun(_, _) -> ok end, arity => 0}
+        },
+        class_methods => #{
+            %% BT-3478: same, on the class side.
+            'baseClassOnly' => #{block => fun(_, _) -> ok end, arity => 0}
         }
     }),
     %% Concrete class with instance + class methods, fields, and a doc string.

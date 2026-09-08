@@ -76,6 +76,17 @@ export interface MethodInfo {
   doc?: string;
 }
 
+/**
+ * An inherited (non-local) method, as returned by the `inherited-methods` op
+ * (BT-3478). Same shape as `MethodInfo` plus `defining_class` — the ancestor
+ * class that actually declares the method, for the sidebar's "Inherited"
+ * groups to attribute each entry (a label, not a tree level — the groups
+ * stay flat, matching the local method groups' depth).
+ */
+export interface InheritedMethodInfo extends MethodInfo {
+  definingClass: string;
+}
+
 export interface StateVarInfo {
   name: string;
   /** BT-3439: see `MethodInfo.line` — same real-vs-fallback story, but for
@@ -395,6 +406,35 @@ export class WorkspaceClient {
       })),
       stateVars: stateVarsRaw.map((v) => ({ name: v.name, line: v.line ?? undefined })),
     };
+  }
+
+  /**
+   * List inherited (non-local) instance and class-side methods for a loaded
+   * class, each attributed to its defining class (BT-3478). Called only when
+   * the sidebar's "Inherited" group is expanded — kept off the eager
+   * `methods()` fetch every class item already pays on first expand.
+   */
+  async inheritedMethods(className: string): Promise<InheritedMethodInfo[]> {
+    const resp = (await this._request({ op: "inherited-methods", class: className })) as {
+      methods?: Array<{
+        name: string;
+        selector: string;
+        side: "instance" | "class";
+        line?: number | null;
+        source_status?: "indexed" | "synthetic" | "unindexed_runtime_fun";
+        signature?: string | null;
+        doc?: string | null;
+        defining_class: string;
+      }>;
+    };
+    const methodsRaw = Array.isArray(resp.methods) ? resp.methods : [];
+    return methodsRaw.map((m) => ({
+      ...m,
+      line: m.line ?? undefined,
+      signature: m.signature ?? undefined,
+      doc: m.doc ?? undefined,
+      definingClass: m.defining_class,
+    }));
   }
 
   /** List all active sessions in the workspace. */
