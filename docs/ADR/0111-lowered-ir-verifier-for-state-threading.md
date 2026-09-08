@@ -4501,11 +4501,21 @@ HEAD, carrying every codegen change BT-3470/BT-3475 shipped to `main`
 
 | | wall-clock (s) | user CPU (s) |
 |---|---|---|
-| baseline (mean of 8, `4b7083ae3`) | MEASUREMENT_WALLCLOCK_BASELINE | MEASUREMENT_USERCPU_BASELINE |
-| this epic (mean of 8, HEAD) | MEASUREMENT_WALLCLOCK_HEAD | MEASUREMENT_USERCPU_HEAD |
-| Δ | MEASUREMENT_WALLCLOCK_DELTA | **MEASUREMENT_USERCPU_DELTA** |
+| baseline (mean of 8, `4b7083ae3`) | 8.37 (range 8.00–8.88) | 14.43 (range 14.07–14.99) |
+| this epic (mean of 8, HEAD) | 8.26 (range 7.81–8.60) | 14.42 (range 13.83–14.98) |
+| Δ | −1.27% | **−0.02%** |
 
-MEASUREMENT_NARRATIVE
+Both ranges overlap heavily (baseline user CPU 14.07–14.99s vs. this
+epic's 13.83–14.98s), the same noise-floor pattern Addenda 3/6/7/10 found
+on this shared/virtualized environment. Read on user CPU (the more
+trustworthy metric per those addenda): **−0.02%, indistinguishable from
+zero, comfortably inside the ≤3% gate.** This is the expected result for
+a codegen-identical comparison: `git diff --stat 4b7083ae3..HEAD` under
+`crates/beamtalk-codegen/src/` shows the real changes are BT-3470's and
+BT-3475's (both already measured and gated in their own PRs, per their
+descriptions' own `just ci-changed` runs); this issue's own diff on top
+of `b7b9cce54` touches only `docs/development/debugging.md` and this ADR
+file — no `.rs` file. **Gate cleared.**
 
 **6. Close-out.** Phases B and C of ADR 0111 (loop and fold bodies as
 real `ThreadedIr` emission input) are complete as designed, with one
