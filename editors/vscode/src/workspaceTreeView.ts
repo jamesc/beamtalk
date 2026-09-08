@@ -29,6 +29,19 @@ import type {
 /** Every class origin the Workspace Explorer can filter by (BT-2552 badges). */
 export const ALL_CLASS_ORIGINS: readonly ClassOrigin[] = ["project", "dependency", "stdlib"];
 
+/**
+ * True for a `source_status` that the backend documents as having no
+ * openable source at all — `synthetic` (a compiler-generated accessor) or
+ * `unindexed_runtime_fun` (a native/runtime-only method, e.g. one injected
+ * for every `Actor subclass:` to support supervision — see
+ * beamtalk_repl_ops_browse.erl's own "no openable source" doc comment).
+ * Neither can be hovered or navigated to via source-text search: there is
+ * no declaration anywhere to find.
+ */
+function hasNoOpenableSource(status: MethodInfo["source_status"]): boolean {
+  return status === "synthetic" || status === "unindexed_runtime_fun";
+}
+
 // ─── Node Types ───────────────────────────────────────────────────────────────
 
 export interface ConnectedRootNode {
@@ -513,14 +526,18 @@ export class WorkspaceTreeDataProvider
       return item;
     }
     if (element.kind === "method-item") {
-      // BT-3444: a `synthetic` method has no declaration anywhere in
+      // BT-3444: a `synthetic` method (a compiler-generated accessor) or an
+      // `unindexed_runtime_fun` one (a native/runtime-only method the
+      // backend explicitly documents as having "no openable source" —
+      // beamtalk_repl_ops_browse.erl) has no declaration anywhere in
       // source, so the LSP-hover / doc-comment lookups below would only
       // ever fail (there is nothing at any position to hover over or read
       // a `///` comment from) — go straight to the wire-supplied
-      // signature/doc (BT-2735's synthetic-only resolution) instead of
-      // paying for two guaranteed-empty lookups.
-      if (element.method.source_status === "synthetic") {
-        item.tooltip = this._syntheticMethodTooltip(element.method);
+      // signature/doc (BT-2735's synthetic-only resolution — always empty
+      // for `unindexed_runtime_fun`, hence the fallback wording below)
+      // instead of paying for two guaranteed-empty lookups.
+      if (hasNoOpenableSource(element.method.source_status)) {
+        item.tooltip = this._noSourceMethodTooltip(element.method);
         return item;
       }
       item.tooltip =
@@ -645,16 +662,20 @@ export class WorkspaceTreeDataProvider
   }
 
   /**
-   * BT-3444: tooltip for a `synthetic` method (a compiler-generated row with
-   * no user-written source anywhere). Built entirely from the `methods` ws
-   * op's wire-supplied `signature`/`doc` (resolved server-side for
-   * `synthetic` rows only, BT-2735) — never a file read or LSP round trip,
-   * since there is no declaration in source to read one from.
+   * BT-3444: tooltip for a method with no openable source — `synthetic` (a
+   * compiler-generated accessor) or `unindexed_runtime_fun` (a
+   * native/runtime-only method). Built entirely from the `methods` ws op's
+   * wire-supplied `signature`/`doc` (resolved server-side for `synthetic`
+   * rows only, BT-2735 — always absent for `unindexed_runtime_fun`) — never
+   * a file read or LSP round trip, since there is no declaration in source
+   * to read one from.
    */
-  private _syntheticMethodTooltip(method: MethodInfo): vscode.MarkdownString {
+  private _noSourceMethodTooltip(method: MethodInfo): vscode.MarkdownString {
     const md = new vscode.MarkdownString(`**${method.signature ?? method.selector}**`);
+    const reason =
+      method.source_status === "synthetic" ? "compiler-generated" : "no source available";
     md.appendMarkdown(
-      `\n\n_${method.side === "instance" ? "instance-side" : "class-side"} · compiler-generated, no source_`
+      `\n\n_${method.side === "instance" ? "instance-side" : "class-side"} · ${reason}_`
     );
     if (method.doc) {
       md.appendMarkdown(`\n\n${method.doc}`);
@@ -904,17 +925,28 @@ export class WorkspaceTreeDataProvider
   private _methodItem(node: MethodItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.method.selector, vscode.TreeItemCollapsibleState.None);
     // BT-3444: a `synthetic` method (e.g. a `Value subclass:`'s
-    // compiler-generated field accessor) has no user-written declaration
-    // anywhere in the class's source file, unlike every other row here —
-    // badge it visibly distinct (gear icon + muted description) and never
-    // wire up "Go to Definition", which would otherwise fail to find the
-    // selector in source and surface a "not found" message (BT-3439's
-    // navigateToMethod). Mirrors the LiveView IDE method list's `derived`
-    // badge for the same `source_status = synthetic` fact (BT-2714).
+    // compiler-generated field accessor) or an `unindexed_runtime_fun` one
+    // (a native/runtime-only method — e.g. HTTPClient class>>supervisionSpec,
+    // injected for every Actor subclass to support supervision, with no
+    // corresponding text anywhere in HTTPClient.bt) has no user-written
+    // declaration anywhere in the class's source file, unlike every other
+    // row here — badge it visibly distinct (gear icon + muted description)
+    // and never wire up "Go to Definition", which would otherwise fail to
+    // find the selector in source and surface a "not found" message
+    // (BT-3439's navigateToMethod) — previously only `synthetic` got this
+    // treatment, so an `unindexed_runtime_fun` row looked like a normal,
+    // clickable method that silently did nothing useful. Mirrors the
+    // LiveView IDE method list's `derived` badge for the same fact (BT-2714).
     if (node.method.source_status === "synthetic") {
       item.iconPath = new vscode.ThemeIcon("gear");
       item.description = "compiler-generated";
       item.contextValue = "method-item-synthetic";
+      return item;
+    }
+    if (node.method.source_status === "unindexed_runtime_fun") {
+      item.iconPath = new vscode.ThemeIcon("gear");
+      item.description = "no source available";
+      item.contextValue = "method-item-unindexed";
       return item;
     }
     item.iconPath = new vscode.ThemeIcon("symbol-method");

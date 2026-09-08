@@ -300,4 +300,39 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
       expect((resolved?.tooltip as { value: string }).value).toContain("withBalance:");
     });
   });
+
+  // Reproduces the reported bug: HTTPClient class>>supervisionSpec (a
+  // native method injected for every Actor subclass) has `source_status:
+  // "unindexed_runtime_fun"` — the backend's own doc calls this "no openable
+  // source" — but the sidebar only special-cased `synthetic`, so this row
+  // got a normal "Go to Definition" command that always silently failed to
+  // find anything (HTTPClient.bt has no `supervisionSpec` text at all).
+  describe("unindexed_runtime_fun methods (native/runtime-only, no openable source)", () => {
+    const unindexedNode: MethodItemNode = {
+      kind: "method-item",
+      method: {
+        name: "supervisionSpec",
+        selector: "supervisionSpec",
+        side: "class",
+        source_status: "unindexed_runtime_fun",
+      },
+      classInfo,
+    };
+
+    it("badges the tree item without a navigable command", () => {
+      const item = provider.getTreeItem(unindexedNode);
+      expect(item.contextValue).toBe("method-item-unindexed");
+      expect(item.command).toBeUndefined();
+      expect((item.iconPath as { id: string }).id).toBe("gear");
+    });
+
+    it("never attempts a file read or LSP round trip for its tooltip", async () => {
+      const resolved = await provider.resolveTreeItem(blankItem(), unindexedNode, noToken);
+      const tooltip = (resolved?.tooltip as { value: string }).value;
+      expect(tooltip).toContain("supervisionSpec");
+      expect(tooltip).toContain("no source available");
+      expect(openTextDocumentMock).not.toHaveBeenCalled();
+      expect(executeCommandMock).not.toHaveBeenCalled();
+    });
+  });
 });
