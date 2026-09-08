@@ -145,12 +145,12 @@ impl Drop for LoopContextGuard<'_, '_> {
 // ─── render: full-fidelity ThreadedIr -> Document (BT-3144) ────────────────
 
 /// Renders `ir` to a [`Document`], full-fidelity for `Bind`, `Return`,
-/// `TupleAccUnpack`, `NlrCatch`, and `Threaded` under
-/// [`ThreadingMode::DirectParams`]/[`ThreadingMode::Hybrid`] — real
-/// `letrec`/try-catch scaffolding, not the pre-BT-3144 skeleton. See the
-/// module docs §Status for exactly which shapes are full-fidelity today and
-/// why (`TupleAcc`/`StateAcc` extend later, driven by a real migration's
-/// needs — issue body point 3).
+/// `TupleAccUnpack`, `NlrCatch`, and `Threaded` under every
+/// [`ThreadingMode`] — real `letrec`/try-catch scaffolding for
+/// `DirectParams`/`Hybrid`, and (ADR 0111 Addendum 15's Foldl migration) a
+/// real merged unpack+body+epilogue sequence for `TupleAcc`/`StateAcc`, not
+/// the pre-BT-3144 skeleton. See the module docs §Status for the full
+/// per-shape history.
 ///
 /// An [`ThreadedStmt::NlrCatch`] node has no `body` field of its own by
 /// design (module docs on the variant): it models the true
@@ -243,9 +243,16 @@ pub(in crate::core_erlang) fn render(
 
 /// Full-fidelity rendering of a [`ThreadedStmt::Threaded`] node: real
 /// `letrec` scaffolding for [`ThreadingMode::DirectParams`]/
-/// [`ThreadingMode::Hybrid`] (the while-loop family modes this issue's
+/// [`ThreadingMode::Hybrid`] (the while-loop family modes BT-3144's
 /// dual-run harness proves parity for — see `render_tests` below);
-/// `TupleAcc`/`StateAcc` still flatten the body (module docs §Status).
+/// `TupleAcc`/`StateAcc` flatten `body` (`render`'s straight-line
+/// concatenation) — ADR 0111 Addendum 15's Foldl migration is what makes
+/// this full-fidelity: the caller (`control_flow::body::generate_foldl_loop_body`)
+/// now merges the fold's own unpack (`TupleAccUnpack`, or a `StateAcc`-map
+/// `Statement` prelude), its per-statement body, and its accumulator
+/// epilogue into ONE `body`, so the flattening here renders the fold's
+/// real `fun (Elem, Acc) -> <unpack> <body> <epilogue>` content, not just
+/// the narrow unpack-only shape this arm originally saw.
 fn render_threaded(
     mode: &ThreadingMode,
     frame: FrameId,

@@ -15,12 +15,14 @@
 //!
 //! `VersionPrefix::Local`, `ThreadingMode::DirectParams`,
 //! `ThreadingMode::Hybrid`, [`LoopCounter`], and `ThreadedStmt::ConditionalLoop`
-//! get their first production constructors from ADR 0111 § Addendum 15's
+//! got their first production constructors from ADR 0111 § Addendum 15's
 //! Letrec migration (`while_loops.rs`/`counted_loops.rs` lowering onto
-//! `ConditionalLoop`) — the Foldl migration (a later issue in the same
-//! addendum) is what still leaves `ThreadingMode::TupleAcc`'s real
-//! `fun (Elem, Acc) -> ...` shape and the `Foldl*` accumulator epilogues
-//! render-only.
+//! `ConditionalLoop`); the Foldl migration (the same addendum's next issue)
+//! merges each fold's own per-iteration unpack (`TupleAccUnpack`, or a
+//! `StateAcc`-map `Statement` prelude) and per-statement body into ONE
+//! `Threaded` node (`control_flow::body::generate_foldl_loop_body`),
+//! `verify()`d and rendered once — `ThreadingMode::TupleAcc`/`StateAcc`
+//! are now full-fidelity, not render-only skeletons.
 
 use super::super::NlrBoundary;
 use beamtalk_cerl_doc::Document;
@@ -597,7 +599,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// BT-3133 (ADR 0111 Phase C): the `TupleAcc` mode's per-iteration
     /// positional destructure of a flat `{Gate1, .., GateG, Var1, .., VarN}`
     /// accumulator into fresh per-iteration versions of each threaded local —
-    /// `generate_tuple_unpack_docs`'s `element(idx, source)` chain. `param`
+    /// `generate_foldl_loop_body`'s `element(idx, source)` chain. `param`
     /// is the unversioned fold-lambda parameter the tuple is read from (an
     /// [`AccParam`], never a [`VersionedVar`] — see its doc comment);
     /// `gate_slots` is the number of leading tuple positions this node skips

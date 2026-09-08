@@ -9,12 +9,11 @@
 //!
 //! BT-3459: split out of `control_flow/mod.rs`, no logic changes.
 
-use super::super::threaded_ir::{self, StateAccFallbackReason};
+use super::super::threaded_ir::StateAccFallbackReason;
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::Expression;
-use beamtalk_core::source_analysis::Span;
 
 // ─── ThreadingPlan ────────────────────────────────────────────────────────────
 
@@ -34,8 +33,8 @@ pub(in crate::core_erlang) enum KeyStyle {
 /// state. This is the "per-op declaration" / lowering-time source
 /// [`threaded_ir::VerifyError::EarlyExitGateSlotMismatch`] cross-checks
 /// against the unpack node's own rendering-time `gate_slots` (each call
-/// site's own `index_offset - 1`, passed to
-/// [`ThreadingPlan::generate_tuple_unpack_docs`] unchanged since BT-3133) —
+/// site's own `index_offset - 1`, passed as `generate_foldl_loop_body`'s
+/// `node_gate_slots` parameter) —
 /// see [`threaded_ir::build_tuple_acc_unpack`]'s doc comment for the full
 /// independent-derivation rationale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,7 +104,7 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     /// declared at lowering time from the constructing call site's
     /// [`ListOpKind`] (`0` for plain `Do`; see [`ListOpKind::gate_slots`]).
     /// Only meaningful when `use_tuple_acc` is `true`; independent of each
-    /// unpack call's own `index_offset - 1` (`generate_tuple_unpack_docs`'s
+    /// unpack call's own `index_offset - 1` (`generate_foldl_loop_body`'s
     /// `node_gate_slots`) — see
     /// [`threaded_ir::build_tuple_acc_unpack`]'s doc comment.
     pub tuple_acc_gate_slots: usize,
@@ -343,8 +342,8 @@ impl ThreadingPlan {
     ///
     /// BT-3147: `kind` declares this call site's canonical `TupleAcc` gate-slot
     /// count ([`ListOpKind::gate_slots`]) at construction time — independent
-    /// of whatever `index_offset` the caller later passes to
-    /// [`Self::generate_tuple_unpack_docs`], see that method's doc comment.
+    /// of whatever `index_offset` the caller later passes as
+    /// `generate_foldl_loop_body`'s `node_gate_slots`.
     pub fn new_for_foldl_list_op(
         generator: &mut CoreErlangGenerator,
         body: &beamtalk_core::ast::Block,
@@ -472,7 +471,7 @@ impl ThreadingPlan {
 
         // BT-3147: the mode's canonical gate-slot count, declared here at
         // lowering time from the caller's `ListOpKind` — independent of
-        // whatever `index_offset` a later `generate_tuple_unpack_docs` call
+        // whatever `index_offset` a later `generate_foldl_loop_body` call
         // computes its own `node_gate_slots` from.
         let tuple_acc_gate_slots = tuple_acc_kind.map_or(0, ListOpKind::gate_slots);
 
@@ -1142,64 +1141,12 @@ impl ThreadingPlan {
         docvec!["{", self.current_vars_doc(generator), "}"]
     }
 
-    /// Generates `let V = call 'erlang':'element'(idx, src) in` docs for each
-    /// threaded local, and registers the bindings in the generator scope.
-    ///
-    /// `source_var` — the lambda parameter holding the tuple (e.g. `"StateAcc"` or
-    ///   the `acc_state_var` name for `collect:`/`inject:`).
-    /// `index_offset` — 1-based index of the first threaded var:
-    ///   - 1 for `do:` (whole tuple is the vars)
-    ///   - 2 for `collect:` / `filter:` / `inject:` (slot 1 is `AccList` or `Acc`)
-    ///
-    /// BT-3147: real `ThreadedIr` emission input now — this builds
-    /// [`threaded_ir::build_tuple_acc_unpack`]'s `ThreadedStmt`, `verify()`s
-    /// it, and [`threaded_ir::render`]s it directly; the pre-BT-3147
-    /// hand-rolled `let`-chain loop and the separate verification-only
-    /// fixture it sat alongside are both gone (see `threaded_ir`'s module
-    /// docs §Status). `self.tuple_acc_gate_slots` (declared at
-    /// `ThreadingPlan` construction, from the caller's [`ListOpKind`]) and
-    /// `index_offset - 1` (this call's own, unchanged) are genuinely
-    /// independent sources for [`VerifyError::EarlyExitGateSlotMismatch`]
-    /// to cross-check — no span is available at this call depth
-    /// (`ThreadingPlan` carries none); this is a compiler-internal
-    /// invariant, not user-facing, so `Span::default()` is an acceptable
-    /// diagnostic-location gap here (mirrors `verify`'s own `produces`
-    /// check, which does the same).
-    pub fn generate_tuple_unpack_docs(
-        &self,
-        generator: &mut CoreErlangGenerator,
-        source_var: &str,
-        index_offset: usize,
-    ) -> Document<'static> {
-        let (stmt, targets) = threaded_ir::build_tuple_acc_unpack(
-            source_var,
-            self.tuple_acc_gate_slots,
-            index_offset.saturating_sub(1),
-            &self.threaded_locals,
-            Span::default(),
-        );
-
-        let errors = threaded_ir::verify(std::slice::from_ref(&stmt));
-        generator.report_threaded_ir_verify_errors(
-            &errors,
-            "tuple-acc positional-unpack mode/shape mismatch",
-            Span::default(),
-        );
-
-        for (var_name, target) in self.threaded_locals.iter().zip(&targets) {
-            generator.bind_var(var_name, &target.render_name());
-        }
-
-        let mut ctx = threaded_ir::RenderCtx::new(generator);
-        threaded_ir::render(std::slice::from_ref(&stmt), &mut ctx)
-    }
-
     /// Returns element-extraction code after foldl completes for tuple mode as a `Document`.
     ///
     /// Generates `let V = call 'erlang':'element'(idx, acc) in ...` using the
     /// outer-scope binding names (from `lookup_var`) as targets.
     ///
-    /// `index_offset` — same as in `generate_tuple_unpack_docs`.
+    /// `index_offset` — same convention as `generate_foldl_loop_body`'s `acc_param_name`/`node_gate_slots`.
     pub fn generate_tuple_extract_suffix_doc(
         &self,
         final_acc_var: &str,

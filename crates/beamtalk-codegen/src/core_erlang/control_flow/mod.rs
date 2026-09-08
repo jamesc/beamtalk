@@ -53,6 +53,11 @@ mod while_loops;
 // visible-to-descendants) `use` is enough.
 use super::threaded_ir::StateAccFallbackReason;
 use counted_loops::class_var_arg_doc;
-use list_ops::BodyKind;
 use plan::ListOpKind;
+// ADR 0111 Addendum 15 (Foldl migration): `BodyKind` is also consumed by
+// `value_type_codegen.rs`'s `generate_value_type_do_open`, which now calls
+// `CoreErlangGenerator::generate_foldl_loop_body` directly (the deleted
+// `generate_list_do_body_with_threading` compat shim's inlined replacement)
+// — `pub(super)`, matching `ThreadingPlan`'s own cross-module visibility.
+pub(super) use list_ops::BodyKind;
 pub(super) use plan::{ThreadingPlan, condition_has_state_effects};

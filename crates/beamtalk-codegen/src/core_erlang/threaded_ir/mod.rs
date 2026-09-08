@@ -17,16 +17,15 @@
 //! Lowered through this IR: conditional branch arms (`ifTrue:`/`ifFalse:`/
 //! `ifTrue:ifFalse:`/`ifNotNil:`/`match:`), `on:do:`/`ensure:` arms, Actor
 //! and class-method bodies (including NLR relay via `NlrCatch`), Tier 2
-//! stateful-block bodies, the list-op/dict-op per-iteration
-//! tuple-accumulator unpack ([`build_tuple_acc_unpack`]), and
-//! expression-position state effects via [`ThreadedValue`] preludes (ADR
-//! 0118).
-//!
-//! **Not yet lowered:** the loop skeleton and body-statement sequence for
-//! while/counted loops, and the fold accumulator for list-op/dict-op bodies
-//! stay on the pre-ADR-0111 AST-directed path. See ADR 0111 § Addendum 15
-//! for the design and the `#[allow(dead_code)]` loop-migration shapes this
-//! keeps ready (`ir` module docs).
+//! stateful-block bodies, expression-position state effects via
+//! [`ThreadedValue`] preludes (ADR 0118), while/counted (`Letrec`) loop
+//! bodies as a single `ThreadedStmt::ConditionalLoop` node
+//! (`control_flow::body::generate_letrec_body_ir`, ADR 0111 § Addendum 15),
+//! and list-op/dict-op fold (`Foldl*`) bodies as a single `Threaded` node
+//! merging the per-iteration unpack ([`build_tuple_acc_unpack`], or a
+//! `StateAcc`-map prelude), the per-statement body, and the accumulator
+//! epilogue (`control_flow::body::generate_foldl_loop_body`, the same
+//! addendum's next issue).
 //!
 //! ## Module layout
 //!
@@ -70,7 +69,7 @@ mod ir;
 mod verify;
 
 pub(super) use build::{
-    build_tuple_acc_unpack, construct_and_verify_class_var_bind,
+    backfill_opaque_version_gaps, build_tuple_acc_unpack, construct_and_verify_class_var_bind,
     verify_body_with_opaque_version_gaps, verify_simple_bind,
 };
 pub(super) use emit::{RenderCtx, render, render_value};

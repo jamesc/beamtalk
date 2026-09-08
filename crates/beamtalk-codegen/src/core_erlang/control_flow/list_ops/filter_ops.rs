@@ -143,15 +143,15 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
-
-            let (body_doc, _) = self.generate_threaded_loop_body(
+            let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
                 &plan,
                 &BodyKind::FoldlFilter {
                     item_var: item_var.clone(),
                     negate,
                 },
+                &acc_state_var,
+                1,
             )?;
             docs.push(body_doc);
             self.pop_scope();
@@ -255,7 +255,7 @@ impl CoreErlangGenerator {
             "let AccList = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -263,15 +263,15 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(
+        let (body_doc, _) = self.generate_foldl_loop_body(
             body,
             &plan,
             &BodyKind::FoldlFilter {
                 item_var: item_var.clone(),
                 negate,
             },
+            &acc_state_var,
+            1,
         )?;
         docs.push(body_doc);
         self.pop_scope();

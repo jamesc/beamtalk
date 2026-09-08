@@ -29,7 +29,6 @@ mod transform_ops;
 mod tests;
 
 use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
-use super::plan::ThreadingPlan;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -45,7 +44,7 @@ use beamtalk_core::ast::{Block, Expression};
 /// this enum's own dispatch — leaving every remaining variant a `Foldl*`
 /// shape by construction, not a naming accident.
 #[allow(clippy::enum_variant_names)]
-pub(super) enum BodyKind {
+pub(in crate::core_erlang) enum BodyKind {
     /// Foldl `do:` body: final accumulator is `StateAcc{N}`.
     FoldlDo,
 
@@ -375,29 +374,5 @@ impl CoreErlangGenerator {
             ")"
         ];
         (binding, out_var)
-    }
-
-    // ── Compat shim ───────────────────────────────────────────────────────────
-
-    /// Generates the foldl lambda body for a `do:` loop with state threading.
-    ///
-    /// This is a forwarding shim used by `value_type_codegen::generate_value_type_do_open`,
-    /// which manages its own pack/extract prefix/suffix independently.
-    pub(in crate::core_erlang) fn generate_list_do_body_with_threading(
-        &mut self,
-        body: &Block,
-        item_var: &str,
-    ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new(self, body, None);
-        self.emit_loop_convention_diagnostic(&plan, body.span);
-        self.push_scope();
-        if let Some(param) = body.parameters.first() {
-            self.bind_var(&param.name, item_var);
-        }
-        let mut docs = plan.generate_unpack_at_iteration_start(self);
-        let (body_doc, _) = self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
-        docs.push(body_doc);
-        self.pop_scope();
-        Ok(Document::Vec(docs))
     }
 }

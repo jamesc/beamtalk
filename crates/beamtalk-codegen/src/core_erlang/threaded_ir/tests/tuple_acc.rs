@@ -9,14 +9,14 @@
 use super::*;
 
 /// Test-facing convenience: builds the same fixture [`build_tuple_acc_unpack`]
-/// does (always in genuine `TupleAcc` mode — production only ever calls
-/// `generate_tuple_unpack_docs` from inside `if plan.use_tuple_acc { .. }`,
-/// so a `StateAcc`-mode unpack fixture is a hand-built-IR-only scenario, see
+/// does (always in genuine `TupleAcc` mode — production only ever builds this
+/// unpack from inside `if plan.use_tuple_acc { .. }`, so a `StateAcc`-mode
+/// unpack fixture is a hand-built-IR-only scenario, see
 /// `verify_tuple_acc_unpack_mode_mismatch_fires_outside_any_tuple_acc_context`
 /// / the dedicated `StateAcc` variant below) and verifies it in one call.
 /// Test-only (`#[cfg(test)]`): production calls
-/// [`build_tuple_acc_unpack`] + [`verify`] directly (`generate_tuple_unpack_docs`,
-/// `control_flow/mod.rs`) since it also needs the built `ThreadedStmt` for
+/// [`build_tuple_acc_unpack`] + [`verify`] directly (`generate_foldl_loop_body`,
+/// `control_flow/body.rs`) since it also needs the built `ThreadedStmt` for
 /// [`render`], which this convenience wrapper discards.
 fn verify_tuple_acc_unpack_invariant(
     mode_gate_slots: usize,
@@ -88,7 +88,7 @@ fn verify_nested_list_op_stateacc_compat(
 #[test]
 fn verify_tuple_acc_unpack_invariant_silent_under_tuple_acc_mode() {
     // The expected, common case: TupleAcc mode with a matching gate_slots
-    // unpack — this is what every real `generate_tuple_unpack_docs` call
+    // unpack — this is what every real `generate_foldl_loop_body` call
     // site produces (`mode_gate_slots`/`node_gate_slots` agree).
     let errors = verify_tuple_acc_unpack_invariant(
         0, // ListOpKind::Do's declared gate_slots
@@ -102,8 +102,8 @@ fn verify_tuple_acc_unpack_invariant_silent_under_tuple_acc_mode() {
 #[test]
 fn verify_tuple_acc_unpack_mode_mismatch_fires_in_stateacc_fallback_context() {
     // A TupleAccUnpack node hand-placed inside a StateAcc-fallback body
-    // (never legitimate in production — `generate_tuple_unpack_docs` is
-    // only ever called from inside `if plan.use_tuple_acc { .. }` — but a
+    // (never legitimate in production — this unpack is only ever built
+    // from inside `if plan.use_tuple_acc { .. }` — but a
     // regression pin for the invariant `TupleAccUnpackModeMismatch`
     // exists to catch: `verify_tuple_acc_unpack_invariant` dropped its old
     // `use_tuple_acc`/`fallback_reason` params since production has no
