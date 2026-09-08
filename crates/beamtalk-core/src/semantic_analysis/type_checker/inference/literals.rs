@@ -13,7 +13,6 @@
 use crate::ast::{Expression, Literal, MapPair, StringSegment, WellKnownSelector};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType, TypeChecker, TypeEnv};
-use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::{EcoString, eco_format};
 
 impl TypeChecker {
@@ -177,20 +176,10 @@ impl TypeChecker {
             // BT-2623: A cons tail must be a proper list. A known
             // non-`List` tail (e.g. `Array`, tuple-backed) builds an
             // improper list at runtime; flag it instead of silently
-            // widening the element type to `Dynamic`.
+            // widening the element type to `Dynamic`. BT-3469: the fact
+            // (this pure check) stays here; `validation.rs` renders it.
             if let Some(tail_display) = Self::improper_cons_tail_display(&tail_ty) {
-                self.diagnostics.push(
-                            Diagnostic::warning(
-                                format!(
-                                    "Cons tail of a list literal is {tail_display}, not a List — this builds an improper list"
-                                ),
-                                t.span(),
-                            )
-                            .with_hint(format!(
-                                "A `[head | tail]` tail must be a List; {tail_display} would form an improper list at runtime"
-                            ))
-                            .with_category(DiagnosticCategory::Type),
-                        );
+                self.emit_improper_cons_tail(&tail_display, t.span());
             }
             element_types.push(Self::tail_element_type(&tail_ty));
         }

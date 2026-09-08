@@ -12,8 +12,11 @@
 use crate::ast::{Expression, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::type_checker::type_resolver;
+use crate::semantic_analysis::type_checker::types::{
+    AssignmentTypeMismatch, CrossObjectFieldMutation,
+};
 use crate::semantic_analysis::type_checker::{EnvKey, InferredType, TypeChecker, TypeEnv};
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use crate::source_analysis::Span;
 use ecow::EcoString;
 
 impl TypeChecker {
@@ -73,6 +76,45 @@ impl TypeChecker {
         None
     }
 
+    /// Detect a declared-vs-inferred type mismatch on an assignment's type
+    /// annotation (BT-3469) — pure data, no diagnostic construction; see
+    /// `validation.rs::emit_assignment_type_mismatch` for the rendering.
+    ///
+    /// Returns `None` when the RHS is `Dynamic` (the primary use case for
+    /// annotations — accepted silently) or `Never` (a diverging expression
+    /// like `self error:`, compatible with any declared type as the bottom
+    /// of the type lattice), or when either type is assignable to the
+    /// other — including the narrowing-assignment escape hatch (declared
+    /// assignable to inferred, e.g. `Dictionary := <Object>`, the
+    /// type-erasure pattern the annotation exists for).
+    fn detect_assignment_type_mismatch(
+        inferred_ty: &InferredType,
+        declared: &InferredType,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<AssignmentTypeMismatch> {
+        if matches!(inferred_ty, InferredType::Dynamic(_) | InferredType::Never) {
+            return None;
+        }
+        let inferred_name = inferred_ty.display_name();
+        let declared_name = declared.display_name();
+        let rhs_assignable_to_declared =
+            Self::is_assignable_to(&inferred_name, &declared_name, hierarchy);
+        let declared_assignable_to_rhs =
+            Self::is_assignable_to(&declared_name, &inferred_name, hierarchy);
+        if rhs_assignable_to_declared || declared_assignable_to_rhs {
+            return None;
+        }
+        // BT-2066: use source-sympathetic spelling (`Nil`) for user-facing messages.
+        Some(AssignmentTypeMismatch {
+            declared_display: declared
+                .display_for_diagnostic()
+                .unwrap_or_else(|| declared_name.clone()),
+            inferred_display: inferred_ty
+                .display_for_diagnostic()
+                .unwrap_or_else(|| inferred_name.clone()),
+        })
+    }
+
     /// Infer an assignment `target := value` (optionally `target :: Type :=
     /// value`) — the `Expression::Assignment` arm of `infer_expr`'s dispatch.
     ///
@@ -127,41 +169,13 @@ impl TypeChecker {
                 &type_resolver::SubstitutionMap::new(),
                 self.protocol_registry.as_ref(),
             );
-            // Check for type mismatch: known RHS that doesn't match declared type.
-            // Dynamic RHS (the primary use case for annotations) is accepted silently.
-            // Never RHS (diverging expressions like `self error:`) is compatible
-            // with any declared type (bottom of the type lattice).
-            // A narrowing assignment (declared type is a subtype of RHS type, e.g.
-            // `Dictionary := <Object>`) is the type-erasure escape hatch the annotation
-            // is designed for — the user is asserting the runtime type is more specific.
-            if !matches!(inferred_ty, InferredType::Dynamic(_) | InferredType::Never) {
-                let inferred_name = inferred_ty.display_name();
-                let declared_name = declared.display_name();
-                let rhs_assignable_to_declared =
-                    Self::is_assignable_to(&inferred_name, &declared_name, hierarchy);
-                let declared_assignable_to_rhs =
-                    Self::is_assignable_to(&declared_name, &inferred_name, hierarchy);
-                if !rhs_assignable_to_declared && !declared_assignable_to_rhs {
-                    // BT-2066: Use source-sympathetic spelling (`Nil`) for user-facing messages.
-                    let inferred_display = inferred_ty
-                        .display_for_diagnostic()
-                        .unwrap_or_else(|| inferred_name.clone());
-                    let declared_display = declared
-                        .display_for_diagnostic()
-                        .unwrap_or_else(|| declared_name.clone());
-                    self.diagnostics.push(
-                                Diagnostic::warning(
-                                    format!(
-                                        "Type mismatch: declared as {declared_display}, got {inferred_display}"
-                                    ),
-                                    span,
-                                )
-                                .with_category(DiagnosticCategory::Type)
-                                .with_hint(format!(
-                                    "The right-hand side has type {inferred_display} which is not assignable to {declared_display}"
-                                )),
-                            );
-                }
+            // BT-3469: detection (is this RHS type actually incompatible
+            // with the declared annotation?) stays here; rendering the
+            // resulting fact as a diagnostic is `validation.rs`'s job.
+            if let Some(mismatch) =
+                Self::detect_assignment_type_mismatch(&inferred_ty, &declared, hierarchy)
+            {
+                self.emit_assignment_type_mismatch(&mismatch, span);
             }
             declared
         } else {
@@ -198,37 +212,19 @@ impl TypeChecker {
                     env.remove(&EnvKey::self_field(field.name.clone()));
                 } else {
                     // `other.field := value` or `(expr).field := value` —
-                    // objects cannot mutate another object's state.
-                    // Value types are immutable; actors can only mutate their
-                    // own state via `self.x :=`.
-                    // Suggest the functional `withField:` pattern.
-                    let with_sel = {
-                        let mut chars = field.name.chars();
-                        match chars.next() {
-                            None => "with:".to_string(),
-                            Some(first) => {
-                                let cap: String = first.to_uppercase().collect();
-                                format!("with{}{}:", cap, chars.as_str())
-                            }
-                        }
-                    };
+                    // objects cannot mutate another object's state. BT-3469:
+                    // the fact (which receiver/field) is detected here; the
+                    // message (including the `withField:` suggestion text)
+                    // is rendered by `validation.rs`.
                     let recv_name = match receiver.as_ref() {
-                        Expression::Identifier(recv_id) => recv_id.name.as_str(),
-                        _ => "receiver",
+                        Expression::Identifier(recv_id) => recv_id.name.clone(),
+                        _ => EcoString::from("receiver"),
                     };
-                    let field_name = field.name.as_str();
-                    self.diagnostics.push(
-                                Diagnostic::warning(
-                                    format!(
-                                        "Cannot assign to `{recv_name}.{field_name}` — objects cannot mutate another object's state"
-                                    ),
-                                    span,
-                                )
-                                .with_hint(format!(
-                                    "Use `{recv_name} := {recv_name} {with_sel} newValue` to get an updated copy"
-                                ))
-                                .with_category(DiagnosticCategory::Type),
-                            );
+                    let mutation = CrossObjectFieldMutation {
+                        receiver_name: recv_name,
+                        field_name: field.name.clone(),
+                    };
+                    self.emit_cross_object_field_mutation(&mutation, span);
                 }
             }
             _ => {}

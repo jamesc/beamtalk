@@ -556,6 +556,10 @@ impl TypeChecker {
         let declared_type = Self::inferred_type_to_string(&resolved_declared);
         let mut env = TypeEnv::new();
         env.set_local("self", InferredType::known(class.name.name.clone()));
+        // BT-3469 (item 3): documented, without fixing, as the same
+        // validation-calls-back-into-inference cyclic dependency as
+        // `validation.rs::check_state_defaults` — see the comment there,
+        // and BT-3481 for the follow-up.
         let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
 
         let InferredType::Known {
