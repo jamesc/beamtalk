@@ -314,8 +314,7 @@ fn set_param_types_untyped() {
         &mut env,
         &params,
         None,
-        None,
-        &mut std::collections::HashSet::new(),
+        &mut type_resolver::ResolutionContext::new(None, &mut std::collections::HashSet::new()),
     );
     assert_eq!(
         env.get_local("x"),
@@ -334,8 +333,7 @@ fn set_param_types_typed() {
         &mut env,
         &params,
         None,
-        None,
-        &mut std::collections::HashSet::new(),
+        &mut type_resolver::ResolutionContext::new(None, &mut std::collections::HashSet::new()),
     );
     assert_eq!(env.get_local("x"), Some(InferredType::known("Integer")));
 }
@@ -354,8 +352,7 @@ fn set_param_types_mixed() {
         &mut env,
         &params,
         None,
-        None,
-        &mut std::collections::HashSet::new(),
+        &mut type_resolver::ResolutionContext::new(None, &mut std::collections::HashSet::new()),
     );
     assert_eq!(env.get_local("x"), Some(InferredType::known("String")));
     assert_eq!(

@@ -508,6 +508,26 @@ impl TypeChecker {
         }
     }
 
+    /// Borrows `alias_registry` and `referenced_aliases` together as one
+    /// [`type_resolver::ResolutionContext`], so a call site that needs both
+    /// no longer reaches `self.alias_registry.as_ref()` and `&mut
+    /// self.referenced_aliases` (or `self.referenced_aliases.extend`) as two
+    /// separate field accesses.
+    ///
+    /// The two borrows stay disjoint from each other (same trick documented
+    /// on [`Self::set_param_types`]) but this method still takes `&mut
+    /// self` as a whole, so it cannot be called in the same expression as
+    /// another `&mut self`/`&self` reach (e.g. `self.diagnostics.push(...)`
+    /// alongside it) — sequence them as separate statements instead.
+    pub(in crate::semantic_analysis) fn resolution_context(
+        &mut self,
+    ) -> type_resolver::ResolutionContext<'_> {
+        type_resolver::ResolutionContext::new(
+            self.alias_registry.as_ref(),
+            &mut self.referenced_aliases,
+        )
+    }
+
     /// Sets the native type registry for FFI call inference (ADR 0075).
     ///
     /// When set, `Erlang <module> <function>:` calls look up return types
