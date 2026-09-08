@@ -156,7 +156,7 @@ If you see a bare `internal error` or a build failure with no readable cause,
 run with `BEAMTALK_COMPILER=escript` and compare — the two backends are
 expected to produce the same wording for the same malformed input.
 
-### ThreadedIr verifier (ADR 0111, BT-3129-BT-3165, BT-3164, BT-3166-BT-3170)
+### ThreadedIr verifier (ADR 0111, BT-3129-BT-3165, BT-3164, BT-3166-BT-3170, BT-3447)
 
 State threading — actor/instance `State`, class-var `ClassVars`, value-type
 `Self`, loop-local threading, and non-local-return (NLR) relay — used to be
@@ -166,9 +166,12 @@ replaces that with a small mid-level IR (`ThreadedIr`/`ThreadedStmt`) that IS
 the `Document` emission for every construct family this table covers —
 conditionals, exception handling's `on:do:`/`ensure:`, Actor and
 class-method bodies, Tier 2 stateful-block bodies, the list-op/dict-op
-tuple-accumulator unpack, and ADR 0118's expression-position preludes —
-with loops the one exception, still on the pre-ADR-0111 AST-directed path
-(see ADR 0111 Addendum 15) — and a single `verify()` pass per construct/method
+tuple-accumulator unpack, ADR 0118's expression-position preludes, and (as
+of ADR 0111 Addendum 15/16, epic BT-3447) `Letrec` (`whileTrue:`/
+`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`) loop bodies as a single
+`ThreadedStmt::ConditionalLoop` node and `Foldl*` (list-op/dict-op fold)
+bodies as a single merged `Threaded` node — no construct family is left on
+the pre-ADR-0111 AST-directed path — and a single `verify()` pass per construct/method
 that checks it
 before `render()` turns it into the `Document` the caller emits. A
 violation is a `threaded_ir::VerifyError`, reported through the
