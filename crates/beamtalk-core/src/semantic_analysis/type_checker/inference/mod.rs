@@ -16,11 +16,11 @@
 use crate::ast::{Expression, ExpressionStatement, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::type_checker::type_resolver;
+use crate::semantic_analysis::type_checker::types::DynamicInTypedClass;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
     DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv,
 };
-use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 
 mod assignment;
@@ -661,37 +661,51 @@ impl TypeChecker {
             self.type_map.insert(expr.span(), ty.clone());
         }
 
-        // BT-1914: Warn when an expression in a typed class infers as Dynamic.
-        // Only warn for root-cause Dynamic reasons (not DynamicReceiver, which is
-        // propagated from a receiver that already produced its own warning).
-        // Unknown is also skipped — no actionable message. BT-2865:
-        // ExplicitDynamic is skipped too — the author already wrote `Dynamic`
-        // in a type annotation, so "add a type annotation" would be
-        // nonsensical advice for something that already has one.
-        if let InferredType::Dynamic(reason) = ty {
-            if !matches!(
-                reason,
-                DynamicReason::DynamicReceiver
-                    | DynamicReason::DynamicSpec
-                    | DynamicReason::Unknown
-                    | DynamicReason::ExplicitDynamic
-            ) {
-                if let Some(ref class_name) = self.typed_class_context {
-                    if let Some(description) = reason.description() {
-                        self.diagnostics.push(
-                            Diagnostic::warning(
-                                format!(
-                                    "expression inferred as Dynamic in typed class `{class_name}` ({description})"
-                                ),
-                                expr.span(),
-                            )
-                            .with_hint("Add a type annotation or use `@expect type` to suppress if intentional")
-                            .with_category(DiagnosticCategory::Type),
-                        );
-                    }
-                }
-            }
+        // BT-1914 / BT-3469: detecting whether this Dynamic warrants the
+        // "Dynamic in typed class" warning is pure data (see
+        // `detect_dynamic_in_typed_class`); rendering it as a diagnostic is
+        // `validation.rs`'s job.
+        if let Some(fact) =
+            Self::detect_dynamic_in_typed_class(ty, self.typed_class_context.as_ref())
+        {
+            self.emit_dynamic_in_typed_class(&fact, expr.span());
         }
+    }
+
+    /// Detect the BT-1914 "Dynamic in typed class" fact for `ty` (an
+    /// expression's freshly-inferred type) under `typed_class_context` (the
+    /// enclosing `typed` class's name, if any) — pure data, no diagnostic
+    /// construction; see `validation.rs::emit_dynamic_in_typed_class` for
+    /// the rendering.
+    ///
+    /// Only warns for root-cause Dynamic reasons: not `DynamicReceiver`
+    /// (propagated from a receiver that already produced its own warning),
+    /// not `Unknown` (no actionable message), and not `ExplicitDynamic`
+    /// (BT-2865 — the author already wrote `Dynamic` in a type annotation,
+    /// so "add a type annotation" would be nonsensical advice for something
+    /// that already has one).
+    fn detect_dynamic_in_typed_class(
+        ty: &InferredType,
+        typed_class_context: Option<&EcoString>,
+    ) -> Option<DynamicInTypedClass> {
+        let InferredType::Dynamic(reason) = ty else {
+            return None;
+        };
+        if matches!(
+            reason,
+            DynamicReason::DynamicReceiver
+                | DynamicReason::DynamicSpec
+                | DynamicReason::Unknown
+                | DynamicReason::ExplicitDynamic
+        ) {
+            return None;
+        }
+        let class_name = typed_class_context?.clone();
+        let description = reason.description()?;
+        Some(DynamicInTypedClass {
+            class_name,
+            description,
+        })
     }
 
     /// Infer types for a sequence of expression statements.

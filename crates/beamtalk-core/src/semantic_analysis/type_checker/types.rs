@@ -1506,6 +1506,49 @@ pub(in crate::semantic_analysis) fn is_generic_type_param(name: &str) -> bool {
     bytes.len() == 1 && bytes[0].is_ascii_uppercase()
 }
 
+// ── BT-3469: diagnostic facts ────────────────────────────────────────────
+//
+// A shared leaf between `inference/` and `validation.rs` (this module is a
+// dependency of both already, via `InferredType`/`DynamicReason`): each
+// struct below is a plain data record of something an `inference/` site
+// *detected*, with no `Diagnostic`/message-formatting logic of its own.
+// `inference/` constructs one and hands it to the matching `validation.rs`
+// `emit_*` method, which does the actual rendering (message text, hint,
+// category, severity) and pushes it. Splitting detection from rendering
+// this way is what item 3 of BT-3469 asked for — inference no longer
+// constructs `Diagnostic`s itself for these four sites. (The cons-tail site
+// already had this split, via `InferredType::improper_cons_tail_display`'s
+// existing `Option<EcoString>` — that one carries no new struct here, only
+// its `validation.rs` renderer moved.)
+
+/// A declared-vs-inferred type mismatch on an assignment's type annotation
+/// (`x :: Declared := value`). Detected in `inference/assignment.rs`,
+/// rendered by `validation.rs::emit_assignment_type_mismatch`.
+pub(in crate::semantic_analysis::type_checker) struct AssignmentTypeMismatch {
+    pub(in crate::semantic_analysis::type_checker) declared_display: EcoString,
+    pub(in crate::semantic_analysis::type_checker) inferred_display: EcoString,
+}
+
+/// An attempt to mutate another object's field (`other.field := value`,
+/// rather than `self.field := value`) — objects cannot mutate another
+/// object's state (Value types are immutable; actors only mutate their own
+/// state via `self.x :=`). Detected in `inference/assignment.rs`, rendered
+/// by `validation.rs::emit_cross_object_field_mutation`.
+pub(in crate::semantic_analysis::type_checker) struct CrossObjectFieldMutation {
+    pub(in crate::semantic_analysis::type_checker) receiver_name: EcoString,
+    pub(in crate::semantic_analysis::type_checker) field_name: EcoString,
+}
+
+/// BT-1914: an expression inside a `typed` class's method body inferred as
+/// `Dynamic` for a root-cause reason (not a propagated `DynamicReceiver`, an
+/// inert `Unknown`, or an author-acknowledged `ExplicitDynamic`). Detected
+/// in `inference/mod.rs`, rendered by
+/// `validation.rs::emit_dynamic_in_typed_class`.
+pub(in crate::semantic_analysis::type_checker) struct DynamicInTypedClass {
+    pub(in crate::semantic_analysis::type_checker) class_name: EcoString,
+    pub(in crate::semantic_analysis::type_checker) description: &'static str,
+}
+
 #[cfg(test)]
 mod display_tests {
     //! BT-2066: `display_name` uses the canonical `UndefinedObject`
