@@ -14,12 +14,13 @@
 
 use crate::ast::{Expression, MessageSelector, WellKnownSelector};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
+use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
     DynamicReason, InferredType, TypeChecker, TypeEnv, TypeStringContext, narrowing,
 };
-use crate::source_analysis::{Diagnostic, Span, is_equality_operator};
+use crate::source_analysis::{Diagnostic, Severity, Span, is_equality_operator};
 use ecow::EcoString;
 
 impl TypeChecker {
@@ -985,12 +986,17 @@ impl TypeChecker {
             } else {
                 member_name.as_str()
             };
-            if !hierarchy.has_class(resolve_name) {
-                uncertain_member_count += 1;
-                return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
-                continue;
-            }
-            if hierarchy.has_instance_dnu_override(resolve_name) {
+            // ADR 0100 Rule 1 (BT-3469): route this member's completeness
+            // classification through the shared classifier instead of
+            // re-deriving it — the two checks this replaced (unknown class,
+            // instance-side DNU override) are a strict subset of what
+            // `classify_receiver` folds in; a cross-file parent, a
+            // parse-error-tainted surface, or the pre-WS3 dependency guard
+            // now also downgrade a member to "uncertain" here, exactly as
+            // they already do for a bare (non-union) receiver.
+            if !receiver_knowledge::classify_receiver(resolve_name, hierarchy, false)
+                .is_closed_complete()
+            {
                 uncertain_member_count += 1;
                 return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
                 continue;
@@ -1149,42 +1155,85 @@ impl TypeChecker {
         // BT-1857: Suppress DNU warnings when Dynamic is in the union —
         // Dynamic accepts any message, so we can't know the full method set.
         if !missing_names.is_empty() && !has_dynamic {
-            // BT-2066: Render `UndefinedObject` as `Nil` for user-facing messages.
+            // ADR 0100 Rule 1 (BT-3469): severity falls straight out of the
+            // classify_receiver-derived counts above — "every non-nil member
+            // is ClosedComplete and none responds" is the ADR's "provably
+            // failing union" row (`Warning`); anything else (some member
+            // responds, or a member was classified `Open`/`Dynamic` and
+            // downgraded to "uncertain") stays a `Hint`, matching the
+            // single-receiver ceiling. This `if` is the only place a
+            // severity is chosen — `responding_count` and
+            // `uncertain_member_count` are just tallies of what
+            // `classify_receiver` already decided per member above.
+            let severity = if responding_count == 0 && uncertain_member_count == 0 {
+                Severity::Warning
+            } else {
+                Severity::Hint
+            };
+
+            // BT-2066: render `UndefinedObject` as `Nil` for the union
+            // display, shared by both branches below — every union DNU,
+            // single- or multi-culprit, names the full union it was sent
+            // to, not just the non-responding member(s).
             let member_names: Vec<String> = members
                 .iter()
                 .filter_map(|m| m.display_for_diagnostic().map(|n| n.to_string()))
                 .collect();
             let union_display = member_names.join(" | ");
-            // BT-2066: Also map missing-member names through the diagnostic rewriter.
-            let missing_display: Vec<EcoString> = missing_names
-                .iter()
-                .map(|n| InferredType::class_name_for_diagnostic(n.as_str()))
-                .collect();
 
-            let message = if missing_names.len() == 1 {
-                format!(
-                    "{} does not understand '{selector}' (in union {union_display})",
-                    missing_display[0]
-                )
+            if let [only_missing] = missing_names.as_slice() {
+                // BT-3469: the common one-culprit shape reuses the same
+                // diagnostic builder a bare receiver's DNU uses
+                // (`emit_unknown_selector_warning`) — identical message
+                // shape (plus the `(in union ...)` suffix every union DNU
+                // carries, via `context_suffix`), and, new for unions, the
+                // same "did you mean" suggestion lookup. A singleton member
+                // (`#foo`) resolves its suggestions through `Symbol` — the
+                // same singleton-as-Symbol convention `resolve_name` above
+                // (and `resolve_class` elsewhere in this file) applies.
+                let suggestion_class = if only_missing.starts_with('#') {
+                    EcoString::from("Symbol")
+                } else {
+                    only_missing.clone()
+                };
+                let display_name = InferredType::class_name_for_diagnostic(only_missing.as_str());
+                self.emit_unknown_selector_warning(
+                    &display_name,
+                    &suggestion_class,
+                    selector,
+                    span,
+                    hierarchy,
+                    false,
+                    severity,
+                    Some(&format!(" (in union {union_display})")),
+                );
             } else {
-                format!(
+                // Multiple non-responding members: `emit_unknown_selector_warning`
+                // has no multi-subject mode — a per-member "did you mean"
+                // can't compose into that diagnostic's single hint field —
+                // so this stays its own combined-message construction.
+                // BT-2066: map the missing list through the same diagnostic
+                // rewriter as the union display above.
+                let missing_display: Vec<EcoString> = missing_names
+                    .iter()
+                    .map(|n| InferredType::class_name_for_diagnostic(n.as_str()))
+                    .collect();
+                let message = format!(
                     "{} do not understand '{selector}' (in union {union_display})",
                     missing_display.join(", ")
+                );
+                let diag = match severity {
+                    Severity::Warning => Diagnostic::warning(message, span),
+                    Severity::Hint | Severity::Error | Severity::Lint => {
+                        Diagnostic::hint(message, span)
+                    }
+                }
+                .with_hint(
+                    "Use `respondsTo:` to check before sending, or `@expect type` to suppress",
                 )
-            };
-
-            // BT-1872: Use warning severity when no non-nil members respond
-            // AND no uncertain members (unknown classes, DNU overrides) exist
-            // (the message send will definitely fail at runtime). Use hint when
-            // only some members lack the selector or uncertainty exists.
-            let diag = if responding_count == 0 && uncertain_member_count == 0 {
-                Diagnostic::warning(message, span)
-            } else {
-                Diagnostic::hint(message, span)
+                .with_category(crate::source_analysis::DiagnosticCategory::Dnu);
+                self.diagnostics.push(diag);
             }
-            .with_hint("Use `respondsTo:` to check before sending, or `@expect type` to suppress")
-            .with_category(crate::source_analysis::DiagnosticCategory::Dnu);
-            self.diagnostics.push(diag);
         }
 
         // BT-1857: If the union had Nil but all non-Nil members responded,
