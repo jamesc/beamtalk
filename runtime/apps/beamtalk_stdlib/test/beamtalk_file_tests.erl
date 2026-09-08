@@ -2299,6 +2299,25 @@ temp_directory_respects_TMPDIR_test() ->
         end
     end.
 
+%% Nightly macOS regression: `$TMPDIR` is conventionally set WITH a trailing
+%% `/` on macOS (e.g. `/var/folders/xx/yyyyyyyy/T/`), unlike Linux/Windows
+%% temp-dir sources — a caller comparing this value against another path
+%% (e.g. `SubprocessTest>>testOpenWithDir`, which spawns a shell `cd`'d into
+%% this directory and checks its `pwd` output for this value as a
+%% substring) needs one consistent contract, not a platform-dependent
+%% trailing separator.
+temp_directory_strips_trailing_slash_test() ->
+    OrigTmpdir = os:getenv("TMPDIR"),
+    try
+        os:putenv("TMPDIR", "/custom/tmp/path/"),
+        ?assertEqual(<<"/custom/tmp/path">>, beamtalk_file:'tempDirectory'())
+    after
+        case OrigTmpdir of
+            false -> os:unsetenv("TMPDIR");
+            V -> os:putenv("TMPDIR", V)
+        end
+    end.
+
 temp_directory_falls_back_to_TMP_test() ->
     %% Unset TMPDIR, set TMP, expect TMP's value.
     OrigTmpdir = os:getenv("TMPDIR"),

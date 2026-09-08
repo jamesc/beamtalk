@@ -1072,7 +1072,12 @@ Returns the current working directory as a String (absolute path).
 -doc """
 Return the OS temporary directory path.
 
-Returns the system temp directory as a String.
+Returns the system temp directory as a String, with any trailing path
+separator stripped — macOS's `$TMPDIR` is conventionally set WITH a
+trailing `/` (e.g. `/var/folders/xx/yyyyyyyy/T/`) while Linux/Windows
+temp-dir sources typically are not, and a caller comparing this value
+against another path (rather than only concatenating onto it) needs one
+consistent contract across platforms.
 """.
 -spec 'tempDirectory'() -> binary().
 'tempDirectory'() ->
@@ -1097,7 +1102,18 @@ Returns the system temp directory as a String.
             V ->
                 V
         end,
-    unicode:characters_to_binary(Dir).
+    unicode:characters_to_binary(strip_trailing_separator(Dir)).
+
+%% Strips a single trailing `/` or `\` from Dir, leaving a lone root
+%% separator (e.g. `"/"`) untouched.
+-spec strip_trailing_separator(string()) -> string().
+strip_trailing_separator(Dir) ->
+    case lists:reverse(Dir) of
+        [Sep | Rest] when Rest =/= [], Sep =:= $/ orelse Sep =:= $\\ ->
+            lists:reverse(Rest);
+        _ ->
+            Dir
+    end.
 
 %%% ============================================================================
 %%% FFI Shims
