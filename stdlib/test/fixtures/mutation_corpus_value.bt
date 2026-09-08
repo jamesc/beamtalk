@@ -289,3 +289,18 @@ Value subclass: MutationCorpusValue
       flag ifTrue: [t := t + 10]
     ] ensure: [nil]
     t
+
+// ── BT-3176 axis 4 (state-field mutation) has NO Value-subclass fragment ────
+// mutation_corpus_actor.bt has stateFieldToDoNonLastReadWrite /
+// stateFieldIfTrueNonLastReadWrite: (the actor's own state field, mutated
+// inside a loop/conditional); mutation_corpus_class_method.bt has the
+// classVar analogues. There is deliberately no MutationCorpusValue
+// counterpart: a genuine `Value subclass:` can never write `self.field :=`
+// at all — it's a hard, unconditional compile error (ADR 0042; see
+// `check_value_slot_assignment` in
+// crates/beamtalk-core/src/semantic_analysis/validators/class_validators.rs),
+// not a codegen gap to work around here. BT-3483 investigated adding this
+// axis via the one legal route to value-type-context self.field :=
+// (the BT-1533 TestCase exemption) and found it currently broken —
+// see value_type_mutation_matrix_test.bt's `fragStateFieldToDoNonLastReadWrite`
+// and BT-3484.
