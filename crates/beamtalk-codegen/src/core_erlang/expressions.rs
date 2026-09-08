@@ -18,6 +18,7 @@
 //! [`super::patterns`]. Message sending is handled by
 //! [`super::dispatch_codegen`].
 
+use super::control_flow::{Closure, FieldWriteSite};
 use super::threaded_ir::{self, ThreadedStmt, ThreadedValue, ValueRef};
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
@@ -591,11 +592,12 @@ impl CoreErlangGenerator {
     /// Generates code for a field assignment (`self.field := value`).
     ///
     /// Uses threading to simulate mutation in Core Erlang. The generated pattern varies
-    /// by context:
+    /// by [`FieldWriteSite`]:
     ///
     /// - **Actor context**: `State{n}` threading via `maps:put`
     /// - **`ValueType` context** (BT-833): `Self{n}` threading — each assignment produces
     ///   a new immutable snapshot; `self` in subsequent expressions resolves to `Self{n}`
+    /// - **Class method** (BT-412): `ClassVars{n}` threading, with ADR 0110's shadow write
     ///
     /// ```erlang
     /// let _Val = <value> in
@@ -604,100 +606,35 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// The assignment expression evaluates to the assigned value (Smalltalk semantics).
+    ///
+    /// BT-3466: a thin, `Closure::Closed` wrapper around
+    /// [`Self::lower_field_write`] — the single lowering core this, `dispatch_codegen.rs`'s
+    /// `generate_field_assignment_open` (`Closure::Open`), and
+    /// `control_flow::conditionals`'s `lower_field_assignment_bind` (the
+    /// un-rendered-`Bind`-push consumption style) all now share, replacing
+    /// what were three independently hand-duplicated `maps:put` emissions —
+    /// the missing abstraction ADR 0110/0111's BT-3140/BT-3159/BT-3172 bug
+    /// family traced back to.
     pub(super) fn generate_field_assignment(
         &mut self,
         field_name: &str,
         value: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-412: Class methods assign to class variables via ClassVars map threading.
-        if self.in_class_method() {
-            // ADR 0118 phase 5b (BT-3422): reached through ordinary
-            // `generate_expression`, not `threaded_expression`'s own
-            // producer recognition — close the prelude inline.
-            let frame = self.current_frame();
-            let tv = self.generate_class_var_field_assignment(field_name, value, frame)?;
-            return Ok(self.close_threaded_value_doc(tv));
-        }
-        // BT-833: Value type field assignment — Self-threading (immutable update).
-        //
-        // Mirrors the Actor state-threading pattern but uses Self{N} instead of State{N}.
-        // Each `:=` produces a new Self snapshot via `maps:put`, so `self` in subsequent
-        // expressions resolves to the latest Self{N} via `current_self_var()`.
-        if matches!(self.context, super::CodeGenContext::ValueType) {
-            let val_var = self.fresh_temp_var("Val");
-            // Capture current Self BEFORE generating the value expression so that
-            // RHS field reads (e.g., `self.x := self.x + 1`) see the current snapshot.
-            let current_self = self.current_self_var();
-            let source_self_version = self.self_version();
-            let val_doc = self.expression_doc(value)?;
-            let new_self = self.next_self_var();
-            let target_self_version = self.self_version();
-            // BT-3139: previously uninstrumented — see
-            // check_simple_field_bind_invariant's doc comment.
-            self.check_simple_field_bind_invariant(
-                super::threaded_ir::VersionPrefix::SelfVt,
-                source_self_version,
-                target_self_version,
-                "value-type Self field-assignment version bind",
-                value.span(),
-            );
-            let doc = docvec![
-                "let ",
-                leaf::var(val_var.clone()),
-                " = ",
-                val_doc,
-                " in let ",
-                leaf::var(new_self),
-                " = call 'maps':'put'(",
-                leaf::atom(field_name.to_string()),
-                ", ",
-                leaf::var(val_var.clone()),
-                ", ",
-                leaf::var(current_self),
-                ") in ",
-                leaf::var(val_var),
-            ];
-            return Ok(doc);
-        }
-
-        let val_var = self.fresh_temp_var("Val");
-
-        // Capture current state BEFORE generating value expression,
-        // because the value expression may reference state (e.g., self.value + 1)
-        let current_state = self.current_state_var();
-        let source_state_version = self.state_version();
-
-        // Capture value expression (preserves side effects on state)
-        let val_doc = self.expression_doc(value)?;
-
-        // Now increment state version for the new state after assignment
-        let new_state = self.next_state_var();
-        let target_state_version = self.state_version();
-        // BT-3139: previously uninstrumented, like the Self branch above.
-        self.check_simple_field_bind_invariant(
-            super::threaded_ir::VersionPrefix::State,
-            source_state_version,
-            target_state_version,
-            "actor State field-assignment version bind",
-            value.span(),
-        );
-
-        let doc = docvec![
-            "let ",
-            leaf::var(val_var.clone()),
-            " = ",
-            val_doc,
-            " in let ",
-            leaf::var(new_state),
-            " = call 'maps':'put'(",
-            leaf::atom(field_name.to_string()),
-            ", ",
-            leaf::var(val_var.clone()),
-            ", ",
-            leaf::var(current_state),
-            ") in ",
-            leaf::var(val_var),
-        ];
+        // BT-412: Class methods assign to class variables via ClassVars map
+        // threading — reached through ordinary `generate_expression`, not
+        // `threaded_expression`'s own producer recognition, so
+        // `lower_field_write`'s `Closed` render (equivalent to closing the
+        // prelude inline) is exactly what's wanted here.
+        let (site, frame) = if self.in_class_method() {
+            (FieldWriteSite::ClassVar, self.current_frame())
+        } else {
+            (
+                FieldWriteSite::for_context(self.context),
+                super::threaded_ir::FrameId::ROOT,
+            )
+        };
+        let (doc, _val_var) =
+            self.lower_field_write(site, Closure::Closed, field_name, value, frame)?;
         Ok(doc)
     }
 

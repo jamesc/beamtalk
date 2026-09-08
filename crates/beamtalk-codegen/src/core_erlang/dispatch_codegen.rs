@@ -36,6 +36,7 @@
 //! - **Await messages**: `future await` → Blocking future resolution
 //! - **Super sends**: `super methodName:` → Parent class dispatch
 
+use super::control_flow::{Closure, FieldWriteSite};
 use super::expr_shape::is_character_typed_receiver;
 use super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
@@ -2146,17 +2147,18 @@ impl CoreErlangGenerator {
     /// The caller is responsible for closing the expression (generating the body
     /// that uses the new state).
     ///
-    /// BT-3180: the plain-`State` branch below carries `ThreadedIr`
-    /// instrumentation (`check_simple_field_bind_invariant`, reused from
-    /// `expressions.rs`) around its `next_state_var()` mint — chosen over
-    /// promoting the mint to a real `Bind` (like the class-var branch
-    /// already does): this function's `Document` is hand-built and returned
-    /// directly to 7 different call sites with their own surrounding glue
-    /// (loop bodies, conditional arms, intrinsics), so replacing it with a
-    /// `ThreadedStmt::Bind` would touch every one of those emission paths
-    /// and require re-verifying the whole snapshot corpus for a version-mint
-    /// site that was never actually producing wrong output — instrumentation
-    /// only, matching BT-3139's precedent for this construct family.
+    /// BT-3466: the plain `Actor`/`ValueType` tail (the `else` fallthrough
+    /// below) is now a thin `Closure::Open` call into
+    /// [`Self::lower_field_write`] — the single lowering core this,
+    /// `expressions.rs`'s `generate_field_assignment` (`Closure::Closed`),
+    /// and `control_flow::conditionals`'s `lower_field_assignment_bind` (the
+    /// un-rendered-`Bind`-push consumption style) all now share. Before this
+    /// issue this branch was hand-built and Actor-only — a `ValueType` field
+    /// write reaching it (from inside a loop/conditional/block body) would
+    /// have silently threaded through the actor `State`/`StateAcc` map, a
+    /// variable that does not exist in a value-type method, instead of
+    /// `Self` — the missing `ValueType` arm `lower_field_write`'s
+    /// [`FieldWriteSite`] dispatch now supplies.
     pub(super) fn generate_field_assignment_open(
         &mut self,
         expr: &Expression,
@@ -2167,8 +2169,9 @@ impl CoreErlangGenerator {
                 // write directly inside a Letrec loop body that threads
                 // `ClassVars` through the loop's own recursive tail call —
                 // threaded via the SAME shared helper the method's own
-                // top-frame write uses (`lower_class_var_field_assignment_bind`),
-                // but tagged with the loop's real, already-minted frame
+                // top-frame write uses (`lower_class_var_field_assignment_bind`,
+                // reached through `lower_field_write`'s `ClassVar` arm), but
+                // tagged with the loop's real, already-minted frame
                 // (`current_branch_frame()`) instead of `FrameId::ROOT`, per
                 // Question 2's resolution. `loop_threads_class_vars` scopes
                 // this to exactly the Letrec loop-body call path — see its
@@ -2178,13 +2181,13 @@ impl CoreErlangGenerator {
                 // unchanged).
                 if self.is_class_var_assignment(expr) && self.loop_mode.loop_threads_class_vars {
                     let frame = self.current_branch_frame();
-                    let (preamble_doc, bind, val_var) =
-                        self.lower_class_var_field_assignment_bind(&field.name, value, frame)?;
-                    let bind_doc = {
-                        let mut ctx = super::threaded_ir::RenderCtx::new(self);
-                        super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
-                    };
-                    return Ok((docvec![preamble_doc, bind_doc], val_var));
+                    return self.lower_field_write(
+                        FieldWriteSite::ClassVar,
+                        Closure::Open,
+                        &field.name,
+                        value,
+                        frame,
+                    );
                 }
                 self.reject_class_var_field_assignment(expr, field)?;
                 // BT-1342: Full-extract mode — rebind field param instead of maps:put.
@@ -2226,46 +2229,22 @@ impl CoreErlangGenerator {
                     ));
                 }
 
-                let val_var = self.fresh_temp_var("Val");
-                let current_state = self.current_state_var();
-                let source_state_version = self.state_version();
-                let val_doc = self.generate_field_assignment_value_doc(value)?;
-
-                let new_state = self.next_state_var();
-                let target_state_version = self.state_version();
-                // BT-3180: this "open" (non-last-position) sibling of
-                // `generate_field_assignment`'s plain-State branch had no
-                // `ThreadedIr` instrumentation around its `next_state_var()`
-                // mint — most of this function's call sites sit outside any
-                // backfilled `Vec<ThreadedStmt>` body sequence, so nothing
-                // else ever isolated-verifies this version step.
-                self.check_simple_field_bind_invariant(
-                    super::threaded_ir::VersionPrefix::State,
-                    source_state_version,
-                    target_state_version,
-                    "actor State open field-assignment version bind",
-                    value.span(),
+                // BT-3466: `ValueType` gains the `Self`-threading arm it
+                // lacked before this issue (see this function's own doc
+                // comment) — `FieldWriteSite::for_context` is the same
+                // dispatch `generate_field_assignment`'s (the `Closed`
+                // sibling's) plain-write default uses.
+                let site = FieldWriteSite::for_context(self.context);
+                // BT-884: `lower_field_write` returns the val var so callers
+                // (e.g. cascade codegen) can reference the assigned value
+                // after hoisting the binding.
+                return self.lower_field_write(
+                    site,
+                    Closure::Open,
+                    &field.name,
+                    value,
+                    FrameId::ROOT,
                 );
-
-                let doc = docvec![
-                    "let ",
-                    leaf::var(val_var.clone()),
-                    " = ",
-                    val_doc,
-                    " in let ",
-                    leaf::var(new_state),
-                    " = call 'maps':'put'(",
-                    leaf::atom(field.name.clone()),
-                    ", ",
-                    leaf::var(val_var.clone()),
-                    ", ",
-                    leaf::var(current_state),
-                    ") in ",
-                ];
-
-                // BT-884: Return the val var so callers (e.g. cascade codegen) can
-                // reference the assigned value after hoisting the binding.
-                return Ok((doc, val_var));
             }
         }
         Err(CodeGenError::Internal(

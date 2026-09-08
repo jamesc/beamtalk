@@ -615,3 +615,80 @@ fn character_value_factory_receiver_dispatches_to_character_module() {
          misroute via is_integer/1 to Integer). Got: {output}"
     );
 }
+
+// ─── BT-3466: generate_field_assignment_open (Closure::Open) × FieldWriteSite ─
+
+/// Builds `self.<field_name> := <value>` as an `Expression::Assignment` over
+/// a `self`-receiver `FieldAccess` target — the shape
+/// `generate_field_assignment_open` matches on.
+fn self_field_assignment_expr(field_name: &str, value: Expression) -> Expression {
+    Expression::Assignment {
+        target: Box::new(Expression::FieldAccess {
+            receiver: Box::new(Expression::Identifier(Identifier::new("self", s()))),
+            field: Identifier::new(field_name, s()),
+            span: s(),
+        }),
+        value: Box::new(value),
+        type_annotation: None,
+        span: s(),
+    }
+}
+
+#[test]
+fn test_field_assignment_open_actor_threads_state() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let expr = self_field_assignment_expr("count", Expression::Literal(Literal::Integer(42), s()));
+    let (doc, val_var) = generator.generate_field_assignment_open(&expr).unwrap();
+    let output = doc.to_pretty_string();
+    assert_eq!(
+        output,
+        "let _Val1 = 42 in let State1 = call 'maps':'put'('count', _Val1, State) in "
+    );
+    assert_eq!(val_var, "_Val1");
+}
+
+/// BT-3466's actual bug fix: before this issue,
+/// `generate_field_assignment_open` had no `ValueType` arm at all — a
+/// value-type field write reaching it (from inside a loop/conditional/block
+/// body) silently threaded through the actor `State`/`StateAcc` map, a
+/// variable that does not exist in a value-type method, instead of `Self`.
+#[test]
+fn test_field_assignment_open_value_type_threads_self() {
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.context = crate::core_erlang::CodeGenContext::ValueType;
+    let expr = self_field_assignment_expr("count", Expression::Literal(Literal::Integer(42), s()));
+    let (doc, val_var) = generator.generate_field_assignment_open(&expr).unwrap();
+    let output = doc.to_pretty_string();
+    assert_eq!(
+        output,
+        "let _Val1 = 42 in let Self1 = call 'maps':'put'('count', _Val1, Self) in "
+    );
+    assert_eq!(val_var, "_Val1");
+    assert!(
+        !output.contains("State"),
+        "value-type field write must never reference State. Got: {output}"
+    );
+}
+
+/// A class-var write directly inside a Letrec loop body that threads
+/// `ClassVars` through the loop's own recursive tail call (BT-3168) —
+/// `generate_field_assignment_open`'s one pre-existing `ClassVar` arm.
+#[test]
+fn test_field_assignment_open_class_var_threads_class_vars_with_shadow_write() {
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.set_in_class_method(true);
+    generator.class_var_names_mut().insert("total".to_string());
+    generator.loop_mode.loop_threads_class_vars = true;
+    let expr = self_field_assignment_expr("total", Expression::Literal(Literal::Integer(42), s()));
+    let (doc, val_var) = generator.generate_field_assignment_open(&expr).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("let ClassVars1 = call 'maps':'put'('total', _Val1, ClassVars) in"),
+        "class-var write should thread ClassVars. Got: {output}"
+    );
+    assert!(
+        output.contains("'$bt_class_vars_shadow'"),
+        "class-var write should carry ADR 0110's shadow write. Got: {output}"
+    );
+    assert_eq!(val_var, "_Val1");
+}
