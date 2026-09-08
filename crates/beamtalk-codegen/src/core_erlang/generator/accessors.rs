@@ -8,7 +8,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use crate::core_erlang::gen_server;
+use crate::core_erlang::class_meta;
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::generator::{ClassContext, ReplContext, ValueTypeContext};
 use crate::core_erlang::util;
@@ -21,8 +21,8 @@ impl CoreErlangGenerator {
     /// ADR 0098 Phase 3: the producing-toolchain identity to bake into
     /// `__beamtalk_meta`. Borrows the generator's version fields; both are `None`
     /// unless the CLI supplied them via [`CodegenOptions::with_provenance`].
-    pub(in crate::core_erlang) fn meta_provenance(&self) -> gen_server::MetaProvenance<'_> {
-        gen_server::MetaProvenance {
+    pub(in crate::core_erlang) fn meta_provenance(&self) -> class_meta::MetaProvenance<'_> {
+        class_meta::MetaProvenance {
             beamtalk_version: self.beamtalk_version.as_deref(),
             otp_release: self.otp_release.as_deref(),
         }
