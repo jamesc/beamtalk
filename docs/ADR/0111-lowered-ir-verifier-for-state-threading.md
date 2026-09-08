@@ -4453,8 +4453,10 @@ proof that BT-3470/BT-3475 already finished the deletion work Addendum 15
 anticipated for this issue.
 
 **3. `#[allow(dead_code)]` audit.** `grep -rn '#\[allow(dead_code)\]'
-crates/beamtalk-codegen/src/core_erlang/threaded_ir/` finds seven markers,
-none of them loop-shape-related: `ValueRef::Version` and `BindOp::Unpack`
+crates/beamtalk-codegen/src/core_erlang/threaded_ir/` returns seven lines,
+but one (`ir.rs:147`) is a doc comment mentioning the attribute in prose,
+not an actual marker — six real markers remain, none of them
+loop-shape-related: `ValueRef::Version` and `BindOp::Unpack`
 (`ir.rs`) still await an unrelated future constructor each (documented
 inline, unchanged since Addendum 7); `CloseContext` and
 `ThreadedValue::pure`/`close()` (`ir.rs`/`build.rs`) are ADR 0118's own
