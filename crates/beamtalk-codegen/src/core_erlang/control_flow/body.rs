@@ -411,7 +411,8 @@ impl CoreErlangGenerator {
                 && (self.get_control_flow_threaded_vars(expr).is_some()
                     || self.control_flow_has_mutations(expr));
             if produces_tuple {
-                let tuple_var = format!("_NestTuple{}", self.state_version() + 1);
+                let tuple_var =
+                    super::super::util::versioned_var("_NestTuple", self.state_version() + 1);
                 let expr_code = self.expression_doc(expr)?;
                 let source_version = self.state_version();
                 let _ = self.next_state_var();
