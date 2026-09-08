@@ -22,7 +22,7 @@ use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::string_utils::edit_distance;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
 use ecow::EcoString;
 
 use super::sendability;
@@ -149,6 +149,7 @@ impl TypeChecker {
     /// maps the class method's parameter types (e.g., `T`) against the concrete
     /// argument types (e.g., `Integer`) to infer the class's type arguments.
     /// Unresolved params default to `Dynamic`.
+    #[allow(clippy::too_many_lines)] // one branch per receiver-knowledge shape — irreducible
     pub(super) fn check_class_side_send(
         &mut self,
         class_name: &EcoString,
@@ -226,7 +227,14 @@ impl TypeChecker {
                 || (is_factory_selector && hierarchy.resolves_selector(class_name, selector));
             if !has_class_chain_method {
                 self.emit_unknown_selector_warning(
-                    class_name, class_name, selector, span, hierarchy, true,
+                    class_name,
+                    class_name,
+                    selector,
+                    span,
+                    hierarchy,
+                    true,
+                    Severity::Hint,
+                    None,
                 );
             }
         }
@@ -576,6 +584,8 @@ impl TypeChecker {
                             span,
                             hierarchy,
                             false,
+                            Severity::Hint,
+                            None,
                         );
                     }
                 }
@@ -603,6 +613,8 @@ impl TypeChecker {
                 span,
                 hierarchy,
                 false,
+                Severity::Hint,
+                None,
             );
         }
     }
@@ -3011,12 +3023,29 @@ impl TypeChecker {
         (Self::inferred_type_to_string(&resolved), deps)
     }
 
-    /// Emit a warning diagnostic for an unknown selector.
-    /// `display_name` is the type the user wrote (e.g. a singleton `#infinity`),
-    /// used only in the message text. `class_name` is the type we resolve
-    /// selectors and "did you mean" suggestions against (e.g. `Symbol` for a
-    /// singleton — BT-2679). They coincide for ordinary class receivers.
-    fn emit_unknown_selector_warning(
+    /// Emit a diagnostic for an unknown selector, at the caller-chosen
+    /// `severity`. `display_name` is the type the user wrote (e.g. a
+    /// singleton `#infinity`), used only in the message text. `class_name`
+    /// is the type we resolve selectors and "did you mean" suggestions
+    /// against (e.g. `Symbol` for a singleton — BT-2679). They coincide for
+    /// ordinary class receivers.
+    ///
+    /// `severity` exists because this is also the single-missing-member
+    /// case's diagnostic builder for [`TypeChecker::infer_union_message_send`]
+    /// (BT-3469) — a union send the checker can *prove* fails (every member
+    /// closed, none responds) is a `Warning` per ADR 0100 Rule 1's
+    /// "provably failing union" row, while every other caller here passes
+    /// `Hint`. Reusing this method, rather than a second copy, is what keeps
+    /// the message shape and "did you mean" suggestion identical between a
+    /// bare receiver's DNU and a union's single-culprit DNU.
+    ///
+    /// `context_suffix`, when `Some`, is appended verbatim after the "does
+    /// not understand '<selector>'" clause — the union call site (BT-3469)
+    /// uses it for `" (in union A | B)"` so a union's single-culprit DNU
+    /// keeps the same receiver context every other union DNU carries; every
+    /// other caller passes `None`.
+    #[allow(clippy::too_many_arguments)] // display/lookup name split (BT-2679) + severity/context (BT-3469)
+    pub(super) fn emit_unknown_selector_warning(
         &mut self,
         display_name: &EcoString,
         class_name: &EcoString,
@@ -3024,12 +3053,19 @@ impl TypeChecker {
         span: Span,
         hierarchy: &ClassHierarchy,
         is_class_side: bool,
+        severity: Severity,
+        context_suffix: Option<&str>,
     ) {
         let side = if is_class_side { " class" } else { "" };
+        let suffix = context_suffix.unwrap_or("");
         let message: EcoString =
-            format!("{display_name}{side} does not understand '{selector}'").into();
+            format!("{display_name}{side} does not understand '{selector}'{suffix}").into();
 
-        let mut diag = Diagnostic::hint(message, span).with_category(DiagnosticCategory::Dnu);
+        let mut diag = match severity {
+            Severity::Warning => Diagnostic::warning(message, span),
+            _ => Diagnostic::hint(message, span),
+        }
+        .with_category(DiagnosticCategory::Dnu);
 
         // Try to suggest similar selectors
         if let Some(suggestion) =
