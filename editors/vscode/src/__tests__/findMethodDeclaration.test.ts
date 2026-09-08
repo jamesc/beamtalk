@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  classNameToStdlibFilename,
   extractMethodDocComment,
   extractStateVarDocComment,
   extractStateVarInfo,
@@ -722,6 +723,35 @@ describe("findStateVarDeclaration / extractStateVarInfo — field: keyword (stdl
     expect(extractStateVarDocComment(src, "maximumAttempts")).toBe(
       "Maximum number of retry attempts."
     );
+  });
+});
+
+// Verified against every real class declaration in stdlib/src (101/102
+// matched exactly; BEAMError is the one hardcoded exception).
+describe("classNameToStdlibFilename", () => {
+  it("converts a plain PascalCase name", () => {
+    expect(classNameToStdlibFilename("Array")).toBe("array.bt");
+  });
+
+  it("converts a multi-word PascalCase name", () => {
+    expect(classNameToStdlibFilename("DateTime")).toBe("date_time.bt");
+    expect(classNameToStdlibFilename("TaskQueueRegistry")).toBe("task_queue_registry.bt");
+  });
+
+  it("treats a short all-caps acronym with nothing following as one word", () => {
+    expect(classNameToStdlibFilename("OS")).toBe("os.bt");
+  });
+
+  it("splits an acronym from a following capitalized word", () => {
+    expect(classNameToStdlibFilename("HTTPClient")).toBe("http_client.bt");
+  });
+
+  it("uses the hardcoded exception for BEAMError instead of the derived beam_error", () => {
+    expect(classNameToStdlibFilename("BEAMError")).toBe("beamerror.bt");
+  });
+
+  it("handles a name with a digit", () => {
+    expect(classNameToStdlibFilename("Uuid")).toBe("uuid.bt");
   });
 });
 

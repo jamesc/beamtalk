@@ -16,8 +16,9 @@ import {
 import { type DocumentMovedParams, planDocumentRetarget } from "./documentMoved";
 import { InspectorPanel } from "./inspectorPanel";
 import { resolveDeclarationOffset } from "./symbolLookup";
+import { classNameToStdlibFilename } from "./textUtils";
 import { TranscriptViewProvider } from "./transcriptView";
-import type { ClassOrigin, LogEntry } from "./workspaceClient";
+import type { ClassInfo, ClassOrigin, LogEntry } from "./workspaceClient";
 import { WorkspaceClient } from "./workspaceClient";
 import type {
   ActorItemNode,
@@ -239,6 +240,45 @@ class StdlibContentProvider implements vscode.TextDocumentContentProvider {
       outputChannel?.warn(`Failed to fetch stdlib content for ${uri}: ${message}`);
       return `// Failed to load ${uri.toString()}\n// ${message}\n`;
     }
+  }
+}
+
+/**
+ * Open a stdlib class's source via the `beamtalk-stdlib://` virtual URI
+ * scheme, for sidebar navigation commands. The runtime's `list-classes`/
+ * `methods` ops never report a real `source_file` for compiled-in stdlib
+ * classes (they simply don't track one) — this is the same fallback the LSP
+ * already uses for Ctrl+click go-to-definition on a stdlib reference inside
+ * a real file (`stdlibSourceDir`/sysroot auto-discovery), just entered from
+ * a class name instead of a code reference.
+ *
+ * Calls `beamtalk-lsp/fetchContent` directly first (rather than going
+ * straight to `openTextDocument`) so a wrong filename guess or a
+ * disconnected LSP is detected as a clean failure here — `openTextDocument`
+ * on a `beamtalk-stdlib://` URI never rejects on its own; `StdlibContentProvider`
+ * deliberately returns friendly placeholder comment text instead, for
+ * LSP-initiated navigation where a raw VS Code error tab would be worse.
+ *
+ * Returns undefined if the class isn't stdlib-origin, no filename guess is
+ * possible, or the guessed file doesn't exist — callers should fall back to
+ * their normal "source not available" handling.
+ */
+async function openStdlibDocumentForClass(
+  classInfo: ClassInfo
+): Promise<vscode.TextDocument | undefined> {
+  if (classInfo.source_origin !== "stdlib" || !client) return undefined;
+  const uriString = `beamtalk-stdlib:///${classNameToStdlibFilename(classInfo.name)}`;
+  try {
+    await client.sendRequest<{ content: string }>("beamtalk-lsp/fetchContent", {
+      uri: uriString,
+    });
+  } catch {
+    return undefined;
+  }
+  try {
+    return await vscode.workspace.openTextDocument(vscode.Uri.parse(uriString));
+  } catch {
+    return undefined;
   }
 }
 
@@ -1113,18 +1153,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.openClassSource", async (node?: ClassItemNode) => {
       const sourceFile = node?.info.source_file;
-      if (!sourceFile || sourceFile === "unknown") {
-        await vscode.window.showInformationMessage("Source not available for this class.");
-        return;
-      }
-      const uri = vscode.Uri.file(sourceFile);
       let document: vscode.TextDocument;
-      try {
-        document = await vscode.workspace.openTextDocument(uri);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        await vscode.window.showErrorMessage(`Could not open source: ${sourceFile}: ${msg}`);
-        return;
+      if (sourceFile && sourceFile !== "unknown") {
+        try {
+          document = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await vscode.window.showErrorMessage(`Could not open source: ${sourceFile}: ${msg}`);
+          return;
+        }
+      } else {
+        // No real source_file recorded — the runtime doesn't track one for
+        // compiled-in stdlib classes. Try the LSP's beamtalk-stdlib:// virtual
+        // URI scheme before giving up.
+        const stdlibDoc = node?.info ? await openStdlibDocumentForClass(node.info) : undefined;
+        if (!stdlibDoc) {
+          await vscode.window.showInformationMessage("Source not available for this class.");
+          return;
+        }
+        document = stdlibDoc;
       }
 
       const className = node?.info.name;
@@ -1218,26 +1265,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("beamtalk.navigateToMethod", async (node: MethodItemNode) => {
       const { classInfo, method } = node;
 
-      // Only navigate if the runtime recorded a source file path.
-      // "unknown" means the class was defined in the REPL or loaded without a path.
       const sourceFile = classInfo.source_file;
-      if (!sourceFile || sourceFile === "unknown") {
-        await vscode.window.showInformationMessage(
-          `No source file recorded for class ${classInfo.name}`
-        );
-        return;
-      }
-
-      const uri = vscode.Uri.file(sourceFile);
       let document: vscode.TextDocument;
-      try {
-        document = await vscode.workspace.openTextDocument(uri);
-      } catch {
-        await vscode.window.showInformationMessage(
-          `Cannot open source for ${classInfo.name}: ${sourceFile}`
-        );
-        return;
+      if (sourceFile && sourceFile !== "unknown") {
+        try {
+          document = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
+        } catch {
+          await vscode.window.showInformationMessage(
+            `Cannot open source for ${classInfo.name}: ${sourceFile}`
+          );
+          return;
+        }
+      } else {
+        // No real source_file recorded — the runtime doesn't track one for
+        // compiled-in stdlib classes. Try the LSP's beamtalk-stdlib:// virtual
+        // URI scheme before giving up.
+        const stdlibDoc = await openStdlibDocumentForClass(classInfo);
+        if (!stdlibDoc) {
+          await vscode.window.showInformationMessage(
+            `No source file recorded for class ${classInfo.name}`
+          );
+          return;
+        }
+        document = stdlibDoc;
       }
+      const uri = document.uri;
 
       // BT-3439: prefer the real declaration line from beamtalk_xref's
       // compiled index over guessing via source-text regex/search — the
@@ -1303,21 +1355,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         const { classInfo, stateVar } = node;
         const sourceFile = classInfo.source_file;
-        if (!sourceFile || sourceFile === "unknown") {
-          await vscode.window.showInformationMessage(
-            `No source file recorded for class ${classInfo.name}`
-          );
-          return;
-        }
-        const uri = vscode.Uri.file(sourceFile);
         let document: vscode.TextDocument;
-        try {
-          document = await vscode.workspace.openTextDocument(uri);
-        } catch {
-          await vscode.window.showInformationMessage(
-            `Cannot open source for ${classInfo.name}: ${sourceFile}`
-          );
-          return;
+        if (sourceFile && sourceFile !== "unknown") {
+          try {
+            document = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
+          } catch {
+            await vscode.window.showInformationMessage(
+              `Cannot open source for ${classInfo.name}: ${sourceFile}`
+            );
+            return;
+          }
+        } else {
+          // No real source_file recorded — the runtime doesn't track one for
+          // compiled-in stdlib classes. Try the LSP's beamtalk-stdlib:// virtual
+          // URI scheme before giving up.
+          const stdlibDoc = await openStdlibDocumentForClass(classInfo);
+          if (!stdlibDoc) {
+            await vscode.window.showInformationMessage(
+              `No source file recorded for class ${classInfo.name}`
+            );
+            return;
+          }
+          document = stdlibDoc;
         }
         // BT-3439: prefer the real declaration line from beamtalk_xref's
         // compiled index — see the analogous comment in navigateToMethod.

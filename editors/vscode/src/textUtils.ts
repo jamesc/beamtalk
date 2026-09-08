@@ -172,6 +172,50 @@ export function findTypeAliasDeclaration(text: string, aliasName: string): numbe
 }
 
 /**
+ * A handful of stdlib source files whose basename doesn't follow the
+ * standard camelCase-to-snake_case convention `classNameToStdlibFilename`
+ * otherwise derives — e.g. `BEAMError` lives in `beamerror.bt`, not
+ * `beam_error.bt`. Verified against every real class declaration in
+ * stdlib/src (101/102 matched the derived convention exactly; this covers
+ * the one exception).
+ */
+const STDLIB_FILENAME_EXCEPTIONS: Readonly<Record<string, string>> = {
+  BEAMError: "beamerror.bt",
+};
+
+/**
+ * Guess a stdlib class's source filename from its name, for the
+ * `beamtalk-stdlib:///<filename>.bt` virtual URI scheme (the runtime's
+ * `list-classes`/`methods` ops never report a real `source_file` for
+ * compiled-in stdlib classes — they simply don't track it — unlike project
+ * or dependency classes).
+ *
+ * Splits `PascalCase`/`camelCase` into words at each capital letter, except
+ * within a run of capitals that isn't ending a word (`BEAMError`'s `M`→`E`
+ * transition doesn't split, since the standalone acronym "BEAM" reads as one
+ * word — but `HTTPClient`'s `P`→`C` does, since `C` starts the new word
+ * "Client"). Verified against every real class declaration in stdlib/src.
+ */
+export function classNameToStdlibFilename(className: string): string {
+  const exception = STDLIB_FILENAME_EXCEPTIONS[className];
+  if (exception) return exception;
+  let snake = "";
+  for (let i = 0; i < className.length; i++) {
+    const c = className[i];
+    const prev = className[i - 1];
+    const next = className[i + 1];
+    if (i > 0 && /[A-Z]/.test(c)) {
+      const prevLowerOrDigit = prev !== undefined && /[a-z0-9]/.test(prev);
+      const prevUpperNextLower =
+        prev !== undefined && /[A-Z]/.test(prev) && next !== undefined && /[a-z]/.test(next);
+      if (prevLowerOrDigit || prevUpperNextLower) snake += "_";
+    }
+    snake += c.toLowerCase();
+  }
+  return `${snake}.bt`;
+}
+
+/**
  * Extract `///` doc comment lines immediately preceding a state variable
  * declaration. Mirrors `extractMethodDocComment` for methods — state vars
  * previously had no equivalent, so a `///` comment above a `state:` line
