@@ -4,6 +4,7 @@
 //! Cross-file class/alias resolution tests: the class-module index, subdirectory actor spawns, inheritance, alias resolution (including stdlib-mode and manifest-less builds), and dependency protocol/alias-info merging.
 
 use super::*;
+use crate::commands::manifest;
 
 #[test]
 fn test_build_class_module_index_skips_unreadable_file() {

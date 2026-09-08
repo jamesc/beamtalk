@@ -4,6 +4,7 @@
 //! Incremental-build tests: stale-artifact cleanup and `detect_changes` across new/unchanged/modified/orphaned/branch-switch scenarios, including the `seed_beam_hash` / `make_pairs` fixtures they share.
 
 use super::*;
+use crate::commands::util::content_hash_of;
 
 #[test]
 fn test_clean_stale_artifacts_removes_orphaned_beam() {

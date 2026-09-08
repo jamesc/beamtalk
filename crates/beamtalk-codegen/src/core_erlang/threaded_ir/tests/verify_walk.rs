@@ -73,6 +73,7 @@ fn verify_silent_on_well_formed_conditional_loop_fixture() {
             span: span(),
         }],
         produces: vec![sum_v0],
+        outer_args: None,
         exit_arm: Document::Str("<opaque exit>"),
         span: span(),
     }];
@@ -115,6 +116,7 @@ fn verify_silent_on_conditional_loop_with_condition_prelude() {
             span: span(),
         }],
         produces: vec![sum_v0],
+        outer_args: None,
         exit_arm: Document::Str("<opaque exit>"),
         span: span(),
     }];
@@ -138,6 +140,7 @@ fn verify_unbound_version_conditional_loop_condition_references_unbound_version(
         continue_arm: Document::Str("<opaque continue arm>"),
         body: Vec::new(),
         produces: Vec::new(),
+        outer_args: None,
         exit_arm: Document::Str("<opaque exit>"),
         span: span(),
     }];
@@ -176,6 +179,7 @@ fn verify_unbound_version_conditional_loop_frame_flow_matches_threaded() {
             span: span(),
         }],
         produces: vec![local("sum", 1, frame)],
+        outer_args: None,
         exit_arm: Document::Str("<opaque exit>"),
         span: span(),
     }];

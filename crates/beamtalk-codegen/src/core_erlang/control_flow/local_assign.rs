@@ -7,11 +7,14 @@
 //!
 //! BT-3459: split out of `control_flow/mod.rs`, no logic changes.
 
-use super::super::threaded_ir::ThreadedStmt;
+use super::super::threaded_ir::{
+    BindOp, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
+};
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Expression;
+use beamtalk_core::source_analysis::Span;
 
 impl CoreErlangGenerator {
     /// BT-1224: Try to generate a plain `let Var = value in` binding for a block-local
@@ -159,6 +162,76 @@ impl CoreErlangGenerator {
             }
         }
         Ok((Document::Nil, None))
+    }
+
+    /// ADR 0111 Addendum 15: `Bind`-producing sibling of
+    /// [`Self::generate_direct_var_update_in_loop`], for the Letrec-onto-
+    /// `ThreadedIr` body lowering (`control_flow::body::lower_letrec_body`).
+    /// Reproduces that function's own two shapes — the common rebind and the
+    /// BT-1329 open-let-chain list-op-result case — as a `ThreadedStmt::Bind`
+    /// (`render_bind`'s `Direct` arm renders `"let NewVar = <rhs> in "`,
+    /// byte-identical to the sibling's own `docvec!`) instead of a hand-built
+    /// `Document`, so `render`'s `final_loop_arg_identities` can trace this
+    /// local's own rebind chain from its `produces` seed.
+    ///
+    /// `source` is the local's identity BEFORE this rebind — [`VersionPrefix::Local`]
+    /// at the loop's own `produces` seed until the first rebind,
+    /// [`VersionPrefix::Gensym`] of the current `lookup_var` name afterward
+    /// (mirroring `collect_final_local_args`'s own scope-lookup mechanism, so
+    /// the chain this builds always terminates at the SAME final identity
+    /// that mechanism would find).
+    pub(super) fn lower_direct_var_update_in_loop_bind(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let Expression::Assignment { target, value, .. } = expr else {
+            return Ok(());
+        };
+        let Expression::Identifier(id) = target.as_ref() else {
+            return Ok(());
+        };
+        let canonical = CoreErlangGenerator::to_core_erlang_var(&id.name);
+        let current = self
+            .lookup_var(&id.name)
+            .cloned()
+            .unwrap_or_else(|| canonical.clone());
+        let source = if current == canonical {
+            VersionedVar::new(VersionPrefix::Local(id.name.to_string()), 0, frame)
+        } else {
+            VersionedVar::new(VersionPrefix::Gensym(current), 1, frame)
+        };
+
+        // BT-1329: Clear any pending list op result before generating the value.
+        self.direct_params_list_op_result = None;
+        let value_code = self.expression_doc(value)?;
+
+        if let Some(result_var) = self.direct_params_list_op_result.take() {
+            let new_var = self.fresh_temp_var(&canonical);
+            self.bind_var(&id.name, &new_var);
+            stmts.push(ThreadedStmt::Statement(value_code, span));
+            stmts.push(ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
+                source,
+                op: BindOp::Direct(ValueRef::Var(result_var)),
+                shadow_write: false,
+                span,
+            });
+            return Ok(());
+        }
+
+        let new_var = self.fresh_temp_var(&canonical);
+        self.bind_var(&id.name, &new_var);
+        stmts.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
+            source,
+            op: BindOp::Direct(ValueRef::Doc(value_code)),
+            shadow_write: false,
+            span,
+        });
+        Ok(())
     }
 
     /// BT-3428 (Claude Review follow-up on PR #3727): shared by
