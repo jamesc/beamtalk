@@ -1515,17 +1515,33 @@ resolve_new_path(Entry) ->
 derive_new_path(undefined, _OldClassBin, _NewClassBin) ->
     undefined;
 derive_new_path(OldPath, OldClassBin, NewClassBin) ->
-    Dir = filename:dirname(binary_to_list(OldPath)),
-    OldBase = filename:basename(binary_to_list(OldPath), ".bt"),
+    % NOTE: `raw_dirname/1`, not `filename:dirname/1` — the stdlib version
+    % always returns a `/`-only path, even when given a `\`-delimited
+    % Windows path (`filename:dirname("C:\\proj\\src\\Counter.bt")` comes
+    % back as `"C:/proj/src"`, per its own implementation and doc example).
+    % That silently desyncs Dir from the un-normalized paths used everywhere
+    % else (the original `beamtalk_source` attribute, ChangeLog
+    % `old_path`/`new_path` strings), breaking `sourceFile` equality checks
+    % on Windows whenever `old_path` was backslash-delimited.
+    Dir = raw_dirname(binary_to_list(OldPath)),
+    % NOTE: `raw_basename/2`, not `filename:basename/2` — the stdlib version
+    % only recognizes `\` as a separator when `os:type/0` reports `win32`,
+    % so it silently fails to split a `\`-delimited path apart on any other
+    % host (harmless when this code actually runs on Windows, since it then
+    % sees real backslashes and os:type() to match, but it makes the same
+    % path-splitting logic behave differently depending on which host runs
+    % it — including in tests, which is why the two now share raw_dirname/1
+    % and raw_basename/2's OS-independent notion of "separator" instead).
+    OldBase = raw_basename(binary_to_list(OldPath), ".bt"),
     NewStem =
         case OldClassBin =/= undefined andalso list_to_binary(OldBase) =:= OldClassBin of
             true -> binary_to_list(NewClassBin);
             false -> beamtalk_repl_loader:to_snake_case(binary_to_list(NewClassBin))
         end,
     % NOTE: deliberately not filename:join/2 — on win32 it lower-cases a
-    % leading drive letter (e.g. "C:" -> "c:") while filename:dirname/1
-    % above does not, so the two would disagree on the drive-letter case
-    % and desync from the un-normalized paths used elsewhere (the original
+    % leading drive letter (e.g. "C:" -> "c:") while raw_dirname/1 above
+    % does not, so the two would disagree on the drive-letter case and
+    % desync from the un-normalized paths used elsewhere (the original
     % `beamtalk_source` attribute, and ChangeLog `old_path`/`new_path`
     % strings), breaking `sourceFile` equality checks on Windows.
     NewPath =
@@ -1539,6 +1555,59 @@ derive_new_path(OldPath, OldClassBin, NewClassBin) ->
                 end
         end,
     list_to_binary(NewPath).
+
+-doc """
+Like `filename:dirname/1`, but treats BOTH `/` and `\\` as path separators
+regardless of host OS, and never normalizes the separator it finds — the
+returned prefix is a byte-for-byte slice of `Path` up to (excluding) the
+last separator character. `filename:dirname/1` always rewrites the result
+to use `/` (see `derive_new_path/3`'s note above), which loses whichever
+separator convention `Path` actually used.
+
+Not OS-gated (unlike `filename:dirname/1`, which only recognizes `\\` when
+`os:type/0` reports `win32`): the paths this function is applied to already
+mix conventions on a single host (a project root in native OS form, with
+`/`-joined suffixes appended by callers), so both separators must always be
+recognized everywhere this runs, not just on Windows.
+""".
+-spec raw_dirname(string()) -> string().
+raw_dirname(Path) ->
+    case last_separator_pos(Path, 1, 0) of
+        0 -> ".";
+        1 -> string:slice(Path, 0, 1);
+        Pos -> string:slice(Path, 0, Pos - 1)
+    end.
+
+-spec last_separator_pos(string(), pos_integer(), non_neg_integer()) -> non_neg_integer().
+last_separator_pos([], _Idx, Last) ->
+    Last;
+last_separator_pos([C | Rest], Idx, _Last) when C =:= $/; C =:= $\\ ->
+    last_separator_pos(Rest, Idx + 1, Idx);
+last_separator_pos([_ | Rest], Idx, Last) ->
+    last_separator_pos(Rest, Idx + 1, Last).
+
+-doc """
+Like `filename:basename/2`, but recognizes BOTH `/` and `\\` as path
+separators regardless of host OS — see `raw_dirname/1`'s doc for why this
+module needs that independence. `Ext` is stripped from the end of the
+final path component when present, exactly like `filename:basename/2`'s
+own `Ext` argument.
+""".
+-spec raw_basename(string(), string()) -> string().
+raw_basename(Path, Ext) ->
+    Base =
+        case last_separator_pos(Path, 1, 0) of
+            0 -> Path;
+            Pos -> string:slice(Path, Pos)
+        end,
+    strip_suffix(Base, Ext).
+
+-spec strip_suffix(string(), string()) -> string().
+strip_suffix(Str, Suffix) ->
+    case lists:suffix(Suffix, Str) of
+        true -> lists:sublist(Str, length(Str) - length(Suffix));
+        false -> Str
+    end.
 
 -doc """
 Per-entry expected file set: every file that must appear in a Phase B
