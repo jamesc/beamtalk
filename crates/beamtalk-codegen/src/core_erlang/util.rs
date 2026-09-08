@@ -18,7 +18,7 @@ use super::threaded_ir::{
 };
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::leaf::{atom, string_lit};
+use beamtalk_cerl_doc::leaf::{atom, int_lit, string_lit};
 use beamtalk_cerl_doc::{Document, join};
 use beamtalk_core::ast::{
     CascadeMessage, ClassDefinition, Expression, ExpressionStatement, Identifier, MessageSelector,
@@ -122,6 +122,23 @@ pub(super) fn collect_body_exprs(body: &[ExpressionStatement]) -> Vec<&Expressio
         .map(|s| &s.expression)
         .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
         .collect()
+}
+
+/// Renders a `usize` index, arity, or size as a Core Erlang integer leaf.
+///
+/// Wraps [`int_lit`] for the many positional-index call sites in
+/// destructuring and pattern-match codegen (`patterns::destructure`,
+/// `patterns::match_lowering`) and block-body array destructuring
+/// (`blocks::generate_block_array_destructure`), where the value comes from
+/// an AST `Vec` length or position and is therefore always non-negative and
+/// far below `i64::MAX`. Saturates rather than panicking on the unreachable
+/// overflow case so codegen never aborts.
+///
+/// BT-3465: split out of `expressions.rs` into this shared leaf module — it
+/// has no generator-state dependency, and is used by three separate
+/// `core_erlang` submodules (CLAUDE.md's no-duplicate-implementations rule).
+pub(super) fn index_lit(n: usize) -> Document<'static> {
+    int_lit(i64::try_from(n).unwrap_or(i64::MAX))
 }
 
 /// BT-940: `'file'` module attribute helper for BEAM stacktrace file names.

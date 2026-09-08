@@ -76,6 +76,10 @@
 //! ## Supporting Modules
 //!
 //! - [`expressions`] - Expression code generation (literals, identifiers, maps, cascades)
+//! - [`blocks`] - BT-3465: block (closure) compilation — Tier 1/Tier 2 codegen,
+//!   the Erlang-interop wrapper, and block-body statement sequencing
+//! - [`patterns`] - BT-3465: `match:` compilation, native `Pattern` lowering,
+//!   `Pattern::Type` runtime-test strategies, and destructuring extraction
 //! - [`gen_server`] - OTP `gen_server` scaffolding (spawn, init, callbacks)
 //! - [`intrinsics`] - Compiler intrinsics (block evaluation, `ProtoObject`, `Object`)
 //! - [`operators`] - Binary operator compilation (arithmetic, comparison, string concat)
@@ -107,6 +111,7 @@
 
 mod actor_codegen;
 mod block_analysis;
+mod blocks;
 mod class_builder_source;
 mod class_meta;
 mod class_registry;
@@ -124,6 +129,7 @@ mod intrinsics;
 mod nlr;
 mod operators;
 mod options;
+mod patterns;
 pub mod primitive_bindings;
 mod primitives;
 pub mod selector_mangler;
