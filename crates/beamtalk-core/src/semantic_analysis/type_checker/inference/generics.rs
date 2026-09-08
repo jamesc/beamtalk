@@ -422,8 +422,8 @@ impl TypeChecker {
     /// Two Known/Union bindings (no Dynamic on either side) unify via
     /// `union_of` rather than last-wins, so neither is silently discarded.
     ///
-    /// `pub(super)` so `type_checker::tests` can unit-test the merge rules
-    /// directly (BT-2865) rather than only indirectly through diagnostics.
+    /// `pub(in crate::semantic_analysis::type_checker)` so `type_checker::tests` can
+    /// unit-test the merge rules directly rather than only indirectly through diagnostics.
     pub(in crate::semantic_analysis::type_checker) fn merge_method_local_binding(
         method_subst: &mut HashMap<EcoString, InferredType>,
         key: EcoString,
