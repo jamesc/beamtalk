@@ -460,6 +460,18 @@ impl TypeChecker {
                         Some(env),
                         &[],
                     );
+                    // ADR 0104 Phase 2 (BT-2750): `self spawnWith: #{...}`
+                    // literal-map key check — the class-reference and
+                    // Meta-typed-receiver branches above already run this;
+                    // BT-3469 unified the cascade continuation loop onto
+                    // this shared path, which surfaced that this branch was
+                    // the one class-side shape missing it.
+                    self.check_spawn_with_map_keys(
+                        class_name,
+                        &selector_name,
+                        arguments,
+                        hierarchy,
+                    );
                     return self.check_class_side_send(
                         class_name,
                         &selector_name,

@@ -7,14 +7,14 @@
 //!
 //! Covers `Expression::Cascade` (`receiver msg1; msg2; msg3`) — all messages
 //! dispatch to the receiver of the cascade's first send, not to its return
-//! value, so this walks the class-side / `Meta` / `Known` / `Union` receiver
-//! shapes to validate each continuation message the same way
-//! `infer_message_send_with_receiver_ty` validates the first.
+//! value, so every continuation message is validated by calling
+//! [`TypeChecker::infer_message_send_with_receiver_ty`] against that shared
+//! receiver — the same dispatch entry point the cascade's first send (and
+//! every non-cascade `MessageSend`) uses.
 
-use crate::ast::{CascadeMessage, Expression, MessageSelector, WellKnownSelector};
+use crate::ast::{CascadeMessage, Expression};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::type_checker::{InferredType, TypeChecker, TypeEnv};
-use crate::source_analysis::is_equality_operator;
 
 impl TypeChecker {
     /// Infer a cascade `receiver msg1; msg2; msg3` — the `Expression::Cascade`
@@ -24,10 +24,9 @@ impl TypeChecker {
     /// not to its return value: the parser bundles `obj msg1; msg2; msg3` as
     /// `Cascade { receiver: MessageSend(obj, msg1), messages: [msg2, msg3] }`,
     /// so this peeks through the first `MessageSend` to find the actual
-    /// receiver and validates each continuation message against it,
-    /// mirroring the class-side / `Meta` / `Known` / `Union` dispatch
-    /// `infer_message_send_with_receiver_ty` performs for the first send.
-    #[allow(clippy::too_many_lines)] // one branch per receiver-knowledge shape — irreducible
+    /// receiver, then validates every message — first and continuations
+    /// alike — through the single shared send path,
+    /// [`Self::infer_message_send_with_receiver_ty`].
     pub(in crate::semantic_analysis::type_checker) fn infer_cascade(
         &mut self,
         receiver: &Expression,
@@ -61,9 +60,10 @@ impl TypeChecker {
                 in_abstract_method,
             );
             // The cascade's first-send node (the outer `MessageSend`
-            // that is `receiver`) bypasses `infer_expr`, so record its
-            // type in the LSP type map and run the BT-1914 Dynamic
-            // warning for it here — mirroring `infer_expr`'s tail.
+            // that is `receiver`) bypasses `infer_expr`, so its tail —
+            // recording the type in the LSP type map and running the
+            // BT-1914 Dynamic warning — is invoked directly here via the
+            // same shared helper `infer_expr` itself calls.
             self.post_process_expr_type(receiver, &send_ty);
             (send_ty, inner.as_ref(), inner_ty)
         } else {
@@ -73,221 +73,32 @@ impl TypeChecker {
             let send_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
             (send_ty.clone(), receiver, send_ty)
         };
-        // ADR 0102 §5 (BT-2744): resolve a `Negation`-typed cascade
-        // target through `base`, mirroring the same substitution in
-        // `infer_message_send_with_receiver_ty` — without it,
-        // cascaded messages after the first would silently skip
-        // DNU/argument checking entirely (`dispatch_ty` matches
-        // neither the `Known` nor `Union` arms below).
-        let dispatch_ty = if let InferredType::Negation { base, .. } = dispatch_ty {
-            *base
-        } else {
-            dispatch_ty
-        };
-        // BT-2158: normalise the cascade target so parenthesised
-        // class references (`(HTTPRouter) build: [...]; ...`) are
-        // treated as class-side both for block-param inference and
-        // downstream selector validation.
-        let unwrapped_target = cascade_target.unwrap_parens();
-        let is_class_ref = matches!(unwrapped_target, Expression::ClassReference { .. });
-        // ADR 0083 / BT-2879: a Meta-typed cascade target (`someVar ::
-        // SomeClass class`) is also class-side for block-param
-        // propagation purposes, mirroring `infer_generic_send_args`'s
-        // `is_class_side` computation (~line 1241).
-        let is_class_side_send = Self::is_class_side_receiver(cascade_target, env)
-            || matches!(dispatch_ty, InferredType::Meta { .. });
+        // `dispatch_ty` is passed to `infer_message_send_with_receiver_ty`
+        // as-is (Negation and all) for every continuation message below —
+        // that function already resolves a `Negation`-typed receiver
+        // through `base` itself (ADR 0102 §5 / BT-2744) at its own entry,
+        // so there is nothing to unwrap here.
+        //
+        // Every continuation message dispatches against the same
+        // `cascade_target` / `dispatch_ty` pair the first send resolved
+        // above, so each one is validated by calling the shared send path
+        // directly — exactly as if it had been written as its own
+        // statement against that receiver. `infer_message_send_with_receiver_ty`
+        // only pattern-matches `cascade_target`'s syntactic shape (it never
+        // calls `infer_expr` on it), so this doesn't re-walk the receiver
+        // subtree and can't double-emit the DNU/type diagnostics the first
+        // send already produced.
         for msg in messages {
-            let selector_name = msg.selector.name();
-            // BT-2845: capture the inferred argument types so every
-            // cascaded message (not just the first) can be run
-            // through `check_argument_types` below — previously this
-            // return value was discarded, so a mistyped argument to a
-            // second-or-later cascade message went entirely
-            // unchecked, unlike the same send written as its own
-            // statement.
-            let arg_types = self.infer_args_with_block_context(
+            self.infer_message_send_with_receiver_ty(
+                cascade_target,
+                dispatch_ty.clone(),
+                &msg.selector,
                 &msg.arguments,
-                &dispatch_ty,
-                &selector_name,
+                msg.span,
                 hierarchy,
                 env,
                 in_abstract_method,
-                is_class_side_send,
             );
-            if is_class_ref {
-                if let Expression::ClassReference { name, .. } = unwrapped_target {
-                    self.check_argument_types(
-                        &name.name,
-                        &selector_name,
-                        &arg_types,
-                        msg.span,
-                        hierarchy,
-                        true,
-                        Some(&msg.arguments),
-                        Some(env),
-                        &[],
-                    );
-                    // BT-2850: ADR 0104 Phase 2 (BT-2750) `C spawnWith:
-                    // #{...}` literal-map key check, mirroring the
-                    // ClassReference branch of
-                    // `infer_message_send_with_receiver_ty` — otherwise
-                    // a cascade's non-first `spawnWith:` message skips
-                    // typo-suggestion checking entirely.
-                    self.check_spawn_with_map_keys(
-                        &name.name,
-                        &selector_name,
-                        &msg.arguments,
-                        hierarchy,
-                    );
-                    self.check_class_side_send(
-                        &name.name,
-                        &selector_name,
-                        msg.span,
-                        hierarchy,
-                        &[], // cascade return type is receiver, not send result
-                    );
-                }
-            } else if let InferredType::Meta {
-                class_name: ref meta_class,
-                ..
-            } = dispatch_ty
-            {
-                // ADR 0083 / BT-2879: cascade continuation messages on
-                // a Meta-typed receiver (`someVar :: SomeClass class`)
-                // dispatch class-side exactly like a syntactic class
-                // reference, mirroring `infer_message_send_with_receiver_ty`'s
-                // `Meta` branch (~line 1541). This branch was entirely
-                // missing — BT-2850 fixed the ClassReference and
-                // self-in-class-method branches the cascade loop
-                // already handled, but the Meta branch never existed
-                // here, so these sends silently skipped
-                // `check_argument_types` and `check_spawn_with_map_keys`.
-                let is_equality = matches!(
-                    msg.selector,
-                    MessageSelector::Binary(ref op) if is_equality_operator(op)
-                );
-                if !is_equality && msg.selector.well_known() != Some(WellKnownSelector::Class) {
-                    self.check_argument_types(
-                        meta_class,
-                        &selector_name,
-                        &arg_types,
-                        msg.span,
-                        hierarchy,
-                        true,
-                        Some(&msg.arguments),
-                        Some(env),
-                        &[],
-                    );
-                    self.check_spawn_with_map_keys(
-                        meta_class,
-                        &selector_name,
-                        &msg.arguments,
-                        hierarchy,
-                    );
-                    self.check_class_side_send(
-                        meta_class,
-                        &selector_name,
-                        msg.span,
-                        hierarchy,
-                        &[], // cascade return type is receiver, not send result
-                    );
-                }
-            } else if let InferredType::Known {
-                ref class_name,
-                ref type_args,
-                ..
-            } = dispatch_ty
-            {
-                if env.in_class_method && Self::is_self_receiver(unwrapped_target) {
-                    if !in_abstract_method {
-                        self.check_argument_types(
-                            class_name,
-                            &selector_name,
-                            &arg_types,
-                            msg.span,
-                            hierarchy,
-                            true,
-                            Some(&msg.arguments),
-                            Some(env),
-                            &[],
-                        );
-                        // BT-2850: ADR 0104 Phase 2 (BT-2750)
-                        // `spawnWith: #{...}` literal-map key check,
-                        // mirroring the Meta-typed-receiver branch of
-                        // `infer_message_send_with_receiver_ty` (this
-                        // branch is the cascade's equivalent — `self`
-                        // dispatch inside a class method).
-                        self.check_spawn_with_map_keys(
-                            class_name,
-                            &selector_name,
-                            &msg.arguments,
-                            hierarchy,
-                        );
-                        self.check_class_side_send(
-                            class_name,
-                            &selector_name,
-                            msg.span,
-                            hierarchy,
-                            &[], // cascade return type is receiver, not send result
-                        );
-                    }
-                } else {
-                    // BT-2871: unlike the non-cascade path in
-                    // `infer_message_send_with_receiver_ty`,
-                    // `check_binary_operand_types` never runs for
-                    // cascade continuation messages (it's only called
-                    // for the first message of a send/cascade), so
-                    // there is no more-specific-wording path to defer
-                    // to here. Always fall back to the generic
-                    // `check_argument_types` for binary continuation
-                    // messages too — this is the "simpler" option
-                    // from BT-2871's AC: `check_binary_operand_types`'s
-                    // only value-add over `check_argument_types` is
-                    // more specific wording for arithmetic/comparison/
-                    // concat, not broader coverage, so skipping it
-                    // here only loses phrasing, not correctness.
-                    self.check_argument_types(
-                        class_name,
-                        &selector_name,
-                        &arg_types,
-                        msg.span,
-                        hierarchy,
-                        false,
-                        Some(&msg.arguments),
-                        Some(env),
-                        type_args,
-                    );
-                    self.check_instance_selector(class_name, &selector_name, msg.span, hierarchy);
-                }
-            } else if let InferredType::Union { ref members, .. } = dispatch_ty {
-                // Union cascades: validate selector on all members.
-                // Argument-type checking against a union *receiver* is
-                // out of scope here — `infer_message_send_with_receiver_ty`
-                // doesn't perform it for the first cascade message
-                // either (see `infer_union_message_send`), so this
-                // preserves parity rather than introducing new
-                // behaviour beyond BT-2845's scope (unchecked
-                // arguments on continuation messages).
-                //
-                // BT-2868: `&msg.arguments` is this continuation
-                // message's own arguments, but `&arg_types` is
-                // whatever the *outer* send in this cascade computed
-                // — they can be mismatched positionally/by-shape for
-                // a continuation message. This is harmless here: the
-                // call's only purpose is DNU validation (its return
-                // value is discarded — the cascade keeps `send_ty`
-                // from the first send), and `if_true_false_solo_boolean_ret_ty`
-                // bails safely whenever the first arg type it reads
-                // doesn't pattern-match `Block(...)`.
-                self.infer_union_message_send(
-                    members,
-                    &selector_name,
-                    &msg.arguments,
-                    &arg_types,
-                    msg.span,
-                    hierarchy,
-                );
-            }
         }
         send_ty
     }
