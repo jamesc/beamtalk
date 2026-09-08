@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3467: Test fixture — base of a two-level actor inheritance chain (see
+// bt3467_actor_child.bt). Bt3467Child does not override greet, so
+// `respondsTo: #greet` on a Bt3467Child instance only answers true if actor
+// has_method/1 delegates to its superclass module — the exact divergence
+// BT-3467 fixes.
+
+Actor subclass: Bt3467Base
+  greet => "hi"
