@@ -344,7 +344,7 @@ impl CoreErlangGenerator {
                     let new_state = if self.in_loop_body {
                         self.current_state_var()
                     } else {
-                        format!("State{}", self.state_version())
+                        super::super::util::versioned_var("State", self.state_version())
                     };
 
                     // BT-2703: Rebind the local to the freshly-written value so a later
@@ -394,7 +394,7 @@ impl CoreErlangGenerator {
                     let new_state = if self.in_loop_body {
                         self.current_state_var()
                     } else {
-                        format!("State{}", self.state_version())
+                        super::super::util::versioned_var("State", self.state_version())
                     };
 
                     self.bind_var(&id.name, &val_var);
@@ -449,7 +449,7 @@ impl CoreErlangGenerator {
                 let new_state = if self.in_loop_body {
                     self.current_state_var()
                 } else {
-                    format!("State{}", self.state_version())
+                    super::super::util::versioned_var("State", self.state_version())
                 };
 
                 // BT-2703: Rebind the local to the freshly-written value so a later read
