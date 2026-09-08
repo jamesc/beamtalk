@@ -97,6 +97,7 @@ mod class_builder_source;
 mod control_flow;
 mod dispatch_codegen;
 pub mod erlang_types;
+mod errors;
 mod expr_shape;
 mod expressions;
 mod gen_server;
@@ -3957,21 +3958,11 @@ impl CoreErlangGenerator {
                 leaf::atom(class_name.to_string()),
                 ") of ",
                 error_doc,
-                "<",
-                leaf::var(class_pid_var.clone()),
-                "> when 'true' -> ",
-                "let ",
-                leaf::var(class_mod_var.clone()),
-                " = call 'beamtalk_object_class':'module_name'(",
-                leaf::var(class_pid_var.clone()),
-                ") in ",
-                "{'beamtalk_object', ",
-                leaf::atom(util::metaclass_tag(&display_name)),
-                ", ",
-                leaf::var(class_mod_var),
-                ", ",
-                leaf::var(class_pid_var),
-                "} ",
+                Self::class_object_from_registry_clause(
+                    &class_pid_var,
+                    &class_mod_var,
+                    &display_name
+                ),
                 "end end",
             ])
         } else {
@@ -3986,24 +3977,42 @@ impl CoreErlangGenerator {
                 leaf::atom(class_name.to_string()),
                 ") of ",
                 error_doc,
-                "<",
-                leaf::var(class_pid_var.clone()),
-                "> when 'true' -> ",
-                "let ",
-                leaf::var(class_mod_var.clone()),
-                " = call 'beamtalk_object_class':'module_name'(",
-                leaf::var(class_pid_var.clone()),
-                ") in ",
-                "{'beamtalk_object', ",
-                leaf::atom(util::metaclass_tag(&display_name)),
-                ", ",
-                leaf::var(class_mod_var),
-                ", ",
-                leaf::var(class_pid_var),
-                "} ",
+                Self::class_object_from_registry_clause(
+                    &class_pid_var,
+                    &class_mod_var,
+                    &display_name
+                ),
                 "end",
             ])
         }
+    }
+
+    /// Builds the `<ClassPid> when 'true' -> let ClassModName =
+    /// module_name(ClassPid) in {'beamtalk_object', Tag, ClassModName,
+    /// ClassPid}` case clause shared by both `whereis_class`-resolved
+    /// branches of [`Self::generate_class_reference`] above.
+    fn class_object_from_registry_clause(
+        class_pid_var: &str,
+        class_mod_var: &str,
+        display_name: &str,
+    ) -> Document<'static> {
+        docvec![
+            "<",
+            leaf::var(class_pid_var.to_string()),
+            "> when 'true' -> ",
+            "let ",
+            leaf::var(class_mod_var.to_string()),
+            " = call 'beamtalk_object_class':'module_name'(",
+            leaf::var(class_pid_var.to_string()),
+            ") in ",
+            "{'beamtalk_object', ",
+            leaf::atom(util::metaclass_tag(display_name)),
+            ", ",
+            leaf::var(class_mod_var.to_string()),
+            ", ",
+            leaf::var(class_pid_var.to_string()),
+            "} ",
+        ]
     }
 
     /// Generates Core Erlang code that raises a `class_not_found` error for undefined classes.

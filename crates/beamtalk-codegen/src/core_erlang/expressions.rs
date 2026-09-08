@@ -461,20 +461,17 @@ impl CoreErlangGenerator {
         }
         let (preamble, mut docs) = self.thread_subexprs(&all_exprs, "MapLit")?;
 
-        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
+        // Pair up (key, value) docs, then reuse the existing comma-join
+        // helper (sequencing.rs) instead of hand-rolling the same separator
+        // loop `generate_list_literal`/`generate_array_literal` use.
         let mut docs_iter = docs.drain(..);
-        for (i, _pair) in pairs.iter().enumerate() {
-            if i > 0 {
-                parts.push(Document::Str(", "));
-            }
+        let mut pair_docs: Vec<Document<'static>> = Vec::with_capacity(pairs.len());
+        for _ in pairs {
             let key_doc = docs_iter.next().expect("key doc");
             let val_doc = docs_iter.next().expect("value doc");
-            parts.push(key_doc);
-            parts.push(Document::Str(" => "));
-            parts.push(val_doc);
+            pair_docs.push(docvec![key_doc, " => ", val_doc]);
         }
-        parts.push(Document::Str(" }~"));
-        let literal_doc = Document::Vec(parts);
+        let literal_doc = docvec!["~{ ", Self::join_docs_with_commas(pair_docs), " }~"];
         Ok(self.close_prelude(&preamble, literal_doc, "MapLit"))
     }
 
@@ -498,19 +495,17 @@ impl CoreErlangGenerator {
         }
         let (preamble, mut docs) = self.thread_subexprs(&all_exprs, "ListLit")?;
 
+        // The tail doc (if any) was threaded last, so pop it off before
+        // comma-joining the remaining element docs via the existing helper
+        // (sequencing.rs) instead of a hand-rolled separator loop.
+        let tail_doc = tail.and_then(|_| docs.pop());
         let mut parts: Vec<Document<'static>> = vec![Document::Str("[")];
-        let mut docs_iter = docs.drain(..);
-        for i in 0..elements.len() {
-            if i > 0 {
-                parts.push(Document::Str(", "));
-            }
-            parts.push(docs_iter.next().expect("element doc"));
-        }
-        if tail.is_some() {
+        parts.push(Self::join_docs_with_commas(docs));
+        if let Some(td) = tail_doc {
             if !elements.is_empty() {
                 parts.push(Document::Str(" | "));
             }
-            parts.push(docs_iter.next().expect("tail doc"));
+            parts.push(td);
         }
         parts.push(Document::Str("]"));
         let literal_doc = Document::Vec(parts);
@@ -530,19 +525,15 @@ impl CoreErlangGenerator {
         // BT-1937: Capture all elements as one ordered sequence so evaluation
         // order is preserved when sub-expressions have open scopes.
         let exprs: Vec<&Expression> = elements.iter().collect();
-        let (preamble, mut docs) = self.thread_subexprs(&exprs, "ArrLit")?;
+        let (preamble, docs) = self.thread_subexprs(&exprs, "ArrLit")?;
 
-        let mut parts: Vec<Document<'static>> =
-            vec![Document::Str("call 'beamtalk_array':'from_list'([")];
-        let mut docs_iter = docs.drain(..);
-        for i in 0..elements.len() {
-            if i > 0 {
-                parts.push(Document::Str(", "));
-            }
-            parts.push(docs_iter.next().expect("element doc"));
-        }
-        parts.push(Document::Str("])"));
-        let literal_doc = Document::Vec(parts);
+        // Reuse the existing comma-join helper (sequencing.rs) instead of a
+        // hand-rolled separator loop.
+        let literal_doc = docvec![
+            "call 'beamtalk_array':'from_list'([",
+            Self::join_docs_with_commas(docs),
+            "])",
+        ];
         Ok(self.close_prelude(&preamble, literal_doc, "ArrLit"))
     }
 

@@ -658,15 +658,9 @@ impl CoreErlangGenerator {
         let doc = docvec![
             "let ",
             leaf::var(discard_var),
-            " = call ",
-            leaf::atom(module),
-            ":'safe_dispatch'(",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "], ",
-            leaf::var(current_state),
-            ") in 'ok'",
+            " = ",
+            Self::safe_dispatch_call_doc(module, selector_atom, args_doc, current_state),
+            " in 'ok'",
         ];
 
         Ok(doc)
@@ -1741,15 +1735,9 @@ impl CoreErlangGenerator {
         let error_clause = self.generate_self_dispatch_error_clause("SelfError", &selector_atom);
 
         let doc = docvec![
-            "case call ",
-            leaf::atom(module),
-            ":'safe_dispatch'(",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "], ",
-            leaf::var(current_state),
-            ") of ",
+            "case ",
+            Self::safe_dispatch_call_doc(module, selector_atom, args_doc, current_state),
+            " of ",
             "<{'reply', ",
             leaf::var(result_var.clone()),
             ", ",
@@ -1951,15 +1939,9 @@ impl CoreErlangGenerator {
                 docvec![
                     "let ",
                     leaf::var(dispatch_var.clone()),
-                    " = case call ",
-                    leaf::atom(module),
-                    ":'safe_dispatch'(",
-                    leaf::atom(selector_atom),
-                    ", [",
-                    args_doc,
-                    "], ",
-                    leaf::var(current_state),
-                    ") of ",
+                    " = case ",
+                    Self::safe_dispatch_call_doc(module, selector_atom, args_doc, current_state),
+                    " of ",
                 ]
             };
 
@@ -2622,23 +2604,14 @@ impl CoreErlangGenerator {
 
         // BT-1639: Build the class-side fallback: direct call or gen_server
         let class_fallback: Document<'static> =
-            if let Some(info) = self.direct_call_eligible.get(class_name) {
-                if info.selectors.contains(&raw) {
-                    let safe_fn = super::selector_mangler::safe_class_method_fn_name(&raw);
-                    let comma = if arguments.is_empty() { "" } else { ", " };
-                    docvec![
-                        "call ",
-                        leaf::atom(info.module_name.clone()),
-                        ":",
-                        leaf::atom(safe_fn),
-                        "('nil', ~{}~",
-                        comma,
-                        args_doc.clone(),
-                        ")"
-                    ]
-                } else {
-                    self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
-                }
+            if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw) {
+                let safe_fn = super::selector_mangler::safe_class_method_fn_name(&raw);
+                Self::direct_class_method_call_doc(
+                    module_name,
+                    safe_fn,
+                    args_doc.clone(),
+                    arguments.is_empty(),
+                )
             } else {
                 self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
             };
@@ -2732,14 +2705,8 @@ impl CoreErlangGenerator {
         let raw_selector = selector.name().to_string();
 
         // BT-1639: Direct call optimization for sealed class methods
-        if let Some(info) = self.direct_call_eligible.get(class_name) {
-            if info.selectors.contains(&raw_selector) {
-                return self.generate_direct_class_method_call(
-                    &info.module_name.clone(),
-                    &raw_selector,
-                    arguments,
-                );
-            }
+        if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw_selector) {
+            return self.generate_direct_class_method_call(&module_name, &raw_selector, arguments);
         }
 
         // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
@@ -2768,13 +2735,8 @@ impl CoreErlangGenerator {
             "<",
             leaf::var(class_pid_var.clone()),
             "> when 'true' -> ",
-            "call 'beamtalk_object_class':'class_send'(",
-            leaf::var(class_pid_var),
-            ", ",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "]) end"
+            Self::class_send_call_doc(&class_pid_var, selector_atom, args_doc),
+            " end"
         ];
 
         // ADR 0118 phase 5b: see the analogous binding-send helper above —
@@ -2817,14 +2779,8 @@ impl CoreErlangGenerator {
         let raw_selector = selector.name().to_string();
 
         // BT-1639: Check if this class method is eligible for direct call optimization.
-        if let Some(info) = self.direct_call_eligible.get(class_name) {
-            if info.selectors.contains(&raw_selector) {
-                return self.generate_direct_class_method_call(
-                    &info.module_name.clone(),
-                    &raw_selector,
-                    arguments,
-                );
-            }
+        if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw_selector) {
+            return self.generate_direct_class_method_call(&module_name, &raw_selector, arguments);
         }
 
         // Fallback: gen_server dispatch via class_send
@@ -2841,13 +2797,7 @@ impl CoreErlangGenerator {
             " = call 'beamtalk_class_registry':'whereis_class'(",
             leaf::atom(class_name.to_string()),
             ") in ",
-            "call 'beamtalk_object_class':'class_send'(",
-            leaf::var(class_pid_var),
-            ", ",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "])"
+            Self::class_send_call_doc(&class_pid_var, selector_atom, args_doc),
         ];
 
         Ok(self.close_prelude(&args_preamble, call_doc, "ClassCall"))
@@ -2871,21 +2821,38 @@ impl CoreErlangGenerator {
         // BT-1937: Hoist preambles from sub-expression class var mutations.
         let safe_fn = super::selector_mangler::safe_class_method_fn_name(selector);
         let (args_preamble, args_doc) = self.thread_args(arguments)?;
-        let comma = if arguments.is_empty() { "" } else { ", " };
+        let call_doc = Self::direct_class_method_call_doc(
+            module_name.to_string(),
+            safe_fn,
+            args_doc,
+            arguments.is_empty(),
+        );
 
+        Ok(self.close_prelude(&args_preamble, call_doc, "DirectCall"))
+    }
+
+    /// Builds the `call Module:safe_fn('nil', ~{}~, Args...)` direct-call
+    /// fragment shared by [`Self::generate_direct_class_method_call`] and
+    /// `generate_binding_aware_class_send`'s already-threaded-args inline
+    /// direct-call branch.
+    fn direct_class_method_call_doc(
+        module_name: String,
+        safe_fn: String,
+        args_doc: Document<'static>,
+        args_empty: bool,
+    ) -> Document<'static> {
+        let comma = if args_empty { "" } else { ", " };
         // Core Erlang empty map is ~{}~ (not #{} which is Erlang source syntax)
-        let call_doc = docvec![
+        docvec![
             "call ",
-            leaf::atom(module_name.to_string()),
+            leaf::atom(module_name),
             ":",
             leaf::atom(safe_fn),
             "('nil', ~{}~",
             comma,
             args_doc,
             ")"
-        ];
-
-        Ok(self.close_prelude(&args_preamble, call_doc, "DirectCall"))
+        ]
     }
 
     /// BT-1639: Generates the `gen_server` `class_send` fallback for binding-aware dispatch.
@@ -2905,14 +2872,43 @@ impl CoreErlangGenerator {
             " = call 'beamtalk_class_registry':'whereis_class'(",
             leaf::atom(class_name.to_string()),
             ") in ",
+            Self::class_send_call_doc(&class_pid_var, class_selector, args_doc),
+        ]
+    }
+
+    /// Builds the shared `call
+    /// 'beamtalk_object_class':'class_send'(ClassPid, Selector, [Args])`
+    /// fragment — the runtime `gen_server` dispatch every class-send fallback
+    /// eventually reaches, once a live `ClassPid` is in hand.
+    fn class_send_call_doc(
+        class_pid_var: &str,
+        selector_atom: String,
+        args_doc: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
             "call 'beamtalk_object_class':'class_send'(",
-            leaf::var(class_pid_var),
+            leaf::var(class_pid_var.to_string()),
             ", ",
-            leaf::atom(class_selector),
+            leaf::atom(selector_atom),
             ", [",
             args_doc,
             "])"
         ]
+    }
+
+    /// Shared `direct_call_eligible` gate — returns the target module name
+    /// when `class_name`/`raw_selector` is eligible for the sealed-class
+    /// direct-call optimization (no class variables, no `gen_server`
+    /// round-trip needed). Used by every direct-call gate check
+    /// (`generate_binding_aware_class_send`, `generate_workspace_class_send`,
+    /// `generate_class_method_call`) instead of each repeating the same
+    /// `.get(class_name)` / `.selectors.contains(...)` lookup.
+    fn direct_call_eligible_module(&self, class_name: &str, raw_selector: &str) -> Option<String> {
+        self.direct_call_eligible.get(class_name).and_then(|info| {
+            info.selectors
+                .contains(raw_selector)
+                .then(|| info.module_name.to_string())
+        })
     }
 
     /// BT-851: Pre-scans a class for self-sends that pass Tier 2 (stateful) block arguments.
@@ -3301,65 +3297,86 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         if self.is_class_sealed() {
             let selector_name = selector.name().to_string();
-            if self.sealed_method_selectors().contains(&selector_name) {
-                let self_var = self.fresh_temp_var("SealedSelf");
+            // The `make_self`/`let DispatchVar = case call Module:...`
+            // scaffolding is identical whichever sealed callee is chosen below —
+            // only the callee expression (`callee_doc`) differs.
+            let self_var = self.fresh_temp_var("SealedSelf");
+            let callee_doc = if self.sealed_method_selectors().contains(&selector_name) {
                 let comma = if no_args { "" } else { ", " };
                 docvec![
-                    "let ",
-                    leaf::var(self_var.clone()),
-                    " = call 'beamtalk_actor':'make_self'(",
-                    leaf::var(current_state.to_string()),
-                    ") in let ",
-                    leaf::var(dispatch_var.to_string()),
-                    " = case call ",
                     leaf::atom(module.to_string()),
                     ":",
                     leaf::atom(super::selector_mangler::sealed_fn_name(&selector_name)),
                     "(",
                     args_doc,
                     comma,
-                    leaf::var(self_var),
+                    leaf::var(self_var.clone()),
                     ", ",
                     leaf::var(current_state.to_string()),
-                    ") of "
+                    ")"
                 ]
             } else {
-                let self_var = self.fresh_temp_var("SealedSelf");
                 docvec![
-                    "let ",
-                    leaf::var(self_var.clone()),
-                    " = call 'beamtalk_actor':'make_self'(",
-                    leaf::var(current_state.to_string()),
-                    ") in let ",
-                    leaf::var(dispatch_var.to_string()),
-                    " = case call ",
                     leaf::atom(module.to_string()),
                     ":'dispatch'(",
                     leaf::atom(selector_atom.to_string()),
                     ", [",
                     args_doc,
                     "], ",
-                    leaf::var(self_var),
+                    leaf::var(self_var.clone()),
                     ", ",
                     leaf::var(current_state.to_string()),
-                    ") of "
+                    ")"
                 ]
-            }
+            };
+            docvec![
+                "let ",
+                leaf::var(self_var),
+                " = call 'beamtalk_actor':'make_self'(",
+                leaf::var(current_state.to_string()),
+                ") in let ",
+                leaf::var(dispatch_var.to_string()),
+                " = case call ",
+                callee_doc,
+                " of "
+            ]
         } else {
             docvec![
                 "let ",
                 leaf::var(dispatch_var.to_string()),
-                " = case call ",
-                leaf::atom(module.to_string()),
-                ":'safe_dispatch'(",
-                leaf::atom(selector_atom.to_string()),
-                ", [",
-                args_doc,
-                "], ",
-                leaf::var(current_state.to_string()),
-                ") of "
+                " = case ",
+                Self::safe_dispatch_call_doc(
+                    module.to_string(),
+                    selector_atom.to_string(),
+                    args_doc,
+                    current_state.to_string()
+                ),
+                " of "
             ]
         }
+    }
+
+    /// BT-920/BT-403: builds the shared `call Module:'safe_dispatch'(Selector,
+    /// [Args], State)` fragment used by every non-sealed self-dispatch call
+    /// site (self-cast, discarding self-dispatch, open self-dispatch, and the
+    /// Tier 2 dispatch call above).
+    fn safe_dispatch_call_doc(
+        module: impl Into<String>,
+        selector_atom: impl Into<String>,
+        args_doc: Document<'static>,
+        state_var: String,
+    ) -> Document<'static> {
+        docvec![
+            "call ",
+            leaf::atom(module),
+            ":'safe_dispatch'(",
+            leaf::atom(selector_atom),
+            ", [",
+            args_doc,
+            "], ",
+            leaf::var(state_var),
+            ")"
+        ]
     }
 }
 
