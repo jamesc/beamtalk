@@ -1146,7 +1146,7 @@ impl ThreadingPlan {
     /// Generates `let V = call 'erlang':'element'(idx, acc) in ...` using the
     /// outer-scope binding names (from `lookup_var`) as targets.
     ///
-    /// `index_offset` — same as in `generate_tuple_unpack_docs`.
+    /// `index_offset` — same convention as `generate_foldl_loop_body`'s `acc_param_name`/`node_gate_slots`.
     pub fn generate_tuple_extract_suffix_doc(
         &self,
         final_acc_var: &str,
