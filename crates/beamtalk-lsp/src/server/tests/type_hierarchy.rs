@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `goto_implementation` and `prepare_type_hierarchy/supertypes/subtypes` tests, plus the initialize capability-advertisement pins for both (BT-2241).
+//! `goto_implementation` and `prepare_type_hierarchy/supertypes/subtypes` tests, plus the initialize capability-advertisement pins for both.
 
 use super::*;
 
-/// BT-2241: `initialize` must advertise `implementation_provider` so
+/// `initialize` must advertise `implementation_provider` so
 /// clients enable goto-implementation. Pins the capability registration
 /// so a future refactor of the capabilities literal can't silently
 /// drop the binding (the surface-parity drift checker would catch
@@ -29,7 +29,7 @@ async fn initialize_advertises_implementation_provider() {
     );
 }
 
-/// BT-2241: AST-fallback path of `goto_implementation`. The runtime
+/// AST-fallback path of `goto_implementation`. The runtime
 /// flag defaults to off in tests (no `initialize` with
 /// `delegateToRuntime`), so this exercises the cold-file walker via
 /// `SimpleLanguageService::find_implementors`. Two classes in the same
@@ -90,7 +90,7 @@ async fn goto_implementation_returns_all_implementors_via_ast_fallback() {
     );
     // Both locations should be in the seeded file (the only one
     // indexed) and both ranges should be zero-width at column 0
-    // (matching the runtime path's header-line anchor, BT-2241 review).
+    // (matching the runtime path's header-line anchor).
     let expected_uri = Url::from_file_path(path.as_std_path()).expect("file URI");
     for loc in &locations {
         assert_eq!(loc.uri, expected_uri, "unexpected URI in result");
@@ -105,7 +105,7 @@ async fn goto_implementation_returns_all_implementors_via_ast_fallback() {
     }
 }
 
-/// BT-2241: cursor on a non-selector token (e.g. a `state:` declaration
+/// Cursor on a non-selector token (e.g. a `state:` declaration
 /// name) yields `None`. The runtime-attached mode would skip the hop
 /// (the classifier returns `None`), and the AST fallback would do the
 /// same — `goto_implementation` is selector-scoped by design.
@@ -154,7 +154,7 @@ async fn goto_implementation_returns_none_for_non_selector_cursor() {
     );
 }
 
-/// BT-2242: `initialize` must advertise type-hierarchy support via the
+/// `initialize` must advertise type-hierarchy support via the
 /// `experimental` channel (lsp-types 0.94.1 does not yet expose a typed
 /// `type_hierarchy_provider` field on `ServerCapabilities`).
 ///
@@ -183,7 +183,7 @@ async fn initialize_advertises_type_hierarchy_provider_via_experimental() {
     );
 }
 
-/// BT-2242: `prepare_type_hierarchy` on a known class name returns a
+/// `prepare_type_hierarchy` on a known class name returns a
 /// single item carrying the class-name span. Exercises the AST-walker
 /// classifier (`type_hierarchy_prepare_at`) plus the LSP-side item
 /// construction.
@@ -237,7 +237,7 @@ async fn prepare_type_hierarchy_resolves_class_under_cursor() {
     assert_eq!(items[0].uri, uri);
 }
 
-/// BT-2242: cursor not on a class name (e.g. inside the `subclass:`
+/// Cursor not on a class name (e.g. inside the `subclass:`
 /// selector token) yields `None`. Selector tokens are owned by the
 /// implementors / senders queries, not type hierarchy.
 #[tokio::test]
@@ -280,7 +280,7 @@ async fn prepare_type_hierarchy_returns_none_for_non_class_cursor() {
     );
 }
 
-/// BT-2242: `typeHierarchy/supertypes` returns the receiver's ancestor
+/// `typeHierarchy/supertypes` returns the receiver's ancestor
 /// chain, in `Behaviour superclassChain` order. Two-level chain
 /// `Bar -> Foo -> Object -> ProtoObject` exercises the BFS-like
 /// ordering (direct parent first).
@@ -343,7 +343,7 @@ async fn supertypes_returns_chain_in_inheritance_order() {
     );
 }
 
-/// BT-2242: `typeHierarchy/subtypes` returns transitive descendants
+/// `typeHierarchy/subtypes` returns transitive descendants
 /// (BFS order — direct children before grandchildren) via
 /// `ClassHierarchy::all_subclasses`. Two-level tree exercises both
 /// levels and confirms the receiver itself is excluded.

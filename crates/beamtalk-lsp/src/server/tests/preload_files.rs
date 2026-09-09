@@ -76,8 +76,8 @@ fn collect_preload_files_separates_user_and_stdlib_files() {
     let _ = fs::remove_dir_all(&temp);
 }
 
-/// BT-2027: Preload must walk both `src/` and `test/`. Before this fix,
-/// opening a `test/` file in the LSP reported spurious `Unresolved class`
+/// Preload must walk both `src/` and `test/`, or
+/// opening a `test/` file in the LSP reports spurious `Unresolved class`
 /// for every reference to a `src/` class.
 #[test]
 fn collect_preload_files_walks_src_and_test() {
@@ -110,7 +110,7 @@ fn collect_preload_files_walks_src_and_test() {
     let _ = fs::remove_dir_all(&temp);
 }
 
-/// BT-2137: Preload must walk every `_build/deps/<name>/src/` so classes
+/// Preload must walk every `_build/deps/<name>/src/` so classes
 /// from declared `beamtalk.toml` dependencies resolve without spurious
 /// `Unresolved class` warnings.
 #[test]
@@ -170,7 +170,7 @@ fn collect_preload_files_walks_dependency_src_dirs() {
     let _ = fs::remove_dir_all(&temp);
 }
 
-/// BT-2959: the real running LSP chains `user_files`/`stdlib_files` into
+/// The real running LSP chains `user_files`/`stdlib_files` into
 /// one generic `update_file` loop, which never marked a preloaded
 /// stdlib file's `ProjectIndex::is_stdlib_file` — only the separate
 /// `ProjectIndex::with_stdlib` constructor (used by beamtalk-cli's build
@@ -225,7 +225,7 @@ async fn preload_workspace_source_files_marks_stdlib_files_in_project_index() {
     let _ = fs::remove_dir_all(&temp);
 }
 
-/// BT-2137: A dep checkout without a `src/` subdirectory must be skipped
+/// A dep checkout without a `src/` subdirectory must be skipped
 /// silently rather than causing a walk failure.
 #[test]
 fn collect_preload_files_tolerates_dep_without_src_dir() {
@@ -250,7 +250,7 @@ fn collect_preload_files_tolerates_dep_without_src_dir() {
     let _ = fs::remove_dir_all(&temp);
 }
 
-/// BT-2137: In a multi-root workspace, every root's own `src/`/`test/`
+/// In a multi-root workspace, every root's own `src/`/`test/`
 /// must be preloaded before *any* root's dependency `src/` directories.
 /// Otherwise deps from an earlier root could exhaust the shared
 /// `PRELOAD_MAX_FILES` budget and leave a later root's user files

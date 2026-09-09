@@ -43,7 +43,7 @@ fn resolve_flushed_path_returns_none_when_nothing_matches() {
     assert!(resolve_flushed_path("does/not/exist.bt", &[]).is_none());
 }
 
-// ADR 0113 Phase 4a (BT-3209): a Tier 2 destructive flush (`remove-class`)
+// ADR 0113 Phase 4a: a Tier 2 destructive flush (`remove-class`)
 // has already unlinked its file by the time `flush_completed` fires —
 // `resolve_flushed_path` must still resolve a usable path for it (so the
 // listener can build a `DeleteFile` URI), just flagged `existed = false`
@@ -93,7 +93,7 @@ fn resolve_flushed_path_returns_none_when_parent_dir_also_missing() {
     assert!(resolve_flushed_path(raw, &[]).is_none());
 }
 
-// ADR 0113 Phase 4a (BT-3209): the `WorkspaceEdit` builders the flush
+// ADR 0113 Phase 4a: the `WorkspaceEdit` builders the flush
 // listener dispatches to, tested directly since driving a full
 // `client.apply_edit` round trip needs a live LSP client on the other
 // end of the socket.
@@ -151,8 +151,8 @@ fn change_file_edit_emits_whole_document_text_edit() {
     );
 }
 
-// BT-3212 (ADR 0113 LSP follow-up): the `CreateFile` builder and the
-// `classify_flush_action` dispatch, tested the same way the BT-3209
+// ADR 0113 LSP follow-up: the `CreateFile` builder and the
+// `classify_flush_action` dispatch, tested the same way the
 // `DeleteFile`/`Change` builders above are — directly, since driving a
 // full `client.apply_edit` round trip needs a live LSP client.
 
@@ -243,7 +243,7 @@ fn classify_flush_action_uses_wire_kind_when_present() {
 
 #[test]
 fn classify_flush_action_falls_back_to_existence_when_kind_absent() {
-    // BT-3209 backward compat: no wire `kind` (a pre-BT-3212 producer)
+    // Backward compat: no wire `kind` (an older producer)
     // falls back to the existence heuristic — and can never produce
     // `Create`, since existence alone cannot distinguish "freshly
     // created" from "patched in place".
@@ -253,7 +253,7 @@ fn classify_flush_action_falls_back_to_existence_when_kind_absent() {
 
 #[test]
 fn classify_flush_action_buckets_rename_kinds_to_patch_defensively() {
-    // ADR 0114 LSP follow-up (BT-3275): `flush_event_listener` never
+    // ADR 0114 LSP follow-up: `flush_event_listener` never
     // actually calls `classify_flush_action` for these — `RenameClass`
     // with `oldFile` and `RenameMethod` are dispatched to their own
     // branches first. This is only the defensive fallback for the
@@ -269,11 +269,10 @@ fn classify_flush_action_buckets_rename_kinds_to_patch_defensively() {
     );
 }
 
-// ADR 0114 LSP follow-up (BT-3275): the rename-method-site
-// `WorkspaceEdit` builder, tested the same direct way the BT-3209/
-// BT-3212 builders above are.
+// ADR 0114 LSP follow-up: the rename-method-site
+// `WorkspaceEdit` builder, tested the same direct way the builders above are.
 
-// BT-3285: the rename-class move path no longer builds a `WorkspaceEdit`
+// The rename-class move path builds no `WorkspaceEdit`
 // at all — it sends the custom `beamtalk-lsp/documentMoved` notification
 // instead (see `DocumentMoved`'s doc for why the old `RenameFile` op was
 // dropped). `Client::send_notification` only actually sends once
@@ -459,7 +458,7 @@ fn rename_method_site_edit_emits_typed_text_document_edit() {
     }
 }
 
-/// BT-3433 (follow-up): `reload_check_listener`/`seed_reload_diagnostics`
+/// `reload_check_listener`/`seed_reload_diagnostics`
 /// must defer their `publish_diagnostics_impl` send — same as
 /// `Backend::publish_diagnostics` already does for
 /// `did_open`/`did_change`/`did_save` — exactly when doing otherwise
@@ -507,7 +506,7 @@ fn should_defer_reload_publish_for_preload_requires_open_and_in_progress() {
 
 #[test]
 fn open_paths_handle_observes_late_inserts() {
-    // ADR 0082 Phase 3 (BT-2289): the listener must see files opened
+    // ADR 0082 Phase 3: the listener must see files opened
     // *after* the runtime client attached. Verify the handle reads the
     // live map, not a captured snapshot, by inserting after handle
     // creation and confirming `contains` flips from false to true.

@@ -1,13 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0082 Phase 3 (BT-2289): executeCommand expression-builder tests for flush, `save_class`, `precheck_method`, `recheck_image`, `remove_method`, plus class-name/selector validation and the beamtalk.* command-list constant check.
+//! ADR 0082 Phase 3: executeCommand expression-builder tests for flush, `save_class`, `precheck_method`, `recheck_image`, `remove_method`, plus class-name/selector validation and the beamtalk.* command-list constant check.
 
 use super::*;
 use beamtalk_core::unparse::escape_string_literal;
 
 // ----------------------------------------------------------------------
-// ADR 0082 Phase 3 (BT-2289): executeCommand expression builder + helpers
+// ADR 0082 Phase 3: executeCommand expression builder + helpers
 // ----------------------------------------------------------------------
 
 #[test]
@@ -235,7 +235,7 @@ fn build_recheck_image_rejects_arguments() {
     assert!(err.contains("expected no arguments"));
 }
 
-// --- ADR 0112 Phase 4 (BT-3188): beamtalk.removeMethod command wiring ---
+// --- ADR 0112 Phase 4: beamtalk.removeMethod command wiring ---
 
 #[test]
 fn build_remove_method_emits_remove_selector_expression() {

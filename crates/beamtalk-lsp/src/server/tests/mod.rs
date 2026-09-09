@@ -8,7 +8,7 @@
 //! - [`hover_and_stdlib`] — hover `SymbolKind` disambiguation, stdlib
 //!   source-dir resolution and policy notes, hover class-name extraction
 //! - [`content_fetch`] — `load_type_cache` and stdlib `fetch_content`
-//! - [`diagnostics_table`] — BT-2800 `beamtalk.toml` `[diagnostics]` table
+//! - [`diagnostics_table`] — `beamtalk.toml` `[diagnostics]` table
 //! - [`preload_racing`] — sibling-root package stamps and didOpen-vs-preload
 //!   races
 //! - [`did_close_racing`] — `did_close` reverting to disk vs. racing a
@@ -21,12 +21,12 @@
 //!   builders and their argument validation
 //! - [`flush_and_rename_edits`] — workspace-edit builders, flush-action
 //!   classification, and rename-class/-method support
-//! - [`call_hierarchy`] — BT-2243 callHierarchy helpers
-//! - [`references`] — BT-2240 `textDocument/references` declaration-merge,
+//! - [`call_hierarchy`] — callHierarchy helpers
+//! - [`references`] — `textDocument/references` declaration-merge,
 //!   driven through the [`open_test_file`] / [`real_did_open`] harness below
 //! - [`type_hierarchy`] — goto-implementation and
 //!   `prepare_type_hierarchy/supertypes/subtypes`
-//! - [`symbol_unification`] — BT-2244 workspace/document symbol unification
+//! - [`symbol_unification`] — workspace/document symbol unification
 
 pub use super::*;
 pub(crate) use beamtalk_core::test_helpers::unique_temp_dir;
@@ -52,7 +52,7 @@ pub(crate) fn open_test_file(backend: &Backend, path: &Utf8PathBuf, source: &str
 
 /// Helper: drives the real `did_open` handler (unlike `open_test_file`
 /// above) so its own `publish_diagnostics` call actually runs — used by
-/// `did_open_during_preload_defers_to_republish_for_sibling_class` (BT-3433)
+/// `did_open_during_preload_defers_to_republish_for_sibling_class`
 /// to verify that call's send behavior, not just the resulting state.
 pub(crate) async fn real_did_open(backend: &Backend, uri: Url, text: &str) {
     backend
