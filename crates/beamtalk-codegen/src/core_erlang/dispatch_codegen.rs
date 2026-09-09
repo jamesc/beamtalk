@@ -48,6 +48,65 @@ use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, MessageSelector, WellKnownSelector};
 use beamtalk_core::source_analysis::Span;
 
+/// One `generate_message_send` dispatch strategy: `Some(doc)` claims the
+/// send, `None` defers to the next entry in [`HANDLERS`].
+type SendHandler = fn(
+    &mut CoreErlangGenerator,
+    &Expression,
+    &MessageSelector,
+    &[Expression],
+) -> Result<Option<Document<'static>>>;
+
+/// BT-3474: `generate_message_send`'s dispatch priority as data, replacing
+/// what were 15 source-ordered `if let Some(doc) = self.try_*()?` calls (two
+/// of them a duplicated `is_character_typed_receiver` check — see
+/// [`CoreErlangGenerator::try_handle_character_typed_message`]'s doc, now
+/// this table's single `character_typed` entry). Order is significant and
+/// load-bearing: earlier entries intentionally preempt later, more generic
+/// ones (e.g. `character_typed` before `protoobject`/`object`, `dict` before
+/// `list`, `class_method_self_send` before `self_dispatch`) — see each
+/// handler's own doc for why. A send that no entry claims falls through to
+/// `generate_message_send`'s `generate_runtime_dispatch` default.
+const HANDLERS: &[(&str, SendHandler)] = &[
+    (
+        "character_typed",
+        CoreErlangGenerator::try_handle_character_typed_message,
+    ),
+    (
+        "protoobject",
+        CoreErlangGenerator::try_generate_protoobject_message,
+    ),
+    ("object", CoreErlangGenerator::try_generate_object_message),
+    ("block", CoreErlangGenerator::try_generate_block_message),
+    ("dict", CoreErlangGenerator::try_generate_dict_message),
+    ("list", CoreErlangGenerator::try_generate_list_message),
+    (
+        "boolean_protocol",
+        CoreErlangGenerator::try_generate_boolean_protocol,
+    ),
+    ("spawn_await", CoreErlangGenerator::try_handle_spawn_await),
+    (
+        "erlang_interop",
+        CoreErlangGenerator::try_handle_erlang_interop,
+    ),
+    (
+        "logger_intrinsic",
+        CoreErlangGenerator::try_generate_logger_intrinsic,
+    ),
+    (
+        "class_reference",
+        CoreErlangGenerator::try_handle_class_reference,
+    ),
+    (
+        "class_method_self_send",
+        CoreErlangGenerator::try_handle_class_method_self_send,
+    ),
+    (
+        "self_dispatch",
+        CoreErlangGenerator::try_handle_self_dispatch,
+    ),
+];
+
 impl CoreErlangGenerator {
     /// BT-2816: Generates the `<{'error', ..., _}>` case clauses shared by all
     /// self-dispatch call sites (`safe_dispatch`/`dispatch` error branches).
@@ -382,14 +441,12 @@ impl CoreErlangGenerator {
     ///
     /// 1. **Super sends** → `generate_super_send`
     /// 2. **Binary operators** → `generate_binary_op` (synchronous Erlang ops)
-    /// 3. **`ProtoObject` messages** → `try_generate_protoobject_message` (synchronous)
-    /// 4. **Object messages** → `try_generate_object_message` → delegates to nil protocol, error signaling, object identity, object reflection
-    /// 5. **Block messages** → `try_generate_block_message` (structural intrinsics)
-    /// 6. **Spawn/Await** → `try_handle_spawn_await` (spawn, await intrinsics)
-    /// 7. **Erlang interop** → `try_handle_erlang_interop` (ADR 0028 direct call / proxy)
-    /// 8. **Class references** → `try_handle_class_reference` (workspace bindings, class methods)
-    /// 9. **Self-sends** → `try_handle_self_dispatch` (synchronous actor self-dispatch)
-    /// 10. **Default** → Runtime dispatch (BT-223: actor vs primitive check)
+    /// 3. **`HANDLERS`** (BT-3474) → priority-ordered table; see its doc for
+    ///    the full breakdown (Character-typed dispatch, `ProtoObject`/Object
+    ///    messages, Block/Dictionary/List messages, Boolean conditionals,
+    ///    spawn/await, Erlang interop, Logger intrinsics, class references,
+    ///    class-method and actor self-sends)
+    /// 4. **Default** → Runtime dispatch (BT-223: actor vs primitive check)
     pub(super) fn generate_message_send(
         &mut self,
         receiver: &Expression,
@@ -426,134 +483,102 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
-        // BT-2095 / BT-3214: Reflective and class-introspection sends on a
-        // Character-typed receiver (a Character literal, or a `Character
-        // value:` factory call — see `is_character_typed_receiver`) must
-        // honour the static type, not fall into the protoobject/object
-        // handlers that key on runtime `class_of/1` (which returns `'Integer'`
-        // for any integer receiver):
-        //   * `$A class`            → must return `'Character'`
-        //   * `$A respondsTo: #foo` → must consult Character's `has_method/1`
-        //   * `$A perform: #foo`    → must dispatch through Character
-        // The protoobject/object handlers run earlier than the general
-        // Character-typed fallback below, so intercept them here.
-        if is_character_typed_receiver(receiver) {
-            match selector.well_known() {
-                Some(WellKnownSelector::Class) => {
-                    // BT-1937: Hoist any side effects in the receiver expression
-                    // (none for a literal, but capture preserves the contract).
-                    let (preamble, _) = self.thread_subexprs(&[receiver], "CharCls")?;
-                    // Resolve to the Character class object so equality with
-                    // the `Character` class reference holds — `class_of_object`
-                    // for raw integer 65 would otherwise return Integer's
-                    // class object via `class_of/1 == 'Integer'`.
-                    let call_doc = Document::Str(
-                        "call 'beamtalk_primitive':'class_of_object_by_name'('Character')",
-                    );
-                    return Ok(self.close_prelude(&preamble, call_doc, "CharClsRes"));
-                }
-                Some(WellKnownSelector::RespondsTo) => {
-                    let exprs: [&Expression; 2] = [receiver, &arguments[0]];
-                    let mut seq = self.sequence_call(&exprs, "CharResp")?;
-                    let _recv = seq.next();
-                    let sel_doc = seq.next();
-                    let call_doc =
-                        docvec!["call 'bt@stdlib@character':'has_method'(", sel_doc, ")"];
-                    return Ok(seq.close(self, call_doc, "CharRespRes"));
-                }
-                Some(
-                    WellKnownSelector::Perform
-                    | WellKnownSelector::PerformWithArgs
-                    | WellKnownSelector::PerformLocallyWithArgs,
-                ) => {
-                    return self.generate_character_typed_dispatch(receiver, selector, arguments);
-                }
-                _ => {}
+        // BT-3474: dispatch priority for every remaining message shape is
+        // `HANDLERS` — see its doc for why `character_typed` leads the list.
+        for (_, handler) in HANDLERS {
+            if let Some(doc) = handler(self, receiver, selector, arguments)? {
+                return Ok(doc);
             }
-        }
-
-        // Special case: ProtoObject methods - fundamental operations on all objects
-        // class returns the class name for any object (primitives or actors)
-        if let Some(doc) = self.try_generate_protoobject_message(receiver, selector, arguments)? {
-            return Ok(doc);
-        }
-
-        // Special case: Object methods - reflection and introspection
-        // respondsTo:, fieldNames, fieldAt: enable runtime introspection
-        if let Some(doc) = self.try_generate_object_message(receiver, selector, arguments)? {
-            return Ok(doc);
-        }
-
-        // Special case: Block evaluation messages (value, value:, whileTrue:, etc.)
-        // These are synchronous function calls, not async actor messages
-        if let Some(doc) = self.try_generate_block_message(receiver, selector, arguments)? {
-            return Ok(doc);
-        }
-
-        // Special case: Dictionary iteration messages (do:, doWithKey:, keysAndValuesDo:)
-        // Must come before list messages so dictionary-specific selectors are handled correctly.
-        if let Some(doc) = self.try_generate_dict_message(receiver, selector, arguments)? {
-            return Ok(doc);
-        }
-
-        // Special case: List iteration messages (do:, collect:, select:, reject:, inject:into:)
-        // These are structural intrinsics that require inline code generation for proper
-        // state threading when used inside actor methods with field mutations.
-        if let Some(doc) = self.try_generate_list_message(receiver, selector, arguments)? {
-            return Ok(doc);
-        }
-
-        // BT-915: Boolean conditionals (ifTrue:, ifFalse:, ifTrue:ifFalse:) in actor context
-        // with field mutations. Generates inline case expressions that thread state correctly
-        // through both branches.
-        if let Some(doc) = self.try_generate_boolean_protocol(receiver, selector, arguments)? {
-            return Ok(doc);
-        }
-
-        // Special case: spawn, spawnWith:, await, awaitForever, await:
-        if let Some(doc) = self.try_handle_spawn_await(receiver, selector, arguments)? {
-            return Ok(doc);
-        }
-
-        // BT-677 / BT-682 / ADR 0028: Erlang interop — direct calls and proxy construction
-        if let Some(doc) = self.try_handle_erlang_interop(receiver, selector, arguments)? {
-            return Ok(doc);
-        }
-
-        // BT-1435: Logger intrinsics — inline logger:log/3 with domain metadata
-        if let Some(doc) = self.try_generate_logger_intrinsic(receiver, selector, arguments)? {
-            return Ok(doc);
-        }
-
-        // BT-374 / ADR 0010: Workspace binding dispatch + class method calls
-        if let Some(doc) = self.try_handle_class_reference(receiver, selector, arguments)? {
-            return Ok(doc);
-        }
-
-        // BT-412: Self-sends in class methods route through class_send
-        if let Some(doc) = self.try_handle_class_method_self_send(receiver, selector, arguments)? {
-            return Ok(doc);
-        }
-
-        // BT-330: Self-sends in actor methods use direct synchronous dispatch
-        if let Some(doc) = self.try_handle_self_dispatch(receiver, selector, arguments)? {
-            return Ok(doc);
-        }
-
-        // BT-2095 / BT-3214: Character-typed receivers (literals like `$A`,
-        // and `Character value: N` factory calls) have static type Character,
-        // but at the BEAM level they are plain integers — runtime `class_of/1`
-        // returns `'Integer'` and routes them to `bt@stdlib@integer:dispatch/3`.
-        // Specialize at codegen so `$A asInteger`, `$A printString`, `$A
-        // uppercase`, `(Character value: 10) asString`, etc. reach the
-        // Character module's dispatch (which delegates to Integer for inherited
-        // methods like `+`, `-`, `bitAnd:`).
-        if is_character_typed_receiver(receiver) {
-            return self.generate_character_typed_dispatch(receiver, selector, arguments);
         }
 
         // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
         self.generate_runtime_dispatch(receiver, selector, arguments)
+    }
+
+    /// BT-2095 / BT-3214 / BT-3474: Character-typed-receiver dispatch —
+    /// `HANDLERS`' first (and only) entry that ever fires on
+    /// `is_character_typed_receiver` (a Character literal, or a `Character
+    /// value:` factory call). Collapses what used to be two separate
+    /// `is_character_typed_receiver` checks in `generate_message_send` (one
+    /// preempting [`Self::try_generate_protoobject_message`]'s `class` and
+    /// [`Self::try_generate_object_message`]'s `respondsTo:`/`perform:`
+    /// family for a Character receiver, one catching every other selector
+    /// after the full non-character priority chain ran) into the one table
+    /// entry `HANDLERS`' ordering now makes explicit:
+    ///
+    /// 1. `class`/`respondsTo:`/`perform:` family MUST be decided here,
+    ///    before `HANDLERS[1..]` runs — `try_generate_protoobject_message`/
+    ///    `try_generate_object_message` handle those selectors generically,
+    ///    keyed on runtime `class_of/1` (which returns `'Integer'` for any
+    ///    Character receiver, at the BEAM level a plain integer), for every
+    ///    *other* receiver shape.
+    /// 2. Any other selector runs the normal non-character priority chain
+    ///    first (`HANDLERS[1..]`, skipping this entry) — e.g. `isNil`/
+    ///    `hash`/`error:` are receiver-agnostic Object-protocol methods and
+    ///    must stay generic even for a Character receiver.
+    /// 3. Only once nothing in that chain claims the selector does this
+    ///    fall back to [`Self::generate_character_typed_dispatch`], instead
+    ///    of [`Self::generate_runtime_dispatch`]'s `class_of/1`-keyed
+    ///    fallback (which would treat the receiver as an `Integer`).
+    fn try_handle_character_typed_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        if !is_character_typed_receiver(receiver) {
+            return Ok(None);
+        }
+
+        match selector.well_known() {
+            Some(WellKnownSelector::Class) => {
+                // BT-1937: Hoist any side effects in the receiver expression
+                // (none for a literal, but capture preserves the contract).
+                let (preamble, _) = self.thread_subexprs(&[receiver], "CharCls")?;
+                // Resolve to the Character class object so equality with
+                // the `Character` class reference holds — `class_of_object`
+                // for raw integer 65 would otherwise return Integer's
+                // class object via `class_of/1 == 'Integer'`.
+                let call_doc = Document::Str(
+                    "call 'beamtalk_primitive':'class_of_object_by_name'('Character')",
+                );
+                return Ok(Some(self.close_prelude(&preamble, call_doc, "CharClsRes")));
+            }
+            Some(WellKnownSelector::RespondsTo) => {
+                let exprs: [&Expression; 2] = [receiver, &arguments[0]];
+                let mut seq = self.sequence_call(&exprs, "CharResp")?;
+                let _recv = seq.next();
+                let sel_doc = seq.next();
+                let call_doc = docvec!["call 'bt@stdlib@character':'has_method'(", sel_doc, ")"];
+                return Ok(Some(seq.close(self, call_doc, "CharRespRes")));
+            }
+            Some(
+                WellKnownSelector::Perform
+                | WellKnownSelector::PerformWithArgs
+                | WellKnownSelector::PerformLocallyWithArgs,
+            ) => {
+                return Ok(Some(self.generate_character_typed_dispatch(
+                    receiver, selector, arguments,
+                )?));
+            }
+            _ => {}
+        }
+
+        for (_, handler) in &HANDLERS[1..] {
+            if let Some(doc) = handler(self, receiver, selector, arguments)? {
+                return Ok(Some(doc));
+            }
+        }
+
+        // BT-2095 / BT-3214: at the BEAM level a Character value is a plain
+        // integer, so the generic fallback (`generate_runtime_dispatch`,
+        // keyed on runtime `class_of/1`) would route it to
+        // `bt@stdlib@integer:dispatch/3`. Reach the Character module's
+        // dispatch instead, e.g. for `$A asInteger`, `$A printString`, `$A
+        // uppercase`, `(Character value: 10) asString`.
+        Ok(Some(self.generate_character_typed_dispatch(
+            receiver, selector, arguments,
+        )?))
     }
 
     /// BT-2095 / BT-3214: Routes a non-binary message to the Character module's
