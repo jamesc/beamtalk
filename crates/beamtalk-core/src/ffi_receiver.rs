@@ -11,11 +11,11 @@
 //! `Erlang lists` (or the parenthesized `(Erlang lists)`) parses as an
 //! ordinary [`Expression::MessageSend`] whose receiver is the `Erlang` class
 //! reference and whose selector is a unary message naming the module. The
-//! rule "is this an FFI module lookup, or a class-protocol send?" was
-//! historically implemented six times across the compiler (BT-3079) and had
-//! already drifted three ways. This module is the single source of truth;
-//! callers must use [`erlang_module_of_receiver`] (or the smaller building
-//! blocks below) rather than re-deriving the pattern.
+//! rule "is this an FFI module lookup, or a class-protocol send?" is easy to
+//! reimplement inconsistently across the compiler. This module is the
+//! single source of truth; callers must use [`erlang_module_of_receiver`]
+//! (or the smaller building blocks below) rather than re-deriving the
+//! pattern.
 //!
 //! # The three points of drift this module resolves uniformly
 //!
@@ -62,7 +62,7 @@ const CLASS_PROTOCOL_SELECTORS: &[&str] = &[
 /// True when `selector` is a class-protocol selector that must not be
 /// intercepted as an Erlang FFI module name (see [`CLASS_PROTOCOL_SELECTORS`]).
 ///
-/// BT-3362 (ADR 0117 Decision step 5): widened from `pub(crate)` — reached
+/// This is `pub`, not `pub(crate)` (ADR 0117 Decision step 5): reached
 /// from the standalone `beamtalk-codegen` crate's `dispatch_codegen` to
 /// decide whether a bare-Erlang-class send routes through class-protocol
 /// dispatch instead of the FFI bridge.
@@ -99,10 +99,10 @@ pub(crate) fn is_erlang_class_reference(expr: &Expression) -> bool {
 /// - the unary selector is a class-protocol selector (`Erlang class`,
 ///   `Erlang new`, …) — those dispatch to the class protocol instead of FFI.
 ///
-/// BT-3361: widened from `pub(crate)` to `pub` — `queries::ffi_sites_query`
+/// This is `pub`, not `pub(crate)`: `queries::ffi_sites_query`
 /// (Language Service) reaches this from the standalone
-/// `beamtalk-language-service` crate now, so `pub(crate)` visibility is no
-/// longer reachable.
+/// `beamtalk-language-service` crate, so `pub(crate)` visibility would not
+/// reach it.
 #[must_use]
 pub fn erlang_module_of_receiver(expr: &Expression) -> Option<&str> {
     if let Expression::MessageSend {

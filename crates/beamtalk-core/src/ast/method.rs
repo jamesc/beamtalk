@@ -104,15 +104,15 @@ pub struct MethodDefinition {
     /// class's `class_methods` — so that the per-method source [`unparse_method`]
     /// produces re-emits the `class ` prefix. That keeps the stored/compiled
     /// `source_ref` byte-identical to the on-disk method span for class-side
-    /// methods (ADR 0082 / BT-2594). Whole-file unparse adds the prefix from its
+    /// methods (ADR 0082). Whole-file unparse adds the prefix from its
     /// own context, so it ignores this flag.
     pub is_class_method: bool,
     /// The kind of method.
     pub kind: MethodKind,
-    /// Optional `@expect` directive attached to this method declaration (BT-1856, BT-1918).
+    /// Optional `@expect` directive attached to this method declaration.
     ///
     /// When present, diagnostics matching any of these categories that fire
-    /// on the method declaration are suppressed (BT-3387: a single directive
+    /// on the method declaration are suppressed (a single directive
     /// may list more than one category, e.g. `@expect unresolved_ffi, type`).
     /// If none of the categories match a diagnostic, a "stale @expect"
     /// warning is emitted. The span is the source location of the
