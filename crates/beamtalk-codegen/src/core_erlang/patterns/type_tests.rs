@@ -629,3 +629,21 @@ impl CoreErlangGenerator {
         ]
     }
 }
+
+#[cfg(test)]
+mod type_tests_tests {
+    use super::TYPE_TESTS;
+    use std::collections::HashSet;
+
+    /// A duplicated key would silently shadow: `Iterator::find` returns the
+    /// *first* match, so a second entry for the same class name compiles
+    /// (nothing rejects it) but is permanently dead — its `TypeTest` would
+    /// never render, however wrong it might be.
+    #[test]
+    fn no_duplicate_class_names() {
+        let mut seen = HashSet::new();
+        for (name, _) in TYPE_TESTS {
+            assert!(seen.insert(*name), "duplicate TYPE_TESTS entry: {name:?}");
+        }
+    }
+}

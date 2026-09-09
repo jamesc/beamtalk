@@ -14,6 +14,27 @@ fn s() -> Span {
     Span::new(0, 0)
 }
 
+/// Index of the `HANDLERS` entry named `name`, or panics — shared by the
+/// BT-3474 ordering tests below.
+fn handlers_index_of(name: &str) -> usize {
+    super::HANDLERS
+        .iter()
+        .position(|(n, _)| *n == name)
+        .unwrap_or_else(|| panic!("no HANDLERS entry named {name:?}"))
+}
+
+/// A duplicated name would break `handlers_index_of` (and
+/// `try_handle_character_typed_message`'s by-name skip) silently: lookups
+/// would resolve to whichever entry happens to come first, with no signal
+/// that a second, unreachable entry exists.
+#[test]
+fn handlers_have_unique_names() {
+    let mut seen = std::collections::HashSet::new();
+    for (name, _) in super::HANDLERS {
+        assert!(seen.insert(*name), "duplicate HANDLERS entry: {name:?}");
+    }
+}
+
 /// BT-3474: `character_typed` must precede `protoobject`/`object` in
 /// `HANDLERS` — those two unconditionally claim `class`/`respondsTo:`/
 /// `perform:` family selectors for *any* receiver (keyed on runtime
@@ -27,15 +48,27 @@ fn s() -> Span {
 /// Character-typed sends silently.
 #[test]
 fn character_typed_handler_precedes_protoobject_and_object() {
-    let index_of = |name: &str| {
-        super::HANDLERS
-            .iter()
-            .position(|(n, _)| *n == name)
-            .unwrap_or_else(|| panic!("no HANDLERS entry named {name:?}"))
-    };
-    let character_typed = index_of("character_typed");
-    assert!(character_typed < index_of("protoobject"));
-    assert!(character_typed < index_of("object"));
+    let character_typed = handlers_index_of("character_typed");
+    assert!(character_typed < handlers_index_of("protoobject"));
+    assert!(character_typed < handlers_index_of("object"));
+}
+
+/// Dictionary iteration selectors (`do:`, `doWithKey:`, `keysAndValuesDo:`)
+/// overlap with List's, so `dict` must run before `list` or a Dictionary
+/// receiver's `do:` would be miscompiled as a List operation.
+#[test]
+fn dict_handler_precedes_list_handler() {
+    assert!(handlers_index_of("dict") < handlers_index_of("list"));
+}
+
+/// A self-send in a `class`-side method must route through `class_send`
+/// (`class_method_self_send`), not the actor-instance direct-dispatch path
+/// (`self_dispatch`) — the two key on different `self`-binding conventions
+/// (`ClassSelf` vs `Self`), so trying `self_dispatch` first would resolve a
+/// class-method self-send against the wrong process.
+#[test]
+fn class_method_self_send_precedes_self_dispatch() {
+    assert!(handlers_index_of("class_method_self_send") < handlers_index_of("self_dispatch"));
 }
 
 /// The classifier must stay in sync with the actual reachable auto-exports

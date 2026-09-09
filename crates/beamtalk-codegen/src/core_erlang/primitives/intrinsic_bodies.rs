@@ -22,10 +22,10 @@ use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 /// table replacing what were eight sequential `if !is_quoted { match name {
 /// ... } }` blocks. [`INTRINSIC_BODIES`] below is keyed from the same name
 /// set `STRUCTURAL_INTRINSICS` validates against, and
-/// `every_structural_intrinsic_has_a_body_entry` (`tests.rs`) asserts the
-/// two sets match exactly — closing the "a new arity/name is added to the
-/// registry but the codegen match is forgotten" gap the original comment on
-/// this match (removed here) warned about.
+/// `every_structural_intrinsic_has_a_body_entry` below asserts the two sets
+/// match exactly — closing the "a new arity/name is added to the registry
+/// but the codegen match is forgotten" gap the original comment on this
+/// match (removed here) warned about.
 enum IntrinsicBody {
     /// `classBuilderRegister` (ADR 0038).
     ClassBuilderRegister,
@@ -707,5 +707,21 @@ mod intrinsic_bodies_tests {
             stale_in_table.is_empty(),
             "INTRINSIC_BODIES entry name(s) no longer in STRUCTURAL_INTRINSICS: {stale_in_table:?}"
         );
+    }
+
+    /// The completeness test above de-duplicates through a `HashSet`, which
+    /// would silently absorb a second entry for the same name — checked
+    /// separately here so a duplicate (permanently dead: `Iterator::find`
+    /// only ever reaches the first match) fails loudly instead of just
+    /// passing the set-equality check above.
+    #[test]
+    fn no_duplicate_names() {
+        let mut seen = HashSet::new();
+        for (name, _) in INTRINSIC_BODIES {
+            assert!(
+                seen.insert(*name),
+                "duplicate INTRINSIC_BODIES entry: {name:?}"
+            );
+        }
     }
 }
