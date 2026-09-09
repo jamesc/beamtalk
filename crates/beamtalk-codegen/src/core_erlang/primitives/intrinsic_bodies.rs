@@ -15,7 +15,140 @@ use crate::core_erlang::{CodeGenContext, CodeGenError, Result, primitives};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
+use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+
+/// Which compiler-generated body [`CoreErlangGenerator::generate_primitive`]
+/// emits for one structural (`!is_quoted`) intrinsic name — BT-3474 data
+/// table replacing what were eight sequential `if !is_quoted { match name {
+/// ... } }` blocks. [`INTRINSIC_BODIES`] below is keyed from the same name
+/// set `STRUCTURAL_INTRINSICS` validates against, and
+/// `every_structural_intrinsic_has_a_body_entry` below asserts the two sets
+/// match exactly — closing the "a new arity/name is added to the registry
+/// but the codegen match is forgotten" gap the original comment on this
+/// match (removed here) warned about.
+enum IntrinsicBody {
+    /// `classBuilderRegister` (ADR 0038).
+    ClassBuilderRegister,
+    /// `basicNew` — only inside `class`-side method context
+    /// (`self.in_class_method()`); [`IntrinsicBody::Placeholder`]'s runtime-
+    /// dispatch body otherwise (BT-1548).
+    BasicNew,
+    /// `basicNewWith` — same context gating as `BasicNew`.
+    BasicNewWith,
+    /// `blockValueWithArguments` — Block's `valueWithArguments:` (BT-2803).
+    BlockValueWithArguments,
+    /// `blockValue`/`blockValue1`/`blockValue2`/`blockValue3` — Block's
+    /// `value`/`value:`/`value:value:`/`value:value:value:` (BT-2812).
+    BlockValue {
+        arity: usize,
+        real_selector: &'static str,
+    },
+    /// `whileTrue`/`whileFalse` — Block's `whileTrue:`/`whileFalse:` (BT-2908).
+    While {
+        negate: bool,
+        real_selector: &'static str,
+    },
+    /// `repeat` — Block's `repeat` (BT-2908).
+    Repeat,
+    /// `onDo` — Block's `on:do:` (BT-2908).
+    OnDo,
+    /// `ensure` — Block's `ensure:` (BT-2908).
+    Ensure,
+    /// `erlangApply` — DNU-forwarding Erlang interop intrinsic (BT-1763).
+    ErlangApply,
+    /// `erlangModuleLookup` — same shape as `ErlangApply`, different target module.
+    ErlangModuleLookup,
+    /// No compiler-generated body of its own — this structural intrinsic is
+    /// always intercepted at the call site (`dispatch_codegen`), so the
+    /// compiled method body is reached only via generic/reflective dispatch
+    /// (e.g. `perform:`) and simply re-enters runtime dispatch, exactly like
+    /// an unmapped quoted selector.
+    Placeholder,
+}
+
+/// BT-3474: data table driving [`CoreErlangGenerator::generate_primitive`]'s
+/// structural-intrinsic dispatch — see [`IntrinsicBody`]'s doc.
+static INTRINSIC_BODIES: &[(&str, IntrinsicBody)] = &[
+    ("classOf", IntrinsicBody::Placeholder),
+    ("doesNotUnderstand", IntrinsicBody::Placeholder),
+    ("dynamicSend", IntrinsicBody::Placeholder),
+    ("dynamicSendWithArgs", IntrinsicBody::Placeholder),
+    ("respondsTo", IntrinsicBody::Placeholder),
+    ("fieldNames", IntrinsicBody::Placeholder),
+    ("fieldAt", IntrinsicBody::Placeholder),
+    ("fieldAtPut", IntrinsicBody::Placeholder),
+    ("printString", IntrinsicBody::Placeholder),
+    ("hash", IntrinsicBody::Placeholder),
+    ("conditional", IntrinsicBody::Placeholder),
+    ("conditionalTrue", IntrinsicBody::Placeholder),
+    ("conditionalFalse", IntrinsicBody::Placeholder),
+    ("shortCircuitAnd", IntrinsicBody::Placeholder),
+    ("shortCircuitOr", IntrinsicBody::Placeholder),
+    ("booleanNot", IntrinsicBody::Placeholder),
+    ("basicNew", IntrinsicBody::BasicNew),
+    ("basicNewWith", IntrinsicBody::BasicNewWith),
+    (
+        "blockValue",
+        IntrinsicBody::BlockValue {
+            arity: 0,
+            real_selector: "value",
+        },
+    ),
+    (
+        "blockValue1",
+        IntrinsicBody::BlockValue {
+            arity: 1,
+            real_selector: "value:",
+        },
+    ),
+    (
+        "blockValue2",
+        IntrinsicBody::BlockValue {
+            arity: 2,
+            real_selector: "value:value:",
+        },
+    ),
+    (
+        "blockValue3",
+        IntrinsicBody::BlockValue {
+            arity: 3,
+            real_selector: "value:value:value:",
+        },
+    ),
+    (
+        "blockValueWithArguments",
+        IntrinsicBody::BlockValueWithArguments,
+    ),
+    (
+        "whileTrue",
+        IntrinsicBody::While {
+            negate: false,
+            real_selector: "whileTrue:",
+        },
+    ),
+    (
+        "whileFalse",
+        IntrinsicBody::While {
+            negate: true,
+            real_selector: "whileFalse:",
+        },
+    ),
+    ("repeat", IntrinsicBody::Repeat),
+    ("listDo", IntrinsicBody::Placeholder),
+    ("listCollect", IntrinsicBody::Placeholder),
+    ("listSelect", IntrinsicBody::Placeholder),
+    ("listReject", IntrinsicBody::Placeholder),
+    ("listInjectInto", IntrinsicBody::Placeholder),
+    ("futureAwait", IntrinsicBody::Placeholder),
+    ("futureAwaitTimeout", IntrinsicBody::Placeholder),
+    ("futureAwaitForever", IntrinsicBody::Placeholder),
+    ("onDo", IntrinsicBody::OnDo),
+    ("ensure", IntrinsicBody::Ensure),
+    ("error", IntrinsicBody::Placeholder),
+    ("erlangModuleLookup", IntrinsicBody::ErlangModuleLookup),
+    ("erlangApply", IntrinsicBody::ErlangApply),
+    ("classBuilderRegister", IntrinsicBody::ClassBuilderRegister),
+];
 
 impl CoreErlangGenerator {
     /// Generates code for an `@primitive` expression (ADR 0007 Phase 3).
@@ -47,220 +180,28 @@ impl CoreErlangGenerator {
                 ))
             })?;
 
-        // ADR 0038: ClassBuilder register intrinsic — emits a call to
-        // beamtalk_class_builder:register/1 with the builder's gen_server state.
-        if !is_quoted && name == "classBuilderRegister" {
-            return Ok(self.generate_class_builder_register());
-        }
-
-        // BT-1548: basicNew/basicNewWith intrinsics in class method context.
-        // When Value defines `class sealed new => @intrinsic basicNew`, the class
-        // method body needs to call class_self_new (which routes through handle_new
-        // to the target class's auto-generated new/0).
-        //
-        // BT-3047 / ADR 0109 amendment: ClassName is derived from `ClassSelf`
-        // (closure-captured, correct even inside a block executing in a foreign
-        // class's process) rather than the process dictionary — the same fix
-        // applied to the instantiation intrinsics in `dispatch_codegen.rs`. Module
-        // is resolved by name via `beamtalk_class_instantiation:resolve_module_or_raise/2`
-        // rather than `element(3, ClassSelf)` (`class_mod`), which is not reliably
-        // the calling class's own module for an inherited class method — see that
-        // function's doc for why (discovered as a `Value does not understand 'x'`-
-        // shaped regression while implementing this amendment).
-        if !is_quoted && self.in_class_method() {
-            match name {
-                "basicNew" => {
-                    return Ok(docvec![
-                        "call 'beamtalk_class_instantiation':'class_self_new'(",
-                        Self::class_self_name_doc(),
-                        ", ",
-                        Self::class_self_module_doc("new"),
-                        ", [])",
-                    ]);
-                }
-                "basicNewWith" => {
-                    let param = self
-                        .current_method_params
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| "InitArgs".to_string());
-                    return Ok(docvec![
-                        "call 'beamtalk_class_instantiation':'class_self_new'(",
-                        Self::class_self_name_doc(),
-                        ", ",
-                        Self::class_self_module_doc("new:"),
-                        ", [",
-                        leaf::var(param),
-                        "])",
-                    ]);
-                }
-                _ => {}
-            }
-        }
-
-        // BT-2803 (adversarial review): `blockValueWithArguments`'s compiled
-        // method body is real, not a placeholder — unlike `blockValue`/
-        // `blockValue1`/etc. (which truly are call-site-only, since a Tier 2
-        // block's extra state argument can only come from a calling method's
-        // live `State`/`StateAcc`), a plain `erlang:apply(Self, Args)` is
-        // correct for *any* receiver reached via generic runtime dispatch
-        // (`beamtalk_primitive:send/3`, `perform:withArguments:`, …) — a
-        // Tier 2 block can never correctly reach this path in the first
-        // place (see `is_tier2_value_call`'s scoping in
-        // `gen_server/methods.rs`), so there's no state to thread here.
-        // Restores the exact behaviour `valueWithArguments:`'s `@primitive`
-        // form had before being converted to a call-site-intercepted
-        // `@intrinsic`, fixing `send_block_valueWithArguments_test_` in
-        // `beamtalk_primitive_tests.erl`.
-        if !is_quoted && name == "blockValueWithArguments" {
-            let args_param = self
-                .current_method_params
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "_Args".to_string());
-            return Ok(docvec![
-                "call 'erlang':'apply'(Self, ",
-                leaf::var(args_param),
-                ")",
-            ]);
-        }
-
-        // BT-2812: `blockValue`/`blockValue1`/`blockValue2`/`blockValue3` — Block's
-        // `value`/`value:`/`value:value:`/`value:value:value:`. Same gap as
-        // `blockValueWithArguments` above, but these can't unconditionally
-        // `erlang:apply` (a Tier 2/stateful block needs a live `StateAcc` this
-        // generic dispatch site doesn't have — see ADR-0041). See
-        // `generate_block_value_structural_fallback` for the Tier 1/Tier 2
-        // discrimination.
-        //
-        // Adversarial review (BT-2812): this match is intentionally exhaustive
-        // over today's four `value*` arities, not pattern-derived from them. A
-        // hypothetical 5th arity (`blockValue4`) or a change to ADR-0041's
-        // `Args..., StateAcc` shape (extra state args, different position)
-        // would silently fall through to the unfixed placeholder below rather
-        // than fail to compile — there's no static check tying this arm list
-        // to `STRUCTURAL_INTRINSICS` or to the block.bt method declarations.
+        // BT-3474: every structural (`!is_quoted`) intrinsic name compiles
+        // via the `INTRINSIC_BODIES` table — see its doc for the full
+        // strategy breakdown, and each `IntrinsicBody` variant's doc for the
+        // BT-XXXX rationale behind that particular shape.
         if !is_quoted {
-            let block_value_info = match name {
-                "blockValue" => Some((0usize, "value")),
-                "blockValue1" => Some((1usize, "value:")),
-                "blockValue2" => Some((2usize, "value:value:")),
-                "blockValue3" => Some((3usize, "value:value:value:")),
-                _ => None,
-            };
-            if let Some((arity, real_selector)) = block_value_info {
-                return Ok(self.generate_block_value_structural_fallback(
-                    name,
-                    arity,
-                    real_selector,
-                    &class_name,
-                ));
+            if let Some((_, body)) = INTRINSIC_BODIES.iter().find(|(n, _)| *n == name) {
+                return Ok(self.render_intrinsic_body(body, name, &class_name, span));
             }
-        }
 
-        // BT-2908: `whileTrue`/`whileFalse`/`repeat`/`onDo`/`ensure` — Block's
-        // `whileTrue:`/`whileFalse:`/`repeat`/`on:do:`/`ensure:`. The other half
-        // of the gap BT-2812's audit found but deliberately left unfixed above
-        // (see the BT-2812 comment on this match's sibling below): unlike
-        // `value*`, these need real loop/exception-handling semantics, not a
-        // bare `erlang:apply`. Feasible generically for the Tier 1 (pure) case
-        // because Core Erlang's `case`/`try`/`catch` mechanics don't themselves
-        // need the block's AST — only ADR-0041's state-threading convention
-        // does, and a Tier 2 (stateful) receiver/argument raises the same
-        // `stateful_block_dispatch` error `generate_block_value_structural_fallback`
-        // established rather than being reimplemented generically.
-        //
-        // Adversarial review (BT-2908): like BT-2812's `value*` match above,
-        // the `is_function/2` arity+1 check each of these five functions runs
-        // is not statically tied to ADR-0041's `Args..., StateAcc` convention
-        // — a future change to that shape (extra state args, different
-        // position) would silently degrade Tier 2 detection here too, with no
-        // compile-time signal.
-        if !is_quoted {
-            match name {
-                "whileTrue" => {
-                    return Ok(self.generate_while_structural_fallback(
-                        name,
-                        false,
-                        "whileTrue:",
-                        &class_name,
-                    ));
-                }
-                "whileFalse" => {
-                    return Ok(self.generate_while_structural_fallback(
-                        name,
-                        true,
-                        "whileFalse:",
-                        &class_name,
-                    ));
-                }
-                "repeat" => {
-                    return Ok(self.generate_repeat_structural_fallback(&class_name));
-                }
-                "onDo" => {
-                    return Ok(self.generate_on_do_structural_fallback(&class_name));
-                }
-                "ensure" => {
-                    return Ok(self.generate_ensure_structural_fallback(&class_name));
-                }
-                _ => {}
-            }
-        }
-
-        // BT-1763: Erlang interop DNU intrinsics — forward selector/args to
-        // the handler module's dispatch/3 rather than passing the intrinsic name.
-        // doesNotUnderstand:args: receives (Self, Selector, Args) and we need to
-        // forward Selector and Args as the dispatch selector and argument list.
-        if !is_quoted {
-            match name {
-                "erlangApply" => {
-                    let params = &self.current_method_params;
-                    let selector_param = params
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| "Selector".to_string());
-                    let args_param = params
-                        .get(1)
-                        .cloned()
-                        .unwrap_or_else(|| "Arguments".to_string());
-                    return Ok(docvec![
-                        "call 'beamtalk_erlang_proxy':'dispatch'(",
-                        leaf::var(selector_param),
-                        ", ",
-                        leaf::var(args_param),
-                        ", Self)"
-                    ]);
-                }
-                "erlangModuleLookup" => {
-                    let params = &self.current_method_params;
-                    let selector_param = params
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| "Selector".to_string());
-                    let args_param = params
-                        .get(1)
-                        .cloned()
-                        .unwrap_or_else(|| "Arguments".to_string());
-                    return Ok(docvec![
-                        "call 'beamtalk_erlang_class':'dispatch'(",
-                        leaf::var(selector_param),
-                        ", ",
-                        leaf::var(args_param),
-                        ", Self)"
-                    ]);
-                }
-                _ => {}
-            }
-        }
-
-        // BT-1478: Logger intrinsics — generate inline logger:log/3 calls.
-        // These are the method bodies for logger.bt's @intrinsic declarations.
-        // Direct `Logger warn:` calls are intercepted at the call site by
-        // try_generate_logger_intrinsic (which injects the caller's class/selector
-        // as metadata). This body path is reached only via indirect dispatch
-        // (e.g., perform:), in which case Logger's own class/selector metadata
-        // is appropriate.
-        if !is_quoted {
+            // BT-1478: Logger intrinsics — generate inline logger:log/3 calls.
+            // These are the method bodies for logger.bt's @intrinsic declarations.
+            // Direct `Logger warn:` calls are intercepted at the call site by
+            // try_generate_logger_intrinsic (which injects the caller's class/selector
+            // as metadata). This body path is reached only via indirect dispatch
+            // (e.g., perform:), in which case Logger's own class/selector metadata
+            // is appropriate.
+            //
+            // Not an `INTRINSIC_BODIES` entry: logger names aren't in
+            // `STRUCTURAL_INTRINSICS` (a `class`-side `@intrinsic` bypasses
+            // `primitive_validator`'s name check — it only walks
+            // `class.methods`, not `class.class_methods`), so they're outside
+            // the completeness invariant that table enforces.
             if let Some(doc) = self.try_generate_logger_body_intrinsic(name) {
                 return Ok(doc);
             }
@@ -330,35 +271,213 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Fallback: delegate to runtime dispatch module.
-        // This path is used for:
-        // - Structural intrinsics (unquoted) — handled at call site, body is placeholder
-        // - Selector-based primitives with no known BIF (unimplemented or complex)
-        //
-        // BT-2803 follow-up: for a structural intrinsic, this placeholder body is
-        // never a real implementation of the selector's semantics — it self-calls
-        // `<runtime_module>:dispatch(<intrinsic_name_atom>, Args, Self)`, passing
-        // the *intrinsic name* (e.g. `blockValue`), not the real selector. Any
-        // call path that reaches the compiled method body directly instead of
-        // through the call-site interception — e.g.
-        // `[42] perform: #value withArguments: #()` — resolves to this
-        // placeholder and raises `does_not_understand` for the intrinsic name.
-        //
-        // BT-2812: Block's `value`/`value:`/`value:value:`/`value:value:value:`/
-        // `valueWithArguments:` are now special-cased above and no longer hit this
-        // placeholder — those were the concrete repro. BT-2812's audit found the
-        // same root cause (wrong dispatch key) also applies, in principle, to
-        // every other structural intrinsic without a special case here — e.g.
-        // `whileTrue`/`whileFalse`/`repeat`/`onDo`/`ensure` (Block) and
-        // `listDo`/`listCollect`/`listSelect`/`listReject`/`listInjectInto`
-        // (List/Collection). BT-2888 fixed the List/Collection family (guarding
-        // their existing correct Tier 1 bodies against a Tier 2 receiver) and
-        // BT-2908 fixed the Block loop/exception-handling family above (a real
-        // generic reimplementation for Tier 1, a clear error for Tier 2) — this
-        // placeholder now only remains live for primitives with no BIF lowering
-        // and no structural special-case, not for any of the originally-audited
-        // selectors.
-        let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
+        // Fallback: delegate to runtime dispatch module. Used for a quoted
+        // selector-based primitive with no known BIF (unimplemented or
+        // complex) — see `generate_primitive_placeholder_body`'s doc for the
+        // structural-intrinsic half of this same fallback.
+        Ok(self.generate_primitive_placeholder_body(name, &class_name, is_quoted, span))
+    }
+
+    /// BT-3474: dispatches an [`IntrinsicBody`] to its renderer — the single
+    /// match `INTRINSIC_BODIES`-driven strategies share, replacing what were
+    /// eight sequential `if !is_quoted { match name { ... } }` blocks.
+    #[allow(clippy::too_many_lines)] // one arm per structural-intrinsic body shape, each documented in place
+    fn render_intrinsic_body(
+        &mut self,
+        body: &IntrinsicBody,
+        name: &str,
+        class_name: &str,
+        span: Span,
+    ) -> Document<'static> {
+        match body {
+            IntrinsicBody::ClassBuilderRegister => self.generate_class_builder_register(),
+
+            // BT-1548: basicNew/basicNewWith intrinsics in class method context.
+            // When Value defines `class sealed new => @intrinsic basicNew`, the class
+            // method body needs to call class_self_new (which routes through handle_new
+            // to the target class's auto-generated new/0).
+            //
+            // BT-3047 / ADR 0109 amendment: ClassName is derived from `ClassSelf`
+            // (closure-captured, correct even inside a block executing in a foreign
+            // class's process) rather than the process dictionary — the same fix
+            // applied to the instantiation intrinsics in `dispatch_codegen.rs`. Module
+            // is resolved by name via `beamtalk_class_instantiation:resolve_module_or_raise/2`
+            // rather than `element(3, ClassSelf)` (`class_mod`), which is not reliably
+            // the calling class's own module for an inherited class method — see that
+            // function's doc for why (discovered as a `Value does not understand 'x'`-
+            // shaped regression while implementing this amendment).
+            //
+            // Outside class-method context, `basicNew`/`basicNewWith` fall
+            // back to the same placeholder body as an ordinary
+            // `IntrinsicBody::Placeholder` entry.
+            IntrinsicBody::BasicNew => {
+                if self.in_class_method() {
+                    docvec![
+                        "call 'beamtalk_class_instantiation':'class_self_new'(",
+                        Self::class_self_name_doc(),
+                        ", ",
+                        Self::class_self_module_doc("new"),
+                        ", [])",
+                    ]
+                } else {
+                    self.generate_primitive_placeholder_body(name, class_name, false, span)
+                }
+            }
+            IntrinsicBody::BasicNewWith => {
+                if self.in_class_method() {
+                    let param = self
+                        .current_method_params
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "InitArgs".to_string());
+                    docvec![
+                        "call 'beamtalk_class_instantiation':'class_self_new'(",
+                        Self::class_self_name_doc(),
+                        ", ",
+                        Self::class_self_module_doc("new:"),
+                        ", [",
+                        leaf::var(param),
+                        "])",
+                    ]
+                } else {
+                    self.generate_primitive_placeholder_body(name, class_name, false, span)
+                }
+            }
+
+            // BT-2803 (adversarial review): `blockValueWithArguments`'s compiled
+            // method body is real, not a placeholder — unlike `blockValue`/
+            // `blockValue1`/etc. (which truly are call-site-only, since a Tier 2
+            // block's extra state argument can only come from a calling method's
+            // live `State`/`StateAcc`), a plain `erlang:apply(Self, Args)` is
+            // correct for *any* receiver reached via generic runtime dispatch
+            // (`beamtalk_primitive:send/3`, `perform:withArguments:`, …) — a
+            // Tier 2 block can never correctly reach this path in the first
+            // place (see `is_tier2_value_call`'s scoping in
+            // `gen_server/methods.rs`), so there's no state to thread here.
+            // Restores the exact behaviour `valueWithArguments:`'s `@primitive`
+            // form had before being converted to a call-site-intercepted
+            // `@intrinsic`, fixing `send_block_valueWithArguments_test_` in
+            // `beamtalk_primitive_tests.erl`.
+            IntrinsicBody::BlockValueWithArguments => {
+                let args_param = self
+                    .current_method_params
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "_Args".to_string());
+                docvec!["call 'erlang':'apply'(Self, ", leaf::var(args_param), ")",]
+            }
+
+            // BT-2812: `blockValue`/`blockValue1`/`blockValue2`/`blockValue3` — Block's
+            // `value`/`value:`/`value:value:`/`value:value:value:`. Same gap as
+            // `blockValueWithArguments` above, but these can't unconditionally
+            // `erlang:apply` (a Tier 2/stateful block needs a live `StateAcc` this
+            // generic dispatch site doesn't have — see ADR-0041). See
+            // `generate_block_value_structural_fallback` for the Tier 1/Tier 2
+            // discrimination.
+            IntrinsicBody::BlockValue {
+                arity,
+                real_selector,
+            } => self.generate_block_value_structural_fallback(
+                name,
+                *arity,
+                real_selector,
+                class_name,
+            ),
+
+            // BT-2908: `whileTrue`/`whileFalse`/`repeat`/`onDo`/`ensure` — Block's
+            // `whileTrue:`/`whileFalse:`/`repeat`/`on:do:`/`ensure:`. The other half
+            // of the gap BT-2812's audit found but deliberately left unfixed for
+            // `value*` above: unlike `value*`, these need real loop/exception-handling
+            // semantics, not a bare `erlang:apply`. Feasible generically for the
+            // Tier 1 (pure) case because Core Erlang's `case`/`try`/`catch`
+            // mechanics don't themselves need the block's AST — only ADR-0041's
+            // state-threading convention does, and a Tier 2 (stateful)
+            // receiver/argument raises the same `stateful_block_dispatch` error
+            // `generate_block_value_structural_fallback` established rather than
+            // being reimplemented generically.
+            IntrinsicBody::While {
+                negate,
+                real_selector,
+            } => self.generate_while_structural_fallback(name, *negate, real_selector, class_name),
+            IntrinsicBody::Repeat => self.generate_repeat_structural_fallback(class_name),
+            IntrinsicBody::OnDo => self.generate_on_do_structural_fallback(class_name),
+            IntrinsicBody::Ensure => self.generate_ensure_structural_fallback(class_name),
+
+            // BT-1763: Erlang interop DNU intrinsics — forward selector/args to
+            // the handler module's dispatch/3 rather than passing the intrinsic name.
+            // doesNotUnderstand:args: receives (Self, Selector, Args) and we need to
+            // forward Selector and Args as the dispatch selector and argument list.
+            IntrinsicBody::ErlangApply => {
+                let params = &self.current_method_params;
+                let selector_param = params
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "Selector".to_string());
+                let args_param = params
+                    .get(1)
+                    .cloned()
+                    .unwrap_or_else(|| "Arguments".to_string());
+                docvec![
+                    "call 'beamtalk_erlang_proxy':'dispatch'(",
+                    leaf::var(selector_param),
+                    ", ",
+                    leaf::var(args_param),
+                    ", Self)"
+                ]
+            }
+            IntrinsicBody::ErlangModuleLookup => {
+                let params = &self.current_method_params;
+                let selector_param = params
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "Selector".to_string());
+                let args_param = params
+                    .get(1)
+                    .cloned()
+                    .unwrap_or_else(|| "Arguments".to_string());
+                docvec![
+                    "call 'beamtalk_erlang_class':'dispatch'(",
+                    leaf::var(selector_param),
+                    ", ",
+                    leaf::var(args_param),
+                    ", Self)"
+                ]
+            }
+
+            IntrinsicBody::Placeholder => {
+                self.generate_primitive_placeholder_body(name, class_name, false, span)
+            }
+        }
+    }
+
+    /// Fallback body shared by every structural intrinsic with no
+    /// compiler-generated body of its own (`IntrinsicBody::Placeholder`, and
+    /// `BasicNew`/`BasicNewWith` outside class-method context) and by a
+    /// quoted selector-based primitive with no known BIF lowering —
+    /// delegates to the class's runtime dispatch module.
+    ///
+    /// BT-2803 follow-up: for a structural intrinsic, this placeholder body is
+    /// never a real implementation of the selector's semantics — it self-calls
+    /// `<runtime_module>:dispatch(<intrinsic_name_atom>, Args, Self)`, passing
+    /// the *intrinsic name* (e.g. `blockValue`), not the real selector. Any
+    /// call path that reaches the compiled method body directly instead of
+    /// through the call-site interception — e.g.
+    /// `[42] perform: #value withArguments: #()` — resolves to this
+    /// placeholder and raises `does_not_understand` for the intrinsic name.
+    ///
+    /// BT-2812/BT-2908/BT-2888 fixed the concrete repros this placeholder
+    /// used to silently miscompile (`value*`, the Block loop/exception
+    /// family, and List/Collection respectively) — see
+    /// [`IntrinsicBody`]'s variants for what now short-circuits before
+    /// reaching here.
+    fn generate_primitive_placeholder_body(
+        &mut self,
+        name: &str,
+        class_name: &str,
+        is_quoted: bool,
+        span: Span,
+    ) -> Document<'static> {
+        let runtime_module = PrimitiveBindingTable::runtime_module_for_class(class_name);
 
         // BT-938: Validate that the target dispatch module exists in the known stdlib
         // module set. Only check when binding data is available (non-empty binding table).
@@ -391,7 +510,7 @@ impl CoreErlangGenerator {
         } else {
             "Self"
         };
-        Ok(docvec![
+        docvec![
             "call ",
             leaf::atom(runtime_module),
             ":'dispatch'(",
@@ -401,7 +520,7 @@ impl CoreErlangGenerator {
             "], ",
             Document::Str(self_var),
             ")"
-        ])
+        ]
     }
 
     /// BT-1478: Generates inline `logger:log/3` code for Logger @intrinsic bodies.
@@ -559,5 +678,50 @@ impl CoreErlangGenerator {
             ") ",
             "end"
         ]
+    }
+}
+
+#[cfg(test)]
+mod intrinsic_bodies_tests {
+    use super::INTRINSIC_BODIES;
+    use beamtalk_core::semantic_analysis::primitive_validator::STRUCTURAL_INTRINSICS;
+    use std::collections::HashSet;
+
+    /// BT-3474: closes the "a fifth `blockValue` arity (or any other new
+    /// structural intrinsic) is added to `STRUCTURAL_INTRINSICS` but the
+    /// codegen body table is forgotten" hole by construction — the two name
+    /// sets must match exactly, in both directions, or this fails.
+    #[test]
+    fn every_structural_intrinsic_has_a_body_entry() {
+        let registry: HashSet<&str> = STRUCTURAL_INTRINSICS.iter().copied().collect();
+        let table: HashSet<&str> = INTRINSIC_BODIES.iter().map(|(name, _)| *name).collect();
+
+        let missing_from_table: Vec<&str> = registry.difference(&table).copied().collect();
+        assert!(
+            missing_from_table.is_empty(),
+            "STRUCTURAL_INTRINSICS name(s) with no INTRINSIC_BODIES entry: {missing_from_table:?}"
+        );
+
+        let stale_in_table: Vec<&str> = table.difference(&registry).copied().collect();
+        assert!(
+            stale_in_table.is_empty(),
+            "INTRINSIC_BODIES entry name(s) no longer in STRUCTURAL_INTRINSICS: {stale_in_table:?}"
+        );
+    }
+
+    /// The completeness test above de-duplicates through a `HashSet`, which
+    /// would silently absorb a second entry for the same name — checked
+    /// separately here so a duplicate (permanently dead: `Iterator::find`
+    /// only ever reaches the first match) fails loudly instead of just
+    /// passing the set-equality check above.
+    #[test]
+    fn no_duplicate_names() {
+        let mut seen = HashSet::new();
+        for (name, _) in INTRINSIC_BODIES {
+            assert!(
+                seen.insert(*name),
+                "duplicate INTRINSIC_BODIES entry: {name:?}"
+            );
+        }
     }
 }

@@ -19,7 +19,12 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 /// These are the unquoted intrinsic names that require custom code generation.
 /// Quoted selectors (e.g., `@primitive \"+\"`) are always valid — they delegate
 /// to runtime dispatch modules.
-const STRUCTURAL_INTRINSICS: &[&str] = &[
+///
+/// `pub`: this is the one authoritative source of the name set — `beamtalk-codegen`
+/// (`primitives::intrinsic_bodies::INTRINSIC_BODIES`, BT-3474) imports it
+/// directly rather than keeping a second hand-maintained copy in sync, per
+/// `architecture-principles.md` § Duplication.
+pub const STRUCTURAL_INTRINSICS: &[&str] = &[
     // Object lifecycle
     "basicNew",
     "basicNewWith",
