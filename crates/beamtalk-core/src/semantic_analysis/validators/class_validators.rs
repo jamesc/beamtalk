@@ -667,6 +667,15 @@ pub fn check_handle_scope_on_object(
 /// Value types (ADR 0042) are immutable — direct slot assignment is a compile
 /// error. Actors allow direct slot assignment but warn when a custom `with*:`
 /// method exists in the hierarchy and would be bypassed.
+///
+/// `TestCase` is a deliberate, permanent exception to the Value immutability
+/// rule (BT-1533) — see `is_testcase_subclass` below. It is not a migration
+/// in progress: sequential `self.field := value` mutation is the ergonomic,
+/// idiomatic way to write test fixtures (setUp, then read/write across
+/// assertions), the same way every other xUnit-family framework does it, and
+/// rewriting that into `self := self withField:` chains buys type-system
+/// purity at the cost of harder-to-write, harder-to-read tests for no bug
+/// anyone has hit. Real `Value` subclasses still get the hard compile error.
 pub(crate) fn check_value_slot_assignment(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -676,9 +685,9 @@ pub(crate) fn check_value_slot_assignment(
         let class_name = class.name.name.as_str();
         let is_value = hierarchy.is_value_subclass(class_name);
 
-        // BT-1533: TestCase subclasses are exempt from slot assignment checks
-        // during the deprecation period. BT-1534 will migrate `self.slot :=`
-        // to `self withSlot:` syntax in all test subclasses.
+        // BT-1533: TestCase subclasses are permanently exempt from slot
+        // assignment checks (see this function's own doc comment) — not a
+        // migration in progress.
         if hierarchy.is_testcase_subclass(class_name) {
             continue;
         }
