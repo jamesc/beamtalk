@@ -4,8 +4,7 @@
 //! Single-compiled-method source queries: `find_senders_in_source`,
 //! `find_all_sends_in_source`, `find_announce_sites_in_source`,
 //! `find_references_to_in_source`, `find_field_readers_in_source`,
-//! `find_field_writers_in_source`, and `find_ffi_sites_in_source`
-//! (BT-2190, BT-2200, BT-2203, BT-2208, BT-2211).
+//! `find_field_writers_in_source`, and `find_ffi_sites_in_source`.
 
 use beamtalk_etf::{
     atom, binary_from_str as binary, int_term, map_get, term_to_string, term_to_usize,
@@ -14,7 +13,7 @@ use eetf::{List, Map, Term};
 
 use crate::respond::error_response;
 
-/// Handle a `find_senders_in_source` request (BT-2190).
+/// Handle a `find_senders_in_source` request.
 ///
 /// Backs `SystemNavigation sendersOf:` — parses the source of a single compiled method
 /// and reports 1-based line numbers (relative to the input source) where a
@@ -40,7 +39,7 @@ pub(crate) fn handle_find_senders_in_source(request: &Map) -> Term {
     ok_lines_response(&lines)
 }
 
-/// Handle a `find_all_sends_in_source` request (BT-2206).
+/// Handle a `find_all_sends_in_source` request.
 ///
 /// Backs `SystemNavigation unimplementedSelectors` — parses the source of a
 /// single compiled method and reports EVERY message send (selector name,
@@ -54,7 +53,7 @@ pub(crate) fn handle_find_senders_in_source(request: &Map) -> Term {
 /// Response: `#{status => ok, sends => [#{selector => <binary>, line => <int>,
 /// recv => self|super|erlang_ffi|other, target_module => <binary>}, ...]}`.
 /// `target_module` is the native (Erlang) module an `erlang_ffi` send targets
-/// (BT-2669); it is the empty binary (`<<>>`) for non-FFI sends and for FFI
+/// it is the empty binary (`<<>>`) for non-FFI sends and for FFI
 /// chains whose module receiver is not a static `Erlang <module>` form. It is
 /// returned as a binary (not an atom) so the response decodes safely with
 /// `[safe]`; the caller interns it only when indexing. Returns an empty list
@@ -98,7 +97,7 @@ pub(crate) fn handle_find_all_sends_in_source(request: &Map) -> Term {
     ]))
 }
 
-/// Handle a `find_announce_sites_in_source` request (BT-2475).
+/// Handle a `find_announce_sites_in_source` request.
 ///
 /// Backs `SystemNavigation announcementsSentBy:` — parses the source of a single
 /// compiled method and reports every `announce:` / `announceAndWait:` /
@@ -146,7 +145,7 @@ pub(crate) fn handle_find_announce_sites_in_source(request: &Map) -> Term {
     ]))
 }
 
-/// Handle a `find_references_to_in_source` request (BT-2203).
+/// Handle a `find_references_to_in_source` request.
 ///
 /// Backs `SystemNavigation referencesTo:` — parses the source of a single
 /// compiled method and reports 1-based line numbers (relative to the input
@@ -175,7 +174,7 @@ pub(crate) fn handle_find_references_to_in_source(request: &Map) -> Term {
     ok_lines_response(&lines)
 }
 
-/// Handle a `find_field_readers_in_source` request (BT-2208).
+/// Handle a `find_field_readers_in_source` request.
 ///
 /// Backs `SystemNavigation fieldReadersOf:in:` — parses the source of a
 /// single compiled method and reports 1-based line numbers (relative to the
@@ -203,7 +202,7 @@ pub(crate) fn handle_find_field_readers_in_source(request: &Map) -> Term {
     ok_lines_response(&lines)
 }
 
-/// Handle a `find_field_writers_in_source` request (BT-2208).
+/// Handle a `find_field_writers_in_source` request.
 ///
 /// Backs `SystemNavigation fieldWritersOf:in:` — parses the source of a
 /// single compiled method and reports 1-based line numbers (relative to the
@@ -231,7 +230,7 @@ pub(crate) fn handle_find_field_writers_in_source(request: &Map) -> Term {
     ok_lines_response(&lines)
 }
 
-/// Handle a `find_ffi_sites_in_source` request (BT-2211).
+/// Handle a `find_ffi_sites_in_source` request.
 ///
 /// Backs `SystemNavigation ffiSitesFor:` — parses the source of a single
 /// compiled method and reports 1-based line numbers (relative to the input
@@ -267,8 +266,8 @@ pub(crate) fn handle_find_ffi_sites_in_source(request: &Map) -> Term {
 }
 
 /// Build the standard `#{status => ok, lines => [...]}` response shared by the
-/// senders query (BT-2200), references-to query (BT-2203), field reader/writer
-/// queries (BT-2208), and FFI sites query (BT-2211).
+/// senders query, references-to query, field reader/writer
+/// queries, and FFI sites query.
 pub(crate) fn ok_lines_response(lines: &[u32]) -> Term {
     let line_terms: Vec<Term> = lines
         .iter()

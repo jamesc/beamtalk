@@ -50,15 +50,14 @@ fn handle_request(request_term: &Term) -> Term {
         _ => return error_response(&["Missing or invalid 'command' field".to_string()]),
     };
 
-    // BT-3095: this match arm's string literals are the Rust half of the
+    // This match arm's string literals are the Rust half of the
     // compiler-port wire vocabulary; `beamtalk_compiler.erl` (fanning out
     // through `beamtalk_compiler_server`/`beamtalk_compiler_port`) is the
     // Erlang half, sending each `command => <atom>` from separate call
     // sites. The two lists cannot literally share code (different
     // languages/processes either side of the OTP port), so a command
     // added to one side and not the other is a silent drift whose only
-    // symptom is a runtime "Unknown command" error wherever it's invoked
-    // (BT-3078 drift audit; BT-3091 flagged this pair for evaluation).
+    // symptom is a runtime "Unknown command" error wherever it's invoked.
     // A shared corpus fixture
     // (`runtime/apps/beamtalk_compiler/test/fixtures/compiler_port_command_vocabulary_corpus.json`)
     // pins both sides to the same 19-command list end-to-end: the Rust test

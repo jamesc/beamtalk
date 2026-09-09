@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `build_class_module_index_in_source` (BT-3441), `categorize_methods` divider grouping, and `class_state_field_defaults` presence reporting.
+//! `build_class_module_index_in_source`, `categorize_methods` divider grouping, and `class_state_field_defaults` presence reporting.
 
 use super::*;
 
-// --- build_class_module_index_in_source tests (BT-3441) ---
+// --- build_class_module_index_in_source tests ---
 
 #[test]
 fn build_class_module_index_in_source_root_file() {
@@ -37,8 +37,8 @@ fn build_class_module_index_in_source_root_file() {
 
 #[test]
 fn build_class_module_index_in_source_subdirectory_and_multiple_classes() {
-    // Exercises the exact bug shape the regex scanner risked (BT-3081/
-    // BT-3431/BT-3432): a subdirectory path segment and more than one
+    // Exercises the exact bug shape a regex scanner would risk: a
+    // subdirectory path segment and more than one
     // class declared in the same file.
     let request = Map::from([
         (atom("command"), atom("build_class_module_index_in_source")),
@@ -100,7 +100,7 @@ fn build_class_module_index_in_source_missing_field_is_error() {
     assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
 }
 
-// --- categorize_methods tests (BT-3239, extended by BT-3238) ---
+// --- categorize_methods tests ---
 
 const CATEGORY_FIXTURE: &str = "\
 Object subclass: Counter
@@ -174,7 +174,7 @@ fn categorize_methods_groups_by_divider() {
     assert_eq!(second_methods.elements.len(), 2);
 }
 
-// BT-3238: `divider_span`/method `span` extend BT-3239's original
+// `divider_span`/method `span` extend the original
 // `name`/`selector`/`side`-only shape — the Cockpit's `save-section`
 // write path needs the divider's own byte span to splice a rename.
 #[test]
@@ -251,9 +251,9 @@ fn categorize_methods_no_dividers_is_single_unnamed_category() {
     let Term::Map(ref category) = categories.elements[0] else {
         panic!("category should be a map");
     };
-    // BT-3238: `name` is always present, using the atom `undefined` as
+    // `name` is always present, using the atom `undefined` as
     // the "absent" sentinel — see `handle_categorize_methods`'s doc for
-    // why this supersedes BT-3239's original omitted-key convention.
+    // why this supersedes the original omitted-key convention.
     assert_eq!(map_get(category, "name"), Some(&atom("undefined")));
 }
 
@@ -285,7 +285,7 @@ fn categorize_methods_missing_source_field_is_error() {
     assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
 }
 
-// --- class_state_field_defaults tests (ADR 0082 extension, BT-3254) ---
+// --- class_state_field_defaults tests (ADR 0082 extension) ---
 
 #[test]
 fn class_state_field_defaults_reports_presence_per_field() {

@@ -14,21 +14,21 @@
 //! - [`type_aliases`] — `known_type_aliases` threading through
 //!   `diagnostics/compile/compile_expression` and diagnostics-overrides
 //!   loading
-//! - [`completion_and_native_types`] — `resolve_completion_type` (BT-1068)
+//! - [`completion_and_native_types`] — `resolve_completion_type`
 //!   and `load_native_type_registry_from`
-//! - [`span_resolution`] — ADR 0082 Phase 1 (BT-2283) source-span commands
+//! - [`span_resolution`] — ADR 0082 Phase 1 source-span commands
 //! - [`class_module_index_and_categorization`] —
-//!   `build_class_module_index_in_source` (BT-3441), `categorize_methods`,
+//!   `build_class_module_index_in_source`, `categorize_methods`,
 //!   `class_state_field_defaults`
-//! - [`module_naming_and_misc`] — `reindent_method_source` (BT-2584),
+//! - [`module_naming_and_misc`] — `reindent_method_source`,
 //!   `compile_expression_trace`, module-naming overrides, and standalone
 //!   method-definition signature reporting
 //! - [`compile_method`] — `compile_method` / method-mode diagnostics
 //! - [`compile_roundtrip_proptest`] — `handle_compile()` /
 //!   `handle_compile_expression()` never panic on near-valid input
-//! - [`type_alias_declarations`] — ADR 0108 Phase 8 (BT-2902) `type Name =
+//! - [`type_alias_declarations`] — ADR 0108 Phase 8 `type Name =
 //!   ...` REPL declarations
-//! - [`type_string_wire_fidelity`] — BT-3100 type-annotation string
+//! - [`type_string_wire_fidelity`] — Type-annotation string
 //!   fidelity across the compiler-port wire protocol
 
 use super::*;
@@ -50,7 +50,7 @@ pub(crate) use crate::handlers::inline_definitions::derive_class_module_name;
 pub(crate) use crate::registry::{load_diagnostics_overrides_from, load_native_type_registry_from};
 pub(crate) use crate::respond::method_definition_ok_response;
 
-/// Fixture source for the ADR 0082 Phase 1 (BT-2283) span-resolution
+/// Fixture source for the ADR 0082 Phase 1 span-resolution
 /// commands, shared with the class-module-index and categorization tests
 /// that exercise the same file.
 pub(crate) const SPAN_FIXTURE: &str = "\
