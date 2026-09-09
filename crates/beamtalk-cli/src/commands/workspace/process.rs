@@ -74,7 +74,7 @@ const READINESS_READ_TIMEOUT_MS: u64 = 10_000;
 /// After Phase 1 (TCP) succeeds the cowboy WS handler may still be initialising
 /// — TCP accepts immediately once the listener socket is bound, but the WS
 /// upgrade can fail until cowboy's request-handling pipeline is fully up.
-/// CI observations (BT-1175, BT-1290, BT-1598) show cowboy can take > 18 s to
+/// CI observations show cowboy can take > 18 s to
 /// register WS routes on heavily loaded runners (e.g. during concurrent startup
 /// tests). With exponential backoff (see `ws_health_delay_ms`), 60 retries
 /// cover ~70 s of sleep time plus per-attempt connect/auth overhead — ample
@@ -86,7 +86,7 @@ const WS_HEALTH_RETRIES: usize = 60;
 /// Exponential backoff starts at `READINESS_PROBE_DELAY_MS` (200 ms) and
 /// doubles every 10 attempts, capping at this value. This gives fast initial
 /// probes while avoiding busy-spinning on a WS handler that needs real time
-/// to initialise (BT-1598).
+/// to initialise.
 const WS_HEALTH_MAX_DELAY_MS: u64 = 2000;
 
 /// Number of TCP readiness probe attempts between BEAM liveness checks.
@@ -122,22 +122,22 @@ fn prepare_workspace_paths(
 
     // If a `starting` tombstone is present, a previous startup was interrupted
     // mid-flight (crash, OOM, SIGKILL, etc.).  Clean up all runtime files —
-    // including the tombstone itself — before attempting a fresh start (BT-969).
-    // `remove_stale_runtime_files` also handles the BT-967 case (stale port/pid/
-    // node.info from a previous aborted run without a tombstone).
+    // including the tombstone itself — before attempting a fresh start.
+    // `remove_stale_runtime_files` also handles the case of stale port/pid/
+    // node.info from a previous aborted run without a tombstone.
     remove_stale_runtime_files(workspace_id)?;
 
     // Clear any previous crash diagnostic so `read_startup_log_detail()` cannot
     // surface a stale run's error for the current attempt. `startup.log` is
     // deliberately owned here rather than by `remove_stale_runtime_files` so
     // that retry helpers (which call `cleanup_stale_node_info` between failed
-    // attempts) preserve the log for their panic message (BT-2057).
+    // attempts) preserve the log for their panic message.
     let ws_dir = workspace_dir(workspace_id)?;
     remove_file_if_exists(&ws_dir.join("startup.log"))?;
 
     // Write the tombstone before spawning the BEAM node.  If startup is
     // interrupted at any point after this, the next call will detect the file
-    // and trigger the cleanup above (BT-969).
+    // and trigger the cleanup above.
     let tombstone_path = workspace_dir(workspace_id)?.join("starting");
     std::fs::write(&tombstone_path, b"").map_err(|e| {
         miette!(
@@ -167,11 +167,11 @@ fn prepare_workspace_paths(
     // Format bind address as Erlang tuple for cowboy socket_opts
     let bind_addr_erl = beamtalk_cli::repl_startup::format_bind_addr_erl(config.bind_addr);
 
-    // ADR 0072 (BT-1724): Start hex dep OTP applications before the OTP app supervisor.
+    // ADR 0072: Start hex dep OTP applications before the OTP app supervisor.
     let hex_deps_start = beamtalk_cli::repl_startup::hex_deps_start_fragment(config.hex_dep_names);
 
     // If an OTP app name is provided, start it after workspace bootstrap so that
-    // all project classes are registered before the OTP supervisor's init/1 runs (BT-1319).
+    // all project classes are registered before the OTP supervisor's init/1 runs.
     let otp_app_start = match config.otp_app_name {
         Some(name) => format!("{{ok, _}} = application:ensure_all_started({name}), "),
         None => String::new(),
@@ -203,7 +203,7 @@ fn prepare_workspace_paths(
 /// mechanism is the `try/catch` in the eval command (see `build_workspace_eval_cmd`),
 /// which writes directly to `startup.log` via `file:write_file/2`.
 ///
-/// Also configures the OTP kernel logger to write to stderr (BT-1431).
+/// Also configures the OTP kernel logger to write to stderr.
 ///
 /// Returns the log file path and whether logging was successfully enabled.
 fn configure_startup_logging(
@@ -233,8 +233,8 @@ fn configure_startup_logging(
         }
     };
 
-    // Redirect the OTP default logger handler to stderr via -kernel VM args
-    // (BT-1431). Without this, OTP logger events between VM start and the
+    // Redirect the OTP default logger handler to stderr via -kernel VM args.
+    // Without this, OTP logger events between VM start and the
     // workspace file handler setup in beamtalk_workspace_sup:init/1 go to stdout
     // (which is /dev/null for detached nodes) and are silently lost. Since stderr
     // is already redirected to startup.log above, this captures boot-time OTP
@@ -253,9 +253,9 @@ fn configure_startup_logging(
 /// If `config.otp_app_name` is `Some(name)`, `application:ensure_all_started(name)` is
 /// inserted into the eval sequence after the workspace supervisor starts but before
 /// the REPL port is queried. This guarantees all project classes are registered
-/// before the OTP supervisor tree is brought up (BT-1319).
+/// before the OTP supervisor tree is brought up.
 ///
-/// BT-3373 decision: this function's own process-spawn/PID-file/port-file
+/// This function's own process-spawn/PID-file/port-file
 /// logic is covered by real-BEAM `#[ignore]`d integration tests
 /// (`workspace/mod.rs`'s `test_node_start_queries_and_kill_integration`,
 /// `test_get_or_start_workspace_lifecycle_integration`,
@@ -286,7 +286,7 @@ pub fn start_detached_node(
 
     let (eval_cmd, project_path) = prepare_workspace_paths(workspace_id, config)?;
 
-    // Write cookie to args file (BT-726: not visible in `ps aux`)
+    // Write cookie to args file (not visible in `ps aux`)
     let cookie_args_file = write_cookie_args_file(workspace_id, &cookie)?;
 
     // Start detached BEAM node
@@ -306,7 +306,7 @@ pub fn start_detached_node(
         miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
     })?;
 
-    // Windows-specific handling (BT-662, BT-727):
+    // Windows-specific handling:
     // On Windows, Erlang's -detached flag doesn't work when spawned from Rust Command::spawn().
     // Instead, we omit -detached and use CREATE_NO_WINDOW + CREATE_NEW_PROCESS_GROUP flags
     // to achieve similar behavior. Dropping the Child handle closes the OS handle via
@@ -392,7 +392,7 @@ pub fn start_detached_node(
         }
     };
 
-    // Create node info (BT-694: store bind_addr for reconnection)
+    // Create node info (store bind_addr for reconnection)
     let node_info = NodeInfo {
         node_name: node_name.clone(),
         port: actual_port,
@@ -415,7 +415,7 @@ pub fn start_detached_node(
     // Save node info
     save_node_info(workspace_id, &node_info)?;
 
-    // Remove the tombstone now that startup completed successfully (BT-969).
+    // Remove the tombstone now that startup completed successfully.
     // On any failure path the tombstone is deliberately left in place so the
     // next `start_detached_node` call can detect and clean up the partial state.
     let tombstone_path = workspace_dir(workspace_id)?.join("starting");
@@ -440,7 +440,7 @@ pub fn start_detached_node(
 ///
 /// Phase 1 checks `is_process_alive` every `LIVENESS_CHECK_INTERVAL` attempts.
 /// Phase 2 checks after every attempt; the delay between attempts grows via
-/// `ws_health_delay_ms` (exponential backoff, see BT-1598).
+/// `ws_health_delay_ms` (exponential backoff).
 ///
 /// `workspace_id` is used to read `startup.log` for inlining into timeout
 /// errors. `log_path` is `Some(path)` only when the startup log file was
@@ -501,15 +501,15 @@ fn wait_for_tcp_ready(
 
     // Phase 2: port is accepting — do the full WS auth + health check.
     // Retried with exponential backoff for transient auth failures (cowboy brief
-    // restart, WS handler not yet registered, scheduler jitter). BT-1598: fast
+    // restart, WS handler not yet registered, scheduler jitter). Fast
     // initial probes catch quick readiness; slower later probes avoid
     // busy-spinning while cowboy finishes route registration.
     let request = serde_json::json!({"op": "health"});
     // Remember the most recent WS-level failure so the final timeout error can name
     // the actual cause (auth/session error, handshake rejection, read timeout)
     // instead of the opaque "health check failed". Without this the recurring
-    // "port accepting TCP but WS health failed" flake is undiagnosable (BT-2532):
-    // ProtocolClient::connect's error was previously discarded.
+    // "port accepting TCP but WS health failed" flake would be undiagnosable
+    // if ProtocolClient::connect's error were discarded.
     let mut last_ws_err: Option<String> = None;
     for attempt in 0..WS_HEALTH_RETRIES {
         match ProtocolClient::connect(
@@ -571,7 +571,7 @@ fn ws_err_detail(last_ws_err: Option<&str>) -> String {
 /// Starts at `READINESS_PROBE_DELAY_MS` (200 ms) and doubles every 10
 /// attempts, capping at `WS_HEALTH_MAX_DELAY_MS` (2 s). This keeps initial
 /// probes fast while giving a genuinely slow cowboy startup enough breathing
-/// room between later attempts (BT-1598).
+/// room between later attempts.
 fn ws_health_delay_ms(attempt: usize) -> u64 {
     let shift = u32::try_from(attempt / 10).unwrap_or(u32::MAX);
     let delay =
@@ -1000,7 +1000,7 @@ mod tests {
 
     // --- wait_for_tcp_ready ---
 
-    /// `wait_for_tcp_ready`'s success path (BT-3370): a live BEAM node isn't
+    /// `wait_for_tcp_ready`'s success path: a live BEAM node isn't
     /// actually needed here, since the function itself only ever talks to a
     /// generic WebSocket endpoint (Phase 1 TCP connect, Phase 2 `ProtocolClient`
     /// auth + `{"op":"health"}` request) — `spawn_auth_ok_server`'s fake server
