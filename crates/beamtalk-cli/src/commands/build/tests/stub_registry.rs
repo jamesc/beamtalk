@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Stub-registry resolution tests (ADR 0075 Phase 2, BT-1847): project/package/distribution/auto-extract precedence, version-drift detection, and cross-package collision checks for dependency stub registries.
+//! Stub-registry resolution tests (ADR 0075 Phase 2): project/package/distribution/auto-extract precedence, version-drift detection, and cross-package collision checks for dependency stub registries.
 
 use super::*;
 
-// ── load_project_stub_registry tests (ADR 0075 Phase 2, BT-1847) ────────
+// ── load_project_stub_registry tests (ADR 0075 Phase 2) ────────
 
 #[test]
 fn load_project_stub_registry_none_when_no_stubs_dir() {
@@ -172,7 +172,7 @@ fn distribution_stubs_dir_env_override_none_when_dir_missing() {
     );
 }
 
-// ── ADR 0075 full resolution chain (BT-3394) ─────────────────────────
+// ── ADR 0075 full resolution chain ─────────────────────────
 
 /// A function declared at all four layers must resolve according to the
 /// ADR 0075 precedence order — project-local stub, then package-bundled

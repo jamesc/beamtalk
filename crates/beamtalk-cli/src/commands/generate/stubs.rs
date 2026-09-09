@@ -280,7 +280,7 @@ fn format_stub_file(module_name: &str, functions: &[FunctionSignature]) -> Strin
 /// rendered by this module's own [`format_type`] instead, and the result is
 /// composed with the same shared
 /// [`beamtalk_core::unparse::render_signature_text`] core every other
-/// consumer uses (BT-3097) — text-in/text-out is exactly the seam that lets
+/// consumer uses — text-in/text-out is exactly the seam that lets
 /// one composer serve both AST- and native-type-rendered signatures without
 /// an AST adapter.
 fn format_signature(sig: &FunctionSignature) -> String {
@@ -366,7 +366,7 @@ fn format_type(ty: &beamtalk_core::semantic_analysis::type_checker::InferredType
                 format!("{} \\ {}", format_type(base), format_type(excluded))
             }
         }
-        // ADR 0102/BT-2743: render an intersection as `A & B & …`. A union
+        // ADR 0102: render an intersection as `A & B & …`. A union
         // member is only reachable via explicit grouping; parenthesise to
         // preserve meaning, matching `InferredType::display_with_options`.
         InferredType::Intersection { members, .. } => {
@@ -672,7 +672,7 @@ mod tests {
 
     /// Build a unique scratch directory under the OS temp dir, removed on
     /// drop even on panic, mirroring `escript.rs`'s own `ScratchDir` (kept
-    /// module-local rather than shared: BT-3349's no-duplication rule is
+    /// module-local rather than shared: the no-duplication rule is
     /// about *production* helpers, and both are tiny test-only RAII types
     /// over a one-line `tempfile`-free pattern already used elsewhere in
     /// this crate's tests).

@@ -53,7 +53,7 @@ pub(crate) fn generate_package_outputs(
     );
     let alias_metadata = build_alias_metadata(outputs.source_files);
 
-    // BT-1191: Generate OTP application callback when [application] supervisor is set.
+    // Generate OTP application callback when [application] supervisor is set.
     let app_callback_module =
         if let Some(ref app_config) = manifest::find_application_config(project_root)? {
             let cb_module_name = format!("beamtalk_{}_app", pkg.name);
@@ -108,7 +108,7 @@ pub(crate) fn generate_package_outputs(
     )?;
     info!(name = %pkg.name, "Generated .app file");
 
-    // BT-1722: Generate per-package corpus files for MCP discovery.
+    // Generate per-package corpus files for MCP discovery.
     // The corpus_dir is _build/dev/ (parent of ebin/) so MCP can find it
     // alongside the build output.
     let corpus_dir = build_dir.parent().unwrap_or(build_dir);
@@ -122,7 +122,7 @@ pub(crate) fn generate_package_outputs(
     Ok(())
 }
 
-/// Generate per-package corpus files for MCP discovery (BT-1722).
+/// Generate per-package corpus files for MCP discovery.
 ///
 /// Produces two files in `corpus_dir`:
 /// - `class_corpus.json` — class metadata (name, superclass, methods, doc)
@@ -405,8 +405,7 @@ pub(crate) fn build_class_metadata(
         .collect()
 }
 
-/// Build `.app`-file type-alias metadata for a package (ADR 0108 Phase 8,
-/// BT-2903).
+/// Build `.app`-file type-alias metadata for a package (ADR 0108 Phase 8).
 ///
 /// Independent of the incremental Pass 1 class-index cache
 /// (`build_class_module_index`/`build_cache.rs`): that cache exists to skip

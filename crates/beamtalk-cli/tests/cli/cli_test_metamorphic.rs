@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Subprocess tests for `beamtalk test-metamorphic` (BT-3356).
+//! Subprocess tests for `beamtalk test-metamorphic`.
 //!
 //! `test_metamorphic.rs`'s pipeline functions (`compile_transform_variant`,
 //! `compile_load_fixtures`, `process_test_file`, `run_tests`,
@@ -12,7 +12,7 @@
 //! the real `test-metamorphic` subcommand end-to-end against hermetic
 //! `.btscript` fixtures rather than re-testing already-covered pure AST
 //! logic (`walk_names_ref`, `rename_names_mut`, `build_transformed_case`,
-//! ..., covered by BT-3352's `#[cfg(test)]` unit tests in that file).
+//! ..., covered by that file's own `#[cfg(test)]` unit tests).
 
 use crate::cli_common;
 
@@ -239,7 +239,7 @@ fn metamorphic_fails_when_load_fixture_missing() {
 #[test]
 fn metamorphic_fails_when_expression_missing_assertion() {
     // Exercises `process_test_file`'s "expression(s) without assertions"
-    // bail (same corpus-hygiene enforcement as `test_stdlib`, BT-3117):
+    // bail (same corpus-hygiene enforcement as `test_stdlib`):
     // an expression line with no following `// =>` comment.
     let project = cli_common::fixture_project();
     write_file(

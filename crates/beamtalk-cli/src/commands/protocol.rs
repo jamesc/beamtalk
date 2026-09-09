@@ -50,7 +50,7 @@ fn is_transport_error(e: &WsError) -> bool {
 pub struct ProtocolClient {
     /// The underlying WebSocket connection.
     ws: WebSocket<TcpStream>,
-    /// Session ID from the server welcome message (BT-666).
+    /// Session ID from the server welcome message.
     session_id: Option<String>,
     /// Connection parameters for reconnects.
     host: String,
@@ -135,7 +135,7 @@ impl ProtocolClient {
     ///
     /// Frame building/recognition is shared with the MCP client
     /// (`beamtalk-mcp/src/client.rs: perform_auth_handshake`) and the other
-    /// Rust surfaces via `beamtalk_repl_protocol::handshake` (BT-3330) — only
+    /// Rust surfaces via `beamtalk_repl_protocol::handshake` — only
     /// the I/O below (sync `tungstenite` reads/writes) is specific to this
     /// client.
     fn perform_auth_handshake(&mut self, resume: Option<&str>) -> Result<()> {
@@ -244,7 +244,7 @@ impl ProtocolClient {
     /// Transcript push messages are printed inline to stdout with a `│ `
     /// gutter prefix at the start of each line so they are visually distinct
     /// from eval results. `reload_check`/`completed` pushes (ADR 0105 Phase
-    /// 1, BT-2779) render the reload-induced re-check notice the same way
+    /// 1) render the reload-induced re-check notice the same way
     /// the ADR's demo shows it — asynchronous, interleaved with whatever the
     /// REPL is doing, since the re-check that produced it runs on the
     /// install path of a *different* session's save as easily as this one's.
@@ -443,7 +443,7 @@ pub fn format_transcript_chunk(text: &str, bol: &mut bool) -> String {
 }
 
 /// Render a `reload_check`/`completed` push frame's `data` payload as the
-/// REPL notice (ADR 0105 §"The demo", BT-2779). Returns `None` if `data`
+/// REPL notice (ADR 0105 §"The demo"). Returns `None` if `data`
 /// is missing the fields the notice needs (defensive — a malformed push
 /// should never crash the REPL; it just prints nothing).
 ///
@@ -453,7 +453,7 @@ pub fn format_transcript_chunk(text: &str, bol: &mut bool) -> String {
 ///    Dashboard>>refresh (line 14): `+` expects a number, `getCount` now returns String
 /// ```
 /// `removal` uses `ℹ` (informational — Hint severity per ADR 0100 Rule 1);
-/// `signature_change` and `shape_change` (ADR 0105 Phase 2, BT-2780) use
+/// `signature_change` and `shape_change` (ADR 0105 Phase 2) use
 /// `⚠`. A `self_edit` classification means no dependent re-check ran at all
 /// — this call only exists because clearing this class's own stale findings
 /// (its source just changed) was itself worth telling the user about, so
@@ -860,7 +860,7 @@ mod tests {
             assert!(notice.contains("AdminPanel>>onClick (line 9)"));
         }
 
-        /// ADR 0105 Phase 2 (BT-2780): a shape change has no single changed
+        /// ADR 0105 Phase 2: a shape change has no single changed
         /// selector — `changedSelector` carries the comma-joined affected
         /// slot names instead (`beamtalk_repl_loader:shape_change_summary/1`).
         #[test]
