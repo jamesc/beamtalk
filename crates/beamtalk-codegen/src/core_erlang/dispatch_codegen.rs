@@ -507,15 +507,15 @@ impl CoreErlangGenerator {
     /// entry `HANDLERS`' ordering now makes explicit:
     ///
     /// 1. `class`/`respondsTo:`/`perform:` family MUST be decided here,
-    ///    before `HANDLERS[1..]` runs — `try_generate_protoobject_message`/
+    ///    before the rest of `HANDLERS` runs — `try_generate_protoobject_message`/
     ///    `try_generate_object_message` handle those selectors generically,
     ///    keyed on runtime `class_of/1` (which returns `'Integer'` for any
     ///    Character receiver, at the BEAM level a plain integer), for every
     ///    *other* receiver shape.
     /// 2. Any other selector runs the normal non-character priority chain
-    ///    first (`HANDLERS[1..]`, skipping this entry) — e.g. `isNil`/
-    ///    `hash`/`error:` are receiver-agnostic Object-protocol methods and
-    ///    must stay generic even for a Character receiver.
+    ///    first (every other `HANDLERS` entry, skipping this one by name) —
+    ///    e.g. `isNil`/`hash`/`error:` are receiver-agnostic Object-protocol
+    ///    methods and must stay generic even for a Character receiver.
     /// 3. Only once nothing in that chain claims the selector does this
     ///    fall back to [`Self::generate_character_typed_dispatch`], instead
     ///    of [`Self::generate_runtime_dispatch`]'s `class_of/1`-keyed
@@ -564,7 +564,14 @@ impl CoreErlangGenerator {
             _ => {}
         }
 
-        for (_, handler) in &HANDLERS[1..] {
+        // Skip by name, not position (`&HANDLERS[1..]`) — this entry's own
+        // position in `HANDLERS` is exactly what's being looked up, so
+        // slicing past index 0 would silently self-recurse if a reorder
+        // ever moved `character_typed` elsewhere in the table.
+        for (name, handler) in HANDLERS {
+            if *name == "character_typed" {
+                continue;
+            }
             if let Some(doc) = handler(self, receiver, selector, arguments)? {
                 return Ok(Some(doc));
             }
