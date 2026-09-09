@@ -146,6 +146,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0117](0117-beamtalk-core-crate-split.md) | Splitting `beamtalk-core` into Sub-Crates | Proposed | 2026-08-30 |
 | [0118](0118-expression-level-state-threading-preludes.md) | Expression-Level State Threading via ThreadedIr Preludes | Accepted | 2026-09-03 |
 | [0119](0119-class-module-name-resolution-registry.md) | Class-Name↔Module-Name Resolution Registry | Accepted | 2026-09-05 |
+| [0120](0120-value-type-self-threading-scope.md) | Value-Type `Self` Threading — Patch the Remaining Gaps, or Generalize `ThreadedIr`'s Storage Families? | Proposed | 2026-09-09 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
