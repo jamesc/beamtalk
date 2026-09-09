@@ -6239,8 +6239,8 @@ fn test_generate_has_method_actor_honors_catch_all_dnu() {
 #[test]
 fn test_generate_safe_dispatch_structure() {
     // safe_dispatch/3 must wrap dispatch/4 in a try/catch that returns the
-    // stacktrace on failure and calls beamtalk_actor:make_self/1 first
-    //. The generated call must reference the module's own dispatch fn.
+    // stacktrace on failure and calls beamtalk_actor:make_self/1 first.
+    // The generated call must reference the module's own dispatch fn.
     let mut generator = CoreErlangGenerator::new("my_counter");
     let doc = generator.generate_safe_dispatch().unwrap();
     let output = doc.to_pretty_string();
