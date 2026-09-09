@@ -8,7 +8,7 @@ use super::*;
 /// Write a fixture project declaring a git dependency `http` in
 /// `beamtalk.toml`, with the dependency's checkout already present under
 /// `_build/deps/http/src/` (simulating the state left by a prior
-/// `beamtalk build`, matching BT-2823's repro). The project's own
+/// `beamtalk build`). The project's own
 /// `src/app.bt` references the dependency's `HTTPServer` class. Returns
 /// the fixture's `TempDir` (keep it alive for the duration of the test —
 /// it removes the project directory on drop) and the path to
@@ -53,7 +53,7 @@ fn write_git_dependency_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
     (temp, app_file)
 }
 
-/// BT-2823: MCP `lint` must resolve classes from a project's git
+/// MCP `lint` must resolve classes from a project's git
 /// dependencies (declared in `beamtalk.toml`) the same way `beamtalk
 /// build`/`beamtalk lint` do, using whatever dependency checkout is
 /// already on disk under `_build/deps/<name>/` — without a false-positive
@@ -74,7 +74,7 @@ fn run_lint_structured_resolves_git_dependency_classes() {
     );
 }
 
-/// BT-2823: Same as `run_lint_structured_resolves_git_dependency_classes`
+/// Same as `run_lint_structured_resolves_git_dependency_classes`
 /// but for the `diagnostic_summary` tool.
 #[test]
 fn compute_diagnostic_summary_resolves_git_dependency_classes() {
@@ -93,7 +93,7 @@ fn compute_diagnostic_summary_resolves_git_dependency_classes() {
 
 /// Write a fixture project declaring a *direct* git dependency `http` in
 /// `beamtalk.toml`, where `http`'s own checked-out `beamtalk.toml`
-/// declares a *transitive* git dependency `net` (BT-2836) — never
+/// declares a *transitive* git dependency `net` — never
 /// mentioned in the project's own manifest. Both checkouts are already
 /// present under `_build/deps/`, simulating a prior `beamtalk build`. The
 /// project's own `src/app.bt` references `net`'s `NetClient` class
@@ -154,7 +154,7 @@ fn write_transitive_git_dependency_fixture() -> (tempfile::TempDir, std::path::P
     (temp, app_file)
 }
 
-/// BT-2836: MCP `lint` must resolve classes from a *transitive*
+/// MCP `lint` must resolve classes from a *transitive*
 /// dependency (declared only in a direct dependency's own
 /// `beamtalk.toml`, not the project's) the same way `beamtalk
 /// build`/`beamtalk lint` do, using whatever checkout is already on disk
@@ -177,7 +177,7 @@ fn run_lint_structured_resolves_transitive_git_dependency_classes() {
     );
 }
 
-/// BT-2836: Same as
+/// Same as
 /// `run_lint_structured_resolves_transitive_git_dependency_classes` but
 /// for the `diagnostic_summary` tool.
 #[test]
@@ -195,7 +195,7 @@ fn compute_diagnostic_summary_resolves_transitive_git_dependency_classes() {
     );
 }
 
-/// BT-2056: When a package-extraction file in src/ cannot be read, MCP lint
+/// When a package-extraction file in src/ cannot be read, MCP lint
 /// must surface a warning rather than silently dropping it from the
 /// extraction set.
 #[cfg(unix)]
@@ -245,7 +245,7 @@ fn run_lint_structured_unreadable_package_file_warns() {
     );
 }
 
-/// BT-2056: `compute_diagnostic_summary` should include unreadable package
+/// `compute_diagnostic_summary` should include unreadable package
 /// files in its output when a sibling file cannot be read.
 #[cfg(unix)]
 #[test]
@@ -293,7 +293,7 @@ fn compute_diagnostic_summary_unreadable_package_file() {
     );
 }
 
-/// BT-2067: `compute_diagnostic_summary` must surface an error when a
+/// `compute_diagnostic_summary` must surface an error when a
 /// direct target file is unreadable, not a clean `files_checked=0` result.
 #[cfg(unix)]
 #[test]
@@ -333,7 +333,7 @@ fn compute_diagnostic_summary_unreadable_direct_target() {
     assert!(listed[0].as_str().unwrap().contains("locked.bt"));
 }
 
-/// BT-2067: Directory-based lint invocations must still surface a specific
+/// Directory-based lint invocations must still surface a specific
 /// unreadable target when some files resolve successfully and others do
 /// not.
 #[cfg(unix)]
@@ -378,7 +378,7 @@ fn compute_diagnostic_summary_directory_with_unreadable_target() {
     assert!(err_msg.contains("locked.bt"));
 }
 
-/// BT-2067: `run_lint_structured` must emit a file-level error for
+/// `run_lint_structured` must emit a file-level error for
 /// unreadable targets surfaced by a directory walk, not drop them silently.
 #[cfg(unix)]
 #[test]
@@ -416,7 +416,7 @@ fn run_lint_structured_directory_with_unreadable_target_errors() {
     );
 }
 
-// BT-2060: `find_package_root` tests moved to
-// `beamtalk_project::package` tests — the MCP helper is now a thin
+// `find_package_root` tests live in
+// `beamtalk_project::package` tests — the MCP helper is a thin
 // wrapper around the shared implementation, so duplicating the
 // ancestor-walk assertions here would only lock in behaviour twice.

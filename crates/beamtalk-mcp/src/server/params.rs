@@ -18,7 +18,7 @@ pub struct EvaluateParams {
     /// Beamtalk expression to evaluate.
     #[schemars(description = "A beamtalk expression to evaluate in the REPL")]
     pub code: String,
-    /// If true, return per-statement step values instead of a single result (BT-1238).
+    /// If true, return per-statement step values instead of a single result.
     /// Each step has `src` (the source text) and `value` (the evaluated result).
     #[schemars(
         description = "If true, return per-statement trace steps instead of a single result value. Each step includes the source text and the evaluated value."
@@ -205,7 +205,7 @@ pub struct SearchClassesParams {
     pub limit: Option<usize>,
 }
 
-/// Parameters for the `list_classes` MCP tool (BT-1404).
+/// Parameters for the `list_classes` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ListClassesParams {
     /// Optional filter: a superclass name to show only subclasses of (e.g. 'Value', 'Actor'),
@@ -305,7 +305,7 @@ pub struct PackageClassesParams {
     pub package: String,
 }
 
-/// Parameters for the `diagnostic_summary` MCP tool (BT-2014).
+/// Parameters for the `diagnostic_summary` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct DiagnosticSummaryParams {
     /// Path to a `.bt` source file or directory. Defaults to the current directory.
@@ -315,7 +315,7 @@ pub struct DiagnosticSummaryParams {
     pub path: Option<String>,
 }
 
-/// Parameters for the `precheck_method` MCP tool (ADR 0105 Phase 3, BT-2782).
+/// Parameters for the `precheck_method` MCP tool (ADR 0105 Phase 3).
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct PrecheckMethodParams {
     /// Name of the Beamtalk class the pending edit targets.
@@ -335,7 +335,7 @@ pub struct PrecheckMethodParams {
     pub body: String,
 }
 
-/// Parameters for the `save_method` MCP tool (ADR 0082 Phase 3, BT-2288).
+/// Parameters for the `save_method` MCP tool (ADR 0082 Phase 3).
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SaveMethodParams {
     /// Name of the Beamtalk class whose method should be patched.
@@ -355,7 +355,7 @@ pub struct SaveMethodParams {
     pub body: String,
 }
 
-/// Parameters for the `try_method` MCP tool (ADR 0082 Phase 3, BT-2288).
+/// Parameters for the `try_method` MCP tool (ADR 0082 Phase 3).
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct TryMethodParams {
     /// Name of the Beamtalk class whose method should be ephemerally patched.
@@ -375,7 +375,7 @@ pub struct TryMethodParams {
     pub body: String,
 }
 
-/// Parameters for the `save_class` MCP tool (ADR 0082 Phase 3, BT-2288).
+/// Parameters for the `save_class` MCP tool (ADR 0082 Phase 3).
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SaveClassParams {
     /// Full Beamtalk class source (e.g. `Object subclass: Greeter ...`).
@@ -391,7 +391,7 @@ pub struct SaveClassParams {
     pub path: String,
 }
 
-/// Parameters for the `remove_method` MCP tool (ADR 0112 Phase 4, BT-3188).
+/// Parameters for the `remove_method` MCP tool (ADR 0112 Phase 4).
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct RemoveMethodParams {
     /// Name of the Beamtalk class to remove the method from.
@@ -412,7 +412,7 @@ pub struct RemoveMethodParams {
     pub if_absent: Option<String>,
 }
 
-/// Parameters for the `remove_class` MCP tool (ADR 0113 Phase 4, BT-3210).
+/// Parameters for the `remove_class` MCP tool (ADR 0113 Phase 4).
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct RemoveClassParams {
     /// Name of the Beamtalk class to remove from the running system.
@@ -422,7 +422,7 @@ pub struct RemoveClassParams {
     pub class: String,
 }
 
-/// Parameters for the `rename_class` MCP tool (ADR 0114 Phase 5, BT-3276).
+/// Parameters for the `rename_class` MCP tool (ADR 0114 Phase 5).
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct RenameClassParams {
     /// Name of the Beamtalk class to rename.
@@ -433,7 +433,7 @@ pub struct RenameClassParams {
     pub new_name: String,
 }
 
-/// Parameters for the `rename_method` MCP tool (ADR 0114 Phase 5, BT-3276).
+/// Parameters for the `rename_method` MCP tool (ADR 0114 Phase 5).
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct RenameMethodParams {
     /// Name of the Beamtalk class whose method should be renamed.
@@ -453,7 +453,7 @@ pub struct RenameMethodParams {
     pub new_selector: String,
 }
 
-/// Parameters for the `flush` MCP tool (ADR 0082 Phase 3, BT-2288).
+/// Parameters for the `flush` MCP tool (ADR 0082 Phase 3).
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct FlushParams {
     /// Optional class name to scope the flush to that class's pending entries.
@@ -471,8 +471,8 @@ pub struct FlushParams {
         description = "Optional change-kind symbol to scope the flush, e.g. \"new-class\" (compiles to 'Workspace flush: #'new-class'). Mutually exclusive with 'class' and 'file'."
     )]
     pub kind: Option<String>,
-    /// Required-when-applicable Tier-2 confirmation (ADR 0113 Phase 2/4,
-    /// BT-3207/BT-3210). Must be `true` to also apply pending `remove-class`
+    /// Required-when-applicable Tier-2 confirmation (ADR 0113 Phase 2/4).
+    /// Must be `true` to also apply pending `remove-class`
     /// (destructive, file-deleting) entries; omitted or `false` flushes only
     /// Tier 1 (patches, new-class, remove-method) exactly as before.
     #[schemars(

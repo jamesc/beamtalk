@@ -39,21 +39,21 @@ pub(crate) fn running_as_root() -> bool {
 }
 
 // ------------------------------------------------------------------
-// MCP tool handlers against a fake REPL (BT-3324)
+// MCP tool handlers against a fake REPL
 // ------------------------------------------------------------------
 //
 // `server.rs`'s tool handlers take a concrete `Arc<ReplClient>`, not a
-// trait object — the same shape BT-3325 found in beamtalk-lsp's
-// runtime.rs, with no mockable seam to introduce. Rather than add one
+// trait object — the same shape `beamtalk-lsp`'s
+// runtime.rs has, with no mockable seam to introduce. Rather than add one
 // neither the CLI nor the REPL wire protocol needs, this fake stands in
 // for a real REPL server: a loopback WebSocket listener that performs the
 // ADR 0020 auth handshake and then answers requests through a per-test
 // responder closure, so a real `ReplClient` connects to it exactly as it
 // would to `beamtalk repl` — and the tool handler methods below run
 // as ordinary async fns against it, unignored and BEAM-free.
-// BT-3331: the loopback WS server performing the ADR 0020 handshake
-// (listener bind, handshake frames, request/response loop) used to be
-// hand-rolled here; it's now shared with `beamtalk-lsp`'s equivalent
+// The loopback WS server performing the ADR 0020 handshake
+// (listener bind, handshake frames, request/response loop) is
+// shared with `beamtalk-lsp`'s equivalent
 // fake workspace via `beamtalk_repl_protocol::test_support` (see that
 // module's doc comment for the full extraction rationale). `FakeRepl`
 // aliases the shared server type under this file's existing name, so
