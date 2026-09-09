@@ -137,7 +137,7 @@ impl LspDriver {
 
     /// Open a file via `textDocument/didOpen` without waiting for diagnostics.
     ///
-    /// Used by the LSP parity capability suite (BT-2081): hover, completion,
+    /// Used by the LSP parity capability suite: hover, completion,
     /// definition, and workspace/symbol all need the document to be indexed
     /// before they can produce results, but unlike the diagnostic case they
     /// don't need the harness to wait for `publishDiagnostics`.
@@ -460,7 +460,7 @@ async fn read_lsp_frame(stream: &mut ChildStdout) -> Result<Vec<u8>, String> {
 /// Render a path as a `file://` URI. Good enough for LSP rootUri / textDocument.uri
 /// — only used for absolute paths from `tempfile::TempDir`.
 ///
-/// BT-3069: `Path::canonicalize()` strips the verbatim (`\\?\`) prefix
+/// `Path::canonicalize()` strips the verbatim (`\\?\`) prefix
 /// Windows adds via [`strip_verbatim_prefix`] before it ever reaches the
 /// slash-replacement below — see that function's doc for why the raw
 /// prefix silently breaks `beamtalk-lsp`.
@@ -476,7 +476,7 @@ fn path_to_uri(p: &Path) -> String {
 }
 
 /// Strips the `\\?\` extended-length ("verbatim") path prefix that
-/// `Path::canonicalize()` adds on Windows (BT-3069).
+/// `Path::canonicalize()` adds on Windows.
 ///
 /// Left in place, the embedded `?` is indistinguishable from a URL
 /// query-string delimiter once folded into a `file://` URI: RFC 3986

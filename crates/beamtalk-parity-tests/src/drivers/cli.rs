@@ -65,7 +65,7 @@ pub fn build_project(path: &Path) -> Result<SurfaceOutput, String> {
 ///
 /// `Protocol define:` is included so the CLI scanner agrees with REPL
 /// and MCP load-project responses, which list registered protocols
-/// alongside concrete classes (BT-1950).
+/// alongside concrete classes.
 fn scan_classes(root: &Path) -> std::collections::BTreeSet<String> {
     let mut out = std::collections::BTreeSet::new();
     visit_bt_files(root, &mut |file| {
@@ -84,7 +84,7 @@ fn scan_classes(root: &Path) -> std::collections::BTreeSet<String> {
                 }
             }
             // Match `Protocol define: <Name>` so cross-file protocols
-            // (BT-1950) are visible in the CLI's class set.
+            // are visible in the CLI's class set.
             if let Some(rest) = t.strip_prefix("Protocol define: ") {
                 if let Some(first) = rest.split_whitespace().next() {
                     let bare = first.split('(').next().unwrap_or(first);

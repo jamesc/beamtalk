@@ -16,7 +16,7 @@ pub mod handshake;
 mod request;
 mod response;
 /// Test-only loopback WebSocket double shared by dependent crates' own test
-/// suites (BT-3331). Gated on `#[cfg(any(test, feature = "test"))]` to avoid
+/// suites. Gated on `#[cfg(any(test, feature = "test"))]` to avoid
 /// prod binary bloat while allowing dependent crates to opt in via the
 /// `test` Cargo feature in their `[dev-dependencies]`.
 #[cfg(any(test, feature = "test"))]

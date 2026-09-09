@@ -80,9 +80,9 @@ pub fn candidate_paths(home: Option<&Path>) -> Vec<PathBuf> {
 /// [`BrokerError::CliNotFound`] if nothing is found.
 ///
 /// A thin wrapper reading the real process environment and handing it to
-/// [`resolve_cli_path_with`] — see that function's doc comment (BT-3056) for
-/// why the actual resolution logic lives there instead, injectable rather
-/// than reading `std::env` directly.
+/// [`resolve_cli_path_with`] — see that function's doc comment for why the
+/// actual resolution logic lives there instead, injectable rather than
+/// reading `std::env` directly.
 ///
 /// # Errors
 ///
@@ -98,14 +98,13 @@ pub fn resolve_cli_path() -> Result<PathBuf> {
 
 /// Core resolution logic behind [`resolve_cli_path`], with every environment
 /// input ([`CLI_PATH_OVERRIDE_ENV`], `PATH`, the home directory) taken as a
-/// parameter instead of read from the real process environment (BT-3056
-/// adversarial-review follow-up).
+/// parameter instead of read from the real process environment.
 ///
 /// This is what makes `resolve_cli_path`'s edge-case tests (an executable
 /// found via a synthetic `PATH`, and none found at all) possible without
 /// mutating process-global `std::env::set_var("PATH", ...)` — the two tests
 /// that used to do that were already RAII-guarded against leaking a clobbered
-/// `PATH` past themselves (BT-3046's `PathRestoreGuard`), but a shared
+/// `PATH` past themselves (a `PathRestoreGuard`), but a shared
 /// `ENV_LOCK`-guarded mutation of real global state is still strictly more
 /// fragile than never touching it: any *future* test in this crate that
 /// spawns a process by bare executable name (matching it through shell/`PATH`
@@ -285,7 +284,7 @@ mod tests {
 
     #[test]
     fn resolve_cli_path_prefers_the_override_env_var() {
-        // BT-3056: no process-global env touched — the override is injected
+        // No process-global env touched — the override is injected
         // directly into resolve_cli_path_with.
         let result =
             resolve_cli_path_with(Some("/custom/path/to/beamtalk".to_string()), None, None);
@@ -299,7 +298,7 @@ mod tests {
         let fake_cli = tmp.path().join(exe_name());
         std::fs::write(&fake_cli, b"#!/bin/sh\n").unwrap();
 
-        // BT-3056: the synthetic PATH is injected, not written to the real
+        // The synthetic PATH is injected, not written to the real
         // process environment — no ENV_LOCK, no restore-on-drop guard, no
         // risk of leaking a clobbered PATH to any other test in this binary.
         let result = resolve_cli_path_with(None, Some(tmp.path().display().to_string()), None);
@@ -315,8 +314,8 @@ mod tests {
         assert!(matches!(result, Err(BrokerError::CliNotFound)));
     }
 
-    /// Smoke test for the thin `resolve_cli_path()` wrapper itself (BT-3056
-    /// adversarial-review follow-up) — everything above exercises the
+    /// Smoke test for the thin `resolve_cli_path()` wrapper itself —
+    /// everything above exercises the
     /// resolution *logic* via the injectable `resolve_cli_path_with` without
     /// touching process env at all; this proves the wrapper actually reads
     /// the real `CLI_PATH_OVERRIDE_ENV`/`PATH`/home-dir inputs and threads

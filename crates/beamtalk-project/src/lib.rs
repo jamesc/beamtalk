@@ -7,11 +7,9 @@
 //!
 //! Shared project/workspace discovery logic for Beamtalk tooling (CLI, LSP, etc.).
 //!
-//! BT-3340 (ADR 0117 Decision step 2): extracted from `beamtalk-core::project`
-//! into its own crate — `project` depended only on `beamtalk-core::file_walker`
-//! (and `test_helpers` in tests) with no back-edges from the rest of the
-//! crate, so this is a mechanical move giving a real, `cargo`-enforced
-//! boundary.
+//! A standalone crate (ADR 0117 Decision step 2) depending only on
+//! `beamtalk-core::file_walker`, so the boundary is `cargo`-enforced rather
+//! than a convention within `beamtalk-core`.
 
 pub mod package;
 

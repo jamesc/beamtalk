@@ -45,7 +45,7 @@ use tracing::{debug, error, warn};
 use tracing_subscriber::EnvFilter;
 
 // ────────────────────────────────────────────────────────────────
-// Windows Job Object support (BT-1133)
+// Windows Job Object support
 
 #[cfg(windows)]
 mod job_object {
@@ -322,7 +322,7 @@ fn handle_spawn_piped(
     let pgid = child.id() as libc::pid_t;
 
     // On Windows, create a Job Object and assign the child to it so the entire
-    // process tree can be terminated as a group (BT-1133).
+    // process tree can be terminated as a group.
     #[cfg(windows)]
     let job = {
         let job =
@@ -370,8 +370,7 @@ fn handle_spawn_piped(
     // stdout/stderr data has already been written to the port before the BEAM
     // gen_server receives the exit signal.  Without this, the reaper could send
     // exit before the reader threads have flushed their final reads, causing the
-    // gen_server to close the port and discard in-flight data (the race fixed by
-    // the 10 ms drain timer in the previous workaround — see BT-1148).
+    // gen_server to close the port and discard in-flight data.
     {
         let writer = Arc::clone(writer);
         let children = Arc::clone(children);
@@ -523,7 +522,7 @@ fn handle_kill(request: &Map, children: &ChildMap) -> Result<(), String> {
 
     #[cfg(windows)]
     {
-        // Terminate all processes in the Job Object (BT-1133).
+        // Terminate all processes in the Job Object.
         let map = children
             .lock()
             .map_err(|e| format!("children lock poisoned: {e}"))?;
@@ -653,7 +652,7 @@ fn kill_all_children(children: &ChildMap) {
         }
     }
 
-    // Windows: terminate all Job Objects to kill all process trees (BT-1133).
+    // Windows: terminate all Job Objects to kill all process trees.
     #[cfg(windows)]
     {
         if let Ok(map) = children.lock() {

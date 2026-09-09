@@ -28,7 +28,7 @@
 //! shape this module does not need, since the happy path always has a real
 //! on-disk cookie to resolve.)
 //!
-//! **Windows has no `bin/server`** (BT-2988) — `bin/server` is a POSIX `sh`
+//! **Windows has no `bin/server`** — `bin/server` is a POSIX `sh`
 //! script with no counterpart in a `mix release` bundle. There, this module
 //! itself does what `bin/server` does on Unix before invoking the release's
 //! own Windows entry point (`bin\bt_attach.bat start`) directly:
@@ -44,7 +44,7 @@
 //!   `exec bin/bt_attach start`)
 //!
 //! **Why this is a Rust reimplementation and not a `bin\server.bat` mirroring
-//! `bin/server`'s shape (BT-3045 adversarial-review follow-up):** `bin/server`
+//! `bin/server`'s shape:** `bin/server`
 //! resolves `BT_WORKSPACE_NODE` with a `sed` regex against `metadata.json`,
 //! which works but is exactly the kind of fragile hand-rolled JSON access a
 //! `.bat` equivalent (batch has no JSON parser at all — a working port would
@@ -56,7 +56,7 @@
 //! — introducing a second, `.bat`-based entry point purely for symmetry with
 //! Unix would add a second-worse implementation of the one thing `bin/server`
 //! does that actually needs mirroring, not remove the drift risk. What *was*
-//! missing, and what BT-3045 actually closes, is a **test** tying the two
+//! missing is a **test** tying the two
 //! together: `spawn::tests::windows_launch_env_matches_bin_server_contract`
 //! (Windows-only, since it exercises `build_launch_command`'s Windows arm)
 //! reads `bin/server`'s source and asserts each of today's known contract env
@@ -78,9 +78,9 @@
 //! Booting non-distributed hands control back to the front's own lazy,
 //! correctly-seeded `ensure_distributed/0` on the first `/readiness` call.
 //!
-//! **Windows gap, documented rather than silently worked around (BT-2988
-//! acceptance criteria):** the epmd/OS-process story is not fully verified on
-//! Windows. `detach` (below) uses `CREATE_NEW_PROCESS_GROUP` as the Windows
+//! **Windows gap, documented rather than silently worked around:** the
+//! epmd/OS-process story is not fully verified on Windows. `detach` (below)
+//! uses `CREATE_NEW_PROCESS_GROUP` as the Windows
 //! analogue of Unix's `process_group(0)` — the standard way to stop a Ctrl-C
 //! sent to the broker's own console from also reaching the front.
 //!
@@ -125,7 +125,7 @@ use crate::sname::attach_node_suffix;
 pub struct SpawnConfig {
     /// Path to the launcher executable — `bin/server` on Unix, invoked as
     /// `bin/server <id>` (it re-resolves everything else itself). On Windows
-    /// (BT-2988, ADR 0097 Implementation §5b), this is instead the release's
+    /// (ADR 0097 Implementation §5b), this is instead the release's
     /// own `bin\bt_attach.bat`, invoked as `bin\bt_attach.bat start` with no
     /// positional workspace-id arg — [`spawn_front`] resolves and sets every
     /// env var `bin/server` would have on Unix before invoking it. Either
@@ -262,7 +262,7 @@ impl std::ops::DerefMut for SpawnedFront {
 /// per the refusal conditions above, or [`BrokerError::Io`] if the launcher
 /// process fails to spawn or (Windows only) if assigning it to the job
 /// object fails. [`build_launch_command`] can additionally return
-/// [`BrokerError::LauncherPlatformMismatch`] (BT-3046 — `config.launcher`
+/// [`BrokerError::LauncherPlatformMismatch`] (`config.launcher`
 /// doesn't look like a real entry point for the current platform) before any
 /// process is spawned. On Windows, its workspace lookups and per-front
 /// `RELEASE_TMP` setup can additionally propagate [`BrokerError::MissingCookie`]
@@ -270,7 +270,7 @@ impl std::ops::DerefMut for SpawnedFront {
 /// [`BrokerError::Workspace`] (a `beamtalk-workspace` failure), or
 /// [`BrokerError::Io`] (failed to create the `RELEASE_TMP` directory) before
 /// any process is spawned. Also returns [`BrokerError::LauncherNotFound`]
-/// (BT-3056) if `config.launcher` looks right for this platform but no file
+/// if `config.launcher` looks right for this platform but no file
 /// actually exists there — the common unpackaged-dev-build failure mode,
 /// checked explicitly rather than left to surface as a generic `Io` error
 /// out of `Command::spawn` below.
@@ -288,7 +288,7 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
 
     let mut cmd = build_launch_command(config)?;
 
-    // BT-3056 adversarial-review follow-up: checked here, immediately after
+    // Checked here, immediately after
     // `build_launch_command` succeeds, rather than inside it — that function
     // has its own unit tests exercising synthetic non-existent launcher
     // paths (e.g. `bin\bt_attach.bat`, `bin/server`) purely for `Command`
@@ -298,13 +298,13 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     // (see `build_launch_command`'s two arms), so checking the former here
     // is equivalent to checking the latter.
     if !config.launcher.is_file() {
-        // Second adversarial-review follow-up (BT-3056): on Windows,
+        // On Windows,
         // `build_launch_command` above already created this attempt's
         // per-front `RELEASE_TMP` directory (`std::fs::create_dir_all`) —
         // returning here without removing it would leave that directory
         // behind forever: no `FrontRecord` is ever written for a
         // `spawn_front` call that fails this early, so `remove_record`'s own
-        // `RELEASE_TMP` cleanup hook (BT-3046/BT-3059) never runs for it.
+        // `RELEASE_TMP` cleanup hook never runs for it.
         // Same cleanup the job-object-assign failure path below already
         // does for the identical reason, just inlined here too.
         #[cfg(windows)]
@@ -346,7 +346,7 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
         // behind.
         if let Err(e) = job.assign(&child) {
             kill_orphaned_child(&mut child);
-            // Best-effort (BT-3046 adversarial-review follow-up, low
+            // Best-effort (low
             // severity): `build_launch_command` above already created this
             // attempt's RELEASE_TMP directory. At this point in the boot
             // sequence the release has likely not written secrets into it
@@ -372,7 +372,7 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
 /// a release build (`windows_subsystem = "windows"` on Windows; macOS/Linux
 /// app bundles have no attached terminal either) — so without this, a
 /// spawned front's crash or an Elixir-side exception is invisible short of
-/// running the release binary manually from a terminal (BT-3225).
+/// running the release binary manually from a terminal.
 ///
 /// Best-effort: if the log file can't be opened (e.g. the workspace
 /// directory somehow isn't writable), stdout/stderr fall back to
@@ -439,8 +439,8 @@ fn kill_orphaned_child(child: &mut std::process::Child) {
 ///
 /// Shares a `Result`-returning signature with its `#[cfg(windows)]` sibling
 /// below so `spawn_front` calls whichever one this build compiles through one
-/// shared call site — this arm can now fail too (BT-3046's
-/// [`check_launcher_platform`] guard), not only the Windows one (a missing
+/// shared call site — this arm can now fail too (see
+/// [`check_launcher_platform`]'s guard), not only the Windows one (a missing
 /// cookie file, or a `read_node_name` failure).
 ///
 /// # Errors
@@ -460,7 +460,7 @@ fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
 
 /// Guard against [`SpawnConfig::launcher`] (or its `BEAMTALK_ATTACH_LAUNCHER`
 /// override — see `desktop/src-tauri/src/launcher.rs`) pointing at the wrong
-/// platform's entry point (BT-3046 adversarial-review follow-up): a Unix
+/// platform's entry point: a Unix
 /// `bin/server` shell script has no extension, while the Windows
 /// `bin\bt_attach.bat` always does — a cheap, reliable discriminator without
 /// needing to actually open or exec the file. Unix arm: refuses a `.bat`/
@@ -488,7 +488,7 @@ fn check_launcher_platform(launcher: &std::path::Path) -> Result<()> {
     }
 }
 
-/// Windows counterpart of the Unix `build_launch_command` above (BT-2988) —
+/// Windows counterpart of the Unix `build_launch_command` above —
 /// see this module's doc comment for the full rationale. `bin/server` does
 /// not exist on Windows, so this function does what it would have: resolve
 /// `BT_WORKSPACE_NODE`/`BT_WORKSPACE_COOKIE` from the on-disk workspace
@@ -505,7 +505,7 @@ fn check_launcher_platform(launcher: &std::path::Path) -> Result<()> {
 /// [`crate::discovery::read_node_name`] failure — malformed `metadata.json`
 /// (`spawn_front` already checked it exists before calling this), or
 /// [`BrokerError::MissingNodeName`] when it exists but has no `node_name`
-/// field yet (a workspace created but never started — BT-3060, matching
+/// field yet (a workspace created but never started, matching
 /// `bin/server`'s Unix fail-fast behavior instead of guessing) — or
 /// [`BrokerError::Io`] if the per-front [`release_tmp_dir`] can't be created.
 #[cfg(windows)]
@@ -525,7 +525,7 @@ fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
     cmd.env("SECRET_KEY_BASE", generate_secret_key_base());
     cmd.env("PHX_SERVER", "true");
 
-    // BT-3045 adversarial-review follow-up: `bin/server`'s Unix arm always
+    // `bin/server`'s Unix arm always
     // `cd -P -- "$(dirname -- "$0")/.."`s to the release root before its
     // final `exec bin/bt_attach start` (see the sibling `#[cfg(unix)]`
     // `build_launch_command` above, which relies on that `exec` inheriting
@@ -542,7 +542,7 @@ fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
         cmd.current_dir(root);
     }
 
-    // BT-3046 adversarial-review follow-up: a bundled MSI/NSIS install lands
+    // A bundled MSI/NSIS install lands
     // under `C:\Program Files\Beamtalk\...`, which a standard (non-admin)
     // Windows user cannot write to. Mix releases resolve `RELEASE_TMP`
     // (default `$RELEASE_ROOT/tmp`) and write the boot's resolved
@@ -559,7 +559,7 @@ fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
 
 /// The release root a Windows launcher path implies — `bin\bt_attach.bat`'s
 /// grandparent directory, mirroring `bin/server`'s own `dirname -- "$0")/..`
-/// (this module's doc comment, BT-3045).
+/// (this module's doc comment).
 ///
 /// **Requires an absolute `launcher`, deliberately** (adversarial-review
 /// follow-up) — `desktop/src-tauri/src/launcher.rs`'s `resolve_launcher_path`
@@ -597,7 +597,7 @@ fn release_root(launcher: &std::path::Path) -> Option<PathBuf> {
 }
 
 /// Guard against [`SpawnConfig::launcher`] pointing at the wrong platform's
-/// entry point (BT-3046) — see the `#[cfg(unix)]` sibling above for the full
+/// entry point — see the `#[cfg(unix)]` sibling above for the full
 /// rationale. Windows arm: requires a `.bat`/`.cmd` extension, since
 /// `bin\bt_attach.bat` (the only real Windows launcher) always has one and a
 /// Unix `bin/server` shell script never does.
@@ -621,7 +621,7 @@ fn check_launcher_platform(launcher: &std::path::Path) -> Result<()> {
     }
 }
 
-/// Per-front `RELEASE_TMP` directory (BT-3046) — see [`build_launch_command`]'s
+/// Per-front `RELEASE_TMP` directory — see [`build_launch_command`]'s
 /// doc comment for why the release's own default (under `RELEASE_ROOT`, which
 /// a standard install puts under `Program Files`) isn't usable.
 ///
@@ -702,7 +702,7 @@ impl SpawnAttemptConfig {
 /// Default grace period for [`spawn_front_with_port_retry`]'s bind-failure
 /// heuristic.
 ///
-/// **Calibrated against a real `dist-liveview` release (BT-3004)**, racing
+/// **Calibrated against a real `dist-liveview` release**, racing
 /// two fronts for the same port against a live workspace: a genuine
 /// `:eaddrinuse` crash took 2.76s–3.40s (mean ~3.05s, n=3) to surface as a
 /// process exit — the VM boots fully, the supervision tree's `Endpoint`
@@ -720,7 +720,7 @@ impl SpawnAttemptConfig {
 ///
 /// This grace period is paid in full on the **success** path of every spawn
 /// attempt (`spawn_front_with_port_retry` polls `try_wait` up to this
-/// deadline — see BT-3226 — but a still-running process can't be told apart
+/// deadline — see `poll_try_wait_until` — but a still-running process can't be told apart
 /// from one about to crash without waiting out the full window) — so
 /// raising it here trades ~3.5s of extra latency on every attach for not
 /// silently handing back a front that is already doomed. Correctness was
@@ -755,7 +755,7 @@ pub const DEFAULT_BIND_FAILURE_GRACE: Duration = Duration::from_secs(5);
 /// reasonable (if imperfect) proxy for "the port was already taken and the
 /// release's supervision tree gave up," while one still running is treated
 /// as bound and handed to the caller. `bind_failure_grace` was calibrated
-/// against a real `bin/server`/`dist-liveview` boot (BT-3004): a genuine
+/// against a real `bin/server`/`dist-liveview` boot: a genuine
 /// `:eaddrinuse` takes 2.76s–3.40s to surface as a process exit, versus well
 /// under 1s for a healthy boot to reach HTTP-up — see
 /// [`DEFAULT_BIND_FAILURE_GRACE`]'s doc comment for the full measurement and
@@ -765,7 +765,7 @@ pub const DEFAULT_BIND_FAILURE_GRACE: Duration = Duration::from_secs(5);
 ///
 /// Returns [`BrokerError::PortsExhausted`] if every port attempt looks like
 /// a conflict — carrying the *last* attempt's real launcher exit status as a
-/// diagnostic (BT-3045; see that variant's doc comment for why: this
+/// diagnostic (see that variant's doc comment for why: this
 /// function's retry signal is a heuristic, so a genuine non-conflict launcher
 /// failure that happens to exit early on every attempt would otherwise be
 /// reported as an opaque attempt count with no clue it wasn't really a port
@@ -789,7 +789,7 @@ pub fn spawn_front_with_port_retry(config: &SpawnAttemptConfig) -> Result<(Spawn
             ide_toml_path: config.ide_toml_path.clone(),
         };
         let mut child = spawn_front(&spawn_config)?;
-        // BT-3226: poll try_wait() up to the deadline instead of a single
+        // Poll try_wait() up to the deadline instead of a single
         // sleep-then-check. A single check exactly at the deadline can miss
         // a child that has *actually* exited but whose exit status the OS
         // hasn't yet made visible to this process under scheduler
@@ -803,7 +803,7 @@ pub fn spawn_front_with_port_retry(config: &SpawnAttemptConfig) -> Result<(Spawn
         // pays the full `bind_failure_grace` either way.
         let exit_status = poll_try_wait_until(&mut child, config.bind_failure_grace)?;
         if let Some(exit_status) = exit_status {
-            // BT-3045: carry the launcher's actual exit status through, so a
+            // Carry the launcher's actual exit status through, so a
             // caller that exhausts every attempt sees more than a bare count
             // (see BrokerError::PortsExhausted's doc comment) — this is a
             // diagnostic only, not a reclassification: an early exit is still
@@ -823,7 +823,7 @@ pub fn spawn_front_with_port_retry(config: &SpawnAttemptConfig) -> Result<(Spawn
 }
 
 /// Poll `child.try_wait()` at short intervals until it reports an exit or
-/// `grace` elapses, whichever comes first (BT-3226).
+/// `grace` elapses, whichever comes first.
 ///
 /// Returns `Ok(Some(status))` as soon as an exit is observed, or
 /// `Ok(None)` once the deadline passes with the child still reported
@@ -861,7 +861,7 @@ fn detach(cmd: &mut Command) {
 fn detach(cmd: &mut Command) {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    // Adversarial-review follow-up (BT-2988): `bin\bt_attach.bat` can only
+    // `bin\bt_attach.bat` can only
     // run via a console-subsystem wrapper (`cmd.exe` — see this module's
     // doc comment), which without this flag pops a visible console window
     // per front, behind the desktop app's GUI, that a user could close and
@@ -901,7 +901,7 @@ mod tests {
 
     #[test]
     fn build_env_respects_an_operator_provided_erl_epmd_address() {
-        // BT-3225 review follow-up: a trusted-private-network operator can
+        // A trusted-private-network operator can
         // still override the loopback pin — see build_env's doc comment.
         let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         // SAFETY: guarded by ENV_LOCK above.
@@ -956,7 +956,7 @@ mod tests {
         assert!(matches!(result, Err(BrokerError::UnknownWorkspace(_))));
     }
 
-    // ── Windows launch command (BT-2988) ────────────────────────────────
+    // ── Windows launch command ──────────────────────────────────────────
     //
     // `build_launch_command`/`generate_secret_key_base` only exist on
     // `cfg(windows)` — these tests build a real, throwaway workspace
@@ -1054,7 +1054,7 @@ mod tests {
             envs.contains_key("SECRET_KEY_BASE"),
             "must set an ephemeral SECRET_KEY_BASE itself — there is no bin/server to do it"
         );
-        // BT-3046: RELEASE_TMP must be a per-user-writable path, not the
+        // RELEASE_TMP must be a per-user-writable path, not the
         // release's own default under RELEASE_ROOT (a bundled install puts
         // that under Program Files, which a standard user can't write to).
         let release_tmp = envs
@@ -1077,7 +1077,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn build_launch_command_sets_current_dir_to_the_release_root() {
-        // BT-3045: unlike the other Windows tests here, this one needs a
+        // Unlike the other Windows tests here, this one needs a
         // launcher path with a real parent chain (bin\bt_attach.bat under a
         // real release root) — `release_root` deliberately no-ops on the
         // bare relative `r"bin\bt_attach.bat"` the other tests use (see its
@@ -1156,7 +1156,7 @@ mod tests {
         );
     }
 
-    /// BT-3045 adversarial-review follow-up: `bin/server`'s Unix arm and
+    /// `bin/server`'s Unix arm and
     /// `build_launch_command`'s Windows arm are two independent
     /// implementations of "resolve `BT_WORKSPACE_NODE`/`BT_WORKSPACE_COOKIE`,
     /// generate `SECRET_KEY_BASE` if needed, set `PHX_SERVER`" — nothing
@@ -1279,7 +1279,7 @@ mod tests {
     fn build_launch_command_errors_on_launcher_platform_mismatch() {
         let ws = WindowsTestWorkspaceDir::new("win_launch_mismatch", None, Some("c"));
         // A Unix-shaped launcher path (no .bat/.cmd extension) handed to a
-        // Windows build — the exact adversarial-review scenario BT-3046
+        // Windows build — the exact scenario
         // flagged: this used to fail with an opaque OS error instead of a
         // named one.
         let config = SpawnConfig::new(PathBuf::from(r"bin\server"), ws.id.clone(), 4567);
@@ -1292,7 +1292,7 @@ mod tests {
         );
     }
 
-    /// BT-3056: `build_launch_command` on its own never checks the launcher
+    /// `build_launch_command` on its own never checks the launcher
     /// actually exists (it only cares that the *path* looks right — see
     /// `check_launcher_platform`) — that check lives in `spawn_front`
     /// instead, deliberately, so it doesn't break the many
@@ -1336,7 +1336,7 @@ mod tests {
         );
     }
 
-    /// BT-3060: the Windows spawn path must hard-fail — not silently guess a
+    /// The Windows spawn path must hard-fail — not silently guess a
     /// node name via [`crate::discovery::default_node_name`] — when a
     /// workspace's `metadata.json` has no `node_name` yet (created but never
     /// started), matching `bin/server`'s Unix fail-fast behavior.
@@ -1461,7 +1461,7 @@ mod tests {
 
     /// Exec `launcher` once, synchronously, and return its exit status —
     /// warms the OS's one-time "cold exec" cost for a brand-new script file
-    /// (BT-3241, BT-3250) so a subsequent *timed* exec of the same file
+    /// so a subsequent *timed* exec of the same file
     /// isn't racing that one-time cost against a tight grace window. Only
     /// suitable for a launcher that's expected to exit on its own quickly;
     /// see `spawn_front_with_port_retry_captures_front_stdout_and_stderr_to_attach_log`
@@ -1504,7 +1504,7 @@ mod tests {
         );
     }
 
-    /// BT-3056: see the Windows counterpart
+    /// See the Windows counterpart
     /// (`spawn_front_errors_with_launcher_not_found_when_file_is_missing`)
     /// for the full rationale, including why this holds `ENV_LOCK` — this
     /// checks the same `spawn_front`-level existence guard on the Unix arm,
@@ -1557,7 +1557,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn spawn_front_with_port_retry_captures_front_stdout_and_stderr_to_attach_log() {
-        // BT-3225: the spawned front's stdout/stderr must land in
+        // The spawned front's stdout/stderr must land in
         // `~/.beamtalk/workspaces/<id>/attach.log`, not the packaged app's
         // inherited (and, in a release build, nonexistent) stdio.
         let ws = TestWorkspaceDir::new("attach_log_capture");
@@ -1568,9 +1568,9 @@ mod tests {
             "echo stdout-marker; echo stderr-marker 1>&2; sleep 5",
         );
 
-        // BT-3250: pay this exact file's first-exec tax here, untimed,
+        // Pay this exact file's first-exec tax here, untimed,
         // instead of racing it against the fixed 2s `wait_for_file_contents`
-        // timeout below. Same root cause as BT-3241 (see the sibling
+        // timeout below. Same root cause as the sibling
         // `..._recovers_after_transient_conflicts` test): the *first* exec of
         // a brand-new script file can take 200ms+ on a loaded macOS sandbox —
         // and under full-crate parallel `cargo test` scheduler contention,
@@ -1619,7 +1619,7 @@ mod tests {
 
         // attach.log can carry the same class of sensitive runtime detail
         // workspace.log does — must be owner-only, not the world-readable
-        // default (BT-3225 review follow-up).
+        // default.
         let mode = std::os::unix::fs::PermissionsExt::mode(
             &std::fs::metadata(&log_path).unwrap().permissions(),
         ) & 0o777;
@@ -1648,7 +1648,7 @@ mod tests {
         }
     }
 
-    /// BT-3226: `poll_try_wait_until` should observe an exit that happens
+    /// `poll_try_wait_until` should observe an exit that happens
     /// well before the deadline without waiting out the full grace period —
     /// this is what lets the conflict path in
     /// `spawn_front_with_port_retry` return early instead of always paying
@@ -1675,7 +1675,7 @@ mod tests {
         );
     }
 
-    /// BT-3226: a still-running child must not be misreported as exited —
+    /// A still-running child must not be misreported as exited —
     /// `poll_try_wait_until` should keep polling right up to (and
     /// including) the deadline and only then report `None`.
     #[cfg(unix)]
@@ -1709,9 +1709,9 @@ mod tests {
         // Simulates an immediate `:eaddrinuse`-style crash on every attempt.
         let launcher = write_launcher_script(tmp.path(), "server", "exit 1");
 
-        // BT-3250: pay this exact file's first-exec tax here, untimed,
+        // Pay this exact file's first-exec tax here, untimed,
         // instead of racing it against `bind_failure_grace` below — same
-        // fix as BT-3241's `..._recovers_after_transient_conflicts` sibling
+        // fix as the sibling `..._recovers_after_transient_conflicts`
         // test (see its comment for the full root-cause rationale). The
         // *first* exec of a brand-new script file can take 200ms+ on a
         // loaded macOS sandbox, comfortably exceeding this test's 250ms
@@ -1730,13 +1730,13 @@ mod tests {
 
         let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml");
-        // BT-3226: the poll loop alone doesn't stabilize this in a sandboxed
+        // The poll loop alone doesn't stabilize this in a sandboxed
         // CI/dev environment — the *first* exec of a brand-new tempdir path
         // (a fresh one every run, from `tempfile::TempDir::new()`) can pay a
         // cold-exec tax north of 50ms here, independent of how tightly
         // `try_wait` is polled within the window. 250ms (the spec's allowed
         // ceiling) comfortably covers that without masking a real hang.
-        // BT-3250: the warm-up above removes the *first-exec* tax race; this
+        // The warm-up above removes the *first-exec* tax race; this
         // grace still covers ordinary scheduler jitter across all 3 timed
         // attempts, same as it always has.
         config.bind_failure_grace = Duration::from_millis(250);
@@ -1752,7 +1752,7 @@ mod tests {
                 })
             ),
             "expected PortsExhausted with attempts=3 and a diagnostic exit status \
-             (BT-3045 — the launcher's real exit status should be surfaced, not just \
+             (the launcher's real exit status should be surfaced, not just \
              a bare count), got {result:?}"
         );
     }
@@ -1773,13 +1773,13 @@ mod tests {
         );
         let launcher = write_launcher_script(tmp.path(), "server", &script);
 
-        // BT-3241: pay this exact file's first-exec tax here, untimed,
+        // Pay this exact file's first-exec tax here, untimed,
         // instead of racing it against `bind_failure_grace` below. Root
         // cause (confirmed by instrumenting `spawn_front_with_port_retry`
         // locally): the *first* exec of a brand-new script file — even one
         // as small as this one — can take 200ms+ on a loaded macOS sandbox,
         // while every *subsequent* exec of that same already-warm file
-        // consistently lands under 20ms. BT-3226's poll loop only shortens
+        // consistently lands under 20ms. The poll loop only shortens
         // *detection* latency once the process actually exits; it can't
         // shorten the process's own wall-clock time to reach `exit 1`, so
         // when that first-exec tax alone exceeds the 250ms grace, attempt 1
@@ -1805,10 +1805,10 @@ mod tests {
 
         let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml");
-        // BT-3226: see the sibling `..._always_exits` test above for why
+        // See the sibling `..._always_exits` test above for why
         // this needed raising past the poll loop alone — same cold-exec tax
         // applies to this test's first attempt at a brand-new tempdir path.
-        // BT-3241: the warm-up above removes the *first-exec* tax race; this
+        // The warm-up above removes the *first-exec* tax race; this
         // grace still covers ordinary scheduler jitter across all 3 timed
         // attempts, same as it always has.
         config.bind_failure_grace = Duration::from_millis(250);
@@ -1832,7 +1832,7 @@ mod tests {
         let _ = child.wait();
     }
 
-    // ── spawn_front_with_port_retry: real spawn (BT-3046) ───────────────
+    // ── spawn_front_with_port_retry: real spawn ─────────────────────────
     //
     // The `build_launch_command_*` tests above only assert that the
     // `cmd.env(...)` calls that produced a `Command` ran, via
@@ -1935,12 +1935,12 @@ mod tests {
                 })
             ),
             "expected PortsExhausted with attempts=3 and a diagnostic exit status \
-             (BT-3045 — the launcher's real exit status should be surfaced, not just \
+             (the launcher's real exit status should be surfaced, not just \
              a bare count), got {result:?}"
         );
     }
 
-    // ── SpawnedFront's JobHandle actually kills the whole tree (BT-3046) ──
+    // ── SpawnedFront's JobHandle actually kills the whole tree ─────────────
     //
     // Adversarial-review follow-up: the two tests above kill/wait `child`
     // (the `cmd.exe` wrapper `Child::id()` refers to — see this module's doc

@@ -13,12 +13,10 @@
 //!
 //! **DDD Context:** REPL
 //!
-//! BT-3344 (ADR 0117 Decision step 4): moved here from `beamtalk-core`'s
-//! `tests/codegen_property_tests.rs`, where these REPL-specific properties
-//! were the last remaining edge from `codegen`'s test tree into `repl`
-//! (test-only; see BT-3340, ADR 0117 Decision step 2, for the production-
-//! code split). The `generate_module`-only properties stayed behind in
-//! `beamtalk-core`, since they don't touch `beamtalk-repl` at all.
+//! Lives here rather than in `beamtalk-core` (ADR 0117 Decision step 4)
+//! since these properties are REPL-specific; the `generate_module`-only
+//! properties stay in `beamtalk-core`'s sibling file, since they don't
+//! touch `beamtalk-repl` at all.
 //!
 //! Kept as a Cargo integration test (not a unit test embedded in
 //! `beamtalk-repl::src`), matching `beamtalk-repl/tests/repl_codegen_smoke.rs`
@@ -28,8 +26,8 @@
 //! `beamtalk_core::test_helpers::test_support`) are shared with
 //! `beamtalk-core`'s sibling file rather than duplicated locally — this
 //! crate's `[dev-dependencies]` opts into `beamtalk-core`'s `test` feature
-//! for exactly that (code review on BT-3344's PR; same mechanism BT-3100
-//! established for `test_support::arb_declared_type`).
+//! for exactly that — the same mechanism `test_support::arb_declared_type`
+//! uses.
 
 use beamtalk_core::ast::Module;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! LSP capability parity (BT-2081).
+//! LSP capability parity.
 //!
 //! The LSP is not a 1:1 overlap with the REPL/MCP surface, but several
 //! interactive editor capabilities have natural REPL/MCP analogues:
@@ -12,7 +12,7 @@
 //! | `textDocument/completion`   | MCP `complete` / REPL op     |
 //! | `textDocument/definition`   | MCP `inspect` / class source |
 //! | `workspace/symbol`          | MCP `list_classes`           |
-//! | Erlang FFI hover (BT-1903)  | MCP `docs` (Erlang module)   |
+//! | Erlang FFI hover            | MCP `docs` (Erlang module)   |
 //!
 //! Each fixture asserts cross-surface equivalence, intentionally lenient
 //! about transport-level differences (markdown wrapping, list ordering,
@@ -232,7 +232,7 @@ async fn check_definition_parity(
     }
     // The resolved URI must point at the staged project tree. We canonicalise
     // both because tempfile may round-trip through `/private/var` on macOS.
-    // BT-3069: `canonicalize()` returns a `\\?\`-prefixed verbatim path on
+    // `canonicalize()` returns a `\\?\`-prefixed verbatim path on
     // Windows; strip it before comparing against `target_uri` (a normal
     // `file://` URI with no such prefix), or the `contains` check below
     // always fails on Windows even when the definition resolved correctly.
@@ -300,7 +300,7 @@ async fn check_workspace_symbol_parity(
     Ok(())
 }
 
-/// Erlang FFI hover parity (BT-1903 + BT-2081).
+/// Erlang FFI hover parity.
 ///
 /// MCP `docs` accepts an `erlang_module` parameter; the LSP exposes the same
 /// payload via hover when the cursor is on an Erlang FFI call site. We

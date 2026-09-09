@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Distribution sname seeding and collision avoidance (ADR 0097 Implementation
-//! §1a, shipped in BT-2983 as `BtAttach.Workspace.attach_sname/2`).
+//! §1a; the front-side counterpart is `BtAttach.Workspace.attach_sname/2`).
 //!
 //! The front's `ensure_distributed/0` composes its own epmd registration name
 //! as `bt_attach_<suffix>_<os_pid>@localhost`, where `<suffix>` comes from the
@@ -21,7 +21,7 @@
 //!   with that suffix and a known OS pid will end up with, once the broker
 //!   knows the child's pid (available immediately after spawn).
 //!
-//! **Verified against a real `dist-liveview` release (BT-3004).** Prediction
+//! **Verified against a real `dist-liveview` release.** Prediction
 //! assumes the OS pid `std::process::Child::id()` reports for the spawned
 //! `bin/server` process is the *same* pid the BEAM VM sees as
 //! `System.pid()` — true only if `bin/server → bin/bt_attach → erlexec →
@@ -35,10 +35,9 @@
 //! `bt_attach_bt3004test_26765`. The launcher chain holds: no fork breaks it
 //! on this platform.
 //!
-//! **The Windows launch path is actually worse here, not better — an earlier
-//! draft of this comment wrongly claimed the opposite** (BT-2988,
-//! adversarial-review correction): Windows cannot `CreateProcessW` a `.bat`
-//! directly, so `bin\bt_attach.bat` runs via `cmd.exe`, which is what
+//! **The Windows launch path is actually worse here, not better:** Windows
+//! cannot `CreateProcessW` a `.bat` directly, so `bin\bt_attach.bat` runs via
+//! `cmd.exe`, which is what
 //! `std::process::Child::id()` actually reports — not `erl.exe`'s pid, and
 //! not `bin/server`'s single extra hop either. `predict_node_name` is
 //! therefore expected to predict the *wrong* name on Windows, not just an
@@ -47,7 +46,7 @@
 //! `Child::kill`/pid tracking) — `predict_node_name`'s pid guess plays no
 //! part in that mechanism.
 //!
-//! **Fixed (BT-3045) by not trusting the pid guess on Windows at all**:
+//! **The pid guess is therefore never trusted on Windows at all**:
 //! [`resolve_registered_node_name`] queries epmd directly — the same
 //! `NAMES_REQ` protocol [`crate::discovery`]'s liveness check already uses —
 //! for a registration matching the known `bt_attach_<suffix>_` prefix,
@@ -68,11 +67,11 @@
 //! a stale or placeholder value there was never a kill/reap-correctness bug,
 //! only a misleading one for anyone reading the on-disk record.
 //!
-//! **Suffix-only matching, deliberately not disambiguated by `pid` (BT-3062)**:
-//! a Claude review Suggestion on the BT-3045 PR proposed closing the
-//! crash→respawn race below by validating the resolved epmd name's own
-//! embedded pid segment against the caller's `expected_pid`
-//! (`Child::id()`/`FrontRecord.pid`) before [`crate::reap::update_record_node_name`]
+//! **Suffix-only matching, deliberately not disambiguated by `pid`**: the
+//! obvious-looking fix for the crash→respawn race below would be to
+//! validate the resolved epmd name's own embedded pid segment against the
+//! caller's `expected_pid` (`Child::id()`/`FrontRecord.pid`) before
+//! [`crate::reap::update_record_node_name`]
 //! writes it. That doesn't actually work *here*: this function is only ever
 //! called from the Windows-only correction path
 //! (`desktop/src-tauri/src/commands.rs`'s `update_windows_node_name_after_readiness`,
@@ -84,7 +83,7 @@
 //! match on Windows — not just in the racy case this was meant to close, but
 //! on *every* call, silently disabling the correction entirely rather than
 //! narrowing its race window. (On Unix the two pids genuinely are the same
-//! process per BT-3004's verification above, so the check would work there —
+//! process per the verification above, so the check would work there —
 //! but Unix never calls this function; `predict_node_name` is trusted
 //! directly there instead, see [`crate::spawn`]'s caller.)
 //!
@@ -164,13 +163,13 @@ pub fn pending_node_name(suffix: &str) -> String {
 
 /// Resolve a front's *actual* epmd registration name by querying epmd
 /// directly, rather than guessing from an OS pid — the Windows-correct
-/// alternative to [`predict_node_name`] this module's doc comment describes
-/// (BT-3045). Looks for exactly one currently-registered short name with the
+/// alternative to [`predict_node_name`] this module's doc comment describes.
+/// Looks for exactly one currently-registered short name with the
 /// `bt_attach_<suffix>_` prefix `BtAttach.Workspace.attach_sname/2` always
 /// produces.
 ///
-/// Deliberately **not** disambiguated further by the caller's own pid
-/// (BT-3062) — see this module's doc comment's "**Suffix-only matching**"
+/// Deliberately **not** disambiguated further by the caller's own pid —
+/// see this module's doc comment's "**Suffix-only matching**"
 /// paragraph for why a pid-based check would silently break this function on
 /// the only platform it's actually called from, rather than narrow a race.
 ///
@@ -296,7 +295,7 @@ mod tests {
         }
     }
 
-    // ── pending_node_name / find_unique_match (BT-3045) ─────────────────
+    // ── pending_node_name / find_unique_match ─────────────────────────
 
     #[test]
     fn pending_node_name_is_not_shaped_like_a_real_dist_node_name() {
@@ -329,9 +328,9 @@ mod tests {
         );
     }
 
-    /// BT-3062 investigated closing this by requiring the resolved name's
-    /// embedded pid to match the caller's own known pid, but concluded (see
-    /// this module's doc comment, "**Suffix-only matching**" paragraph) that
+    /// Requiring the resolved name's embedded pid to match the caller's own
+    /// known pid was investigated and rejected (see this module's doc
+    /// comment, "**Suffix-only matching**" paragraph) because
     /// a pid-based check would silently break every call on the only
     /// platform this function runs on (Windows: the caller's known pid is
     /// `cmd.exe`'s, not the `erl.exe` pid epmd's registration actually

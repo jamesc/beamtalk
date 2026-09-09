@@ -4,8 +4,8 @@
 //! Attach-twice / focus-existing decision and window-per-workspace
 //! bookkeeping.
 //!
-//! The BT-2984 spike decided (`docs/research/desktop-shell-spike.md`,
-//! "Single-instance policy & attach-twice semantics"): **attaching twice to
+//! `docs/research/desktop-shell-spike.md` ("Single-instance policy &
+//! attach-twice semantics") settled the policy: **attaching twice to
 //! the same workspace focuses/reuses the existing front, it does not spawn a
 //! second one.** [`AttachManager`] is the pure state that decision needs — it
 //! tracks which workspaces currently have a live front attached (by
@@ -102,7 +102,7 @@ pub enum AttachDecision {
     /// monitor's stop-condition check.
     Spawn { generation: u64 },
     /// A front is already attached: focus/reuse its window rather than
-    /// spawning a second one (BT-2984 spike decision).
+    /// spawning a second one.
     FocusExisting { window_id: WindowId, port: u16 },
     /// A concurrent attach for this same workspace is already in flight
     /// (racing this one) — do not spawn a second front. The in-flight
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn decide_and_claim_reports_already_in_flight_on_a_racing_second_call() {
-        // The exact race the BT-2984 spike found: two near-simultaneous
+        // The race that motivates the claim: two near-simultaneous
         // attach clicks for the same workspace. The first claims; the
         // second, before any record_attached/release_claim, must not also
         // get Spawn.

@@ -30,7 +30,7 @@ fn main() {
 /// Pure (no I/O beyond reading the source tree): given the same source tree it
 /// always returns the same `Corpus` — entries are sorted by id and every entry's
 /// tags are sorted+deduped, so `serde_json` serialization is byte-stable. The
-/// `corpus_generation_is_deterministic` test pins this invariant (BT-2595).
+/// `corpus_generation_is_deterministic` test pins this invariant.
 fn generate_corpus(root: &Path) -> Corpus {
     let mut entries = Vec::new();
 
@@ -248,7 +248,7 @@ fn explanation_from_comments(source: &str) -> String {
 /// yielding an empty vec: a transient read error (e.g. concurrent filesystem
 /// activity in CI) must not silently drop a whole directory's entries, which
 /// would produce a truncated `corpus.json` and surface as a confusing,
-/// non-deterministic "corpus out of date" diff (BT-2595). A build that cannot
+/// non-deterministic "corpus out of date" diff. A build that cannot
 /// read its inputs must fail loudly, not emit a partial corpus.
 fn walk_bt_files(dir: &Path) -> Vec<PathBuf> {
     use beamtalk_core::file_walker::FileWalker;
@@ -519,7 +519,7 @@ fn add_synonym_tags(entries: &mut [CorpusEntry]) {
 mod tests {
     use super::*;
 
-    /// Regression guard for BT-2595: two back-to-back builds of the same source
+    /// Regression guard: two back-to-back builds of the same source
     /// tree must serialize identically — entries sorted by id, tags sorted+
     /// deduped, no hash-collection field leaking iteration order. This pins the
     /// in-process invariant (the ordering logic); the *cross-process* guarantee

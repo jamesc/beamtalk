@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Lint: warn when `inspect` is sent in string position — directly as an operand
-//! of `++` (string concatenation) or as a string-interpolation segment (BT-2504,
-//! ADR 0095 Phase 3).
+//! of `++` (string concatenation) or as a string-interpolation segment
+//! (ADR 0095 Phase 3).
 //!
 //! **DDD Context:** Compilation
 //!

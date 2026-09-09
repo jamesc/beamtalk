@@ -10,7 +10,7 @@ use std::fmt;
 /// Display wrapper for [`BrokerError::PortsExhausted`]'s `last_exit_status`.
 ///
 /// Renders `" — last launcher exit: <status>"` when a diagnostic is present,
-/// or an empty string when `None` (the pre-BT-3045 message shape, unchanged
+/// or an empty string when `None` (the original message shape, unchanged
 /// when there's nothing more to say).
 struct DisplayLastExitStatus<'a>(&'a Option<String>);
 
@@ -27,7 +27,7 @@ impl fmt::Display for DisplayLastExitStatus<'_> {
 ///
 /// Kept as a concrete enum (rather than `miette::Report`, which the CLI/
 /// workspace crates use for terminal-formatted diagnostics) because a future
-/// Tauri shell (BT-2986) needs to match on *why* an operation failed to pick
+/// Tauri shell needs to match on *why* an operation failed to pick
 /// a UI treatment (e.g. `OidcConfigured` shows setup instructions, `PortsExhausted`
 /// just retries) rather than only display a formatted string.
 #[derive(Debug, thiserror::Error)]
@@ -46,7 +46,7 @@ pub enum BrokerError {
     UnknownWorkspace(String),
 
     /// A workspace directory exists but has no `cookie` file (or it's empty)
-    /// — the Windows spawn path (BT-2988) needs to read `BT_WORKSPACE_COOKIE`
+    /// — the Windows spawn path needs to read `BT_WORKSPACE_COOKIE`
     /// itself before invoking `bin\bt_attach.bat` directly, since there is no
     /// `bin/server` shell script there to resolve it. On Unix this can't
     /// happen in practice (`bin/server` re-resolves the cookie itself and
@@ -57,13 +57,13 @@ pub enum BrokerError {
     /// A workspace directory exists but `metadata.json` has no `node_name`
     /// field yet — the workspace was created but never started, so
     /// `beamtalk_workspace_meta` (Erlang) never wrote a real node name back
-    /// to disk. The Windows spawn path (BT-2988) needs `node_name` itself
+    /// to disk. The Windows spawn path needs `node_name` itself
     /// before invoking `bin\bt_attach.bat` directly (there is no `bin/server`
     /// shell script there to resolve it), and hard-fails here rather than
     /// guessing at a name via [`crate::discovery::default_node_name`] —
     /// matching `bin/server`'s Unix fail-fast behavior instead of silently
     /// dist-connecting to a name that only *usually* matches the CLI's own
-    /// naming convention (BT-3060 adversarial-review follow-up).
+    /// naming convention.
     #[error(
         "workspace '{0}' has no node_name in ~/.beamtalk/workspaces/{0}/metadata.json yet — \
          start it first: beamtalk workspace create {0} --background --persistent"
@@ -82,9 +82,8 @@ pub enum BrokerError {
     /// doc comment), not a proof: a genuine launcher failure unrelated to
     /// port conflicts (a crash, a missing DLL, `bin\bt_attach.bat` rejecting
     /// its `start` invocation for some Windows-specific reason) would
-    /// previously report only a bare attempt count here, reading as "every
-    /// candidate port really was taken" even when that was never true (BT-3045
-    /// adversarial-review follow-up).
+    /// otherwise report only a bare attempt count here, reading as "every
+    /// candidate port really was taken" even when that was never true.
     #[error(
         "failed to allocate a free port after {attempts} attempt(s){}",
         DisplayLastExitStatus(.last_exit_status)
@@ -125,7 +124,7 @@ pub enum BrokerError {
     /// `SpawnConfig::launcher` (or its `BEAMTALK_ATTACH_LAUNCHER` override,
     /// see `desktop/src-tauri/src/launcher.rs`) points at an entry point
     /// built for the wrong platform — e.g. a Unix `bin/server` shell script
-    /// on Windows, or `bin\bt_attach.bat` on Unix (BT-3046). Caught by a
+    /// on Windows, or `bin\bt_attach.bat` on Unix. Caught by a
     /// cheap extension check in `spawn::build_launch_command` *before*
     /// `Command::spawn`, so the failure is this named error rather than an
     /// opaque OS error (`os error 193` — "not a valid Win32 application" —
@@ -137,8 +136,8 @@ pub enum BrokerError {
 
     /// `SpawnConfig::launcher` looks like a valid entry point for this
     /// platform ([`BrokerError::LauncherPlatformMismatch`] already passed),
-    /// but no file exists there (BT-3056 adversarial-review follow-up) —
-    /// the far more common real-world spawn failure in practice: an
+    /// but no file exists there — the far more common real-world spawn
+    /// failure in practice: an
     /// unpackaged dev build where `BEAMTALK_ATTACH_LAUNCHER` /
     /// `desktop/src-tauri/src/launcher.rs`'s `resolve_launcher_path` fallback
     /// path hasn't been built yet. Checked in `spawn::spawn_front`

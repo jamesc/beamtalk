@@ -2,6 +2,8 @@
 
 Guidelines for generating Erlang code and working with the BEAM runtime in the Beamtalk compiler.
 
+> The Rust-side comment cleanup (`rust-guidelines.md` § Comments) has not yet been applied to the Erlang runtime (`runtime/`); that sweep is tracked separately (BT-3485).
+
 ## References
 
 - [OTP Design Principles](https://www.erlang.org/doc/system/design_principles.html) - Official OTP patterns

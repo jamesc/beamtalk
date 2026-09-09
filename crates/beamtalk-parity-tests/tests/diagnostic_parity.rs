@@ -1,28 +1,28 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Diagnostic parity corpus (BT-2078).
+//! Diagnostic parity corpus.
 //!
 //! Drives a curated set of fixture projects through every diagnostic
 //! surface — CLI `beamtalk lint`, MCP `lint`, MCP `diagnostic_summary`, and
 //! LSP `textDocument/diagnostic` — and asserts that each surface produces
 //! the diagnostic count locked in for that fixture.
 //!
-//! This is the Tier-2 counterpart to BT-2052/BT-2056/BT-2060/BT-2067 (lint
-//! divergence) and BT-2027 (LSP diagnostic regression). Each fixture under
+//! This is the Tier-2 counterpart to the CLI/MCP lint-divergence and LSP
+//! diagnostic-regression suites. Each fixture under
 //! `tests/parity/diagnostics/<name>/` represents a category where surface
 //! drift has historically appeared:
 //!
 //! | Fixture                      | Regression context |
 //! |------------------------------|--------------------|
-//! | `cross_file_class`           | BT-2052 — cross-file class extraction |
+//! | `cross_file_class`           | cross-file class extraction |
 //! | `sealed_subclass`            | Sealed subclass error |
-//! | `stdlib_mode`                | BT-2027 — package-mode cross-file lookup |
-//! | `protocol_cross_file`        | BT-1950 — cross-file Protocol use |
+//! | `stdlib_mode`                | package-mode cross-file lookup |
+//! | `protocol_cross_file`        | cross-file Protocol use |
 //! | `mixed_diagnostics`          | type / dnu / lint mix |
-//! | `unreadable_target`          | BT-2067 — unreadable target file (Unix only) |
-//! | `unreadable_package`         | BT-2056 — unreadable extraction file (Unix only) |
-//! | `native_declaration_location`| BT-3404 — misplaced `declare native:` block |
+//! | `unreadable_target`          | unreadable target file (Unix only) |
+//! | `unreadable_package`         | unreadable extraction file (Unix only) |
+//! | `native_declaration_location`| misplaced `declare native:` block |
 //!
 //! Each fixture is checked four ways. A minimum diagnostic count is
 //! locked in **per surface** so legitimate-but-bounded divergences (e.g.
@@ -111,7 +111,7 @@ async fn diagnostic_parity_corpus() {
 }
 
 /// True when the test process is running as Unix root. Root bypasses POSIX
-/// permission bits, so `chmod 000` fixtures (BT-2056 / BT-2067) cannot
+/// permission bits, so `chmod 000` fixtures cannot
 /// produce the expected `permission_denied` diagnostics under root.
 fn running_as_root() -> bool {
     #[cfg(unix)]
@@ -182,7 +182,7 @@ fn corpus_cases() -> Vec<CorpusCase> {
             name: "sealed_subclass",
             lsp_target: "src/bad_integer.bt",
             lint_target: "",
-            // BT-2087: Sealed-subclass diagnostics now carry the `Inheritance`
+            // Sealed-subclass diagnostics now carry the `Inheritance`
             // category, so they pass through the `category.is_some()` filter
             // on every lint surface.
             expected: ExpectedCounts {
@@ -197,7 +197,7 @@ fn corpus_cases() -> Vec<CorpusCase> {
         CorpusCase {
             name: "stdlib_mode",
             lsp_target: "test/math_box_harness.bt",
-            // BT-2027: lint the `test/` subdir specifically — the regression
+            // Lint the `test/` subdir specifically — the regression
             // surfaced when the extraction set didn't include sibling `src/`.
             lint_target: "test",
             expected: ExpectedCounts {
@@ -243,7 +243,7 @@ fn corpus_cases() -> Vec<CorpusCase> {
             name: "unreadable_target",
             lsp_target: "src/locked_target.bt",
             lint_target: "src/locked_target.bt",
-            // BT-2067: every surface must surface at least one diagnostic
+            // Every surface must surface at least one diagnostic
             // for an unreadable target file. LSP's behaviour here is
             // implementation-defined (it may or may not publish a
             // diagnostic), so we leave it at >= 0.
@@ -260,7 +260,7 @@ fn corpus_cases() -> Vec<CorpusCase> {
             name: "unreadable_package",
             lsp_target: "src/target_class.bt",
             lint_target: "src/target_class.bt",
-            // BT-2056: MCP lint and diagnostic_summary surface a warning for
+            // MCP lint and diagnostic_summary surface a warning for
             // unreadable extraction files. CLI lint historically logged a
             // miette-formatted error; LSP doesn't currently surface anything
             // for this case (its extraction set is per-document, not the
@@ -279,7 +279,7 @@ fn corpus_cases() -> Vec<CorpusCase> {
             name: "native_declaration_location",
             lsp_target: "src/misplaced_native.bt",
             lint_target: "",
-            // BT-3404: `check_native_declaration_location`'s diagnostic now
+            // `check_native_declaration_location`'s diagnostic now
             // carries a `DiagnosticCategory`, so it survives every surface's
             // `category.is_some()` filter (CLI lint, MCP lint, MCP summary)
             // the same way LSP — which never filtered by category — already
@@ -410,7 +410,7 @@ async fn run_case(
     // LSP: open the target file and read the first publishDiagnostics. Spawn
     // a fresh LSP child per case so the workspace root reflects the fixture.
     //
-    // BT-2067: when the LSP target is one of the chmod'd files, the LSP
+    // When the LSP target is one of the chmod'd files, the LSP
     // driver can't even read the file to send `didOpen` — skip the LSP
     // probe. The `expected.lsp = 0` lower bound is still asserted (the
     // surface trivially meets it), and the other surfaces still verify
@@ -498,7 +498,7 @@ fn run_cli_lint(path: &Path) -> Result<(usize, String), String> {
         }
     }
     if !found_summary {
-        // BT-2067: the CLI exits non-zero with a miette-formatted error
+        // The CLI exits non-zero with a miette-formatted error
         // message before printing any JSON. Treat that as one diagnostic so
         // the unreadable-target case still meets its lower bound.
         if !output.status.success() && !combined.trim().is_empty() {
@@ -527,7 +527,7 @@ async fn call_diagnostic_summary(
         .and_then(|n| usize::try_from(n).ok())
         .unwrap_or(0);
     let mut count = total;
-    // BT-2056 / BT-2067: structured fields also count as diagnostic-shaped
+    // Structured fields also count as diagnostic-shaped
     // output. Without this, surfaces that surface unreadable-file
     // diagnostics through these fields (rather than `total`) would zero
     // out and the fixture would fail.

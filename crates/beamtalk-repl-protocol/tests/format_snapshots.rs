@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Snapshot tests for shared output formatters (BT-2086).
+//! Snapshot tests for shared output formatters.
 //!
 //! These snapshots pin the canonical text rendering for every REPL surface.
 //! Both [`OutputMode::Plain`] and [`OutputMode::Ansi`] are exercised so

@@ -58,9 +58,8 @@ pub enum SpawnAttempt {
     /// [`allocate_port_with_retry`] carries the most recent one through to
     /// [`BrokerError::PortsExhausted`] so a caller that exhausts every
     /// attempt sees *something* about the real cause, not just a bare count
-    /// (BT-3045 adversarial-review follow-up — see that error variant's doc
-    /// comment for why a bare count alone can be actively misleading on the
-    /// Windows spawn path).
+    /// — see that error variant's doc comment for why a bare count alone
+    /// can be actively misleading on the Windows spawn path.
     PortTaken(Option<String>),
 }
 
@@ -178,7 +177,7 @@ mod tests {
         assert_eq!(calls, 4, "should stop after exactly max_attempts tries");
     }
 
-    /// BT-3045: the diagnostic carried by the *last* `PortTaken` attempt
+    /// The diagnostic carried by the *last* `PortTaken` attempt
     /// should surface in the terminal `PortsExhausted` error, not get
     /// silently dropped — this is the whole point of threading it through
     /// `allocate_port_with_retry` instead of just counting attempts.

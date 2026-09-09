@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! REPL and test evaluation module assembly (BT-1462).
+//! REPL and test evaluation module assembly.
 //!
 //! **DDD Context:** REPL
 //!
@@ -48,7 +48,7 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
     Ok(doc.to_pretty_string())
 }
 
-/// Generates Core Erlang for multiple REPL expressions (BT-780).
+/// Generates Core Erlang for multiple REPL expressions.
 ///
 /// Like [`generate_repl_expression`] but accepts a slice of expressions,
 /// generating a single `eval/1` that evaluates all of them in sequence
@@ -70,7 +70,7 @@ pub fn generate_repl_expressions(expressions: &[Expression], module_name: &str) 
 /// This is needed in workspace/package mode so that `compiled_module_name` resolves
 /// class references correctly instead of falling back to the best-effort convention.
 ///
-/// ADR 0119 / BT-3436: `class_module_index` stays a plain `HashMap` here — it
+/// ADR 0119: `class_module_index` stays a plain `HashMap` here — it
 /// is ADR 0050's stable, versioned compiler-port wire field (predating this
 /// ADR), not a shape this crate should reinterpret. What changed is what
 /// happens to it downstream: [`CoreErlangGenerator::set_class_module_index`]
@@ -102,7 +102,7 @@ pub fn generate_repl_expressions_with_index(
     Ok(doc.to_pretty_string())
 }
 
-/// Generates Core Erlang for trace mode eval (BT-1238).
+/// Generates Core Erlang for trace mode eval.
 ///
 /// Generates a single `eval/1` module that returns
 /// `{[{<<"source0">>, Value0}, ...], FinalState}` instead of `{Result, FinalState}`,
@@ -190,10 +190,10 @@ impl<'a> ReplAssembler<'a> {
         let previous_workspace_mode = self.generator.workspace_mode();
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
-        // BT-374 / ADR 0010: REPL runs in workspace context
+        // ADR 0010: REPL runs in workspace context
         self.generator.set_workspace_mode(true);
 
-        // BT-1482: Restore generator state unconditionally, then propagate error.
+        // Restore generator state unconditionally, then propagate error.
         let result = self.generate_eval_module_body(expression);
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
@@ -202,7 +202,7 @@ impl<'a> ReplAssembler<'a> {
         result
     }
 
-    /// Generates a REPL evaluation module in trace mode (BT-1238).
+    /// Generates a REPL evaluation module in trace mode.
     ///
     /// Returns `{[{<<"source">>, Value}, ...], FinalState}` instead of `{Result, FinalState}`,
     /// giving the caller a value for every top-level statement.
@@ -219,7 +219,7 @@ impl<'a> ReplAssembler<'a> {
         self.generator.set_is_repl_mode(true);
         self.generator.set_workspace_mode(true);
 
-        // BT-1482: Restore generator state unconditionally, then propagate error.
+        // Restore generator state unconditionally, then propagate error.
         let result = if expressions.len() == 1 {
             self.generate_repl_single_traced(&expressions[0], &source_texts[0])
         } else {
@@ -241,13 +241,13 @@ impl<'a> ReplAssembler<'a> {
         self.generator.push_scope();
         self.generator.bind_var("__bindings__", "Bindings");
 
-        // BT-1482: Delegate to inner method so pop_scope() runs unconditionally.
+        // Delegate to inner method so pop_scope() runs unconditionally.
         let result = self.generate_repl_single_traced_inner(expression, source_text);
         self.generator.pop_scope();
         result
     }
 
-    /// Inner implementation for single-expression trace body (BT-1482).
+    /// Inner implementation for single-expression trace body.
     ///
     /// Separated from [`generate_repl_single_traced`] so that `pop_scope()`
     /// runs unconditionally regardless of whether this returns `Ok` or `Err`.
@@ -326,7 +326,7 @@ impl<'a> ReplAssembler<'a> {
         Ok(doc)
     }
 
-    /// Multi-expression trace body (BT-1238).
+    /// Multi-expression trace body.
     fn generate_repl_multi_traced_body(
         &mut self,
         expressions: &[Expression],
@@ -335,13 +335,13 @@ impl<'a> ReplAssembler<'a> {
         self.generator.push_scope();
         self.generator.bind_var("__bindings__", "Bindings");
 
-        // BT-1482: Delegate to inner method so pop_scope() runs unconditionally.
+        // Delegate to inner method so pop_scope() runs unconditionally.
         let result = self.generate_repl_multi_traced_body_inner(expressions, source_texts);
         self.generator.pop_scope();
         result
     }
 
-    /// Inner implementation for multi-expression trace body (BT-1482).
+    /// Inner implementation for multi-expression trace body.
     fn generate_repl_multi_traced_body_inner(
         &mut self,
         expressions: &[Expression],
@@ -483,7 +483,7 @@ impl<'a> ReplAssembler<'a> {
         result
     }
 
-    /// Generates a REPL evaluation module for multiple expressions (BT-780).
+    /// Generates a REPL evaluation module for multiple expressions.
     pub(crate) fn generate_repl_module_multi(
         &mut self,
         expressions: &[Expression],
@@ -499,7 +499,7 @@ impl<'a> ReplAssembler<'a> {
         self.generator.set_is_repl_mode(true);
         self.generator.set_workspace_mode(true);
 
-        // BT-1482: Restore generator state unconditionally, then propagate error.
+        // Restore generator state unconditionally, then propagate error.
         let result = self.generate_repl_multi_module_body(expressions);
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
@@ -523,7 +523,7 @@ impl<'a> ReplAssembler<'a> {
         self.generator.set_is_repl_mode(true);
         self.generator.set_workspace_mode(false);
 
-        // BT-1482: Restore generator state unconditionally, then propagate error.
+        // Restore generator state unconditionally, then propagate error.
         let result = self.generate_eval_module_body(expression);
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
@@ -538,13 +538,13 @@ impl<'a> ReplAssembler<'a> {
         self.generator.push_scope();
         self.generator.bind_var("__bindings__", "Bindings");
 
-        // BT-1482: Delegate to inner method so pop_scope() runs unconditionally.
+        // Delegate to inner method so pop_scope() runs unconditionally.
         let result = self.generate_eval_module_body_inner(expression);
         self.generator.pop_scope();
         result
     }
 
-    /// Inner implementation for eval module body (BT-1482).
+    /// Inner implementation for eval module body.
     fn generate_eval_module_body_inner(
         &mut self,
         expression: &Expression,
@@ -577,9 +577,9 @@ impl<'a> ReplAssembler<'a> {
         let final_state = self.generator.current_state_var();
 
         let return_tuple: Document<'static> = if repl_mutated {
-            // BT-483: Mutation-threaded control flow returns {Result, State} tuple.
+            // Mutation-threaded control flow returns {Result, State} tuple.
             // Extract display value and updated bindings using element/2.
-            // BT-245: repl_mutated catches mutations inside StateAcc-threaded loops
+            // repl_mutated catches mutations inside StateAcc-threaded loops
             // where current_state_var() is restored after the loop.
             Document::Str(
                 "let _LoopResult = call 'erlang':'element'(1, Result) in \
@@ -614,7 +614,7 @@ impl<'a> ReplAssembler<'a> {
         Ok(doc)
     }
 
-    /// Multi-expression eval module body for BT-780.
+    /// Multi-expression eval module body.
     fn generate_repl_multi_module_body(
         &mut self,
         expressions: &[Expression],
@@ -622,13 +622,13 @@ impl<'a> ReplAssembler<'a> {
         self.generator.push_scope();
         self.generator.bind_var("__bindings__", "Bindings");
 
-        // BT-1482: Delegate to inner method so pop_scope() runs unconditionally.
+        // Delegate to inner method so pop_scope() runs unconditionally.
         let result = self.generate_repl_multi_module_body_inner(expressions);
         self.generator.pop_scope();
         result
     }
 
-    /// Inner implementation for multi-expression eval module body (BT-1482).
+    /// Inner implementation for multi-expression eval module body.
     fn generate_repl_multi_module_body_inner(
         &mut self,
         expressions: &[Expression],
@@ -718,7 +718,7 @@ impl<'a> ReplAssembler<'a> {
             .generator
             .expression_doc_with_repl_mutation_tracking(expr)?;
         if repl_mutated {
-            // BT-790: Loop with mutations returns {Result, StateAcc} — extract StateAcc and
+            // Loop with mutations returns {Result, StateAcc} — extract StateAcc and
             // thread it forward so subsequent expressions see the updated bindings.
             let new_state = self.generator.next_state_var();
             Ok((
@@ -994,7 +994,7 @@ mod tests {
 
     #[test]
     fn repl_self_miss_raises_undefined_variable_not_resolve_name() {
-        // BT-2509: a top-level `self` resolves from the bindings map, but on a
+        // A top-level `self` resolves from the bindings map, but on a
         // miss it must raise `undefined_variable` directly — never route through
         // `resolve_name`, whose `bind:as:` tier would let a user binding named
         // `self` silently shadow the reserved word.

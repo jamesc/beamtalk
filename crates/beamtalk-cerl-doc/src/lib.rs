@@ -58,7 +58,8 @@ pub enum Document<'a> {
     /// helper (`leaf::atom`, `leaf::var`, `leaf::int_lit`, …), never build this
     /// variant directly. Rust cannot give an enum variant a narrower visibility
     /// than its enum, so this variant is nominally `pub`; the open-leaf escape
-    /// hatch that drove BT-875 is closed structurally instead by removing the
+    /// hatch that once let unescaped strings reach the output is closed
+    /// structurally instead by removing the
     /// `Document::String`/`Document::Eco` variants and the
     /// `Documentable for String`/`EcoString` impls. The only sanctioned way to
     /// introduce a runtime-derived leaf is a typed-leaf constructor, which is

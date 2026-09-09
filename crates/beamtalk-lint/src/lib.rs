@@ -9,16 +9,14 @@
 //! warnings. They are suppressed during normal `check`/`compile` and only
 //! reported by `beamtalk lint`.
 //!
-//! BT-3340 (ADR 0117 Decision step 2): extracted from `beamtalk-core::lint`
-//! into its own crate — `lint` depended only on the Compilation bounded
-//! context (`ast`, `ast_walker`, `semantic_analysis`, `source_analysis`) in
-//! production, with no back-edges, so this is a mechanical move giving a
-//! real, `cargo`-enforced boundary. The one exception is the
-//! near-miss-divider check (BT-3240): it stayed behind as
-//! `beamtalk_core::near_miss_divider`, a shared leaf module, because
-//! `queries::diagnostic_provider` (which stays in `beamtalk-core`) calls it
-//! directly — see that module's doc for why moving it here would have
-//! created a crate cycle.
+//! A standalone crate (ADR 0117 Decision step 2) depending only on the
+//! Compilation bounded context (`ast`, `ast_walker`, `semantic_analysis`,
+//! `source_analysis`) in production, with no back-edges, so the boundary is
+//! `cargo`-enforced. The one exception is the near-miss-divider check: it
+//! stays in `beamtalk_core::near_miss_divider`, a shared leaf module,
+//! because `queries::diagnostic_provider` (which stays in `beamtalk-core`)
+//! calls it directly — see that module's doc for why moving it here would
+//! have created a crate cycle.
 //!
 //! # Adding a New Lint
 //!
@@ -62,8 +60,8 @@ pub(crate) trait LintPass {
 /// subclasses (e.g. `class Foo extends Bar` where `Bar extends Actor`).
 /// Lint passes that need correct actor/value classification should build a
 /// hierarchy from this module and use `resolve_class_kind`, the single
-/// authority for actor/value classification (BT-3086), which walks the full
-/// ancestor chain (BT-3092, BT-3098).
+/// authority for actor/value classification, which walks the full
+/// ancestor chain.
 pub(crate) fn hierarchy_for_lint(module: &Module) -> ClassHierarchy {
     let (hierarchy_result, _hierarchy_diagnostics) = ClassHierarchy::build(module);
     hierarchy_result.expect("ClassHierarchy::build is infallible")

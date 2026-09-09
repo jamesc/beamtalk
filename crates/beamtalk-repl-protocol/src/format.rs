@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared output formatters for REPL response payloads (BT-2086).
+//! Shared output formatters for REPL response payloads.
 //!
 //! **DDD Context:** REPL — Presentation Contract
 //!
@@ -87,7 +87,7 @@ fn paint(mode: OutputMode, color: &str, text: &str) -> String {
 /// * Strings beginning with `#` and containing `<` (e.g. `"#Actor<0.123.0>"`)
 ///   or starting with `"Block"` are rendered as cyan opaque values.
 /// * Strings that look like floats (contain `.` and parse as `f64`) — sent
-///   as strings to preserve trailing zeros (BT-1336) — are rendered as numbers.
+///   as strings to preserve trailing zeros — are rendered as numbers.
 /// * Plain strings render unquoted in green.
 /// * Numbers render in yellow, booleans/`null` in bold-blue.
 /// * Arrays render as Beamtalk list literals: `#(a, b, c)`.
@@ -133,9 +133,9 @@ pub fn format_value(value: &serde_json::Value, mode: OutputMode) -> String {
 pub struct Diagnostic<'a> {
     /// Primary error message (required).
     pub message: &'a str,
-    /// Optional 1-based line number in the submitted snippet (BT-1235).
+    /// Optional 1-based line number in the submitted snippet.
     pub line: Option<u32>,
-    /// Optional hint text (BT-1235).
+    /// Optional hint text.
     pub hint: Option<&'a str>,
 }
 
@@ -247,7 +247,7 @@ pub fn format_warning(msg: &str, mode: OutputMode, style: WarningStyle) -> Strin
 pub enum WarningStyle {
     /// `Warning: <msg>` — used by sync diagnostics, show-codegen, etc.
     Prefixed,
-    /// `⚠ <msg>` — used inline in eval response output (BT-407).
+    /// `⚠ <msg>` — used inline in eval response output.
     Bullet,
 }
 
@@ -255,7 +255,7 @@ pub enum WarningStyle {
 // format_trace_step
 // ---------------------------------------------------------------------------
 
-/// Format one entry from a trace-step list (BT-1238 / ADR 0069).
+/// Format one entry from a trace-step list (ADR 0069).
 ///
 /// Each step is a JSON object with `src` (source text) and `value` (evaluated
 /// result, may be a JSON string or any other value). Renders as:
@@ -317,7 +317,7 @@ pub fn format_actor_list(actors: &[ActorInfo], mode: OutputMode) -> String {
 // format_class_summary
 // ---------------------------------------------------------------------------
 
-/// Single-line class summary used by `list_classes` (BT-1404).
+/// Single-line class summary used by `list_classes`.
 ///
 /// Renders as `<Name> < <Super>[ [sealed, abstract]] — <doc>`, with the
 /// dash + doc suffix omitted when no documentation is present.
@@ -430,7 +430,7 @@ mod tests {
 
     #[test]
     fn value_float_string_plain() {
-        // BT-1336: floats arrive as strings to preserve ".0"
+        // Floats arrive as strings to preserve ".0"
         let v = serde_json::json!("6.0");
         assert_eq!(format_value(&v, OutputMode::Plain), "6.0");
     }

@@ -296,7 +296,7 @@ impl McpDriver {
         })
     }
 
-    /// Drive the `docs` MCP tool against a Beamtalk class (BT-2081).
+    /// Drive the `docs` MCP tool against a Beamtalk class.
     ///
     /// Returns the joined text content; the parity harness compares the
     /// payload to the LSP `textDocument/hover` markdown semantically.
@@ -305,7 +305,7 @@ impl McpDriver {
         Ok(extract_content_text(&result))
     }
 
-    /// Drive the `docs` MCP tool against an Erlang FFI module (BT-2081).
+    /// Drive the `docs` MCP tool against an Erlang FFI module.
     pub async fn docs_erlang(&mut self, module: &str) -> Result<String, String> {
         let result = self
             .call_tool("docs", json!({"erlang_module": module}))
@@ -518,7 +518,7 @@ mod tests {
 
     #[test]
     fn test_summary_failed_uses_embedded_json() {
-        // BT-2080: MCP `test` envelope (failure path).
+        // MCP `test` envelope (failure path).
         let envelope = "TEST FAILURES:\n{\n  \"failed\": 1,\n  \"passed\": 0,\n  \"total\": 1\n}";
         assert!(test_summary_failed(envelope));
 

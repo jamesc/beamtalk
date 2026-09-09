@@ -15,11 +15,11 @@
 //! 4. Server → client, on success only: `{"op": "session-started", "session": ...}`
 //!    (`create_session/3` / `start_or_resume_session/3`).
 //!
-//! Before BT-3330 each of the four callers hand-transcribed this literal JSON
-//! shape independently, with nothing pinning any of them to the Erlang
+//! Each of the four callers hand-transcribing this literal JSON shape
+//! independently would leave nothing pinning any of them to the Erlang
 //! server's actual frame shapes — a rename on the Erlang side (e.g.
-//! `auth_ok` → `authOk`) would have broken every client at runtime with no
-//! test failing first. This module is now the single Rust-side source of
+//! `auth_ok` → `authOk`) could break every client at runtime with no
+//! test failing first. This module is instead the single Rust-side source of
 //! truth: every caller builds/recognises these frames through the functions
 //! below instead of re-matching JSON fields itself, and the `tests` module
 //! below pins this module's behaviour to
@@ -282,7 +282,7 @@ mod tests {
             .unwrap_or_else(|| panic!("corpus is missing case {id:?}"))
     }
 
-    /// BT-3330 conformance: this module's frame recognition/construction must
+    /// Conformance: this module's frame recognition/construction must
     /// agree with the shared corpus the Erlang side (`beamtalk_ws_handler`'s
     /// production code) is pinned to as well — see the module doc comment.
     #[test]

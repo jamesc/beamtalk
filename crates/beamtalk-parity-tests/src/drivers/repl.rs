@@ -43,7 +43,7 @@ impl ReplDriver {
             .map_err(|e| format!("ws connect {url}: {e}"))?;
 
         // auth-required. Frame recognition goes through
-        // `beamtalk_repl_protocol::handshake` (BT-3330) rather than
+        // `beamtalk_repl_protocol::handshake` rather than
         // re-matching the JSON here — see that module's doc comment for why.
         let _required = read_text(&mut ws).await?;
         // auth

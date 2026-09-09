@@ -158,7 +158,7 @@ fn define_pattern_vars_in_scope(pattern: &beamtalk_core::ast::Pattern, scope: &m
             }
         }
         // Pattern::Type's binding is not wired into lint scope tracking yet
-        // (BT-2855 — bindings/scope land with narrowing and codegen).
+        // (bindings/scope land with narrowing and codegen).
         Pattern::Binary { .. }
         | Pattern::Wildcard(_)
         | Pattern::Literal(_, _)

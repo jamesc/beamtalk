@@ -7,20 +7,18 @@
 //!
 //! **DDD Context:** Compilation
 //!
-//! **BT-3385 correction:** an earlier version of this lint fired for *any*
-//! block literal passed directly to a message send, on the theory that
-//! value types capture variables by value and any reassignment inside such
-//! a block is silently lost. That is no longer true (and empirically was
-//! not true at the time either — see BT-3385's root-cause notes) for a
-//! block literal passed directly to a loop, conditional, or list-op
-//! selector the compiler's codegen recognizes: ADR 0041's state-threading
-//! ("known inline call sites", plus BT-1392/BT-2359's `ifTrue:`/`ifFalse:`
-//! threading) packs captured-and-mutated outer locals into a `StateAcc` and
-//! rebinds them in the caller's scope after the call returns — the
-//! reassignment DOES escape the block. `is_state_threaded_block_arg` below
+//! **This lint does not fire for every block literal passed directly to a
+//! message send**, even though value types capture variables by value and a
+//! reassignment inside such a block is normally lost: for a block literal
+//! passed directly to a loop, conditional, or list-op selector the
+//! compiler's codegen recognizes, ADR 0041's state-threading ("known inline
+//! call sites", plus `ifTrue:`/`ifFalse:` threading) packs
+//! captured-and-mutated outer locals into a `StateAcc` and rebinds them in
+//! the caller's scope after the call returns — the reassignment DOES escape
+//! the block. `is_state_threaded_block_arg` below
 //! is the exemption list for exactly these shapes; see its doc comment for
-//! the codegen cross-reference and how BT-3385 verified it (`BUnit` runtime
-//! tests, `stdlib/test/bt3385dead_assignment_test.bt`).
+//! the codegen cross-reference, and `stdlib/test/bt3385dead_assignment_test.bt`
+//! for the `BUnit` runtime coverage.
 //!
 //! ```text
 //! // Fine — do: is a recognized selector, the mutation is threaded through
@@ -28,8 +26,8 @@
 //! #(1, 2, 3) do: [:item | count := count + 1]
 //! count  // => 3
 //!
-//! // Still worth a warning — blk escapes and is invoked indirectly; BT-3385
-//! // found this currently raises a runtime error ("captures mutable state
+//! // Still worth a warning — blk escapes and is invoked indirectly; this
+//! // currently raises a runtime error ("captures mutable state
 //! // and must be invoked directly") rather than silently dropping the
 //! // mutation, but it is still a trap worth flagging before it crashes
 //! blk := [count := count + 1]
@@ -62,7 +60,7 @@ impl LintPass for DeadBlockAssignmentPass {
         let mut scope = LintScope::new();
         walk_expr_seq(&module.expressions, &mut scope, None, diagnostics);
 
-        // BT-3092: see `hierarchy_for_lint` doc comment for why this is needed
+        // See `hierarchy_for_lint` doc comment for why this is needed
         // instead of `class.class_kind`.
         let hierarchy = hierarchy_for_lint(module);
 
@@ -79,7 +77,7 @@ impl LintPass for DeadBlockAssignmentPass {
 
         // Standalone method definitions: need to determine class kind from the hierarchy
         for standalone in &module.method_definitions {
-            // Resolves the full ancestor chain (BT-3092) rather than only the
+            // Resolves the full ancestor chain rather than only the
             // direct superclass.
             if hierarchy.resolve_class_kind(&standalone.class_name.name) == ClassKind::Actor {
                 continue;
@@ -379,7 +377,7 @@ fn enter_block(
         scope.define(param.name.as_str());
     }
     if is_state_threaded_block_arg(msg_ctx) {
-        // BT-3385: this block literal sits at a (selector, argument position)
+        // This block literal sits at a (selector, argument position)
         // that the compiler's Value-type / class-method state-threading
         // codegen (ADR 0041; see `is_state_threaded_block_arg`'s doc comment
         // for the exact codegen cross-reference) recognizes and threads
@@ -403,34 +401,31 @@ fn enter_block(
 ///
 /// Delegates to `beamtalk_core::state_threading_selectors::is_state_threaded_block_arg`
 /// — the single canonical "which selectors thread which block-argument
-/// positions" table (BT-3423 / ADR 0118 §7), shared with `beamtalk-codegen`'s
+/// positions" table (ADR 0118 §7), shared with `beamtalk-codegen`'s
 /// `get_control_flow_threaded_vars`, so the two can never silently drift
 /// (CLAUDE.md's "No duplicate implementations" rule; see that table's doc
 /// comment for the full selector list and index mapping).
 ///
-/// BT-3385 confirmed empirically (`BUnit` runtime tests, see
-/// `stdlib/test/bt3385dead_assignment_test.bt`) that mutating ANY captured
-/// outer local inside these shapes persists after the call returns — not
-/// just an `inject:into:` accumulator parameter, which is why this replaces
-/// (rather than extends) the old accumulator-only exemption.
+/// Mutating ANY captured outer local inside these shapes persists after the
+/// call returns (confirmed empirically by `BUnit` runtime tests, see
+/// `stdlib/test/bt3385dead_assignment_test.bt`) — not just an
+/// `inject:into:` accumulator parameter, so the lint's exemption covers the
+/// whole block body, not only a narrower accumulator-only case.
 ///
 /// Deliberately NOT included, so the lint keeps firing there: a block
 /// stored in a variable or passed to a user-defined (non-intrinsic) method
-/// and invoked indirectly via `value`/`value:` — BT-3385 confirmed the
-/// compiler does not silently drop such a mutation, but currently refuses
+/// and invoked indirectly via `value`/`value:` — the compiler does not
+/// silently drop such a mutation, but currently refuses
 /// the indirect invocation outright at runtime (a separate, more confusing
 /// failure mode outside this lint's scope) rather than threading it through;
 /// `eachWithIndex:`/`do:separatedBy:`, whose threading is context-dependent
 /// (see the shared table's doc comment) and so conservatively excluded from
 /// it entirely.
 ///
-/// BT-3423 correction: the pre-unification version of this lint's own table
-/// additionally excluded `on:do:`'s handler and `ensure:`'s cleanup block
-/// ("BT-3385 did not verify these shapes"). The shared canonical table has
-/// no such carve-out — codegen threads both the same way as the loop/
-/// conditional family (BT-3160, `generate_on_do_with_mutations`/
-/// `generate_ensure_with_mutations`) — so unifying onto it also stops this
-/// lint over-warning on those two shapes; see
+/// `on:do:`'s handler and `ensure:`'s cleanup block are included too: the
+/// shared canonical table has no carve-out for them — codegen threads both
+/// the same way as the loop/conditional family
+/// (`generate_on_do_with_mutations`/`generate_ensure_with_mutations`) — see
 /// `on_do_and_ensure_handler_no_longer_warn` below.
 fn is_state_threaded_block_arg(msg_ctx: Option<&BlockMessageContext>) -> bool {
     let Some(ctx) = msg_ctx else {
@@ -517,7 +512,7 @@ fn collect_pattern_var_names_inner(pattern: &beamtalk_core::ast::Pattern, names:
             }
         }
         // Pattern::Type's binding is not wired into lint scope tracking yet
-        // (BT-2855 — bindings/scope land with narrowing and codegen).
+        // (bindings/scope land with narrowing and codegen).
         Pattern::Binary { .. }
         | Pattern::Wildcard(_)
         | Pattern::Literal(_, _)
@@ -563,7 +558,7 @@ fn define_pattern_vars_in_scope(pattern: &beamtalk_core::ast::Pattern, scope: &m
             }
         }
         // Pattern::Type's binding is not wired into lint scope tracking yet
-        // (BT-2855 — bindings/scope land with narrowing and codegen).
+        // (bindings/scope land with narrowing and codegen).
         Pattern::Binary { .. }
         | Pattern::Wildcard(_)
         | Pattern::Literal(_, _)
@@ -592,7 +587,7 @@ mod tests {
 
     /// Assignment inside a block stored in a variable, on a top-level script
     /// (value-type context) — the block escapes its origin call site, so the
-    /// compiler cannot thread the mutation back out (BT-3385: invoking such a
+    /// compiler cannot thread the mutation back out (invoking such a
     /// block indirectly currently raises a runtime error rather than
     /// silently dropping the mutation, but the lint still flags it early).
     #[test]
@@ -660,7 +655,7 @@ Actor subclass: Counter
     }
 
     /// Indirect Actor subclass (two hops: `Actor <- BaseActor <- Counter`) —
-    /// block mutations still propagate for actors, no warning (BT-3092).
+    /// block mutations still propagate for actors, no warning.
     ///
     /// `Counter`'s direct superclass is `BaseActor`, not `Actor` literally,
     /// so `class.class_kind` (the pre-writeback `ClassKind::from_superclass_name`
@@ -761,7 +756,7 @@ Object subclass: Foo
 
     /// Standalone method (`Counter >> increment`) on an indirect Actor
     /// subclass — the standalone-method path must also resolve the full
-    /// ancestor chain, not just the direct superclass (BT-3092).
+    /// ancestor chain, not just the direct superclass.
     #[test]
     fn standalone_method_indirect_actor_subclass_no_warn() {
         let src = "\
@@ -860,15 +855,14 @@ Object subclass: Foo
         );
     }
 
-    // ── BT-3385: state-threaded call sites no longer warn ──────────────────────
+    // ── State-threaded call sites no longer warn ────────────────────────────
     //
-    // The compiler's Value-type / class-method state-threading (ADR 0041;
-    // BT-1392/BT-2359 for conditionals) threads a captured-and-mutated outer
+    // The compiler's Value-type / class-method state-threading (ADR 0041,
+    // including conditionals) threads a captured-and-mutated outer
     // local back out for a block literal passed directly to any of these
     // selectors — confirmed at runtime by the existing `mutation_corpus_value.bt`
     // / `mutation_corpus_class_method.bt` / `counted_loop_mutation_test.bt` BUnit
-    // corpora (BT-1053/BT-2308/BT-2360) and, for this issue's own reported
-    // shape, by `stdlib/test/bt3385dead_assignment_test.bt`.
+    // corpora and by `stdlib/test/bt3385dead_assignment_test.bt`.
 
     /// The issue's exact reproduction: a `sealed typed Value subclass` class
     /// method accumulating into a `Dictionary` via a `to:do:` loop. No longer
@@ -906,7 +900,7 @@ sealed typed Value subclass: Foo
     }
 
     /// `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` thread captured-local mutations
-    /// too (BT-1392/BT-2359) — no longer flagged.
+    /// too — no longer flagged.
     #[test]
     fn iftrue_iffalse_no_longer_warn() {
         for src in [
@@ -922,9 +916,7 @@ sealed typed Value subclass: Foo
         }
     }
 
-    /// `and:`/`or:` thread captured-local mutations too (BT-3402's codegen
-    /// fix; BT-3423 closes the gap where this lint's own table hadn't
-    /// caught up) — no longer flagged.
+    /// `and:`/`or:` thread captured-local mutations too — no longer flagged.
     #[test]
     fn and_or_no_longer_warn() {
         for src in [
@@ -939,13 +931,10 @@ sealed typed Value subclass: Foo
         }
     }
 
-    /// BT-3423: unifying onto the shared canonical table (rather than the
-    /// pre-unification version of this lint's own, narrower one) also picks
-    /// up `on:do:`'s handler block and `ensure:`'s cleanup block, neither of
-    /// which was in the old table ("BT-3385 did not verify these shapes").
-    /// Codegen threads both the same way as the loop/conditional family
-    /// (BT-3160) — see `is_state_threaded_block_arg`'s doc comment — so
-    /// these are no longer false positives.
+    /// The shared canonical table also covers `on:do:`'s handler block and
+    /// `ensure:`'s cleanup block: codegen threads both the same way as the
+    /// loop/conditional family — see `is_state_threaded_block_arg`'s doc
+    /// comment — so these are no longer false positives.
     #[test]
     fn on_do_and_ensure_handler_no_longer_warn() {
         for src in [
@@ -979,7 +968,7 @@ sealed typed Value subclass: Foo
             "x := 0.\n1 to: 3 do: [:i | x := x + i]",
             "x := 0.\n1 to: 3 by: 1 do: [:i | x := x + i]",
             // inject:into: — a NON-accumulator captured var, not just the
-            // accumulator parameter (BT-3385 found this threads too).
+            // accumulator parameter, threads too.
             "count := 0.\n#(1, 2, 3) inject: 0 into: [:acc :item | count := count + 1. acc + item]",
         ];
         for src in cases {
@@ -991,7 +980,7 @@ sealed typed Value subclass: Foo
         }
     }
 
-    // ── BT-1476: @expect dead_assignment suppression ─────────────────────────
+    // ── @expect dead_assignment suppression ─────────────────────────────────
 
     /// `@expect dead_assignment` suppresses the dead block assignment lint.
     #[test]

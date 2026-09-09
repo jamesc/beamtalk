@@ -79,7 +79,7 @@ fn is_always_unnecessary(expr: &Expression) -> bool {
 /// top-level `Parenthesized` node and only recurses into its contents.
 ///
 /// Used for map literal keys: `#{(x) => v}` uses parens to signal a dynamic
-/// variable key (bare words are a compile error per BT-1240), so `(x)` there
+/// variable key (bare words are a compile error), so `(x)` there
 /// is semantically meaningful.  Deeper nesting (e.g., `#{((x)) => v}`) still
 /// recurses and may flag the inner `(x)`.
 fn check_map_key(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
@@ -112,7 +112,7 @@ fn check_receiver(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
 /// Parentheses like `self assert: (obj size) equals: 1` or
 /// `self assert: (self.queue dequeue) equals: "first"` visually delimit
 /// the argument boundary and aid readability. Flagging them creates noisy
-/// output that forces users to extract temporaries for no benefit (BT-1522).
+/// output that forces users to extract temporaries for no benefit.
 ///
 /// Parens around bare literals/identifiers (`self assert: (42)`) are still
 /// flagged since they add no clarity.
@@ -155,7 +155,7 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
             ..
         } => {
             check_receiver(receiver, diagnostics);
-            // BT-1522: For keyword message arguments, parens around unary sends
+            // For keyword message arguments, parens around unary sends
             // and field accesses serve a readability purpose — e.g.
             // `self assert: (self.queue dequeue) equals: "first"`.
             // Skip the top-level parens check for keyword args (same pattern as
@@ -364,7 +364,7 @@ mod tests {
     }
 
     /// `#{(key) => val}` uses parens to signal a dynamic variable key (bare words
-    /// are a compile error per BT-1240) — these parens are semantically required
+    /// are a compile error) — these parens are semantically required
     /// and must NOT be flagged.
     #[test]
     fn parens_around_map_key_variable_not_flagged() {
@@ -387,7 +387,7 @@ mod tests {
         assert_eq!(diags[0].severity, Severity::Lint);
     }
 
-    /// BT-1522: Parentheses around keyword message arguments (e.g.
+    /// Parentheses around keyword message arguments (e.g.
     /// `self assert: (self.queue dequeue) equals: "first"`) serve readability
     /// and should not be flagged.
     #[test]
@@ -400,7 +400,7 @@ mod tests {
         );
     }
 
-    /// BT-1522: Parens around field access in keyword arg position.
+    /// Parens around field access in keyword arg position.
     #[test]
     fn parens_around_field_access_in_keyword_arg_not_flagged() {
         let diags = lint(
@@ -424,7 +424,7 @@ mod tests {
         );
     }
 
-    /// BT-957: Parentheses around a message receiver (e.g. `(x builder) add: 1`)
+    /// Parentheses around a message receiver (e.g. `(x builder) add: 1`)
     /// are used for visual grouping even when precedence makes them redundant.
     /// They should NOT be flagged as unnecessary.
     #[test]

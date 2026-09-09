@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Shared test-only loopback WebSocket double for the ADR 0020 auth
-//! handshake (BT-3331).
+//! handshake.
 //!
 //! `beamtalk-lsp`'s `FakeWorkspace`/`spawn_workspace` (`src/runtime.rs`) and
 //! `beamtalk-mcp`'s `FakeRepl`/`spawn_fake_repl` (`src/server.rs`) each
@@ -15,7 +15,7 @@
 //! implementation both now share; each crate still supplies its own
 //! [`Responder`] closure (and, for the LSP side, the [`HandshakeMode`]
 //! failure variants it needs to exercise `perform_auth_handshake`'s error
-//! branches — see BT-3330).
+//! branches).
 //!
 //! `beamtalk-cli`'s `ReplClient` uses a *synchronous* transport
 //! (`std::net::TcpStream` + blocking `tungstenite`), so its own
@@ -46,8 +46,8 @@ use tokio_tungstenite::tungstenite::Message;
 /// `Ok` is the only variant `beamtalk-mcp`'s fake REPL needs — handshake
 /// robustness there is `client.rs`'s own concern, covered live via `just
 /// test-mcp`. `beamtalk-lsp`'s fake workspace also exercises every failure
-/// branch of `perform_auth_handshake`/`read_text` (BT-3330 tracks the real
-/// gap this leaves in live-node coverage).
+/// branch of `perform_auth_handshake`/`read_text` — a real gap remains in
+/// live-node coverage for the `beamtalk-mcp` side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HandshakeMode {
     /// The real sequence: `auth-required` -> (client auth) -> `auth_ok` ->

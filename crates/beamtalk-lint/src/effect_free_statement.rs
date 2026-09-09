@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Lint: flag effect-free expressions in statement position (BT-951).
+//! Lint: flag effect-free expressions in statement position.
 //!
 //! Warns when a non-last expression in a method body, block body, or module-level
 //! sequence is a literal, variable reference, or pure arithmetic/comparison whose
@@ -26,7 +26,7 @@ pub(crate) struct EffectFreeStatementPass;
 
 impl LintPass for EffectFreeStatementPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        // BT-979: lint always checks module.expressions (skip_module_expression_lint = false)
+        // This lint always checks module.expressions (skip_module_expression_lint = false)
         beamtalk_core::semantic_analysis::validators::check_effect_free_statements(
             module,
             diagnostics,
@@ -109,7 +109,7 @@ mod tests {
         );
     }
 
-    // BT-979: Module-level expression linting
+    // Module-level expression linting
 
     #[test]
     fn discarded_module_level_map_literal_surfaced() {
