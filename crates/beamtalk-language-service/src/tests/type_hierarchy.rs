@@ -1,13 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2242 type-hierarchy queries (`type_hierarchy_prepare_at`, `supertypes_of`,
-//! `subtypes_of`) and BT-2317 protocol/class shadowing on the type-hierarchy
+//! Type-hierarchy queries (`type_hierarchy_prepare_at`, `supertypes_of`,
+//! `subtypes_of`) and protocol/class shadowing on the type-hierarchy
 //! path.
 
 use super::common::*;
 
-// ---------- BT-2242: type hierarchy ----------
+// ---------- type hierarchy ----------
 
 #[test]
 fn type_hierarchy_prepare_at_resolves_class_name_on_subclass_clause() {
@@ -115,15 +115,15 @@ fn subtypes_of_returns_empty_for_class_with_no_children() {
     assert!(subs.is_empty());
 }
 
-// ---------- BT-2317: protocol/class shadowing on the type-hierarchy path ----------
+// ---------- protocol/class shadowing on the type-hierarchy path ----------
 
 #[test]
 fn type_hierarchy_prepare_at_prefers_class_over_same_named_protocol() {
-    // BT-2317: a name defined as both a real class and a synthetic
-    // protocol (BT-1933) across separate files must resolve to the class
-    // on the type-hierarchy path, mirroring goto-definition. Before the
-    // fix this depended on `HashMap` iteration order and could land on the
-    // protocol header.
+    // A name defined as both a real class and a synthetic
+    // protocol across separate files must resolve to the class
+    // on the type-hierarchy path, mirroring goto-definition — resolution
+    // must not depend on `HashMap` iteration order and land on the
+    // protocol header instead.
     let mut service = SimpleLanguageService::new();
     let class_file = Utf8PathBuf::from("real_class.bt");
     let protocol_file = Utf8PathBuf::from("protocol_foo.bt");

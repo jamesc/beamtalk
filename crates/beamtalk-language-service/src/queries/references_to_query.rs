@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Language Service
 //!
-//! Backs `SystemNavigation referencesTo:` (BT-2203). Where `sendersOf:` answers
+//! Backs `SystemNavigation referencesTo:`. Where `sendersOf:` answers
 //! "who calls this method?", `referencesTo:` answers "who mentions this class?".
 //! Given the source text of a single compiled method (as returned by
 //! `CompiledMethod source`) and a target class name, returns the 1-based line
@@ -472,7 +472,7 @@ mod tests {
         assert!(lines.is_empty());
     }
 
-    /// BT-2195: Class-side method sources (as unparsed for `class_method_source`)
+    /// Class-side method sources (as unparsed for `class_method_source`)
     /// carry the same shape as instance methods — no `class ` prefix is emitted
     /// by `unparse_method`. The references walker must still find class
     /// references in their bodies and signatures.
@@ -487,7 +487,7 @@ mod tests {
         );
     }
 
-    // BT-2298 / ADR 0087 Phase 2: find_all_references_in_source collects every
+    // ADR 0087 Phase 2: find_all_references_in_source collects every
     // class reference in one pass for the xref codegen.
 
     #[test]

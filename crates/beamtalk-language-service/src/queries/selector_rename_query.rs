@@ -6,7 +6,7 @@
 //! **DDD Context:** Language Service / Compilation (shared leaf, per
 //! `docs/development/architecture-principles.md` §6)
 //!
-//! Backs `Behaviour>>renameSelector:to:` (ADR 0114, BT-3279). Given a
+//! Backs `Behaviour>>renameSelector:to:` (ADR 0114). Given a
 //! specific `self`/`super` message send (or a method's own definition), a
 //! whole-method span (`resolve_method_span`) is too coarse to splice — it
 //! would let a caller corrupt the rest of the method body — and a plain

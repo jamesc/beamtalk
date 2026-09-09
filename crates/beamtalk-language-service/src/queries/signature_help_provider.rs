@@ -369,7 +369,7 @@ fn resolve_ffi_signature_help(
     let sig = registry.lookup(module_name, function_name, arity)?;
 
     // Build signature help from the FFI signature via the shared
-    // signature-text composer (BT-3097): each parameter's keyword/name/type
+    // signature-text composer: each parameter's keyword/name/type
     // is pre-rendered here (native-type registry types don't have a
     // `TypeAnnotation`, so they render through their own
     // `display_for_diagnostic`, not `unparse::unparse_type_annotation_display`),
@@ -543,8 +543,8 @@ fn resolve_receiver_class(
 }
 
 /// Builds a `SignatureHelp` from a resolved `MethodInfo`.
-/// Builds signature help from a resolved `ClassHierarchy::MethodInfo`
-/// (BT-3097). Like [`crate::queries::hover_provider`]'s resolved-call
+/// Builds signature help from a resolved `ClassHierarchy::MethodInfo`.
+/// Like [`crate::queries::hover_provider`]'s resolved-call
 /// display, `MethodInfo` has no parameter names — only types — so each
 /// parameter renders as `keyword: Type` via the shared
 /// [`beamtalk_core::unparse::render_signature_text`] core (`SignatureParam { name:
@@ -556,7 +556,7 @@ fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> Signature
 
     let selector = &method.selector;
 
-    // BT-3076: `MethodInfo` types are structured `DeclaredType`s — render
+    // `MethodInfo` types are structured `DeclaredType`s — render
     // once here (`Display` matches `TypeAnnotation::type_name` verbatim)
     // and hand the composer the text it contracts for.
     let return_type_text = method.return_type.as_ref().map(ToString::to_string);

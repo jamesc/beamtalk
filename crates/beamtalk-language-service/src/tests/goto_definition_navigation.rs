@@ -115,9 +115,9 @@ fn goto_definition_type_annotation_identifier() {
     assert_eq!(loc.file, integer_file);
 }
 
-// BT-1940: goto-definition on the class name inside a constructor
+// Goto-definition on the class name inside a constructor
 // pattern (e.g. `Result` in `Result ok: v`) must navigate to the class
-// declaration. Prior to the pattern walker the cursor returned None.
+// declaration.
 #[test]
 fn goto_definition_constructor_pattern_class_name() {
     let mut service = SimpleLanguageService::new();
@@ -152,7 +152,7 @@ fn goto_definition_constructor_pattern_class_name() {
     assert_eq!(loc.file, result_file);
 }
 
-// BT-1940: goto-definition must also reach identifiers inside a `when:`
+// Goto-definition must also reach identifiers inside a `when:`
 // guard, not just the pattern and the arm body. `references_provider`
 // already walks guards; this test pins the parity in `find_identifier_in_expr`.
 #[test]
@@ -357,13 +357,13 @@ fn goto_definition_method_with_super_receiver_resolves_in_superclass() {
     assert_eq!(def.unwrap().file, file_hierarchy);
 }
 
-// ── BT-1939: Go to Definition on method definition headers ─────────────
+// ── Go to Definition on method definition headers ─────────────
 
 #[test]
 fn goto_definition_from_method_header_unary_navigates_to_parent() {
-    // BT-1939: clicking Go to Definition on the selector in a method's
+    // Clicking Go to Definition on the selector in a method's
     // own definition header should navigate to the overridden parent
-    // method, mirroring the BT-1938 header path added for find_references.
+    // method, mirroring the header path added for find_references.
     let mut service = SimpleLanguageService::new();
     let file = Utf8PathBuf::from("test.bt");
 
@@ -397,7 +397,7 @@ fn goto_definition_from_method_header_unary_navigates_to_parent() {
 
 #[test]
 fn goto_definition_from_method_header_binary_navigates_to_parent() {
-    // BT-1939: binary selectors (`+`, `-`, etc.) must also resolve.
+    // Binary selectors (`+`, `-`, etc.) must also resolve.
     let mut service = SimpleLanguageService::new();
     let file = Utf8PathBuf::from("test.bt");
 
@@ -427,7 +427,7 @@ fn goto_definition_from_method_header_binary_navigates_to_parent() {
 
 #[test]
 fn goto_definition_from_method_header_keyword_navigates_to_parent() {
-    // BT-1939: keyword selectors — both keyword parts must navigate to
+    // Keyword selectors — both keyword parts must navigate to
     // the parent definition.
     let mut service = SimpleLanguageService::new();
     let file = Utf8PathBuf::from("test.bt");
@@ -477,7 +477,7 @@ fn goto_definition_from_method_header_keyword_navigates_to_parent() {
 
 #[test]
 fn goto_definition_from_method_header_no_override_returns_none() {
-    // BT-1939 no-regression: if the method does not override anything in
+    // If the method does not override anything in
     // any ancestor, Go to Definition on the header returns None rather
     // than navigating elsewhere.
     let mut service = SimpleLanguageService::new();
@@ -499,7 +499,7 @@ fn goto_definition_from_method_header_no_override_returns_none() {
 
 #[test]
 fn goto_definition_from_class_method_header_navigates_to_parent() {
-    // BT-1939: class-side methods (`class foo => ...`) must resolve the
+    // Class-side methods (`class foo => ...`) must resolve the
     // same way as instance methods. The `class_side` flag on the
     // receiver context threads through `find_method_in_module` so the
     // MRO walk matches only class-side methods on each ancestor.
@@ -534,7 +534,7 @@ fn goto_definition_from_class_method_header_navigates_to_parent() {
 
 #[test]
 fn goto_definition_from_standalone_method_header_navigates_to_parent() {
-    // BT-1939: standalone (Tonel-style) method definitions
+    // Standalone (Tonel-style) method definitions
     // (`Foo >> bar => ...`) must also resolve correctly. These live in
     // `module.method_definitions` rather than on `Class::methods`.
     let mut service = SimpleLanguageService::new();
@@ -570,7 +570,7 @@ fn goto_definition_from_standalone_method_header_navigates_to_parent() {
 
 #[test]
 fn goto_definition_from_method_header_skips_non_overriding_intermediate() {
-    // BT-1939: walk MRO order correctly. Given
+    // Walk MRO order correctly. Given
     //   Grandparent defines greet, Middle does NOT, Leaf overrides greet
     // clicking on Leaf's greet header should navigate to Grandparent
     // (skipping Middle). This pins the MRO walk order guarantee — a
@@ -609,7 +609,7 @@ fn goto_definition_from_method_header_skips_non_overriding_intermediate() {
 
 #[test]
 fn goto_definition_from_method_header_navigates_cross_file() {
-    // BT-1939: the parent definition can live in a different file from
+    // The parent definition can live in a different file from
     // the overriding child. The cross-file walker in
     // `find_overridden_method_definition` should handle it.
     let mut service = SimpleLanguageService::new();

@@ -9,7 +9,7 @@
 use super::common::*;
 
 // -----------------------------------------------------------------------
-// ADR 0108 Phase 8 (BT-2901): completions, goto-definition, find-
+// ADR 0108 Phase 8: completions, goto-definition, find-
 // references, and hover for type aliases via `SimpleLanguageService`
 // -----------------------------------------------------------------------
 
@@ -172,7 +172,7 @@ fn alias_name_at_identifies_alias_and_rejects_class_name() {
     assert_eq!(service.alias_name_at(&file, Position::new(2, 20)), None);
 }
 
-/// BT-2919: a cursor on `Foo` in `policy :: Foo` (parameter-annotation
+/// A cursor on `Foo` in `policy :: Foo` (parameter-annotation
 /// position) must be recognized as an unresolved type reference even
 /// though the file declaring `type Foo = ...` is deliberately never
 /// passed to `update_file` here — this simulates workspace preload not
@@ -217,7 +217,7 @@ fn unresolved_type_reference_at_detects_annotation_position_before_declaring_fil
     );
 }
 
-/// BT-2919: `has_incomplete_reference_coverage_at` must agree with the
+/// `has_incomplete_reference_coverage_at` must agree with the
 /// two checks it combines (`alias_name_at` for an already-resolved
 /// alias, `unresolved_type_reference_at` for a not-yet-indexed one) —
 /// it's a single-AST-walk optimization, not a behavior change.
@@ -257,7 +257,7 @@ fn has_incomplete_reference_coverage_at_matches_split_checks() {
     assert!(!service.has_incomplete_reference_coverage_at(&file_d, Position::new(1, 3)));
 }
 
-/// BT-2027: `SimpleLanguageService::diagnostics` must hand off the
+/// `SimpleLanguageService::diagnostics` must hand off the
 /// cross-file class set from the `ProjectIndex` to the unified diagnostic
 /// pipeline, so that a file referencing a class defined elsewhere does
 /// not produce a spurious `UnresolvedClass` diagnostic.
@@ -289,14 +289,13 @@ fn diagnostics_resolve_cross_file_class_via_project_index() {
     );
 }
 
-/// BT-2951: `ProjectIndex::cross_file_alias_infos_for` used to return
-/// every alias from every indexed file unconditionally, with no
-/// `package` stamping and no `current_package` threaded to
-/// `AliasRegistry::add_pre_loaded`'s seeding-boundary exclusion — so a
+/// `ProjectIndex::cross_file_alias_infos_for` must stamp every alias
+/// with its `package` and thread `current_package` to
+/// `AliasRegistry::add_pre_loaded`'s seeding-boundary exclusion, so a
 /// dependency's `internal type Foo = ...` (indexed from
 /// `_build/deps/<name>/src/`, mirroring `beamtalk-lsp`'s filesystem-driven
-/// dependency preload) was visible (and go-to-definition-navigable) from
-/// every other indexed file, silently bypassing ADR 0108's `internal`
+/// dependency preload) stays invisible (and not go-to-definition-navigable)
+/// from every other indexed file, honoring ADR 0108's `internal`
 /// modifier on this surface. A dependency's *public* alias must still
 /// resolve — this mirrors `beamtalk-cli`'s
 /// `lint_resolves_dependency_protocol_and_public_alias_but_not_internal_alias`.
@@ -343,7 +342,7 @@ fn goto_definition_excludes_dependency_internal_alias_but_resolves_public_one() 
     assert_eq!(loc.file, dep_file);
 }
 
-/// BT-2951 sibling: a same-project file's `internal type Foo = ...` must
+/// A same-project file's `internal type Foo = ...` must
 /// stay visible to every *other* same-project file (ADR 0108: internal
 /// aliases are usable throughout their declaring package, not just their
 /// declaring file) — only a *different* package's internal alias should
@@ -372,13 +371,13 @@ fn goto_definition_resolves_same_project_internal_alias_cross_file() {
     assert_eq!(loc.file, alias_file);
 }
 
-/// BT-2950: `pre_loaded_protocols` was never populated on the LSP
-/// surface at all — a protocol declared in a different project file was
-/// invisible to LSP diagnostics, so an `extending:` clause naming it
-/// produced a false "extends unknown protocol" error even though
-/// `beamtalk build`/`beamtalk lint` already resolve it correctly
-/// (BT-2910). Mirrors `diagnostics_resolve_cross_file_class_via_project_index`
-/// above, but for protocols.
+/// `pre_loaded_protocols` must be populated on the LSP surface: a
+/// protocol declared in a different project file must be visible to
+/// LSP diagnostics, so an `extending:` clause naming it does not
+/// produce a false "extends unknown protocol" error, matching
+/// `beamtalk build`/`beamtalk lint`. Mirrors
+/// `diagnostics_resolve_cross_file_class_via_project_index` above, but
+/// for protocols.
 #[test]
 fn diagnostics_resolve_cross_file_protocol_via_project_index() {
     let mut service = SimpleLanguageService::new();
@@ -405,11 +404,11 @@ fn diagnostics_resolve_cross_file_protocol_via_project_index() {
     );
 }
 
-/// BT-2950 sibling: a protocol exported by an indexed path dependency
+/// A protocol exported by an indexed path dependency
 /// (under `_build/deps/<name>/src/`, mirroring how the alias-resolution
 /// path already covers dependency files) must resolve in a consumer
 /// file — parity with `beamtalk-cli`'s dependency-side test for the same
-/// wiring (BT-2910).
+/// wiring.
 #[test]
 fn diagnostics_resolve_dependency_protocol_via_project_index() {
     let mut service = SimpleLanguageService::new();
@@ -436,7 +435,7 @@ fn diagnostics_resolve_dependency_protocol_via_project_index() {
     );
 }
 
-/// BT-2800 (ADR 0100 Rule 3 surface-parity gap): `SimpleLanguageService`
+/// ADR 0100 Rule 3 surface parity: `SimpleLanguageService`
 /// must apply the `[diagnostics]` table set via `set_diagnostics_overrides`
 /// exactly like `beamtalk build` does — a `dnu = "error"` override
 /// promotes the default `Hint` on an unresolved selector to `Error`.
@@ -473,7 +472,7 @@ fn diagnostics_applies_severity_overrides() {
     );
 }
 
-/// BT-2795 (ADR 0100 Rule 2 WS1): a standalone extension defined in one
+/// ADR 0100 Rule 2 WS1: a standalone extension defined in one
 /// file must be visible to another file's diagnostics — the false `Dnu`
 /// hint on a same-project cross-file extension disappears.
 #[test]
@@ -502,7 +501,7 @@ fn diagnostics_resolve_cross_file_extension_via_project_index() {
     );
 }
 
-/// BT-2795: removing the defining file makes the extension unresolved again.
+/// Removing the defining file makes the extension unresolved again.
 #[test]
 fn diagnostics_cross_file_extension_gone_after_remove() {
     let mut service = SimpleLanguageService::new();
@@ -530,7 +529,7 @@ fn diagnostics_cross_file_extension_gone_after_remove() {
     );
 }
 
-/// BT-2027: Opening a stdlib source file must not emit "conflicts with
+/// Opening a stdlib source file must not emit "conflicts with
 /// stdlib class" diagnostics for every class the file defines. The
 /// language service now sets `stdlib_mode = true` for files tracked as
 /// stdlib in the `ProjectIndex`.
