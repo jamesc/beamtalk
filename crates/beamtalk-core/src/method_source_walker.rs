@@ -51,8 +51,8 @@ use crate::source_analysis::{MethodSide, Span, SpanResolveError, lex_with_eof, p
 /// send-walker in this module so the single implementation can be shared
 /// without reaching upward into `queries`.
 ///
-/// BT-3361: widened from `pub(crate)` to `pub` — no longer reachable at
-/// `pub(crate)` visibility now that `queries` lives in its own crate.
+/// This is `pub`, not `pub(crate)`: `queries` lives in its own crate, so
+/// `pub(crate)` visibility would not reach it.
 pub fn selector_span(selector: &MessageSelector) -> Option<Span> {
     match selector {
         MessageSelector::Keyword(parts) => {
@@ -107,7 +107,7 @@ pub struct SendHit {
     /// module name the call targets — the `M` in `(Erlang M) fun: …` or the
     /// module-name send `Erlang M`. `None` for every non-FFI send and for an
     /// FFI chain whose module receiver is not a static `Erlang <module>` form.
-    /// Backs the reverse "callers of a native module" index (BT-2669).
+    /// Backs the reverse "callers of a native module" index.
     pub target_module: Option<String>,
 }
 
@@ -406,7 +406,7 @@ fn selector_line(selector: &MessageSelector, fallback: Span, source: &str) -> u3
 }
 
 // ---------------------------------------------------------------------------
-// Selector-send span extraction (ADR 0114, BT-3279)
+// Selector-send span extraction (ADR 0114)
 // ---------------------------------------------------------------------------
 
 /// One rewrite target within a single matched self/super send of the target
@@ -468,7 +468,7 @@ fn first_token_span_after(source: &str, pos: u32) -> Option<Span> {
 /// Find every self/super-directed send of `old_selector` within
 /// `method_source`, returning the splice spans needed to rewrite each
 /// occurrence to `new_selector` (ADR 0114 § "`renameSelector:to:` auto-
-/// rewrites only `self`/`super` sends", BT-3279).
+/// rewrites only `self`/`super` sends").
 ///
 /// `senders_of/1` (`beamtalk_xref.erl`) only carries a *line* number per
 /// sending method, not a byte span — and a whole-method span
@@ -721,7 +721,7 @@ fn selector_send_spans_for_match(
 /// Resolve `class`'s `(old_selector, side)` method DEFINITION's own bare
 /// selector-token span(s) within `source`, paired with the replacement text
 /// for a rename to `new_selector` (ADR 0114 § `ChangeLog` schema's `sites[0]`
-/// note, BT-3279) — the narrow-rewrite counterpart to
+/// note) — the narrow-rewrite counterpart to
 /// [`find_selector_send_spans`] for the definition site itself.
 ///
 /// A method's own signature is not a self/super *send* — `MethodDefinition`
@@ -842,7 +842,7 @@ pub fn find_definition_selector_spans(
 }
 
 // ---------------------------------------------------------------------------
-// Receiver-span extraction (BT-3217, ADR 0115 Phase 2)
+// Receiver-span extraction (ADR 0115 Phase 2)
 // ---------------------------------------------------------------------------
 
 /// One send/cascade-message hit discovered by [`collect_receiver_spans`]: the
@@ -1084,7 +1084,7 @@ const REFS_SYNTHETIC_PREFIX: &str = "Object subclass: __SyntheticReferencesScope
 
 /// A single class reference discovered while walking a method's AST.
 ///
-/// Used by the xref codegen (ADR 0087 Phase 2, BT-2298) to bake per-method
+/// Used by the xref codegen (ADR 0087 Phase 2) to bake per-method
 /// `references` rows into `register_class/0`, and re-exported by
 /// `beamtalk-language-service`'s `queries::references_to_query` for Language
 /// Service use.
@@ -1343,7 +1343,7 @@ fn collect_all_type_refs(annotation: &TypeAnnotation, source: &str, hits: &mut V
 }
 
 // ---------------------------------------------------------------------------
-// Selector-send / definition span tests (ADR 0114, BT-3279)
+// Selector-send / definition span tests (ADR 0114)
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]

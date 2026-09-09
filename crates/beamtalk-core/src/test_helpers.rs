@@ -144,7 +144,7 @@ pub mod test_support {
     }
 
     /// Arbitrary [`DeclaredType`] values, recursively covering every
-    /// grouping shape BT-3100's type-string fidelity properties exercise:
+    /// grouping shape the type-string fidelity properties exercise:
     /// union, generic, `FalseOr`/optional, difference, intersection, and
     /// the `Self`-family leaves (`Self`, `Self class`, `<Name> class`).
     ///
@@ -193,7 +193,7 @@ pub mod test_support {
     }
 
     // ========================================================================
-    // Near-valid Beamtalk fragment generator (BT-3344)
+    // Near-valid Beamtalk fragment generator
     // ========================================================================
     //
     // A small, fast "fuzz-adjacent robustness" generator: near-valid source
@@ -202,7 +202,7 @@ pub mod test_support {
     // `tests/codegen_property_tests.rs` (both need the exact same "never
     // panics on near-valid input" properties, one for `generate_module`, one
     // for `generate_repl_expression`) via this crate's `test` feature, the
-    // same mechanism [`arb_declared_type`] established (BT-3100) — see
+    // same mechanism [`arb_declared_type`] uses — see
     // `beamtalk-core/Cargo.toml`'s `[features] test` entry for how a
     // dependent crate opts in from its own `[dev-dependencies]`.
     //
@@ -257,10 +257,7 @@ pub mod test_support {
                             // `str::floor_char_boundary` (stable since 1.91,
                             // past this crate's pinned MSRV). Always floors
                             // to a valid boundary, including 0 (an empty
-                            // prefix) -- no special-casing needed, unlike an
-                            // earlier version of this generator that
-                            // returned the untruncated string at that
-                            // boundary instead (BT-3344 code review).
+                            // prefix) -- no special-casing needed.
                             let mut safe_cut = cut;
                             while safe_cut > 0 && !s.is_char_boundary(safe_cut) {
                                 safe_cut -= 1;
@@ -277,7 +274,7 @@ pub mod test_support {
     }
 
     // ========================================================================
-    // Grammar-driven Beamtalk program generator (BT-3116)
+    // Grammar-driven Beamtalk program generator
     // ========================================================================
     //
     // Every proptest in the compiler previously built inputs from a
@@ -499,7 +496,7 @@ pub mod test_support {
             .boxed()
     }
 
-    /// The core expression grammar (BT-3116 tier 1): literals/identifiers,
+    /// The core expression grammar (tier 1): literals/identifiers,
     /// unary/binary/keyword sends, `ifTrue:ifFalse:`, and self-invoking
     /// blocks -- recursing with a shrinking `depth` budget so generation
     /// always terminates.
@@ -589,7 +586,7 @@ pub mod test_support {
 
     /// Generates a complete, well-formed Beamtalk **program**: an
     /// `Object subclass: <name>` with a single unary `run` method whose
-    /// body is a grammar-driven statement sequence (BT-3116).
+    /// body is a grammar-driven statement sequence.
     ///
     /// Render with [`crate::unparse::unparse_module`] to get source text
     /// guaranteed to parse back with zero diagnostics — see
@@ -625,10 +622,10 @@ pub mod test_support {
     type EcoStr = ecow::EcoString;
 
     /// Patterns that should never appear in valid Core Erlang output — Rust
-    /// Debug/Display leaks (BT-875).
+    /// Debug/Display leaks.
     ///
     /// Shared by `core_erlang_validity_tests.rs`'s proptest suite and the
-    /// `compile_pipeline` fuzz target (BT-3124) so the two never drift.
+    /// `compile_pipeline` fuzz target so the two never drift.
     pub const CORE_ERLANG_FORMAT_ARTIFACT_PATTERNS: &[&str] = &[
         "{:?}",
         "Document::",
@@ -646,7 +643,7 @@ pub mod test_support {
     /// delimiter characters).
     ///
     /// Shared by `core_erlang_validity_tests.rs`'s proptest suite and the
-    /// `compile_pipeline` fuzz target (BT-3124) so the two never drift.
+    /// `compile_pipeline` fuzz target so the two never drift.
     #[must_use]
     pub fn core_erlang_has_balanced_delimiters(s: &str) -> bool {
         let mut stack = Vec::new();
@@ -684,7 +681,7 @@ pub mod test_support {
     /// empty means the output is structurally valid.
     ///
     /// Shared by `core_erlang_validity_tests.rs`'s proptest suite and the
-    /// `compile_pipeline` fuzz target (BT-3124) so the two never drift.
+    /// `compile_pipeline` fuzz target so the two never drift.
     #[must_use]
     pub fn core_erlang_structural_issues(output: &str) -> Vec<String> {
         let mut issues = Vec::new();
@@ -746,7 +743,7 @@ pub mod test_support {
     /// [`near_valid_beamtalk`]: enable this crate's `test` feature (which pulls
     /// in `proptest` as a normal, non-dev dependency via `dep:proptest`) rather
     /// than `#[cfg(test)]`-only, which would make it invisible to a dependent
-    /// crate's own integration tests (BT-3344).
+    /// crate's own integration tests.
     #[must_use]
     pub fn proptest_config_default() -> proptest::prelude::ProptestConfig {
         let default = proptest::prelude::ProptestConfig::default();

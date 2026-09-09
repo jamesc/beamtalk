@@ -6,10 +6,10 @@
 //! Used by both `semantic_analysis` (for `DispatchKind::ControlFlow` classification)
 //! and `codegen` (for block-mutation analysis and state-threading code generation).
 //!
-//! BT-3362 (ADR 0117 Decision step 5): the module and its four predicates
-//! widened from `pub(crate)` to `pub` — `codegen`'s consumer moved out into
-//! the standalone `beamtalk-codegen` crate, so a `pub(crate)` item it reached
-//! had to become genuinely `pub` once that consumer left the crate.
+//! The module and its four predicates are `pub`, not `pub(crate)` (ADR 0117
+//! Decision step 5): `codegen`'s consumer lives in the standalone
+//! `beamtalk-codegen` crate, outside this one, so it needs genuine `pub`
+//! visibility to reach them.
 //!
 //! Predicates in this module classify selectors for block-mutation analysis.
 //! Where a selector is also part of [`WellKnownSelector`](crate::ast::WellKnownSelector)
@@ -21,7 +21,7 @@
 //! selectors the type-checker/codegen *intrinsify*, not every selector the
 //! compiler happens to recognise.
 //!
-//! BT-3402: `and:`/`or:` join the string-matched group for the same reason
+//! `and:`/`or:` join the string-matched group for the same reason
 //! as the loop/iteration selectors — they are ordinary self-hosted
 //! `Boolean` methods (`boolean.bt`'s `and:`/`or:`, each defined in terms of
 //! `ifTrue:ifFalse:`), not selectors the type-checker itself intrinsifies.
@@ -51,7 +51,7 @@ pub fn is_state_threading_keyword_selector(sel: &str) -> bool {
                 | WellKnownSelector::IfFalse
                 | WellKnownSelector::IfTrueIfFalse
                 | WellKnownSelector::IfNotNil
-                // BT-3420 (ADR 0118 phase 4): `ifNil:`/`ifNil:ifNotNil:`/
+                // ADR 0118 phase 4: `ifNil:`/`ifNil:ifNotNil:`/
                 // `ifNotNil:ifNil:` get the same `_with_mutations` inline-case
                 // treatment as `ifNotNil:` — their block argument(s) are
                 // analysed for field mutations the same way.
@@ -90,7 +90,7 @@ pub fn is_state_threading_keyword_selector(sel: &str) -> bool {
             | "doWithKey:"
             | "keysAndValuesDo:"
             | "ensure:"
-            // BT-3402: see module doc comment.
+            // See module doc comment.
             | "and:"
             | "or:"
     )
@@ -121,11 +121,11 @@ pub fn is_exception_selector(sel: &str) -> bool {
 /// For these selectors every block argument must be analysed independently,
 /// because mutations may appear in the first branch but not the second.
 ///
-/// BT-3402: `and:`/`or:` are not `WellKnownSelector`s (see module doc
+/// `and:`/`or:` are not `WellKnownSelector`s (see module doc
 /// comment) so they're matched by string, the same way `is_exception_selector`
 /// folds in `ensure:` alongside the well-known `on:do:`.
 ///
-/// BT-3420 (ADR 0118 phase 4): `ifNil:`/`ifNil:ifNotNil:`/`ifNotNil:ifNil:`
+/// ADR 0118 phase 4: `ifNil:`/`ifNil:ifNotNil:`/`ifNotNil:ifNil:`
 /// join `ifNotNil:` here — each has its own `_with_mutations` inline-case
 /// generator (`generate_nil_conditional_with_mutations` in
 /// `beamtalk-codegen`), so a mutation in any of their block(s) threads the
@@ -146,13 +146,13 @@ pub fn is_conditional_selector(sel: &str) -> bool {
     ) || matches!(sel, "and:" | "or:")
 }
 
-/// BT-3423 (ADR 0118 §Decision 7): the single "which selectors thread which
-/// block-argument positions" table, replacing the parallel copies that
-/// previously lived in `beamtalk-core::ast::well_known::is_state_threaded_block_arg`
+/// ADR 0118 §Decision 7: the single "which selectors thread which
+/// block-argument positions" table. `beamtalk-core::ast::well_known::is_state_threaded_block_arg`
 /// (consulted by `beamtalk-codegen`'s `block_arg_for_selector`) and (via a
-/// thin per-crate wrapper) `beamtalk-lint`'s `DeadAssignment` check — the
-/// second of which was missing `and:`/`or:` from BT-3402 onward (the gap
-/// this issue closes).
+/// thin per-crate wrapper) `beamtalk-lint`'s `DeadAssignment` check must both
+/// stay derived from this table rather than keeping their own parallel copy,
+/// so neither one silently drifts out of step with `and:`/`or:` or any
+/// future addition.
 ///
 /// Returns the 0-based argument indices of `sel` whose block-literal
 /// argument's outer-local mutations are threaded back to the caller via the
@@ -193,11 +193,10 @@ pub fn state_threaded_block_arg_indices(sel: &str) -> &'static [usize] {
         "to:do:" | "inject:into:" | "on:do:" => &[1],
         "to:by:do:" => &[2],
         // Two-block conditionals: `generate_*_with_mutations` threads both
-        // branches (BT-1392/BT-2359 for `ifTrue:ifFalse:`; BT-3420's
-        // `generate_nil_conditional_with_mutations` for the `ifNil:`
-        // two-block forms).
+        // branches (for `ifTrue:ifFalse:`; `generate_nil_conditional_with_mutations`
+        // for the `ifNil:` two-block forms).
         "ifTrue:ifFalse:" | "ifNil:ifNotNil:" | "ifNotNil:ifNil:" => &[0, 1],
-        // BT-3402/BT-3423: `and:`/`or:` join `ifTrue:`/`ifFalse:` here —
+        // `and:`/`or:` join `ifTrue:`/`ifFalse:` here —
         // same single-block-argument shape.
         _ => &[0],
     }
@@ -222,25 +221,25 @@ mod tests {
         assert!(is_state_threading_keyword_selector("ifTrue:"));
         assert!(is_state_threading_keyword_selector("doWithKey:"));
         assert!(is_state_threading_keyword_selector("keysAndValuesDo:"));
-        // BT-1486: New block-accepting selectors
+        // New block-accepting selectors
         assert!(is_state_threading_keyword_selector("detect:"));
         assert!(is_state_threading_keyword_selector("detect:ifNone:"));
         assert!(is_state_threading_keyword_selector("count:"));
         assert!(is_state_threading_keyword_selector("flatMap:"));
-        // BT-1487: Medium-risk list selectors
+        // Medium-risk list selectors
         assert!(is_state_threading_keyword_selector("takeWhile:"));
         assert!(is_state_threading_keyword_selector("dropWhile:"));
         assert!(is_state_threading_keyword_selector("groupBy:"));
         assert!(is_state_threading_keyword_selector("partition:"));
         assert!(is_state_threading_keyword_selector("sort:"));
-        // BT-2703: enumeration helpers self-hosted on inject:into:
+        // Enumeration helpers self-hosted on inject:into:
         assert!(is_state_threading_keyword_selector("eachWithIndex:"));
         assert!(is_state_threading_keyword_selector("do:separatedBy:"));
         assert!(!is_state_threading_keyword_selector("perform:"));
-        // BT-3402: `and:`/`or:` block arguments compile inline the same way.
+        // `and:`/`or:` block arguments compile inline the same way.
         assert!(is_state_threading_keyword_selector("and:"));
         assert!(is_state_threading_keyword_selector("or:"));
-        // BT-3420: ifNil:/ifNil:ifNotNil:/ifNotNil:ifNil: block(s) compile
+        // ifNil:/ifNil:ifNotNil:/ifNotNil:ifNil: block(s) compile
         // inline the same way as ifTrue:/ifNotNil:.
         assert!(is_state_threading_keyword_selector("ifNil:"));
         assert!(is_state_threading_keyword_selector("ifNil:ifNotNil:"));
@@ -271,10 +270,9 @@ mod tests {
         assert!(is_conditional_selector("ifNotNil:"));
         assert!(!is_conditional_selector("on:do:"));
         assert!(!is_conditional_selector("do:"));
-        // BT-3402
         assert!(is_conditional_selector("and:"));
         assert!(is_conditional_selector("or:"));
-        // BT-3420 (ADR 0118 phase 4)
+        // ADR 0118 phase 4
         assert!(is_conditional_selector("ifNil:"));
         assert!(is_conditional_selector("ifNil:ifNotNil:"));
         assert!(is_conditional_selector("ifNotNil:ifNil:"));
@@ -282,7 +280,7 @@ mod tests {
 
     // ---------------------------------------------------------------
     // state_threaded_block_arg_indices / is_state_threaded_block_arg
-    // (BT-3423 / ADR 0118 §7 — the one selector table)
+    // (ADR 0118 §7 — the one selector table)
     // ---------------------------------------------------------------
 
     #[test]
@@ -313,7 +311,6 @@ mod tests {
             "ifFalse:",
             "ifNotNil:",
             "ifNil:",
-            // BT-3402/BT-3423: the gap this issue closes.
             "and:",
             "or:",
         ] {
@@ -377,7 +374,7 @@ mod tests {
         assert!(!is_state_threaded_block_arg("customLoop:", 0));
     }
 
-    /// BT-3423 (ADR 0118 §7) conformance test: enumerates every
+    /// ADR 0118 §7 conformance test: enumerates every
     /// [`WellKnownSelector`] variant (via an exhaustive `match` — adding a
     /// new variant without extending this match is a compile error, so this
     /// table can never silently fall behind the enum it classifies) and
@@ -451,7 +448,7 @@ mod tests {
                 | WellKnownSelector::Perform
                 | WellKnownSelector::PerformWithArgs
                 | WellKnownSelector::PerformLocallyWithArgs
-                // BT-3462: neither carries a block-literal argument —
+                // Neither carries a block-literal argument —
                 // `withTimeout:`'s argument is a duration, `at:`'s an index/key.
                 | WellKnownSelector::WithTimeout
                 | WellKnownSelector::At => &[],

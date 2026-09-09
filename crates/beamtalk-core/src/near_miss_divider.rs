@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Lint: flag a `=`-bordered comment that looks like it's trying to be a
-//! `// === Name ===` section divider but doesn't actually parse as one
-//! (BT-3240).
+//! `// === Name ===` section divider but doesn't actually parse as one.
 //!
 //! `source_analysis::method_category::parse_divider_name` recognizes exactly
 //! `// === Name ===`: a plain `//` line comment with symmetric `=`-runs of 3
@@ -12,10 +11,10 @@
 //! `/* */` instead of a plain `//` line comment — silently fails to parse as
 //! a divider and falls back to an ordinary leading comment, with no
 //! diagnostic anywhere in the pipeline (see that function's module doc,
-//! "Known limitations", BT-2601). The methods that follow are then silently
+//! "Known limitations"). The methods that follow are then silently
 //! absorbed into whichever category was already open, rather than starting
-//! the section the author intended — this whole module is BT-3240, the
-//! fix for that gap.
+//! the section the author intended — this whole module exists to close
+//! that gap.
 //!
 //! This check calls [`parse_divider_name`] directly as the single source of
 //! truth for "is this a valid divider" — it never reimplements that
@@ -50,16 +49,16 @@
 //! immediately above a method with no blank line, which the AST swallows
 //! whole into that method's plain-`String` `doc_comment` field (no
 //! `Comment`, no span, invisible to an AST walk). [`check_near_miss_dividers`]
-//! is the thin, `pub` wrapper every caller actually reaches: BT-3240 wired
-//! it into `queries::diagnostic_provider` (the LSP-facing pipeline); BT-3257
-//! threaded `source: &str` through `beamtalk lint`'s `collect_diagnostics`
-//! and MCP's `run_module_analysis` so those two surfaces call it too,
-//! instead of a since-removed AST-based `NearMissDividerPass` that shared
-//! this file's accept/reject decision ([`check_comment_text`]) but inherited
-//! the AST's span imprecision. All three callers now agree, by construction,
+//! is the thin, `pub` wrapper every caller actually reaches:
+//! `queries::diagnostic_provider` (the LSP-facing pipeline), `beamtalk
+//! lint`'s `collect_diagnostics`, and MCP's `run_module_analysis` all
+//! thread `source: &str` through it and call it directly, rather than each
+//! reimplementing an AST-based pass that would share this file's
+//! accept/reject decision ([`check_comment_text`]) but inherit the AST's
+//! span imprecision. All three callers agree, by construction,
 //! on both *whether* something is a near-miss and *where* it is.
 //!
-//! # Why this lives at the crate root, not inside `lint/` (BT-3340)
+//! # Why this lives at the crate root, not inside `lint/`
 //!
 //! Every sibling lint pass moved into the standalone `beamtalk-lint` crate
 //! (ADR 0117 Decision step 2). This one check stays behind: it's called
@@ -78,7 +77,7 @@
 use crate::ast::CommentKind;
 use crate::source_analysis::{Diagnostic, Span, parse_divider_name};
 
-/// Runs the source-text near-miss-divider scan (BT-3240) and appends its
+/// Runs the source-text near-miss-divider scan and appends its
 /// findings to `diagnostics`. See [`scan_source`]'s doc for why this check
 /// takes `source` directly instead of a `Module`: `Comment::span` in the AST
 /// is stamped with the *following declaration's* span, not the comment's
@@ -88,7 +87,7 @@ use crate::source_analysis::{Diagnostic, Span, parse_divider_name};
 /// is reachable through its `run_lint_passes`. This one check instead has
 /// three direct callers — `queries::diagnostic_provider` (so it also reaches
 /// the LSP's `publishDiagnostics`), `beamtalk lint`'s `collect_diagnostics`,
-/// and MCP's `run_module_analysis` (BT-3257) — because a silently-mis-parsed
+/// and MCP's `run_module_analysis` — because a silently-mis-parsed
 /// section divider is cheap to fix the moment it's written and easy to miss
 /// later, and every surface should point at the comment's own line rather
 /// than the AST's imprecise span. It stays out of `beamtalk build`'s output:
@@ -112,7 +111,7 @@ pub fn check_near_miss_dividers(source: &str, diagnostics: &mut Vec<Diagnostic>)
 /// `stdlib/`/`examples/`). Multi-line `/* ... */` block comments are out of
 /// scope — a divider is inherently a one-line construct, so a genuine
 /// attempt is always on one line; a block comment whose opening line has no
-/// closing `*/` is skipped rather than misidentified, and (BT-3240 review)
+/// closing `*/` is skipped rather than misidentified, and
 /// every line up to its matching `*/` is skipped too — otherwise a `// ...`
 /// line of ordinary commentary *inside* a real block comment would be
 /// misread as a genuine `//` line comment the lexer never sees as one.
@@ -343,7 +342,7 @@ mod tests {
 
     #[test]
     fn scan_source_locates_the_near_miss_comment_line_precisely() {
-        // BT-3240/BT-3257: a diagnostic built from the AST's `Comment::span`
+        // A diagnostic built from the AST's `Comment::span`
         // would actually point at `bar` (the *following* declaration's
         // token span — see module doc), not the comment. `scan_source` must
         // point at the comment's own line instead.
@@ -359,7 +358,7 @@ mod tests {
 
     #[test]
     fn scan_source_gives_distinct_spans_to_adjacent_near_misses() {
-        // BT-3240 review: two near-miss comments leading the same member
+        // Two near-miss comments leading the same member
         // must not collapse onto one identical (wrong) span.
         let source = "Object subclass: Foo\n  // == A ==\n  // == B ==\n  bar => 1\n";
         let diags = super::scan_source(source);
@@ -374,7 +373,7 @@ mod tests {
 
     #[test]
     fn scan_source_catches_a_doc_comment_immediately_above_a_method() {
-        // BT-3240 review: without a blank line, `/// === Section ===` is
+        // Without a blank line, `/// === Section ===` is
         // consumed whole into the method's plain-`String` `doc_comment`
         // field (no `Comment`, no span) — invisible to any AST walk.
         // `scan_source` doesn't depend on AST comment attachment at all, so
@@ -421,7 +420,7 @@ mod tests {
 
     #[test]
     fn scan_source_ignores_a_near_miss_shaped_line_inside_a_block_comment() {
-        // BT-3240 review: a `//`-shaped line *inside* a real multi-line
+        // A `//`-shaped line *inside* a real multi-line
         // `/* ... */` block comment is never a `//` line comment to the
         // lexer/AST at all — it's ordinary text the block comment swallows.
         // Without block-comment state tracking, the naive per-line scan
