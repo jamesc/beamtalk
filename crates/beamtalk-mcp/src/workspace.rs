@@ -24,7 +24,7 @@ pub fn generate_workspace_id(path: &Path) -> Option<String> {
 }
 
 /// Read the port file for a workspace.
-/// Port file format (BT-611): `PORT\nNONCE` (two lines). Only the port is returned.
+/// Port file format: `PORT\nNONCE` (two lines). Only the port is returned.
 pub fn read_port_file(workspace_id: &str) -> Option<u16> {
     beamtalk_workspace::read_port_file(workspace_id)
         .ok()
@@ -49,7 +49,7 @@ pub fn discover_port_and_cookie(workspace_id: Option<&str>) -> Option<(u16, Stri
 }
 
 /// Like [`discover_port_and_cookie`] but also returns the resolved workspace ID
-/// so callers can pass it to `ReplClient` for port re-discovery on reconnect (BT-1416).
+/// so callers can pass it to `ReplClient` for port re-discovery on reconnect.
 pub fn discover_port_cookie_and_id(workspace_id: Option<&str>) -> Option<(u16, String, String)> {
     let id = if let Some(id) = workspace_id {
         id.to_string()
@@ -89,7 +89,7 @@ pub fn parse_workspace_id(stdout: &str) -> Option<String> {
 /// Find any running workspace and return its port, cookie, and workspace ID.
 ///
 /// Scans `~/.beamtalk/workspaces/` for directories with port files.
-/// Returns the workspace ID for port re-discovery on reconnect (BT-1416).
+/// Returns the workspace ID for port re-discovery on reconnect.
 pub fn discover_any_port_cookie_and_id() -> Option<(u16, String, String)> {
     tracing::debug!("scanning for any running workspace");
     let dir = beamtalk_workspace::workspaces_base_dir().ok()?;
@@ -186,7 +186,7 @@ mod tests {
             .unwrap()
             .join(&workspace_id);
         fs::create_dir_all(&dir).unwrap();
-        // BT-727: port file has PORT\nNONCE format; reader must parse only first line
+        // Port file has PORT\nNONCE format; reader must parse only first line
         fs::write(dir.join("port"), "9876\nabc123nonce\n").unwrap();
 
         let result = read_port_file(&workspace_id);
@@ -287,7 +287,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// BT-1416: Verify that re-reading a port file after the port changes
+    /// Verify that re-reading a port file after the port changes
     /// returns the new port. This is the mechanism that allows reconnect to
     /// find the new port after a workspace restart.
     #[test]

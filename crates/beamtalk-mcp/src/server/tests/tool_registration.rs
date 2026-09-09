@@ -24,7 +24,7 @@ fn reload_class_tool_registered() {
 
 #[test]
 fn precheck_method_and_recheck_image_tools_registered() {
-    // ADR 0105 Phase 3 (BT-2782): surface-parity entries for MCP.
+    // ADR 0105 Phase 3: surface-parity entries for MCP.
     let router = BeamtalkMcp::tool_router();
     let tools = router.list_all();
     let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
@@ -49,7 +49,7 @@ fn list_modules_tool_not_registered() {
     );
 }
 
-// BT-2369 (ADR 0081 Phase 6): the get_bindings / clear tools were removed —
+// ADR 0081 Phase 6: the get_bindings / clear tools were removed —
 // session state is read and reset via `evaluate` (`Session current bindings
 // keys`, `Session current clear`).
 #[test]
@@ -67,7 +67,7 @@ fn session_state_tools_not_registered() {
     );
 }
 
-// --- tool registration: package tools (BT-1658, ADR 0070 Phase 5) ---
+// --- tool registration: package tools (ADR 0070 Phase 5) ---
 
 #[test]
 fn list_packages_tool_registered() {
@@ -91,7 +91,7 @@ fn package_classes_tool_registered() {
     );
 }
 
-// --- diagnostic_summary (BT-2014) ---
+// --- diagnostic_summary ---
 
 #[test]
 fn diagnostic_summary_tool_registered() {
@@ -128,7 +128,7 @@ fn compute_diagnostic_summary_clean_file() {
     assert!(result["type_coverage"]["dynamic_percent"].is_number());
 }
 
-// --- ADR 0082 Phase 3 (BT-2288): MCP ChangeLog / flush tool wiring ---
+// --- ADR 0082 Phase 3: MCP ChangeLog / flush tool wiring ---
 //
 // The tools below pin the Beamtalk expression each MCP tool dispatches to,
 // matching the REPL meta-command tests in
@@ -173,11 +173,11 @@ fn try_method_expr_compiles_ephemeral_patch() {
 
 // `save_class_expr`, `precheck_method_expr`, `remove_method_expr`,
 // `remove_method_if_absent_expr`, and `flush_expr`/`FlushFilter` are
-// defined in `beamtalk_core::tool_expr` (BT-3193) and golden-tested
+// defined in `beamtalk_core::tool_expr` and golden-tested
 // there — that suite is the single source of truth both this crate and
 // `beamtalk-lsp` call into, so there is nothing left to re-test here.
 
-// --- compute_doc_method_categories (BT-3239) ---
+// --- compute_doc_method_categories ---
 
 #[test]
 fn compute_doc_method_categories_groups_by_divider() {
