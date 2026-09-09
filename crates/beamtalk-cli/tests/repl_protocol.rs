@@ -281,7 +281,7 @@ struct ProcessManager {
 ///
 /// When `cover` is true, instruments runtime modules with Erlang cover and
 /// polls for a signal file to trigger graceful shutdown with cover export.
-/// The non-cover path delegates to the shared `repl_startup` module (BT-390)
+/// The non-cover path delegates to the shared `repl_startup` module
 /// so the E2E startup matches production exactly.
 fn beam_eval_cmd(
     cover: bool,
@@ -451,8 +451,8 @@ impl ProcessManager {
         // OUTSIDE the project tree and are therefore non-flushable — a
         // `Workspace flush` in one btscript can no longer write a patched method
         // back into a shared fixture and corrupt it for later btscripts
-        // (BT-2553 follow-up: method patches are now correctly flushable, which
-        // exposed this). `TMPDIR` is pointed at the same dir so the flush
+        // (method patches are correctly flushable, so this scenario
+        // surfaces). `TMPDIR` is pointed at the same dir so the flush
         // round-trip test's own temp files (created via `File tempDirectory`)
         // stay INSIDE the project and remain flushable.
         let e2e_project_dir =
@@ -574,7 +574,7 @@ struct ReplClient {
     ws: WebSocket<TcpStream>,
     /// Last warnings from evaluation (for WARNING: assertions)
     last_warnings: Vec<String>,
-    /// Last loaded path for :reload support (path, `is_directory`) — BT-848
+    /// Last loaded path for :reload support (path, `is_directory`)
     last_loaded_path: Option<(String, bool)>,
 }
 
@@ -583,7 +583,7 @@ impl ReplClient {
     ///
     /// Frame recognition/construction for the auth handshake (`auth-required`
     /// → `auth` → `auth_ok`/`auth_error` → `session-started`) goes through the
-    /// shared `beamtalk_repl_protocol::handshake` module (BT-3330/BT-3348)
+    /// shared `beamtalk_repl_protocol::handshake` module
     /// rather than re-matching JSON fields here — see that module's doc
     /// comment for why. This is the one caller that exercises the handshake
     /// against a real, live BEAM node (`just test-repl-protocol`).
@@ -704,7 +704,7 @@ impl ReplClient {
         // Read and parse response using shared protocol types
         let response = self.read_repl_response()?;
 
-        // Extract warnings if present (BT-407)
+        // Extract warnings if present
         self.last_warnings.clear();
         if let Some(ref warnings) = response.warnings {
             self.last_warnings.clone_from(warnings);
@@ -732,7 +732,7 @@ impl ReplClient {
     /// This compiles the file and loads its classes into the REPL session,
     /// making them available for spawning and messaging.
     ///
-    /// BT-2091: Routes through `Workspace load: "path"` evaluation rather than
+    /// Routes through `Workspace load: "path"` evaluation rather than
     /// the deprecated `load-file` protocol op (which has been removed). The
     /// returned value is a Beamtalk list of class objects which renders as a
     /// JSON array of class-name strings.
@@ -743,7 +743,7 @@ impl ReplClient {
 
         let response = self.read_repl_response()?;
 
-        // Extract warnings from load response (BT-737: class collision warnings)
+        // Extract warnings from load response (class collision warnings)
         self.last_warnings.clear();
         if let Some(ref warnings) = response.warnings {
             self.last_warnings.clone_from(warnings);
@@ -755,7 +755,7 @@ impl ReplClient {
         }
 
         // The eval value is a JSON array of class name strings (e.g. ["Counter"]).
-        // BT-2091: Fail loudly on unexpected response shapes so future protocol
+        // Fail loudly on unexpected response shapes so future protocol
         // drift surfaces in the test suite rather than being papered over by an
         // empty Vec.
         match response.value {
@@ -772,7 +772,7 @@ impl ReplClient {
 
     /// Get documentation for a class or method via `Beamtalk help:` evaluation.
     ///
-    /// BT-2091: Migrated from the deprecated `docs` op to `Beamtalk help:`.
+    /// Migrated from the deprecated `docs` op to `Beamtalk help:`.
     /// A leading `#` on the selector is stripped before interpolation so
     /// callers passing either `foo:` or `#foo:` produce the same expression
     /// (`Beamtalk help: Class selector: #foo:`) rather than an invalid
@@ -788,7 +788,7 @@ impl ReplClient {
         self.eval_to_string(&expr)
     }
 
-    /// Get help for an Erlang module or function via the erlang-help op (BT-1852).
+    /// Get help for an Erlang module or function via the erlang-help op.
     fn get_erlang_help(&mut self, module: &str, function: Option<&str>) -> Result<String, String> {
         self.send_docs_request(&RequestBuilder::erlang_help(module, function))
     }
@@ -839,7 +839,7 @@ impl ReplClient {
 
     /// Clear the session's local bindings and return "ok".
     ///
-    /// BT-2369 (ADR 0081 Phase 6): the `clear` op was removed; this evaluates
+    /// ADR 0081 Phase 6: the `clear` op was removed; this evaluates
     /// `Session current clear` (mirrors the `:clear` CLI command).
     fn clear_and_report(&mut self) -> Result<String, String> {
         let response = self.send_op(&RequestBuilder::eval_with_trace(
@@ -864,7 +864,7 @@ impl ReplClient {
 
     /// Get the session's local binding names as a sorted, newline-joined string.
     ///
-    /// BT-2369 (ADR 0081 Phase 6): the `bindings` op was removed; this evaluates
+    /// ADR 0081 Phase 6: the `bindings` op was removed; this evaluates
     /// `Session current bindings keys` (mirrors the `:bindings` CLI command),
     /// whose result `value` is a list of binding-name symbols.
     fn get_bindings(&mut self) -> Result<String, String> {
@@ -912,7 +912,7 @@ impl ReplClient {
     ///
     /// A trailing space is appended to `code` to simulate pressing TAB after the
     /// last token — the btscript parser trims trailing whitespace, but chain
-    /// resolution (BT-1006) requires the space to distinguish "complete methods on
+    /// resolution requires the space to distinguish "complete methods on
     /// the *result* of `size`" from "complete String methods *starting with* `size`".
     fn get_completions(&mut self, code: &str) -> Result<String, String> {
         let code_with_space = format!("{code} ");
@@ -1064,7 +1064,7 @@ impl ReplClient {
         Ok("ok".to_string())
     }
 
-    /// Send an interrupt op to cancel a running evaluation (BT-2090).
+    /// Send an interrupt op to cancel a running evaluation.
     fn send_interrupt(&mut self) -> Result<String, String> {
         self.send_op(&RequestBuilder::interrupt())?;
         Ok("Interrupt sent.".to_string())
@@ -1085,7 +1085,7 @@ impl ReplClient {
     }
 }
 
-/// Pattern matcher for test assertions (BT-502).
+/// Pattern matcher for test assertions.
 ///
 /// Supports glob-style matching where `_` acts as a wildcard segment:
 /// - Bare `_` → matches any result (full wildcard)
@@ -1269,7 +1269,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
             } else {
                 case.expression.strip_prefix(":h ").unwrap().trim()
             };
-            // BT-1852: Detect "Erlang <module>" pattern for FFI help.
+            // Detect "Erlang <module>" pattern for FFI help.
             let tokens: Vec<&str> = args.split_whitespace().collect();
             if tokens.first() == Some(&"Erlang") && tokens.len() > 1 {
                 let module = tokens[1];
@@ -1302,7 +1302,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                 Some((normalized_path.clone(), std::path::Path::new(path).is_dir()));
             client.load_and_report(path)
         } else if case.expression == ":reload" || case.expression == ":r" {
-            // :reload (no arg) → reload the last loaded path  (BT-848)
+            // :reload (no arg) → reload the last loaded path
             if let Some((path, _)) = &client.last_loaded_path.clone() {
                 client.load_and_report_with_verb(path, "Reloaded")
             } else {
@@ -1315,10 +1315,10 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                 .or_else(|| case.expression.strip_prefix(":r "))
                 .unwrap()
                 .trim();
-            // :reload Counter → Counter reload  (BT-848)
+            // :reload Counter → Counter reload
             client.eval(&format!("{class_name} reload"))
         } else if case.expression == ":test" || case.expression == ":t" {
-            // :test → Workspace test  (BT-848)
+            // :test → Workspace test
             client.eval("Workspace test")
         } else if case.expression.starts_with(":test ") || case.expression.starts_with(":t ") {
             let class_name = case
@@ -1327,7 +1327,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                 .or_else(|| case.expression.strip_prefix(":t "))
                 .unwrap()
                 .trim();
-            // :test CounterTest → Workspace test: CounterTest  (BT-848)
+            // :test CounterTest → Workspace test: CounterTest
             client.eval(&format!("Workspace test: {class_name}"))
         } else if case.expression.starts_with(":inspect ") {
             let arg = case.expression.strip_prefix(":inspect ").unwrap().trim();
@@ -1360,29 +1360,29 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
             let code = case.expression.strip_prefix(":complete ").unwrap();
             client.get_completions(code)
         } else if case.expression == ":flush" {
-            // BT-2287 / ADR 0082 Phase 3: `:flush` → `Workspace flush`.
+            // ADR 0082 Phase 3: `:flush` → `Workspace flush`.
             client.eval("Workspace flush")
         } else if case.expression.starts_with(":flush ") {
-            // BT-2287 / ADR 0082 Phase 3: `:flush <sel>` → `Workspace flush: <sel>`,
+            // ADR 0082 Phase 3: `:flush <sel>` → `Workspace flush: <sel>`,
             // via the same `flush_expr_for` the real REPL dispatch calls
             // (`beamtalk_cli::repl_meta_exprs`) — not a hand-copied mirror,
-            // so this harness can't drift from production behavior (BT-3196).
+            // so this harness can't drift from production behavior.
             let selector = case.expression.strip_prefix(":flush ").unwrap();
             match beamtalk_cli::repl_meta_exprs::flush_expr_for(selector) {
                 Some(expr) => client.eval(&expr),
                 None => Err("Usage: :flush [<Class>|#kind|#{ #file => \"path\" }]".to_string()),
             }
         } else if case.expression == ":changes" {
-            // BT-2287 / ADR 0082 Phase 3: `:changes` → `Workspace changes`.
+            // ADR 0082 Phase 3: `:changes` → `Workspace changes`.
             client.eval("Workspace changes")
         } else if case.expression == ":dirty" {
-            // BT-2287 / ADR 0082 Phase 3: `:dirty` → `Workspace changes notEmpty`.
+            // ADR 0082 Phase 3: `:dirty` → `Workspace changes notEmpty`.
             client.eval("Workspace changes notEmpty")
         } else if case.expression == ":recheck image" {
-            // ADR 0105 Phase 3 (BT-2782): `:recheck image` → `Workspace recheckImage`.
+            // ADR 0105 Phase 3: `:recheck image` → `Workspace recheckImage`.
             client.eval("Workspace recheckImage")
         } else if case.expression.starts_with(":remove-method ") {
-            // ADR 0112 Phase 4 (BT-3189): `:remove-method <Class> <selector>` →
+            // ADR 0112 Phase 4: `:remove-method <Class> <selector>` →
             // `<Class> removeSelector: #<selector>`, via the same
             // `remove_method_expr_for` the real REPL dispatch calls
             // (`beamtalk_cli::repl_meta_exprs`) — not a hand-copied mirror,
@@ -1393,7 +1393,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                 None => Err("Usage: :remove-method <Class> <selector>".to_string()),
             }
         } else if case.expression.starts_with(":remove-class ") {
-            // ADR 0113 Phase 4 (BT-3210): `:remove-class <Class>` →
+            // ADR 0113 Phase 4: `:remove-class <Class>` →
             // `<Class> removeFromSystem`, via the same `remove_class_expr_for`
             // the real REPL dispatch calls (`beamtalk_cli::repl_meta_exprs`)
             // — not a hand-copied mirror. The real dispatch also prompts for
@@ -1407,11 +1407,11 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                 None => Err("Usage: :remove-class <Class>".to_string()),
             }
         } else if case.expression == ":flush-destructive" {
-            // ADR 0113 Phase 4 (BT-3210): bare `:flush-destructive` →
+            // ADR 0113 Phase 4: bare `:flush-destructive` →
             // `Workspace flushIncludingDestructive`.
             client.eval(beamtalk_cli::repl_meta_exprs::FLUSH_INCLUDING_DESTRUCTIVE_EXPR)
         } else if case.expression.starts_with(":flush-destructive ") {
-            // ADR 0113 Phase 4 (BT-3210): `:flush-destructive <selector>` →
+            // ADR 0113 Phase 4: `:flush-destructive <selector>` →
             // `Workspace flush: <selector> confirmDestructive: true`, via
             // the same `flush_destructive_expr_for` the real REPL dispatch
             // calls.
@@ -1423,7 +1423,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                 ),
             }
         } else if case.expression.starts_with(":rename-class ") {
-            // ADR 0114 Phase 5 (BT-3276): `:rename-class <Class> <NewName>` →
+            // ADR 0114 Phase 5: `:rename-class <Class> <NewName>` →
             // `<Class> renameTo: #<NewName>`, via the same
             // `rename_class_expr_for` the real REPL dispatch calls
             // (`beamtalk_cli::repl_meta_exprs`) — not a hand-copied mirror.
@@ -1436,7 +1436,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                 None => Err("Usage: :rename-class <Class> <NewName>".to_string()),
             }
         } else if case.expression.starts_with(":rename-method ") {
-            // ADR 0114 Phase 5 (BT-3276): `:rename-method <Class> <selector>
+            // ADR 0114 Phase 5: `:rename-method <Class> <selector>
             // <newSelector>` → `<Class> renameSelector: #<selector> to:
             // #<newSelector>`, via the same `rename_method_expr_for` the
             // real REPL dispatch calls.
@@ -1450,7 +1450,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
         };
         match eval_result {
             Ok(result) => {
-                // Check if this is a WARNING assertion (BT-407)
+                // Check if this is a WARNING assertion
                 if case.expected.starts_with("WARNING:") {
                     let expected_warning = case.expected.strip_prefix("WARNING:").unwrap().trim();
                     if client
@@ -1536,14 +1536,14 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
 /// Beamtalk files and run escript, which can conflict with shared build artifacts.
 ///
 /// Note: Ignored by default due to slow execution (~50s for 316 test cases).
-/// BT-885: Class definition + trailing expressions in one eval block.
+/// Class definition + trailing expressions in one eval block.
 ///
 /// When a class definition and method calls are submitted as a single `evaluate` call
 /// (as happens with MCP/REPL multi-line submission), the trailing expressions must be
 /// evaluated and their result returned — not the class name.
 ///
 /// Verify that a project's OTP supervision tree can be started during
-/// BEAM node boot via `application:ensure_all_started` (BT-1340).
+/// BEAM node boot via `application:ensure_all_started`.
 ///
 /// This test validates the OTP application infrastructure end-to-end:
 /// 1. Creates a temp project with `beamtalk.toml` containing `[application] supervisor`

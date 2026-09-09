@@ -50,8 +50,8 @@ pub(crate) struct TestCaseClass {
     pub(crate) module_name: String,
     /// Methods whose names start with `test`.
     pub(crate) test_methods: Vec<String>,
-    // BT-1631: Removed has_setup, has_teardown, has_setup_once, has_teardown_once, is_serial
-    // fields — test lifecycle and serial detection are now handled entirely by
+    // No has_setup/has_teardown/has_setup_once/has_teardown_once/is_serial
+    // fields — test lifecycle and serial detection are handled entirely by
     // beamtalk_test_runner in the Erlang runtime.
 }
 
@@ -113,7 +113,7 @@ pub(crate) fn discover_test_classes(
             }
         }
 
-        // BT-1631: Removed setUp/tearDown/serial detection — the BUnit runner
+        // No setUp/tearDown/serial detection here — the BUnit runner
         // (beamtalk_test_runner) handles all lifecycle and serialization in Erlang.
 
         if !test_methods.is_empty() {
@@ -248,14 +248,14 @@ fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
 ///    `"ValueSubCircle"` → `"ValueBaseShape"`).
 /// 3. A `Vec<ClassInfo>` of full class metadata for validator/type-checker
 ///    resolution.
-/// 4. A `Vec<ProtocolInfo>` of fixture-defined protocols (BT-2006) so the
+/// 4. A `Vec<ProtocolInfo>` of fixture-defined protocols so the
 ///    unresolved-class validator recognises their names when analysing test
 ///    modules that reference them.
 ///
 /// All four outputs are merged into the pipeline before fixture compilation so
 /// that cross-file references and class hierarchy resolution work correctly —
 /// in particular, Value sub-subclasses are recognized as value types rather
-/// than defaulting to actor codegen (BT-1564).
+/// than defaulting to actor codegen.
 #[allow(clippy::type_complexity)]
 fn build_fixture_class_indexes(
     fixture_files: &[Utf8PathBuf],
@@ -282,7 +282,7 @@ fn build_fixture_class_indexes(
         class_infos
             .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
 
-        // BT-2006: Extract ProtocolInfo so fixture-defined protocol names are
+        // Extract ProtocolInfo so fixture-defined protocol names are
         // recognised by the unresolved-class validator when compiling test files.
         protocol_infos.extend(
             beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
@@ -322,9 +322,9 @@ fn generate_core_file(
 ) -> Result<Utf8PathBuf> {
     let core_file = output_dir.join(format!("{module_name}.core"));
 
-    // BT-2922: Set the current package so E0401/E0402 visibility checks fire
+    // Set the current package so E0401/E0402 visibility checks fire
     // when compiling test/fixture files, matching what `beamtalk build` and
-    // `beamtalk lint` enforce (BT-2920) — the checks are gated on
+    // `beamtalk lint` enforce — the checks are gated on
     // `current_package: Some(_)` and silently emit zero diagnostics otherwise.
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode: false,
@@ -354,7 +354,7 @@ fn generate_core_file(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// BUnit runner (BT-1631)
+// BUnit runner
 // ──────────────────────────────────────────────────────────────────────────
 
 /// Result from running `BUnit` tests via `beamtalk_test_runner:run_all/1`.
@@ -531,9 +531,9 @@ fn canonical_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
 /// anywhere in the ancestor chain.
 ///
 /// Delegates to [`beamtalk_project::package::find_package_root`] — the same
-/// canonical implementation used by `beamtalk lint` (BT-2060) — which
-/// canonicalizes `path` before the walk (BT-2027) and guards against
-/// empty-path false hits (BT-1228).
+/// canonical implementation used by `beamtalk lint` — which
+/// canonicalizes `path` before the walk and guards against
+/// empty-path false hits.
 fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
     package::find_package_root(path.as_std_path()).and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
 }
@@ -750,9 +750,9 @@ struct TestPipeline {
     class_module_index: HashMap<String, String>,
     /// Merged class-name to superclass-name index across all packages.
     class_superclass_index: HashMap<String, String>,
-    /// BT-1559: Cross-file class metadata for type checker hierarchy resolution.
+    /// Cross-file class metadata for type checker hierarchy resolution.
     all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    /// BT-2006: Fixture-defined protocols so the unresolved-class validator
+    /// Fixture-defined protocols so the unresolved-class validator
     /// and type checker recognise protocol names declared in `fixtures/*.bt`.
     fixture_protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     /// Fixture class-name to module-name index.
@@ -778,7 +778,7 @@ struct TestPipeline {
 }
 
 impl TestPipeline {
-    /// Resolve the owning package name for a file or directory (BT-2922).
+    /// Resolve the owning package name for a file or directory.
     ///
     /// Walks up to the nearest `beamtalk.toml` and maps its canonical root
     /// through `pkg_root_to_name` — the same manifest-derived name `beamtalk
@@ -787,7 +787,7 @@ impl TestPipeline {
     ///
     /// The path is canonicalized *before* the walk-up: a relative path like
     /// `test/Foo.bt` would otherwise hit `find_package_root`'s empty-parent
-    /// guard (BT-1228) before ever reaching the package root on disk.
+    /// guard before ever reaching the package root on disk.
     fn current_package_for(&self, path: &Utf8Path) -> Option<String> {
         let package = canonical_package_root(&canonical_path(path))
             .and_then(|root| self.pkg_root_to_name.get(&root).cloned());
@@ -935,7 +935,7 @@ fn build_merged_class_indexes(
     let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
     let mut class_module_index: HashMap<String, String> = HashMap::new();
     let mut class_superclass_index: HashMap<String, String> = HashMap::new();
-    // BT-1733: Collect source and dep ClassInfos separately, then merge
+    // Collect source and dep ClassInfos separately, then merge
     // via collect_all_class_infos for a single unified collection point.
     let mut source_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
         Vec::new();
@@ -984,7 +984,7 @@ fn build_merged_class_indexes(
         }
     }
 
-    // BT-1733: Single unified collection of all ClassInfo from all sources.
+    // Single unified collection of all ClassInfo from all sources.
     // Fixture ClassInfo is added later in compile_fixtures() via
     // pipeline.all_class_infos.extend(fixture_class_infos).
     // To add a new .bt source location, add its ClassInfo slice here.
@@ -1065,7 +1065,7 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     // Build the fixture class index separately so it can be merged per-file in
     // Phase 1. Also merge into the combined index for Phase 0 fixture compilation,
     // where cross-package and cross-fixture references are allowed.
-    // BT-1564: Also build a fixture superclass index so the class hierarchy
+    // Also build a fixture superclass index so the class hierarchy
     // resolves correctly for Value sub-subclasses defined across fixture files.
     let (
         fixture_class_index,
@@ -1084,12 +1084,12 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     pipeline
         .class_superclass_index
         .extend(fixture_superclass_index);
-    // BT-1736: Fixture ClassInfo is now included in all_class_infos so the type
+    // Fixture ClassInfo is included in all_class_infos so the type
     // checker can validate cross-file references in test files. The Shape class
     // name collision between abstract_shape.bt and shape.bt was
     // resolved by renaming abstract_shape's class to AbstractShape.
     pipeline.all_class_infos.extend(fixture_class_infos);
-    // BT-2006: Fixture-defined protocols need to flow through to each test
+    // Fixture-defined protocols need to flow through to each test
     // file's compilation so their names resolve in the unresolved-class validator.
     pipeline
         .fixture_protocol_infos
@@ -1246,7 +1246,7 @@ fn compile_single_test_file(
         .wrap_err_with(|| format!("Failed to compile test file '{test_file}'"))?;
         pending_test_cores.push(core_file);
 
-        // BT-1631: No longer generate EUnit wrappers; beamtalk_test_runner:run_all/1
+        // EUnit wrappers are not generated; beamtalk_test_runner:run_all/1
         // handles test discovery and execution directly in the Erlang runtime.
         pipeline.compiled_tests.push(CompiledTest {
             source_file: test_file.to_path_buf(),
@@ -1263,7 +1263,7 @@ fn compile_single_test_file(
         test_file_package.as_deref(),
     )?;
     for dr in doc_results {
-        // BT-1631: Doc test EUnit wrappers are still generated but not compiled here.
+        // Doc test EUnit wrappers are still generated but not compiled here.
         // TODO: Migrate doc tests to use BUnit runner directly.
         pipeline.compiled_doc_tests.push(CompiledDocTest {
             source_file: test_file.to_path_buf(),
@@ -1377,7 +1377,7 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         debug!(count = modules.len(), "Discovered package modules");
         pipeline.package_modules.extend(modules);
 
-        // BT-1750: Use BeamEnvironment for unified code path and OTP app collection.
+        // Use BeamEnvironment for unified code path and OTP app collection.
         // The environment includes package ebin, dep ebins, native ebin, rebar3 ebins.
         let beam_env =
             super::beam_environment::BeamEnvironment::from_layout(&pkg_layout, pkg_root)?;
@@ -1531,7 +1531,7 @@ fn execute_tests(pipeline: &TestPipeline) -> Result<TestResults> {
 /// keeps the `-eval` argument a constant, small size regardless of module
 /// count.
 fn build_load_command(pipeline: &TestPipeline) -> Result<String> {
-    // BT-1732: Use ensure_loaded_or_warn for consistent on_load failure reporting.
+    // Use ensure_loaded_or_warn for consistent on_load failure reporting.
     // Order matters: packages must load (and register their classes) before
     // fixtures and test classes that depend on them.
     let modules = pipeline
@@ -2000,9 +2000,9 @@ fn fail_detail_line(display_name: &str, error: &str) -> String {
 
 /// Format the final one-line run summary.
 ///
-/// Until BT-3191, `.github/workflows/cross-repo.yml` parsed the failure count
-/// out of this line to tell a known `beamtalk-http` network flake from a real
-/// regression; that wrapper is gone now that the flaky test is hermetic by
+/// `.github/workflows/cross-repo.yml` no longer parses the failure count
+/// out of this line — that once let it tell a known `beamtalk-http` network
+/// flake from a real regression, but the flaky test is now hermetic by
 /// default, and nothing else parses this output. `summary_line_format` and
 /// `fail_detail_line_format` keep pinning both formats anyway, since they're
 /// still user-facing display text worth a regression test.
@@ -2020,7 +2020,7 @@ fn summary_line(
 
 /// Phase 4: Aggregate and report test results.
 ///
-/// BT-1631: Displays results from `beamtalk_test_runner:run_all/1` with
+/// Displays results from `beamtalk_test_runner:run_all/1` with
 /// Beamtalk class names (not Erlang module names) and per-class summary.
 /// Also reports native `EUnit` test results when present.
 fn report_results(
@@ -2143,8 +2143,8 @@ fn report_results(
 mod tests {
     use super::*;
 
-    /// Pins the summary line's display format. See [`summary_line`] for why
-    /// this format used to matter beyond display (BT-3191).
+    /// Pins the summary line's display format. See [`summary_line`] for the
+    /// format's history and why it's still worth pinning.
     #[test]
     fn summary_line_format() {
         let line = summary_line(8, 168, 167, 1, 39.84);
@@ -2208,7 +2208,7 @@ mod tests {
 
         let (classes, _) = discover_test_classes(&file).unwrap();
         assert_eq!(classes.len(), 1);
-        // BT-1631: setUp/tearDown detection removed — handled by the BUnit runtime.
+        // No setUp/tearDown detection — handled by the BUnit runtime.
         // Only test method discovery matters for the CLI now.
         assert_eq!(classes[0].test_methods, vec!["testIt"]);
     }
@@ -2224,7 +2224,7 @@ mod tests {
         assert_eq!(loads, vec!["stdlib/test/fixtures/counter.bt"]);
     }
 
-    // BT-1631: Removed test_generate_eunit_wrapper_simple — EUnit wrappers are no longer generated.
+    // test_generate_eunit_wrapper_simple no longer applies — EUnit wrappers are no longer generated.
     // Test discovery and execution now use beamtalk_test_runner:run_all/1 directly.
 
     #[test]
@@ -2255,7 +2255,7 @@ mod tests {
     fn test_build_fixture_class_module_index_flat() {
         let (_temp, dir) = temp_utf8_dir();
 
-        // BT-2006: fixture also declares a protocol so we can assert the
+        // Fixture also declares a protocol so we can assert the
         // returned `protocol_infos` carries it through.
         fs::write(
             dir.join("counter.bt"),
@@ -2349,7 +2349,7 @@ mod tests {
         assert!(result.is_none());
     }
 
-    /// BT-1228: Walking up from a relative single-component path (e.g. "test")
+    /// Walking up from a relative single-component path (e.g. "test")
     /// yields "" as the parent directory. The guard in `find_package_root` must
     /// return `None` before treating "" as a valid package root, since
     /// `"".join("beamtalk.toml")` resolves to `"beamtalk.toml"` relative to
@@ -2525,7 +2525,7 @@ mod tests {
         );
     }
 
-    // BT-1631: Removed test_generate_eunit_wrapper_with_lifecycle — EUnit wrappers are no longer generated.
+    // test_generate_eunit_wrapper_with_lifecycle no longer applies — EUnit wrappers are no longer generated.
 
     /// Inserting `"."` and the absolute CWD into `seen` without canonicalization would
     /// treat them as different entries, making a single-package run appear to have two
