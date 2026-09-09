@@ -1,13 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3123: verifies that threading a driver's `AnalysisResult` into codegen
+//! verifies that threading a driver's `AnalysisResult` into codegen
 //! via `CodegenOptions::with_analysis` skips codegen's own re-derivation of
 //! the class hierarchy, semantic facts, and inferred method return types —
 //! the duplicate work this issue eliminates.
 //!
 //! Uses thread-local call counters (`#[cfg(any(test, feature = "test"))]` in
-//! `beamtalk-core`, so this crate's own tests can see them too — BT-3362)
+//! `beamtalk-core`, so this crate's own tests can see them too)
 //! on the three costly functions (`ClassHierarchy::build_with_options`,
 //! `compute_semantic_facts`, `TypeChecker::check_module`) rather than a
 //! shared global counter, since plenty of *other* tests call these
@@ -15,7 +15,7 @@
 //! this test's own thread accumulates is meaningful. See
 //! `CHECK_MODULE_CALL_COUNT`'s doc for the full rationale.
 //!
-//! BT-3125 extends this file with `with_analysis_trusts_driver_prepared_module`
+//! This file also includes `with_analysis_trusts_driver_prepared_module`
 //! and `with_analysis_without_driver_prep_omits_writeback` (below) — these pin
 //! the *new* contract `CodegenOptions::with_analysis` documents: codegen no
 //! longer runs the writeback trio itself when the hand-off is trustworthy, so
@@ -73,7 +73,7 @@ fn with_analysis_skips_codegen_re_derivation() {
     .expect("codegen should succeed");
     assert!(code.contains("greet"));
 
-    // BT-3123: codegen must not have made ANY additional calls to the three
+    // codegen must not have made ANY additional calls to the three
     // costly functions — it consumed the driver's already-computed analysis
     // instead of re-deriving it from scratch.
     assert_eq!(
@@ -164,7 +164,7 @@ fn base_class_info(
 /// compiler-port's `handle_compile`) feed the *same* cross-file class list to
 /// both `AnalysisContext::with_pre_loaded_classes` (for `analyse_full`) and
 /// `CodegenOptions::with_class_hierarchy`/`with_class_superclass_index` (for
-/// codegen) — see `write_core_erlang_with_bindings`'s BT-3123 comment. This
+/// codegen) — see `write_core_erlang_with_bindings`'s own doc comment. This
 /// guards against a regression where that overlap stops being a no-op: if
 /// `add_from_beam_meta`/`add_external_superclasses` ever "see" a class that
 /// wasn't already in the handed-off hierarchy for realistic same-driver
@@ -180,7 +180,7 @@ fn with_analysis_skips_re_derivation_with_overlapping_cross_file_metadata() {
 
     // Mirrors a package build's Pass 1 output: full ClassInfo for a
     // same-package sibling file's class, AND a name-only superclass index
-    // entry for the very same class (BT-894's codegen-only field, populated
+    // entry for the very same class (a codegen-only field, populated
     // from the same Pass 1 walk as the full ClassInfo list in every real
     // driver).
     let foo_info = base_class_info("Foo", "Object");
@@ -230,7 +230,7 @@ fn with_analysis_skips_re_derivation_with_overlapping_cross_file_metadata() {
     );
 }
 
-/// BT-3125: a driver that calls `lower_module_for_codegen` on its own module
+/// a driver that calls `lower_module_for_codegen` on its own module
 /// — using the same `AnalysisResult` it goes on to hand to `with_analysis`
 /// — gets the return-type writeback reflected in the generated `-spec`: an
 /// unannotated method whose body infers to `Integer` gets a spec entry
@@ -260,7 +260,7 @@ fn with_analysis_trusts_driver_prepared_module() {
     );
 }
 
-/// BT-3125's inverse: a driver that hands off `AnalysisResult` via
+/// The inverse: a driver that hands off `AnalysisResult` via
 /// `with_analysis` WITHOUT first calling `lower_module_for_codegen` no
 /// longer gets the writeback applied on its behalf — codegen trusts the
 /// hand-off is already prepared instead of re-running it. This pins the
@@ -285,7 +285,7 @@ fn with_analysis_without_driver_prep_omits_writeback() {
     );
 }
 
-/// BT-3125 (post-review fix): when codegen's own cross-file enrichment
+/// post-review fix: when codegen's own cross-file enrichment
 /// (`add_from_beam_meta`/`add_external_superclasses`) invalidates a driver's
 /// hand-off, the "fuller hierarchy" recompute must actually *overwrite* a
 /// stale return type the driver's earlier (narrower) pass already wrote back

@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3131: Discipline-pinning tests for `with_branch_context`'s per-prefix
+//! Discipline-pinning tests for `with_branch_context`'s per-prefix
 //! save/reset/restore policy. Unifying `StateThreading`/`class_var_version`/
 //! `self_version` behind the shared `VersionCounter` must unify their
 //! naming/identity *shape* only — each prefix's branch-entry/exit
 //! *discipline* stays exactly as documented on `BranchContextGuard`
-//! (ADR 0111 §Phase A2 / BT-1449 / BT-1550 / BT-3131).
+//! (ADR 0111 §Phase A2).
 
 use super::*;
 
@@ -29,7 +29,7 @@ fn with_branch_context_state_resets_on_entry_and_restores_on_exit() {
 }
 
 /// `class_vars`: NOT reset on entry — the branch inherits the outer scope's
-/// current version — but restored to it on exit (BT-1449/BT-1550).
+/// current version — but restored to it on exit.
 #[test]
 fn with_branch_context_class_vars_inherits_on_entry_and_restores_on_exit() {
     let mut generator = CoreErlangGenerator::new("test");
@@ -51,7 +51,7 @@ fn with_branch_context_class_vars_inherits_on_entry_and_restores_on_exit() {
 }
 
 /// `class_var_mutated`: sticky — set inside a branch, deliberately NOT
-/// restored when the branch exits (BT-1550).
+/// restored when the branch exits.
 #[test]
 fn with_branch_context_class_var_mutated_is_sticky_across_exit() {
     let mut generator = CoreErlangGenerator::new("test");
@@ -65,7 +65,7 @@ fn with_branch_context_class_var_mutated_is_sticky_across_exit() {
     );
 }
 
-/// self: BT-3131 decision, revised during review — NOT reset on entry (the
+/// self: NOT reset on entry (the
 /// branch inherits the outer scope's current version, same as
 /// `class_vars`), restored to it on exit. Fixes the prior "live landmine"
 /// of neither save nor restore without introducing a stale-read regression:

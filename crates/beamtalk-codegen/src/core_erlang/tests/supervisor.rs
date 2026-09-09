@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tests for supervisor module Core Erlang code generation (BT-1220, ADR 0059 Phase 3).
+//! Tests for supervisor module Core Erlang code generation (ADR 0059 Phase 3).
 
 use super::*;
 
@@ -347,7 +347,7 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
 
 #[test]
 fn test_static_supervisor_class_method_alias_param_emits_user_type_and_named_type() {
-    // BT-2909: `supervisor_codegen.rs`'s `generate_class_specs` call site
+    // `supervisor_codegen.rs`'s `generate_class_specs` call site
     // must resolve alias-typed annotations to `user_type` references,
     // with the module also declaring the matching named `-type` in the
     // same attribute list (an `erlc` compile error otherwise).
@@ -436,7 +436,7 @@ fn test_static_supervisor_class_method_alias_param_emits_user_type_and_named_typ
 
 #[test]
 fn test_static_supervisor_cross_module_alias_reference_emits_user_type() {
-    // BT-2932: same wiring check as
+    // same wiring check as
     // `test_static_supervisor_class_method_alias_param_emits_user_type_and_named_type`
     // above, but the alias is declared in a *different* module — passed via
     // `CodegenOptions::with_pre_loaded_aliases` instead of this module's own
@@ -538,7 +538,7 @@ fn test_static_supervisor_cross_module_alias_reference_emits_user_type() {
 
 #[test]
 fn test_dynamic_supervisor_cross_module_alias_reference_emits_user_type() {
-    // BT-2932: same wiring check as
+    // same wiring check as
     // `test_static_supervisor_cross_module_alias_reference_emits_user_type`
     // above, but for `supervisor_codegen.rs`'s *second* call site,
     // `generate_dynamic_supervisor` (`DynamicSupervisor subclass:`) — the

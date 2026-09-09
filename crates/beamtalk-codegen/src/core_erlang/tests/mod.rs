@@ -9,13 +9,13 @@
 //! - [`control_flow`] — loops, stored closures, if-true/false conditionals
 //! - [`gen_server`] — module/class codegen, REPL modules, value subclasses
 //! - [`primitives`] — primitive selector and intrinsic codegen
-//! - [`branch_context`] — BT-3131: `with_branch_context`'s per-prefix
+//! - [`branch_context`] — `with_branch_context`'s per-prefix
 //!   save/reset/restore discipline (state/`class_vars`/self)
-//! - [`class_var_shadow_contract`] — BT-3135 (ADR 0111 Phase D): the
+//! - [`class_var_shadow_contract`] — ADR 0111 Phase D: the
 //!   cross-boundary ADR 0110 shadow-write key conformance fixture, asserted
 //!   against `runtime/apps/beamtalk_runtime/include/beamtalk.hrl` and the
 //!   `beamtalk_class_dispatch_tests.erl` `EUnit` suite
-//! - [`recv_type`] — BT-3217 (ADR 0115 Phase 2): the xref `recv_type`
+//! - [`recv_type`] — ADR 0115 Phase 2: the xref `recv_type`
 //!   write-path fixture matrix (typed/protocol/dynamic/union/native/alias
 //!   locals, `Meta{C}`, self-send, FFI receiver)
 
@@ -36,7 +36,7 @@ pub(crate) fn bare(expr: Expression) -> ExpressionStatement {
 /// If `erlc` is not found in PATH, prints a skip notice and returns without
 /// failing.
 ///
-/// BT-3362 (ADR 0117 Decision step 5): relocated here from
+/// ADR 0117 Decision step 5: relocated here from
 /// `beamtalk_core::test_helpers` — every caller (`control_flow`,
 /// `expressions`, `gen_server` below) now lives in this crate, and
 /// `#[cfg(test)]` in `beamtalk-core` only applies to that crate's own build,
