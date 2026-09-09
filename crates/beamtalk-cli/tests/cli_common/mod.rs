@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared helpers for CLI subprocess tests (BT-2084).
+//! Shared helpers for CLI subprocess tests.
 //!
 //! These tests use `assert_cmd` to invoke the built `beamtalk` binary
 //! against synthesized fixture projects in temporary directories.
@@ -55,14 +55,14 @@ pub fn beamtalk() -> Command {
     // honours `BEAMTALK_RUNTIME_DIR` first, which keeps `doctor`/`build`/`test`
     // pointing at the in-repo `runtime/` directory.
     cmd.env("BEAMTALK_RUNTIME_DIR", runtime_dir())
-        // BT-3066: Pin the shared, OTP-version-keyed FFI type-spec cache
+        // Pin the shared, OTP-version-keyed FFI type-spec cache
         // (`beamtalk_core::ffi_type_specs::shared_otp_cache_dir`) to a
         // fresh directory per invocation instead of letting it default to
         // the developer/CI machine's persistent cache dir
         // (`dirs::cache_dir()`, e.g. `%LOCALAPPDATA%\beamtalk\otp-specs\`
         // on Windows). That default is *shared across every checkout and
-        // test run on the machine* and outlives `_build/` wipes by design
-        // (BT-2470) — exactly the opposite of what a hermetic subprocess
+        // test run on the machine* and outlives `_build/` wipes by design —
+        // exactly the opposite of what a hermetic subprocess
         // test needs. A single prior extraction failure (e.g. a build
         // worker killed mid-batch) permanently poisons it with negative
         // (`specs_line: ""`) cache entries for every module that failed to
@@ -73,7 +73,7 @@ pub fn beamtalk() -> Command {
         // matching. Long-lived developer machines accumulate this state;
         // ephemeral CI runners mostly don't, which is why this surfaced as
         // a "deterministic on this Windows box" failure rather than a CI
-        // one. BT-3077: every `beamtalk()` call made from a given test
+        // one. Every `beamtalk()` call made from a given test
         // *thread* shares that thread's isolated directory (see
         // `thread_cache_dir`) rather than littering a fresh one per call.
         // libtest runs each `#[test]` on its own worker thread and never
@@ -102,9 +102,9 @@ pub fn beamtalk() -> Command {
 const CACHE_DIR_PREFIX: &str = "beamtalk-cli-test-cache-";
 
 thread_local! {
-    /// This test thread's `BEAMTALK_CACHE_DIR` (BT-3066), created lazily on
+    /// This test thread's `BEAMTALK_CACHE_DIR`, created lazily on
     /// first use and reused by every `beamtalk()` call made from this
-    /// thread (BT-3077) instead of littering a fresh directory per call.
+    /// thread instead of littering a fresh directory per call.
     /// Dropping the `TempDir` deletes it — which happens when this worker
     /// thread exits, i.e. after libtest has run every test scheduled on it
     /// and joins the thread, well after any subprocess using the directory
@@ -113,13 +113,13 @@ thread_local! {
 }
 
 /// Returns this test thread's `BEAMTALK_CACHE_DIR` isolation directory
-/// (BT-3066/BT-3077), creating it on first call from this thread.
+/// creating it on first call from this thread.
 ///
 /// Threads (not the whole process) are the sharing unit because libtest
 /// runs each `#[test]` on its own worker thread and never runs two tests
 /// concurrently on the same thread — so every `beamtalk()` call sharing a
 /// directory is guaranteed sequential, which is what keeps this from
-/// reintroducing the cross-test cache-poisoning race BT-3066 fixed. A
+/// reintroducing the cross-test cache-poisoning race guarded against above. A
 /// process-wide shared directory does not have that guarantee (many test
 /// threads run truly concurrently) and was confirmed to reproduce spurious
 /// `beamtalk lint`/`build` FFI-check failures under parallel test

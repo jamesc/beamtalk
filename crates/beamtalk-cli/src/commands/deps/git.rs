@@ -402,7 +402,7 @@ mod tests {
 
         // file:// URLs need forward slashes. On Windows, paths don't start with
         // `/`, so we prepend one to get `file:///C:/...`. On Unix, `display()`
-        // already starts with `/`, giving `file:///tmp/...` (BT-1737).
+        // already starts with `/`, giving `file:///tmp/...`.
         let mut path_str = to_forward_slash(&repo_path.display().to_string());
         if !path_str.starts_with('/') {
             path_str.insert(0, '/');
@@ -559,7 +559,7 @@ mod tests {
 
     /// A checkout that doesn't match the lock forces a re-clone (the
     /// skip-clone `verify_checkout` guard), but the fresh clone is then held
-    /// to the same lock as any other fresh clone (BT-2992): if the freshly
+    /// to the same lock as any other fresh clone: if the freshly
     /// resolved SHA still doesn't match a lock entry that names this exact
     /// `(url, reference)`, resolution fails instead of silently adopting
     /// whatever commit the reference resolves to now.
@@ -615,7 +615,7 @@ mod tests {
         );
     }
 
-    /// The primary regression this guards against (BT-2992): a fresh clone —
+    /// The primary regression this guards against: a fresh clone —
     /// no local checkout at all, the state of every CI runner and every
     /// `beamtalk clean` — must enforce the lock too, not just the skip-clone
     /// path. Simulates a moved tag by retagging a local `file://` repo onto a

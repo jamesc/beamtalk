@@ -54,12 +54,12 @@ pub(crate) struct DependencyContext {
 /// manifest-less directory build compiles a loose pile of sources with nothing
 /// to enforce a boundary against.
 ///
-/// BT-2965: `--stdlib-mode` is the exception. The stdlib carries no
+/// `--stdlib-mode` is the exception. The stdlib carries no
 /// `beamtalk.toml`, but every file it compiles belongs to one package, so any
 /// manifest-less `--stdlib-mode` build — in practice `beamtalk build
 /// --stdlib-mode <dir>`, what `just dialyzer-specs` runs over a flat copy of
 /// `stdlib/src/*.bt` in a bare temp dir — reports the same identity
-/// `build_stdlib::stdlib_compiler_options` (BT-2964) and the LSP's
+/// `build_stdlib::stdlib_compiler_options` and the LSP's
 /// [`STDLIB_PACKAGE_MARKER`](beamtalk_language_service::STDLIB_PACKAGE_MARKER)
 /// use. (`test_internal_alias_resolves_cross_file_within_stdlib` pins
 /// `build_stdlib`'s hardcoded literal to that constant so the two stdlib
@@ -175,7 +175,7 @@ pub(crate) fn resolve_and_validate_dependencies(
     // ADR 0072: Determine whether native hex deps exist (needed to choose
     // the compilation path later). The actual native compilation is deferred
     // until after Pass 1 so we can generate the beamtalk_classes.hrl header
-    // (BT-1730) that native .erl files can include.
+    // that native .erl files can include.
     let has_native_deps = env
         .full_manifest
         .as_ref()

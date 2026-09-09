@@ -361,7 +361,7 @@ fn run_create_background(
 }
 
 /// `run_create`'s and `run_list`/`run_status`'s success paths now run
-/// against a `BeamtalkHomeOverride`-pointed hermetic tempdir (BT-3370), now
+/// against a `BeamtalkHomeOverride`-pointed hermetic tempdir, now
 /// that `test_support` serializes every `~/.beamtalk`-touching test (real or
 /// overridden) against a shared `RwLock` so an override can never race a
 /// real-directory test in the same test binary.
@@ -376,8 +376,8 @@ fn run_create_background(
 /// real `start_detached_node`), the same live-runtime dependency as
 /// `workspace/process.rs`'s live-node paths.
 ///
-/// BT-3373 decision: not duplicated by a dedicated integration test in this
-/// file. `get_or_start_workspace` already has its own real-BEAM `#[ignore]`d
+/// This function's coverage is not duplicated by a dedicated integration test
+/// in this file. `get_or_start_workspace` already has its own real-BEAM `#[ignore]`d
 /// coverage (`workspace/mod.rs`'s `test_get_or_start_workspace_lifecycle_integration`
 /// and friends); everything this function adds on top of that call is three
 /// `println!`s with no BEAM-node-dependent branching of its own, so a second
@@ -389,7 +389,7 @@ mod tests {
     use crate::commands::test_support::{BeamtalkHomeOverride, WorkspaceFixture};
     use crate::commands::workspace::workspace_exists;
 
-    /// `run_create`'s foreground success path (BT-3370): creates a real
+    /// `run_create`'s foreground success path: creates a real
     /// workspace under an overridden `BEAMTALK_HOME` hermetic tempdir and
     /// confirms both the returned success and the on-disk result, exercising
     /// `run_create`'s own wrapper body (project-root discovery, the
@@ -410,7 +410,7 @@ mod tests {
         );
     }
 
-    /// `run_list`'s success path (BT-3370), both table and `--json` output:
+    /// `run_list`'s success path, both table and `--json` output:
     /// with at least one real workspace present, exercises the non-empty
     /// table-printing loop (current-project marker detection, path
     /// truncation, port formatting) and the JSON-serialization branch —
@@ -428,7 +428,7 @@ mod tests {
         run_list(true).expect("json output should succeed");
     }
 
-    /// `run_status`'s success path (BT-3370): with a real workspace present,
+    /// `run_status`'s success path: with a real workspace present,
     /// exercises this wrapper's own body (age calculation, conditional
     /// node/port/pid lines) rather than just the underlying
     /// `workspace_status()` (already covered in `workspace::mod`'s tests).

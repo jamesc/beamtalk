@@ -41,7 +41,7 @@ const COMPLETION_TIMEOUT: Duration = Duration::from_millis(500);
 pub(crate) struct ReplHelper {
     /// Separate protocol client for completion requests (with short timeout).
     completion_client: RefCell<Option<ProtocolClient>>,
-    /// Host address for reconnection (BT-694).
+    /// Host address for reconnection.
     host: String,
     /// Port for reconnection if the completion client disconnects.
     port: u16,
@@ -131,7 +131,7 @@ impl ReplHelper {
     /// Query the backend for completions given the full line up to the cursor.
     ///
     /// Sends the line context and cursor position so the backend can perform
-    /// receiver-aware method completion (BT-783).
+    /// receiver-aware method completion.
     fn backend_complete(&self, line_to_pos: &str, cursor: usize) -> Vec<String> {
         if line_to_pos.is_empty() {
             return Vec::new();
@@ -150,7 +150,7 @@ impl ReplHelper {
 /// command prefix and pass only the argument to the backend completer so it can
 /// perform the same receiver-aware completion it does for bare expressions.
 ///
-/// BT-3083: derived from `commands::REPL_COMMAND_TABLE` (each entry with
+/// Derived from `commands::REPL_COMMAND_TABLE` (each entry with
 /// `takes_class_expr_arg: true`) rather than a separately hand-maintained
 /// list, so this can't drift from what `classify_command` in `mod.rs`
 /// actually routes to the class/expr argument path.
@@ -245,14 +245,14 @@ impl Completer for ReplHelper {
         // Find the start of the current word (identifier boundary). Colons
         // and `@` are treated as word chars so keyword selectors like
         // `ifTrue:`/`ifTrue:ifFalse:` and qualified names like `json@Parser`
-        // complete as a unit (BT-783 / BT-1659). `completion_word_start` is
-        // the canonical Rust definition (BT-3083), conformance-tested
+        // complete as a unit. `completion_word_start` is
+        // the canonical Rust definition, conformance-tested
         // against `is_identifier_char/1` in `beamtalk_repl_ops_dev.erl` via
         // the shared corpus fixture — see `beamtalk_core::source_analysis`.
         let word_start = completion_word_start(line_to_pos);
 
         // Query backend with full line context so it can perform receiver-aware
-        // method completion (BT-783). The backend parses the receiver from the line.
+        // method completion. The backend parses the receiver from the line.
         let completions = self.backend_complete(line_to_pos, pos);
         let candidates: Vec<Pair> = completions
             .into_iter()
@@ -465,9 +465,9 @@ mod tests {
         assert!(candidates.contains(&":sc".to_string()));
     }
 
-    /// BT-3083: `:actors`/`:kill`/`:inspect`/`:sessions` used to tab-complete
-    /// with no dispatch arm behind them (guaranteed parse error on Enter).
-    /// See `commands.rs`'s module doc for why they were removed rather than
+    /// `:actors`/`:kill`/`:inspect`/`:sessions` must not tab-complete: they
+    /// have no dispatch arm behind them (would guarantee a parse error on
+    /// Enter). See `commands.rs`'s module doc for why they were removed rather than
     /// wired up — the capability lives on `Workspace`/actor message-sends.
     #[test]
     fn test_repl_command_completion_no_longer_offers_dead_actor_commands() {
@@ -480,8 +480,8 @@ mod tests {
         }
     }
 
-    /// BT-3083: `:interrupt`/`:int`/`:recheck` dispatched but were missing
-    /// from tab-completion.
+    /// `:interrupt`/`:int`/`:recheck` dispatch correctly and must also
+    /// appear in tab-completion.
     #[test]
     fn test_repl_command_completion_offers_interrupt_and_recheck() {
         let candidates = command_completions(":");
@@ -496,7 +496,7 @@ mod tests {
         assert!(candidates.is_empty());
     }
 
-    /// BT-2287 / ADR 0082 Phase 3: the `ChangeLog` meta-commands must be
+    /// ADR 0082 Phase 3: the `ChangeLog` meta-commands must be
     /// discoverable via tab completion.
     #[test]
     fn test_repl_command_completion_changelog_commands_present() {
@@ -522,8 +522,7 @@ mod tests {
     }
 
     // Word-boundary behaviour is exercised directly against the canonical
-    // `completion_word_start` (BT-3083: previously a test-only copy of the
-    // Completer's inline closure — now the same production function backs
+    // `completion_word_start` (the same production function backs
     // both the Completer and these tests, and is shared with the LSP's
     // completion provider and conformance-tested against the Erlang REPL
     // engine; see `beamtalk_core::source_analysis`).
@@ -587,7 +586,7 @@ mod tests {
 
     #[test]
     fn test_word_boundary_qualified_name() {
-        // BT-1659: @ is an identifier char so json@Parser stays as one token
+        // @ is an identifier char so json@Parser stays as one token
         let start = completion_word_start("json@Parser");
         assert_eq!(&"json@Parser"[start..], "json@Parser");
     }

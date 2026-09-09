@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Single integration-test binary for the `beamtalk-cli` subprocess test
-//! suite (BT-2823). Consolidating what used to be 11 separate `tests/*.rs`
+//! suite. Consolidating what used to be 11 separate `tests/*.rs`
 //! binaries into modules of one binary avoids re-linking the full
 //! dependency graph (clap, miette, `assert_cmd`, ...) once per file, which
 //! was the dominant contributor to `target/debug` size.

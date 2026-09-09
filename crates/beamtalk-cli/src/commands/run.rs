@@ -40,7 +40,7 @@ use super::workspace;
 ///   delivered as a `List(String)` (ADR 0099). Empty for the unary entry form.
 /// - `connect`: when set (or `workspace` is given), dispatch the entry into a
 ///   live shared workspace over the REPL protocol instead of starting a fresh
-///   run-mode node (BT-2691). Only valid in script mode.
+///   run-mode node. Only valid in script mode.
 /// - `workspace`: explicit workspace name to connect to (implies `connect`);
 ///   disambiguates when a project has more than one.
 #[instrument(skip_all, fields(class_or_dot = %class_or_dot))]
@@ -55,7 +55,7 @@ pub fn run(
 
     // Determine project root (always current directory for run). Canonicalized
     // to an absolute path — service-mode workspace metadata's `project_path`
-    // must never be a bare relative string like "." (BT-3332): a relative
+    // must never be a bare relative string like ".": a relative
     // stored path resolves against whichever process later reads it, not
     // wherever `beamtalk run .` was originally invoked from, which lets an
     // unrelated later invocation collide with a stale workspace.
@@ -98,7 +98,7 @@ pub fn run(
             }
         }
         (class_name, Some(sel)) if connect => {
-            // Connected mode: dispatch into a live shared workspace (BT-2691).
+            // Connected mode: dispatch into a live shared workspace.
             run_connected(&project_root, class_name, sel, args, workspace)
         }
         (class_name, Some(sel)) => {
@@ -113,7 +113,7 @@ pub fn run(
                  Example: beamtalk run {class_name} run"
             ))
         }
-        // BT-2767: unreachable today — the guards above are exhaustive over
+        // Unreachable today — the guards above are exhaustive over
         // every (class_or_dot, selector) combination that argv parsing can
         // produce: `(".", None)`, `(_, Some(_))`, and `(_ != ".", None)`
         // cover the whole space. Rust's guard-based match can't prove that
@@ -230,7 +230,7 @@ fn prepare_eval_environment(
 
     let layout = BuildLayout::new(project_root);
 
-    // BT-1750: Unified BEAM environment — single source of truth for code paths
+    // Unified BEAM environment — single source of truth for code paths
     // and OTP app names. All commands use BeamEnvironment instead of ad-hoc assembly.
     let beam_env = BeamEnvironment::from_layout(&layout, project_root)?;
 
@@ -343,7 +343,7 @@ fn run_script(
     Ok(())
 }
 
-/// Run a class entry method inside a live shared workspace (BT-2691, ADR 0099 §3).
+/// Run a class entry method inside a live shared workspace (ADR 0099 §3).
 ///
 /// The connected counterpart of [`run_script`]: instead of booting a fresh
 /// run-mode node, discover the project's running workspace (registry under
@@ -352,11 +352,11 @@ fn run_script(
 ///
 /// The entry's `Console` output streams back over that connection and is
 /// written to **stdout** as it arrives, while the two status lines this
-/// function prints go to stderr (BT-2702) — so `beamtalk run … --connect | …`
+/// function prints go to stderr — so `beamtalk run … --connect | …`
 /// pipes the program's output and nothing else, exactly as script mode does.
-/// Making that true required the workspace side to route a class method's
-/// output back to the dispatching session (BT-2963); before that fix the output
-/// was silently dropped despite the entry running successfully.
+/// This depends on the workspace side routing a class method's
+/// output back to the dispatching session; without that routing the output
+/// would be silently dropped despite the entry running successfully.
 ///
 /// On completion the connecting process adopts the entry's status:
 ///
@@ -546,7 +546,7 @@ fn format_program_args_list(program_args: &[String]) -> String {
         .join(", ")
 }
 
-/// Run a package as a persistent OTP service (BT-1191, BT-1319).
+/// Run a package as a persistent OTP service.
 ///
 /// Starts a persistent workspace (with REPL server) so that all project classes
 /// are registered via the workspace bootstrap before the OTP application's root
@@ -557,7 +557,7 @@ fn format_program_args_list(program_args: &[String]) -> String {
 /// and exits 0 (idempotent, matching `systemctl start` conventions).
 ///
 /// All status/progress output goes to stderr, matching script and connected
-/// mode (BT-2702, BT-2889): `beamtalk run`'s stdout is program output only.
+/// mode: `beamtalk run`'s stdout is program output only.
 fn run_package_as_otp_application(
     project_root: &Utf8PathBuf,
     pkg: &manifest::PackageManifest,
@@ -587,7 +587,7 @@ fn run_package_as_otp_application(
 
     let layout = BuildLayout::new(project_root);
 
-    // BT-1750: Unified BEAM environment for service mode
+    // Unified BEAM environment for service mode
     let beam_env = BeamEnvironment::from_layout(&layout, project_root)?;
     let extra_code_paths = beam_env.code_paths_std();
     let ebin_dir: PathBuf = layout.ebin_dir().into_std_path_buf();
@@ -647,7 +647,7 @@ fn run_package_as_otp_application(
 ///
 /// Short hostnames (e.g. `localhost`) require `-sname`; fully qualified
 /// hostnames (containing `.`) require `-name`. Using `-name` with `localhost`
-/// causes Erlang to reject it as "illegal" (BT-1418).
+/// causes Erlang to reject it as "illegal".
 fn node_name_flag(node_name: &str) -> &'static str {
     if let Some((_local, host)) = node_name.split_once('@') {
         if host.contains('.') {
@@ -830,7 +830,7 @@ mod tests {
         );
     }
 
-    // --- BT-2691: connected-mode `beamtalk run --connect` ---
+    // --- connected-mode `beamtalk run --connect` ---
 
     #[test]
     #[serial(cwd)]
@@ -1119,7 +1119,7 @@ mod tests {
         );
     }
 
-    // --- ADR 0099 Phase 2: arity-1 keyword entry + program_name (BT-2686) ---
+    // --- ADR 0099 Phase 2: arity-1 keyword entry + program_name ---
 
     #[test]
     fn test_validate_accepts_unary_selector() {

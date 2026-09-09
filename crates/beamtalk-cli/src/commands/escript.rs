@@ -53,7 +53,7 @@ pub fn build_escript(
         resolve_entry_and_output(entry, output, pkg.as_ref().map(|p| p.name.as_str()))?;
 
     // Compile the project (produces the project `bt@*.beam`).
-    // Status output goes to stderr, matching `beamtalk run` (BT-2702, BT-2889).
+    // Status output goes to stderr, matching `beamtalk run`.
     eprintln!("Building...");
     super::build::build(project_root.as_str(), options, force)?;
 
@@ -153,7 +153,7 @@ pub fn build_escript(
 /// `output` wins when given explicitly; otherwise the name is derived from
 /// `pkg_name` (the manifest package name, lowercased). Pulled out of
 /// [`build_escript`] as a pure seam so its argument-validation bail branches
-/// are unit-testable without a real build (BT-3381).
+/// are unit-testable without a real build.
 fn resolve_entry_and_output(
     entry: Option<&str>,
     output: Option<&str>,

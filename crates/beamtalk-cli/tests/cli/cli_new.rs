@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Subprocess tests for `beamtalk new` (BT-2084).
+//! Subprocess tests for `beamtalk new`.
 
 use crate::cli_common;
 

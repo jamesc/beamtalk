@@ -290,7 +290,7 @@ fn test_build_alias_metadata_preserves_declaration_order() {
     assert_eq!(names, vec!["Zebra", "Alpha"]);
 }
 
-// BT-3067: `source_file` is written verbatim into the checked-in
+// `source_file` is written verbatim into the checked-in
 // `beamtalk_stdlib.app.src`, so it must be identical regardless of the
 // host OS that generated it. Uses a `Utf8PathBuf` built directly from a
 // backslash-containing string (rather than `Utf8Path::join`, whose

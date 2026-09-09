@@ -4,7 +4,7 @@
 //! Build script for beamtalk-cli.
 //!
 //! Injects the `BEAMTALK_VERSION` compile-time env var from VERSION + git state,
-//! and the `BEAMTALK_SPEC_MAPPING_STAMP` env var (BT-2852) — a content hash of
+//! and the `BEAMTALK_SPEC_MAPPING_STAMP` env var — a content hash of
 //! `beamtalk_spec_reader.erl` used to invalidate the FFI type-spec cache when
 //! the compiler's Erlang→Beamtalk type-mapping logic changes. The Erlang
 //! runtime is built by `just build-erlang`, not here.

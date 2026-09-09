@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Metamorphic testing harness (BT-3117).
+//! Metamorphic testing harness.
 //!
 //! **DDD Context:** CLI / Test System
 //!
@@ -922,7 +922,7 @@ fn process_test_file(
 // Main entry point
 // ============================================================================
 
-/// Run the metamorphic testing harness (BT-3117).
+/// Run the metamorphic testing harness.
 ///
 /// Finds all `.btscript` files in the given path, applies each transform in
 /// [`Transform::ALL`] to every `// =>` expression, and asserts each

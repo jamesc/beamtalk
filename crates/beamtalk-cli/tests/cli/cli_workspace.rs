@@ -1,15 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Subprocess tests for `beamtalk workspace {list,status,stop,create}`
-//! (BT-3326).
+//! Subprocess tests for `beamtalk workspace {list,status,stop,create}`.
 //!
 //! `workspace create` (without `--background`) and a bare `workspace list`
 //! success path both write real state under the machine's `~/.beamtalk`
-//! directory. `beamtalk_home`'s `BEAMTALK_HOME` override (BT-3364) now
+//! directory. `beamtalk_home`'s `BEAMTALK_HOME` override now
 //! exists, but redirecting these subprocess tests through it needs a
 //! serialization strategy shared with every other non-`#[serial]` test that
-//! touches the real directory (BT-3370), so this file still sticks to
+//! touches the real directory, so this file still sticks to
 //! read-only and validation-only paths that never persist anything:
 //! `list`/`status` against workspaces that don't exist, and the
 //! `create --background` flag-validation errors that fire *before* any

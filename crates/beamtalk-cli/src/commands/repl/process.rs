@@ -67,7 +67,7 @@ pub(crate) fn start_beam_node(
         warn!("Stdlib not compiled — run `beamtalk build-stdlib` to enable stdlib classes in REPL");
     }
 
-    // Build the eval command using the shared builder (BT-390)
+    // Build the eval command using the shared builder
     let eval_cmd = if let Some(name) = node_name {
         // Validate node name to prevent injection into Erlang eval string
         if !name
@@ -126,7 +126,7 @@ pub(crate) fn start_beam_node(
     let mut cmd = Command::new("erl");
     cmd.arg("-noshell")
         .args(&args)
-        // Redirect OTP default logger to stderr from boot (BT-1431). The startup
+        // Redirect OTP default logger to stderr from boot. The startup
         // prelude removes the default handler, but there's a window between VM
         // start and the -eval code where early events (e.g. application startup
         // failures) would otherwise go to stdout and be parsed as protocol.
@@ -170,7 +170,7 @@ pub(crate) fn connect_with_retries(host: &str, port: u16, cookie: &str) -> Resul
 /// [`connect_with_retries`]'s retry loop, parameterized on attempt count/delay
 /// so tests can exhaust retries against a dead/unreachable port without
 /// paying `MAX_CONNECT_RETRIES * RETRY_DELAY_MS` of real wall-clock time
-/// (mirrors `client.rs`'s `reconnect_with_retries`, BT-3375).
+/// (mirrors `client.rs`'s `reconnect_with_retries`).
 fn connect_with_retries_and_delay(
     host: &str,
     port: u16,
@@ -264,7 +264,7 @@ pub(crate) fn read_port_from_child(child: &mut Child) -> Result<u16> {
     ))
 }
 
-/// Drain stderr from a BEAM child process in a background thread (BT-1431).
+/// Drain stderr from a BEAM child process in a background thread.
 ///
 /// OTP logger output and VM diagnostics go to stderr. Without draining, the
 /// pipe buffer fills up and the BEAM node blocks. Lines are logged via

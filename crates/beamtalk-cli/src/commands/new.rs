@@ -140,7 +140,7 @@ version = "0.1.0"
 /// formatter unless it exceeds the line-width budget, in which case it stays
 /// multi-line. Running each generated `.bt` file through the same formatter
 /// `beamtalk fmt` uses guarantees a freshly scaffolded project passes its own
-/// `fmt-check` out of the box, regardless of package-name length (BT-2476).
+/// `fmt-check` out of the box, regardless of package-name length.
 ///
 /// Falls back to the raw template if formatting fails (it should not for our
 /// templates, which are always syntactically valid).
@@ -741,7 +741,7 @@ mod tests {
         out
     }
 
-    /// Regression guard for BT-2476: a freshly scaffolded project must be
+    /// Regression guard: a freshly scaffolded project must be
     /// fmt-clean, so `beamtalk fmt-check` exits 0 (and the scaffolded CI's
     /// formatting gate passes) the moment the project is created. We assert
     /// every generated `.bt` file is already in canonical form by checking it

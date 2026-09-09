@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Persistent metadata cache for incremental Pass 1 builds (BT-1683).
+//! Persistent metadata cache for incremental Pass 1 builds.
 //!
 //! Serialises the class indexes and `ClassInfo` vectors that Pass 1 produces so
 //! that unchanged files can be skipped on the next build. The cache stores
 //! per-file metadata keyed by source path, together with a SHA-256 hash of the
-//! file's contents so staleness can be detected correctly (BT-3120) — mtime is
+//! file's contents so staleness can be detected correctly — mtime is
 //! not used for this decision because it lies under git operations (branch
 //! switches restore old content under a fresh mtime) and under tools that
 //! preserve or backdate mtimes on write, either of which can make an
@@ -43,10 +43,10 @@ use super::util::{content_hashes_of, mtime_of};
 const CACHE_FILENAME: &str = ".beamtalk-pass1-cache.json";
 
 /// Current cache format version. Bump when the serialised layout changes.
-/// v2: `ClassInfo` gained `surface_incomplete` (BT-2796); entries gained
-/// per-file extension definitions (BT-2795).
+/// v2: `ClassInfo` gained `surface_incomplete`; entries gained
+/// per-file extension definitions.
 /// v3: `CacheEntry.mtime` replaced by `CacheEntry.content_hash` — staleness
-/// is now keyed on file content, not filesystem mtime (BT-3120).
+/// is now keyed on file content, not filesystem mtime.
 const CACHE_VERSION: u32 = 3;
 
 /// On-disk representation of the Pass 1 metadata cache.
@@ -72,8 +72,8 @@ pub(crate) struct Pass1Cache {
 /// Cached metadata for a single source file.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct CacheEntry {
-    /// SHA-256 content hash of the source file when this entry was recorded
-    /// (BT-3120). The source of truth for staleness — see the module doc for
+    /// SHA-256 content hash of the source file when this entry was recorded.
+    /// The source of truth for staleness — see the module doc for
     /// why mtime isn't used.
     content_hash: String,
 
@@ -88,7 +88,7 @@ pub(crate) struct CacheEntry {
     /// Full `ClassInfo` entries extracted from this file.
     class_infos: Vec<ClassInfo>,
 
-    /// Standalone extension definitions in this file (BT-2795),
+    /// Standalone extension definitions in this file,
     /// keyed by `(class, side, selector)`.
     #[serde(default)]
     extensions: Vec<(ExtensionKey, Vec<ExtensionLocation>)>,
@@ -102,15 +102,15 @@ pub(crate) struct IncrementalPass1Result {
     pub class_superclass_index: HashMap<String, String>,
     /// Merged `ClassInfo` vector.
     pub all_class_infos: Vec<ClassInfo>,
-    /// Merged project-wide extension index (BT-2795).
+    /// Merged project-wide extension index.
     pub extension_index: ExtensionIndex,
     /// Cached ASTs for files that were re-scanned in this build.
     pub cached_asts: HashMap<Utf8PathBuf, super::build::CachedAst>,
     /// Whether the manifest changed and forced a full cache invalidation.
     /// When true, Pass 2 should also force-recompile all files.
     pub manifest_invalidated: bool,
-    /// Content hash of every file in `source_files`, keyed by path string
-    /// (BT-3120) — computed once for this Pass 1 pass and handed back so
+    /// Content hash of every file in `source_files`, keyed by path string —
+    /// computed once for this Pass 1 pass and handed back so
     /// Pass 2's `detect_changes` can reuse them instead of re-hashing every
     /// file's content a second time. See [`super::util::content_hashes_of`].
     pub source_hashes: HashMap<String, String>,
@@ -227,7 +227,7 @@ pub(crate) fn discard_pass1_cache(build_dir: &Utf8Path) {
 }
 
 /// Name of the sidecar file recording, for each source file, the content
-/// hash that produced its currently-compiled `.beam` (BT-3120).
+/// hash that produced its currently-compiled `.beam`.
 const BEAM_HASH_CACHE_FILENAME: &str = ".beamtalk-beam-hashes.json";
 
 /// Format version for the beam-hash sidecar. Bump when the layout changes.
@@ -311,7 +311,7 @@ pub(crate) fn save_beam_hash_cache(build_dir: &Utf8Path, hashes: &HashMap<String
 }
 
 /// Name of the sidecar file recording, for each source file, the diagnostics
-/// produced the last time it was actually compiled (BT-3410).
+/// produced the last time it was actually compiled.
 const DIAGNOSTICS_CACHE_FILENAME: &str = ".beamtalk-diagnostics-cache.json";
 
 /// Format version for the diagnostics sidecar. Bump when the layout changes.
@@ -333,7 +333,7 @@ struct DiagnosticsCache {
     diagnostics: HashMap<String, Vec<beamtalk_core::source_analysis::Diagnostic>>,
 }
 
-/// Load the diagnostics sidecar for `build_dir` (BT-3410).
+/// Load the diagnostics sidecar for `build_dir`.
 ///
 /// Returns an empty map on any miss — no file, corrupt JSON, or a version
 /// mismatch. Unlike the beam-hash sidecar (where a miss means "assume
@@ -377,7 +377,7 @@ pub(crate) fn load_diagnostics_cache(
     cache.diagnostics
 }
 
-/// Save the diagnostics sidecar to `build_dir` (BT-3410).
+/// Save the diagnostics sidecar to `build_dir`.
 ///
 /// Call with the diagnostics for every file in this build's `file_module_pairs`
 /// (both freshly compiled and unchanged-and-replayed) so a file removed from
@@ -429,7 +429,7 @@ pub(crate) fn incremental_build_class_module_index(
     manifest_path: Option<&Utf8Path>,
     force: bool,
 ) -> Result<IncrementalPass1Result> {
-    // BT-3120: hash every source file's content exactly once for this Pass 1
+    // Hash every source file's content exactly once for this Pass 1
     // pass. `partition_files` (staleness) and `build_cache_entries` (the
     // updated cache) both need every file's hash; computing it once here and
     // passing it into both — instead of each calling `content_hash_of`
@@ -581,11 +581,11 @@ pub(crate) fn incremental_build_class_module_index(
 ///
 /// `hashes` is `source_files`' content hashes, keyed by path string —
 /// precomputed once by the caller via [`content_hashes_of`] rather than
-/// hashed again per file here (BT-3120).
+/// hashed again per file here.
 ///
 /// A file is considered stale if:
 /// - It has no cache entry
-/// - Its content hash differs from the cached content hash (BT-3120)
+/// - Its content hash differs from the cached content hash
 /// - Its content cannot be read (err on the side of re-scanning)
 fn partition_files(
     source_files: &[Utf8PathBuf],
@@ -624,7 +624,7 @@ fn partition_files(
 
 /// The merged Pass 1 indexes `build_cache_entries` reads from — bundled into
 /// one borrow so the function stays under clippy's argument-count limit
-/// (BT-3120 added the `hashes` parameter, which would otherwise push it over).
+/// (the `hashes` parameter would otherwise push it over).
 /// Mirrors the corresponding fields of [`IncrementalPass1Result`].
 struct Pass1Indexes<'a> {
     class_module_index: &'a HashMap<String, String>,
@@ -635,8 +635,8 @@ struct Pass1Indexes<'a> {
 
 /// Build cache entries from the current Pass 1 results.
 ///
-/// Each source file gets an entry with its current content hash (BT-3120,
-/// taken from the precomputed `hashes` map — see [`content_hashes_of`] —
+/// Each source file gets an entry with its current content hash (taken
+/// from the precomputed `hashes` map — see [`content_hashes_of`] —
 /// rather than re-hashed here) and the subset of class/superclass indexes
 /// that belong to it (determined by module name prefix matching).
 fn build_cache_entries(
@@ -903,7 +903,7 @@ mod tests {
         assert_eq!(stale, vec![file_c]);
     }
 
-    /// BT-3120: a file whose content changed but whose mtime was backdated
+    /// A file whose content changed but whose mtime was backdated
     /// (or preserved) by the writing tool must still be detected as stale —
     /// staleness comes from the content hash, never from mtime.
     #[test]
@@ -959,7 +959,7 @@ mod tests {
         assert!(fresh.is_empty());
     }
 
-    /// BT-3120: rewriting identical content (e.g. a `touch`, or a build tool
+    /// Rewriting identical content (e.g. a `touch`, or a build tool
     /// that always rewrites its output) bumps mtime but must not be treated
     /// as stale — only a content change should trigger re-scanning.
     #[test]
@@ -1002,7 +1002,7 @@ mod tests {
         assert!(stale.is_empty());
     }
 
-    /// BT-3120 acceptance criterion: build with content A, then simulate a
+    /// Acceptance criterion: build with content A, then simulate a
     /// `git checkout` that restores older content B under a *newer* mtime
     /// (git always sets mtime to the checkout time, regardless of the
     /// content's age) — the cache must still detect the content change and
@@ -1125,7 +1125,7 @@ mod extension_cache_tests {
     use super::*;
     use tempfile::TempDir;
 
-    /// BT-2795: extensions must survive the Pass 1 cache round-trip — first
+    /// Extensions must survive the Pass 1 cache round-trip — first
     /// build scans and saves them; a second build with unchanged files must
     /// restore the same project-wide extension index from cache alone, and a
     /// deleted file's cached extensions must disappear.
@@ -1156,7 +1156,7 @@ mod extension_cache_tests {
         )
         .unwrap();
         assert_eq!(first.extension_index.len(), 1, "extension scanned");
-        // BT-3120: Pass 1 hands back every scanned file's content hash so
+        // Pass 1 hands back every scanned file's content hash so
         // Pass 2 (`detect_changes`) can reuse it instead of re-hashing.
         assert_eq!(
             first.source_hashes.len(),
@@ -1194,7 +1194,7 @@ mod extension_cache_tests {
             1,
             "cached extension regroups under its defining file"
         );
-        // BT-3120: even on an all-fresh (cache-hit) build, every file is
+        // Even on an all-fresh (cache-hit) build, every file is
         // still hashed once so `source_hashes` stays complete for Pass 2 —
         // the fresh/stale split only affects re-scanning, not hashing.
         assert_eq!(
