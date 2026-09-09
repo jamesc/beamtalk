@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::core_erlang::CoreErlangGenerator;
-use beamtalk_core::ast::{Expression, Identifier, Literal, MatchArm, MessageSelector, Pattern};
+use beamtalk_core::ast::{
+    Expression, Identifier, Literal, MapPatternKey, MapPatternPair, MatchArm, MessageSelector,
+    Pattern,
+};
 use beamtalk_core::source_analysis::Span;
 
 fn s() -> Span {
@@ -300,5 +303,225 @@ fn test_match_mixes_primitive_type_arm_and_native_arm_in_one_case() {
     assert!(
         output.contains("<42>"),
         "Should still contain the native literal arm. Got: {output}"
+    );
+}
+
+// ── destructure.rs: edge / error-path coverage ───────────────────────────────
+
+fn var_pat(name: &str) -> Pattern {
+    Pattern::Variable(Identifier::new(name, s()))
+}
+
+fn array_pat(elements: Vec<Pattern>) -> Pattern {
+    Pattern::Array {
+        elements,
+        rest: None,
+        list_syntax: false,
+        span: s(),
+    }
+}
+
+fn tuple_pat(elements: Vec<Pattern>) -> Pattern {
+    Pattern::Tuple {
+        elements,
+        span: s(),
+    }
+}
+
+fn map_pat(pairs: Vec<MapPatternPair>) -> Pattern {
+    Pattern::Map { pairs, span: s() }
+}
+
+fn sym_pair(key: &str, value: Pattern) -> MapPatternPair {
+    MapPatternPair {
+        key: MapPatternKey::Symbol(key.into()),
+        value,
+        span: s(),
+    }
+}
+
+// generate_destructure_bindings_from_var: exercises the delegating path through
+// generate_pattern_extractions_from_var with a pre-evaluated RHS variable.
+#[test]
+fn destructure_bindings_from_var_tuple_emits_element_extractions() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let pat = tuple_pat(vec![var_pat("a"), var_pat("b")]);
+    let docs = generator
+        .generate_destructure_bindings_from_var(&pat, "Tup1")
+        .unwrap();
+    let out: String = docs
+        .iter()
+        .map(beamtalk_cerl_doc::Document::to_pretty_string)
+        .collect();
+    assert!(
+        out.contains("'erlang':'tuple_size'"),
+        "should emit arity check. Got: {out}"
+    );
+    assert!(
+        out.contains("'erlang':'element'(1"),
+        "should extract element 1. Got: {out}"
+    );
+    assert!(
+        out.contains("'erlang':'element'(2"),
+        "should extract element 2. Got: {out}"
+    );
+}
+
+// generate_destructure_bindings (which calls generate_destructure_extractions)
+// with a Map pattern: exercises the Map arm at line 107 in destructure.rs.
+#[test]
+fn destructure_bindings_map_pattern_emits_map_get() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let pat = map_pat(vec![sym_pair("key", var_pat("v"))]);
+    let docs = generator
+        .generate_destructure_bindings(&pat, &int_expr(1))
+        .unwrap();
+    let out: String = docs
+        .iter()
+        .map(beamtalk_cerl_doc::Document::to_pretty_string)
+        .collect();
+    assert!(
+        out.contains("'erlang':'map_get'"),
+        "Map destructuring should use erlang:map_get. Got: {out}"
+    );
+    assert!(
+        out.contains("'key'"),
+        "Map key atom should appear. Got: {out}"
+    );
+}
+
+// Array Pattern::Literal: exercises the guard-check block in the Array branch.
+#[test]
+fn destructure_array_literal_element_emits_guard_check() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let pat = array_pat(vec![Pattern::Literal(Literal::Integer(42), s())]);
+    let (docs, _) = generator
+        .generate_pattern_extractions_from_var(&pat, "Arr1", "let ", " in ")
+        .unwrap();
+    let out: String = docs
+        .iter()
+        .map(beamtalk_cerl_doc::Document::to_pretty_string)
+        .collect();
+    assert!(
+        out.contains("'beamtalk_message_dispatch':'send'"),
+        "should extract element via message dispatch. Got: {out}"
+    );
+    assert!(out.contains("'at:'"), "should use at: selector. Got: {out}");
+    assert!(
+        out.contains("<42>"),
+        "should guard-check against the literal. Got: {out}"
+    );
+    assert!(
+        out.contains("'badmatch'"),
+        "mismatch should raise badmatch. Got: {out}"
+    );
+}
+
+// Array Pattern::Wildcard: exercises line 204 — wildcard produces no binding.
+#[test]
+fn destructure_array_wildcard_element_produces_no_bindings() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let pat = array_pat(vec![Pattern::Wildcard(s())]);
+    let (docs, bound) = generator
+        .generate_pattern_extractions_from_var(&pat, "Arr1", "let ", " in ")
+        .unwrap();
+    assert!(
+        docs.is_empty(),
+        "wildcard should emit no let-bindings. Got {docs:?}"
+    );
+    assert!(bound.is_empty(), "wildcard should produce no bound pairs");
+}
+
+// Tuple Pattern::Literal: exercises the guard-check block in the Tuple branch.
+#[test]
+fn destructure_tuple_literal_element_emits_guard_check() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let pat = tuple_pat(vec![Pattern::Literal(Literal::Integer(7), s())]);
+    let (docs, _) = generator
+        .generate_pattern_extractions_from_var(&pat, "Tup1", "let ", " in ")
+        .unwrap();
+    let out: String = docs
+        .iter()
+        .map(beamtalk_cerl_doc::Document::to_pretty_string)
+        .collect();
+    assert!(
+        out.contains("'erlang':'tuple_size'"),
+        "should emit arity check. Got: {out}"
+    );
+    assert!(
+        out.contains("'erlang':'element'"),
+        "should extract the element. Got: {out}"
+    );
+    assert!(
+        out.contains("<7>"),
+        "should guard-check against the literal. Got: {out}"
+    );
+    assert!(
+        out.contains("'badmatch'"),
+        "mismatch should raise badmatch. Got: {out}"
+    );
+}
+
+// Map Pattern::Wildcard value: wildcard value in a map pair skips binding.
+#[test]
+fn destructure_map_wildcard_value_produces_no_binding() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let pat = map_pat(vec![sym_pair("key", Pattern::Wildcard(s()))]);
+    let (docs, bound) = generator
+        .generate_pattern_extractions_from_var(&pat, "Map1", "let ", " in ")
+        .unwrap();
+    assert!(
+        docs.is_empty(),
+        "map wildcard should emit no bindings. Got {docs:?}"
+    );
+    assert!(bound.is_empty(), "map wildcard should have no bound pairs");
+}
+
+// Array nested pattern: exercises the error arm for unsupported nested patterns in the Array branch.
+#[test]
+fn destructure_array_nested_pattern_returns_error() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let nested = array_pat(vec![var_pat("x")]);
+    let pat = array_pat(vec![nested]);
+    let result = generator.generate_pattern_extractions_from_var(&pat, "Arr1", "let ", " in ");
+    assert!(result.is_err(), "nested array pattern should be an error");
+}
+
+// Tuple nested pattern: exercises the error arm for unsupported nested patterns in the Tuple branch.
+#[test]
+fn destructure_tuple_nested_pattern_returns_error() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let nested = tuple_pat(vec![var_pat("x")]);
+    let pat = tuple_pat(vec![nested]);
+    let result = generator.generate_pattern_extractions_from_var(&pat, "Tup1", "let ", " in ");
+    assert!(result.is_err(), "nested tuple pattern should be an error");
+}
+
+// Map nested pattern value: exercises the error arm for unsupported nested patterns in the Map branch.
+#[test]
+fn destructure_map_nested_pattern_returns_error() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let nested_val = tuple_pat(vec![var_pat("x")]);
+    let pat = map_pat(vec![sym_pair("key", nested_val)]);
+    let result = generator.generate_pattern_extractions_from_var(&pat, "Map1", "let ", " in ");
+    assert!(
+        result.is_err(),
+        "unsupported map value pattern should be an error"
+    );
+}
+
+// Unsupported outer pattern kind: exercises the catch-all error arm in generate_pattern_extractions_from_var.
+#[test]
+fn destructure_unsupported_outer_pattern_returns_error() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let result = generator.generate_pattern_extractions_from_var(
+        &Pattern::Wildcard(s()),
+        "X",
+        "let ",
+        " in ",
+    );
+    assert!(
+        result.is_err(),
+        "a bare Wildcard at top level should be an unsupported-pattern error"
     );
 }
