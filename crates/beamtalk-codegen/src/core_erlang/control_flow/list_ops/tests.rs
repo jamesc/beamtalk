@@ -28,7 +28,7 @@ fn test_list_collect_generates_map() {
 
 #[test]
 fn test_list_inject_into_pure_generates_inline_foldl() {
-    // BT-1327: inject:into: (no mutations) with a literal block emits inline
+    // inject:into: (no mutations) with a literal block emits inline
     // lists:foldl with the block body compiled directly in foldl arg order
     // (Elem, Acc) — no wrapper function, no runtime helper call.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items inject: 0 into: [:acc :item | acc + item]\n";
@@ -51,7 +51,7 @@ fn test_list_inject_into_pure_generates_inline_foldl() {
 
 #[test]
 fn test_list_inject_into_non_literal_generates_wrapper() {
-    // BT-1327: inject:into: with a non-literal block (variable) emits inline
+    // inject:into: with a non-literal block (variable) emits inline
     // lists:foldl with an arg-swap wrapper: fun (Elem, Acc) -> apply Block (Acc, Elem).
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items inject: 0 into: block\n";
     let code = codegen(src);
@@ -89,7 +89,7 @@ fn test_list_do_with_field_mutation_threads_state() {
 
 #[test]
 fn test_bt1290_local_var_captured_by_nested_timer_block() {
-    // BT-1290: local var `y` assigned in do: block must be capturable by a nested block.
+    // local var `y` assigned in do: block must be capturable by a nested block.
     // Before the fix, `let Y = ... in <Timer_case_expr> in StateAcc` was generated,
     // which is invalid Core Erlang (orphaned `in StateAcc` after a closed expression).
     // After the fix, `let Y = ... in let _ = <Timer_case_expr> in StateAcc` is generated.
@@ -109,7 +109,7 @@ fn test_bt1290_local_var_captured_by_nested_timer_block() {
         "Y should be captured by nested block. Got:\n{code}"
     );
     // The foldl lambda must use `let _ = <Timer_expr> in StateAcc`, not bare `<Timer_expr> in StateAcc`
-    // BT-1639: Timer is now a direct call (no class_registry lookup), so check
+    // Timer is now a direct call (no class_registry lookup), so check
     // for the `let _ =` wrapping of the Timer class method call.
     assert!(
         code.contains("let _ = call 'bt@stdlib@timer':'class_after:do:'"),
@@ -119,9 +119,9 @@ fn test_bt1290_local_var_captured_by_nested_timer_block() {
 
 #[test]
 fn test_bt1291_destructure_then_on_do_last_expr() {
-    // BT-1291: #[...] list destructuring (has_plain_lets=true) followed by
-    // `on:Exception do:` as the last expression produced the same invalid
-    // `<bindings> in <on_do_expr> in StateAcc` pattern fixed by BT-1290.
+    // #[...] list destructuring (has_plain_lets=true) followed by
+    // `on:Exception do:` as the last expression produces the same
+    // `<bindings> in <on_do_expr> in StateAcc` pattern as the case above.
     let src = concat!(
         "Actor subclass: BugDemo\n",
         "  tick =>\n",
@@ -141,7 +141,7 @@ fn test_bt1291_destructure_then_on_do_last_expr() {
 
 #[test]
 fn test_bt1290_field_mutation_then_general_last_expr() {
-    // BT-1290: same fix also applies when has_mutations=true (field write before general last expr).
+    // same fix also applies when has_mutations=true (field write before general last expr).
     // Before the fix: `let StateAcc1 = maps:put(...) in <external_call> in StateAcc1` — invalid.
     // After the fix: `let StateAcc1 = maps:put(...) in let _ = <external_call> in StateAcc1`.
     let src = concat!(
@@ -152,7 +152,7 @@ fn test_bt1290_field_mutation_then_general_last_expr() {
     );
     let code = codegen(src);
     // The last expr (Timer send) must be wrapped with `let _ =`
-    // BT-1639: Timer is now a direct call (no class_registry lookup), so check
+    // Timer is now a direct call (no class_registry lookup), so check
     // for the `let _ =` wrapping of the Timer class method call.
     assert!(
         code.contains("let _ = call 'bt@stdlib@timer':'class_after:do:'"),
@@ -205,7 +205,7 @@ fn test_list_collect_multi_stmt_first_is_pure_generates_let_underscore() {
     );
 }
 
-// ── BT-1276: Tuple-accumulator tests ──────────────────────────────────
+// ── Tuple-accumulator tests ──────────────────────────────────
 
 #[test]
 fn test_do_with_local_mutation_uses_tuple_acc() {
@@ -276,7 +276,7 @@ fn test_inject_with_local_mutation_uses_tuple_acc() {
 
 #[test]
 fn test_inject_literal_initial_elides_acc_maybe_await() {
-    // BT-1304 (now trivially passing since BT-1321 removed all maybe_await from binary ops):
+    // Binary op codegen no longer emits maybe_await on any operand, so
     // maybe_await is never emitted on the fold accumulator.
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    items inject: 0 into: [:acc :item | count := count + 1. acc + item]\n";
     let code = codegen(src);
@@ -288,7 +288,7 @@ fn test_inject_literal_initial_elides_acc_maybe_await() {
 
 #[test]
 fn test_inject_sync_var_initial_elides_acc_maybe_await() {
-    // BT-1304 (now trivially passing since BT-1321 removed all maybe_await from binary ops):
+    // Binary op codegen no longer emits maybe_await on any operand, so
     // maybe_await is never emitted on the fold accumulator.
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items start: start =>\n    count := 0\n    items inject: start into: [:acc :item | count := count + 1. acc + item]\n";
     let code = codegen(src);
@@ -300,7 +300,7 @@ fn test_inject_sync_var_initial_elides_acc_maybe_await() {
 
 #[test]
 fn test_inject_non_literal_initial_no_maybe_await() {
-    // BT-1321: Binary op codegen no longer emits maybe_await on any operand (ADR-0043).
+    // Binary op codegen no longer emits maybe_await on any operand (ADR-0043).
     // Even when the initial accumulator is a non-literal field read, the generated
     // binary op for `acc + item` must not wrap either operand with maybe_await.
     let src = "Actor subclass: Ctr\n  state: x = 0\n  state: initial = 0\n\n  run: items =>\n    count := 0\n    items inject: self.initial into: [:acc :item | count := count + 1. acc + item]\n";
@@ -317,7 +317,7 @@ fn test_inject_non_literal_initial_no_maybe_await() {
 
 #[test]
 fn test_inject_non_literal_initial_no_maybe_await_map_acc() {
-    // BT-1321: Binary op codegen no longer emits maybe_await (ADR-0043), even on the
+    // Binary op codegen no longer emits maybe_await (ADR-0043), even on the
     // map-accumulator path when the initial is a non-literal field read.
     let src = "Actor subclass: Ctr\n  state: count = 0\n  state: initial = 0\n\n  run: items =>\n    items inject: self.initial into: [:acc :item | self.count := self.count + 1. acc + item]\n";
     let code = codegen(src);
@@ -333,7 +333,7 @@ fn test_inject_non_literal_initial_no_maybe_await_map_acc() {
 
 #[test]
 fn test_inject_nested_scope_no_maybe_await() {
-    // BT-1321: Binary op codegen no longer emits maybe_await on any operand (ADR-0043).
+    // Binary op codegen no longer emits maybe_await on any operand (ADR-0043).
     // Verifies that neither the outer nor the inner fold's accumulator is wrapped.
     let src = concat!(
         "Actor subclass: Ctr\n",
@@ -355,7 +355,7 @@ fn test_inject_nested_scope_no_maybe_await() {
 
 #[test]
 fn test_filter_with_local_mutation_uses_tuple_acc() {
-    // BT-1276: select: with only local mutation should use tuple accumulator.
+    // select: with only local mutation should use tuple accumulator.
     // element(2, ...) reads the first threaded var (slot 1 is AccList).
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    items select: [:item | count := count + 1. item > 0]\n";
     let code = codegen(src);
@@ -371,7 +371,7 @@ fn test_filter_with_local_mutation_uses_tuple_acc() {
 
 #[test]
 fn test_collect_with_mutation_has_list_like_result() {
-    // BT-1489/BT-2342: collect: with mutations reconstructs the result to match the
+    // collect: with mutations reconstructs the result to match the
     // receiver via beamtalk_collection:from_list_like/2 (String → binary, Array → Array,
     // list → list), mirroring the pure collect: path.
     let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items collect: [:x | self.n := self.n + 1. x]\n";
@@ -384,7 +384,7 @@ fn test_collect_with_mutation_has_list_like_result() {
 
 #[test]
 fn test_select_with_mutation_has_list_like_result() {
-    // BT-1489/BT-2342: select: with mutations reconstructs the result to match the
+    // select: with mutations reconstructs the result to match the
     // receiver via beamtalk_collection:from_list_like/2.
     let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items select: [:x | self.n := self.n + 1. x > 0]\n";
     let code = codegen(src);
@@ -394,7 +394,7 @@ fn test_select_with_mutation_has_list_like_result() {
     );
 }
 
-// ── BT-1487: takeWhile/dropWhile/groupBy/partition/sort ──────────────
+// ── takeWhile/dropWhile/groupBy/partition/sort ──────────────
 
 #[test]
 fn test_take_while_with_mutation_compiles() {
@@ -490,10 +490,10 @@ fn test_drop_while_pure_generates_dropwhile() {
 
 #[test]
 fn test_any_satisfy_pure_generates_lists_any() {
-    // BT-1481: Pure anySatisfy: (no mutations) delegates to lists:any/2 with an
+    // Pure anySatisfy: (no mutations) delegates to lists:any/2 with an
     // is_list guard so non-list receivers fall back to beamtalk_message_dispatch:send
-    // (BT-3380: not beamtalk_primitive:send — the receiver may be a live actor,
-    // whose reply envelope only beamtalk_actor:sync_send/3 knows how to unwrap).
+    // (not beamtalk_primitive:send — the receiver may be a live actor, whose
+    // reply envelope only beamtalk_actor:sync_send/3 knows how to unwrap).
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items anySatisfy: [:item | item > 0]\n";
     let code = codegen(src);
     assert!(
@@ -516,7 +516,7 @@ fn test_any_satisfy_pure_generates_lists_any() {
 
 #[test]
 fn test_all_satisfy_pure_generates_lists_all() {
-    // BT-1481: Pure allSatisfy: (no mutations) delegates to lists:all/2.
+    // Pure allSatisfy: (no mutations) delegates to lists:all/2.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items allSatisfy: [:item | item > 0]\n";
     let code = codegen(src);
     assert!(
@@ -531,9 +531,8 @@ fn test_all_satisfy_pure_generates_lists_all() {
 
 #[test]
 fn test_detect_pure_generates_beamtalk_list_detect() {
-    // BT-1486: Pure detect: (no mutations) delegates to beamtalk_list:detect/2
-    // with an is_list guard for non-list fallback via beamtalk_message_dispatch:send
-    // (BT-3380).
+    // Pure detect: (no mutations) delegates to beamtalk_list:detect/2
+    // with an is_list guard for non-list fallback via beamtalk_message_dispatch:send.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items detect: [:item | item > 0]\n";
     let code = codegen(src);
     assert!(
@@ -548,8 +547,8 @@ fn test_detect_pure_generates_beamtalk_list_detect() {
 
 #[test]
 fn test_detect_if_none_pure_dispatches_to_runtime() {
-    // BT-1486: Pure detect:ifNone: (no mutations) dispatches to runtime via
-    // beamtalk_message_dispatch:send (BT-3380) with the predicate and ifNone
+    // Pure detect:ifNone: (no mutations) dispatches to runtime via
+    // beamtalk_message_dispatch:send with the predicate and ifNone
     // block as arguments.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items detect: [:item | item > 0] ifNone: [42]\n";
     let code = codegen(src);
@@ -569,7 +568,7 @@ fn test_detect_if_none_pure_dispatches_to_runtime() {
 
 #[test]
 fn test_any_satisfy_with_field_mutation_threads_state() {
-    // BT-1481: anySatisfy: with a field mutation in its body cannot short-circuit
+    // anySatisfy: with a field mutation in its body cannot short-circuit
     // (mutations must run for every element), so it uses lists:foldl with a bool
     // accumulator starting false.
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items anySatisfy: [:item | self.count := self.count + 1. item > 0]\n";
@@ -590,7 +589,7 @@ fn test_any_satisfy_with_field_mutation_threads_state() {
 
 #[test]
 fn test_all_satisfy_with_field_mutation_threads_state() {
-    // BT-1481: allSatisfy: with field mutation uses foldl with bool accumulator
+    // allSatisfy: with field mutation uses foldl with bool accumulator
     // starting true (all-satisfy assumption, set to false on first failure).
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items allSatisfy: [:item | self.count := self.count + 1. item > 0]\n";
     let code = codegen(src);
@@ -610,7 +609,7 @@ fn test_all_satisfy_with_field_mutation_threads_state() {
 
 #[test]
 fn test_detect_with_field_mutation_threads_state() {
-    // BT-1486: detect: with field mutation uses foldl with a {FoundItem, FoundFlag, State...}
+    // detect: with field mutation uses foldl with a {FoundItem, FoundFlag, State...}
     // accumulator so that mutations execute for every element (no short-circuit).
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items detect: [:item | self.count := self.count + 1. item > 0]\n";
     let code = codegen(src);
@@ -630,7 +629,7 @@ fn test_detect_with_field_mutation_threads_state() {
 
 #[test]
 fn test_detect_if_none_with_field_mutation_threads_state() {
-    // BT-1486: detect:ifNone: with field mutation uses foldl + FoundFlag to distinguish
+    // detect:ifNone: with field mutation uses foldl + FoundFlag to distinguish
     // "found nil" from "nothing matched", then evaluates the ifNone block when unmatched.
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items detect: [:item | self.count := self.count + 1. item > 0] ifNone: [42]\n";
     let code = codegen(src);
@@ -650,7 +649,7 @@ fn test_detect_if_none_with_field_mutation_threads_state() {
 
 #[test]
 fn test_any_satisfy_with_local_mutation_uses_tuple_acc() {
-    // BT-1481 + BT-1276: anySatisfy: with only a local variable mutation uses the
+    // anySatisfy: with only a local variable mutation uses the
     // tuple-accumulator path: {BoolAcc, Var1, ...}. Locals are unpacked via
     // element(N, AccSt) inside the lambda — not via maps:get.
     let src = concat!(
@@ -668,7 +667,7 @@ fn test_any_satisfy_with_local_mutation_uses_tuple_acc() {
         code.contains("let Count = call 'erlang':'element'(2, "),
         "anySatisfy: with local mutation should extract 'count' via element(2, AccSt) in tuple-acc lambda. Got:\n{code}"
     );
-    // BT-2356: the fold packs the final 'count' into the StateAcc map at exit so the
+    // the fold packs the final 'count' into the StateAcc map at exit so the
     // outer method body can thread it back via maps:get — the tuple accumulator is an
     // internal-to-the-fold optimisation, not a reason to drop the outer-local threading.
     assert!(
@@ -683,7 +682,7 @@ fn test_any_satisfy_with_local_mutation_uses_tuple_acc() {
 
 #[test]
 fn test_detect_with_local_mutation_uses_tuple_acc() {
-    // BT-1486 + BT-1276: detect: with only a local variable mutation uses the
+    // detect: with only a local variable mutation uses the
     // tuple-accumulator path: {FoundItem, FoundFlag, Var1, ...}. Locals are
     // unpacked via element(N, AccSt) inside the lambda — not via maps:get.
     let src = concat!(
@@ -704,7 +703,7 @@ fn test_detect_with_local_mutation_uses_tuple_acc() {
         code.contains("FoundFlag"),
         "detect: with local mutation should still use FoundFlag accumulator. Got:\n{code}"
     );
-    // BT-2355: the fold packs the final 'count' into the StateAcc map at exit so the
+    // the fold packs the final 'count' into the StateAcc map at exit so the
     // outer method body can thread it back via maps:get — the tuple accumulator is an
     // internal-to-the-fold optimisation, not a reason to drop the outer-local threading.
     assert!(
@@ -719,7 +718,7 @@ fn test_detect_with_local_mutation_uses_tuple_acc() {
 
 #[test]
 fn test_all_satisfy_with_local_mutation_uses_tuple_acc() {
-    // BT-1481 + BT-1276: allSatisfy: with only a local variable mutation uses the
+    // allSatisfy: with only a local variable mutation uses the
     // tuple-accumulator path: {BoolAcc, Var1, ...}. Locals are unpacked via
     // element(N, AccSt) inside the lambda — not via maps:get.
     let src = concat!(
@@ -737,7 +736,7 @@ fn test_all_satisfy_with_local_mutation_uses_tuple_acc() {
         code.contains("let Count = call 'erlang':'element'(2, "),
         "allSatisfy: with local mutation should extract 'count' via element(2, AccSt) in tuple-acc lambda. Got:\n{code}"
     );
-    // BT-2356: the fold packs the final 'count' into the StateAcc map at exit so the
+    // the fold packs the final 'count' into the StateAcc map at exit so the
     // outer method body can thread it back via maps:get — the tuple accumulator is an
     // internal-to-the-fold optimisation, not a reason to drop the outer-local threading.
     assert!(
@@ -752,7 +751,7 @@ fn test_all_satisfy_with_local_mutation_uses_tuple_acc() {
 
 #[test]
 fn test_detect_if_none_with_local_mutation_uses_tuple_acc() {
-    // BT-1486 + BT-1276: detect:ifNone: with only a local variable mutation uses the
+    // detect:ifNone: with only a local variable mutation uses the
     // tuple-accumulator path: {FoundItem, FoundFlag, Var1, ...}. Locals are
     // unpacked via element(N, AccSt) inside the lambda — not via maps:get.
     let src = concat!(
@@ -773,7 +772,7 @@ fn test_detect_if_none_with_local_mutation_uses_tuple_acc() {
         code.contains("FoundFlag"),
         "detect:ifNone: with local mutation should still use FoundFlag accumulator. Got:\n{code}"
     );
-    // BT-2355: pack the final 'count' into StateAcc at fold exit and thread it back
+    // pack the final 'count' into StateAcc at fold exit and thread it back
     // to the outer method body via maps:get.
     assert!(
         code.contains("maps':'put'('__local__count'"),
@@ -785,7 +784,7 @@ fn test_detect_if_none_with_local_mutation_uses_tuple_acc() {
     );
 }
 
-// ── BT-2561: in_direct_params_loop path for search ops ────────────────
+// ── in_direct_params_loop path for search ops ────────────────
 // Each test nests a search op with a local-var mutation inside a to:do:
 // loop that has its own local-var mutation. The outer loop's threaded-locals
 // are purely local (count + seen/inner), so it chooses use_direct_params=true
@@ -796,7 +795,7 @@ fn test_detect_if_none_with_local_mutation_uses_tuple_acc() {
 
 #[test]
 fn test_any_satisfy_nested_in_direct_params_loop() {
-    // BT-2561: anySatisfy: with a local mutation nested inside a direct-params
+    // anySatisfy: with a local mutation nested inside a direct-params
     // to:do: loop. The outer loop uses use_direct_params=true (local-only mutations
     // on `count` and `seen`), which sets in_direct_params_loop=true before
     // compiling the body. The inner anySatisfy: picks up in_direct_params_loop=true
@@ -838,7 +837,7 @@ fn test_any_satisfy_nested_in_direct_params_loop() {
 
 #[test]
 fn test_all_satisfy_nested_in_direct_params_loop() {
-    // BT-2561: allSatisfy: with a local mutation nested inside a direct-params
+    // allSatisfy: with a local mutation nested inside a direct-params
     // to:do: loop. Exercises generate_list_bool_predicate_with_mutations(is_all=true)
     // with in_direct_params_loop=true.
     let src = concat!(
@@ -874,7 +873,7 @@ fn test_all_satisfy_nested_in_direct_params_loop() {
 
 #[test]
 fn test_detect_nested_in_direct_params_loop() {
-    // BT-2561: detect: with a local mutation nested inside a direct-params
+    // detect: with a local mutation nested inside a direct-params
     // to:do: loop. Exercises generate_list_detect_with_mutations with
     // in_direct_params_loop=true (skips the StateAcc repack in the non-direct path).
     let src = concat!(
@@ -914,7 +913,7 @@ fn test_detect_nested_in_direct_params_loop() {
 
 #[test]
 fn test_detect_if_none_nested_in_direct_params_loop() {
-    // BT-2561: detect:ifNone: with a local mutation nested inside a direct-params
+    // detect:ifNone: with a local mutation nested inside a direct-params
     // to:do: loop. Exercises generate_list_detect_if_none_with_mutations with
     // in_direct_params_loop=true.
     let src = concat!(
@@ -948,12 +947,12 @@ fn test_detect_if_none_nested_in_direct_params_loop() {
     );
 }
 
-// ── BT-1486: count: ───────────────────────────────────────────────────
+// ── count: ───────────────────────────────────────────────────
 
 #[test]
 fn test_count_pure_generates_filter_then_length() {
     // Pure count: (no mutations) uses lists:filter + erlang:length on the filtered result.
-    // Falls back to beamtalk_message_dispatch:send (BT-3380) for non-list receivers.
+    // Falls back to beamtalk_message_dispatch:send for non-list receivers.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items count: [:item | item > 0]\n";
     let code = codegen(src);
     assert!(
@@ -992,7 +991,7 @@ fn test_count_with_field_mutation_uses_foldl() {
 
 #[test]
 fn test_count_with_local_mutation_uses_tuple_acc() {
-    // BT-1276: count: with only a local variable mutation uses the tuple-accumulator
+    // count: with only a local variable mutation uses the tuple-accumulator
     // path: {CountAcc, N, ...}. The local is unpacked inside the lambda via
     // element(2, AccSt) — not via maps:get.
     // `n` is both read inside the predicate (n := n + 1) and used after the loop, so
@@ -1016,7 +1015,7 @@ fn test_count_with_local_mutation_uses_tuple_acc() {
         code.contains("let N = call 'erlang':'element'(2, "),
         "count: tuple-acc should extract 'n' via element(2, AccSt) inside the lambda. Got:\n{code}"
     );
-    // BT-2356 pattern: pack 'n' into StateAcc at fold exit and thread it back via maps:get.
+    // Packs 'n' into StateAcc at fold exit and threads it back via maps:get.
     assert!(
         code.contains("maps':'put'('__local__n'"),
         "count: with local mutation should pack '__local__n' into StateAcc at fold exit. Got:\n{code}"
@@ -1032,7 +1031,7 @@ fn test_count_with_local_mutation_uses_tuple_acc() {
 #[test]
 fn test_flat_map_pure_generates_lists_flatmap() {
     // Pure flatMap: (no mutations) delegates to lists:flatmap with an is_list guard.
-    // Non-list receivers fall back to beamtalk_message_dispatch:send (BT-3380).
+    // Non-list receivers fall back to beamtalk_message_dispatch:send.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items flatMap: [:item | #(item, item)]\n";
     let code = codegen(src);
     assert!(
@@ -1295,11 +1294,11 @@ fn test_list_select_pure_generates_lists_filter() {
     );
 }
 
-// ── BT-909: non-literal callable in simple list ops ───────────────────
+// ── non-literal callable in simple list ops ───────────────────
 
 #[test]
 fn test_list_do_non_literal_callable_emits_arity_check() {
-    // BT-909: do: with a non-literal callable (method parameter) must emit an
+    // do: with a non-literal callable (method parameter) must emit an
     // is_function/2 arity check so that Tier-2 (2-arg) blocks are wrapped to
     // satisfy lists:foreach's arity-1 contract.
     let src =
@@ -1317,7 +1316,7 @@ fn test_list_do_non_literal_callable_emits_arity_check() {
 
 #[test]
 fn test_list_collect_non_literal_callable_emits_arity_check() {
-    // BT-909: collect: with a non-literal callable emits the same arity-check
+    // collect: with a non-literal callable emits the same arity-check
     // wrapper as do:, here wrapping for lists:map (arity-1 contract).
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items collect: block\n";
     let code = codegen(src);
@@ -1333,7 +1332,7 @@ fn test_list_collect_non_literal_callable_emits_arity_check() {
 
 #[test]
 fn test_list_select_non_literal_callable_emits_arity_check() {
-    // BT-909: select: with a non-literal callable also emits the arity-check wrapper.
+    // select: with a non-literal callable also emits the arity-check wrapper.
     // This additionally covers the "filter" => "select:" match arm in mod.rs via the
     // non-literal code path (the non-literal else branch still uses the selector).
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items select: block\n";
@@ -1353,7 +1352,7 @@ fn test_list_select_non_literal_callable_emits_arity_check() {
     );
 }
 
-// ── BT-2478: ValueType context — list-op codegen ──────────────────────
+// ── ValueType context — list-op codegen ──────────────────────
 
 #[test]
 fn test_value_type_do_with_local_mutation_open_chain() {
@@ -1397,7 +1396,7 @@ fn test_value_type_collect_with_local_mutation_threaded_result_wrapper() {
         code.contains("ThreadedResult"),
         "ValueType collect: should produce a ThreadedResult wrapper. Got:\n{code}"
     );
-    // BT-1489: String-aware result wrapping via from_list_like.
+    // String-aware result wrapping via from_list_like.
     assert!(
         code.contains("'beamtalk_collection':'from_list_like'"),
         "ValueType collect: should use from_list_like for string-aware result. Got:\n{code}"
@@ -1421,7 +1420,7 @@ fn test_value_type_select_with_local_mutation_threaded_result_wrapper() {
         code.contains("ThreadedResult"),
         "ValueType select: should produce a ThreadedResult wrapper. Got:\n{code}"
     );
-    // BT-1489: String-aware result wrapping via from_list_like.
+    // String-aware result wrapping via from_list_like.
     assert!(
         code.contains("'beamtalk_collection':'from_list_like'"),
         "ValueType select: should use from_list_like for string-aware result. Got:\n{code}"
@@ -1456,7 +1455,7 @@ fn test_value_type_do_non_literal_callable_seeds_empty_state() {
 fn test_list_reject_pure_generates_negated_filter() {
     // Pure reject: (no mutations) wraps the predicate in an `erlang:not` negating fun
     // and delegates to lists:filter. An is_list guard routes non-list receivers to
-    // beamtalk_message_dispatch:send (BT-3380) with 'reject:' selector.
+    // beamtalk_message_dispatch:send with 'reject:' selector.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items reject: [:item | item > 0]\n";
     let code = codegen(src);
     assert!(
@@ -1504,7 +1503,7 @@ fn test_list_reject_with_field_mutation_uses_foldl() {
 
 #[test]
 fn test_list_reject_with_local_mutation_uses_tuple_acc() {
-    // BT-1276 + BT-2342: reject: with only a local variable mutation uses the
+    // reject: with only a local variable mutation uses the
     // tuple-accumulator path: {ResultList, Var1, ...}. Locals are unpacked via
     // element(2, AccSt) inside the lambda, and the result is wrapped via
     // from_list_like for string-aware reconstruction — parity with select:.
@@ -1531,7 +1530,7 @@ fn test_list_reject_with_local_mutation_uses_tuple_acc() {
         code.contains("call 'erlang':'not'"),
         "reject: with local mutation should emit erlang:not for the negate=true case condition. Got:\n{code}"
     );
-    // BT-2342: result must be reconstructed via from_list_like (String → binary, Array → Array).
+    // result must be reconstructed via from_list_like (String → binary, Array → Array).
     assert!(
         code.contains("'beamtalk_collection':'from_list_like'("),
         "reject: with local mutation should use from_list_like for string-aware result. Got:\n{code}"
@@ -1544,7 +1543,7 @@ fn test_list_reject_with_local_mutation_uses_tuple_acc() {
 fn test_sort_pure_generates_beamtalk_list_sort_with() {
     // Pure sort: (no mutations) delegates to beamtalk_list:sort_with/2 with an
     // is_list guard. Non-list receivers fall back to beamtalk_message_dispatch:send
-    // (BT-3380) with 'sort:' selector. The mutation path (lists:sort + process-dict)
+    // with 'sort:' selector. The mutation path (lists:sort + process-dict)
     // must NOT appear.
     let src =
         "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items sort: [:a :b | a < b]\n";
@@ -1573,7 +1572,7 @@ fn test_sort_pure_generates_beamtalk_list_sort_with() {
     );
 }
 
-// ── BT-2703: eachWithIndex: / do:separatedBy: desugar ────────────────────────
+// ── eachWithIndex: / do:separatedBy: desugar ────────────────────────
 //
 // When a block mutates actor state (field or local), `eachWithIndex:` and
 // `do:separatedBy:` desugar into an `inject:into:` fold so the mutations are
@@ -1653,8 +1652,8 @@ fn test_each_with_index_wrong_arity_block_falls_through() {
     // A 1-arg block (wrong arity for eachWithIndex:) must not desugar; the
     // collection.bt method will raise the correct runtime error (covers the
     // arity guard in try_generate_each_with_index). Body is a pure expression
-    // (not a `self.field :=` mutation) — see BT-2792, which made a mutating
-    // block that falls through to normal dispatch a compile-time error.
+    // (not a `self.field :=` mutation): a mutating block that falls through
+    // to normal dispatch is a compile-time error.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x | x + 1]\n";
     let code = codegen(src);
     assert!(
@@ -1669,7 +1668,7 @@ fn test_each_with_index_wrong_arity_block_falls_through() {
 
 #[test]
 fn test_each_with_index_wrong_arity_field_mutating_block_is_compile_error() {
-    // BT-2792: the compound case the 7 sibling "falls through" tests above and
+    // the compound case the 7 sibling "falls through" tests above and
     // below deliberately avoid (they use pure bodies so they can assert on the
     // dispatch/lists:foldl shape of successful codegen). When a block that
     // falls through eachWithIndex:'s arity guard *also* mutates self.<field>,
@@ -1777,8 +1776,8 @@ fn test_each_with_index_degenerate_param_names_falls_through() {
     // guard in try_generate_each_with_index leaves it to the normal dispatch
     // path's own diagnostics rather than building a fold with a shadowed
     // accumulator parameter. Body is a pure expression, not a `self.field :=`
-    // mutation — see BT-2792 (a mutating block that falls through to normal
-    // dispatch is now a compile-time error, tested separately).
+    // mutation: a mutating block that falls through to normal dispatch is a
+    // compile-time error (tested separately).
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x :x | x + 1]\n";
     let code = codegen(src);
     assert!(
@@ -1799,7 +1798,7 @@ fn test_each_with_index_non_literal_callable_falls_through() {
     //
     // Body is a pure expression, not a `self.field :=` mutation: storing a
     // self-mutating block in a local and invoking it later is now a
-    // compile-time error (BT-2792, tested separately), so it can no longer be
+    // compile-time error (tested separately), so it can no longer be
     // exercised via `codegen()`'s `expect`-success helper here.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:item :i | item + i]\n    items eachWithIndex: blk\n";
     let code = codegen(src);
@@ -1816,8 +1815,8 @@ fn test_each_with_index_non_literal_callable_falls_through() {
 #[test]
 fn test_do_separated_by_non_literal_callable_falls_through() {
     // Same non-literal guard as above, but for the `do:separatedBy:` element
-    // block argument. Body is a pure expression — see BT-2792, which made a
-    // stored self-mutating block invoked this way a compile-time error.
+    // block argument. Body is a pure expression:
+    // a stored self-mutating block invoked this way is a compile-time error.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:x | x + 1]\n    items do: blk separatedBy: [nil]\n";
     let code = codegen(src);
     // Bracket deliberately left open (no trailing `]`) here, unlike the
@@ -1838,8 +1837,8 @@ fn test_do_separated_by_non_literal_separator_falls_through() {
     // Symmetric with test_do_separated_by_non_literal_callable_falls_through,
     // but the *separator* block (not the element block) is the non-literal
     // variable. Both callable positions must be literal blocks for the
-    // desugar to fire. Body is a pure expression — see BT-2792, which made a
-    // stored self-mutating block invoked this way a compile-time error.
+    // desugar to fire. Body is a pure expression:
+    // a stored self-mutating block invoked this way is a compile-time error.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    sep := [nil]\n    items do: [:x | x printString] separatedBy: sep\n";
     let code = codegen(src);
     assert!(
@@ -1880,8 +1879,8 @@ fn test_each_with_index_zero_arity_block_falls_through() {
     // A 0-arg block is wrong arity too (the guard is `!= 2`, not `== 1`), so it
     // must fall through the same as the 1-arg case covered by
     // test_each_with_index_wrong_arity_block_falls_through. Body is a pure
-    // expression — see BT-2792, which made a mutating block that falls
-    // through to normal dispatch a compile-time error.
+    // expression: a mutating block that falls through to normal dispatch
+    // is a compile-time error.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [1]\n";
     let code = codegen(src);
     assert!(
@@ -1899,8 +1898,8 @@ fn test_do_separated_by_separator_with_param_falls_through() {
     // do:separatedBy:'s separator block must be 0-arg (`[…]`); a separator with
     // a parameter (`[:y | …]`) is wrong arity and must fall through, covering
     // the `!separator_block.parameters.is_empty()` guard. Body is a pure
-    // expression — see BT-2792, which made a mutating block that falls
-    // through to normal dispatch a compile-time error.
+    // expression: a mutating block that falls through to normal dispatch
+    // is a compile-time error.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items do: [:x | x printString] separatedBy: [:y | y + 1]\n";
     let code = codegen(src);
     assert!(
@@ -1915,7 +1914,7 @@ fn test_do_separated_by_separator_with_param_falls_through() {
 
 #[test]
 fn test_select_wrong_arity_block_is_compile_error() {
-    // BT-493: select: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // select: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
     // validate_block_arity_exact and produce a BlockArityError, covering the `?`
     // error-propagation branch at filter_ops.rs:27.
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items select: [nil]\n";
@@ -1936,7 +1935,7 @@ fn test_select_wrong_arity_block_is_compile_error() {
 
 #[test]
 fn test_reject_wrong_arity_block_is_compile_error() {
-    // BT-493: reject: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // reject: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
     // validate_block_arity_exact and produce a BlockArityError, covering the `?`
     // error-propagation branch at filter_ops.rs:50.
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items reject: [nil]\n";
@@ -2064,7 +2063,7 @@ fn test_detect_if_none_wrong_arity_if_none_block_is_compile_error() {
 
 #[test]
 fn test_select_nested_in_direct_params_loop() {
-    // BT-1329: select: with a local mutation nested inside a direct-params to:do:
+    // select: with a local mutation nested inside a direct-params to:do:
     // loop. The outer loop sets in_direct_params_loop=true, which causes
     // generate_list_filter_with_mutations to skip the StateAcc repack and emit an
     // open let-chain instead. Covers filter_ops.rs lines 168-193 (negate=false path).
@@ -2102,7 +2101,7 @@ fn test_select_nested_in_direct_params_loop() {
 
 #[test]
 fn test_reject_nested_in_direct_params_loop() {
-    // BT-1329: reject: with a local mutation nested inside a direct-params to:do:
+    // reject: with a local mutation nested inside a direct-params to:do:
     // loop. The outer loop sets in_direct_params_loop=true, which causes
     // generate_list_filter_with_mutations to skip the StateAcc repack (negate=true path).
     // The negate=true flag additionally emits `call 'erlang':'not'` in the fold body.
@@ -2142,12 +2141,12 @@ fn test_reject_nested_in_direct_params_loop() {
 
 #[test]
 fn test_do_nested_in_direct_params_loop() {
-    // BT-1329: do: with a local mutation nested inside a direct-params to:do: loop.
+    // do: with a local mutation nested inside a direct-params to:do: loop.
     // The outer loop sets in_direct_params_loop=true, which causes
     // generate_list_do_with_mutations to hit the tuple-acc + in_direct_params_loop
     // branch (basic_ops.rs lines 94-112): StateAcc repack is skipped, an open
     // let-chain is emitted, and direct_params_do_open_chain is set to true
-    // (BT-3053/ADR 0118 phase 5b) so the outer loop can chain the next
+    // (ADR 0118 phase 5b) so the outer loop can chain the next
     // expression directly.
     let src = concat!(
         "Actor subclass: Ctr\n",
@@ -2183,7 +2182,7 @@ fn test_do_nested_in_direct_params_loop() {
 
 #[test]
 fn test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
-    // BT-3053: `^` (Expression::Return, compiled via the NLR-throw path since
+    // `^` (Expression::Return, compiled via the NLR-throw path since
     // it's inside a block) fed the *direct result* of a mutation-threaded
     // `do:` nested inside a direct-params loop — the exact shape that used to
     // reference the bare `"_"` sentinel as if it were a bound variable (the
@@ -2197,8 +2196,8 @@ fn test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
     // `test_do_nested_in_direct_params_loop` above, with `^` inside the
     // outer to:do:'s own block wrapping the nested do:'s result directly —
     // any `^` inside a block (not just the ADR 0109 cross-process case)
-    // goes through the NLR-throw codegen path (see BT-3051's fix in
-    // `Expression::Return`) rather than a plain return.
+    // goes through the NLR-throw codegen path (`Expression::Return`) rather
+    // than a plain return.
     let src = concat!(
         "Actor subclass: Ctr3053\n",
         "  state: x = 0\n\n",
@@ -2239,7 +2238,7 @@ fn test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
 
 #[test]
 fn test_collect_nested_in_direct_params_loop() {
-    // BT-1329: collect: with a local mutation nested inside a direct-params to:do:
+    // collect: with a local mutation nested inside a direct-params to:do:
     // loop. The outer loop sets in_direct_params_loop=true, which causes
     // generate_list_collect_with_mutations to hit the tuple-acc + in_direct_params_loop
     // branch (basic_ops.rs lines 302-360): StateAcc repack is skipped and the result
@@ -2283,7 +2282,7 @@ fn test_collect_nested_in_direct_params_loop() {
 
 #[test]
 fn test_do_wrong_arity_block_is_compile_error() {
-    // BT-493: do: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // do: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
     // validate_block_arity_exact and produce a BlockArityError, covering the `?`
     // error-propagation branch at basic_ops.rs:31.
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items do: [nil]\n";
@@ -2304,7 +2303,7 @@ fn test_do_wrong_arity_block_is_compile_error() {
 
 #[test]
 fn test_collect_wrong_arity_block_is_compile_error() {
-    // BT-493: collect: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // collect: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
     // validate_block_arity_exact and produce a BlockArityError, covering the `?`
     // error-propagation branch at basic_ops.rs:219.
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items collect: [nil]\n";
@@ -2323,13 +2322,13 @@ fn test_collect_wrong_arity_block_is_compile_error() {
     );
 }
 
-// ── BT-2413: transform ops nested inside a direct-params to:do: loop ─────────
+// ── transform ops nested inside a direct-params to:do: loop ─────────
 //
 // Each of the seven remaining transform operations (count:, flatMap:,
 // inject:into:, takeWhile:, dropWhile:, partition:, groupBy:) has an
 // `in_direct_params_loop=true` branch that skips the StateAcc repack and emits
 // an open let-chain so variable rebindings escape to the outer to:do: scope.
-// The existing BT-2561/BT-1329 series covers the search and filter/basic ops;
+// A parallel test series already covers the search and filter/basic ops;
 // these tests cover the remaining transform_ops.rs paths.
 
 #[test]
@@ -2614,7 +2613,7 @@ fn test_sort_with_local_mutation_uses_process_dict() {
     // generate_local_var_assignment_in_loop instead of generate_field_assignment_open.
     // The local var is threaded via maps:put with key '__local__n' (not bare 'n').
     //
-    // BT-2948: the process-dict key is a fresh `erlang:make_ref/0` generated at the
+    // the process-dict key is a fresh `erlang:make_ref/0` generated at the
     // start of each invocation (not a fixed atom), so nested/recursive mutating
     // sort: calls in the same process can't stomp each other's state.
     let src = concat!(
@@ -2641,7 +2640,7 @@ fn test_sort_with_local_mutation_uses_process_dict() {
 
 #[test]
 fn test_nested_sort_with_mutations_uses_distinct_state_keys() {
-    // BT-2948: a mutating sort: comparator that itself performs a nested mutating
+    // a mutating sort: comparator that itself performs a nested mutating
     // sort: must not have its process-dict state stomped by the inner call. Each
     // `generate_list_sort_with_mutations` invocation now binds its own fresh
     // `erlang:make_ref/0`-derived key, so the two calls never share process-dict state.

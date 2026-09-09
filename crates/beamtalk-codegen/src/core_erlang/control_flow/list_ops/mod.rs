@@ -17,7 +17,7 @@
 //! - [`search_ops`] — `detect:`, `anySatisfy:`, `allSatisfy:` codegen
 //! - [`transform_ops`] — `inject:into:`, `flatMap:`, `count:`, `takeWhile:`,
 //!   `dropWhile:`, `partition:`, `groupBy:`, `sort:` codegen
-//! - [`enumeration_ops`] — `eachWithIndex:`, `do:separatedBy:` desugar codegen (BT-2703)
+//! - [`enumeration_ops`] — `eachWithIndex:`, `do:separatedBy:` desugar codegen
 
 mod basic_ops;
 mod enumeration_ops;
@@ -72,7 +72,7 @@ pub(in crate::core_erlang) enum BodyKind {
         is_all: bool,
     },
 
-    /// BT-1486: Foldl `detect:` / `detect:ifNone:` body: last expression becomes a predicate;
+    /// Foldl `detect:` / `detect:ifNone:` body: last expression becomes a predicate;
     /// a `case` expression updates the found-item accumulator on first match.
     /// Accumulator is `{FoundItem, FoundFlag, StateAcc{N}}`.
     FoldlDetect {
@@ -80,12 +80,12 @@ pub(in crate::core_erlang) enum BodyKind {
         item_var: String,
     },
 
-    /// BT-1486: Foldl `count:` body: last expression becomes a predicate;
+    /// Foldl `count:` body: last expression becomes a predicate;
     /// a `case` expression increments the count accumulator on match.
     /// Accumulator is `{Count, StateAcc{N}}`.
     FoldlCount,
 
-    /// BT-1487: Foldl `takeWhile:` body: last expression becomes a predicate;
+    /// Foldl `takeWhile:` body: last expression becomes a predicate;
     /// a `case` expression includes the item only while the predicate holds.
     /// Once the predicate returns false, all subsequent elements are excluded.
     /// Accumulator is `{ResultList, StillTaking, StateVars...}`.
@@ -94,7 +94,7 @@ pub(in crate::core_erlang) enum BodyKind {
         item_var: String,
     },
 
-    /// BT-1487: Foldl `dropWhile:` body: last expression becomes a predicate;
+    /// Foldl `dropWhile:` body: last expression becomes a predicate;
     /// a `case` expression drops elements while the predicate holds.
     /// Once the predicate returns false, all subsequent elements are included.
     /// Accumulator is `{ResultList, StillDropping, StateVars...}`.
@@ -103,7 +103,7 @@ pub(in crate::core_erlang) enum BodyKind {
         item_var: String,
     },
 
-    /// BT-1487: Foldl `partition:` body: last expression becomes a predicate;
+    /// Foldl `partition:` body: last expression becomes a predicate;
     /// a `case` expression routes the item to one of two lists.
     /// Accumulator is `{MatchList, NoMatchList, StateVars...}`.
     FoldlPartition {
@@ -111,7 +111,7 @@ pub(in crate::core_erlang) enum BodyKind {
         item_var: String,
     },
 
-    /// BT-1487: Foldl `groupBy:` body: last expression is the key function result;
+    /// Foldl `groupBy:` body: last expression is the key function result;
     /// each element is grouped by its key into a map.
     /// Accumulator is `{Map, StateVars...}`.
     FoldlGroupBy {
@@ -121,7 +121,7 @@ pub(in crate::core_erlang) enum BodyKind {
 }
 
 /// Emits the Core Erlang preamble that binds a receiver to a guaranteed-list
-/// variable (BT-524 `is_list` guard):
+/// variable (`is_list` guard):
 ///
 /// ```text
 /// let {list_var} = {recv_code}
@@ -173,7 +173,7 @@ impl CoreErlangGenerator {
         None
     }
 
-    /// BT-3151 review follow-up: checks a bare (no-mutation-threading) list-op
+    /// Checks a bare (no-mutation-threading) list-op
     /// block body for a class-var-mutating self-send. Call this after
     /// `block_needs_mutation_threading` returns `None`, before falling
     /// through to a plain/BIF dispatch that compiles the block via
@@ -199,7 +199,7 @@ impl CoreErlangGenerator {
         body: &Expression,
         operation: &str,
     ) -> Result<Document<'static>> {
-        // BT-416: Map Erlang list operation to Beamtalk selector for runtime fallback
+        // Map Erlang list operation to Beamtalk selector for runtime fallback
         let selector = match operation {
             "foreach" => "do:",
             "map" => "collect:",
@@ -207,7 +207,7 @@ impl CoreErlangGenerator {
             _ => operation,
         };
 
-        // BT-3151: `do:`/`collect:`/`select:` all route through here — a
+        // `do:`/`collect:`/`select:` all route through here — a
         // same-class mutating self-send inside a bare block has no way to
         // thread its class-var mutation back (this always runs in-process,
         // never a genuine cross-class gen_server call). See
@@ -218,10 +218,10 @@ impl CoreErlangGenerator {
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
 
-        // BT-855: When the body is a stateful block (captured mutations), wrap it so
+        // When the body is a stateful block (captured mutations), wrap it so
         // Erlang receives a plain fun(Args) -> Result without the StateAcc protocol.
         // Mutations inside the block are dropped (Erlang cannot propagate NewStateAcc).
-        // BT-855 follow-up: Also unwrap parenthesized block literals (e.g. `([:x | ...])`).
+        // Also unwrap parenthesized block literals (e.g. `([:x | ...])`).
         let body_code = if let Some(block) = Self::extract_block_literal(body) {
             let (wrapped_doc, is_stateful) = self.generate_erlang_interop_wrapper(block)?;
             if is_stateful {
@@ -232,7 +232,7 @@ impl CoreErlangGenerator {
             }
             wrapped_doc
         } else {
-            // BT-909: Non-literal callable — emit a runtime arity check that wraps
+            // Non-literal callable — emit a runtime arity check that wraps
             // Tier-2 (arity 2) blocks to satisfy the arity-1 contract expected by
             // lists:foreach / lists:map / lists:filter.
             //
@@ -343,7 +343,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1489/BT-2342: Generates a `let` binding that reconstructs a list result
+    /// Generates a `let` binding that reconstructs a list result
     /// so its type matches the original receiver, mirroring the pure list-op path.
     ///
     /// Returns `(binding_code, result_var)` where `binding_code` is:
@@ -355,8 +355,8 @@ impl CoreErlangGenerator {
     ///
     /// `beamtalk_collection:from_list_like/2` wraps the raw fold result back into:
     /// - a binary when the receiver was a String,
-    /// - an `Array` when the receiver was an `Array` (BT-2342: the stateful foldl
-    ///   path previously leaked a raw list where the pure path returns an Array),
+    /// - an `Array` when the receiver was an `Array` (the stateful foldl
+    ///   path returns a raw list, while the pure path returns an Array),
     /// - the list unchanged otherwise (already-an-Erlang-list receivers).
     pub(in crate::core_erlang) fn generate_list_like_result_binding(
         &mut self,

@@ -14,7 +14,7 @@ use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 
 impl CoreErlangGenerator {
-    /// BT-1486: Generates code for `list count:` with mutation analysis.
+    /// Generates code for `list count:` with mutation analysis.
     ///
     /// Without mutations: falls through to `lists:filter` + `erlang:length`.
     /// With mutations: uses `lists:foldl` with a count accumulator, processing
@@ -37,7 +37,7 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use lists:filter + erlang:length
-        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        // see `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -72,7 +72,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1486: Generates stateful `count:` using `lists:foldl` with state threading
+    /// Generates stateful `count:` using `lists:foldl` with state threading
     /// and a count accumulator.
     ///
     /// All elements are processed. Accumulator is `{Count, StateVars...}`.
@@ -190,7 +190,7 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
         // unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -252,7 +252,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// BT-1486: Generates code for `list flatMap:` with mutation analysis.
+    /// Generates code for `list flatMap:` with mutation analysis.
     ///
     /// Without mutations: falls through to `lists:flatmap/2`.
     /// With mutations: uses `lists:foldl` like `collect:` (accumulates reversed
@@ -275,7 +275,7 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use lists:flatmap
-        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        // see `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -305,7 +305,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1486: Generates stateful `flatMap:` using `lists:foldl` with state threading.
+    /// Generates stateful `flatMap:` using `lists:foldl` with state threading.
     ///
     /// Uses `FoldlCollect` body kind to build a reversed list of sub-lists, then
     /// reverses and appends (flattens) the result.
@@ -443,7 +443,7 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
         // unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -521,7 +521,7 @@ impl CoreErlangGenerator {
         initial: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-493: Validate body block arity (must be 2-arg: accumulator and element)
+        // Validate body block arity (must be 2-arg: accumulator and element)
         validate_block_arity_exact(
             body,
             2,
@@ -535,12 +535,12 @@ impl CoreErlangGenerator {
             return self.generate_list_inject_with_mutations(receiver, initial, body_block);
         }
 
-        // BT-1327: Pure-block fast path — emit inline lists:foldl instead of
+        // Pure-block fast path — emit inline lists:foldl instead of
         // calling beamtalk_collection:inject_into at runtime.
         // This eliminates: (1) the runtime function call overhead, (2) the to_list
         // indirection when receiver is already a list.
         //
-        // BT-820: lists:foldl calls Fun(Elem, Acc) but Beamtalk convention is Block(Acc, Elem).
+        // lists:foldl calls Fun(Elem, Acc) but Beamtalk convention is Block(Acc, Elem).
         // For literal blocks, we compile the body directly with swapped parameter order
         // (Elem, Acc) to avoid any wrapper overhead. For non-literal callables, we fall
         // back to beamtalk_collection:inject_into which handles arg swapping at runtime.
@@ -554,7 +554,7 @@ impl CoreErlangGenerator {
         // Generate the foldl fun: for literal blocks, compile body with swapped
         // parameter order; for non-literal, use runtime arg-swap wrapper.
         let foldl_fun_doc = if let Expression::Block(body_block) = body {
-            // BT-3151: this pure-block fast path calls `generate_block_body`
+            // this pure-block fast path calls `generate_block_body`
             // directly below, bypassing `generate_block`'s own self-send
             // check — so it needs the same guard here. See
             // `check_no_unsafe_class_method_self_sends`'s doc comment.
@@ -637,11 +637,11 @@ impl CoreErlangGenerator {
         initial: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        // BT-1276: Use tuple accumulator when eligible.
+        // Use tuple accumulator when eligible.
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
-        // BT-524: Add is_list guard for non-list collection types.
+        // Add is_list guard for non-list collection types.
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let safe_list_var = self.fresh_temp_var("temp");
@@ -651,7 +651,7 @@ impl CoreErlangGenerator {
         let acc_state_var = self.fresh_temp_var("AccSt");
 
         if plan.use_tuple_acc {
-            // BT-1276: Tuple-accumulator path.
+            // Tuple-accumulator path.
             // Initial fold acc: {InitVar, Var1, ..., VarN} (flat tuple).
             let vars_doc = plan.current_vars_doc(self); // Before push_scope.
 
@@ -698,7 +698,7 @@ impl CoreErlangGenerator {
             // Extract each updated local var from tuple positions 2..N.
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&result_var, 2, self);
             if self.loop_mode.in_direct_params_loop {
-                // BT-1329: Skip StateAcc repack. Emit open let-chain so variable rebindings
+                // Skip StateAcc repack. Emit open let-chain so variable rebindings
                 // escape to the outer scope. Store the result var for the caller.
                 self.loop_mode.direct_params_list_op_result = Some(acc_out.clone());
                 docs.push(docvec![
@@ -720,7 +720,7 @@ impl CoreErlangGenerator {
                     extract_doc,
                 ]);
             } else {
-                // BT-1276: Re-pack into StateAcc for outer method-body `maps:get` extraction.
+                // Re-pack into StateAcc for outer method-body `maps:get` extraction.
                 let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
                 docs.push(docvec![
                     " in let ",
@@ -760,7 +760,7 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
         // unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -795,7 +795,7 @@ impl CoreErlangGenerator {
         docs.push(body_doc);
         self.pop_scope();
 
-        // BT-483: Return {Result, State} tuple — inject:into: returns accumulator as result.
+        // Return {Result, State} tuple — inject:into: returns accumulator as result.
         let result_var = self.fresh_temp_var("temp");
         let acc_out = self.fresh_temp_var("AccOut");
         let state_out = self.fresh_temp_var("StOut");
@@ -828,9 +828,9 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    // ── BT-1487: takeWhile:/dropWhile:/groupBy:/partition:/sort: ─────────
+    // ── takeWhile:/dropWhile:/groupBy:/partition:/sort: ─────────
 
-    /// BT-1487: Generates code for `list takeWhile:` with mutation analysis.
+    /// Generates code for `list takeWhile:` with mutation analysis.
     ///
     /// Without mutations: falls through to `lists:takewhile/2`.
     /// With mutations: uses `lists:foldl` processing ALL elements, tracking
@@ -853,7 +853,7 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use lists:takewhile
-        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        // see `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -883,7 +883,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1487: Generates stateful `takeWhile:` using `lists:foldl` with state threading.
+    /// Generates stateful `takeWhile:` using `lists:foldl` with state threading.
     ///
     /// Accumulator is `{ResultList, StillTaking, StateVars...}`.
     /// All elements are processed. Once predicate returns false, `StillTaking` flips
@@ -1015,7 +1015,7 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
         // unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -1091,7 +1091,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// BT-1487: Generates code for `list dropWhile:` with mutation analysis.
+    /// Generates code for `list dropWhile:` with mutation analysis.
     ///
     /// Without mutations: falls through to `lists:dropwhile/2`.
     /// With mutations: uses `lists:foldl` processing ALL elements, tracking
@@ -1114,7 +1114,7 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use lists:dropwhile
-        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        // see `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -1144,7 +1144,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1487: Generates stateful `dropWhile:` using `lists:foldl` with state threading.
+    /// Generates stateful `dropWhile:` using `lists:foldl` with state threading.
     ///
     /// Accumulator is `{ResultList, StillDropping, StateVars...}`.
     #[allow(clippy::too_many_lines)]
@@ -1273,7 +1273,7 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
         // unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -1349,7 +1349,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// BT-1487: Generates code for `list partition:` with mutation analysis.
+    /// Generates code for `list partition:` with mutation analysis.
     ///
     /// Without mutations: falls through to `beamtalk_list:partition/2`.
     /// With mutations: uses `lists:foldl` routing each element to one of two lists.
@@ -1371,7 +1371,7 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use beamtalk_list:partition
-        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        // see `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -1401,7 +1401,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1487: Generates stateful `partition:` using `lists:foldl` with state threading.
+    /// Generates stateful `partition:` using `lists:foldl` with state threading.
     ///
     /// Accumulator is `{MatchList, NoMatchList, StateVars...}`.
     /// Result is `{lists:reverse(MatchList), lists:reverse(NoMatchList)}` (a 2-tuple, converted to
@@ -1564,7 +1564,7 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
         // unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -1657,7 +1657,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// BT-1487: Generates code for `list groupBy:` with mutation analysis.
+    /// Generates code for `list groupBy:` with mutation analysis.
     ///
     /// Without mutations: falls through to `beamtalk_list:group_by/2`.
     /// With mutations: uses `lists:foldl` building a map where each key
@@ -1680,7 +1680,7 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use beamtalk_list:group_by
-        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        // see `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -1710,7 +1710,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1487: Generates stateful `groupBy:` using `lists:foldl` with state threading.
+    /// Generates stateful `groupBy:` using `lists:foldl` with state threading.
     ///
     /// Accumulator is `{GroupMap, StateVars...}`.
     /// The key block result is used to group elements into a map.
@@ -1839,7 +1839,7 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
         // unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -1913,7 +1913,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// BT-1487: Generates code for `list sort:` with mutation analysis.
+    /// Generates code for `list sort:` with mutation analysis.
     ///
     /// Without mutations: falls through to `beamtalk_list:sort_with/2`.
     /// With mutations: uses process dictionary to thread state through the
@@ -1937,7 +1937,7 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use beamtalk_list:sort_with
-        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        // see `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -1967,11 +1967,11 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1487: Generates stateful `sort:` using process dictionary for state threading.
+    /// Generates stateful `sort:` using process dictionary for state threading.
     ///
     /// Strategy:
     /// 1. Pack current state into a process dictionary key unique to this invocation
-    ///    (BT-2948: a fresh `erlang:make_ref/0`, not a fixed atom — nested/recursive
+    ///    (a fresh `erlang:make_ref/0`, not a fixed atom — nested/recursive
     ///    calls to the same call site each get their own key, so they can't stomp
     ///    each other's state).
     /// 2. Build a wrapper comparator that reads state, calls the block body,
@@ -2005,7 +2005,7 @@ impl CoreErlangGenerator {
 
         // `state_key_var` names the Core Erlang variable bound to the
         // `make_ref()` key at runtime; `state_key_doc` is a Document
-        // referencing that variable (not an atom literal — BT-2948).
+        // referencing that variable (not an atom literal).
         let state_key_var = self.fresh_temp_var("SortStateKey");
         let state_key_doc = leaf::var(state_key_var.clone());
 
@@ -2100,7 +2100,7 @@ impl CoreErlangGenerator {
                     leaf::var(pred_result),
                 ]);
             } else {
-                // BT-3420 (ADR 0118 phase 4): a non-last, non-assignment
+                // ADR 0118 phase 4: a non-last, non-assignment
                 // statement in the comparator body — e.g. a bare `self
                 // bumpCount` before the trailing `a < b` — has no state
                 // threading of its own here; thread any nested (or bare)
