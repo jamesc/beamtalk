@@ -27,7 +27,7 @@ fn test_generate_literal_float() {
 
 #[test]
 fn test_generate_literal_float_whole_number() {
-    // BT-1562: Whole-number floats must retain decimal point in Core Erlang
+    // Whole-number floats must retain decimal point in Core Erlang
     // so that Erlang distinguishes them from integers (5.0 ≠ 5).
     let generator = CoreErlangGenerator::new("test");
     let lit = Literal::Float(5.0);
@@ -121,7 +121,7 @@ fn test_generate_binary_op_no_wrap_for_identifiers() {
     );
 }
 
-// BT-2709: arithmetic operators are dispatchable messages. The bare-BIF fast
+// arithmetic operators are dispatchable messages. The bare-BIF fast
 // path must hold for statically-numeric receivers (literals, `self` in
 // Integer/Float, `:: Number`-family params); everything else gets a runtime
 // `is_number` guard that falls back to message dispatch.
@@ -145,7 +145,7 @@ fn test_arith_bare_bif_for_numeric_literal_receiver() {
 #[test]
 fn test_arith_bare_bif_for_self_in_numeric_class() {
     use beamtalk_core::ast::Identifier;
-    // ADR 0116/BT-3263: `self <op> other` in Integer/Float stays a bare BIF
+    // ADR 0116: `self <op> other` in Integer/Float stays a bare BIF
     // with no `try` only when the right operand is ALSO statically numeric —
     // here `other :: Number`, so `receiver_is_statically_numeric(right)` is
     // `true` and the always-bare path never engages the coercion mechanism.
@@ -176,7 +176,7 @@ fn test_arith_bare_bif_for_self_in_numeric_class() {
 #[test]
 fn test_arith_coercion_try_for_self_in_numeric_class_unknown_right() {
     use beamtalk_core::ast::Identifier;
-    // ADR 0116/BT-3263: `self * x` in a numeric class with an UNTYPED right
+    // ADR 0116: `self * x` in a numeric class with an UNTYPED right
     // operand must wrap the bare BIF in the number-on-the-left coercion
     // try/catch — a statically-numeric left operand no longer means "skip all
     // guards" once the right operand's type is genuinely unknown (`5 *
@@ -231,7 +231,7 @@ fn test_arith_bare_bif_for_numeric_param() {
 #[test]
 fn test_arith_guard_for_unknown_receiver_numeric_right_no_try() {
     use beamtalk_core::ast::Identifier;
-    // ADR 0116/BT-3263: the right operand is statically numeric (`:: Number`)
+    // ADR 0116: the right operand is statically numeric (`:: Number`)
     // here, so the guard's is_number-true branch stays a bare BIF — the
     // coercion try/catch never engages because the right operand's type is
     // already known at compile time.
@@ -266,7 +266,7 @@ fn test_arith_guard_for_unknown_receiver_numeric_right_no_try() {
 #[test]
 fn test_arith_guard_for_unknown_receiver_and_unknown_right_uses_coercion_try() {
     use beamtalk_core::ast::Identifier;
-    // ADR 0116/BT-3263: both operands are genuinely unknown here, so the
+    // ADR 0116: both operands are genuinely unknown here, so the
     // guard's is_number-true (bare BIF) branch must itself become the
     // number-on-the-left coercion try/catch — a numeric-at-runtime `x` could
     // still meet a non-numeric `y`.
@@ -320,7 +320,7 @@ fn test_arith_guard_for_self_in_non_numeric_class() {
     );
 }
 
-// ADR 0116/BT-3263: number-on-the-left coercion. `5 + aVector` — a
+// ADR 0116: number-on-the-left coercion. `5 + aVector` — a
 // statically-numeric left operand and a right operand whose type is
 // genuinely unknown — must wrap the bare arithmetic BIF in a badarith-
 // catching try/catch that dispatches to the right operand's
@@ -486,18 +486,18 @@ fn test_number_coercion_try_catch_compiles_through_erlc() {
 
 #[test]
 fn test_number_coercion_untyped_self_field_right_operand_stays_bare() {
-    // Known, tracked gap (BT-3266, filed from BT-3263 code review): the
+    // Known, tracked gap (from code review): the
     // right-operand gate reuses `receiver_is_statically_numeric` verbatim —
     // per ADR 0116's own "Trigger condition, refined" spec ("a numeric/
     // untyped field — the exact same rule already applied to the left
     // operand") — so an UNTYPED `self.field` on the right is treated as
     // statically numeric and skips the new try/catch entirely, exactly like
-    // an untyped left-operand field already does (BT-2709's deliberate
+    // an untyped left-operand field already does (a deliberate
     // `self.count := self.count + 1` performance trade-off). This means
     // `self.total + self.extra` with `extra` untyped still raw-crashes on
     // badarith at runtime if `extra` isn't a number, rather than dispatching
     // to `plusFromNumber:` — pinned down here as documented, current
-    // behavior, not asserted as correct; BT-3266 tracks whether to close it.
+    // behavior, not asserted as correct.
     let mut generator = CoreErlangGenerator::new("test");
     let left = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
     let right = self_field_access("extra");
@@ -514,7 +514,7 @@ fn test_number_coercion_untyped_self_field_right_operand_stays_bare() {
 
 #[test]
 fn test_number_coercion_untyped_self_fields_both_sides_stay_bare() {
-    // BT-3266 (ADR 0116 addendum, decision: accept the gap): this issue's
+    // ADR 0116 addendum, decision: accept the gap — this test's
     // own literal example, `self.total + self.extra` with both fields
     // untyped. `receiver_is_statically_numeric` trusts an untyped
     // `self.<field>` on either side of the operator identically, so this
@@ -539,7 +539,7 @@ fn test_number_coercion_untyped_self_fields_both_sides_stay_bare() {
     );
 }
 
-// BT-2710: comparison operators (`< > <= >=`) are dispatchable messages. The
+// comparison operators (`< > <= >=`) are dispatchable messages. The
 // bare-BIF fast path holds for statically-comparable receivers (numeric / char
 // / string literals, `self` in Integer/Float/Character/String, and
 // Integer/Float/Number/Character/String params); everything else gets a runtime
@@ -645,7 +645,7 @@ fn test_comparison_guard_for_unknown_receiver() {
         .generate_binary_op("<", &left, &right)
         .unwrap()
         .to_pretty_string();
-    // Inverted guard (BT-2710): is_object → dispatch, else bare comparison BIF.
+    // Inverted guard: is_object → dispatch, else bare comparison BIF.
     assert!(
         output.contains("call 'beamtalk_primitive':'is_object'("),
         "unknown comparison receiver must emit an is_object guard; got: {output}"
@@ -689,7 +689,7 @@ fn test_comparison_guard_for_self_in_non_comparable_class() {
     );
 }
 
-// BT-2710 follow-up: `self.<field>` operator fast path is type-aware. A field
+// `self.<field>` operator fast path is type-aware. A field
 // with an explicit non-primitive (object) declared type routes through the
 // runtime guard so it dispatches (silent-wrong-result fix for comparison;
 // badarith fix for arithmetic); numeric/primitive and untyped fields stay bare.
@@ -1178,7 +1178,7 @@ fn test_generate_map_literal_with_atoms() {
 
 #[test]
 fn test_generate_map_literal_compiles() {
-    // BT-3340: uses the shared `codegen()` class-method helper (workspace
+    // uses the shared `codegen()` class-method helper (workspace
     // mode) rather than `generate_repl_expression` — map-literal Core
     // Erlang representation doesn't depend on REPL vs class-method context,
     // and this keeps the test (which needs the `#[cfg(test)]`-only
@@ -1209,8 +1209,8 @@ fn test_generate_map_literal_compiles() {
 
 #[test]
 fn test_dictionary_at_on_identifier() {
-    // BT-296: Dictionary methods now go through runtime dispatch
-    // BT-430: person at: #name -> beamtalk_message_dispatch:send(person, 'at:', ['name'])
+    // Dictionary methods now go through runtime dispatch
+    // person at: #name -> beamtalk_message_dispatch:send(person, 'at:', ['name'])
     let mut generator = CoreErlangGenerator::new("test");
     generator.push_scope();
     generator.bind_var("person", "Person");
@@ -1227,7 +1227,7 @@ fn test_dictionary_at_on_identifier() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    // BT-430: Unified dispatch
+    // Unified dispatch
     assert!(
         output.contains("beamtalk_message_dispatch") && output.contains("'at:'"),
         "Should generate unified dispatch for at:. Got: {output}"
@@ -1236,8 +1236,8 @@ fn test_dictionary_at_on_identifier() {
 
 #[test]
 fn test_dictionary_at_put_on_identifier() {
-    // BT-296: Dictionary methods now go through runtime dispatch
-    // BT-430: person at: #age put: 31 -> beamtalk_message_dispatch:send(person, 'at:put:', ['age', 31])
+    // Dictionary methods now go through runtime dispatch
+    // person at: #age put: 31 -> beamtalk_message_dispatch:send(person, 'at:put:', ['age', 31])
     let mut generator = CoreErlangGenerator::new("test");
     generator.push_scope();
     generator.bind_var("person", "Person");
@@ -1265,8 +1265,8 @@ fn test_dictionary_at_put_on_identifier() {
 
 #[test]
 fn test_dictionary_size_on_identifier() {
-    // BT-296: Dictionary methods now go through runtime dispatch
-    // BT-430: person size -> beamtalk_message_dispatch:send(person, 'size', [])
+    // Dictionary methods now go through runtime dispatch
+    // person size -> beamtalk_message_dispatch:send(person, 'size', [])
     let mut generator = CoreErlangGenerator::new("test");
     generator.push_scope();
     generator.bind_var("person", "Person");

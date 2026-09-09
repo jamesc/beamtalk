@@ -21,7 +21,7 @@ fn test_generate_unary_message_send_creates_future() {
         .generate_message_send(&receiver, &selector, &[])
         .unwrap();
     let output = doc.to_pretty_string();
-    // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
+    // Unified dispatch via beamtalk_message_dispatch:send/3
     assert!(
         output.contains("beamtalk_message_dispatch':'send'("),
         "Should dispatch via beamtalk_message_dispatch:send/3. Got: {output}"
@@ -53,7 +53,7 @@ fn test_generate_keyword_message_send_creates_future() {
         .generate_message_send(&receiver, &selector, &arguments)
         .unwrap();
     let output = doc.to_pretty_string();
-    // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
+    // Unified dispatch via beamtalk_message_dispatch:send/3
     assert!(
         output.contains("beamtalk_message_dispatch':'send'("),
         "Should dispatch via beamtalk_message_dispatch:send/3. Got: {output}"
@@ -187,7 +187,7 @@ fn test_generate_nested_message_sends_use_unique_variables() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    // BT-430: Unified dispatch generates nested beamtalk_message_dispatch:send calls
+    // Unified dispatch generates nested beamtalk_message_dispatch:send calls
     let send_count = output.matches("beamtalk_message_dispatch':'send'(").count();
     assert!(
         send_count >= 2,
@@ -197,7 +197,7 @@ fn test_generate_nested_message_sends_use_unique_variables() {
 
 #[test]
 fn test_generate_spawn_message_send() {
-    // BT-794: Use workspace-qualified module name to test package-mode spawn
+    // Use workspace-qualified module name to test package-mode spawn
     let mut generator = CoreErlangGenerator::new("bt@my_pkg@test_module");
 
     // Create AST for: Counter spawn
@@ -221,7 +221,7 @@ fn test_generate_spawn_message_send() {
 
 #[test]
 fn test_generate_spawn_with_message_send() {
-    // BT-794: Use workspace-qualified module name to test package-mode spawn
+    // Use workspace-qualified module name to test package-mode spawn
     let mut generator = CoreErlangGenerator::new("bt@my_pkg@test_module");
 
     // Create AST for: Counter spawnWith: #{value => 10}
@@ -279,10 +279,10 @@ fn test_generate_spawn_function() {
 
     // Check that spawn/1 function exists and calls gen_server:start_link with InitArgs
     assert!(code.contains("'spawn'/1 = fun (InitArgs) ->"));
-    // BT-1541: spawn/1 also uses safe_spawn
+    // spawn/1 also uses safe_spawn
     assert!(code.contains("call 'beamtalk_actor':'safe_spawn'('counter', InitArgs)"));
 
-    // BT-1541: spawn uses safe_spawn for trap_exit + initialize sync
+    // spawn uses safe_spawn for trap_exit + initialize sync
     assert!(
         code.contains("call 'beamtalk_actor':'safe_spawn'('counter', ~{}~)"),
         "spawn/0 must use safe_spawn. Got: {code}"
@@ -297,7 +297,7 @@ fn test_generate_spawn_function() {
 
     // Check that it handles errors
     assert!(code.contains("<{'error', Reason}> when 'true' ->"));
-    // BT-1541: Error now includes hint with actual Reason
+    // Error now includes hint with actual Reason
     assert!(code.contains("call 'beamtalk_error':'with_hint'(SpawnErr1, Reason)"));
     assert!(code.contains("call 'beamtalk_error':'raise'(SpawnErr2)"));
 
@@ -322,7 +322,7 @@ fn test_generate_spawn_function() {
 
 #[test]
 fn test_bt897_subdirectory_module_name_consistency() {
-    // BT-897: Actor classes from subdirectory file paths must use the full
+    // Actor classes from subdirectory file paths must use the full
     // module name consistently — module declaration, gen_server:start_link,
     // register_class, init method_table call, and all self-dispatch calls.
     use beamtalk_core::ast::*;
@@ -387,7 +387,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
         "Module declaration should use full path-qualified name. Got:\n{code}"
     );
 
-    // BT-1541: safe_spawn must use the full name
+    // safe_spawn must use the full name
     assert!(
         code.contains(&format!(
             "call 'beamtalk_actor':'safe_spawn'('{full_name}', ~{{}}~)"
@@ -424,7 +424,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
 
 #[test]
 fn test_bt906_class_module_index_overrides_heuristic_for_spawn() {
-    // BT-906: When class_module_index contains an explicit mapping, it must be
+    // When class_module_index contains an explicit mapping, it must be
     // used for actor spawn — not the heuristic that drops subdirectory segments.
     //
     // Without the index, a generator with module_name="bt@my_pkg@main" would
@@ -463,7 +463,7 @@ fn test_bt906_class_module_index_overrides_heuristic_for_spawn() {
     );
 }
 
-// ── ADR 0119 / BT-3436: `own_package_id` ────────────────────────────────
+// ── ADR 0119: `own_package_id` ────────────────────────────────
 
 #[test]
 fn test_own_package_id_stdlib_module() {
@@ -501,7 +501,7 @@ fn test_own_package_id_unprefixed_test_fixture_module() {
 
 #[test]
 fn test_generate_actor_new_error_methods() {
-    // BT-217: Actor classes must export and generate new/0 and new/1 error methods
+    // Actor classes must export and generate new/0 and new/1 error methods
     // using structured #beamtalk_error{} records
     use beamtalk_core::ast::*;
 
@@ -644,7 +644,7 @@ fn test_block_value_message_two_args() {
 
 #[test]
 fn test_value_keyword_erlang_ffi_receiver_routes_to_erlang_interop() {
-    // BT-1260: `(Erlang maps) value: key` must route through Erlang interop, not block apply.
+    // `(Erlang maps) value: key` must route through Erlang interop, not block apply.
     // Before the fix, this emitted `apply Fun(Key)` which crashes at runtime.
     let mut generator = CoreErlangGenerator::new("test");
 
@@ -687,9 +687,9 @@ fn test_value_keyword_erlang_ffi_receiver_routes_to_erlang_interop() {
 
 #[test]
 fn test_value_keyword_unknown_receiver_emits_is_function_guard() {
-    // BT-1260: `someVar value: arg` where receiver is unknown emits a runtime
+    // `someVar value: arg` where receiver is unknown emits a runtime
     // is_function guard: if it's a function, apply it; otherwise dispatch via send.
-    // BT-3377: the "otherwise" branch must go through beamtalk_message_dispatch:send
+    // the "otherwise" branch must go through beamtalk_message_dispatch:send
     // (which knows how to unwrap an actor's gen_server reply envelope), not the
     // lower-level beamtalk_primitive:send — otherwise an actor with its own
     // `value:` method gets its reply returned as a raw `{ok, Result}` tuple.
@@ -730,7 +730,7 @@ fn test_value_keyword_unknown_receiver_emits_is_function_guard() {
 
 #[test]
 fn test_value_keyword_block_literal_receiver_still_uses_fast_apply() {
-    // BT-1260: Block literal receivers must still use the fast inline apply path (no regression).
+    // Block literal receivers must still use the fast inline apply path (no regression).
     // [:x | x + 1] value: 5 → let _Fun = ... in apply _Fun (5)
     let mut generator = CoreErlangGenerator::new("test");
 
@@ -767,7 +767,7 @@ fn test_value_keyword_block_literal_receiver_still_uses_fast_apply() {
 
 #[test]
 fn test_value_value_keyword_erlang_ffi_receiver_routes_to_erlang_interop() {
-    // BT-1260: `(Erlang maps) value: key value: default` must route through Erlang
+    // `(Erlang maps) value: key value: default` must route through Erlang
     // interop, not block apply, for value:value: selector.
     let mut generator = CoreErlangGenerator::new("test");
 
@@ -812,7 +812,7 @@ fn test_value_value_keyword_erlang_ffi_receiver_routes_to_erlang_interop() {
 
 #[test]
 fn test_value_value_value_keyword_unknown_receiver_emits_correct_selector() {
-    // BT-1260: `someVar value: a value: b value: c` emits the full 'value:value:value:'
+    // `someVar value: a value: b value: c` emits the full 'value:value:value:'
     // selector atom in the beamtalk_primitive:send fallback.
     let mut generator = CoreErlangGenerator::new("test");
 
@@ -849,7 +849,7 @@ fn test_value_value_value_keyword_unknown_receiver_emits_correct_selector() {
 
 #[test]
 fn test_value_keyword_class_protocol_receiver_uses_is_function_guard() {
-    // BT-1260: `(Erlang class) value: x` — class-protocol selectors must NOT be
+    // `(Erlang class) value: x` — class-protocol selectors must NOT be
     // treated as FFI module proxies; they fall through to the is_function guard.
     let mut generator = CoreErlangGenerator::new("test");
 
@@ -886,7 +886,7 @@ fn test_value_keyword_class_protocol_receiver_uses_is_function_guard() {
 
 #[test]
 fn test_non_block_message_uses_unified_dispatch() {
-    // BT-430: Regular message sends now use unified dispatch
+    // Regular message sends now use unified dispatch
     // actor increment → beamtalk_message_dispatch:send(actor, 'increment', [])
     let mut generator = CoreErlangGenerator::new("test");
 
@@ -950,7 +950,7 @@ fn test_cascade_unary_messages() {
         "Should send second message 'abs'. Got: {output}"
     );
 
-    // BT-430: Should use unified dispatch for cascade messages
+    // Should use unified dispatch for cascade messages
     assert!(
         output.contains("call 'beamtalk_message_dispatch':'send'(_Receiver"),
         "Should send messages via unified dispatch. Got: {output}"
@@ -1223,7 +1223,7 @@ fn test_cascade_multiple_field_assignments_state_threading() {
 #[test]
 fn test_erlang_interop_direct_call_keyword_single_arg() {
     // `Erlang lists reverse: xs` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'reverse', [Xs])`
-    // BT-1127: Routes through proxy for binary→charlist coercion support
+    // Routes through proxy for binary→charlist coercion support
     let mut generator = CoreErlangGenerator::new("test");
 
     // Inner: Erlang lists (ClassReference("Erlang") + Unary("lists"))
@@ -1267,7 +1267,7 @@ fn test_erlang_interop_direct_call_keyword_single_arg() {
 #[test]
 fn test_erlang_interop_direct_call_keyword_multi_arg() {
     // `Erlang lists seq: 1 with: 10` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'seq', [1, 10])`
-    // BT-1127: Routes through proxy for binary→charlist coercion support
+    // Routes through proxy for binary→charlist coercion support
     let mut generator = CoreErlangGenerator::new("test");
 
     let inner_receiver = Expression::MessageSend {
@@ -1307,7 +1307,7 @@ fn test_erlang_interop_direct_call_keyword_multi_arg() {
 
 #[test]
 fn test_bt2685_parenthesized_erlang_ffi_error_routes_to_proxy() {
-    // BT-2685: `(Erlang beamtalk_console) error: msg` is an Erlang FFI call to a
+    // `(Erlang beamtalk_console) error: msg` is an Erlang FFI call to a
     // function named `error`, NOT the `Object >> error:` error-signaling intrinsic.
     // The receiver is wrapped in `Parenthesized` (the canonical `(Erlang mod)` form),
     // which the FFI-receiver check must peel through. Regression for the bug where
@@ -1357,7 +1357,7 @@ fn test_bt2685_parenthesized_erlang_ffi_error_routes_to_proxy() {
 #[test]
 fn test_erlang_interop_direct_call_zero_arg() {
     // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])`
-    // BT-1127: Routes through proxy for consistent validation/coercion
+    // Routes through proxy for consistent validation/coercion
     let mut generator = CoreErlangGenerator::new("test");
 
     let inner_receiver = Expression::MessageSend {
@@ -1479,7 +1479,7 @@ fn test_erlang_interop_protocol_selectors_not_optimized() {
 
 #[test]
 fn test_erlang_interop_direct_call_parenthesized_receiver() {
-    // BT-3079: `(Erlang lists) reverse: xs` with a genuine `Parenthesized`
+    // `(Erlang lists) reverse: xs` with a genuine `Parenthesized`
     // AST node wrapping the inner `Erlang lists` send must hit the same
     // direct-call fast path as the unparenthesized form — the shared
     // `beamtalk_core::ffi_receiver::erlang_module_of_receiver` recognizer peels
@@ -1528,7 +1528,7 @@ fn test_erlang_interop_direct_call_parenthesized_receiver() {
 
 #[test]
 fn test_erlang_interop_bare_class_protocol_selector_falls_through() {
-    // BT-3079 regression: `Erlang class` (receiver is directly the bare
+    // `Erlang class` (receiver is directly the bare
     // `Erlang` class reference, selector is the class-protocol `class`) must
     // NOT construct an `ErlangModule` proxy for a module literally named
     // `class` — it falls through to normal class-side dispatch.
@@ -1558,7 +1558,7 @@ fn test_erlang_interop_bare_class_protocol_selector_falls_through() {
 
 #[test]
 fn test_erlang_interop_package_qualified_not_treated_as_ffi() {
-    // BT-3079: `json@Erlang lists` — a package-qualified `Erlang` names a
+    // `json@Erlang lists` — a package-qualified `Erlang` names a
     // different, package-scoped class, not the compiler's built-in FFI
     // bridge, so it must not be optimized as a direct Erlang call or
     // construct an `ErlangModule` proxy.
@@ -1601,7 +1601,7 @@ fn test_cross_file_value_object_subclass_without_index() {
 
 #[test]
 fn test_cross_file_value_object_subclass_with_index() {
-    // BT-894: With the superclass index providing the chain MyParent → Object,
+    // With the superclass index providing the chain MyParent → Object,
     // the compiler should generate value-type code (no gen_server).
     let src = "MyParent subclass: MyChild\n  getValue => 42";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -1623,7 +1623,7 @@ fn test_cross_file_value_object_subclass_with_index() {
 
 #[test]
 fn test_cross_file_actor_subclass_with_index() {
-    // BT-894: With the superclass index providing the chain MyActor → Actor,
+    // With the superclass index providing the chain MyActor → Actor,
     // the compiler should still generate actor code (gen_server).
     let src = "MyActor subclass: MySpecialActor\n  getValue => 42";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -1645,7 +1645,7 @@ fn test_cross_file_actor_subclass_with_index() {
 
 #[test]
 fn test_bt855_erlang_interop_wrapper_pure_block_no_warning() {
-    // BT-855: A pure block passed to an Erlang call site should generate a plain
+    // A pure block passed to an Erlang call site should generate a plain
     // Tier 1 fun with no wrapper and no warning.
     //
     // Beamtalk: `Erlang lists map: [:x | x + 1] to: items`
@@ -1713,7 +1713,7 @@ fn test_bt855_erlang_interop_wrapper_pure_block_no_warning() {
 
 #[test]
 fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
-    // BT-855: A stateful block (one with captured variable mutations) passed to
+    // A stateful block (one with captured variable mutations) passed to
     // an Erlang call site must be wrapped so Erlang sees a plain fun(Args) -> Result
     // without the StateAcc protocol. A warning is emitted because mutations are dropped.
     //
@@ -1815,7 +1815,7 @@ fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
 
 #[test]
 fn test_bt855_collect_pure_block_no_warning() {
-    // BT-855: `collect:` with a pure block should NOT emit a warning.
+    // `collect:` with a pure block should NOT emit a warning.
     // Pure blocks compile to Tier 1 and are passed directly to lists:map.
     let src = "
 Actor subclass: Processor
@@ -1849,7 +1849,7 @@ Actor subclass: Processor
 
 #[test]
 fn test_bt855_generate_erlang_interop_wrapper_pure_returns_tier1() {
-    // BT-855: generate_erlang_interop_wrapper on a pure block returns (Tier1Doc, false).
+    // generate_erlang_interop_wrapper on a pure block returns (Tier1Doc, false).
     let mut generator = CoreErlangGenerator::new("test");
 
     let pure_block = Block::new(
@@ -1889,7 +1889,7 @@ fn test_bt855_generate_erlang_interop_wrapper_pure_returns_tier1() {
 
 #[test]
 fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
-    // BT-855: generate_erlang_interop_wrapper on a stateful block returns (WrapperDoc, true).
+    // generate_erlang_interop_wrapper on a stateful block returns (WrapperDoc, true).
     // The wrapper is:
     //   let BtBlock = fun(X, StateAcc) -> ... in fun(X) ->
     //       let _WT = apply BtBlock(X, State) in let WRes = call 'erlang':'element'(1, _WT) in WRes
@@ -1971,7 +1971,7 @@ fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
 
 #[test]
 fn test_cast_send_to_non_self_receiver_uses_dispatch_cast() {
-    // BT-920: `someActor increment!` should generate beamtalk_message_dispatch:cast/3
+    // `someActor increment!` should generate beamtalk_message_dispatch:cast/3
     let mut generator = CoreErlangGenerator::new("test");
 
     let receiver = Expression::Identifier(Identifier::new("someActor", Span::new(0, 9)));
@@ -2016,7 +2016,7 @@ fn test_cast_send_to_non_self_receiver_uses_dispatch_cast() {
 
 #[test]
 fn test_cast_send_to_non_self_keyword_receiver_uses_dispatch_cast() {
-    // BT-920: `someActor setValue: 42!` should generate beamtalk_message_dispatch:cast/3
+    // `someActor setValue: 42!` should generate beamtalk_message_dispatch:cast/3
     let mut generator = CoreErlangGenerator::new("test");
 
     let receiver = Expression::Identifier(Identifier::new("someActor", Span::new(0, 9)));
@@ -2062,7 +2062,7 @@ fn test_cast_send_to_non_self_keyword_receiver_uses_dispatch_cast() {
 
 #[test]
 fn test_cast_self_send_uses_safe_dispatch_and_discards_result() {
-    // BT-920: `self increment!` in actor context should call safe_dispatch but
+    // `self increment!` in actor context should call safe_dispatch but
     // discard the result and return 'ok'.
     let mut generator = CoreErlangGenerator::new("test");
     // CoreErlangGenerator::new defaults to Actor context — self-sends are valid
@@ -2115,7 +2115,7 @@ fn test_cast_self_send_uses_safe_dispatch_and_discards_result() {
 
 #[test]
 fn test_cast_send_in_actor_method_compiles() {
-    // BT-920: `counter increment!` as a statement in an actor method compiles
+    // `counter increment!` as a statement in an actor method compiles
     // to Core Erlang that calls beamtalk_message_dispatch:cast/3.
     let src = "Actor subclass: Sender\n  state: target = nil\n\n  fire =>\n    target increment!\n    \"done\"\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -2284,9 +2284,9 @@ sealed Object subclass: Other
 
 #[test]
 fn test_bt2233_unmapped_quoted_primitive_errors_in_stdlib_mode() {
-    // BT-2233: In stdlib mode, a quoted @primitive in a value-type class with no
+    // In stdlib mode, a quoted @primitive in a value-type class with no
     // inline BIF lowering is a hard error (naming class + selector) instead of a
-    // silent runtime-dispatch fallback that DNUs at runtime (the BT-2232 bug).
+    // silent runtime-dispatch fallback that DNUs at runtime.
     let src = "
 sealed Object subclass: Foo
   doIt => @primitive \"doIt\"
@@ -2307,11 +2307,11 @@ sealed Object subclass: Foo
 
 #[test]
 fn test_bt2233_unmapped_quoted_primitive_warns_outside_stdlib_mode() {
-    // BT-2233: Outside stdlib mode (e.g. user FFI @primitive via
-    // --allow-primitives) the BT-938 warn-and-fallback path is preserved — the
+    // Outside stdlib mode (e.g. user FFI @primitive via
+    // --allow-primitives) the warn-and-fallback path is preserved — the
     // strict failure is scoped to the stdlib build it protects. The binding
-    // table knows a different class, so `bt@stdlib@foo` is absent and BT-938
-    // emits a warning (not a hard error).
+    // table knows a different class, so `bt@stdlib@foo` is absent and the
+    // fallback path emits a warning (not a hard error).
     let src = "
 sealed Object subclass: Foo
   doIt => @primitive \"doIt\"
@@ -2342,7 +2342,7 @@ sealed Object subclass: Bar
     );
 }
 
-// --- BT-1321: intrinsic async_send → sync_send migration ---
+// --- intrinsic async_send → sync_send migration ---
 
 use super::codegen as codegen_source;
 
@@ -2359,7 +2359,7 @@ fn has_sync_send_for_selector(code: &str, selector: &str) -> bool {
 
 #[test]
 fn test_field_names_actor_uses_sync_send() {
-    // BT-1321: fieldNames on an actor receiver must use sync_send, not async_send + future.
+    // fieldNames on an actor receiver must use sync_send, not async_send + future.
     // Assertion is selector-specific: checks sync_send includes the 'fieldNames' atom.
     let src = concat!(
         "Actor subclass: Srv\n",
@@ -2384,7 +2384,7 @@ fn test_field_names_actor_uses_sync_send() {
 
 #[test]
 fn test_field_at_actor_uses_sync_send() {
-    // BT-1321: fieldAt: on an actor receiver must use sync_send.
+    // fieldAt: on an actor receiver must use sync_send.
     // Assertion is selector-specific: checks sync_send includes the 'fieldAt:' atom.
     let src = concat!(
         "Actor subclass: Srv\n",
@@ -2409,7 +2409,7 @@ fn test_field_at_actor_uses_sync_send() {
 
 #[test]
 fn test_field_at_put_actor_uses_sync_send() {
-    // BT-1321: fieldAt:put: on an actor receiver must use sync_send.
+    // fieldAt:put: on an actor receiver must use sync_send.
     // Assertion is selector-specific: checks sync_send includes the 'fieldAt:put:' atom.
     let src = concat!(
         "Actor subclass: Srv\n",
@@ -2434,7 +2434,7 @@ fn test_field_at_put_actor_uses_sync_send() {
 
 #[test]
 fn test_field_names_self_no_sync_send() {
-    // BT-1321: `self fieldNames` inside an actor must NOT route through sync_send.
+    // `self fieldNames` inside an actor must NOT route through sync_send.
     // Self is a #beamtalk_object{..., pid: self()} tuple; sync_send(self()) would be
     // gen_server:call(self(), ...) → deadlock. Must use beamtalk_primitive:send(State).
     let src = concat!(
@@ -2456,7 +2456,7 @@ fn test_field_names_self_no_sync_send() {
 
 #[test]
 fn test_field_at_self_no_sync_send() {
-    // BT-1321: `self fieldAt: name` inside an actor must NOT route through sync_send.
+    // `self fieldAt: name` inside an actor must NOT route through sync_send.
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: x = 0\n\n",
@@ -2476,8 +2476,8 @@ fn test_field_at_self_no_sync_send() {
 
 #[test]
 fn test_field_at_put_self_no_sync_send() {
-    // BT-1321: `self fieldAt: name put: val` inside an actor must NOT route through sync_send.
-    // BT-1324: Must thread state update via maps:put so subsequent reads see the new value.
+    // `self fieldAt: name put: val` inside an actor must NOT route through sync_send.
+    // Must thread state update via maps:put so subsequent reads see the new value.
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: x = 0\n\n",
@@ -2497,7 +2497,7 @@ fn test_field_at_put_self_no_sync_send() {
 
 #[test]
 fn test_field_at_put_self_threads_state() {
-    // BT-1324: After `self fieldAt: #x put: val`, subsequent `self fieldAt: #x`
+    // After `self fieldAt: #x put: val`, subsequent `self fieldAt: #x`
     // must read from the updated state, not the stale snapshot.
     let src = concat!(
         "Actor subclass: Srv\n",
@@ -2520,7 +2520,7 @@ fn test_field_at_put_self_threads_state() {
     );
 }
 
-// --- BT-1270: State-mutation hoisting in block value: apply paths ---
+// --- State-mutation hoisting in block value: apply paths ---
 
 #[test]
 fn test_block_value_keyword_field_assignment_arg_hoisted() {
@@ -2648,11 +2648,11 @@ fn test_value_keyword_guard_field_assignment_arg_hoisted() {
     generator.pop_scope();
 }
 
-// --- BT-1420: Self-call state threading ---
+// --- Self-call state threading ---
 
 #[test]
 fn test_self_call_non_last_threads_state() {
-    // BT-1420: `self setup` followed by `self.value` — the self-send must
+    // `self setup` followed by `self.value` — the self-send must
     // thread NewState so the subsequent field read sees the mutation.
     let src = concat!(
         "Actor subclass: Srv\n",
@@ -2684,7 +2684,7 @@ fn test_self_call_non_last_threads_state() {
 
 #[test]
 fn test_self_call_as_last_expression_threads_state() {
-    // BT-1420: `self setup` as the last expression must thread NewState
+    // `self setup` as the last expression must thread NewState
     // into the reply tuple so gen_server state is updated.
     let src = concat!(
         "Actor subclass: Srv\n",
@@ -2709,17 +2709,17 @@ fn test_self_call_as_last_expression_threads_state() {
 
 #[test]
 fn test_self_call_error_branch_handles_both_error_shapes() {
-    // BT-2816: A self-send's error branch must handle TWO distinct shapes
+    // A self-send's error branch must handle TWO distinct shapes
     // returned by safe_dispatch/dispatch, not just one:
     //
     // 1. A caught exception: safe_dispatch/3's try/catch packs it as the
     //    3-tuple {'error', {Type, Reason, Stacktrace}, State} — must be
     //    destructured and routed through beamtalk_exception_handler:reraise/4
-    //    (with a selector/class breadcrumb — see BT-2822's
+    //    (with a selector/class breadcrumb — see
     //    test_self_call_error_branch_threads_selector_class_breadcrumb below)
     //    (passing the whole triple straight to beamtalk_error:raise/1 crashes
     //    with function_clause, since raise/1 only accepts a raw
-    //    #beamtalk_error{} record — the original BT-2816 bug).
+    //    #beamtalk_error{} record).
     // 2. A plain returned error: dispatch/4's DNU fallback (and other
     //    non-exception error paths) *return* {'error', Error, State} where
     //    Error is a bare #beamtalk_error{} record — never reaching
@@ -2740,7 +2740,7 @@ fn test_self_call_error_branch_handles_both_error_shapes() {
     let code = codegen_source(src);
 
     // Clause 1: destructured triple routed through reraise/4 (with a
-    // selector/class breadcrumb, since BT-2822).
+    // selector/class breadcrumb).
     assert!(
         code.contains("call 'beamtalk_exception_handler':'reraise'("),
         "Self-dispatch error branch must destructure the caught-exception \
@@ -2763,14 +2763,14 @@ fn test_self_call_error_branch_handles_both_error_shapes() {
 
 #[test]
 fn test_self_call_error_branch_threads_selector_class_breadcrumb() {
-    // BT-2822 (BT-2816 follow-up): the caught-exception clause of a
+    // (follow-up): the caught-exception clause of a
     // self-dispatch error branch must call reraise/4 with a
     // #{selector => ..., class => ...} breadcrumb — mirroring
     // beamtalk_actor:sync_send_remote/3's cross-actor Context construction —
     // so a raw Erlang error escaping a forwarded self-send gets the same
     // `ClassName>>selector: ...` location prefix as the cross-actor case.
     //
-    // BT-2833: `class` is now resolved via a runtime `lookup_class/1` call
+    // `class` is now resolved via a runtime `lookup_class/1` call
     // on `self()` — not a compile-time literal atom baked in from
     // `class_name()` — so a self-send inside a method a subclass inherits
     // without overriding still reports the actor's actual runtime class,
@@ -2787,7 +2787,7 @@ fn test_self_call_error_branch_threads_selector_class_breadcrumb() {
     // `gen_server/dispatch.rs`) discards the real error returned by
     // `beamtalk_dispatch:super/5` whenever an inherited method raises,
     // fabricating a bogus `does_not_understand` instead — masking this
-    // fix's effect for any selector not matched locally. Tracked in BT-2842.
+    // fix's effect for any selector not matched locally.
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: value = 0\n\n",
@@ -2821,8 +2821,8 @@ fn test_self_call_error_branch_threads_selector_class_breadcrumb() {
     let class_var = &captures[1];
 
     // The 'class' value must come from a runtime lookup, not a literal
-    // 'Srv' atom — BT-2833 fixes the inheritance mismatch by resolving the
-    // actor's actual runtime class via beamtalk_actor:lookup_class/1.
+    // 'Srv' atom — the actor's actual runtime class is resolved via
+    // beamtalk_actor:lookup_class/1, fixing the inheritance mismatch.
     let lookup_binding = regex::Regex::new(&format!(
         r"let {class_var} = call 'beamtalk_actor':'lookup_class'\(call 'erlang':'self'\(\)\) in"
     ))
@@ -2836,7 +2836,7 @@ fn test_self_call_error_branch_threads_selector_class_breadcrumb() {
 
 #[test]
 fn test_self_call_error_branch_sealed_direct_call_breadcrumb() {
-    // BT-2833: generate_direct_sealed_call (a sealed class self-sending one
+    // generate_direct_sealed_call (a sealed class self-sending one
     // of its own sealed methods, in *closed* expression position — e.g. as
     // the receiver of another message) had no breadcrumb coverage at all.
     // A self-send nested inside a binary op forces codegen through the
@@ -2880,7 +2880,7 @@ fn test_self_call_error_branch_sealed_direct_call_breadcrumb() {
 
 #[test]
 fn test_sealed_method_logger_call_tags_own_selector() {
-    // BT-3479 (PR #3810 review follow-up): generate_sealed_method_functions_doc
+    // PR #3810 review follow-up: generate_sealed_method_functions_doc
     // now enters its prologue via MethodFrame::enter(..., MethodBoundary::Actor),
     // which sets current_method_selector unconditionally. Before that, the
     // hand-rolled prologue for sealed-method functions never set it, so a
@@ -2923,7 +2923,7 @@ fn test_sealed_method_logger_call_tags_own_selector() {
 
 #[test]
 fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
-    // BT-2833: generate_tier2_self_send_open (a self-send passing a
+    // generate_tier2_self_send_open (a self-send passing a
     // stateful block argument — one that captures and mutates an outer
     // local, e.g. a user-defined HOM invocation like
     // `self eachItem: [:x | count := count + x]`) had no breadcrumb
@@ -3105,7 +3105,7 @@ fn test_unqualified_class_reference_unchanged() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-2276: classMethods: block arity validation (compile-time).
+// classMethods: block arity validation (compile-time).
 // A `classMethods:` block whose parameter count does not match the selector
 // (`self` plus one per selector slot) must be rejected with a clear
 // BlockArityError naming the selector, not silently lowered to a wrong-arity
@@ -3202,7 +3202,7 @@ fn test_bt2276_class_methods_correct_block_unaffected() {
 
 #[test]
 fn test_builder_class_var_mutation_emits_shadow_write() {
-    // ADR 0110 (BT-3037): ClassBuilder classMethods: funs lower through the
+    // ADR 0110: ClassBuilder classMethods: funs lower through the
     // shared class-method body path, so a top-frame class-var mutation inside
     // one must emit the '$bt_class_vars_shadow' write exactly like a compiled
     // class method.
@@ -3220,14 +3220,14 @@ fn test_builder_class_var_mutation_emits_shadow_write() {
 
 #[test]
 fn test_builder_cascade_at_block_depth_still_emits_shadow_write() {
-    // ADR 0110 (BT-3037): the builder cascade may lexically sit inside a block
+    // ADR 0110: the builder cascade may lexically sit inside a block
     // (block_depth > 0 at the cascade's position), but the fun body executes
     // at runtime as a class method's own top frame.
     // generate_class_method_fun_from_block saves/resets/restores block_depth so
     // the shadow-write gate (`block_depth == 0`) still fires — forgetting that
     // reset would silently disable the fix for builder classes defined inside
     // blocks. A source-level `[… classBuilder …]` wrapper is currently rejected
-    // earlier (BT-2792 stored-closure field-write validation sees the
+    // earlier (the stored-closure field-write validation sees the
     // classMethods: mutation), so simulate the lexical position directly, as
     // test_generate_cast_send_actor_self_in_block_uses_mailbox does.
     let src = "Object classBuilder name: #ShadowBlk; superclass: Object; \
@@ -3271,7 +3271,7 @@ fn test_bt2276_class_methods_computed_fun_passes_compile() {
 
 #[test]
 fn test_class_method_self_send_long_selector_uses_hashed_atom() {
-    // BT-1408 follow-up (#3051): inside a class-side method, a self-send whose
+    // Inside a class-side method, a self-send whose
     // selector would form a 'class_<selector>' atom exceeding Erlang's 255-byte
     // hard limit must hash via safe_class_method_fn_name, not emit the raw
     // overlong atom that erlc's core_scan rejects at BEAM-compile time.
@@ -3303,7 +3303,7 @@ fn test_class_method_self_send_long_selector_uses_hashed_atom() {
 
 #[test]
 fn test_abstract_actor_spawn_raises_instantiation_error() {
-    // BT-105: Abstract Actor subclasses must emit spawn/0 and spawn/1 as
+    // Abstract Actor subclasses must emit spawn/0 and spawn/1 as
     // instantiation_error stubs — not real safe_spawn calls.
     use beamtalk_core::ast::*;
 
@@ -3384,7 +3384,7 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
 
 #[test]
 fn test_actor_spawn_registers_instance_for_hot_reload() {
-    // BT-572: spawn/0 and spawn/1 ok-branches must register the new pid with
+    // spawn/0 and spawn/1 ok-branches must register the new pid with
     // beamtalk_object_instances:register/2, wrapped in try-catch so a missing
     // registry (e.g. in stdlib unit tests) does not crash the spawn.
     use beamtalk_core::ast::*;
@@ -3463,7 +3463,7 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
 
 #[test]
 fn test_spawn_with_args_validates_map_argument() {
-    // BT-473: spawn/1 must guard InitArgs with erlang:is_map before calling
+    // spawn/1 must guard InitArgs with erlang:is_map before calling
     // safe_spawn. A non-map raises type_error with the 'spawnWith:' selector
     // and a descriptive hint.
     use beamtalk_core::ast::*;
