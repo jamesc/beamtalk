@@ -7,7 +7,7 @@
 //!
 //! Generates code for counted loop constructs: `repeat`, and mutation-threading
 //! variants of `timesRepeat:`, `to:do:`, and `to:by:do:`.
-//! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods (BT-1054).
+//! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods.
 
 use super::super::threaded_ir::{
     self, LoopCounter, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
@@ -54,7 +54,7 @@ pub(super) struct CountedLoopFrame {
     pub initial_counter: Document<'static>,
     /// Optional Beamtalk block-parameter name to bind to the gensym'd counter.
     pub body_param: Option<String>,
-    /// BT-2354: gensym'd Core Erlang counter variable name (e.g. `_loopidx3`).
+    /// gensym'd Core Erlang counter variable name (e.g. `_loopidx3`).
     ///
     /// Used as the loop fun's first parameter and threaded through
     /// `condition_value`/`next_counter`. Produced by `fresh_temp_var` (leading
@@ -63,14 +63,14 @@ pub(super) struct CountedLoopFrame {
     /// unique suffix also keeps it distinct from underscore-prefixed user
     /// identifiers (which `to_core_var` passes through verbatim).
     pub counter: String,
-    /// BT-3168 (ADR 0111 Addendum 9, Question 3): the pre-loop `ClassVars`
+    /// ADR 0111 Addendum 9, Question 3: the pre-loop `ClassVars`
     /// name (`current_class_var()`, captured before body generation runs),
     /// when the body threads a `ClassVars` mutation through the loop's own
     /// recursive tail call. `None` when it doesn't. Used, verbatim, as both
     /// the letrec fun's extra trailing formal parameter and the initial
     /// `apply`'s trailing argument — see [`extra_threaded_arg_doc`].
     pub class_var_param: Option<String>,
-    /// BT-3484: the pre-loop value-type `Self` name (`current_self_var()`,
+    /// the pre-loop value-type `Self` name (`current_self_var()`,
     /// captured before body generation runs), when the body threads a
     /// `self.field := ...` value-type mutation through the loop's own
     /// recursive tail call. `None` when it doesn't. The `SelfVt` mirror of
@@ -90,7 +90,7 @@ impl CountedLoopFrame {
     }
 }
 
-/// BT-3168 (ADR 0111 Addendum 9, Question 3) / BT-3484: renders
+/// ADR 0111 Addendum 9, Question 3: renders
 /// `", <name>"` for a threaded extra fun-argument slot — the `ClassVars`
 /// one (class-method loops) or the value-type `Self` one — or nothing when
 /// the loop threads neither. Shared by `while_loops.rs`'s and
@@ -149,17 +149,17 @@ impl CoreErlangGenerator {
 
         let n_var = self.fresh_temp_var("temp");
         let receiver_code = self.expression_doc(receiver)?;
-        // BT-2354: gensym the loop counter so a user local named `i` (→ Core `I`)
+        // gensym the loop counter so a user local named `i` (→ Core `I`)
         // cannot collide with the loop fun parameter.
         let counter = self.fresh_temp_var("loopidx");
 
-        // BT-3168 (ADR 0111 Addendum 9, Question 3): pre-loop ClassVars name,
+        // ADR 0111 Addendum 9, Question 3: pre-loop ClassVars name,
         // captured before `generate_counted_stateful_loop` runs —
         // `with_branch_context` inherits (never resets) the outer
         // `class_var_version`, so this is both the letrec fun's own extra
         // trailing formal parameter and the exit arm's reference to it.
         let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
-        // BT-3484: the `SelfVt` mirror — see `CountedLoopFrame::self_param`.
+        // the `SelfVt` mirror — see `CountedLoopFrame::self_param`.
         let self_param = plan.threads_value_self.then(|| self.current_self_var());
 
         let frame = CountedLoopFrame {
@@ -203,16 +203,16 @@ impl CoreErlangGenerator {
         let receiver_code = self.expression_doc(receiver)?;
         let end_var = self.fresh_temp_var("temp");
         let limit_code = self.expression_doc(limit)?;
-        // BT-2354: gensym the loop counter (the block param is aliased to it).
+        // gensym the loop counter (the block param is aliased to it).
         let counter = self.fresh_temp_var("loopidx");
 
         // Bind the block parameter name (e.g. "i" in [:i | ...])
         let body_param = body.parameters.first().map(|p| p.name.to_string());
 
-        // BT-3168 (ADR 0111 Addendum 9, Question 3): see the analogous
+        // ADR 0111 Addendum 9, Question 3: see the analogous
         // comment in `generate_times_repeat_with_mutations`.
         let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
-        // BT-3484: the `SelfVt` mirror — see `CountedLoopFrame::self_param`.
+        // the `SelfVt` mirror — see `CountedLoopFrame::self_param`.
         let self_param = plan.threads_value_self.then(|| self.current_self_var());
 
         let frame = CountedLoopFrame {
@@ -263,15 +263,15 @@ impl CoreErlangGenerator {
         let limit_code = self.expression_doc(limit)?;
         let step_var = self.fresh_temp_var("temp");
         let step_code = self.expression_doc(step)?;
-        // BT-2354: gensym the loop counter (the block param is aliased to it).
+        // gensym the loop counter (the block param is aliased to it).
         let counter = self.fresh_temp_var("loopidx");
 
         let body_param = body.parameters.first().map(|p| p.name.to_string());
 
-        // BT-3168 (ADR 0111 Addendum 9, Question 3): see the analogous
+        // ADR 0111 Addendum 9, Question 3: see the analogous
         // comment in `generate_times_repeat_with_mutations`.
         let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
-        // BT-3484: the `SelfVt` mirror — see `CountedLoopFrame::self_param`.
+        // the `SelfVt` mirror — see `CountedLoopFrame::self_param`.
         let self_param = plan.threads_value_self.then(|| self.current_self_var());
 
         let frame = CountedLoopFrame {
@@ -337,7 +337,7 @@ impl CoreErlangGenerator {
     /// that captures the loop-type-specific preamble, condition, and step expression.
     ///
     /// In standard mode the fun signature is `(I, StateAcc)`.
-    /// In direct-params mode (BT-1275, no field mutations) it is `(I, Var1, ..., VarN)`
+    /// In direct-params mode (no field mutations) it is `(I, Var1, ..., VarN)`
     /// eliminating per-iteration `maps:get` / `maps:put` calls.
     ///
     /// ADR 0111 Addendum 15: lowers to one `ThreadedStmt::ConditionalLoop`
@@ -362,7 +362,7 @@ impl CoreErlangGenerator {
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
         let cv_param_doc = extra_threaded_arg_doc(frame.class_var_param.as_ref());
         let class_var_seed_version = self.class_var_version();
-        // BT-3484: the value-type `Self` mirror of the two lines above —
+        // the value-type `Self` mirror of the two lines above —
         // `self_version`, like `class_var_version`, is inherited (never
         // reset) across `with_branch_context`, so this names the identity
         // the loop body's own first `SelfVt` `Bind` will source from.
@@ -376,7 +376,7 @@ impl CoreErlangGenerator {
             self.bind_var(bt_name, &frame.counter);
         }
 
-        // Unpack threaded locals at the top of each iteration. BT-3470 (ADR
+        // Unpack threaded locals at the top of each iteration (ADR
         // 0111 Addendum 15): the returned docs are real
         // `let I = call 'maps':'get'(...) in` text that must render at the
         // top of the letrec fun's own body, before the condition — legacy
@@ -419,7 +419,7 @@ impl CoreErlangGenerator {
             Self::rebase_loop_seed(&mut body_stmts, &real_seed, &gensym_seed);
             produces.push(gensym_seed);
         }
-        // BT-3484: identical treatment for the value-type `Self` slot —
+        // identical treatment for the value-type `Self` slot —
         // mutually exclusive with the `ClassVars` one above, so at most one
         // of these two `produces` entries ever exists.
         if let Some(self_name) = &frame.self_param {
@@ -471,7 +471,7 @@ impl CoreErlangGenerator {
         Ok(docvec![pack_doc, frame.preamble.clone(), " ", rendered])
     }
 
-    /// BT-1275: Direct-params variant of `generate_counted_stateful_loop`.
+    /// Direct-params variant of `generate_counted_stateful_loop`.
     ///
     /// Uses `fun (I, Var1, ..., VarN)` instead of `fun (I, StateAcc)`.
     /// The `StateAcc` map is rebuilt only once in the false (exit) arm.
@@ -515,7 +515,7 @@ impl CoreErlangGenerator {
         let condition_stmt = ThreadedStmt::Statement(frame.condition_prelude.clone(), body.span);
         let condition_value = ValueRef::Doc(frame.condition_value.clone());
 
-        // Body — set in_direct_params_loop so nested list ops skip StateAcc repack (BT-1329).
+        // Body — set in_direct_params_loop so nested list ops skip StateAcc repack.
         let prev_direct_params_loop = self.loop_mode.in_direct_params_loop;
         self.loop_mode.in_direct_params_loop = true;
         let (body_stmts, ir_frame) = self.generate_letrec_body_ir(body, plan)?;
@@ -564,7 +564,7 @@ impl CoreErlangGenerator {
         Ok(docvec![frame.preamble.clone(), " ", rendered])
     }
 
-    /// BT-1326/BT-1342: Full-extract variant of `generate_counted_stateful_loop`.
+    /// Full-extract variant of `generate_counted_stateful_loop`.
     ///
     /// Uses `fun (I, Var1, ..., VarN, RField1, ..., MField1, ...)` — locals, read-only fields,
     /// AND mutated fields as direct fun parameters. No `State` parameter.
@@ -631,7 +631,7 @@ impl CoreErlangGenerator {
         let condition_stmt = ThreadedStmt::Statement(frame.condition_prelude.clone(), body.span);
         let condition_value = ValueRef::Doc(frame.condition_value.clone());
 
-        // BT-1326/BT-1342: Run body with hybrid field params active.
+        // Run body with hybrid field params active.
         let (body_stmts, ir_frame) =
             self.generate_letrec_hybrid_body_ir(body, plan, &all_field_params)?;
 
@@ -757,7 +757,7 @@ mod tests {
         );
     }
 
-    // ── BT-1275: direct-params optimisation ──────────────────────────────────
+    // ── direct-params optimisation ──────────────────────────────────
 
     #[test]
     fn test_to_do_local_var_only_uses_direct_params() {
@@ -769,7 +769,7 @@ mod tests {
             "to:do: with local mutation should generate a letrec. Got:\n{code}"
         );
         // Fun signature must be (<gensym'd counter>, Sum), not (_, StateAcc).
-        // BT-2354: the counter is gensym'd (e.g. `_loopidx3`) so it can never
+        // the counter is gensym'd (e.g. `_loopidx3`) so it can never
         // collide with a user local named `i` (→ Core `I`).
         assert!(
             code.contains("= fun (_loopidx") && code.contains(", Sum) ->"),
@@ -830,11 +830,11 @@ mod tests {
         );
     }
 
-    // ── BT-1326/BT-1342: full-extract direct-params + field extraction ───────
+    // ── full-extract direct-params + field extraction ───────
 
     #[test]
     fn test_to_do_field_plus_local_mutation_uses_full_extract() {
-        // BT-1342: When both field AND local vars are mutated, full-extract mode
+        // When both field AND local vars are mutated, full-extract mode
         // extracts mutated fields to direct params (no State param in loop).
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i. self.n := self.n + 1]\n    self.n := sum\n";
         let code = codegen(src);
@@ -876,7 +876,7 @@ mod tests {
 
     #[test]
     fn test_times_repeat_field_plus_local_mutation_uses_full_extract() {
-        // BT-1342: timesRepeat: with both field + local mutations uses full-extract mode.
+        // timesRepeat: with both field + local mutations uses full-extract mode.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    3 timesRepeat: [sum := sum + 1. self.n := self.n + 1]\n    self.n := sum\n";
         let code = codegen(src);
         // No State in fun signature.
@@ -907,7 +907,7 @@ mod tests {
 
     #[test]
     fn test_to_by_do_field_plus_local_mutation_uses_full_extract() {
-        // BT-1342: to:by:do: with both field + local mutations uses full-extract mode.
+        // to:by:do: with both field + local mutations uses full-extract mode.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := sum + i. self.n := self.n + 1]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
@@ -933,11 +933,11 @@ mod tests {
         );
     }
 
-    // ── BT-2308: value-type local threading for counted loops ────────────────
+    // ── value-type local threading for counted loops ────────────────
 
     #[test]
     fn test_value_type_to_do_write_only_threads_local() {
-        // BT-2308: `[:i | last := i]` mutates an outer local write-only. In value-type
+        // `[:i | last := i]` mutates an outer local write-only. In value-type
         // context this must thread `last` back via the {'nil', StateAcc} tuple even
         // though it is never read inside the block.
         let src = "Object subclass: Calc\n\n  run =>\n    last := 0\n    1 to: 5 do: [:i | last := i]\n    last\n";
@@ -958,7 +958,7 @@ mod tests {
 
     #[test]
     fn test_value_type_to_do_read_write_threads_local() {
-        // BT-2308: read+write `[:i | sum := sum + i]` must thread `sum` back to the caller.
+        // read+write `[:i | sum := sum + i]` must thread `sum` back to the caller.
         let src = "Object subclass: Calc\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i]\n    sum\n";
         let code = codegen(src);
         assert!(
@@ -969,7 +969,7 @@ mod tests {
 
     #[test]
     fn test_value_type_times_repeat_write_only_threads_local() {
-        // BT-2308: timesRepeat: with a write-only outer-local mutation threads it back.
+        // timesRepeat: with a write-only outer-local mutation threads it back.
         let src = "Object subclass: Calc\n\n  run =>\n    last := 0\n    3 timesRepeat: [last := 7]\n    last\n";
         let code = codegen(src);
         assert!(
@@ -980,7 +980,7 @@ mod tests {
 
     #[test]
     fn test_value_type_to_by_do_threads_local() {
-        // BT-2308: to:by:do: threads outer-local mutations in value-type context.
+        // to:by:do: threads outer-local mutations in value-type context.
         let src = "Object subclass: Calc\n\n  run =>\n    last := 0\n    1 to: 10 by: 2 do: [:i | last := i]\n    last\n";
         let code = codegen(src);
         assert!(
@@ -991,7 +991,7 @@ mod tests {
 
     #[test]
     fn test_value_type_counted_loop_last_expr_unwraps_nil() {
-        // BT-2308: a mutating counted loop as the method's LAST expression must return
+        // a mutating counted loop as the method's LAST expression must return
         // the loop's logical value (element 1 = nil), not the raw {'nil', StateAcc} tuple.
         let src = "Object subclass: Calc\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i]\n";
         let code = codegen(src);
@@ -1003,7 +1003,7 @@ mod tests {
 
     #[test]
     fn test_to_do_readonly_field_pre_extracted_as_direct_param() {
-        // BT-1326: When the loop body reads a field that it never writes, that field is
+        // When the loop body reads a field that it never writes, that field is
         // pre-extracted before the letrec and passed as a direct fun parameter.
         // Body reads self.step (readonly) and writes self.n + local sum (hybrid mode).
         let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + self.step. self.n := self.n + 1]\n    sum\n";
@@ -1041,7 +1041,7 @@ mod tests {
 mod bt2363_nested_counted_loops {
     use crate::core_erlang::tests::codegen;
 
-    // BT-2363: A nested `timesRepeat:` mutating an outer local must thread the inner
+    // A nested `timesRepeat:` mutating an outer local must thread the inner
     // loop's `{value, StateAcc}` result back out through the OUTER loop. Previously the
     // outer loop was emitted as a plain `beamtalk_message_dispatch:send` (no threading)
     // and the inner mutation was dropped, returning 0 instead of the accumulated value.
@@ -1073,7 +1073,7 @@ mod bt2363_nested_counted_loops {
         );
     }
 
-    // BT-2363: write-only outer-local mutation inside a nested counted loop must also be
+    // write-only outer-local mutation inside a nested counted loop must also be
     // threaded back (the read+write detector alone misses write-only mutations).
     #[test]
     fn test_nested_times_repeat_write_only_outer_local_threaded() {
@@ -1085,7 +1085,7 @@ mod bt2363_nested_counted_loops {
         );
     }
 
-    // BT-2363 (Copilot review): the inner counted loop may be parenthesized
+    // Copilot review: the inner counted loop may be parenthesized
     // (`(2 timesRepeat: [...])`). The cross-scope mutation collectors must peel
     // parens or the write-only detection is silently skipped.
     #[test]

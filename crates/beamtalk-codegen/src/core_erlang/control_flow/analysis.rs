@@ -6,7 +6,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! BT-3459: split out of `control_flow/mod.rs`, no logic changes.
+//! split out of `control_flow/mod.rs`, no logic changes.
 
 use super::super::threaded_ir::StateAccFallbackReason;
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
@@ -14,7 +14,7 @@ use super::plan::ThreadingPlan;
 use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::Span;
 
-/// BT-3172: which family a [`Self::nested_loop_or_fold_body`] match belongs
+/// which family a [`Self::nested_loop_or_fold_body`] match belongs
 /// to — `ThreadingPlan::threads_class_vars` uses a genuinely different
 /// formula for each (see that field's doc comment), so
 /// [`Self::nested_loop_lost_class_var_mutation`] must apply the matching
@@ -31,7 +31,7 @@ enum NestedLoopShape {
 }
 
 impl CoreErlangGenerator {
-    /// BT-1343: Emits a codegen diagnostic for the calling convention chosen for a loop.
+    /// Emits a codegen diagnostic for the calling convention chosen for a loop.
     ///
     /// Reports which optimization mode was selected (direct-params, tuple-acc, hybrid,
     /// or `StateAcc` fallback with reason). Also emits a large-arity warning when >8 params
@@ -78,7 +78,7 @@ impl CoreErlangGenerator {
             );
         }
 
-        // BT-1343: Large extracted arity diagnostic (>8 direct fun params)
+        // Large extracted arity diagnostic (>8 direct fun params)
         let total = plan.total_extracted_params();
         if total > 8 && (plan.use_direct_params || plan.use_hybrid_params) {
             self.emit_codegen_diagnostic(
@@ -88,7 +88,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// ADR 0111 Addendum 9 (BT-3168), Questions 3/4: whether a Letrec loop
+    /// ADR 0111 Addendum 9, Questions 3/4: whether a Letrec loop
     /// body threads a `ClassVars` mutation through the loop's own recursive
     /// tail call. True exactly when the body is compiled inside a class
     /// method AND has a direct class-var field write or a same-class
@@ -110,7 +110,7 @@ impl CoreErlangGenerator {
         self.find_class_var_mutating_stmt(body).is_some()
     }
 
-    /// BT-3484: whether a Letrec loop body threads a value-type `Self`
+    /// whether a Letrec loop body threads a value-type `Self`
     /// mutation (`self.field := ...` in [`CodeGenContext::ValueType`])
     /// through the loop's own recursive tail call — the `SelfVt` mirror of
     /// [`Self::loop_body_threads_class_vars`], deliberately built the same
@@ -144,10 +144,10 @@ impl CoreErlangGenerator {
     /// nested `let` and the mutation is silently lost. That is exactly the
     /// class-var precedent's own accepted, separately-pinned behavior for the
     /// identical shape (`class_var_sub_expr_test.bt`'s
-    /// `testTickInLoopConditionalCompilesAndRuns`, BT-2308 — see
+    /// `testTickInLoopConditionalCompilesAndRuns` — see
     /// [`Self::nested_loop_lost_class_var_mutation`]'s doc comment on why
     /// widening the predicate instead produced real unbound-variable
-    /// regressions), and is deliberately out of BT-3484's scope.
+    /// regressions), and is deliberately out of this function's scope.
     pub(in crate::core_erlang) fn loop_body_threads_value_self(
         &self,
         body: &beamtalk_core::ast::Block,
@@ -156,7 +156,7 @@ impl CoreErlangGenerator {
     }
 
     /// Shared predicate behind [`Self::loop_body_threads_value_self`] and
-    /// [`Self::nested_loop_lost_value_self_mutation`] (BT-3484) — returns
+    /// [`Self::nested_loop_lost_value_self_mutation`] — returns
     /// the first top-level statement of `body` that is a value-type
     /// `self.field := ...` write, or `None` if there isn't one. The `SelfVt`
     /// mirror of [`Self::find_class_var_mutating_stmt`]; see
@@ -175,7 +175,7 @@ impl CoreErlangGenerator {
             .find(|expr| Self::is_field_assignment(expr))
     }
 
-    /// BT-3484: the `SelfVt` mirror of
+    /// the `SelfVt` mirror of
     /// [`Self::nested_loop_lost_class_var_mutation`] — if `expr` is itself a
     /// nested Letrec-shaped loop whose own body would thread a value-type
     /// `Self` mutation through its own recursive tail call, returns a short
@@ -186,8 +186,7 @@ impl CoreErlangGenerator {
     /// Same deliberate scope limit, for the same reason: nothing unpacks a
     /// nested loop's own trailing `Self` tuple slot back into the enclosing
     /// loop body's statement sequence, so the inner loop's mutation would be
-    /// silently discarded (exactly the BT-3484 bug class this issue fixes at
-    /// one level). Rejecting it cleanly is consistent with the class-var
+    /// silently discarded. Rejecting it cleanly is consistent with the class-var
     /// precedent; making arbitrary nesting work is explicitly out of scope.
     ///
     /// Only the `Letrec` shape is checked: a `Foldl*` (`do:`/`collect:`/…)
@@ -211,7 +210,7 @@ impl CoreErlangGenerator {
     }
 
     /// Shared predicate behind [`Self::loop_body_threads_class_vars`] and
-    /// [`Self::nested_loop_lost_class_var_mutation`] (BT-3172) — returns the
+    /// [`Self::nested_loop_lost_class_var_mutation`] — returns the
     /// first top-level statement of `body` that is a bare class-var
     /// assignment or class-method self-send, or `None` if there isn't one.
     ///
@@ -251,7 +250,7 @@ impl CoreErlangGenerator {
         })
     }
 
-    /// BT-3172: if `expr` is itself a nested `Letrec`- or `Foldl*`-shaped
+    /// if `expr` is itself a nested `Letrec`- or `Foldl*`-shaped
     /// loop (per [`Self::nested_loop_or_fold_body`]) whose own body would
     /// thread a `ClassVars` mutation through its own recursive tail call or
     /// fold accumulator, returns a short description of that mutation for
@@ -306,7 +305,7 @@ impl CoreErlangGenerator {
                 return Some(format!("'self {}'", selector.name()));
             }
         }
-        // BT-3172 review: the recursive self-send fallback must match
+        // The recursive self-send fallback must match
         // `ThreadingPlan::new_impl`'s OWN per-shape gate exactly, not apply
         // uniformly to both shapes. `Letrec`'s real gate
         // (`loop_body_threads_class_vars`, already checked above) is
@@ -316,7 +315,7 @@ impl CoreErlangGenerator {
         // `tickInLoopConditional` regression), and it's also the shape
         // `class_var_sub_expr_test.bt`'s `testTickInLoopConditionalCompilesAndRuns`
         // pins as already-accepted, out-of-scope, silently-non-threading
-        // behavior (BT-2308) at a single loop level — rejecting only the
+        // behavior at a single loop level — rejecting only the
         // nested-loop variant of that exact same shape would be an
         // inconsistent, surprising new restriction this predicate has no
         // business introducing. Only `Foldl*`'s own real gate
@@ -341,7 +340,7 @@ impl CoreErlangGenerator {
         None
     }
 
-    /// BT-3175: Canonical "selector → body-block-argument position" table.
+    /// Canonical "selector → body-block-argument position" table.
     /// Shared by every "given a keyword-selector `MessageSend`, extract its
     /// loop/fold body block" call site in this module
     /// ([`Self::nested_loop_or_fold_body`],
@@ -350,7 +349,7 @@ impl CoreErlangGenerator {
     /// [`Self::expr_has_nested_counted_loop_threading`]) — before this, each
     /// independently re-matched selector strings against
     /// `arguments.first()`/`arguments.last()`/`arguments[N]`, and could
-    /// silently drift out of sync (see BT-3175).
+    /// silently drift out of sync with each other.
     ///
     /// This is the canonical/maximal selector set: the `BodyKind::Letrec`
     /// shapes (`whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/
@@ -358,9 +357,9 @@ impl CoreErlangGenerator {
     /// `BodyKind::Foldl*` shapes (`do:`/`collect:`/`select:`/`reject:`/
     /// `anySatisfy:`/`allSatisfy:`/`inject:into:`/`detect:`/`count:`/
     /// `takeWhile:`/`dropWhile:`/`partition:`/`groupBy:`) — matching
-    /// [`Self::nested_loop_or_fold_body`]'s pre-BT-3175 coverage, the most
-    /// complete of the four (BT-3172 added the predicate-based shapes
-    /// there only). `detect:ifNone:` is intentionally excluded: its second
+    /// [`Self::nested_loop_or_fold_body`]'s coverage, the most
+    /// complete of the four (it alone also includes the predicate-based
+    /// shapes). `detect:ifNone:` is intentionally excluded: its second
     /// (`ifNone:`) block argument is a separate, not-yet-analyzed risk
     /// surface no call site here attempts to cover.
     ///
@@ -385,8 +384,8 @@ impl CoreErlangGenerator {
     ///
     /// Position eligibility is delegated to
     /// `beamtalk_core::ast::is_loop_or_fold_block_arg` — the single
-    /// source of truth for this NARROWER loop/fold-shape table (BT-3423:
-    /// deliberately not the broader
+    /// source of truth for this NARROWER loop/fold-shape table (deliberately
+    /// not the broader
     /// `beamtalk_core::state_threading_selectors::is_state_threaded_block_arg`
     /// canonical table shared by `get_control_flow_threaded_vars` and
     /// `beamtalk-lint`'s `DeadAssignment` check — see that function's doc
@@ -443,7 +442,7 @@ impl CoreErlangGenerator {
         Some((block, shape))
     }
 
-    /// BT-1343: Emits a diagnostic for synchronous self-send detected in a loop body.
+    /// Emits a diagnostic for synchronous self-send detected in a loop body.
     pub(super) fn emit_self_send_in_loop_diagnostic(&mut self, expr: &Expression, span: Span) {
         if !self.codegen_diagnostics_enabled {
             return;
@@ -501,7 +500,7 @@ impl CoreErlangGenerator {
         false
     }
 
-    /// BT-1329: Collects variables that are captured and mutated by nested list op blocks.
+    /// Collects variables that are captured and mutated by nested list op blocks.
     ///
     /// Scans a body expression for list op message sends (do:, collect:, etc.) with literal
     /// blocks, and adds any variables that are captured from the outer scope and written
@@ -524,7 +523,7 @@ impl CoreErlangGenerator {
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
 
-        // BT-3173: ensure:/on:do:/ifNotNil: aren't list-ops/counted-loops
+        // ensure:/on:do:/ifNotNil: aren't list-ops/counted-loops
         // themselves, but one may be nested inside one of their blocks —
         // recurse straight through their block(s) (the receiver for
         // ensure:/on:do:, any block arguments for all three) so a list-op's
@@ -547,7 +546,7 @@ impl CoreErlangGenerator {
                 }
             }
             for block in blocks {
-                // BT-3173 review follow-up: exclude this wrapping block's own
+                // Exclude this wrapping block's own
                 // parameters (e.g. `on:do:`'s exception var, `ifNotNil:`'s bound
                 // value) before merging into `out` — mirrors
                 // `collect_nested_loop_outer_local_writes`'s `all_excluded`
@@ -577,7 +576,7 @@ impl CoreErlangGenerator {
             return;
         }
 
-        // BT-2363: nested counted loops (`timesRepeat:`/`to:do:`/`to:by:do:`)
+        // nested counted loops (`timesRepeat:`/`to:do:`/`to:by:do:`)
         // capture and mutate outer locals just like list ops. Including them
         // here makes the *outer* loop's threaded-locals computation see
         // writes buried in an inner counted loop, so the outer loop threads
@@ -620,7 +619,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-2363: Recurse into the inner block's statements so deeper nesting
+        // Recurse into the inner block's statements so deeper nesting
         // (a counted/list op nested two or more levels deep) is still detected.
         // `analyze_block` does not propagate writes out of nested non-conditional
         // blocks, so a write buried in a doubly-nested loop is invisible above
@@ -641,7 +640,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2363: Returns `true` if `expr` is (or wraps, via assignment RHS or parens) a
+    /// Returns `true` if `expr` is (or wraps, via assignment RHS or parens) a
     /// nested counted loop (`timesRepeat:`/`to:do:`/`to:by:do:`) whose body mutates one
     /// of the outer loop's `threaded_locals`.
     ///
@@ -680,7 +679,7 @@ impl CoreErlangGenerator {
         inner_threaded.iter().any(|v| threaded_locals.contains(v))
     }
 
-    /// BT-1329: Returns `true` if `expr` is a list op (do:, collect:, select:, reject:,
+    /// Returns `true` if `expr` is a list op (do:, collect:, select:, reject:,
     /// anySatisfy:, allSatisfy:, inject:into:) whose block captures and mutates outer-scope locals but whose inner
     /// block is NOT eligible for tuple-acc optimization.
     ///
@@ -774,7 +773,7 @@ impl CoreErlangGenerator {
         false
     }
 
-    /// BT-1329: Recursive wrapper for `list_op_needs_stateacc_fallback` that also
+    /// Recursive wrapper for `list_op_needs_stateacc_fallback` that also
     /// looks inside Assignment values. Without this, `result := items collect: [...]`
     /// inside a counted loop body would not be detected by the top-level scan.
     pub(super) fn list_op_needs_stateacc_fallback_recursive(
