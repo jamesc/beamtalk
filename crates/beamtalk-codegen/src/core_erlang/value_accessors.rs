@@ -117,7 +117,7 @@ pub(super) fn compute_auto_slot_methods(class: &ClassDefinition) -> Option<AutoS
     })
 }
 
-/// BT-2998: whether this class's instances are opaque terms owned entirely by
+/// Whether this class's instances are opaque terms owned entirely by
 /// a paired Erlang module, so the inherited `basicNew` cannot build one.
 ///
 /// `Value class>>new` is `@intrinsic basicNew`, which compiles to a map of
@@ -141,7 +141,7 @@ pub(in crate::core_erlang) fn has_opaque_native_representation(class: &ClassDefi
     class.backing_module.is_some() && class.state.is_empty()
 }
 
-/// BT-2734: Compiler-derived `__signature__` / `__doc__` selector-map entries
+/// Compiler-derived `__signature__` / `__doc__` selector-map entries
 /// for a value class's auto-generated accessors, split by dispatch side.
 ///
 /// Each `Vec` holds ready-to-embed `'selector' => <binary>` fragments (built by
@@ -156,13 +156,13 @@ pub(in crate::core_erlang) struct SyntheticAccessorMetadata {
     pub(in crate::core_erlang) class_docs: Vec<Document<'static>>,
 }
 
-/// BT-2734: one compiler-derived accessor's readable metadata:
+/// One compiler-derived accessor's readable metadata:
 /// `(selector, signature, doc)`. The pure, unit-testable intermediate produced
 /// by [`CoreErlangGenerator::synthetic_value_accessor_entries`] before it is
 /// rendered into Core Erlang `'selector' => <binary>` map fragments.
 type SyntheticAccessorEntry = (String, String, String);
 
-/// BT-2734: a value class's synthetic-accessor metadata, split by dispatch side.
+/// A value class's synthetic-accessor metadata, split by dispatch side.
 /// `instance` holds slot getters and `with*:` setters; `class` holds the keyword
 /// constructor.
 #[derive(Default)]
@@ -172,7 +172,7 @@ struct SyntheticAccessorEntries {
 }
 
 /// Collects the class names referenced by a type annotation into `out`
-/// (ADR 0087 Phase 6, BT-2304).
+/// (ADR 0087 Phase 6).
 ///
 /// Mirrors `collect_all_type_refs` in
 /// [`beamtalk_core::method_source_walker`] — the walker hand-written-method
@@ -215,7 +215,7 @@ fn collect_type_annotation_class_names(annotation: &TypeAnnotation, out: &mut Ve
 }
 
 impl CoreErlangGenerator {
-    /// Generates an auto-getter function for a single slot (BT-923).
+    /// Generates an auto-getter function for a single slot.
     ///
     /// ```erlang
     /// 'x'/1 = fun (Self) -> call 'maps':'get'('x', Self)
@@ -231,7 +231,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates an auto `with*:` functional setter for a single slot (BT-923).
+    /// Generates an auto `with*:` functional setter for a single slot.
     ///
     /// ```erlang
     /// 'withX:'/2 = fun (Self, NewVal) -> call 'maps':'put'('x', NewVal, Self)
@@ -248,7 +248,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates the all-fields keyword constructor class method (BT-923).
+    /// Generates the all-fields keyword constructor class method.
     ///
     /// For direct `Value subclass:` classes, builds a flat map:
     /// ```erlang
@@ -256,7 +256,7 @@ impl CoreErlangGenerator {
     ///     ~{'$beamtalk_class' => 'Point', 'x' => X, 'y' => Y}~
     /// ```
     ///
-    /// For sub-subclasses (BT-1559), delegates to `new:` so inherited fields
+    /// For sub-subclasses, delegates to `new:` so inherited fields
     /// from the parent are included:
     /// ```erlang
     /// 'class_y:'/3 = fun (_ClassSelf, _ClassVars, SlotArg0) ->
@@ -286,11 +286,11 @@ impl CoreErlangGenerator {
             .flat_map(|name| [Document::Str(", "), leaf::var(name.clone())])
             .collect();
 
-        // BT-1408: Hash long keyword constructor atoms to stay within Erlang's
+        // Hash long keyword constructor atoms to stay within Erlang's
         // 255-char atom limit.
         let safe_fn_name = super::selector_mangler::safe_class_method_fn_name(kw_selector);
 
-        // BT-1559: Sub-subclasses delegate to new: to include inherited fields.
+        // Sub-subclasses delegate to new: to include inherited fields.
         if is_sub_subclass {
             // Build a map of own slot args: ~{'slot0' => SlotArg0, 'slot1' => SlotArg1}~
             let mut map_parts: Vec<Document<'static>> = Vec::new();
@@ -345,7 +345,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates dispatch arms for auto-generated getter and `with*:` setter methods (BT-923).
+    /// Generates dispatch arms for auto-generated getter and `with*:` setter methods.
     ///
     /// Each arm follows the same pattern as user-defined methods in `generate_primitive_dispatch`.
     pub(in crate::core_erlang) fn generate_auto_slot_dispatch_arms(
@@ -391,7 +391,7 @@ impl CoreErlangGenerator {
         arms
     }
 
-    /// BT-2734: Builds the four Core Erlang selector-map entry lists for a value
+    /// Builds the four Core Erlang selector-map entry lists for a value
     /// class's auto-generated accessors, ready to inject into the
     /// `methodSignatures` / `methodDocs` (instance) and
     /// `classMethodSignatures` / `classMethodDocs` (class-side) maps.
@@ -402,8 +402,8 @@ impl CoreErlangGenerator {
     /// be `nil`. Wrapping [`Self::synthetic_value_accessor_entries`], this renders
     /// each `(selector, signature, doc)` triple into `'selector' => <binary>`
     /// entries so the synthetics carry the same self-describing metadata every
-    /// reflective surface reads (reusing the BT-2714 resolver — no new read path).
-    /// BT-2734: Builds a single `'selector' => <binary>` selector-map entry for a
+    /// reflective surface reads (reusing the existing resolver — no new read path).
+    /// Builds a single `'selector' => <binary>` selector-map entry for a
     /// compiler-derived signature or doc string. The value is a human-readable
     /// data string (not a Core Erlang structural fragment), so it is wrapped once
     /// in a `binary_lit` typed leaf — mirroring how the AST-driven maps embed
@@ -436,7 +436,7 @@ impl CoreErlangGenerator {
         md
     }
 
-    /// BT-2734: Computes the readable `(selector, signature, doc)` triples for a
+    /// Computes the readable `(selector, signature, doc)` triples for a
     /// value class's compiler-generated accessors — the pure, unit-testable core
     /// of [`Self::build_synthetic_value_accessor_metadata`].
     ///
@@ -495,7 +495,7 @@ impl CoreErlangGenerator {
                     format!("{n}: {n}")
                 })
                 .collect();
-            // BT-1408: the map *key* must be the same atom the runtime dispatch and
+            // The map *key* must be the same atom the runtime dispatch and
             // `__beamtalk_meta/0` entry use (`safe_class_method_selector` — hashed
             // once "class_" + selector would exceed Erlang's 255-char atom limit),
             // so a many-field Value class's keyword constructor doesn't blow the
@@ -515,7 +515,7 @@ impl CoreErlangGenerator {
         entries
     }
 
-    /// BT-2734: Display form of a slot's declared type for a synthetic accessor
+    /// Display form of a slot's declared type for a synthetic accessor
     /// signature, falling back to `Object` when the slot carries no annotation.
     fn synthetic_slot_type_display(slot: &StateDeclaration) -> String {
         slot.type_annotation
@@ -523,7 +523,7 @@ impl CoreErlangGenerator {
             .map_or_else(|| "Object".to_string(), unparse_type_annotation_display)
     }
 
-    /// ADR 0087 Phase 6 (BT-2304): Builds `method_xref` rows for the
+    /// ADR 0087 Phase 6: Builds `method_xref` rows for the
     /// compiler-generated auto-accessors of a `Value subclass:` class.
     ///
     /// For each auto-generated slot getter (`field/1`) and `with*:` setter
@@ -571,7 +571,7 @@ impl CoreErlangGenerator {
     }
 
     /// Builds a single synthetic auto-accessor `method_xref` row
-    /// (ADR 0087 Phase 6, BT-2304).
+    /// (ADR 0087 Phase 6).
     ///
     /// `selector` is the accessor selector (`field` or `withField:`), `slot` the
     /// generating slot declaration that supplies the derived origin line and the

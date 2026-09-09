@@ -2879,6 +2879,49 @@ fn test_self_call_error_branch_sealed_direct_call_breadcrumb() {
 }
 
 #[test]
+fn test_sealed_method_logger_call_tags_own_selector() {
+    // BT-3479 (PR #3810 review follow-up): generate_sealed_method_functions_doc
+    // now enters its prologue via MethodFrame::enter(..., MethodBoundary::Actor),
+    // which sets current_method_selector unconditionally. Before that, the
+    // hand-rolled prologue for sealed-method functions never set it, so a
+    // Logger call inside a sealed method picked up whatever selector (or
+    // None) generate_dispatch's per-method cleanup had already reset it to —
+    // try_generate_logger_intrinsic falls back to the literal atom 'unknown'
+    // when current_method_selector is None (see intrinsics.rs).
+    //
+    // Pins that a Logger call inside a sealed method's own body is tagged
+    // with that method's own selector, not 'unknown'.
+    let src = concat!(
+        "sealed Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  setup =>\n",
+        "    Logger info: \"starting\"\n",
+    );
+    let code = codegen_source(src);
+
+    // Confirm this actually reached the sealed-method-function codegen path
+    // (generate_sealed_method_functions_doc), not some other shape.
+    assert!(
+        code.contains("'__sealed_setup'"),
+        "Test setup must exercise generate_sealed_method_functions_doc \
+         (the '__sealed_setup' standalone function). Got:\n{code}"
+    );
+
+    assert!(
+        code.contains("'beamtalk_selector' => 'setup'"),
+        "Logger call inside a sealed method must tag beamtalk_selector with \
+         the method's own selector ('setup'), not fall back to 'unknown'. \
+         Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'beamtalk_selector' => 'unknown'"),
+        "Logger call inside a sealed method must not tag beamtalk_selector \
+         as 'unknown' — that was the pre-MethodFrame regression this test \
+         pins. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
     // BT-2833: generate_tier2_self_send_open (a self-send passing a
     // stateful block argument — one that captures and mutates an outer
