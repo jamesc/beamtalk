@@ -2070,7 +2070,7 @@ impl CoreErlangGenerator {
                         // `plan.threads_class_vars` — see
                         // `bind_closed_expr_threading_class_vars`'s doc
                         // comment. This is the exact shape a `select:`
-                        // predicate self-send needs ('s own repro).
+                        // predicate self-send needs.
                         let doc = self.bind_closed_expr_threading_class_vars(expr, pv, plan)?;
                         stmts.push(ThreadedStmt::Statement(doc, span));
                     }
