@@ -252,7 +252,7 @@ fn actor_spawn_methods_are_class_side() {
     // BT-3071: new/new: are back on Actor's class_methods — lifted from the
     // codegen-injected error stubs (`generate_actor_new_error_method` et al.,
     // BT-1524's era) into real, documented `class sealed new` / `new:`
-    // declarations in Actor.bt. This does NOT reopen instantiation: the
+    // declarations in actor.bt. This does NOT reopen instantiation: the
     // compiled body still always raises `instantiation_error`, and
     // `check_actor_new_usage` (BT-563/BT-1524's own hard compile-time error,
     // unaffected by hierarchy method resolution — see
@@ -277,7 +277,7 @@ fn actor_spawn_methods_are_class_side() {
         "isAlive must NOT be in class_methods"
     );
     // Actor class methods carry doc strings from generated_builtins.rs
-    // (sourced from Actor.bt via build-stdlib)
+    // (sourced from actor.bt via build-stdlib)
     let spawn = class_methods
         .iter()
         .find(|m| m.selector == "spawn")

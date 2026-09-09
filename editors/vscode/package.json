@@ -72,6 +72,16 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "beamtalk.filterClasses",
+        "title": "Beamtalk: Filter Classes (Stdlib / Project / Dependencies)",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "beamtalk.clearClassFilter",
+        "title": "Clear Class Filter",
+        "icon": "$(close)"
+      },
+      {
         "command": "beamtalk.killActor",
         "title": "Kill Actor",
         "icon": "$(stop)"
@@ -107,6 +117,11 @@
         "icon": "$(go-to-file)"
       },
       {
+        "command": "beamtalk.navigateToTypeAlias",
+        "title": "Go to Definition",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "beamtalk.setLogLevel",
         "title": "Beamtalk: Set Log Level"
       },
@@ -131,6 +146,16 @@
         {
           "command": "beamtalk.refreshWorkspace",
           "when": "view == beamtalk.workspaceExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "beamtalk.filterClasses",
+          "when": "view == beamtalk.workspaceExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "beamtalk.clearClassFilter",
+          "when": "view == beamtalk.workspaceExplorer && beamtalk.classFilterActive",
           "group": "navigation"
         },
         {
@@ -164,6 +189,11 @@
           "command": "beamtalk.inspectActor",
           "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
           "group": "beamtalk@1"
+        },
+        {
+          "command": "beamtalk.clearClassFilter",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == classes-section-filtered",
+          "group": "inline"
         },
         {
           "command": "beamtalk.inspectBinding",
@@ -209,6 +239,16 @@
           "command": "beamtalk.navigateToStateVar",
           "when": "view == beamtalk.workspaceExplorer && viewItem == state-item",
           "group": "beamtalk@1"
+        },
+        {
+          "command": "beamtalk.navigateToTypeAlias",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == type-alias-item",
+          "group": "inline"
+        },
+        {
+          "command": "beamtalk.navigateToTypeAlias",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == type-alias-item",
+          "group": "beamtalk@1"
         }
       ]
     },
@@ -246,6 +286,11 @@
           "type": "string",
           "default": "",
           "description": "Override path to the beamtalk-lsp binary. Leave empty to use automatic discovery (sysroot, then PATH)."
+        },
+        "beamtalk.stdlibSourceDir": {
+          "type": "string",
+          "default": "",
+          "description": "Directory containing stdlib '.bt' source files, so 'Go to Definition' resolves stdlib classes. Leave empty to auto-discover from the beamtalk-lsp binary's sysroot (a system install of Beamtalk). Set to e.g. '${workspaceFolder}/stdlib/src' when developing against a local build that has no sysroot install."
         },
         "beamtalk.trace.server": {
           "type": "string",

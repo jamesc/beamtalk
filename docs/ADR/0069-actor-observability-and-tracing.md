@@ -66,7 +66,7 @@ This gives us optionality — the `Logging` migration is a separate future ADR, 
 Use the Erlang [`telemetry`](https://github.com/beam-telemetry/telemetry) library as the event bus, with lock-free storage for aggregation and direct ETS writes for trace capture. The `beamtalk_trace_store` gen_server owns the tables and handles queries/lifecycle but is **not in the write path** — no serialization bottleneck on the hot path.
 
 ```text
-Beamtalk API (Tracing class — stdlib/src/Tracing.bt)
+Beamtalk API (Tracing class — stdlib/src/tracing.bt)
     ↓ delegates to
 Erlang shim (beamtalk_tracing.erl — runtime)
     ↓ queries
@@ -668,10 +668,10 @@ This spike should be a single branch with ~100 lines of test code. If the teleme
 5. EUnit tests: verify telemetry events, verify overhead budget, verify context propagation (with and without OTel module present)
 
 ### Phase 3: Beamtalk API (M)
-**Affected components:** Stdlib (`Tracing.bt`), Runtime (`beamtalk_tracing.erl`)
+**Affected components:** Stdlib (`tracing.bt`), Runtime (`beamtalk_tracing.erl`)
 
 1. Create `beamtalk_tracing.erl` — Erlang shim that the Tracing class delegates to
-2. Create `Tracing.bt` — sealed class-only facade
+2. Create `tracing.bt` — sealed class-only facade
 3. BUnit tests for Tracing API: enable/disable, traces, stats, slowMethods, healthFor, systemHealth
 
 ### Phase 4: MCP Tools (S)
@@ -696,7 +696,7 @@ This spike should be a single branch with ~100 lines of test code. If the teleme
 - BT-1602: Trace store gen_server with lock-free storage (M) — Phase 1, blocked by BT-1601
 - BT-1603: Instrument actor send wrappers with telemetry (M) — Phase 2a, blocked by BT-1602
 - BT-1604: Propagated context across actor boundaries (M) — Phase 2b, blocked by BT-1603
-- BT-1605: Tracing.bt stdlib class and Erlang shim (M) — Phase 3, blocked by BT-1602, BT-1603
+- BT-1605: tracing.bt stdlib class and Erlang shim (M) — Phase 3, blocked by BT-1602, BT-1603
 - BT-1606: MCP tracing tools — lean surface (S) — Phase 4, blocked by BT-1605
 - BT-1607: Tracing documentation and examples (S) — Phase 5, blocked by BT-1605
 

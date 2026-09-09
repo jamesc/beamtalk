@@ -374,7 +374,7 @@ Phase 8/BT-2903, written by `build_stdlib.rs`'s `generate_app_file`/
 `generate_app_src_file` from `app_file::AliasMetadata`) — the same durable
 record `beamtalk_repl_ops_browse:package_type_aliases/1` reads for
 `browse-type-aliases`. Without this, a stdlib alias like `SupervisionStrategy`
-(`stdlib/src/Supervisor.bt`) has no live BEAM class/process the way a stdlib
+(`stdlib/src/supervisor.bt`) has no live BEAM class/process the way a stdlib
 *class* does (`beamtalk_class_registry`, populated at boot from the same
 `.app`'s `{classes, [...]}` env) for a fresh session to already know about —
 aliases erase entirely at compile time, so this session-state table is the

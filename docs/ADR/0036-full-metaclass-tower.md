@@ -43,7 +43,7 @@ ADR 0032 established the `Behaviour`/`Class` chain and removed the flattened tab
 
 - **No new process per metaclass**: Metaclasses are represented as `#beamtalk_object{}` structs backed by the same class gen_server as their associated class. One class process handles both class-side and metaclass-side dispatch (the virtual tag trick from ADR 0013 continues).
 - **Sealed at v0.1**: `Metaclass` is sealed — users cannot subclass it. Per-metaclass instance variables are not supported in this ADR.
-- **`sealed` allows stdlib-internal subclassing**: `Class.bt` is declared `sealed`, preventing user subclassing. However, `sealed` already only restricts user code — `check_sealed_superclass` in the semantic analyser explicitly exempts classes recognised by `is_runtime_protected_class` (all stdlib `.bt` sources registered in `generated_builtins.rs`). Once `Metaclass.bt` is added to `stdlib/src/` and `build-stdlib` regenerates `generated_builtins.rs`, `Metaclass` will be exempt automatically. No prerequisite unsealing of `Class` is required.
+- **`sealed` allows stdlib-internal subclassing**: `class.bt` is declared `sealed`, preventing user subclassing. However, `sealed` already only restricts user code — `check_sealed_superclass` in the semantic analyser explicitly exempts classes recognised by `is_runtime_protected_class` (all stdlib `.bt` sources registered in `generated_builtins.rs`). Once `metaclass.bt` is added to `stdlib/src/` and `build-stdlib` regenerates `generated_builtins.rs`, `Metaclass` will be exempt automatically. No prerequisite unsealing of `Class` is required.
 - **Bootstrap ordering**: `Metaclass` must be registered after `Class` in the bootstrap chain. Self-grounding (`Metaclass class class == Metaclass class`) requires correct dispatch routing (see Section 5).
 - **Breaking**: `metaclass_test.bt` sentinel assertions (`equals: #Metaclass`) must become class object assertions.
 
@@ -51,7 +51,7 @@ ADR 0032 established the `Behaviour`/`Class` chain and removed the flattened tab
 
 Introduce `Metaclass` as a real sealed Beamtalk stdlib class, subclass of `Class`. Each class object's metaclass is a real `#beamtalk_object{}` that responds to the full `Behaviour` protocol plus metaclass-specific methods. The metaclass tower self-grounds: `Metaclass class class == Metaclass class`.
 
-### 1. New `Metaclass.bt` Stdlib Class
+### 1. New `metaclass.bt` Stdlib Class
 
 ```beamtalk
 // Copyright 2026 James Casey
@@ -185,7 +185,7 @@ The metaclass object wraps the *same* class pid but dispatches through the `'Met
 
 **Self-grounding**: When `classClass/1` is called on an object already tagged with `class = 'Metaclass'` (i.e., `Metaclass class class`), it extracts the pid and returns a *new* `#beamtalk_object{class = 'Metaclass', pid = Pid}` — structurally identical to the input. Beamtalk's `==` compiles to Erlang's structural `==` (`call 'erlang':'=='(L, R)`), so `Metaclass class class == Metaclass class` holds because both produce `#beamtalk_object{class = 'Metaclass', pid = MetaclassPid}` with the same three fields. Note: `Metaclass class class == Metaclass` is **false** — `Metaclass` as a class reference has tag `'Metaclass class'` (different `class` field).
 
-#### New primitives backing `Metaclass.bt`
+#### New primitives backing `metaclass.bt`
 
 | Primitive | Erlang backing |
 |---|---|
@@ -224,7 +224,7 @@ send(#beamtalk_object{class = 'Metaclass', pid = Pid} = Self, Selector, Args) ->
     end.
 ```
 
-Implementation detail: the `{metaclass_method_call, Selector, Args}` handler in `beamtalk_object_class.erl` returns `{error, not_found}` for the bootstrap stub, since metaclass methods are defined in `Metaclass.bt`, not as user-defined class methods. The fallthrough to `'Metaclass'` chain handles all protocol methods.
+Implementation detail: the `{metaclass_method_call, Selector, Args}` handler in `beamtalk_object_class.erl` returns `{error, not_found}` for the bootstrap stub, since metaclass methods are defined in `metaclass.bt`, not as user-defined class methods. The fallthrough to `'Metaclass'` chain handles all protocol methods.
 
 #### `beamtalk_primitive.erl` — `class_of_object/1`
 
@@ -263,7 +263,7 @@ The `responds_to/2` function (line 227) checks `is_class_object(Obj)` and dispat
 
 #### `beamtalk_metaclass_bt.erl` — Bootstrap stub
 
-Analogous to `beamtalk_class_bt.erl`, provides a minimal dispatch stub until `stdlib/src/Metaclass.bt` is compiled:
+Analogous to `beamtalk_class_bt.erl`, provides a minimal dispatch stub until `stdlib/src/metaclass.bt` is compiled:
 
 ```erlang
 %% Copyright 2026 James Casey
@@ -560,12 +560,12 @@ Allow `Counter class addInstVarNamed: 'cache'` to add dynamic per-class state on
 
 All follow the thin data-access pattern from ADR 0032: raw data reads only, no logic.
 
-### Phase 3: `Metaclass.bt` Stdlib Class
+### Phase 3: `metaclass.bt` Stdlib Class
 
-**Files**: `stdlib/src/Metaclass.bt` (new), `stdlib/test/metaclass_test.bt`
+**Files**: `stdlib/src/metaclass.bt` (new), `stdlib/test/metaclass_test.bt`
 
-- Create `stdlib/src/Metaclass.bt` with full protocol (see Decision section)
-- Replace `beamtalk_metaclass_bt.erl` stub with compiled `Metaclass.bt`
+- Create `stdlib/src/metaclass.bt` with full protocol (see Decision section)
+- Replace `beamtalk_metaclass_bt.erl` stub with compiled `metaclass.bt`
 - Update `metaclass_test.bt`: replace sentinel assertions with class object assertions
 - Add new test cases: `isMeta`, `isClass`, `name`, `thisClass`, `superclass` invariant, self-grounding
 
@@ -580,8 +580,8 @@ All follow the thin data-access pattern from ADR 0032: raw data reads only, no l
 | `runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl` | 1 | Handle `{metaclass_method_call, ...}` in `handle_call` |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_runtime_app.erl` | 1 | Bootstrap order + post-bootstrap assertion |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_method_resolver.erl` | 1 | Verify `is_class_name(ClassTag)` code path for metaclass tags |
-| `stdlib/src/Metaclass.bt` | 3 | New file |
-| `stdlib/src/Class.bt` | 1 | Note: `sealed` already allows stdlib-internal subclassing via `is_runtime_protected_class` exemption |
+| `stdlib/src/metaclass.bt` | 3 | New file |
+| `stdlib/src/class.bt` | 1 | Note: `sealed` already allows stdlib-internal subclassing via `is_runtime_protected_class` exemption |
 | `stdlib/test/metaclass_test.bt` | 1 | Breaking: sentinel → class object assertions |
 
 ## Migration Path
@@ -608,7 +608,7 @@ self assert: (Metaclass class class == Metaclass class) equals: true.
 **Epic:** BT-801
 **Issues:**
 - BT-802 (Phase 1: Bootstrap stub, runtime wiring + primitives) — Done
-- BT-803 (Phase 2: Metaclass.bt stdlib class + tests) — Done
+- BT-803 (Phase 2: metaclass.bt stdlib class + tests) — Done
 - BT-2194 — Fix `isKindOf:` / `inheritsFrom:` on metaclass receivers (`classAllSuperclasses` walks the parallel chain) — Done
 - BT-2217 — Ground the parallel metaclass chain at `Class` (`ProtoObject class superclass == Class`) — Done
 **Status:** Implemented

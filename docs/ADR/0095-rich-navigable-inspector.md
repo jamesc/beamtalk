@@ -575,7 +575,7 @@ cycle sources: process refs (pid-keyed) vs depth (capped).
   (`Array`, `Bag`, `BindingsView`, `Boolean`, `ChangeLog`, `Dictionary`,
   `Interval`, `List`, `Number`, `Object`, `Set`, `String`, `Tuple`, `Value`); the
   **gradual-typing crash audit** (a leftover `… ++ x inspect` compiles but crashes
-  at runtime — ADR 0094 Risk #2); the `SystemNavigation.bt:2235`
+  at runtime — ADR 0094 Risk #2); the `system_navigation.bt:2235`
   `runtimeCalledSelectors` `#inspect` entry; the `"op": "inspect"` (REPL protocol)
   vs `inspect`-method naming unification (ADR 0094 Risk #6). Mitigation below.
 - **The migration window does not close.** Because typing is gradual and code hot-
@@ -663,9 +663,9 @@ inspect`), **runtime** (snapshot/derive/window shim; shared `sys:get_*` guard),
   Tower — reflection foundation), ADR 0085 (Editor Live-Image Representation —
   consumer), ADR 0091 (Remote Workspace Access — remote `inspect` op gating)
 - Code: `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_actors.erl:57,71`
-  (current `"op": "inspect"`, `sys:get_state`), `stdlib/src/Value.bt`,
-  `stdlib/src/Object.bt` (the 14 `inspect -> String` overrides live across
-  `stdlib/src/*.bt`), `stdlib/src/SystemNavigation.bt:2235`
+  (current `"op": "inspect"`, `sys:get_state`), `stdlib/src/value.bt`,
+  `stdlib/src/object.bt` (the 14 `inspect -> String` overrides live across
+  `stdlib/src/*.bt`), `stdlib/src/system_navigation.bt:2235`
   (`runtimeCalledSelectors`), `docs/development/surface-parity.md:86,245`
 - External: Pharo Inspector (`Spec2-Inspector`); Newspeak Hopscotch; Phoenix
   LiveDashboard process detail; BEAM `:observer`

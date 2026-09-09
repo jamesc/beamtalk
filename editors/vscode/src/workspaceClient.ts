@@ -22,10 +22,14 @@ export interface ActorStoppedInfo {
   reason: string;
 }
 
+/** Where a class's source comes from — drives the Workspace Explorer's class filter. */
+export type ClassOrigin = "stdlib" | "project" | "dependency";
+
 export interface ClassInfo {
   name: string;
   source_file?: string;
   actor_count?: number;
+  source_origin?: ClassOrigin;
 }
 
 /**
@@ -48,10 +52,46 @@ export interface MethodInfo {
   name: string;
   selector: string;
   side: "instance" | "class";
+  /**
+   * BT-3439: the method's real declaration line, from `beamtalk_xref`'s
+   * compiled index. `undefined` for a class compiled before this field
+   * existed, or a `ClassBuilder`-built class with no compiler to derive a
+   * line from — callers fall back to the source-text regex guess in that
+   * case (see `findMethodDeclaration` in `textUtils.ts`).
+   */
+  line?: number;
+  /**
+   * BT-3444: the xref tag verbatim (`indexed` | `synthetic` |
+   * `unindexed_runtime_fun`) — the same fact the LiveView IDE method list
+   * already badges (BT-2714). A `synthetic` method (e.g. a `Value
+   * subclass:`'s compiler-generated field accessor) has no user-written
+   * declaration anywhere in `classInfo.source_file`, so it renders with a
+   * distinct icon/tooltip in the sidebar and never wires up
+   * `beamtalk.navigateToMethod` (there is nothing to navigate to).
+   */
+  source_status?: "indexed" | "synthetic" | "unindexed_runtime_fun";
+  /** BT-3444: compiler-derived signature, resolved only for `synthetic` rows. */
+  signature?: string;
+  /** BT-3444: compiler-derived doc, resolved only for `synthetic` rows. */
+  doc?: string;
+}
+
+/**
+ * An inherited (non-local) method, as returned by the `inherited-methods` op
+ * (BT-3478). Same shape as `MethodInfo` plus `defining_class` — the ancestor
+ * class that actually declares the method, for the sidebar's "Inherited"
+ * groups to attribute each entry (a label, not a tree level — the groups
+ * stay flat, matching the local method groups' depth).
+ */
+export interface InheritedMethodInfo extends MethodInfo {
+  definingClass: string;
 }
 
 export interface StateVarInfo {
   name: string;
+  /** BT-3439: see `MethodInfo.line` — same real-vs-fallback story, but for
+   * instance-variable declarations. */
+  line?: number;
 }
 
 export type BindingsMap = Record<string, unknown>;
@@ -75,6 +115,7 @@ export type PushEvent =
   | { channel: "actors"; event: "spawned"; data: ActorInfo }
   | { channel: "actors"; event: "stopped"; data: ActorStoppedInfo }
   | { channel: "classes"; event: "loaded"; data: { class: string } }
+  | { channel: "classes"; event: "removed"; data: { class: string } }
   | { channel: "bindings"; event: "changed"; data: { session: string } }
   | { channel: "transcript"; text: string }
   | { channel: "logs"; event: "entry"; data: LogEntry };
@@ -275,7 +316,9 @@ export class WorkspaceClient {
    * BT-2091: Routes through `list-classes` rather than the deprecated
    * `modules` protocol op (which has been removed). `list-classes` was
    * extended in BT-2091 to include `source_file` and `actor_count` so
-   * the editor's class navigation keeps working.
+   * the editor's class navigation keeps working, and later to include
+   * `source_origin` (stdlib/project/dependency, reusing the System
+   * Browser's `browse-classes` classifier) so the sidebar can filter by it.
    */
   async classes(): Promise<ClassInfo[]> {
     const resp = (await this._request({ op: "list-classes" })) as {
@@ -283,12 +326,14 @@ export class WorkspaceClient {
         name: string;
         source_file?: string | null;
         actor_count?: number;
+        source_origin?: ClassOrigin | null;
       }>;
     };
     return (resp.class_list ?? []).map((c) => ({
       name: c.name,
       source_file: c.source_file ?? undefined,
       actor_count: c.actor_count,
+      source_origin: c.source_origin ?? undefined,
     }));
   }
 
@@ -333,15 +378,63 @@ export class WorkspaceClient {
   /** List all methods and state vars for a loaded class. */
   async methods(className: string): Promise<{ methods: MethodInfo[]; stateVars: StateVarInfo[] }> {
     const resp = (await this._request({ op: "methods", class: className })) as {
-      methods?: Array<{ name: string; selector: string; side: "instance" | "class" }>;
-      state_vars?: string[];
+      methods?: Array<{
+        name: string;
+        selector: string;
+        side: "instance" | "class";
+        line?: number | null;
+        source_status?: "indexed" | "synthetic" | "unindexed_runtime_fun";
+        signature?: string | null;
+        doc?: string | null;
+      }>;
+      state_vars?: Array<{ name: string; line?: number | null }>;
     };
-    const methods = Array.isArray(resp.methods) ? resp.methods : [];
+    const methodsRaw = Array.isArray(resp.methods) ? resp.methods : [];
     const stateVarsRaw = Array.isArray(resp.state_vars) ? resp.state_vars : [];
     return {
-      methods,
-      stateVars: stateVarsRaw.map((name) => ({ name })),
+      // BT-3439: `line` is `null` on the wire (a class predating this field,
+      // or ClassBuilder-built) — normalize to `undefined` so callers can use
+      // a single `??`/optional-chaining check for "no real line available".
+      // BT-3444: `signature`/`doc` are `null` on the wire for every
+      // non-`synthetic` row (they're resolved for synthetic rows only) —
+      // same normalization.
+      methods: methodsRaw.map((m) => ({
+        ...m,
+        line: m.line ?? undefined,
+        signature: m.signature ?? undefined,
+        doc: m.doc ?? undefined,
+      })),
+      stateVars: stateVarsRaw.map((v) => ({ name: v.name, line: v.line ?? undefined })),
     };
+  }
+
+  /**
+   * List inherited (non-local) instance and class-side methods for a loaded
+   * class, each attributed to its defining class (BT-3478). Called only when
+   * the sidebar's "Inherited" group is expanded — kept off the eager
+   * `methods()` fetch every class item already pays on first expand.
+   */
+  async inheritedMethods(className: string): Promise<InheritedMethodInfo[]> {
+    const resp = (await this._request({ op: "inherited-methods", class: className })) as {
+      methods?: Array<{
+        name: string;
+        selector: string;
+        side: "instance" | "class";
+        line?: number | null;
+        source_status?: "indexed" | "synthetic" | "unindexed_runtime_fun";
+        signature?: string | null;
+        doc?: string | null;
+        defining_class: string;
+      }>;
+    };
+    const methodsRaw = Array.isArray(resp.methods) ? resp.methods : [];
+    return methodsRaw.map((m) => ({
+      ...m,
+      line: m.line ?? undefined,
+      signature: m.signature ?? undefined,
+      doc: m.doc ?? undefined,
+      definingClass: m.defining_class,
+    }));
   }
 
   /** List all active sessions in the workspace. */
@@ -567,6 +660,16 @@ export class WorkspaceClient {
       this._emitPush({
         channel: "classes",
         event: "loaded",
+        data: { class: String(data.class ?? "") },
+      });
+    } else if (channel === "classes" && event === "removed" && data) {
+      // BT-2531 (server-side): the runtime already announces this whenever a
+      // class's process shuts down (e.g. `removeFromSystem`) — the sidebar
+      // just never consumed it, so a removed/unloaded class lingered in the
+      // tree until a manual "Refresh Workspace".
+      this._emitPush({
+        channel: "classes",
+        event: "removed",
         data: { class: String(data.class ?? "") },
       });
     } else if (channel === "bindings" && event === "changed" && data) {

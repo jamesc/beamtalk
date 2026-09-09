@@ -8,7 +8,7 @@ Tests for beamtalk_tuple runtime helper (BT-417).
 
 Tests the runtime helper module that provides complex Tuple operations
 (bounds-checked at:, unwrap*, asString). The compiled Tuple class
-(from lib/Tuple.bt) delegates these methods to beamtalk_tuple.
+(from lib/tuple.bt) delegates these methods to beamtalk_tuple.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
@@ -78,7 +78,7 @@ as_string_test() ->
 
 %%% ============================================================================
 %%% Compiled dispatch integration tests
-%%% Tests via 'bt@stdlib@tuple':dispatch/3 (compiled from lib/Tuple.bt)
+%%% Tests via 'bt@stdlib@tuple':dispatch/3 (compiled from lib/tuple.bt)
 %%% to verify BIF mappings are wired correctly end-to-end.
 %%% ============================================================================
 

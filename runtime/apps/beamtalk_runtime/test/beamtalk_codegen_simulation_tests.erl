@@ -869,8 +869,8 @@ inner_while_loop(Inner, Total) ->
 %%% Real compiled coverage already existed and needed no new fixture:
 %%% - Value-correctness for ifTrue:ifFalse:, ifTrue:, ifFalse:, and:, or:,
 %%%   not (and xor:) is exercised end-to-end against the real compiled
-%%%   True/False/Boolean stdlib classes (stdlib/src/True.bt, False.bt,
-%%%   Boolean.bt) by stdlib/bootstrap-test/booleans.btscript.
+%%%   True/False/Boolean stdlib classes (stdlib/src/true.bt, false.bt,
+%%%   boolean.bt) by stdlib/bootstrap-test/booleans.btscript.
 %%% - Short-circuit behavior (the unused block must never run, not just
 %%%   "the result happens to be right") is proven against the same real
 %%%   compiled classes by stdlib/test/boolean_short_circuit_test.bt, added
@@ -879,7 +879,7 @@ inner_while_loop(Inner, Total) ->
 %%%
 %%% Deleting the Erlang re-implementation here removes the drift risk the
 %%% disposition rule flags: the hand-rolled clauses could silently diverge
-%%% from True.bt/False.bt's actual dispatch without either test file
+%%% from true.bt/false.bt's actual dispatch without either test file
 %%% failing.
 
 %%% ===========================================================================

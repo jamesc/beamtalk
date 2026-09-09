@@ -14,7 +14,7 @@ otp-tree/
 │   ├── worker_pool.bt       # DynamicSupervisor — manages TaskWorkers
 │   └── task_worker.bt       # Transient Actor — processes tasks
 ├── test/
-│   ├── otp_tree_test.bt         # Supervisor config (strategy, policies)
+│   ├── supervisor_config_test.bt         # Supervisor config (strategy, policies)
 │   ├── event_logger_test.bt     # EventLogger actor behaviour
 │   └── task_worker_test.bt      # TaskWorker actor behaviour and crash
 ├── AGENTS.md            # This file

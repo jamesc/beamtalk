@@ -3,7 +3,7 @@
 
 // BT-1457: Tests for Server handleInfo: codegen dispatch (ADR 0065)
 //
-// Fixtures: stdlib/test/fixtures/server_handle_info.bt
+// Fixtures: stdlib/test/fixtures/handle_info_counter.bt
 //           stdlib/test/fixtures/failing_handle_info_server.bt
 //           stdlib/test/fixtures/plain_actor_for_info_test.bt
 

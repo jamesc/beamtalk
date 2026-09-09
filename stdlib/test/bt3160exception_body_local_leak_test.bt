@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3160: local-var assignment inside an on:do:/ensure: try body must not
+// leak its temp binding past the try — the method-level read after the
+// construct must see the threaded value, not an out-of-scope temp.
+//
+// See ADR 0111 Addendum 5 ("Production bugs found", bug 2) for the root
+// cause and stdlib/test/fixtures/bt3160exception_body_local_leak_actor.bt
+// for the fixture actor.
+
+TestCase subclass: BT3160ExceptionBodyLocalLeakTest
+
+  testEnsureThreadsLocalAssignedInTryBody =>
+    a := BT3160ExceptionBodyLocalLeakActor spawn
+    self assert: a runEnsure equals: 1
+    self assert: a getCount equals: 1
+
+  testOnDoThreadsLocalAssignedInTryBody =>
+    a := BT3160ExceptionBodyLocalLeakActor spawn
+    self assert: a runOnDo equals: 1
+    self assert: a getCount equals: 1

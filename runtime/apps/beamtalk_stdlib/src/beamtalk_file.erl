@@ -583,7 +583,7 @@ so lowering `open:mode:` would seem to make that auto-close "free". But the
 REPL spawns a fresh worker per evaluated statement (`spawn_monitor` in
 `beamtalk_repl_shell:handle_call({eval, ...})`), so a handle opened on one
 turn would die the instant that turn's statement finished — breaking the
-documented multi-turn `File.bt` workflow (`handle := (File open: … mode: …)
+documented multi-turn `file.bt` workflow (`handle := (File open: … mode: …)
 unwrap` on one line, `handle writeLine: …` on the next). Handles survive turns
 today only because they're opened in the long-lived File class process
 instead. See `resolve_owner/0` for how ownership is resolved without lowering.
@@ -1072,7 +1072,12 @@ Returns the current working directory as a String (absolute path).
 -doc """
 Return the OS temporary directory path.
 
-Returns the system temp directory as a String.
+Returns the system temp directory as a String, with any trailing path
+separator stripped — macOS's `$TMPDIR` is conventionally set WITH a
+trailing `/` (e.g. `/var/folders/xx/yyyyyyyy/T/`) while Linux/Windows
+temp-dir sources typically are not, and a caller comparing this value
+against another path (rather than only concatenating onto it) needs one
+consistent contract across platforms.
 """.
 -spec 'tempDirectory'() -> binary().
 'tempDirectory'() ->
@@ -1097,7 +1102,35 @@ Returns the system temp directory as a String.
             V ->
                 V
         end,
-    unicode:characters_to_binary(Dir).
+    unicode:characters_to_binary(strip_trailing_separator(Dir)).
+
+%% Strips a single trailing `/` or `\` from Dir, leaving a root untouched:
+%% either a lone Unix root separator (e.g. `"/"`) or a Windows drive root
+%% (e.g. `"C:\"`) — stripping the latter's separator would leave `"C:"`,
+%% which names the current directory on that drive, not its root, so it is
+%% not an equivalent path.
+-spec strip_trailing_separator(string()) -> string().
+strip_trailing_separator(Dir) ->
+    case lists:reverse(Dir) of
+        [Sep | Rest] when Rest =/= [], Sep =:= $/ orelse Sep =:= $\\ ->
+            case is_drive_root(Rest) of
+                true -> Dir;
+                false -> lists:reverse(Rest)
+            end;
+        _ ->
+            Dir
+    end.
+
+%% `Rest` is Dir reversed with its trailing separator already dropped —
+%% true when what remains is exactly a drive letter followed by `:`
+%% (reversed: `:` then the letter), i.e. Dir was a Windows drive root.
+-spec is_drive_root(string()) -> boolean().
+is_drive_root([$:, Letter]) when
+    (Letter >= $A andalso Letter =< $Z) orelse (Letter >= $a andalso Letter =< $z)
+->
+    true;
+is_drive_root(_) ->
+    false.
 
 %%% ============================================================================
 %%% FFI Shims

@@ -10,7 +10,7 @@
 //! `maps:to_list` (for `doWithKey:`) using `lists:foldl` with state threading.
 
 use super::super::intrinsics::validate_block_arity_exact;
-use super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result, block_analysis};
+use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use super::{BodyKind, ListOpKind, ThreadingPlan};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -87,21 +87,19 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.push(plan.generate_tuple_unpack_docs(self, "StateAcc", 1));
-
             let (body_doc, _) =
-                self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
             docs.push(body_doc);
             self.pop_scope();
 
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
-            let result_doc = if self.in_direct_params_loop {
+            let result_doc = if self.loop_mode.in_direct_params_loop {
                 // BT-1329/BT-3053: see the identical branch in
                 // `control_flow/list_ops/basic_ops.rs`'s `do:` — same shape here for a
                 // dictionary iteration: multiple rebound accumulator vars, no single
                 // "result" value, so signal open-with-no-value rather than naming one.
-                self.last_open_scope_result = Some(OpenScopeResult::NoValue);
+                self.loop_mode.direct_params_do_open_chain = true;
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -184,9 +182,8 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+        let (body_doc, _) =
+            self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
         docs.push(body_doc);
         self.pop_scope();
 
@@ -299,21 +296,19 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.get(1) {
                 self.bind_var(&param.name, &val_var);
             }
-            docs.push(plan.generate_tuple_unpack_docs(self, "StateAcc", 1));
-
             let (body_doc, _) =
-                self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
             docs.push(body_doc);
             self.pop_scope();
 
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
-            let result_doc = if self.in_direct_params_loop {
+            let result_doc = if self.loop_mode.in_direct_params_loop {
                 // BT-1329/BT-3053: see the identical branch in
                 // `control_flow/list_ops/basic_ops.rs`'s `do:` — same shape here for a
                 // dictionary iteration: multiple rebound accumulator vars, no single
                 // "result" value, so signal open-with-no-value rather than naming one.
-                self.last_open_scope_result = Some(OpenScopeResult::NoValue);
+                self.loop_mode.direct_params_do_open_chain = true;
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -408,9 +403,8 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.get(1) {
             self.bind_var(&param.name, &val_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+        let (body_doc, _) =
+            self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
         docs.push(body_doc);
         self.pop_scope();
 
@@ -510,8 +504,8 @@ mod tests {
         // BT-3053: same shape as
         // control_flow::list_ops::tests::test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return,
         // but for the dictionary `do:` producer (dict_ops.rs:104) rather than
-        // list `do:` (basic_ops.rs:104) — both hit the identical
-        // `OpenScopeResult::NoValue` branch, but only the list-ops path had a
+        // list `do:` (basic_ops.rs:104) — both set the identical
+        // `direct_params_do_open_chain` flag, but only the list-ops path had a
         // regression test pinning the fix (flagged by the Claude review bot
         // on the original PR). `^` (Expression::Return, via the NLR-throw
         // path) fed the direct result of a mutation-threaded dictionary

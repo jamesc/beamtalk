@@ -10,7 +10,7 @@ Canonical structural renderer for Beamtalk objects.
 
 This module is the **single source of truth** for the structural
 `ClassName(field: value, ...)` representation (ADR 0094, Phase 1).
-Both the compiled stdlib (`Value.bt`) and the runtime fallback
+Both the compiled stdlib (`value.bt`) and the runtime fallback
 (`beamtalk_object_ops`, `beamtalk_primitive`, `beamtalk_reflection`)
 must call through this module to guarantee byte-identical output.
 
@@ -105,7 +105,7 @@ Render `ClassName(field: value, ...)` directly from a Beamtalk object's
 state map (a tagged map).
 
 This is the canonical entry point used by both the compiled stdlib
-(`Value.bt` `printString`) and the runtime fallbacks (`beamtalk_object_ops`,
+(`value.bt` `printString`) and the runtime fallbacks (`beamtalk_object_ops`,
 `beamtalk_reflection`). The class name and user fields are extracted from the
 tagged map, guaranteeing byte-identical output across every caller (ADR 0094,
 Critical Risk #4). Uses default bounds.

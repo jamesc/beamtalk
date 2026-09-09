@@ -24,7 +24,7 @@ Class → Behaviour → Object → ProtoObject chain via beamtalk_dispatch.
 
 ## Future (ADR 0036 Phase 3)
 
-This stub will be replaced by a compiled Metaclass.bt stdlib module once
+This stub will be replaced by a compiled metaclass.bt stdlib module once
 the full Metaclass protocol (thisClass, name, superclass, printString) is
 implemented (BT-803 or equivalent Phase 2/3 issue).
 
@@ -57,7 +57,7 @@ overridden from the Class chain:
   - isClass     → false (Class defines isClass → true; Metaclass overrides)
   - isMetaclass → true  (new predicate, not in superclasses)
 
-Future (ADR 0036 Phase 3): This stub will be replaced by compiled Metaclass.bt.
+Future (ADR 0036 Phase 3): This stub will be replaced by compiled metaclass.bt.
 """.
 -spec dispatch(atom(), list(), term(), map()) ->
     {reply, term(), map()} | {error, #beamtalk_error{}, map()}.
@@ -76,7 +76,7 @@ Check if Metaclass has an instance method.
 Returns true for the 3 identity predicates implemented directly in this stub.
 All other selectors are inherited from Class/Behaviour via chain walk.
 
-ADR 0036 Phase 3: Will be replaced by compiled Metaclass.bt exports.
+ADR 0036 Phase 3: Will be replaced by compiled metaclass.bt exports.
 """.
 -spec has_method(atom()) -> boolean().
 has_method('isMeta') -> true;
@@ -99,7 +99,7 @@ The 'Metaclass' class:
   - module: beamtalk_metaclass_bt (this module)
   - instance_methods: 3 identity predicates (isMeta, isClass, isMetaclass)
 
-ADR 0036 Phase 1: Bootstrap stub. Full protocol in Phase 3 (Metaclass.bt).
+ADR 0036 Phase 1: Bootstrap stub. Full protocol in Phase 3 (metaclass.bt).
 """.
 -spec register_class() -> ok.
 register_class() ->

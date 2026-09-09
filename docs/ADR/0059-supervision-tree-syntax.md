@@ -46,7 +46,7 @@ Supervision trees are expressed via two abstract base classes in the stdlib (`Su
 The stdlib base classes:
 
 ```beamtalk
-// stdlib/src/Supervisor.bt
+// stdlib/src/supervisor.bt
 abstract Object subclass: Supervisor
   class strategy      -> Symbol    => #oneForOne
   class maxRestarts   -> Integer   => 10
@@ -146,7 +146,7 @@ SubclassResponsibility: BrokenPool does not implement 'childClass'
 Each Actor class overrides the inherited `supervisionPolicy` class-side method to declare its default restart behaviour. The default is defined on the `Actor` base class:
 
 ```beamtalk
-// stdlib/src/Actor.bt — defaults on the base class
+// stdlib/src/actor.bt — defaults on the base class
 abstract Object subclass: Actor
   class supervisionPolicy -> Symbol  => #temporary  // default: do not restart on crash
   class isSupervisor      -> Boolean => false
@@ -824,8 +824,8 @@ No new syntax. Users invoke Erlang supervision APIs via BEAM interop:
 
 Add `Supervisor`, `DynamicSupervisor`, and `SupervisionSpec` to the stdlib and bootstrap sequence:
 
-- `stdlib/src/Supervisor.bt` — two abstract classes: `Supervisor` (`strategy => #oneForOne`, `maxRestarts => 10`, `restartWindow => 60`, `children => self subclassResponsibility`); `DynamicSupervisor` (`maxRestarts => 10`, `restartWindow => 60`, `childClass => self subclassResponsibility`)
-- `stdlib/src/SupervisionSpec.bt` — `SupervisionSpec` value type with `id`, `actorClass`, `restart`, `args` fields; `withId:`, `withRestart:`, `withArgs:`, `withId:withRestart:`, `withId:withArgs:`, `withId:withRestart:withArgs:` fluent overrides
+- `stdlib/src/supervisor.bt` — two abstract classes: `Supervisor` (`strategy => #oneForOne`, `maxRestarts => 10`, `restartWindow => 60`, `children => self subclassResponsibility`); `DynamicSupervisor` (`maxRestarts => 10`, `restartWindow => 60`, `childClass => self subclassResponsibility`)
+- `stdlib/src/supervision_spec.bt` — `SupervisionSpec` value type with `id`, `actorClass`, `restart`, `args` fields; `withId:`, `withRestart:`, `withArgs:`, `withId:withRestart:`, `withId:withArgs:`, `withId:withRestart:withArgs:` fluent overrides
 - `runtime/apps/beamtalk_runtime/src/beamtalk_bootstrap.erl` — add `Supervisor`, `DynamicSupervisor` after `Actor` in the bootstrap sequence
 - `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs` — add `Supervisor`, `DynamicSupervisor` as known base classes (alongside `Actor`, `Object`)
 
@@ -833,7 +833,7 @@ Add `Supervisor`, `DynamicSupervisor`, and `SupervisionSpec` to the stdlib and b
 
 ### Phase 1 — `supervisionSpec` Synthesis (S)
 
-**No new parser grammar required.** `supervisionPolicy` is a class-side method override (`class supervisionPolicy => #permanent`) — the parser already handles this. The default is defined in `stdlib/src/Actor.bt` as `class supervisionPolicy => #temporary` on the `Actor` base class, inherited automatically by all Actor subclasses that do not override it.
+**No new parser grammar required.** `supervisionPolicy` is a class-side method override (`class supervisionPolicy => #permanent`) — the parser already handles this. The default is defined in `stdlib/src/actor.bt` as `class supervisionPolicy => #temporary` on the `Actor` base class, inherited automatically by all Actor subclasses that do not override it.
 
 **AST (`crates/beamtalk-core/src/ast.rs`):**
 - `ClassDefinition` gains `supervisor_kind: Option<SupervisorKind>` where `SupervisorKind` is `Static` (inherits from `Supervisor`) or `Dynamic` (inherits from `DynamicSupervisor`), set by semantic analysis
@@ -844,7 +844,7 @@ Add `Supervisor`, `DynamicSupervisor`, and `SupervisionSpec` to the stdlib and b
 - Warn if an Actor subclass used as a child in a static `children` array literal does not explicitly override `supervisionPolicy` (default `#temporary` — "not restarted on crash")
 - No validation of the `children` method return type — this is method dispatch, validated at runtime
 
-**Stdlib (`stdlib/src/Actor.bt`):**
+**Stdlib (`stdlib/src/actor.bt`):**
 - Add `class supervisionPolicy => #temporary` to the `Actor` abstract base
 
 **Codegen (`crates/beamtalk-core/src/codegen/core_erlang/actor_codegen.rs`):**
@@ -853,7 +853,7 @@ Add `Supervisor`, `DynamicSupervisor`, and `SupervisionSpec` to the stdlib and b
 
 ### Phase 2 — Supervisor Codegen (M)
 
-The compiler work is intentionally minimal. Most logic lives in the stdlib (`Supervisor.bt`, `SupervisionSpec.bt`) and the runtime Erlang helper (`beamtalk_supervisor.erl`). The compiler generates only two functions per supervisor subclass.
+The compiler work is intentionally minimal. Most logic lives in the stdlib (`supervisor.bt`, `supervision_spec.bt`) and the runtime Erlang helper (`beamtalk_supervisor.erl`). The compiler generates only two functions per supervisor subclass.
 
 **New file: `crates/beamtalk-core/src/codegen/core_erlang/supervisor_codegen.rs`**
 
@@ -902,9 +902,9 @@ Thin dispatch glue — no construction logic (that lives in `SupervisionSpec chi
 - `crates/beamtalk-core/src/codegen/core_erlang/actor_codegen.rs` — add `supervisor_kind` branch (~5 lines)
 - `runtime/apps/beamtalk_runtime/src/beamtalk_dispatch.erl` — detect `'beamtalk_supervisor'` tag; route to `Module:'method'(Self)` directly instead of `beamtalk_actor:sync_send/3`
 - `runtime/apps/beamtalk_runtime/src/beamtalk_repl.erl` — add `'beamtalk_supervisor'` clause to display `#Supervisor<ClassName, Pid>` and `#DynamicSupervisor<ClassName, Pid>`
-- `stdlib/src/Actor.bt` — add `class supervisionPolicy -> Symbol => #temporary` and `class isSupervisor -> Boolean => false`
-- `stdlib/src/Supervisor.bt` — `Supervisor` and `DynamicSupervisor` abstract classes with all inherited methods and type annotations
-- `stdlib/src/SupervisionSpec.bt` — value type with `childSpec` and fluent override methods
+- `stdlib/src/actor.bt` — add `class supervisionPolicy -> Symbol => #temporary` and `class isSupervisor -> Boolean => false`
+- `stdlib/src/supervisor.bt` — `Supervisor` and `DynamicSupervisor` abstract classes with all inherited methods and type annotations
+- `stdlib/src/supervision_spec.bt` — value type with `childSpec` and fluent override methods
 - `runtime/apps/beamtalk_runtime/src/beamtalk_supervisor.erl` — new file
 - `runtime/apps/beamtalk_runtime/src/beamtalk_bootstrap.erl` — add `Supervisor`, `DynamicSupervisor` to sequence
 

@@ -105,7 +105,7 @@ pub const FLUSH_INCLUDING_DESTRUCTIVE_EXPR: &str = "Workspace flushIncludingDest
 /// `selector` is passed through **verbatim** (only trimmed), exactly like
 /// [`flush_expr_for`] — a Class, a Symbol kind (`#'remove-class'`), or a
 /// Dictionary (`#{ #file => "path" }`) are all legal scopes for
-/// `WorkspaceInterface.bt`'s `flush: filter confirmDestructive: confirmDestructive`
+/// `workspace_interface.bt`'s `flush: filter confirmDestructive: confirmDestructive`
 /// keyword form. Returns `None` when `selector` is empty (including
 /// whitespace-only), so the caller can print a usage hint instead of
 /// evaluating a malformed bare `Workspace flush: confirmDestructive: true`

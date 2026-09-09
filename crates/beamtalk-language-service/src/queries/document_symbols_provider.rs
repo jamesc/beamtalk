@@ -23,6 +23,7 @@
 //! before class-side methods, exactly as before this feature — a divider-free
 //! class's outline never changes shape.
 
+use crate::queries::hover_provider::selector_span_in_method_signature;
 use crate::{DocumentSymbol, DocumentSymbolKind};
 use beamtalk_core::ast::Module;
 use beamtalk_core::source_analysis::{self, CategorizedMethod, MethodSide};
@@ -45,7 +46,10 @@ pub fn compute_document_symbols(module: &Module, source: &str) -> Vec<DocumentSy
                 name: state_var.name.name.clone(),
                 kind: DocumentSymbolKind::Field,
                 span: state_var.span,
-                name_span: None,
+                // `state_var.span` starts at the `state:`/`field:` keyword
+                // (captured before it's consumed, same as methods below), so
+                // point `name_span` at the identifier's own span instead.
+                name_span: Some(state_var.name.span),
                 children: vec![],
             });
         }
@@ -89,7 +93,12 @@ pub fn compute_document_symbols(module: &Module, source: &str) -> Vec<DocumentSy
                     name: method.selector.name(),
                     kind: DocumentSymbolKind::Method,
                     span: method.span,
-                    name_span: None,
+                    // `method.span` starts at the `class`/`sealed`/`internal`
+                    // modifier keyword when present (captured before
+                    // `parse_method_definition` consumes it), so `name_span`
+                    // must be computed independently rather than defaulting
+                    // to `method.span`'s start via the `None` fallback.
+                    name_span: selector_span_in_method_signature(method, source),
                     children: vec![],
                 });
             }
@@ -98,7 +107,7 @@ pub fn compute_document_symbols(module: &Module, source: &str) -> Vec<DocumentSy
                     name: method.selector.name(),
                     kind: DocumentSymbolKind::ClassMethod,
                     span: method.span,
-                    name_span: None,
+                    name_span: selector_span_in_method_signature(method, source),
                     children: vec![],
                 });
             }
@@ -119,6 +128,17 @@ pub fn compute_document_symbols(module: &Module, source: &str) -> Vec<DocumentSy
 
 /// Converts one [`CategorizedMethod`] to a leaf [`DocumentSymbol`] (`Method`
 /// or `ClassMethod`, matching the pre-BT-2601 flat-shape mapping).
+///
+/// `name_span` stays `None` here (same latent gap as before: a class-side
+/// method's `selectionRange` falls back to `method.span`'s start, i.e. the
+/// modifier keyword) — unlike the flat-shape path above, `CategorizedMethod`
+/// only carries a flattened `selector: String` and whole-method `span`, not
+/// the original `MethodDefinition`'s `KeywordPart` spans that
+/// `selector_span_in_method_signature` needs to place a multi-keyword
+/// selector correctly. A text-search fallback using only `selector`/`span`
+/// would work for a unary/binary selector but silently misplace (or simply
+/// not find) a keyword one — the same class of bug this whole fix is for.
+/// Only classes using `// === Name ===` section dividers take this path.
 fn method_symbol(method: &CategorizedMethod) -> DocumentSymbol {
     DocumentSymbol {
         name: method.selector.as_str().into(),
@@ -200,6 +220,56 @@ mod tests {
             .collect();
         assert_eq!(class_methods.len(), 1);
         assert_eq!(class_methods[0].name.as_str(), "withInitial:");
+    }
+
+    #[test]
+    fn class_side_method_name_span_points_at_selector_not_class_keyword() {
+        // Reproduces the reported bug: a class-side method's `span` starts
+        // at the `class` keyword (captured before `parse_method_definition`
+        // consumes it), so `selectionRange` must not fall back to it.
+        let source = "Object subclass: Workflow\n  class registerQueries: ctx :: WorkflowContext -> Nil => nil";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let symbols = compute_document_symbols(&module, source);
+        let method = &symbols[0].children[0];
+        assert_eq!(method.name.as_str(), "registerQueries:");
+        let name_span = method
+            .name_span
+            .expect("class-side method should have a name_span");
+        let name_start = usize::try_from(name_span.start()).unwrap();
+        let name_end = usize::try_from(name_span.end()).unwrap();
+        assert_eq!(&source[name_start..name_end], "registerQueries:");
+    }
+
+    #[test]
+    fn instance_method_with_multiple_keywords_name_span_covers_all_keywords() {
+        let source = "Object subclass: Workflow\n  run: args ctx: ctx => nil";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let symbols = compute_document_symbols(&module, source);
+        let method = &symbols[0].children[0];
+        let name_span = method
+            .name_span
+            .expect("keyword method should have a name_span");
+        let name_start = usize::try_from(name_span.start()).unwrap();
+        let name_end = usize::try_from(name_span.end()).unwrap();
+        // Spans from the first keyword's start to the last keyword's end —
+        // not a literal "run:ctx:" substring, which never appears in source.
+        assert_eq!(&source[name_start..name_end], "run: args ctx:");
+    }
+
+    #[test]
+    fn state_var_name_span_points_at_the_identifier_not_the_state_keyword() {
+        let source = "Object subclass: Counter\n  state: count = 0";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let symbols = compute_document_symbols(&module, source);
+        let field = &symbols[0].children[0];
+        assert_eq!(field.kind, DocumentSymbolKind::Field);
+        let name_span = field.name_span.expect("field should have a name_span");
+        let name_start = usize::try_from(name_span.start()).unwrap();
+        let name_end = usize::try_from(name_span.end()).unwrap();
+        assert_eq!(&source[name_start..name_end], "count");
     }
 
     #[test]

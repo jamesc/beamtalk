@@ -148,7 +148,7 @@ nil ifNotNil: [:v | v * 2] ifNil: [0]  // => 0
 // IMPLEMENTATION STATUS
 // ===========================================================================
 //
-// ✅ Object.bt defined with reflection API
+// ✅ object.bt defined with reflection API
 // ✅ Compiler support for respondsTo:, fieldNames, fieldAt:, fieldAt:put:
 // ✅ Runtime support in beamtalk_actor.erl
 // ✅ Nil-testing protocol (isNil, notNil, ifNil:, ifNotNil:) - TESTED HERE

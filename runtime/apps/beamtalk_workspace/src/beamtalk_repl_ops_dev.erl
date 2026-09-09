@@ -31,6 +31,7 @@ Extracted from beamtalk_repl_server (BT-705).
     make_class_not_found_error/1,
     base_protocol_response/1,
     list_class_methods_for_ws/1,
+    list_inherited_methods_for_ws/1,
     resolve_qualified_class_name/1
 ]).
 
@@ -85,9 +86,9 @@ Extracted from beamtalk_repl_server (BT-705).
 ]).
 
 -doc """
-Handle complete/describe/show-codegen/methods/list-classes/test/test-all/
-erlang-help/erlang-complete ops for the WebSocket transport — encodes the term
-result to JSON at the edge (BT-2402).
+Handle complete/describe/show-codegen/methods/inherited-methods/list-classes/
+test/test-all/erlang-help/erlang-complete ops for the WebSocket transport —
+encodes the term result to JSON at the edge (BT-2402).
 """.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(Op, Params, Msg, SessionPid) ->
@@ -98,10 +99,10 @@ Term-returning handler for the developer read-surface ops (BT-2402, ADR 0085).
 
 Returns `{completions, [binary()]}`, `{docs, binary()}`,
 `{codegen, CoreErlang, Warnings}`, `{methods, Methods, StateVars}`,
-`{class_list, [ClassInfo]}`, `{test_results, TestResult}`,
-`{describe, Ops, Versions}`, `{value, JsonValue}` (`list-tests`,
-`reload-findings` — BT-2801), or `{error, #beamtalk_error{}}` — no JSON in
-this path.
+`{inherited_methods, Methods}` (BT-3478), `{class_list, [ClassInfo]}`,
+`{test_results, TestResult}`, `{describe, Ops, Versions}`, `{value, JsonValue}`
+(`list-tests`, `reload-findings` — BT-2801), or `{error, #beamtalk_error{}}` —
+no JSON in this path.
 """.
 -spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
     beamtalk_repl_ops:op_result().
@@ -378,6 +379,16 @@ handle_term(<<"methods">>, Params, _Msg, _SessionPid) ->
     Methods = list_class_methods_for_ws(ClassBin),
     StateVars = list_state_vars_for_ws(ClassBin),
     {methods, Methods, StateVars};
+handle_term(<<"inherited-methods">>, Params, _Msg, _SessionPid) ->
+    %% BT-3478: Return inherited (non-local) instance and class-side methods
+    %% for a loaded class, each attributed to its defining class. Kept as a
+    %% separate op (rather than a flag on "methods") so the sidebar's eager
+    %% per-class-item fetch — already paid via "methods" on first expand —
+    %% is unaffected; this op is only called when the sidebar's new lazy
+    %% "Inherited" group is itself expanded.
+    ClassBin = maps:get(<<"class">>, Params, <<>>),
+    Methods = list_inherited_methods_for_ws(ClassBin),
+    {inherited_methods, Methods};
 handle_term(<<"list-classes">>, Params, _Msg, SessionPid) ->
     %% BT-1404: List all available classes with one-line descriptions.
     %% BT-2091: Now also returns `source_file` and `actor_count` so editors
@@ -468,7 +479,19 @@ handle_term(<<"list-classes">>, Params, _Msg, SessionPid) ->
                                             <<"abstract">> => IsAbstract,
                                             <<"internal">> => IsInternal,
                                             <<"source_file">> => SourceFile,
-                                            <<"actor_count">> => ActorCount
+                                            <<"actor_count">> => ActorCount,
+                                            %% stdlib/project/dependency
+                                            %% classification for the VS Code
+                                            %% Workspace Explorer's class filter.
+                                            %% Reuses the System Browser's
+                                            %% `browse-classes` classifier
+                                            %% (ADR 0096) rather than
+                                            %% re-deriving it from `SourceFile`
+                                            %% client-side.
+                                            <<"source_origin">> =>
+                                                beamtalk_repl_ops_browse:source_origin_of(
+                                                    ModName, SourceFile
+                                                )
                                         }};
                                     false ->
                                         false
@@ -2162,6 +2185,7 @@ base_ops() ->
         <<"unload">> => #{<<"params">> => [<<"module">>]},
         <<"health">> => #{<<"params">> => []},
         <<"methods">> => #{<<"params">> => [<<"class">>]},
+        <<"inherited-methods">> => #{<<"params">> => [<<"class">>]},
         <<"list-classes">> => #{
             <<"params">> => [],
             <<"optional">> => [<<"filter">>]
@@ -2187,7 +2211,9 @@ Return a list of method descriptors for a class by name (BT-1026).
 
 Collects local instance methods and local class-side methods for the named
 class. Returns an empty list if the class name is unknown or not loaded.
-Each entry is a map with <<"name">>, <<"selector">>, and <<"side">> keys.
+Each entry is a map with <<"name">>, <<"selector">>, <<"side">>, <<"line">>,
+<<"source_status">>, <<"signature">>, and <<"doc">> keys — see
+`method_ws_entry/4`.
 """.
 -spec list_class_methods_for_ws(binary()) -> [map()].
 list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
@@ -2205,26 +2231,136 @@ list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
                     ),
                     ClassSelectors = lists:sort(beamtalk_runtime_api:local_class_methods(Pid)),
                     InstanceEntries = [
-                        #{
-                            <<"name">> => atom_to_binary(S, utf8),
-                            <<"selector">> => atom_to_binary(S, utf8),
-                            <<"side">> => <<"instance">>
-                        }
+                        method_ws_entry(ClassName, false, S, Pid)
                      || S <- InstanceSelectors
                     ],
                     ClassEntries = [
-                        #{
-                            <<"name">> => atom_to_binary(S, utf8),
-                            <<"selector">> => atom_to_binary(S, utf8),
-                            <<"side">> => <<"class">>
-                        }
+                        method_ws_entry(ClassName, true, S, Pid)
                      || S <- ClassSelectors
                     ],
                     InstanceEntries ++ ClassEntries
             end
     end.
 
--spec list_state_vars_for_ws(binary()) -> [binary()].
+-doc """
+Collect inherited (non-local) instance and class-side methods for the named
+class, each attributed to its defining class (BT-3478). Returns an empty
+list if the class name is unknown or not loaded.
+
+Reuses `beamtalk_hierarchy_docs:collect_flattened_methods/2` and
+`collect_flattened_class_methods/2` — the same defining-class-attributed
+hierarchy walk the `:help` REPL command already builds on (BT-3087) — rather
+than a new walk, then drops every selector whose defining class is the
+receiver itself (those are already covered by the local `\"methods\"` op).
+
+Each entry has the same shape as `method_ws_entry/4` plus a
+<<"defining_class">> key; source/doc/signature are resolved against the
+*defining* class's pid, since that's where the method actually lives.
+""".
+-spec list_inherited_methods_for_ws(binary()) -> [map()].
+list_inherited_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
+    case resolve_qualified_class_name(ClassBin) of
+        {error, badarg} ->
+            [];
+        {ok, ClassName} ->
+            case beamtalk_runtime_api:whereis_class(ClassName) of
+                undefined ->
+                    [];
+                Pid ->
+                    FlatInstance = beamtalk_hierarchy_docs:collect_flattened_methods(
+                        ClassName, Pid
+                    ),
+                    FlatClass = beamtalk_hierarchy_docs:collect_flattened_class_methods(
+                        ClassName, Pid
+                    ),
+                    InstanceEntries = inherited_ws_entries(ClassName, false, FlatInstance),
+                    ClassEntries = inherited_ws_entries(ClassName, true, FlatClass),
+                    InstanceEntries ++ ClassEntries
+            end
+    end.
+
+-doc """
+Build inherited-method ws entries from a flattened hierarchy map (BT-3478).
+`Flattened` is `#{Selector => {DefiningClass, MethodInfo}}` (instance side,
+from `collect_flattened_methods/2`) or `#{Selector => DefiningClass}` (class
+side, from `collect_flattened_class_methods/2`) — entries whose defining
+class is `ClassName` itself are local, not inherited, and are dropped.
+""".
+-spec inherited_ws_entries(atom(), boolean(), map()) -> [map()].
+inherited_ws_entries(ClassName, ClassSide, Flattened) ->
+    Entries = maps:fold(
+        fun(Selector, Value, Acc) ->
+            DefiningClass =
+                case Value of
+                    {DC, _MethodInfo} -> DC;
+                    DC when is_atom(DC) -> DC
+                end,
+            case DefiningClass of
+                ClassName ->
+                    Acc;
+                _ ->
+                    case beamtalk_runtime_api:whereis_class(DefiningClass) of
+                        undefined ->
+                            Acc;
+                        DefiningPid ->
+                            Entry = method_ws_entry(
+                                DefiningClass, ClassSide, Selector, DefiningPid
+                            ),
+                            [
+                                Entry#{
+                                    <<"defining_class">> => atom_to_binary(DefiningClass, utf8)
+                                }
+                                | Acc
+                            ]
+                    end
+            end
+        end,
+        [],
+        Flattened
+    ),
+    lists:sort(
+        fun(A, B) -> maps:get(<<"selector">>, A) =< maps:get(<<"selector">>, B) end, Entries
+    ).
+
+-doc """
+Build one method descriptor for the `\"methods\"` ws op (BT-1026, BT-3439,
+BT-3444).
+
+`line` is the real declaration line from `beamtalk_xref:method_info/3`, or
+`null` when unregistered (e.g. a `ClassBuilder`-built class compiled before
+BT-3439 landed) — the same lookup the LiveView `browse-protocols` op and the
+LSP `nav-query` op read from, instead of leaving `beamtalk.navigateToMethod`
+(VS Code Workspace Explorer sidebar) to guess the position via source-text
+regex.
+
+`source_status` is the xref tag verbatim (`indexed` | `synthetic` |
+`unindexed_runtime_fun`) via the shared `info_fields/1` helper op 2/3 already
+use (`beamtalk_repl_ops_browse`) — so the sidebar can badge a `synthetic`
+row (a `Value subclass:`'s compiler-generated field accessor) as visibly
+distinct, the same honest fact the LiveView IDE method list already badges
+(BT-2714), instead of a second `source_status`-shaping implementation.
+`signature`/`doc` are resolved for `synthetic` rows only via the shared
+`row_doc_signature/4` helper (BT-2735) — a value accessor's sidebar hover
+shows its generated signature instead of a blank tooltip.
+""".
+-spec method_ws_entry(atom(), boolean(), atom(), pid()) -> map().
+method_ws_entry(ClassName, ClassSide, Selector, ClassPid) ->
+    Info = beamtalk_xref:method_info(ClassName, ClassSide, Selector),
+    {Line, SourceStatus, _Provenance} = beamtalk_repl_ops_browse:info_fields(Info),
+    {Doc, Signature} = beamtalk_repl_ops_browse:row_doc_signature(
+        ClassPid, ClassSide, Selector, SourceStatus
+    ),
+    #{
+        <<"name">> => atom_to_binary(Selector, utf8),
+        <<"selector">> => atom_to_binary(Selector, utf8),
+        <<"side">> => beamtalk_repl_ops_browse:side_to_binary(ClassSide),
+        <<"line">> => Line,
+        <<"source_status">> => atom_to_binary(SourceStatus, utf8),
+        <<"signature">> => Signature,
+        <<"doc">> => Doc
+    }.
+
+-spec list_state_vars_for_ws(binary()) -> [map()].
 list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
     case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
         {error, badarg} ->
@@ -2234,8 +2370,26 @@ list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
                 undefined ->
                     [];
                 Pid ->
-                    IVars = beamtalk_runtime_api:instance_variables(Pid),
-                    lists:sort([atom_to_binary(V, utf8) || V <- IVars])
+                    IVars = lists:sort(beamtalk_runtime_api:instance_variables(Pid)),
+                    [
+                        #{
+                            <<"name">> => atom_to_binary(V, utf8),
+                            %% BT-3439: real declaration line when the class
+                            %% was compiled with this feature (via
+                            %% beamtalk_xref:register_state_vars/2); `null`
+                            %% for a ClassBuilder-built class with no
+                            %% compiler to derive one from, or a class
+                            %% compiled before this feature landed —
+                            %% `beamtalk.navigateToStateVar` falls back to
+                            %% its source-text regex guess in that case.
+                            <<"line">> =>
+                                case beamtalk_xref:state_var_line(ClassName, V) of
+                                    undefined -> null;
+                                    Line -> Line
+                                end
+                        }
+                     || V <- IVars
+                    ]
             end
     end.
 

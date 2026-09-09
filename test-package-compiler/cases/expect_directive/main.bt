@@ -24,3 +24,8 @@ someUndefinedMethod
 @expect dnu
 @expect type
 42 unknownMessage
+
+// BT-3387: a single @expect can list multiple categories, suppressing all
+// of them on the same following expression
+@expect dnu, type
+42 unknownMessage

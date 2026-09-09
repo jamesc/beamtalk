@@ -343,7 +343,7 @@ real_stdlib_delegate_callers_test_() ->
             SubprocessRows = [R || R <- Rows, maps:get(owner, R) =:= 'Subprocess'],
             ?assertNotEqual([], SubprocessRows),
             %% `exitCode` is one of Subprocess's `self delegate` instance methods
-            %% (Subprocess.bt) — assert the real selector, not just "some row".
+            %% (subprocess.bt) — assert the real selector, not just "some row".
             Selectors = [maps:get(method, R) || R <- SubprocessRows],
             ?assert(lists:member(exitCode, Selectors))
         end}

@@ -404,17 +404,10 @@ dyn_user_source() ->
     >>.
 
 register_dynamic_class(ClassName) ->
-    State = #{
-        className => ClassName,
-        superclassRef => 'Object',
-        fieldSpecs => #{},
-        methodSpecs => #{}
-    },
-    {ok, Pid} = beamtalk_class_builder:register(State),
-    Tag = beamtalk_class_registry:class_object_tag(ClassName),
-    Module = beamtalk_object_class:module_name(Pid),
-    ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = Pid},
-    {ClassObj, Pid}.
+    %% Extracted to `beamtalk_test_dynamic_class` (BT-3443) once
+    %% `beamtalk_repl_compiler_rename_freshness_tests` needed this exact
+    %% fixture too — see that module's own helper for the shared source.
+    beamtalk_test_dynamic_class:register(ClassName).
 
 setup_dynamic_with_reference() ->
     application:ensure_all_started(compiler),

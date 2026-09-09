@@ -1198,13 +1198,8 @@ fn find_definition_in_expr(expr: &Expression, name: &str) -> Option<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::queries::parse_source;
     use beamtalk_core::semantic_analysis::ClassHierarchy;
-    use beamtalk_core::source_analysis::{lex_with_eof, parse};
-
-    fn parse_source(source: &str) -> Module {
-        let tokens = lex_with_eof(source);
-        parse(tokens).0
-    }
 
     #[test]
     fn find_definition_variable_assignment() {
@@ -1278,11 +1273,11 @@ mod tests {
 
     #[test]
     fn cross_file_stdlib_class_with_source_loaded() {
-        let file_collection = Utf8PathBuf::from("stdlib/src/Collection.bt");
+        let file_collection = Utf8PathBuf::from("stdlib/src/collection.bt");
         let module_collection = parse_source("abstract Object subclass: Collection");
         let hierarchy_collection = ClassHierarchy::build(&module_collection).0.unwrap();
 
-        let file_set = Utf8PathBuf::from("stdlib/src/Set.bt");
+        let file_set = Utf8PathBuf::from("stdlib/src/set.bt");
         let module_set = parse_source("sealed Collection subclass: Set");
         let hierarchy_set = ClassHierarchy::build(&module_set).0.unwrap();
 
@@ -1479,7 +1474,7 @@ mod tests {
 
     #[test]
     fn goto_definition_protocol_cross_file() {
-        let file_a = Utf8PathBuf::from("Printable.bt");
+        let file_a = Utf8PathBuf::from("printable.bt");
         let module_a = parse_source("Protocol define: Printable\n  asString -> String\n");
 
         let file_b = Utf8PathBuf::from("User.bt");
@@ -1570,7 +1565,7 @@ mod tests {
         let module_a =
             parse_source("type RestartStrategy = #temporary | #transient | #permanent\n");
 
-        let file_b = Utf8PathBuf::from("Supervisor.bt");
+        let file_b = Utf8PathBuf::from("supervisor.bt");
         let module_b = parse_source(
             "Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n",
         );

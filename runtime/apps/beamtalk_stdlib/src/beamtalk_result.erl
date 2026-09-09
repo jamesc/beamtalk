@@ -28,7 +28,7 @@ Result tagged maps have the form:
   'errReason' => nil | ExceptionObject
 }
 ```
-Field names match the `state:` declarations in `stdlib/src/Result.bt`.
+Field names match the `state:` declarations in `stdlib/src/result.bt`.
 """.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 

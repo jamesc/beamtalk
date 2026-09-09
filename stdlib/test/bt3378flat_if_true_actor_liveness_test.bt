@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3378: A trailing, non-matching ifTrue: check in a flat sequence of
+// sibling `cond ifTrue: [...]` statements must not affect the liveness of
+// an actor spawned by an earlier, matching branch's block. See
+// stdlib/test/fixtures/bt3378watcher.bt for the fixture
+// actors (a crash-recovery-style dispatcher: five flat `which == #x
+// ifTrue: [self configureX]` checks, only one of which matches per call).
+
+TestCase subclass: BT3378FlatIfTrueActorLivenessTest
+  field: w = nil
+
+  setUp => self withW: BT3378Watcher spawn
+
+  tearDown => self.w isNil ifFalse: [self.w stop]
+
+  // Original repro (BT-3378): #receiver is the 4th of 5 flat checks — not
+  // last. The trailing #dashboard check (condition false, block never
+  // runs) must not kill the actor spawned by the #receiver branch.
+  testNonLastMatchingBranchLeavesSpawnedActorAlive =>
+    self.w childExited: #receiver reason: #crashed
+    receiver := self.w getReceiver
+    self assert: receiver isAlive
+
+  // Baseline named in the issue: moving the matching check to the very
+  // last position (nothing evaluated afterward) must behave the same way.
+  testLastMatchingBranchLeavesSpawnedActorAlive =>
+    self.w childExited: #dashboard reason: #crashed
+    dashboard := self.w getDashboard
+    self assert: dashboard isAlive
+
+  // Every non-last position in the flat sequence must leave its spawned
+  // actor alive, not just the position from the original repro.
+  testEveryNonLastPositionLeavesSpawnedActorAlive =>
+    self.w childExited: #alertLog reason: #crashed
+    self assert: self.w getAlertLog isAlive
+    self.w childExited: #router reason: #crashed
+    self assert: self.w getRouter isAlive
+    self.w childExited: #registry reason: #crashed
+    self assert: self.w getRegistry isAlive
+
+  // A non-matching trailing check must not affect a *different*,
+  // previously-spawned sibling actor either (not just the one spawned in
+  // the same call).
+  testTrailingCheckDoesNotKillPreviouslySpawnedSiblings =>
+    self.w childExited: #alertLog reason: #boot
+    self.w childExited: #router reason: #boot
+    self.w childExited: #registry reason: #boot
+    alertLog := self.w getAlertLog
+    router := self.w getRouter
+    registry := self.w getRegistry
+    self.w childExited: #receiver reason: #crashed
+    self assert: self.w getReceiver isAlive
+    self assert: alertLog isAlive
+    self assert: router isAlive
+    self assert: registry isAlive
+
+  // Confirmed workaround from BT-3378: nested ifTrue:ifFalse: (a match
+  // short-circuits, no later condition even evaluated). The flat sequence
+  // must produce the same outcome as this nested form.
+  testFlatSequenceMatchesNestedIfTrueIfFalseBehavior =>
+    self.w childExitedNested: #receiver reason: #crashed
+    self assert: self.w getReceiver isAlive

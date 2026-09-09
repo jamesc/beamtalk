@@ -158,7 +158,7 @@ TestCase subclass: ExtensionSealedTest
 
   testLocalMethodWinsOverExtensionForGenuinelyDispatchedMethod =>
     // BT-3203: unlike Integer >> + above, Bt3203ExtensionPriorityHost >>
-    // localGreeting (stdlib/test/fixtures/bt3203_extension_priority_host.bt)
+    // localGreeting (stdlib/test/fixtures/bt3203extension_priority_host.bt)
     // is a real, non-intrinsic instance method that does reach compiled
     // dispatch. Confirm the local method runs first...
     host := Bt3203ExtensionPriorityHost new

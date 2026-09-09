@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3412 review follow-up: the same `ClassVarsN`-scoping hazard as
+// stdlib/test/fixtures/cascade_class_var_rebind.bt, but with the same-class
+// self-send as the cascade's *receiver* rather than a message argument —
+// `generate_cascade`'s receiver capture must thread an open scope produced
+// by `underlying_receiver`, not close it away, or the rebind is trapped
+// inside the receiver's own closed subexpression instead of the argument's.
+//
+// Reuses CascadeClassVarRebindLog/CascadeClassVarRebindReceiver from
+// cascade_class_var_rebind_log.bt / cascade_class_var_rebind_receiver.bt.
+
+Object subclass: CascadeClassVarRebindReceiverPosition
+  classState: dummy = 0
+
+  class run: log :: CascadeClassVarRebindLog -> Nil =>
+    (CascadeClassVarRebindReceiverPosition spawnReceiver: log) add: 1 value: 2; noop
+    nil
+
+  class spawnReceiver: log :: CascadeClassVarRebindLog -> CascadeClassVarRebindReceiver =>
+    log record: #spawned
+    CascadeClassVarRebindReceiver spawn

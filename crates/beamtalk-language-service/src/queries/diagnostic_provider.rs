@@ -89,6 +89,15 @@ pub struct ProjectDiagnosticContext<'a> {
     /// caller that never sets this still correctly rejects `declare native:`
     /// outside `stubs/`.
     pub is_stub_file: bool,
+    /// Basename (without extension) of the file being analysed, or `None`
+    /// when there is no real file backing the module (REPL sessions,
+    /// in-memory snippets). Used by
+    /// [`check_class_file_name_agreement`](beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement)
+    /// (BT-3431) to validate that the file name agrees with the class it
+    /// declares — a mismatch silently breaks self-dispatch codegen with no
+    /// other diagnostic. Callers derive this from the file path they're
+    /// about to analyse, mirroring `is_stub_file` above.
+    pub source_file_stem: Option<String>,
 }
 
 /// Unified post-analysis diagnostic pipeline (BT-2009).
@@ -160,6 +169,16 @@ pub fn compute_project_diagnostics_with_analysis(
     // `AnalysisResult` (hierarchy, semantic facts, inferred return types,
     // alias registry) can be handed to codegen without cloning it.
     diagnostics.extend(std::mem::take(&mut analysis_result.diagnostics));
+
+    // BT-3431: Validate that the file name agrees with the class it
+    // declares — a mismatch silently breaks self-dispatch codegen (see
+    // `check_class_file_name_agreement`'s doc) with no other diagnostic.
+    diagnostics.extend(
+        beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement(
+            module,
+            ctx.source_file_stem.as_deref(),
+        ),
+    );
 
     // BT-1732: Enrich unresolved class warnings with dependency package hints.
     if let Some(registry) = ctx.dep_registry {
@@ -434,6 +453,7 @@ pub fn compute_diagnostics_and_referenced_aliases(
     parse_diagnostics: Vec<Diagnostic>,
     known_vars: &[&str],
     pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_protocols: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
     diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> (Vec<Diagnostic>, Vec<EcoString>) {
@@ -442,6 +462,7 @@ pub fn compute_diagnostics_and_referenced_aliases(
         parse_diagnostics,
         known_vars,
         pre_loaded_classes,
+        pre_loaded_protocols,
         pre_loaded_aliases,
         diagnostics_overrides,
     );
@@ -466,12 +487,14 @@ pub fn compute_diagnostics_and_analysis(
     parse_diagnostics: Vec<Diagnostic>,
     known_vars: &[&str],
     pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_protocols: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
     diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> (Vec<Diagnostic>, semantic_analysis::AnalysisResult) {
     let ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
         .with_known_vars(known_vars)
         .with_pre_loaded_classes(pre_loaded_classes)
+        .with_pre_loaded_protocols(pre_loaded_protocols)
         .with_pre_loaded_aliases(pre_loaded_aliases);
     let mut analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, ctx);
     // BT-3123: diagnostics are consumed by `run_diagnostic_pipeline` below;
@@ -1154,6 +1177,344 @@ mod tests {
         );
     }
 
+    // ── BT-3387: combined `@expect cat1, cat2` form ──
+
+    #[test]
+    fn expect_combined_categories_suppresses_dnu() {
+        // @expect dnu, type is still valid single-line syntax when only one
+        // category is actually needed — the comma form must not break the
+        // plain single-category case.
+        let source = "@expect dnu, type\n42 unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        assert!(
+            parse_diags.is_empty(),
+            "Should have no parse errors, got: {parse_diags:?}"
+        );
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "@expect dnu, type should suppress DNU hint, got: {diagnostics:?}"
+        );
+        let stale = diagnostics
+            .iter()
+            .any(|d| d.message.contains("stale @expect"));
+        assert!(
+            !stale,
+            "@expect dnu, type must not be stale when DNU hint is present, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_combined_categories_unknown_name_skipped_valid_still_applies() {
+        // BT-3387: a typo mixed into a category list should still report an
+        // "unknown @expect category" error for the bad name, while the
+        // other, valid name in the same directive still suppresses.
+        let source = "@expect selfcapture, dnu\n42 foo";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_error = diagnostics
+            .iter()
+            .any(|d| d.message.contains("unknown @expect category"));
+        assert!(
+            has_error,
+            "Typo in one of several categories should still be a parse error, got: {diagnostics:?}"
+        );
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "the other, valid category in the list should still suppress DNU, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_combined_categories_comma_does_not_continue_across_a_newline() {
+        // Review follow-up on BT-3387: a trailing comma at the end of an
+        // @expect line (e.g. a typo or an aborted edit) must not have the
+        // next line's leading identifier silently absorbed into the
+        // category list just because it happens to spell a real category
+        // name (`type` here doubles as a very plausible variable/receiver
+        // name). The comma-continuation must be same-line only, mirroring
+        // the existing same-line rule for the reason string.
+        let source = "@expect dnu,\ntype unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, _parse_diags) = parse(tokens);
+
+        match &module.expressions[0].expression {
+            beamtalk_core::ast::Expression::ExpectDirective { categories, .. } => {
+                assert_eq!(
+                    categories,
+                    &[beamtalk_core::ast::ExpectCategory::Dnu],
+                    "the next line's `type` must not be absorbed into the category list"
+                );
+            }
+            other => panic!("expected ExpectDirective, got: {other:?}"),
+        }
+        // The dangling comma must be consumed with its own diagnostic (not
+        // left dangling as a stray token) so `type unknownMethod` still
+        // parses as its own statement.
+        assert_eq!(module.expressions.len(), 2, "got: {:?}", module.expressions);
+        assert!(
+            matches!(
+                &module.expressions[1].expression,
+                beamtalk_core::ast::Expression::MessageSend { .. }
+            ),
+            "the next line must still parse as its own statement, got: {:?}",
+            module.expressions[1].expression
+        );
+    }
+
+    #[test]
+    fn expect_combined_categories_dangling_comma_does_not_truncate_class_body() {
+        // BT-3387 review follow-up: a trailing comma at the end of a
+        // declaration-level `@expect` line must not be left dangling —
+        // `parse_class_body`'s caller treats a stray `,` as "not a valid
+        // declaration" and would otherwise silently drop every subsequent
+        // state/method declaration in the class (the same failure mode the
+        // BT-1918 comment on the reason-string lookahead guards against).
+        let source = "\
+Object subclass: Foo
+  @expect dnu,
+  state: x = 0
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags
+                .iter()
+                .any(|d| d.message.contains("trailing ','")),
+            "expected a diagnostic about the dangling comma, got: {parse_diags:?}"
+        );
+        assert!(
+            !parse_diags.iter().any(|d| d
+                .message
+                .contains("must precede a state/field or method declaration")),
+            "the class body must not be treated as truncated, got: {parse_diags:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "got: {:?}", module.classes);
+        assert_eq!(
+            module.classes[0].state.len(),
+            1,
+            "the state: x declaration after the dangling comma must still parse, got: {:?}",
+            module.classes[0].state
+        );
+    }
+
+    #[test]
+    fn expect_declaration_no_category_garbage_does_not_truncate_class_body() {
+        // Review follow-up: `@expect` immediately followed by a non-identifier,
+        // non-string, same-line token (e.g. a stray `,`) with zero valid
+        // categories parsed must not be left dangling either — same
+        // class-body-truncation risk the dangling-comma-in-a-list fix
+        // addresses, but for the "no identifier at all" branch.
+        let source = "\
+Object subclass: Foo
+  @expect ,
+  state: x = 0
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags.iter().any(|d| d
+                .message
+                .contains("@expect must be followed by a category name")),
+            "expected a parse error for the missing category, got: {parse_diags:?}"
+        );
+        assert!(
+            !parse_diags.iter().any(|d| d
+                .message
+                .contains("must precede a state/field or method declaration")),
+            "the class body must not be treated as truncated, got: {parse_diags:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "got: {:?}", module.classes);
+        assert_eq!(
+            module.classes[0].state.len(),
+            1,
+            "the state: x declaration after the bad @expect must still parse, got: {:?}",
+            module.classes[0].state
+        );
+    }
+
+    #[test]
+    fn expect_declaration_no_category_on_own_line_preserves_next_line_declaration() {
+        // Companion to the test above: when `@expect` has nothing at all
+        // after it on its own line, the real next declaration on the
+        // *following* line must be left completely alone (not consumed as
+        // if it were garbage) — it's the legitimate next declaration, e.g.
+        // a category name simply forgotten.
+        let source = "\
+Object subclass: Foo
+  @expect
+  state: x = 0
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags.iter().any(|d| d
+                .message
+                .contains("@expect must be followed by a category name")),
+            "expected a parse error for the missing category, got: {parse_diags:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "got: {:?}", module.classes);
+        assert_eq!(
+            module.classes[0].state.len(),
+            1,
+            "the state: x declaration on the next line must still parse, got: {:?}",
+            module.classes[0].state
+        );
+    }
+
+    #[test]
+    fn expect_declaration_no_category_same_line_as_real_declaration_is_not_swallowed() {
+        // Review follow-up: `@expect` with the category forgotten and NO
+        // separator at all before the real declaration on the *same* line
+        // (`@expect state: x = 0`) must not have `state:` swallowed as if
+        // it were garbage — `state:` lexes as a Keyword, not an Identifier,
+        // so it falls into the same "no category" recovery branch as a
+        // stray `,`, but unlike a stray `,` it IS the real next
+        // declaration and must be left alone.
+        let source = "\
+Object subclass: Foo
+  @expect state: x = 0
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags.iter().any(|d| d
+                .message
+                .contains("@expect must be followed by a category name")),
+            "expected a parse error for the missing category, got: {parse_diags:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "got: {:?}", module.classes);
+        assert_eq!(
+            module.classes[0].state.len(),
+            1,
+            "the state: x declaration must not be swallowed, got: {:?}",
+            module.classes[0].state
+        );
+    }
+
+    #[test]
+    fn expect_combined_categories_comma_continuation_into_a_declaration_keyword_is_not_swallowed() {
+        // Review follow-up: the comma-continuation loop can also land on a
+        // declaration keyword — `@expect dnu, state: x = 0` continues past
+        // the comma (both `dnu,` and `state:` are on the same line), then
+        // hits `state:` expecting another category identifier. `state:`
+        // must be left alone here too, for the same reason as the test
+        // above.
+        let source = "\
+Object subclass: Foo
+  @expect dnu, state: x = 0
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags.iter().any(|d| d
+                .message
+                .contains("@expect must be followed by a category name")),
+            "expected a parse error for the missing second category, got: {parse_diags:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "got: {:?}", module.classes);
+        assert_eq!(
+            module.classes[0].state.len(),
+            1,
+            "the state: x declaration must not be swallowed, got: {:?}",
+            module.classes[0].state
+        );
+    }
+
+    #[test]
+    fn expect_combined_categories_round_trips_through_unparse() {
+        // @expect unresolved_ffi, type should round-trip through unparse.
+        let source = "@expect unresolved_ffi, type\n42 unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+
+        let output = beamtalk_core::unparse::unparse_module(&module);
+        assert!(
+            output.contains("@expect unresolved_ffi, type"),
+            "Unparsed output should contain the combined category list, got: {output}"
+        );
+    }
+
+    #[test]
+    fn expect_combined_categories_on_method_declaration_round_trips() {
+        // BT-3387's motivating case: a combined @expect on a method
+        // declaration (the form that previously required splitting into two
+        // methods, since stacking two separate `@expect` lines before a
+        // declaration was rejected outright).
+        let source = "\
+typed Object subclass: MyTyped
+  @expect unresolved_ffi, type
+  publicKeyModule => Erlang public_key
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        assert!(
+            parse_diags.is_empty(),
+            "Should have no parse errors, got: {parse_diags:?}"
+        );
+
+        let output = beamtalk_core::unparse::unparse_module(&module);
+        assert!(
+            output.contains("@expect unresolved_ffi, type"),
+            "Unparsed output should contain the combined category list, got: {output}"
+        );
+    }
+
+    #[test]
+    fn expect_with_no_category_on_declaration_does_not_truncate_class_body() {
+        // BT-3387 review follow-up: a category-less `@expect` (not even an
+        // invalid category name) followed by a stray token, e.g. a reason
+        // string with nothing to attach to, must not derail parsing of the
+        // rest of the class body. `parse_expect_tail`'s reason-string
+        // lookahead deliberately runs even when no category was found, so
+        // the stray string is consumed as a (discarded) reason rather than
+        // left for `parse_class_body`'s caller to trip over as "not a valid
+        // declaration" — which would otherwise silently end the class body
+        // right there.
+        let source = "\
+Object subclass: Foo
+  @expect \"oops\"
+  state: x = 0
+";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        assert!(
+            parse_diags.iter().any(|d| d
+                .message
+                .contains("@expect must be followed by a category name")),
+            "expected a parse error for the missing category, got: {parse_diags:?}"
+        );
+        assert!(
+            !parse_diags.iter().any(|d| d
+                .message
+                .contains("must precede a state/field or method declaration")),
+            "the class body must not be treated as truncated, got: {parse_diags:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "got: {:?}", module.classes);
+        assert_eq!(
+            module.classes[0].state.len(),
+            1,
+            "the state: x declaration after the bad @expect must still parse, got: {:?}",
+            module.classes[0].state
+        );
+    }
+
     // ── BT-1476: Dead block assignment warning + @expect dead_assignment ──
 
     // ── BT-1476: @expect dead_assignment parsing and stale detection ──
@@ -1560,7 +1921,7 @@ typed Object subclass: MyTyped
             // Note: "actor new" (`Actor subclass: A ... A new`) used to live here as
             // a Warning/Hint exemplar, but BT-3071 lifted Actor's `new`/`new:` into
             // real, hierarchy-resolvable `class sealed new`/`new:` declarations on
-            // Actor.bt — so the TypeChecker no longer treats the send as unknown and
+            // actor.bt — so the TypeChecker no longer treats the send as unknown and
             // stops contributing a Warning/Hint diagnostic for it (the DNU-style
             // secondary signal this snippet exercised). The actual "use spawn, not
             // new" protection is untouched: `check_actor_new_usage` (BT-563/BT-1524)

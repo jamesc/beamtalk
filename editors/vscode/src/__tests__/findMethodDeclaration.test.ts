@@ -3,10 +3,15 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  classNameToStdlibFilename,
+  extractMethodDocComment,
+  extractStateVarDocComment,
+  extractStateVarInfo,
+  findClassDeclaration,
   findMethodDeclaration,
   findStateVarDeclaration,
-  extractStateVarInfo,
-  extractMethodDocComment,
+  findTypeAliasDeclaration,
+  offsetForDeclarationLine,
 } from "../textUtils";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -394,13 +399,13 @@ describe("extractMethodDocComment", () => {
 
 const TYPED_BT = `\
 Object subclass: TypedAccount
-  state: balance: Integer = 0
-  state: owner: String = ""
+  state: balance :: Integer = 0
+  state: owner :: String = ""
 
   /// Returns current balance.
   balance -> Integer => self.balance
 
-  deposit: amount: Integer -> Integer =>
+  deposit: amount :: Integer -> Integer =>
     self.balance := self.balance + amount
     self.balance
 `;
@@ -423,6 +428,176 @@ describe("findMethodDeclaration — typed declarations", () => {
   it("extracts doc comment for typed unary method", () => {
     const doc = extractMethodDocComment(TYPED_BT, "balance", "instance");
     expect(doc).toBe("Returns current balance.");
+  });
+});
+
+// Found by cross-checking findMethodDeclaration/findClassDeclaration/
+// findStateVarDeclaration against every real declaration in stdlib/src
+// (1281 methods, 107 classes, 103 state vars) — a `sealed`/`internal`
+// modifier, a binary selector's typed parameter, and several type-position
+// shapes (metaclass refs, generics, unions, singleton symbols) were never
+// handled by the regex at all, so any stdlib method using them fell through
+// to the document-symbol-provider tier (or worse, a raw text.indexOf guess).
+describe("findMethodDeclaration — sealed/internal modifiers", () => {
+  it("finds a sealed instance method (stdlib: Metaclass>>isMeta)", () => {
+    const src = "Class subclass: Metaclass\n  sealed isMeta -> Boolean => true\n";
+    const offset = findMethodDeclaration(src, "isMeta", "instance");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 6)).toBe("isMeta");
+  });
+
+  it("finds an internal keyword instance method (stdlib: BeamtalkInterface>>help:)", () => {
+    const src = "Object subclass: Foo\n  internal help: aClass :: Object => nil\n";
+    const offset = findMethodDeclaration(src, "help:", "instance");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 5)).toBe("help:");
+  });
+
+  it("finds a class-side method with class+sealed combined (stdlib: Duration class>>milliseconds:)", () => {
+    const src =
+      "Value subclass: Duration\n  class sealed milliseconds: n :: Number -> Duration => nil\n";
+    const offset = findMethodDeclaration(src, "milliseconds:", "class");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 13)).toBe("milliseconds:");
+  });
+
+  it("finds a class-side method with sealed before class (either modifier order)", () => {
+    const src = "Object subclass: Foo\n  sealed class current => nil\n";
+    const offset = findMethodDeclaration(src, "current", "class");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 7)).toBe("current");
+  });
+
+  it("does not match a sealed method when searching the wrong side", () => {
+    const src = "Object subclass: Foo\n  sealed isMeta => true\n";
+    expect(findMethodDeclaration(src, "isMeta", "class")).toBe(-1);
+  });
+
+  it("a method literally named `class` is not eaten as a modifier (stdlib: ProtoObject>>class)", () => {
+    const src = 'Object subclass: Foo\n  class => @intrinsic "class"\n';
+    const offset = findMethodDeclaration(src, "class", "instance");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 5)).toBe("class");
+  });
+
+  it("a method literally named `sealed` is not eaten as a modifier", () => {
+    const src = "Object subclass: Foo\n  sealed => 42\n";
+    const offset = findMethodDeclaration(src, "sealed", "instance");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 6)).toBe("sealed");
+  });
+});
+
+describe("findMethodDeclaration — binary selectors with typed params", () => {
+  it("finds a binary selector with a typed param and return type (stdlib: Integer>>+)", () => {
+    const src = "Number subclass: Integer\n  + other :: Number -> Integer => @primitive\n";
+    const offset = findMethodDeclaration(src, "+", "instance");
+    expect(offset).not.toBe(-1);
+    expect(src[offset]).toBe("+");
+  });
+
+  it("finds an untyped binary selector param (no :: annotation)", () => {
+    const src = "Object subclass: Vector\n  + other => self x + other x\n";
+    const offset = findMethodDeclaration(src, "+", "instance");
+    expect(offset).not.toBe(-1);
+    expect(src[offset]).toBe("+");
+  });
+
+  it("treats `=:=` as one binary selector, not a keyword selector (stdlib: ProtoObject>>=:=)", () => {
+    const src = 'Object subclass: Foo\n  =:= other :: ProtoObject -> Boolean => @intrinsic "=:="\n';
+    const offset = findMethodDeclaration(src, "=:=", "instance");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 3)).toBe("=:=");
+  });
+});
+
+describe("findMethodDeclaration — type-position syntax in params/returns", () => {
+  it("finds a method with a metaclass return type (stdlib: Collection>>species)", () => {
+    const src = "Value subclass: Collection\n  species -> Self class => self class\n";
+    const offset = findMethodDeclaration(src, "species", "instance");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 7)).toBe("species");
+  });
+
+  it("finds a method with a generic return type (stdlib: FileHandle>>lines)", () => {
+    const src = "Object subclass: FileHandle\n  lines -> Stream(String) => nil\n";
+    const offset = findMethodDeclaration(src, "lines", "instance");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 5)).toBe("lines");
+  });
+
+  it("finds a method with a nested generic return type (stdlib: Package class>>all)", () => {
+    const src =
+      "Object subclass: Package\n  class all -> Dictionary(String, List(Package)) => nil\n";
+    const offset = findMethodDeclaration(src, "all", "class");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 3)).toBe("all");
+  });
+
+  it("finds a method with a union return type (stdlib: Behaviour>>>>)", () => {
+    const src =
+      "Object subclass: Behaviour\n  sealed >> aSelector :: Symbol -> CompiledMethod | Nil => nil\n";
+    const offset = findMethodDeclaration(src, ">>", "instance");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 2)).toBe(">>");
+  });
+
+  it("finds a method with singleton symbols in a union return type (stdlib: BeamtalkInterface>>logLevel)", () => {
+    const src = "Object subclass: Foo\n  logLevel -> LogLevel | #all | #none => nil\n";
+    const offset = findMethodDeclaration(src, "logLevel", "instance");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 8)).toBe("logLevel");
+  });
+});
+
+// This codebase's real typed-parameter syntax uses `::` (not the single `:`
+// the original methodHeadPattern assumed), often with generic type args.
+const DOUBLE_COLON_BT = `\
+Actor subclass: EventStore
+  /// List executions matching a filter dictionary.
+  ///
+  /// ## Examples
+  /// \`\`\`beamtalk
+  /// store listExecutions: #{#status => #running}
+  /// store listExecutions: #{}   // all executions
+  /// \`\`\`
+  listExecutions: filter :: Dictionary -> List =>
+    42
+
+  recordFailedAndRaise: eventStore :: EventStore workflowId: workflowId :: String payload: payload :: Dictionary(Symbol, JsonValue) =>
+    42
+`;
+
+describe("findMethodDeclaration — :: typed params (BT-3439 gap)", () => {
+  it("finds the real declaration, not the doc-comment usage example", () => {
+    const offset = findMethodDeclaration(DOUBLE_COLON_BT, "listExecutions:", "instance");
+    expect(offset).not.toBe(-1);
+    const line = lineOf(DOUBLE_COLON_BT, offset);
+    expect(DOUBLE_COLON_BT.split("\n")[line]).toMatch(/^\s*listExecutions:\s+filter\s*::/);
+  });
+
+  it("handles multiple :: typed keyword params with a generic type argument", () => {
+    const offset = findMethodDeclaration(
+      DOUBLE_COLON_BT,
+      "recordFailedAndRaise:workflowId:payload:",
+      "instance"
+    );
+    expect(offset).not.toBe(-1);
+    const line = lineOf(DOUBLE_COLON_BT, offset);
+    expect(DOUBLE_COLON_BT.split("\n")[line]).toMatch(/^\s*recordFailedAndRaise:/);
+  });
+
+  it("handles a 3-keyword selector where a param name shadows a keyword (saveSnapshot:state:eventId:)", () => {
+    const src = [
+      "Actor subclass: EventStore",
+      '  /// store saveSnapshot: "wf-1" state: #{#replayCursor => 50} eventId: 51',
+      "  saveSnapshot: workflowId :: String state: state :: ReplaySnapshot eventId: eventId :: Integer -> Nil =>",
+      "    42",
+    ].join("\n");
+    const offset = findMethodDeclaration(src, "saveSnapshot:state:eventId:", "instance");
+    expect(offset).not.toBe(-1);
+    const line = lineOf(src, offset);
+    expect(src.split("\n")[line]).toMatch(/^\s*saveSnapshot:\s+workflowId\s*::/);
   });
 });
 
@@ -449,5 +624,306 @@ describe("extractStateVarInfo — typed state vars", () => {
   it("extracts empty string default for typed string state var", () => {
     const info = extractStateVarInfo(TYPED_BT, "owner");
     expect(info?.defaultValue).toBe('""');
+  });
+});
+
+// Reproduces task_queue_registry.bt's `state: queues :: Dictionary(String, TaskQueue)`
+// — a typed state var with no `= default` at all.
+const DEFAULTLESS_TYPED_BT = `\
+typed Actor subclass: TaskQueueRegistry
+  /// Internal mapping of queue names to TaskQueue actors.
+  state: queues :: Dictionary(String, TaskQueue)
+
+  initialize -> Nil =>
+    self.queues := #{}
+    nil
+`;
+
+describe("findStateVarDeclaration — defaultless typed state var", () => {
+  it("finds a typed state var with no default value at all", () => {
+    const offset = findStateVarDeclaration(DEFAULTLESS_TYPED_BT, "queues");
+    expect(offset).not.toBe(-1);
+    expect(DEFAULTLESS_TYPED_BT.slice(offset, offset + 6)).toBe("queues");
+  });
+
+  it("does not false-positive on a longer name sharing the same prefix", () => {
+    const src = "state: queuesFoo :: Dictionary(String, TaskQueue)";
+    expect(findStateVarDeclaration(src, "queues")).toBe(-1);
+  });
+});
+
+describe("extractStateVarInfo — defaultless typed state var", () => {
+  it("returns an empty info object rather than undefined", () => {
+    const info = extractStateVarInfo(DEFAULTLESS_TYPED_BT, "queues");
+    expect(info).toEqual({});
+  });
+
+  it("does not false-positive on a longer name sharing the same prefix", () => {
+    const src = "state: queuesFoo :: Dictionary(String, TaskQueue)";
+    expect(extractStateVarInfo(src, "queues")).toBeUndefined();
+  });
+});
+
+describe("extractStateVarDocComment", () => {
+  it("extracts a /// doc comment above a defaultless typed state var", () => {
+    const doc = extractStateVarDocComment(DEFAULTLESS_TYPED_BT, "queues");
+    expect(doc).toBe("Internal mapping of queue names to TaskQueue actors.");
+  });
+
+  it("extracts a multi-line doc comment", () => {
+    const src = [
+      "Object subclass: Foo",
+      "  /// Line one.",
+      "  ///",
+      "  /// Line two.",
+      "  state: bar = nil",
+    ].join("\n");
+    expect(extractStateVarDocComment(src, "bar")).toBe("Line one.\n\nLine two.");
+  });
+
+  it("returns undefined when there is no doc comment", () => {
+    const src = "Object subclass: Foo\n  state: bar = nil\n";
+    expect(extractStateVarDocComment(src, "bar")).toBeUndefined();
+  });
+
+  it("does not match a doc comment belonging to a different state var", () => {
+    const src = [
+      "Object subclass: Foo",
+      "  /// Doc for bar.",
+      "  state: bar = nil",
+      "  state: baz = nil",
+    ].join("\n");
+    expect(extractStateVarDocComment(src, "baz")).toBeUndefined();
+  });
+});
+
+// `field:` is a synonym for `state:` used by several stdlib classes (e.g.
+// RetryPolicy) — findStateVarDeclaration/extractStateVarInfo/
+// extractStateVarDocComment only ever recognized `state:` before this.
+describe("findStateVarDeclaration / extractStateVarInfo — field: keyword (stdlib synonym for state:)", () => {
+  it("finds a field: declaration (stdlib: RetryPolicy)", () => {
+    const src = "Value subclass: RetryPolicy\n  field: initialInterval :: Integer = 1000\n";
+    const offset = findStateVarDeclaration(src, "initialInterval");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 15)).toBe("initialInterval");
+  });
+
+  it("extracts info from a field: declaration", () => {
+    const src = "Value subclass: RetryPolicy\n  field: jitter :: Boolean = false\n";
+    const info = extractStateVarInfo(src, "jitter");
+    expect(info?.defaultValue).toBe("false");
+  });
+
+  it("extracts a doc comment above a field: declaration", () => {
+    const src = [
+      "Value subclass: RetryPolicy",
+      "  /// Maximum number of retry attempts.",
+      "  field: maximumAttempts :: Integer | Nil = nil",
+    ].join("\n");
+    expect(extractStateVarDocComment(src, "maximumAttempts")).toBe(
+      "Maximum number of retry attempts."
+    );
+  });
+});
+
+// Verified against every real class declaration in stdlib/src (101/102
+// matched exactly; BEAMError is the one hardcoded exception).
+describe("classNameToStdlibFilename", () => {
+  it("converts a plain PascalCase name", () => {
+    expect(classNameToStdlibFilename("Array")).toBe("array.bt");
+  });
+
+  it("converts a multi-word PascalCase name", () => {
+    expect(classNameToStdlibFilename("DateTime")).toBe("date_time.bt");
+    expect(classNameToStdlibFilename("TaskQueueRegistry")).toBe("task_queue_registry.bt");
+  });
+
+  it("treats a short all-caps acronym with nothing following as one word", () => {
+    expect(classNameToStdlibFilename("OS")).toBe("os.bt");
+  });
+
+  it("splits an acronym from a following capitalized word", () => {
+    expect(classNameToStdlibFilename("HTTPClient")).toBe("http_client.bt");
+  });
+
+  it("uses the hardcoded exception for BEAMError instead of the derived beam_error", () => {
+    expect(classNameToStdlibFilename("BEAMError")).toBe("beamerror.bt");
+  });
+
+  it("handles a name with a digit", () => {
+    expect(classNameToStdlibFilename("Uuid")).toBe("uuid.bt");
+  });
+});
+
+describe("findClassDeclaration", () => {
+  it("finds a generic class declaration (stdlib: Value subclass: Collection(E))", () => {
+    const src = "abstract typed Value subclass: Collection(E)\n";
+    const offset = findClassDeclaration(src, "Collection");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 10)).toBe("Collection");
+  });
+
+  it("finds a generic class declaration with multiple type params (stdlib: Result(T, E))", () => {
+    const src = "sealed typed Value subclass: Result(T, E)\n";
+    const offset = findClassDeclaration(src, "Result");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 6)).toBe("Result");
+  });
+
+  it("finds a class declared via SuperClass subclass: ClassName", () => {
+    const src =
+      "Actor subclass: TaskQueueRegistry\n  state: queues :: Dictionary(String, TaskQueue)\n";
+    const offset = findClassDeclaration(src, "TaskQueueRegistry");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 17)).toBe("TaskQueueRegistry");
+  });
+
+  it("does not match a mention inside a doc-comment usage example", () => {
+    const src = [
+      "/// ## Examples",
+      "/// ```beamtalk",
+      "/// registry := TaskQueueRegistry spawn",
+      "/// ```",
+      "Actor subclass: TaskQueueRegistry",
+      "  state: queues :: Dictionary(String, TaskQueue)",
+    ].join("\n");
+    const offset = findClassDeclaration(src, "TaskQueueRegistry");
+    expect(offset).not.toBe(-1);
+    const line = src.slice(0, offset).split("\n").length - 1;
+    expect(src.split("\n")[line]).toBe("Actor subclass: TaskQueueRegistry");
+  });
+
+  it("returns -1 for a class that does not exist", () => {
+    expect(findClassDeclaration("Object subclass: Foo", "Bar")).toBe(-1);
+  });
+
+  it("does not false-positive on a longer name sharing the same prefix", () => {
+    const src = "Object subclass: FooBar";
+    expect(findClassDeclaration(src, "Foo")).toBe(-1);
+  });
+});
+
+describe("findTypeAliasDeclaration (ADR 0108 Phase 8, BT-2903)", () => {
+  it("finds a plain type alias declaration", () => {
+    const src = "type Timeout = Integer | #infinity\n";
+    const offset = findTypeAliasDeclaration(src, "Timeout");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 7)).toBe("Timeout");
+  });
+
+  it("finds an internal type alias declaration", () => {
+    const src = "internal type LogFormat = #text | #json\n";
+    const offset = findTypeAliasDeclaration(src, "LogFormat");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 9)).toBe("LogFormat");
+  });
+
+  it("does not match a mention inside a doc-comment usage example", () => {
+    const src = [
+      "/// See the Timeout alias below for retry/backoff options.",
+      "type Timeout = Integer | #infinity",
+    ].join("\n");
+    const offset = findTypeAliasDeclaration(src, "Timeout");
+    expect(offset).not.toBe(-1);
+    const line = src.slice(0, offset).split("\n").length - 1;
+    expect(src.split("\n")[line]).toBe("type Timeout = Integer | #infinity");
+  });
+
+  it("returns -1 for an alias that does not exist", () => {
+    expect(findTypeAliasDeclaration("type Timeout = Integer", "Nonexistent")).toBe(-1);
+  });
+
+  it("does not false-positive on a longer name sharing the same prefix", () => {
+    expect(findTypeAliasDeclaration("type TimeoutMs = Integer", "Timeout")).toBe(-1);
+  });
+});
+
+describe("offsetForDeclarationLine (BT-3439)", () => {
+  // Actor subclass: Widget         <- line 1
+  //   state: count = 0             <- line 2
+  //   state: engine :: Engine      <- line 3
+  //                                <- line 4
+  //   increment =>                 <- line 5
+  //     self.count := self.count + 1  <- line 6
+  const SRC = [
+    "Actor subclass: Widget",
+    "  state: count = 0",
+    "  state: engine :: Engine",
+    "",
+    "  increment =>",
+    "    self.count := self.count + 1",
+  ].join("\n");
+
+  it("resolves a real line to the offset of its first non-whitespace column", () => {
+    const offset = offsetForDeclarationLine(SRC, 2, "count");
+    expect(offset).not.toBe(-1);
+    expect(SRC.slice(offset, offset + 5)).toBe("state");
+  });
+
+  it("resolves a method line by its first selector keyword", () => {
+    const offset = offsetForDeclarationLine(SRC, 5, "increment");
+    expect(offset).not.toBe(-1);
+    expect(SRC.slice(offset, offset + 9)).toBe("increment");
+  });
+
+  it("returns -1 for a line number outside the document", () => {
+    expect(offsetForDeclarationLine(SRC, 0, "count")).toBe(-1);
+    expect(offsetForDeclarationLine(SRC, 999, "count")).toBe(-1);
+  });
+
+  it("returns -1 when the line no longer contains the expected needle (BT-3439 stale line)", () => {
+    // Simulates the file being edited (a line inserted above `engine`)
+    // after the class was last compiled — beamtalk_xref still reports
+    // line 3 for `engine`, but line 3 is now something else entirely.
+    const edited = ["// a new comment", ...SRC.split("\n")].join("\n");
+    expect(offsetForDeclarationLine(edited, 3, "engine")).toBe(-1);
+    // The correct, shifted line (4) still resolves.
+    expect(offsetForDeclarationLine(edited, 4, "engine")).not.toBe(-1);
+  });
+
+  it("does not false-positive on a stale line that merely contains the needle as a substring (review feedback)", () => {
+    // `count`'s real declaration (line 2) is edited away; the stale line 3
+    // it used to occupy now reads a comment that happens to contain
+    // "count" as part of "discount" — a bare substring check would wrongly
+    // validate this line and navigate there.
+    const edited = ["Actor subclass: Widget", "// discount handling"].join("\n");
+    expect(offsetForDeclarationLine(edited, 2, "count")).toBe(-1);
+  });
+
+  it("does not false-positive on a short method-keyword needle embedded in an unrelated word", () => {
+    // `at:put:`'s first keyword ("at") is a substring of extremely common
+    // tokens like "state" — a bare substring check would wrongly validate
+    // any such line as the (stale) declaration of `at:put:`.
+    expect(offsetForDeclarationLine("  state: count = 0", 1, "at")).toBe(-1);
+  });
+
+  it("still matches a real declaration whose needle sits at a line's start/end", () => {
+    expect(offsetForDeclarationLine("count", 1, "count")).not.toBe(-1);
+  });
+
+  it("matches a symbolic binary-selector needle correctly", () => {
+    const src = ["Object subclass: Vector", "  + other =>", "    self x + other x"].join("\n");
+    const offset = offsetForDeclarationLine(src, 2, "+");
+    expect(offset).not.toBe(-1);
+    expect(src[offset]).toBe("+");
+  });
+
+  it("does not false-positive on a stale line landing on a doc-comment usage example", () => {
+    // Reproduces the reported bug: a doc comment above the real declaration
+    // mentions the selector in a usage example (`/// store listExecutions: ...`).
+    // If the recorded line goes stale and now points at that comment line,
+    // the word-boundary check alone would wrongly validate it since
+    // "listExecutions" does appear there at a word boundary.
+    const src = [
+      "  /// List executions matching a filter dictionary.",
+      "  ///",
+      "  /// ## Examples",
+      "  /// ```beamtalk",
+      "  /// store listExecutions: #{#status => #running}",
+      "  /// ```",
+      "  listExecutions: filter :: Dictionary -> List =>",
+    ].join("\n");
+    expect(offsetForDeclarationLine(src, 5, "listExecutions")).toBe(-1);
+    expect(offsetForDeclarationLine(src, 7, "listExecutions")).not.toBe(-1);
   });
 });

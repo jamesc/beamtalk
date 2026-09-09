@@ -143,15 +143,15 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
-
-            let (body_doc, _) = self.generate_threaded_loop_body(
+            let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
                 &plan,
                 &BodyKind::FoldlFilter {
                     item_var: item_var.clone(),
                     negate,
                 },
+                &acc_state_var,
+                1,
             )?;
             docs.push(body_doc);
             self.pop_scope();
@@ -167,10 +167,10 @@ impl CoreErlangGenerator {
             let (str_binding, str_result) =
                 self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
-            if self.in_direct_params_loop {
+            if self.loop_mode.in_direct_params_loop {
                 // BT-1329: Skip StateAcc repack. Emit open let-chain so variable rebindings
                 // escape to the outer scope. Store the result var for the caller.
-                self.direct_params_list_op_result = Some(str_result);
+                self.loop_mode.direct_params_list_op_result = Some(str_result);
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -255,7 +255,7 @@ impl CoreErlangGenerator {
             "let AccList = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -263,15 +263,15 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(
+        let (body_doc, _) = self.generate_foldl_loop_body(
             body,
             &plan,
             &BodyKind::FoldlFilter {
                 item_var: item_var.clone(),
                 negate,
             },
+            &acc_state_var,
+            1,
         )?;
         docs.push(body_doc);
         self.pop_scope();

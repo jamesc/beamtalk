@@ -60,7 +60,7 @@ System-Browser-shaped:
 
 The substrate to fill these gaps already exists:
 
-- **`SystemNavigation`** (BT-2201, `stdlib/src/SystemNavigation.bt`) — the
+- **`SystemNavigation`** (BT-2201, `stdlib/src/system_navigation.bt`) — the
   enumeration backbone: `allClasses`, `actorClasses`, `selectorsForClass:`,
   `selectorsMatching:`. Class-scoped instances (`SystemNavigation over:`,
   `forClasses:`) are designed for in BT-2201.
@@ -589,7 +589,7 @@ The next issue (**BT-2488**) implements the four op shapes. High-level approach:
 |---|---|
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_nav.erl` (or a new `beamtalk_repl_ops_browse.erl`) | Four `handle_term/4` clauses: `browse-classes`, `browse-protocols`, `browse-method-source`, `browse-class-definition`; each returns `{value, JsonValue}` |
 | `runtime/.../beamtalk_repl_protocol.erl` | Per-op JSON encoders (identity for `{value, …}`, but keep the thin `handle/4` WS wrapper) |
-| `stdlib/src/SystemNavigation.bt` | Scope projection helpers if needed (`selectorsForClass:` grouped by protocol); reuse, don't duplicate, the xref-backed gather (ADR 0087) |
+| `stdlib/src/system_navigation.bt` | Scope projection helpers if needed (`selectorsForClass:` grouped by protocol); reuse, don't duplicate, the xref-backed gather (ADR 0087) |
 | `runtime/.../beamtalk_xref.erl` (read) | Read `source_status` / `provenance` / `line` per `{class, side, selector}` for the protocol/selector rows — already maintained, this is a read |
 | `runtime/.../beamtalk_runtime_api.erl` | `category` reflection; `aClass sourceString` (patch-aware, BT-2196/ADR 0085) for definition + method source; state-slot reflection (ADR 0035) |
 | `crates/beamtalk-core/src/language_service/` | Cold-mode (static) answers for the four ops from `ProjectIndex` / `ClassHierarchy` (ADR 0024 Tier 1/2), tagged `origin = "static"` |
@@ -627,5 +627,5 @@ ADR 0087's Phase 3 pattern.
 - Documentation:
   - `docs/development/repl-op-term-contract.md` (BT-2399 op layer)
   - `spikes/cockpit-ux-spike/image.js` (the implied browse contract)
-  - `stdlib/src/SystemNavigation.bt`
+  - `stdlib/src/system_navigation.bt`
   - `docs/development/surface-parity.md`

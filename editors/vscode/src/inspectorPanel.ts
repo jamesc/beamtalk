@@ -85,15 +85,11 @@ export class InspectorPanel {
 
     if (existing) {
       existing._client = client;
+      existing._target = target;
       existing._panel.reveal(vscode.ViewColumn.Two);
-      if (target.kind === "binding") {
-        // Update to the latest value passed in and re-render immediately.
-        existing._target = target;
-        existing._postContent(renderValue(target.value));
-      } else {
-        // Actor: re-fetch live state so the panel is always up to date on reveal.
-        void existing._refetch();
-      }
+      // Re-fetch live state so the panel is always up to date on reveal.
+      // (`target.value` is only a placeholder — see the binding case below.)
+      void existing._refetch();
       return;
     }
 
@@ -111,14 +107,12 @@ export class InspectorPanel {
     const inspector = new InspectorPanel(panel, target, client);
     InspectorPanel._panels.set(key, inspector);
 
-    if (target.kind === "binding") {
-      // Value is immediately available — render it directly.
-      inspector._initHtml(renderValue(target.value));
-    } else {
-      // Actor state must be fetched from the workspace.
-      inspector._initHtml(renderLoading());
-      void inspector._refetch();
-    }
+    // Both bindings and actors need a live fetch: `BindingTarget.value` is
+    // only a placeholder (BT-2369 — the tree's bindings list carries names,
+    // not values), so the real value must come from `bindingValue` via
+    // `_fetchContent`, same as actor state comes from `inspect`.
+    inspector._initHtml(renderLoading());
+    void inspector._refetch();
   }
 
   /**

@@ -257,27 +257,19 @@ format_formatted_diagnostics(FormattedList) ->
 
 -doc "Format a single diagnostic for human-readable display.".
 -spec format_diagnostic_text(term()) -> binary().
-format_diagnostic_text(D) when is_map(D) ->
-    Msg = maps:get(message, D, <<"Unknown error">>),
+format_diagnostic_text(D) ->
+    #{message := Msg} = Norm = beamtalk_repl_errors:normalize_diagnostic(D),
     LinePrefix =
-        % elp:fixme W0032 maps:find with complex branch logic
-        case maps:find(line, D) of
-            {ok, Line} when is_integer(Line) ->
-                [<<"Line ">>, integer_to_binary(Line), <<": ">>];
-            _ ->
-                []
+        case maps:find(line, Norm) of
+            {ok, Line} -> [<<"Line ">>, integer_to_binary(Line), <<": ">>];
+            error -> []
         end,
     HintSuffix =
-        % elp:fixme W0032 maps:find with complex branch logic
-        case maps:find(hint, D) of
+        case maps:find(hint, Norm) of
             {ok, Hint} -> [<<"\nHint: ">>, Hint];
             error -> []
         end,
-    iolist_to_binary([LinePrefix, Msg, HintSuffix]);
-format_diagnostic_text(D) when is_binary(D) ->
-    D;
-format_diagnostic_text(D) ->
-    iolist_to_binary(io_lib:format("~p", [D])).
+    iolist_to_binary([LinePrefix, Msg, HintSuffix]).
 
 -doc """
 Build the `KnownVars' list passed to the compiler port for a REPL eval.
@@ -345,10 +337,13 @@ build_class_superclass_index() ->
 -doc """
 Build a class→module index from all registered class gen-servers.
 
-When a class lives in a subdirectory (e.g. src/singleton/app_logger.bt),
-the Rust compiler's user_package_prefix loses the subdirectory segment. By passing
-a full class→module map, compiled_module_name/2 uses the correct module name
-(e.g. bt@gang_of_four@singleton@app_logger) instead of guessing bt@gang_of_four@app_logger.
+When a class lives in a subdirectory (e.g. src/singleton/app_logger.bt), the
+Rust compiler's registry-miss fallback (ADR 0119 / BT-3436's
+`CoreErlangGenerator::own_package_id`, replacing the deleted
+`user_package_prefix`) has no path info to recover the subdirectory segment
+from. By passing a full class→module map, compiled_module_name/2 resolves
+through the registry instead and uses the correct module name (e.g.
+bt@gang_of_four@singleton@app_logger) instead of guessing bt@gang_of_four@app_logger.
 """.
 -spec build_class_module_index() -> #{binary() => binary()}.
 build_class_module_index() ->
@@ -454,7 +449,7 @@ compile_method_reload(ClassSource, MethodSource, Options) ->
                             %% originating file's other top-level
                             %% declarations. A `type Name = ...` alias
                             %% declared as a *sibling* of this class in the
-                            %% same source file (the exact `stdlib/src/Ets.bt`
+                            %% same source file (the exact `stdlib/src/ets.bt`
                             %% shape BT-2955 fixed for the other REPL-inline
                             %% paths) is therefore just as invisible to this
                             %% compile as it is to `compile_class_definition_result/2`
@@ -582,7 +577,7 @@ the REPL session*.
 ## File-local aliases (BT-2955): the `Mode` parameter
 
 "Trustworthy" above does not extend to an alias declared inside the SAME
-file as the protocol/class (e.g. `stdlib/src/Ets.bt`'s `type EtsTableType =
+file as the protocol/class (e.g. `stdlib/src/ets.bt`'s `type EtsTableType =
 ...` alongside `Ets`'s own method signatures) — a REPL-inline redefinition
 of that protocol/class has no way to see a file-local alias it didn't also
 declare in-session, so its `referenced_aliases` silently omits it, and an

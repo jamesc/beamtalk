@@ -196,11 +196,11 @@ fn bench_stdlib_incremental_one_file(c: &mut Criterion) {
         "initial stdlib build failed"
     );
 
-    // Pick a representative file (Object.bt — the base class, moderate size)
-    let touch_target = root.join("stdlib/src/Object.bt");
+    // Pick a representative file (object.bt — the base class, moderate size)
+    let touch_target = root.join("stdlib/src/object.bt");
     assert!(
         touch_target.exists(),
-        "Object.bt not found — expected at {}",
+        "object.bt not found — expected at {}",
         touch_target.display()
     );
 
@@ -265,12 +265,12 @@ fn bench_pass1_class_scanning(c: &mut Criterion) {
 /// per-file regression independently of file count changes.
 fn bench_pass1_single_file(c: &mut Criterion) {
     let root = workspace_root();
-    let file_path = root.join("stdlib/src/Collection.bt");
+    let file_path = root.join("stdlib/src/collection.bt");
     assert!(
         file_path.exists(),
-        "Collection.bt not found for single-file bench"
+        "collection.bt not found for single-file bench"
     );
-    let source = std::fs::read_to_string(&file_path).expect("failed to read Collection.bt");
+    let source = std::fs::read_to_string(&file_path).expect("failed to read collection.bt");
 
     let mut group = c.benchmark_group("pass1_scanning");
     group.sample_size(200);

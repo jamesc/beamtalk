@@ -322,7 +322,7 @@ parser's internal ambiguity into user-visible syntax.
 - Negative number pattern (line 863): no change needed — only matches `"-"`, not `"->"`
 
 **Phase 4 — Stdlib annotations:**
-- Add `-> Association` to `Object.->` in `Object.bt`
+- Add `-> Association` to `Object.->` in `object.bt`
 - Regenerate `generated_builtins.rs`
 - `Class.class` annotation (`-> Metaclass`) is deferred to ADR 0048
 

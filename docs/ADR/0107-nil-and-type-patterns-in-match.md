@@ -135,7 +135,7 @@ a flat, exhaustively-checkable list.
   depend on `parse`'s AST types, never the reverse.
 - **Hot reload (ADR 0105) — the leaf-classification snapshot can go stale.**
   Stdlib primitives (`String`, `Integer`, ...) are declared `sealed`
-  (`stdlib/src/String.bt:18`) and can never gain a subclass, hot-reload or
+  (`stdlib/src/string.bt:18`) and can never gain a subclass, hot-reload or
   not — Phase A's leaf-check is permanently sound for them. But an ordinary
   (non-`sealed`) user `Value` leaf class *can* gain a subclass via live
   reload after a `match:` using `x :: ThatClass` already compiled. This does

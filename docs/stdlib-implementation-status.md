@@ -46,7 +46,7 @@
 
 ## Tier 1: Core Classes
 
-### ProtoObject (`stdlib/src/ProtoObject.bt`)
+### ProtoObject (`stdlib/src/proto_object.bt`)
 
 **Class:** `ProtoObject` — superclass: `nil` (root class)
 **Methods:** 9/9 implemented (100%)
@@ -63,7 +63,7 @@
 | `performLocally:withArguments:` | intrinsic | ✅ | Execute a class method in the caller's process, bypassing gen_server dispatch |
 | `perform:withArguments:timeout:` | intrinsic | ✅ | Dynamic dispatch with explicit timeout |
 
-### Object (`stdlib/src/Object.bt`)
+### Object (`stdlib/src/object.bt`)
 
 **Class:** `Object` — superclass: `ProtoObject`
 **Methods:** 27/27 implemented (100%)
@@ -102,7 +102,7 @@
 
 _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses without data (FFI namespaces, abstract extension points) cannot be directly instantiated.
 
-### Value (`stdlib/src/Value.bt`)
+### Value (`stdlib/src/value.bt`)
 
 **Class:** `Value` — superclass: `Object`
 **Methods:** 3/3 implemented (100%)
@@ -113,7 +113,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 | `new:` | intrinsic `basicNewWith` | ✅ | 🧪 | Instantiation with constructor args |
 | `inspect` | pure BT | ✅ | | `ClassName(field: value, ...)` format |
 
-### Collection (`stdlib/src/Collection.bt`)
+### Collection (`stdlib/src/collection.bt`)
 
 **Class:** `Collection` — superclass: `Value` — `abstract typed`
 **Methods:** 33/33 implemented (100%)
@@ -155,7 +155,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 | `asBag` | pure BT | ✅ | Convert to a `Bag`, counting occurrences |
 | `asString` | pure BT | ✅ | String representation |
 
-### Binary (`stdlib/src/Binary.bt`)
+### Binary (`stdlib/src/binary.bt`)
 
 **Class:** `Binary` — superclass: `Collection` — `@sealed typed` ([ADR 0086](ADR/0086-string-subclass-of-binary.md))
 **Methods:** 22/22 implemented (100%)
@@ -186,7 +186,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 | `asBase64Url` | pure BT (Erlang FFI) | ✅ | URL-safe (RFC 4648 §5) base64 encoding |
 | `asHex` | pure BT (Erlang FFI) | ✅ | Lowercase hexadecimal encoding |
 
-### Number (`stdlib/src/Number.bt`)
+### Number (`stdlib/src/number.bt`)
 
 **Class:** `Number` — superclass: `Value` — `abstract typed`
 **Methods:** 18/18 implemented (100%)
@@ -212,7 +212,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 | `isInteger` | pure BT | ✅ | `Magnitude>>isInteger` (identity/type check) |
 | `isFloat` | pure BT | ✅ | `Magnitude>>isFloat` (identity/type check) |
 
-### Integer (`stdlib/src/Integer.bt`)
+### Integer (`stdlib/src/integer.bt`)
 
 **Class:** `Integer` — superclass: `Number` — `@sealed`
 **Methods:** 55/55 implemented (100%)
@@ -277,7 +277,7 @@ equivalent `raisedTo:` but no separate `**` operator.
 | `exp` | @primitive selector | ✅ | `Number>>exp` |
 | `raisedTo:` | @primitive selector | ✅ | `Number>>raisedTo:` |
 
-### String (`stdlib/src/String.bt`)
+### String (`stdlib/src/string.bt`)
 
 **Class:** `String` — superclass: `Binary` — `@sealed` ([ADR 0086](ADR/0086-string-subclass-of-binary.md))
 **Methods:** 68/68 implemented (100%)
@@ -357,12 +357,12 @@ if it were the callable method name).
 | `urlEncoded` | pure BT (Erlang FFI) | ✅ | N/A |
 | `urlDecoded` | pure BT (Erlang FFI) | ✅ | N/A |
 
-### List (`stdlib/src/List.bt`)
+### List (`stdlib/src/list.bt`)
 
 **Class:** `List` — superclass: `Collection` — `@sealed typed`
 **Methods:** 44/44 implemented (100%)
 **Note:** List in Beamtalk maps to Erlang linked lists. Literal syntax: `#(1, 2, 3)`. Renamed from Array in BT-419 — `Array` is reserved for a future tuple-backed O(1)-indexed collection.
-**Migration:** BT-419 — migrated from hand-written `beamtalk_list.erl` (Option B) to compiled `stdlib/src/List.bt` with BIF mappings (Option A). Complex operations delegate to the **`beamtalk_list.erl`** (and, for `inject:into:`, **`beamtalk_collection.erl`**) helper modules — corrected in this pass (BT-2976); the module names were previously misspelled as `beamtalk_list_ops.erl` / `beamtalk_collection_ops.erl`, which do not exist in this repo.
+**Migration:** BT-419 — migrated from hand-written `beamtalk_list.erl` (Option B) to compiled `stdlib/src/list.bt` with BIF mappings (Option A). Complex operations delegate to the **`beamtalk_list.erl`** (and, for `inject:into:`, **`beamtalk_collection.erl`**) helper modules — corrected in this pass (BT-2976); the module names were previously misspelled as `beamtalk_list_ops.erl` / `beamtalk_collection_ops.erl`, which do not exist in this repo.
 **Corrections (BT-2976):** `add:` now appends to the **end** of the list (O(n)); `addFirst:` is the O(1) prepend. `indexOf:` is `pure BT` (not a primitive delegate). `eachWithIndex:` is a self-hosted compiler intrinsic (BT-2703), not a `beamtalk_list` delegate. `++` lowers straight to the `erlang:++` BIF, not a `beamtalk_list` function.
 
 | Selector | Mechanism | Status | Pharo Equivalent |
@@ -412,7 +412,7 @@ if it were the callable method name).
 | `join` | @primitive selector | ✅ | Join a list of strings with no separator |
 | `join:` | @primitive selector | ✅ | Join a list of strings with a separator |
 
-### Block (`stdlib/src/Block.bt`)
+### Block (`stdlib/src/block.bt`)
 
 **Class:** `Block` — superclass: `Object` — `@sealed`
 **Methods:** 11/11 implemented (100%)
@@ -432,7 +432,7 @@ if it were the callable method name).
 | `arity` | @primitive selector | ✅ | `BlockClosure>>argumentCount` |
 | `valueWithArguments:` | intrinsic | ✅ | `BlockClosure>>valueWithArguments:` |
 
-### True (`stdlib/src/True.bt`) & False (`stdlib/src/False.bt`)
+### True (`stdlib/src/true.bt`) & False (`stdlib/src/false.bt`)
 
 **Class:** `True` / `False` — superclass: `Boolean` — `@sealed`
 **Methods:** 7/7 implemented each (100%)
@@ -449,7 +449,7 @@ if it were the callable method name).
 | `isFalse` | pure BT | ✅ | N/A |
 | `printString` | pure BT | ✅ | `Boolean>>printString` |
 
-### UndefinedObject (`stdlib/src/UndefinedObject.bt`)
+### UndefinedObject (`stdlib/src/undefined_object.bt`)
 
 **Class:** `UndefinedObject` — superclass: `Object` — `@sealed`
 **Methods:** 10/10 implemented (100%)
@@ -468,7 +468,7 @@ if it were the callable method name).
 | `shallowCopy` | pure BT | ✅ | `UndefinedObject>>shallowCopy` |
 | `printString` | pure BT | ✅ | `UndefinedObject>>printString` |
 
-### Float (`stdlib/src/Float.bt`)
+### Float (`stdlib/src/float.bt`)
 
 **Class:** `Float` — superclass: `Number` — `@sealed`
 **Methods:** 48/48 implemented (100%)
@@ -532,7 +532,7 @@ separate `**` operator (unlike `Integer`) — use `raisedTo:`, which `**` desuga
 
 ## Tier 2: Standard Classes
 
-### Actor (`stdlib/src/Actor.bt`)
+### Actor (`stdlib/src/actor.bt`)
 
 **Class:** `Actor` — superclass: `Object` — `@sealed`
 **Methods:** 26/26 implemented (100%)
@@ -540,7 +540,7 @@ separate `**` operator (unlike `Integer`) — use `raisedTo:`, which `**` desuga
 `named:`, `allRegistered`, …) and lifecycle/monitoring protocol below were added since the last audit
 (BT-2966-era work) and were entirely undocumented here.
 **Update (BT-3071):** `new`/`new:` (previously codegen-injected error stubs invisible to this source-based
-audit) are now real `class sealed new` / `new:` declarations on `Actor.bt` — both always raise
+audit) are now real `class sealed new` / `new:` declarations on `actor.bt` — both always raise
 `instantiation_error` ("Use spawn instead" / "Use spawnWith: instead"); see `docs/ADR/0013-class-variables-class-methods-instantiation.md`.
 
 | Selector | Mechanism | Status | Notes |
@@ -572,7 +572,7 @@ audit) are now real `class sealed new` / `new:` declarations on `Actor.bt` — b
 | `kill` | intrinsic | ✅ | Forcefully kill this actor (`exit(Pid, kill)`) |
 | `isAlive` | intrinsic | ✅ | Check if this actor's process is still alive |
 
-### File (`stdlib/src/File.bt`)
+### File (`stdlib/src/file.bt`)
 
 **Class:** `File` — superclass: `Object` (native: `beamtalk_file`)
 **Methods:** 22/22 implemented (100%) — all class-level methods
@@ -605,7 +605,7 @@ dispatching via `native delegate` (`self delegate`) to `beamtalk_file.erl`, not 
 | `class cwd` | native delegate | ✅ | Current working directory |
 | `class tempDirectory` | native delegate | ✅ | OS temporary directory path |
 
-### Beamtalk / BeamtalkInterface (`stdlib/src/BeamtalkInterface.bt`)
+### Beamtalk / BeamtalkInterface (`stdlib/src/beamtalk_interface.bt`)
 
 **Class:** `BeamtalkInterface` — superclass: `Actor`
 **Methods:** 20/20 implemented (100%)
@@ -635,7 +635,7 @@ control-plane and Erlang-module-help selectors below.
 | `disableAllDebug` | pure BT | ✅ | Disable all debug targets |
 | `loggerInfo` | pure BT | ✅ | Formatted description of the current logger state |
 
-### Dictionary (`stdlib/src/Dictionary.bt` — BT-418)
+### Dictionary (`stdlib/src/dictionary.bt` — BT-418)
 
 **Class:** `Dictionary(K, V)` — superclass: `Collection` — `@sealed`
 **Helper module:** `beamtalk_map.erl` (complex operations) — corrected in this pass (BT-2976); previously
@@ -662,7 +662,7 @@ misspelled `beamtalk_map_ops.erl`, which does not exist.
 | `keysAndValuesDo:` | pure BT (delegates to `doWithKey:`) | ✅ | `Dictionary>>keysAndValuesDo:` |
 | `printString` | @primitive selector | ✅ | `Dictionary>>printString` |
 
-### Set (`stdlib/src/Set.bt` — BT-73)
+### Set (`stdlib/src/set.bt` — BT-73)
 
 **Class:** `Set(E)` — superclass: `Collection` — `@sealed`
 **Helper module:** `beamtalk_set.erl` (ordsets operations + tagged map wrapping) — corrected in this pass
@@ -670,7 +670,7 @@ misspelled `beamtalk_map_ops.erl`, which does not exist.
 **Representation:** Tagged map `#{'$beamtalk_class' => 'Set', elements => [sorted_list]}`
 **Methods:** 17/17 implemented (100%)
 **Correction (BT-2976):** `describe` no longer exists on `Set`. `new` (no-arg) is inherited unchanged from
-`Value`, not redefined in `Set.bt`, so it is not counted here; `class new:`/`class withAll:` are Set's own
+`Value`, not redefined in `set.bt`, so it is not counted here; `class new:`/`class withAll:` are Set's own
 list-based constructors, and `stream` and `asSet` (identity override) were undocumented.
 
 | Selector | Mechanism | Status | Notes | Pharo Equivalent |
@@ -693,7 +693,7 @@ list-based constructors, and `stream` and `asSet` (identity override) were undoc
 | `printString` | @primitive selector | ✅ | `beamtalk_primitive:print_string/1` | `Set>>printString` (BT-477) |
 | `stream` | @primitive selector | ✅ | Lazy `Stream` over set elements | N/A |
 
-### Tuple (`stdlib/src/Tuple.bt`)
+### Tuple (`stdlib/src/tuple.bt`)
 
 **Class:** `Tuple` — superclass: `Collection` — `@sealed typed`
 **Methods:** 13/13 implemented (100%)
@@ -716,7 +716,7 @@ list-based constructors, and `stream` and `asSet` (identity override) were undoc
 | `do:` | @primitive selector | ✅ | Iterate over each element |
 | `atRandom` | @primitive selector | ✅ | Return a random element |
 
-### Symbol (`stdlib/src/Symbol.bt`)
+### Symbol (`stdlib/src/symbol.bt`)
 
 **Class:** `Symbol` — superclass: `Object` — `@sealed`
 **Methods:** 8/8 implemented (100%)
@@ -733,7 +733,7 @@ list-based constructors, and `stream` and `asSet` (identity override) were undoc
 | `displayString` | pure BT | ✅ | User-facing string without the `#` prefix |
 | `hash` | @primitive selector | ✅ | `Symbol>>hash` |
 
-### Exception (`stdlib/src/Exception.bt`)
+### Exception (`stdlib/src/exception.bt`)
 
 **Class:** `Exception` — superclass: `Object`
 **Methods:** 11/11 implemented (100%)
@@ -754,15 +754,15 @@ list-based constructors, and `stream` and `asSet` (identity override) were undoc
 | `signal` | @primitive selector | ✅ | `Exception>>signal` |
 | `signal:` | @primitive selector | ✅ | `Exception>>signal:` |
 
-### Error (`stdlib/src/Error.bt`)
+### Error (`stdlib/src/error.bt`)
 
 **Class:** `Error` — superclass: `Exception`
 **Methods:** 0 — empty subclass, inherits `Exception`'s protocol entirely
-**Correction (BT-2976):** `describe` no longer exists — `Error.bt` currently declares no methods of its own
+**Correction (BT-2976):** `describe` no longer exists — `error.bt` currently declares no methods of its own
 (previously documented as `describe`, 1/1). Same for `InstantiationError`, `RuntimeError`, and `TypeError`
 below — all are now empty `Error` subclasses that exist purely to be caught by class via `on:do:`.
 
-### TranscriptStream (`stdlib/src/TranscriptStream.bt`)
+### TranscriptStream (`stdlib/src/transcript_stream.bt`)
 
 **Class:** `TranscriptStream` — superclass: `Actor` (native: `beamtalk_transcript_stream`)
 **Methods:** 9/9 implemented (100%)
@@ -782,7 +782,7 @@ below — all are now empty `Error` subclasses that exist purely to be caught by
 
 ---
 
-### CompiledMethod (`stdlib/src/CompiledMethod.bt`)
+### CompiledMethod (`stdlib/src/compiled_method.bt`)
 
 **Class:** `CompiledMethod` — superclass: `Object`
 **Methods:** 6/6 implemented (100%)
@@ -797,7 +797,7 @@ below — all are now empty `Error` subclasses that exist purely to be caught by
 | `printString` | @primitive selector | ✅ | `CompiledMethod>>printString` |
 | `asString` | @primitive selector | ✅ | `CompiledMethod>>asString` |
 
-### Character (`stdlib/src/Character.bt`)
+### Character (`stdlib/src/character.bt`)
 
 **Class:** `Character` — superclass: `Integer` — `@sealed`
 **Methods:** 19/19 implemented (100%)
@@ -826,7 +826,7 @@ was already documented but is now the only class-side method.
 | `uppercase` | @primitive selector | ✅ | Case conversion |
 | `lowercase` | @primitive selector | ✅ | Case conversion |
 
-### Boolean (`stdlib/src/Boolean.bt`)
+### Boolean (`stdlib/src/boolean.bt`)
 
 **Class:** `Boolean` — superclass: `Value` — `abstract sealed`
 **Methods:** 8/8 implemented (100%)
@@ -845,7 +845,7 @@ overrides (see their table above).
 | `or:` | pure BT | ✅ | Logical OR (lazy) |
 | `xor:` | pure BT | ✅ | Logical XOR |
 
-### TestCase (`stdlib/src/TestCase.bt`)
+### TestCase (`stdlib/src/test_case.bt`)
 
 **Class:** `TestCase` — superclass: `Value`
 **Methods:** 17/17 implemented (100%)
@@ -873,19 +873,19 @@ were undocumented.
 | `assertOk:` | pure BT | ✅ | Assert `result` is a successful `Result`, return its value |
 | `assertError:equals:` | pure BT | ✅ | Assert `result` is an error `Result` matching `expected` |
 
-### InstantiationError (`stdlib/src/InstantiationError.bt`)
+### InstantiationError (`stdlib/src/instantiation_error.bt`)
 
 **Class:** `InstantiationError` — superclass: `Error`
 **Methods:** 0 — empty subclass, inherits `Error`/`Exception`'s protocol entirely
 **Correction (BT-2976):** `describe` no longer exists (previously documented as 1/1).
 
-### RuntimeError (`stdlib/src/RuntimeError.bt`)
+### RuntimeError (`stdlib/src/runtime_error.bt`)
 
 **Class:** `RuntimeError` — superclass: `Error`
 **Methods:** 0 — empty subclass, inherits `Error`/`Exception`'s protocol entirely
 **Correction (BT-2976):** `describe` no longer exists (previously documented as 1/1).
 
-### TypeError (`stdlib/src/TypeError.bt`)
+### TypeError (`stdlib/src/type_error.bt`)
 
 **Class:** `TypeError` — superclass: `Error`
 **Methods:** 0 — empty subclass, inherits `Error`/`Exception`'s protocol entirely
@@ -895,7 +895,7 @@ were undocumented.
 
 ## Protocols
 
-### Printable (`stdlib/src/Printable.bt`)
+### Printable (`stdlib/src/printable.bt`)
 
 **Protocol:** `Printable` — structural protocol (ADR 0068, BT-1766)
 **Required methods:** 2
@@ -910,7 +910,7 @@ Most stdlib classes conform because `Object` provides a default `printString` an
 
 **Usage:** `TranscriptStream >> show:` accepts `Printable`, so conforming objects can be displayed directly without manual `asString` calls.
 
-### JsonRepresentable (`stdlib/src/JsonRepresentable.bt`)
+### JsonRepresentable (`stdlib/src/json_representable.bt`)
 
 **Protocol:** `JsonRepresentable` — structural protocol (ADR 0068, BT-2818)
 **Required methods:** 1
@@ -931,82 +931,82 @@ The following stdlib `.bt` classes exist but have not yet received a full method
 
 | Class | Superclass | File | Notes |
 |-------|------------|------|-------|
-| `ActorSpawned` | `Announcement` | `ActorSpawned.bt` | System event: actor started (ADR 0093) |
-| `ActorStopped` | `Announcement` | `ActorStopped.bt` | System event: actor terminated (ADR 0093) |
-| `Announcement` | `Value` | `Announcement.bt` | Base event type for the typed Observer substrate (ADR 0093) |
-| `AnnouncementNavigation` | `Object` | `AnnouncementNavigation.bt` | Live subscription-graph introspection queries (ADR 0093 §7) |
-| `Announcer` | `Object` | `Announcer.bt` | Typed pub/sub dispatcher handle (ADR 0093) |
-| `Array` | `Collection` | `Array.bt` | Fixed-size O(1) indexed collection (Erlang tuple-backed) |
-| `AtomicCounter` | `Object` | `AtomicCounter.bt` | Lock-free counter via `atomics` |
-| `BEAMError` | `Error` | `BEAMError.bt` | Wraps raw BEAM exceptions |
-| `Bag` | `Collection` | `Bag.bt` | Multiset / counted collection |
-| `Behaviour` | `Object` | `Behaviour.bt` | Metaclass introspection |
-| `BindingChanged` | `Announcement` | `BindingChanged.bt` | System event: workspace binding changed (ADR 0093) |
-| `BindingsView` | `Object` | `BindingsView.bt` | Live Dictionary-protocol view over session/workspace bindings (ADR 0081) |
-| `ChangeEntry` | `Value` | `ChangeEntry.bt` | One recorded in-memory method mutation (ADR 0082 Phase 1) |
-| `ChangeLog` | `Value` | `ChangeLog.bt` | Navigable view of pending workspace changes (ADR 0082 Phase 1) |
-| `Class` | `Behaviour` | `Class.bt` | Class mirror |
-| `ClassBuilder` | `Object` | `ClassBuilder.bt` | Dynamic class creation |
-| `ClassLoaded` | `Announcement` | `ClassLoaded.bt` | System event: class loaded/redefined (ADR 0093) |
-| `ClassRemoved` | `Announcement` | `ClassRemoved.bt` | System event: class removed (ADR 0093) |
-| `Console` | `Object` | `Console.bt` | This process's stdin/stdout/stderr (ADR 0099 §1) |
-| `DateTime` | `Value` | `DateTime.bt` | Date/time value type |
-| `Digest` | `Object` | `Digest.bt` | Cryptographic hash functions and HMAC (`crypto:hash/2`, `crypto:mac/4`) |
-| `Duration` | `Value` | `Duration.bt` | Span of time stored as total milliseconds; accepted by timeout-taking APIs |
-| `DynamicSupervisor` | `Object` | `DynamicSupervisor.bt` | OTP DynamicSupervisor wrapper |
-| `Erlang` | `Object` | `Erlang.bt` | Direct Erlang module access |
-| `ErlangModule` | `Object` | `ErlangModule.bt` | Erlang module wrapper |
-| `Ets` | `Object` | `Ets.bt` | Shared in-memory table wrapper (OTP `ets`) |
-| `ExitError` | `Error` | `ExitError.bt` | Process exit wrapper |
-| `FileHandle` | `Object` | `FileHandle.bt` | File I/O handle |
-| `FlushCompleted` | `Announcement` | `FlushCompleted.bt` | System event: `Workspace flush` finished (ADR 0093) |
-| `Inspector` | `Object` | `Inspector.bt` | Live, immutable cursor for navigating into a single object (ADR 0095) |
-| `InspectorField` | `Value` | `InspectorField.bt` | Immutable record for one drillable inspected field (ADR 0095 §2) |
-| `Interval` | `Collection` | `Interval.bt` | Arithmetic sequence (1 to: 10) |
-| `Json` | `Object` | `Json.bt` | JSON parse/stringify |
-| `Logger` | `Object` | `Logger.bt` | OTP logger wrapper |
-| `Metaclass` | `Behaviour` | `Metaclass.bt` | Metaclass mirror |
-| `OS` | `Object` | `OS.bt` | OS-level operations |
-| `ObjectStateChanged` | `Announcement` | `ObjectStateChanged.bt` | System event: watched actor commits a state write (ADR 0095 §5) |
-| `Package` | `Object` | `Package.bt` | Package management |
-| `Parallel` | `Object` | `Parallel.bt` | Block-based fan-out/join combinators (`all:`, `all:timeout:`, `any:`) — spawns one linked+monitored process per block, blocks the caller, returns plain `Result` values; no awaitable future/promise ever escapes into user code (BT-2974, ADR 0104) |
-| `Pid` | `Object` | `Pid.bt` | BEAM process identifier |
-| `Port` | `Object` | `Port.bt` | BEAM port wrapper |
-| `ProcessNavigation` | `Value` | `ProcessNavigation.bt` | Live supervision-tree introspection queries (ADR 0092) |
-| `Program` | `Object` | `Program.bt` | The running program/invocation (ADR 0099 §2) |
-| `Protocol` | `Object` | `Protocol.bt` | Protocol mirror |
-| `Queue` | `Collection` | `Queue.bt` | FIFO queue |
-| `Random` | `Object` | `Random.bt` | Random number generation |
-| `ReactiveSubprocess` | `Actor` | `ReactiveSubprocess.bt` | Streaming subprocess |
-| `Reference` | `Object` | `Reference.bt` | BEAM reference wrapper |
-| `Regex` | `Value` | `Regex.bt` | Regular expressions |
-| `Result` | `Value` | `Result.bt` | Ok/Error result type |
-| `RetryPolicy` | `Value` | `RetryPolicy.bt` | Configurable exponential backoff and retry execution (BT-2973) |
-| `Server` | `Actor` | `Server.bt` | OTP Server base class |
-| `Session` | `Object` | `Session.bt` | First-class handle to a REPL session (ADR 0081) |
-| `StackFrame` | `Object` | `StackFrame.bt` | Stack trace inspection |
-| `Stream` | `Object` | `Stream.bt` | Lazy sequences |
-| `Subprocess` | `Actor` | `Subprocess.bt` | OS subprocess management |
-| `Subscription` | `Object` | `Subscription.bt` | Unsubscribe token returned by `when:do:` et al (ADR 0093) |
-| `SubscriptionNode` | `Value` | `SubscriptionNode.bt` | Immutable snapshot record for one live subscription (ADR 0093 §7) |
-| `SupervisionChildAdded` | `Announcement` | `SupervisionChildAdded.bt` | System event: supervisor started a child (ADR 0093) |
-| `SupervisionChildCrashed` | `Announcement` | `SupervisionChildCrashed.bt` | System event: supervised child failed to start or crashed (ADR 0093) |
-| `SupervisionNode` | `Value` | `SupervisionNode.bt` | Immutable snapshot record for one process in the live supervision tree (ADR 0092) |
-| `SupervisionSpec` | `Value` | `SupervisionSpec.bt` | Supervisor child specs |
-| `SupervisionTree` | `Value` | `SupervisionTree.bt` | Navigable snapshot of the live supervision tree (ADR 0092) |
-| `Supervisor` | `Object` | `Supervisor.bt` | OTP Supervisor wrapper |
-| `System` | `Object` | `System.bt` | System info and control |
-| `SystemAnnouncer` | `Announcer` | `SystemAnnouncer.bt` | Singleton system event bus (ADR 0093 Layer 2) |
-| `SystemNavigation` | `Object` | `SystemNavigation.bt` | Class-registry navigation queries ("who implements X") |
-| `TestResult` | `Value` | `TestResult.bt` | BUnit test result |
-| `TestRunner` | `Object` | `TestRunner.bt` | BUnit test runner |
-| `ThrowError` | `Error` | `ThrowError.bt` | Non-local return error |
-| `Time` | `Object` | `Time.bt` | Time operations |
-| `TimeoutProxy` | `Object` | `TimeoutProxy.bt` | Timeout wrapper |
-| `Timer` | `Object` | `Timer.bt` | Timer operations |
-| `Tracing` | `Object` | `Tracing.bt` | Actor observability |
-| `Uuid` | `Value` | `Uuid.bt` | RFC 9562 UUIDs (v4 random, v7 time-ordered) |
-| `WorkspaceInterface` | `Actor` | `WorkspaceInterface.bt` | Workspace management |
+| `ActorSpawned` | `Announcement` | `actor_spawned.bt` | System event: actor started (ADR 0093) |
+| `ActorStopped` | `Announcement` | `actor_stopped.bt` | System event: actor terminated (ADR 0093) |
+| `Announcement` | `Value` | `announcement.bt` | Base event type for the typed Observer substrate (ADR 0093) |
+| `AnnouncementNavigation` | `Object` | `announcement_navigation.bt` | Live subscription-graph introspection queries (ADR 0093 §7) |
+| `Announcer` | `Object` | `announcer.bt` | Typed pub/sub dispatcher handle (ADR 0093) |
+| `Array` | `Collection` | `array.bt` | Fixed-size O(1) indexed collection (Erlang tuple-backed) |
+| `AtomicCounter` | `Object` | `atomic_counter.bt` | Lock-free counter via `atomics` |
+| `BEAMError` | `Error` | `beamerror.bt` | Wraps raw BEAM exceptions |
+| `Bag` | `Collection` | `bag.bt` | Multiset / counted collection |
+| `Behaviour` | `Object` | `behaviour.bt` | Metaclass introspection |
+| `BindingChanged` | `Announcement` | `binding_changed.bt` | System event: workspace binding changed (ADR 0093) |
+| `BindingsView` | `Object` | `bindings_view.bt` | Live Dictionary-protocol view over session/workspace bindings (ADR 0081) |
+| `ChangeEntry` | `Value` | `change_entry.bt` | One recorded in-memory method mutation (ADR 0082 Phase 1) |
+| `ChangeLog` | `Value` | `change_log.bt` | Navigable view of pending workspace changes (ADR 0082 Phase 1) |
+| `Class` | `Behaviour` | `class.bt` | Class mirror |
+| `ClassBuilder` | `Object` | `class_builder.bt` | Dynamic class creation |
+| `ClassLoaded` | `Announcement` | `class_loaded.bt` | System event: class loaded/redefined (ADR 0093) |
+| `ClassRemoved` | `Announcement` | `class_removed.bt` | System event: class removed (ADR 0093) |
+| `Console` | `Object` | `console.bt` | This process's stdin/stdout/stderr (ADR 0099 §1) |
+| `DateTime` | `Value` | `date_time.bt` | Date/time value type |
+| `Digest` | `Object` | `digest.bt` | Cryptographic hash functions and HMAC (`crypto:hash/2`, `crypto:mac/4`) |
+| `Duration` | `Value` | `duration.bt` | Span of time stored as total milliseconds; accepted by timeout-taking APIs |
+| `DynamicSupervisor` | `Object` | `dynamic_supervisor.bt` | OTP DynamicSupervisor wrapper |
+| `Erlang` | `Object` | `erlang.bt` | Direct Erlang module access |
+| `ErlangModule` | `Object` | `erlang_module.bt` | Erlang module wrapper |
+| `Ets` | `Object` | `ets.bt` | Shared in-memory table wrapper (OTP `ets`) |
+| `ExitError` | `Error` | `exit_error.bt` | Process exit wrapper |
+| `FileHandle` | `Object` | `file_handle.bt` | File I/O handle |
+| `FlushCompleted` | `Announcement` | `flush_completed.bt` | System event: `Workspace flush` finished (ADR 0093) |
+| `Inspector` | `Object` | `inspector.bt` | Live, immutable cursor for navigating into a single object (ADR 0095) |
+| `InspectorField` | `Value` | `inspector_field.bt` | Immutable record for one drillable inspected field (ADR 0095 §2) |
+| `Interval` | `Collection` | `interval.bt` | Arithmetic sequence (1 to: 10) |
+| `Json` | `Object` | `json.bt` | JSON parse/stringify |
+| `Logger` | `Object` | `logger.bt` | OTP logger wrapper |
+| `Metaclass` | `Behaviour` | `metaclass.bt` | Metaclass mirror |
+| `OS` | `Object` | `os.bt` | OS-level operations |
+| `ObjectStateChanged` | `Announcement` | `object_state_changed.bt` | System event: watched actor commits a state write (ADR 0095 §5) |
+| `Package` | `Object` | `package.bt` | Package management |
+| `Parallel` | `Object` | `parallel.bt` | Block-based fan-out/join combinators (`all:`, `all:timeout:`, `any:`) — spawns one linked+monitored process per block, blocks the caller, returns plain `Result` values; no awaitable future/promise ever escapes into user code (BT-2974, ADR 0104) |
+| `Pid` | `Object` | `pid.bt` | BEAM process identifier |
+| `Port` | `Object` | `port.bt` | BEAM port wrapper |
+| `ProcessNavigation` | `Value` | `process_navigation.bt` | Live supervision-tree introspection queries (ADR 0092) |
+| `Program` | `Object` | `program.bt` | The running program/invocation (ADR 0099 §2) |
+| `Protocol` | `Object` | `protocol.bt` | Protocol mirror |
+| `Queue` | `Collection` | `queue.bt` | FIFO queue |
+| `Random` | `Object` | `random.bt` | Random number generation |
+| `ReactiveSubprocess` | `Actor` | `reactive_subprocess.bt` | Streaming subprocess |
+| `Reference` | `Object` | `reference.bt` | BEAM reference wrapper |
+| `Regex` | `Value` | `regex.bt` | Regular expressions |
+| `Result` | `Value` | `result.bt` | Ok/Error result type |
+| `RetryPolicy` | `Value` | `retry_policy.bt` | Configurable exponential backoff and retry execution (BT-2973) |
+| `Server` | `Actor` | `server.bt` | OTP Server base class |
+| `Session` | `Object` | `session.bt` | First-class handle to a REPL session (ADR 0081) |
+| `StackFrame` | `Object` | `stack_frame.bt` | Stack trace inspection |
+| `Stream` | `Object` | `stream.bt` | Lazy sequences |
+| `Subprocess` | `Actor` | `subprocess.bt` | OS subprocess management |
+| `Subscription` | `Object` | `subscription.bt` | Unsubscribe token returned by `when:do:` et al (ADR 0093) |
+| `SubscriptionNode` | `Value` | `subscription_node.bt` | Immutable snapshot record for one live subscription (ADR 0093 §7) |
+| `SupervisionChildAdded` | `Announcement` | `supervision_child_added.bt` | System event: supervisor started a child (ADR 0093) |
+| `SupervisionChildCrashed` | `Announcement` | `supervision_child_crashed.bt` | System event: supervised child failed to start or crashed (ADR 0093) |
+| `SupervisionNode` | `Value` | `supervision_node.bt` | Immutable snapshot record for one process in the live supervision tree (ADR 0092) |
+| `SupervisionSpec` | `Value` | `supervision_spec.bt` | Supervisor child specs |
+| `SupervisionTree` | `Value` | `supervision_tree.bt` | Navigable snapshot of the live supervision tree (ADR 0092) |
+| `Supervisor` | `Object` | `supervisor.bt` | OTP Supervisor wrapper |
+| `System` | `Object` | `system.bt` | System info and control |
+| `SystemAnnouncer` | `Announcer` | `system_announcer.bt` | Singleton system event bus (ADR 0093 Layer 2) |
+| `SystemNavigation` | `Object` | `system_navigation.bt` | Class-registry navigation queries ("who implements X") |
+| `TestResult` | `Value` | `test_result.bt` | BUnit test result |
+| `TestRunner` | `Object` | `test_runner.bt` | BUnit test runner |
+| `ThrowError` | `Error` | `throw_error.bt` | Non-local return error |
+| `Time` | `Object` | `time.bt` | Time operations |
+| `TimeoutProxy` | `Object` | `timeout_proxy.bt` | Timeout wrapper |
+| `Timer` | `Object` | `timer.bt` | Timer operations |
+| `Tracing` | `Object` | `tracing.bt` | Actor observability |
+| `Uuid` | `Value` | `uuid.bt` | RFC 9562 UUIDs (v4 random, v7 time-ordered) |
+| `WorkspaceInterface` | `Actor` | `workspace_interface.bt` | Workspace management |
 
 ---
 
@@ -1076,7 +1076,7 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 
 ## Missing `.bt` Files
 
-All stdlib classes now have corresponding `stdlib/src/*.bt` definitions. `Collection` is now defined in `stdlib/src/Collection.bt` as an abstract typed subclass of `Value`.
+All stdlib classes now have corresponding `stdlib/src/*.bt` definitions. `Collection` is now defined in `stdlib/src/collection.bt` as an abstract typed subclass of `Value`.
 
 ---
 

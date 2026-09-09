@@ -50,7 +50,7 @@ erl -pa build
 
 Stack traces from compiled `.bt` code (both raw Erlang `erlang:get_stacktrace/0`-style
 frames and Beamtalk's `StackFrame` objects, see `e stackTrace` in
-`stdlib/src/StackFrame.bt`) report the original `.bt` file and line number for
+`stdlib/src/stack_frame.bt`) report the original `.bt` file and line number for
 function heads and message-send call sites — not the compiled module's own
 name or line 1 — as long as the compilation unit had a source path (any
 `.bt` file built via `beamtalk build`/`beamtalk test`; REPL-evaluated code
@@ -156,16 +156,23 @@ If you see a bare `internal error` or a build failure with no readable cause,
 run with `BEAMTALK_COMPILER=escript` and compare — the two backends are
 expected to produce the same wording for the same malformed input.
 
-### ThreadedIr verifier (ADR 0111, BT-3129-BT-3165, BT-3164, BT-3166-BT-3170)
+### ThreadedIr verifier (ADR 0111, BT-3129-BT-3165, BT-3164, BT-3166-BT-3170, BT-3447)
 
 State threading — actor/instance `State`, class-var `ClassVars`, value-type
 `Self`, loop-local threading, and non-local-return (NLR) relay — used to be
 coordinated only by scattered `debug_assert!`s at each emission site, each
-independently re-deriving the same invariants. `crates/beamtalk-codegen/src/core_erlang/threaded_ir.rs`
+independently re-deriving the same invariants. `crates/beamtalk-codegen/src/core_erlang/threaded_ir/`
 replaces that with a small mid-level IR (`ThreadedIr`/`ThreadedStmt`) that IS
-the `Document` emission for every construct family this table covers,
-including exception handling's `on:do:`/`ensure:` (BT-3165, the last
-holdout), and a single `verify()` pass per construct/method that checks it
+the `Document` emission for every construct family this table covers —
+conditionals, exception handling's `on:do:`/`ensure:`, Actor and
+class-method bodies, Tier 2 stateful-block bodies, the list-op/dict-op
+tuple-accumulator unpack, ADR 0118's expression-position preludes, and (as
+of ADR 0111 Addendum 15/16, epic BT-3447) `Letrec` (`whileTrue:`/
+`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`) loop bodies as a single
+`ThreadedStmt::ConditionalLoop` node and `Foldl*` (list-op/dict-op fold)
+bodies as a single merged `Threaded` node — no construct family is left on
+the pre-ADR-0111 AST-directed path — and a single `verify()` pass per construct/method
+that checks it
 before `render()` turns it into the `Document` the caller emits. A
 violation is a `threaded_ir::VerifyError`, reported through the
 shared `report_threaded_ir_verify_errors` helper (`control_flow/mod.rs`,
@@ -189,11 +196,11 @@ where to start reading:
 | `NonLinearVersion` | Within one `FrameId`, a version was produced by more than one `Bind`, or consumed as the source of more than one successor — frame-scoped SSA-like linearity broken. | The generator for that frame; likely a duplicate `Bind` or a version reused across two branch arms that should have gotten distinct `FrameId`s. Live everywhere `UnboundVersion` is. |
 | `ThreadingModeUnpackMismatch` | An optimized `ThreadingMode` (a mode chosen specifically because it needs no `StateAcc` unpack) contains an unpack `Bind` anyway. | `while_loops.rs` / `counted_loops.rs`'s mode-selection logic — `ThreadingPlan::generate_unpack_at_iteration_start`'s `if !use_direct_params && !use_hybrid_params` guard (`control_flow/mod.rs`) is what makes this invariant hold structurally; BT-3154 deleted the per-call-site `check_loop_unpack_invariant`/`verify_loop_unpack_invariant` wrapper that used to check it explicitly, since `verify()`'s general `ThreadingModeUnpackMismatch` check was redundant with that guard. |
 | `ShadowWriteMissing` | A class-var `Bind` at a shadow-write-eligible point (per the enclosing `Threaded`/`ConditionalLoop` nodes' `shadow_write_eligible` stack — ADR 0111 Addendum 9, not `FrameId` as of BT-3167) inside a method whose body can relay a foreign NLR (an `NlrCatch` with `boundary: ClassMethod { has_class_vars: true }`) lacks `shadow_write: true` — the ADR 0110 contract. | `expressions.rs`'s class-var assignment emission path (BT-3148, real `Bind` producer) and `gen_server/methods.rs`'s method-body backfill (`verify_body_with_opaque_version_gaps`) — a future change dropped the shadow write ADR 0110's fix depends on, or added a new class-var mutation site without it. As of BT-3164, `verify_body_with_opaque_version_gaps` backfills both `State`- and `ClassVars`-prefix gaps (`backfill_opaque_version_gap`), and `gen_server/methods.rs::lower_class_method_body` promotes a class method's own last-statement `self.classVar := value` to a real `Bind` — the shape that first lets this variant see a real class-var `Bind` jointly with a real class-method `NlrCatch` over the method's actual emitted IR, not just the isolated synthetic-marker fixture `construct_and_verify_class_var_bind` has always checked. |
-| `TupleAccUnpackModeMismatch` | A `ThreadedStmt::TupleAccUnpack` node (flat positional-unpack accumulator) appeared outside a `ThreadingMode::TupleAcc` body. | `list_ops/*.rs` / `dict_ops.rs`'s `ThreadingPlan::generate_tuple_unpack_docs` — the tuple-shaped sibling of `ThreadingModeUnpackMismatch`. |
+| `TupleAccUnpackModeMismatch` | A `ThreadedStmt::TupleAccUnpack` node (flat positional-unpack accumulator) appeared outside a `ThreadingMode::TupleAcc` body. | `list_ops/*.rs` / `dict_ops.rs`, via `control_flow::body::generate_foldl_loop_body` (ADR 0111 Addendum 15) — the tuple-shaped sibling of `ThreadingModeUnpackMismatch`. |
 | `EarlyExitGateSlotMismatch` | A `TupleAccUnpack` node's own `gate_slots` disagrees with its enclosing `ThreadingMode::TupleAcc`'s `gate_slots` — the unpack would read threaded-local values from the wrong tuple positions (well-formed Core Erlang, silently *wrong values*, not a `core_lint` failure). | The list-op family's slot count in `list_ops/*.rs` (`do:`: 0; `collect:`/`select:`/boolean-predicate ops: 1; `takeWhile:`/`dropWhile:`/`detect:`-family: 2). Live since BT-3147 — `mode_gate_slots` (from `ListOpKind::gate_slots`, a canonical per-op table) and `node_gate_slots` (from each call site's own `index_offset - 1`) are genuinely independent sources now. |
 | `TupleAccInValueTypeContext` | `TupleAcc` mode was selected in a `ValueType` context, which has no actor `State` to reference — regression-pinning, `#[cfg(test)]`-only (unreachable today via `select_tuple_acc`'s own early-return; no production constructor). | `control_flow/mod.rs`'s `select_tuple_acc` guard ordering. |
 | `NestedStateAccFallbackUnderDirectParams` | A nested list-op that itself needs a `StateAcc`-map fallback appeared under an enclosing `DirectParams` loop, which has no `StateAcc` map for the inner `{value, StateAcc}` result to unpack into. Regression-pinning, `#[cfg(test)]`-only (unreachable today via `select_direct_params`'s own guard; no production constructor). | `control_flow/mod.rs`'s `select_direct_params`'s `!effects.has_non_tuple_safe_list_op` guard. |
-| `StateEffectEscapesExpression` | A `ThreadedValue` (ADR 0118) whose prelude carries a versioned `Bind` for `prefix` was `close()`d — rendered as nested `let`s around its value — in a context that cannot thread that prefix (`CloseContext::Opaque`), so the state effect the expression performed (a nested actor self-send's `NewState`, say) is scoped away and lost to everything after it: the "silent drop" class of bug as a verifier finding. | The consumer that called `close()` — it should *splice* the prelude into its own frame's IR instead (`stmts.extend(tv.prelude)`, as every `lower_body_exprs_with_reply` arm does since BT-3415), or, at a genuine boundary (a Tier 1 closure body, an FFI argument), surface a user-facing diagnostic built from this error. Constructed only by `ThreadedValue::close`; as of ADR 0118 phase 1a (BT-3415) that has no production caller — un-migrated positions still reach the byte-identical discarding fallback `generate_discarding_self_dispatch`, gated per phase in `stdlib/test/actor_self_send_position_matrix_test.bt`, until phase 2b routes `expression_doc` through `close()`. |
+| `StateEffectEscapesExpression` | A `ThreadedValue` (ADR 0118) whose prelude carries a versioned `Bind` for `prefix` was `close()`d — rendered as nested `let`s around its value — in a context that cannot thread that prefix (`CloseContext::Opaque`), so the state effect the expression performed (a nested actor self-send's `NewState`, say) is scoped away and lost to everything after it: the "silent drop" class of bug as a verifier finding. | The consumer that called `close()` — it should *splice* the prelude into its own frame's IR instead (`stmts.extend(tv.prelude)`, as every `lower_body_exprs_with_reply` arm does since BT-3415), or, at a genuine boundary (a Tier 1 closure body, an FFI argument, a block passed to a class method, spec/doc codegen), surface a user-facing diagnostic built from this error. Constructed only by `ThreadedValue::close`; every ADR 0118 phase (1a-4, plus 5a/5b/6's `ClassVars` consolidation) has landed, so every expression-position consumer now splices its prelude — `close()` itself still has no production caller as of this writing (`expression_doc` deliberately stays a plain forwarder per ADR 0118 §Decision 5: it is reached only by genuinely un-migrated, self-contained-`Document` boundaries, not by any position this table's matrix rows cover). Wiring `close()`'s `StateEffectEscapesExpression` into a user-facing diagnostic at one of those genuine boundaries (`check_no_unsafe_class_method_self_sends`) is tracked separately as a follow-up (BT-3430), not part of this migration. |
 
 `RoutingMismatch` (BT-3135's structural replacement for the two
 `gen_server/methods.rs` routing `debug_assert!`s) was itself deleted by
@@ -228,6 +235,24 @@ trigger state threading in the first place — see `docs/beamtalk-language-featu
 of that boundary, and ADR 0111 Addendum 9 for the full six-question design
 this migration implements.
 
+**The `whileTrue:`/`whileFalse:` condition as real IR (ADR 0118 phase 3,
+BT-3419).** `ConditionalLoop` no longer treats its condition as an opaque,
+outside-the-frame `Document` (the pre-BT-3419 `continue_header` field): it
+now carries `condition: Vec<ThreadedStmt>` (the condition block's own
+prelude — typically a self-send producer's `Bind`, or a plain local-var
+rebind) and `condition_value: ValueRef` (the condition's pure final boolean),
+verified in the SAME frame `body` is — `verify()`'s `UnboundVersion`/
+`NonLinearVersion` checks apply to the condition's `Bind`s unchanged, no new
+`VerifyError` variant. `render_conditional_loop` emits `condition`'s prelude
+inside the loop's own `fun`, directly ahead of the `case`, so a self-send's
+`State` advance is available to both the continuing recursive call and the
+exit arm — closing the two `#[should_panic]` regressions BT-3414 pinned for
+a self-send (or an inline-threaded `and:`) inside a `whileTrue:`/
+`whileFalse:` condition block. The remaining opaque half, `continue_arm`
+(the case-clause pattern text, e.g. `"<'true'> when 'true' -> "`), is sound
+opacity in the same sense `exit_arm`'s pattern half is — see the variant's
+own doc comment.
+
 `just verify-threaded-ir` (wired into `just ci`) compiles the full
 `stdlib/test/*.bt` + `stdlib/bootstrap-test/*.btscript` corpus in a debug
 build so any of these panics the build instead of only degrading to a
@@ -236,12 +261,15 @@ narrow that corpus down: `just test-stdlib <file>` / `just test-bunit
 <file>` against the specific fixture, then `dbg!` the `ThreadedIr` fragment
 at the failing construct's emission site.
 
-**Emission-input coverage, as of BT-3165.** `ThreadedIr` started
+**Emission-input coverage, as of ADR 0118 (BT-3424 close-out).** `ThreadedIr` started
 (BT-3129-BT-3144) as a verification-only side channel: a fixture built and
 checked alongside `Document` emission that happened separately, directly
 from AST + generator state (ADR 0111's own Addendum, "delivered vs.
 designed"). BT-3145 (`while_loops.rs`'s `generate_while_loop_direct`) was
-the first real emission-input call site; BT-3146 (`conditionals.rs`),
+the first real emission-input call site — since deleted (ADR 0111
+Addendum 13); loops (both `Letrec` — while/counted loop bodies onto
+`ConditionalLoop` — and `Foldl*` — list-op/dict-op fold bodies onto a
+merged `Threaded` node — since fully migrated, Addendum 15). BT-3146 (`conditionals.rs`),
 BT-3147 (`list_ops/*.rs`/`dict_ops.rs`), BT-3148 (`gen_server/methods.rs`
 Actor method bodies, class-var `Bind`s, `NlrCatch`), BT-3149
 (`expressions.rs`'s `generate_block_stateful`, the Tier 2 stateful-block-body
@@ -258,16 +286,34 @@ arm) except for gen_server Actor method bodies and class-method bodies,
 where BT-3148's `lower_body_exprs_with_reply` and BT-3164's
 `lower_class_method_body` (both + `verify_body_with_opaque_version_gaps`)
 already verify the WHOLE method body in one call — the "method-level
-verify()" shape ADR 0111's close-out aimed at. Generalizing that same
-single-call-per-method shape to constructs nested inside expression
-position (conditionals, loops, list-ops, exception handling) would require
-those constructs to hand their real `Vec<ThreadedStmt>` fragment up to the
-enclosing body instead of rendering to a `Document` at their own boundary —
-a comparable migration to the `ThreadedStmt::Statement` opaque-embedding
-design BT-3156 did for gen_server bodies, generalized to expression-nested
-constructs, and was evaluated as ADR-0018-§Alternative-3-scale scope,
-deliberately not attempted here (see the ADR 0111 addendum's "full-pipeline
-re-evaluation" note).
+verify()" shape ADR 0111's close-out aimed at. As of ADR 0111's own close-out
+(BT-3165), a state effect *nested inside expression position* — a self-send
+as a binary-op operand, a conditional leaking its `{Result, State}` tuple
+into a keyword-send argument, and the other rows
+`stdlib/test/actor_self_send_position_matrix_test.bt` pins — still wasn't
+verified as such: generalizing the single-call-per-method shape to those
+positions would have meant hoisting each nested construct's whole real
+`Vec<ThreadedStmt>` fragment up to the enclosing body instead of rendering
+to a `Document` at its own boundary, a rewrite estimated at the scale of
+ADR 0018's rejected Alternative 3 (a full typed Core Erlang IR) and
+deliberately not attempted at the time.
+
+ADR 0118 (BT-3415-BT-3424) closed that gap without needing a rewrite at
+that scale: rather than hoisting a nested construct's fragment up to the
+enclosing body, every state-effecting expression form becomes a *producer*
+of a small `ThreadedValue { prelude, value }` (see this file's
+`StateEffectEscapesExpression` row and ADR 0118 itself for the full design),
+and the existing sequencing rule splices that prelude into whichever
+frame's own per-construct `verify()` call already covers it — the same
+`UnboundVersion`/`NonLinearVersion` checks this table describes, now also
+firing for a `Bind` nested inside expression position, not just one at
+statement-top-level. Every consumer this table's construct families cover
+(conditional/exception arms, stateful-block bodies, loop bodies and the
+loop **condition**, inline-threaded control flow used as a value) is
+migrated as of phase 4 (BT-3420); the remaining gap is the genuinely
+un-migrated, self-contained-`Document` boundaries `close()`'s own row above
+describes, which are a different (and much smaller) case than the
+expression-position coverage this paragraph used to call out of scope.
 
 **`exception_handling.rs`'s `on:do:`/`ensure:` (BT-3165, closing the gap
 BT-3149's close-out found).** `generate_exception_body_with_threading_inner`

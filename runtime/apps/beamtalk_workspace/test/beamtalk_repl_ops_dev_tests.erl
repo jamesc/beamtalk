@@ -1294,7 +1294,11 @@ dev_runtime_test_() ->
             {"context completion: unknown lowercase receiver -> empty",
                 fun context_completion_unknown_lowercase/0},
             {"methods op returns instance + class methods", fun methods_op_returns_methods/0},
+            {"methods op tags a synthetic method's source_status (BT-3444)",
+                fun methods_op_tags_synthetic_source_status/0},
             {"methods op returns state vars", fun methods_op_returns_state_vars/0},
+            {"methods op state vars carry a real line when xref-registered",
+                fun methods_op_state_vars_carry_line_when_registered/0},
             {"list_class_methods_for_ws includes inherited side tags",
                 fun list_class_methods_known_class/0},
             {"list-classes op returns the registered class", fun list_classes_op_returns_class/0},
@@ -1358,7 +1362,14 @@ dev_runtime_test_() ->
             {"single-colon keyword-selector prefix is not annotation position",
                 fun single_colon_not_annotation_position/0},
             {"collect_all_methods dedups an overridden inherited selector",
-                fun collect_all_methods_dedups_override/0}
+                fun collect_all_methods_dedups_override/0},
+            {"inherited-methods op returns only non-local methods, attributed to their class",
+                fun inherited_methods_excludes_local_attributes_defining_class/0},
+            {"inherited-methods op excludes a locally-overridden selector entirely",
+                fun inherited_methods_excludes_shadowed_override/0},
+            {"inherited-methods op on a root class (no superclass) returns nothing",
+                fun inherited_methods_root_class_empty/0},
+            {"inherited-methods ws op end-to-end via handle/4", fun inherited_methods_op_handle/0}
         ]
     end}.
 
@@ -1375,6 +1386,48 @@ collect_all_methods_dedups_override() ->
     %% Sanity: non-overridden local and inherited methods are still present.
     ?assert(lists:member('render', Result)),
     ?assert(lists:member('next', Result)).
+
+inherited_methods_excludes_local_attributes_defining_class() ->
+    %% BT-3478: WidgetDev's own methods (render/resize/next/inheritedGreet
+    %% instance-side, create class-side) must not appear — only WidgetDevBase's
+    %% never-shadowed baseOnly/baseClassOnly, each carrying its defining class.
+    Result = beamtalk_repl_ops_dev:list_inherited_methods_for_ws(<<"WidgetDev">>),
+    Names = [maps:get(<<"name">>, M) || M <- Result],
+    ?assertEqual([<<"baseClassOnly">>, <<"baseOnly">>], lists:sort(Names)),
+    lists:foreach(
+        fun(Local) -> ?assertNot(lists:member(Local, Names)) end,
+        [<<"render">>, <<"resize">>, <<"next">>, <<"inheritedGreet">>, <<"create">>]
+    ),
+    [InstanceRow] = [M || M <- Result, maps:get(<<"name">>, M) =:= <<"baseOnly">>],
+    ?assertEqual(<<"instance">>, maps:get(<<"side">>, InstanceRow)),
+    ?assertEqual(<<"WidgetDevBase">>, maps:get(<<"defining_class">>, InstanceRow)),
+    [ClassRow] = [M || M <- Result, maps:get(<<"name">>, M) =:= <<"baseClassOnly">>],
+    ?assertEqual(<<"class">>, maps:get(<<"side">>, ClassRow)),
+    ?assertEqual(<<"WidgetDevBase">>, maps:get(<<"defining_class">>, ClassRow)).
+
+inherited_methods_excludes_shadowed_override() ->
+    %% BT-3087-style regression, for the new op: WidgetDev overrides
+    %% WidgetDevBase's inheritedGreet, so it is local now, not inherited —
+    %% it must not appear in the inherited-methods result at all (neither
+    %% attributed to WidgetDev nor, incorrectly, to WidgetDevBase).
+    Result = beamtalk_repl_ops_dev:list_inherited_methods_for_ws(<<"WidgetDev">>),
+    Names = [maps:get(<<"name">>, M) || M <- Result],
+    ?assertNot(lists:member(<<"inheritedGreet">>, Names)).
+
+inherited_methods_root_class_empty() ->
+    %% WidgetDevBase has no superclass — nothing to inherit.
+    ?assertEqual([], beamtalk_repl_ops_dev:list_inherited_methods_for_ws(<<"WidgetDevBase">>)).
+
+inherited_methods_op_handle() ->
+    Msg = make_msg(<<"inherited-methods">>, <<"im-1">>, undefined),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"inherited-methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+    Methods = maps:get(<<"methods">>, Decoded),
+    Names = [maps:get(<<"name">>, M) || M <- Methods],
+    ?assertEqual([<<"baseClassOnly">>, <<"baseOnly">>], lists:sort(Names)).
 
 context_completion_expression_empty_prefix() ->
     %% "WidgetDev create " — resolved instance receiver with empty prefix returns
@@ -1490,7 +1543,15 @@ setup_dev_runtime() ->
         module => 'bt@test@widget_dev_base',
         superclass => none,
         instance_methods => #{
-            'inheritedGreet' => #{block => fun(_, _) -> ok end, arity => 0}
+            'inheritedGreet' => #{block => fun(_, _) -> ok end, arity => 0},
+            %% BT-3478: a genuinely-inherited (never shadowed) instance
+            %% method, so `list_inherited_methods_for_ws('WidgetDev')` has
+            %% something real to attribute back to WidgetDevBase.
+            'baseOnly' => #{block => fun(_, _) -> ok end, arity => 0}
+        },
+        class_methods => #{
+            %% BT-3478: same, on the class side.
+            'baseClassOnly' => #{block => fun(_, _) -> ok end, arity => 0}
         }
     }),
     %% Concrete class with instance + class methods, fields, and a doc string.
@@ -1664,14 +1725,94 @@ methods_op_returns_methods() ->
     Sides = [maps:get(<<"side">>, M) || M <- Methods, maps:get(<<"name">>, M) =:= <<"create">>],
     ?assertEqual([<<"class">>], Sides).
 
+methods_op_tags_synthetic_source_status() ->
+    %% BT-3444: the VS Code Workspace Explorer sidebar badges a compiler-
+    %% generated method (no user-written declaration anywhere in source) as
+    %% visibly distinct — the same `source_status = synthetic` fact the
+    %% LiveView IDE method list already badges (BT-2714). WidgetDev's
+    %% `render` isn't really synthetic (it's a plain hand-registered test
+    %% fixture method), but xref doesn't know that — tagging its xref row
+    %% `synthetic` here exercises the ws op's tagging path exactly as it
+    %% would run against a real `Value subclass:`'s generated accessor.
+    case whereis(beamtalk_xref) of
+        undefined -> {ok, _} = beamtalk_xref:start_link();
+        _ -> ok
+    end,
+    ok = beamtalk_xref:register_class('WidgetDev', [
+        #{
+            class_side => false,
+            selector => render,
+            line => 7,
+            sends => [],
+            references => [],
+            source_status => synthetic,
+            provenance => class_body
+        }
+    ]),
+    Msg = make_msg(<<"methods">>, <<"mm-4">>, undefined),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    Methods = maps:get(<<"methods">>, Decoded),
+    ByName = maps:from_list([{maps:get(<<"name">>, M), M} || M <- Methods]),
+    RenderRow = maps:get(<<"render">>, ByName),
+    ?assertEqual(<<"synthetic">>, maps:get(<<"source_status">>, RenderRow)),
+    %% `resize` carries no xref row at all — the honest "no source" default,
+    %% never mistaken for `synthetic`.
+    ResizeRow = maps:get(<<"resize">>, ByName),
+    ?assertEqual(<<"unindexed_runtime_fun">>, maps:get(<<"source_status">>, ResizeRow)),
+    %% Clean up so this fixture's xref rows don't leak into other tests that
+    %% share the WidgetDev fixture (mirrors
+    %% methods_op_state_vars_carry_line_when_registered's cleanup).
+    ok = beamtalk_xref:register_class('WidgetDev', []).
+
 methods_op_returns_state_vars() ->
+    %% BT-3439: WidgetDev is built directly via beamtalk_object_class:start/2
+    %% (setup_dev_runtime/0), not compiled — no state_var_xref was ever baked
+    %% for it, so every entry's line is `null`. This is exactly the "class
+    %% predates the feature / ClassBuilder-built" fallback case
+    %% beamtalk.navigateToStateVar's regex fallback exists for.
     Msg = make_msg(<<"methods">>, <<"mm-2">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
     ),
     Decoded = json:decode(Result),
     StateVars = maps:get(<<"state_vars">>, Decoded),
-    ?assertEqual([<<"height">>, <<"width">>], StateVars).
+    Names = [maps:get(<<"name">>, V) || V <- StateVars],
+    ?assertEqual([<<"height">>, <<"width">>], Names),
+    Lines = [maps:get(<<"line">>, V) || V <- StateVars],
+    ?assertEqual([null, null], Lines).
+
+methods_op_state_vars_carry_line_when_registered() ->
+    %% BT-3439: once beamtalk_xref has real rows for a class (as codegen bakes
+    %% for a compiled class via register_class/0), the ws op surfaces them.
+    %% beamtalk_xref is a beamtalk_runtime_sup worker; this app's eunit run
+    %% doesn't necessarily boot that supervision tree, so stand one up
+    %% on-demand exactly like beamtalk_xref_tests:setup/0 does.
+    case whereis(beamtalk_xref) of
+        undefined -> {ok, _} = beamtalk_xref:start_link();
+        _ -> ok
+    end,
+    ok = beamtalk_xref:register_state_vars('WidgetDev', [
+        #{name => width, line => 12},
+        #{name => height, line => 13}
+    ]),
+    Msg = make_msg(<<"methods">>, <<"mm-3">>, undefined),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    StateVars = maps:get(<<"state_vars">>, Decoded),
+    ByName = maps:from_list([
+        {maps:get(<<"name">>, V), maps:get(<<"line">>, V)}
+     || V <- StateVars
+    ]),
+    ?assertEqual(#{<<"width">> => 12, <<"height">> => 13}, ByName),
+    %% Clean up so this fixture doesn't leak real lines into other tests that
+    %% share the WidgetDev fixture (setup_dev_runtime/0's own state, not this
+    %% test's registration, is the source of truth for what WidgetDev "is").
+    ok = beamtalk_xref:register_state_vars('WidgetDev', []).
 
 list_class_methods_known_class() ->
     Result = beamtalk_repl_ops_dev:list_class_methods_for_ws(<<"WidgetDev">>),
@@ -1692,7 +1833,14 @@ list_classes_op_returns_class() ->
     [Row] = [C || C <- ClassList, maps:get(<<"name">>, C) =:= <<"WidgetDev">>],
     ?assertEqual(<<"A widget for dev tests.">>, maps:get(<<"doc">>, Row)),
     ?assertEqual(<<"WidgetDevBase">>, maps:get(<<"superclass">>, Row)),
-    ?assertEqual(0, maps:get(<<"actor_count">>, Row)).
+    ?assertEqual(0, maps:get(<<"actor_count">>, Row)),
+    %% BT-2552-style classification, reused (not re-derived) from the System
+    %% Browser's `browse-classes` classifier — see `source_origin_of/2`.
+    ?assert(
+        lists:member(
+            maps:get(<<"source_origin">>, Row), [<<"stdlib">>, <<"project">>, <<"dependency">>]
+        )
+    ).
 
 list_classes_filter_stdlib() ->
     %% WidgetDev is registered with a non-stdlib module, so the stdlib filter
@@ -1704,7 +1852,12 @@ list_classes_filter_stdlib() ->
     Decoded = json:decode(Result),
     ClassList = maps:get(<<"class_list">>, Decoded),
     Names = [maps:get(<<"name">>, C) || C <- ClassList],
-    ?assertEqual(false, lists:member(<<"WidgetDev">>, Names)).
+    ?assertEqual(false, lists:member(<<"WidgetDev">>, Names)),
+    %% Everything the "stdlib" filter lets through must carry the matching
+    %% source_origin — the filter and the row-level classification must agree
+    %% (vacuously true if no stdlib classes are loaded in this eunit sandbox).
+    Origins = [maps:get(<<"source_origin">>, C) || C <- ClassList],
+    ?assertEqual([], [O || O <- Origins, O =/= <<"stdlib">>]).
 
 list_classes_superclass_filter() ->
     %% Filtering by superclass WidgetDevBase should include WidgetDev (which

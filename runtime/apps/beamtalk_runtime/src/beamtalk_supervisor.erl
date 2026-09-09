@@ -30,7 +30,7 @@ functions that call OTP APIs from the caller's process context.
 ## References
 
 - ADR 0059: Supervision Tree Syntax, Phase 2
-- stdlib/src/Supervisor.bt, DynamicSupervisor.bt
+- stdlib/src/supervisor.bt, dynamic_supervisor.bt
 - runtime/apps/beamtalk_runtime/src/beamtalk_message_dispatch.erl (routing)
 """.
 
@@ -1154,7 +1154,7 @@ spec_to_otp(BtSpec, Mode) ->
                     'spawnWith:' when Mode =:= dynamic ->
                         %% BT-3365 (review follow-up): a DynamicSupervisor childClass
                         %% can override `class supervisionSpec` to bake default args via
-                        %% `withArgs:` (SupervisionSpec.bt childSpec), which also compiles
+                        %% `withArgs:` (supervision_spec.bt childSpec), which also compiles
                         %% to startFn #spawnWith:. That hits the exact same arity-mismatch
                         %% badarg as the plain #spawn case once `startChild: args` appends
                         %% its own args on top of the baked ones — so it needs the same

@@ -42,6 +42,55 @@ fn run_script_mode_invokes_class_method() {
 }
 
 #[test]
+fn run_script_mode_dispatches_subdirectory_class_by_name() {
+    // BT-3437 (ADR 0119 Phase 3): package-compiler/e2e regression test for
+    // the `user_package_prefix` subdirectory-dispatch bug this epic fixes.
+    //
+    // Before BT-3436, a reference from a root-level class to a class
+    // declared in a package subdirectory (`src/scheme/SchemeEnv.bt`) could
+    // compile to the wrong module name: `user_package_prefix` reverse-parsed
+    // an already-computed module name to guess a package prefix and, by its
+    // own doc comment, discarded subdirectory segments doing so (its
+    // `bt@sicp@scheme@eval` -> `bt@sicp@` example). The generated call would
+    // then target a nonexistent module and fail at runtime with `undef`.
+    // `compiled_module_name` now resolves such references through the
+    // shared `ClassModuleRegistry`, built from the real, parsed file paths
+    // (Pass 1) — no guessing, no dropped subdirectory segment.
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("src/scheme")).expect("mkdir src/scheme");
+    std::fs::write(
+        project.path().join("src/scheme/SchemeEnv.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         /// A class declared in a package subdirectory (BT-3437 regression fixture).\n\
+         Value subclass: SchemeEnv\n\
+         \n\
+         \x20\x20greet => \"hello-from-subdir\"\n",
+    )
+    .expect("write src/scheme/SchemeEnv.bt");
+    // A root-level class referencing the subdirectory class by bare name —
+    // exactly the reference shape `user_package_prefix` mis-resolved.
+    std::fs::write(
+        project.path().join("src/Runner.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Runner\n\
+         \n\
+         \x20\x20class run => Console printLine: SchemeEnv new greet\n",
+    )
+    .expect("write src/Runner.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["run", "Runner", "run"])
+        .assert()
+        .success()
+        .stdout(contains("hello-from-subdir"));
+}
+
+#[test]
 fn run_without_manifest_errors() {
     // `run` requires a beamtalk.toml in the cwd.
     let empty = tempfile::tempdir().unwrap();

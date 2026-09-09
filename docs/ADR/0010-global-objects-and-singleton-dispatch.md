@@ -38,7 +38,7 @@ Both interface pairs have **full primitive parity** as of 2026-03-04:
 
 **BeamtalkInterface primitives** (allClasses, classNamed:, globals, help:, help:selector:, version) — identical in both phases.
 
-**WorkspaceInterface primitives** (actors, actorAt:, classes, load:, globals, bind:as:, unbind:) — identical in both phases. The selectors `actorsOf:`, `testClasses`, `test`, `test:` that exist only in Phase 1 are now implemented as Beamtalk-level methods in `stdlib/src/WorkspaceInterface.bt` (not native primitives).
+**WorkspaceInterface primitives** (actors, actorAt:, classes, load:, globals, bind:as:, unbind:) — identical in both phases. The selectors `actorsOf:`, `testClasses`, `test`, `test:` that exist only in Phase 1 are now implemented as Beamtalk-level methods in `stdlib/src/workspace_interface.bt` (not native primitives).
 
 ### Migration sequence
 
@@ -359,7 +359,7 @@ lookup_binding(Name) ->
 ### Class Definitions (Future — not yet in `stdlib/src/`)
 
 ```beamtalk
-// stdlib/src/TranscriptStream.bt (future)
+// stdlib/src/transcript_stream.bt (future)
 Actor subclass: TranscriptStream
   show: value => @primitive 'show:'
   cr => @primitive 'cr'
@@ -604,7 +604,7 @@ beamtalk_workspace_sup (one_for_one)          [beamtalk_workspace app]
 Restarted processes update their own `persistent_term` binding in `init/1` — no external monitoring needed.
 
 ### Phase 1: Singleton Actor Classes
-- Create `TranscriptStream` class with pub/sub actor dispatch (`stdlib/src/TranscriptStream.bt`)
+- Create `TranscriptStream` class with pub/sub actor dispatch (`stdlib/src/transcript_stream.bt`)
 - Create `SystemDictionary` class with actor dispatch (`stdlib/src/SystemDictionary.bt`)
 - Runtime modules: `beamtalk_transcript_stream.erl`, `beamtalk_system_dictionary.erl`
 
@@ -628,7 +628,7 @@ Restarted processes update their own `persistent_term` binding in `init/1` — n
 - **Codegen:** `dispatch_codegen.rs` — `ClassReference` checks workspace bindings first
 - **Workspace:** Startup code spawns singletons, injects `persistent_term` bindings
 - **Runtime (new):** `beamtalk_transcript_stream.erl`, `beamtalk_system_dictionary.erl`
-- **Stdlib:** `stdlib/src/TranscriptStream.bt`, `stdlib/src/SystemDictionary.bt`
+- **Stdlib:** `stdlib/src/transcript_stream.bt`, `stdlib/src/SystemDictionary.bt`
 - **Tests:** E2E and unit tests for workspace bindings and singletons
 
 ## Migration Path

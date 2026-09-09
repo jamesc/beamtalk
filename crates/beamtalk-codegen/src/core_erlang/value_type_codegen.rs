@@ -13,11 +13,16 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
 
-use super::control_flow::ThreadingPlan;
+use super::control_flow::{BodyKind, ThreadingPlan};
+use super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::intrinsics::validate_block_arity_exact;
+use super::method_frame::{MethodBoundary, MethodFrame};
 use super::spec_codegen;
 use super::util::ClassIdentity;
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
+use super::value_accessors::{
+    AutoSlotMethods, compute_auto_slot_methods, has_opaque_native_representation,
+};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, concat, join, leaf, line, nest};
 use beamtalk_core::ast::{
@@ -76,125 +81,6 @@ struct VtBranchPieces {
     /// `Some(version)` if a class-method self-send in this arm's body advanced the
     /// class-var version past the baseline it started from.
     cv_mutated_version: Option<usize>,
-}
-
-/// Auto-generated slot methods for `Value subclass:` classes (ADR 0042).
-///
-/// Only populated when `class_kind == ClassKind::Value`.
-/// Skips any slot whose getter/setter selector the user has already defined.
-pub(super) struct AutoSlotMethods {
-    /// Field names for which a getter `fieldName/1` is auto-generated.
-    pub(super) getters: Vec<String>,
-    /// Field names for which a `withFieldName:/2` setter is auto-generated.
-    pub(super) setters: Vec<String>,
-    /// Keyword constructor selector (e.g., `"x:y:"` for a Point with slots x, y),
-    /// `None` if the class has no slots or the user already defined it.
-    pub(super) keyword_constructor: Option<String>,
-}
-
-impl AutoSlotMethods {
-    /// Computes the `with*:` selector name for a slot.
-    ///
-    /// Delegates to [`beamtalk_core::synthetic_selectors::with_star_selector`], the shared
-    /// naming authority for value-class synthetics.
-    pub(super) fn with_star_selector(field_name: &str) -> String {
-        beamtalk_core::synthetic_selectors::with_star_selector(field_name)
-    }
-
-    /// Returns the keyword constructor selector for the given slot names.
-    ///
-    /// E.g. `["x", "y"]` → `"x:y:"`. Delegates to the shared naming authority in
-    /// [`beamtalk_core::synthetic_selectors`].
-    fn keyword_selector(slots: &[String]) -> String {
-        beamtalk_core::synthetic_selectors::keyword_constructor_selector(
-            slots.iter().map(String::as_str),
-        )
-    }
-}
-
-/// Computes which slot methods to auto-generate for a `Value subclass:` class.
-///
-/// Returns `None` for `ClassKind::Object` and `ClassKind::Actor` — only
-/// `ClassKind::Value` classes get auto-generated slot accessors.
-pub(super) fn compute_auto_slot_methods(class: &ClassDefinition) -> Option<AutoSlotMethods> {
-    if class.class_kind != ClassKind::Value {
-        return None;
-    }
-
-    // Collect selectors the user has already explicitly defined
-    let user_instance_selectors: std::collections::HashSet<String> = class
-        .methods
-        .iter()
-        .map(|m| m.selector.name().to_string())
-        .collect();
-    let user_class_selectors: std::collections::HashSet<String> = class
-        .class_methods
-        .iter()
-        .map(|m| m.selector.name().to_string())
-        .collect();
-
-    let getters: Vec<String> = class
-        .state
-        .iter()
-        .filter(|s| !user_instance_selectors.contains(s.name.name.as_str()))
-        .map(|s| s.name.name.to_string())
-        .collect();
-
-    let setters: Vec<String> = class
-        .state
-        .iter()
-        .filter(|s| {
-            let with_name = AutoSlotMethods::with_star_selector(s.name.name.as_str());
-            !user_instance_selectors.contains(&with_name)
-        })
-        .map(|s| s.name.name.to_string())
-        .collect();
-
-    let keyword_constructor = if class.state.is_empty() {
-        None
-    } else {
-        let all_slots: Vec<String> = class
-            .state
-            .iter()
-            .map(|s| s.name.name.to_string())
-            .collect();
-        let sel = AutoSlotMethods::keyword_selector(&all_slots);
-        if user_class_selectors.contains(&sel) {
-            None
-        } else {
-            Some(sel)
-        }
-    };
-
-    Some(AutoSlotMethods {
-        getters,
-        setters,
-        keyword_constructor,
-    })
-}
-
-/// BT-2998: whether this class's instances are opaque terms owned entirely by
-/// a paired Erlang module, so the inherited `basicNew` cannot build one.
-///
-/// `Value class>>new` is `@intrinsic basicNew`, which compiles to a map of
-/// `$beamtalk_class` plus every declared field's default. That is a complete
-/// instance for an ordinary value type — but a `native:` class keeps its state
-/// in the shape its backing module defines (`beamtalk_datetime`'s calendar
-/// tuple, `beamtalk_uuid`'s 16 raw bytes, …) and declares no BT fields to
-/// stand in for it. `basicNew` therefore yields `~{'$beamtalk_class' => 'X'}~`:
-/// correctly tagged, so dispatch accepts it, and empty, so the very first
-/// method call dies inside the Erlang module on an unrelated-looking
-/// `function_clause`. Codegen raises a clear `instantiation_error` instead.
-///
-/// Deliberately narrow on both counts:
-///
-/// * A `native:` class that *does* declare fields (`Package`,
-///   `SupervisionNode`) has a real default instance, so `basicNew` is right.
-/// * A class that declares its own `new` (`Random`, `Queue`) already routes
-///   `new/0` through `generate_delegating_new` to that method; this predicate
-///   is only consulted on the auto-generated path.
-pub(in crate::core_erlang) fn has_opaque_native_representation(class: &ClassDefinition) -> bool {
-    class.backing_module.is_some() && class.state.is_empty()
 }
 
 /// BT-2998: the class-side selectors that actually produce an instance of
@@ -263,9 +149,6 @@ fn type_mentions_class(annotation: &TypeAnnotation, class_name: &str) -> bool {
     }
 }
 
-// Auto-generated from lib/*.bt by build.rs — do not edit manually.
-include!(concat!(env!("OUT_DIR"), "/stdlib_types.rs"));
-
 impl CoreErlangGenerator {
     /// Generates a value type module (BT-213).
     ///
@@ -322,7 +205,7 @@ impl CoreErlangGenerator {
         self.set_class_field_types(&class.state);
 
         // Check if the class explicitly defines new/new: methods
-        // (e.g., Object.bt defines `new => @primitive basicNew`)
+        // (e.g., object.bt defines `new => @primitive basicNew`)
         // If so, skip auto-generating constructors to avoid duplicate definitions
         // Only check Primary methods — check both instance and class methods
         let cf = self.semantic_facts.class_facts(&class.name.name);
@@ -952,182 +835,6 @@ impl CoreErlangGenerator {
     // BT-923: Auto-generated slot methods for `Value subclass:` classes
     // ──────────────────────────────────────────────────────────────────────────
 
-    /// Generates an auto-getter function for a single slot (BT-923).
-    ///
-    /// ```erlang
-    /// 'x'/1 = fun (Self) -> call 'maps':'get'('x', Self)
-    /// ```
-    fn generate_slot_getter(field_name: &str) -> Document<'static> {
-        docvec![
-            leaf::fname(field_name.to_string(), 1),
-            " = fun (Self) ->\n",
-            "    call 'maps':'get'(",
-            leaf::atom(field_name.to_string()),
-            ", Self)\n",
-            "\n",
-        ]
-    }
-
-    /// Generates an auto `with*:` functional setter for a single slot (BT-923).
-    ///
-    /// ```erlang
-    /// 'withX:'/2 = fun (Self, NewVal) -> call 'maps':'put'('x', NewVal, Self)
-    /// ```
-    fn generate_slot_setter(field_name: &str) -> Document<'static> {
-        let with_sel = AutoSlotMethods::with_star_selector(field_name);
-        docvec![
-            leaf::fname(with_sel, 2),
-            " = fun (Self, NewVal) ->\n",
-            "    call 'maps':'put'(",
-            leaf::atom(field_name.to_string()),
-            ", NewVal, Self)\n",
-            "\n",
-        ]
-    }
-
-    /// Generates the all-fields keyword constructor class method (BT-923).
-    ///
-    /// For direct `Value subclass:` classes, builds a flat map:
-    /// ```erlang
-    /// 'class_x:y:'/4 = fun (ClassSelf, ClassVars, X, Y) ->
-    ///     ~{'$beamtalk_class' => 'Point', 'x' => X, 'y' => Y}~
-    /// ```
-    ///
-    /// For sub-subclasses (BT-1559), delegates to `new:` so inherited fields
-    /// from the parent are included:
-    /// ```erlang
-    /// 'class_y:'/3 = fun (_ClassSelf, _ClassVars, SlotArg0) ->
-    ///     call 'child':'new'(~{'y' => SlotArg0}~)
-    /// ```
-    fn generate_keyword_constructor_fn(
-        class_name: &str,
-        kw_selector: &str,
-        slots: &[String],
-        is_sub_subclass: bool,
-        module_name: &str,
-    ) -> Document<'static> {
-        let arity = slots.len() + 2; // _ClassSelf + _ClassVars + N slot args
-
-        // Pre-compute slot argument names once; write! instead of format! per codegen rules.
-        let slot_arg_names: Vec<String> = (0..slots.len())
-            .map(|i| {
-                let mut name = String::from("SlotArg");
-                let _ = write!(&mut name, "{i}");
-                name
-            })
-            .collect();
-
-        // Extra slot parameters appended after "_ClassSelf, _ClassVars": ", SlotArg0", ...
-        let slot_param_docs: Vec<Document<'static>> = slot_arg_names
-            .iter()
-            .flat_map(|name| [Document::Str(", "), leaf::var(name.clone())])
-            .collect();
-
-        // BT-1408: Hash long keyword constructor atoms to stay within Erlang's
-        // 255-char atom limit.
-        let safe_fn_name = super::selector_mangler::safe_class_method_fn_name(kw_selector);
-
-        // BT-1559: Sub-subclasses delegate to new: to include inherited fields.
-        if is_sub_subclass {
-            // Build a map of own slot args: ~{'slot0' => SlotArg0, 'slot1' => SlotArg1}~
-            let mut map_parts: Vec<Document<'static>> = Vec::new();
-            for (i, slot_name) in slots.iter().enumerate() {
-                if i > 0 {
-                    map_parts.push(Document::Str(", "));
-                }
-                map_parts.extend([
-                    leaf::atom(slot_name.clone()),
-                    Document::Str(" => "),
-                    leaf::var(slot_arg_names[i].clone()),
-                ]);
-            }
-
-            return docvec![
-                leaf::fname(safe_fn_name, arity),
-                " = fun (_ClassSelf, _ClassVars",
-                concat(slot_param_docs),
-                ") ->\n",
-                "    call ",
-                leaf::atom(module_name.to_string()),
-                ":'new'(~{",
-                concat(map_parts),
-                "}~)\n",
-                "\n",
-            ];
-        }
-
-        // Direct Value subclass: build a flat map with all own fields.
-        let mut map_field_docs: Vec<Document<'static>> = vec![
-            Document::Str("'$beamtalk_class' => "),
-            leaf::atom(class_name.to_string()),
-        ];
-        for (i, slot_name) in slots.iter().enumerate() {
-            map_field_docs.extend([
-                Document::Str(", "),
-                leaf::atom(slot_name.clone()),
-                Document::Str(" => "),
-                leaf::var(slot_arg_names[i].clone()),
-            ]);
-        }
-
-        docvec![
-            leaf::fname(safe_fn_name, arity),
-            " = fun (_ClassSelf, _ClassVars",
-            concat(slot_param_docs),
-            ") ->\n",
-            "    ~{",
-            concat(map_field_docs),
-            "}~\n",
-            "\n",
-        ]
-    }
-
-    /// Generates dispatch arms for auto-generated getter and `with*:` setter methods (BT-923).
-    ///
-    /// Each arm follows the same pattern as user-defined methods in `generate_primitive_dispatch`.
-    fn generate_auto_slot_dispatch_arms(
-        mod_name: &str,
-        auto: &AutoSlotMethods,
-    ) -> Vec<Document<'static>> {
-        let mut arms: Vec<Document<'static>> = Vec::new();
-
-        for field in &auto.getters {
-            arms.push(docvec![
-                "        <",
-                leaf::atom(field.clone()),
-                "> when 'true' ->\n",
-            ]);
-            arms.push(docvec![
-                "            call ",
-                leaf::atom(mod_name.to_string()),
-                ":",
-                leaf::atom(field.clone()),
-                "(Self)\n",
-            ]);
-        }
-
-        for field in &auto.setters {
-            let with_sel = AutoSlotMethods::with_star_selector(field);
-            arms.push(docvec![
-                "        <",
-                leaf::atom(with_sel.clone()),
-                "> when 'true' ->\n",
-            ]);
-            arms.push(Document::Str(
-                "            let <DispArg0> = call 'erlang':'hd'(Args) in\n",
-            ));
-            arms.push(docvec![
-                "            call ",
-                leaf::atom(mod_name.to_string()),
-                ":",
-                leaf::atom(with_sel),
-                "(Self, DispArg0)\n",
-            ]);
-        }
-
-        arms
-    }
-
     // ── BT-1445: Unified value-type method body classification ─────────
 
     /// Classify a value-type body expression for Self-threading dispatch.
@@ -1640,35 +1347,23 @@ impl CoreErlangGenerator {
         let mangled = method.selector.name().to_string();
         let arity = method.parameters.len() + 1; // +1 for Self
 
-        // BT-833: Reset Self-threading version so each method starts with Self (version 0).
-        self.reset_self_version();
-
         // Bind parameters via fresh_var (not to_core_var) so names go through
-        // the counter and can't collide with sequencing temp vars — BT-369
-        self.push_scope();
-        // BT-295: Track method params for @primitive codegen
-        self.current_method_params.clear();
-        // BT-2709: Reset arithmetic fast-path parameter-type tracking.
-        self.clear_method_param_types();
-        // BT-1435: Track current method selector for Logger intrinsic metadata.
-        self.current_method_selector = Some(method.selector.name().to_string());
+        // the counter and can't collide with sequencing temp vars.
+        let (mut frame, user_params) = MethodFrame::enter(
+            self,
+            method.selector.name().as_str(),
+            &method.parameters,
+            MethodBoundary::ValueType,
+        );
         let mut params = vec!["Self".to_string()];
-        for param in &method.parameters {
-            let var_name = self.fresh_var(&param.name.name);
-            self.current_method_params.push(var_name.clone());
-            // BT-2709: Record declared type for the arithmetic fast path.
-            self.record_method_param_type(&param.name.name, param.type_annotation.as_ref());
-            params.push(var_name);
-        }
+        params.extend(user_params);
 
-        // ADR 0101 / BT-2720: On a `native:` Object, a `self delegate` body
-        // lowers through the unified FFI boundary (`beamtalk_erlang_proxy:
+        // ADR 0101: On a `native:` Object, a `self delegate` body lowers
+        // through the unified FFI boundary (`beamtalk_erlang_proxy:
         // native_call/4`) carrying `{Class, Sel}` — instance methods prepend
         // `Self` to the arg list (`params` already starts with Self).
         if let Some(backing) = class_def.backing_module.as_ref() {
             if method.is_self_delegate() {
-                self.pop_scope();
-                self.current_method_selector = None;
                 let body = Self::native_delegate_body_doc(
                     backing.name.as_str(),
                     class_def.name.name.as_str(),
@@ -1677,33 +1372,35 @@ impl CoreErlangGenerator {
                 );
                 let params_doc = join(params.into_iter().map(leaf::var), &Document::Str(", "));
                 let mut fun_doc = docvec!["fun (", params_doc, ") ->\n    ", body, "\n"];
-                if let Some(line_num) = self.span_to_line(method.span) {
-                    fun_doc = self.annotate_with_line(fun_doc, line_num);
+                if let Some(line_num) = frame.span_to_line(method.span) {
+                    fun_doc = frame.annotate_with_line(fun_doc, line_num);
                 }
+                // `frame` drops here (pops the scope, restores the selector)
+                // on this early return, same as the fall-through path below.
                 return Ok(docvec![leaf::fname(mangled, arity), " = ", fun_doc, "\n"]);
             }
         }
 
-        // BT-754: Detect whether any block argument in this method body contains ^.
+        // Detect whether any block argument in this method body contains ^.
         // If so, set up a non-local return token so ^ inside blocks can throw to escape
         // the closure and return from the enclosing method.
-        let needs_nlr = self
+        let needs_nlr = frame
             .semantic_facts
             .has_block_nlr_or_walk(&method.span, &method.body);
 
         let nlr_token_var = if needs_nlr {
-            let token_var = self.fresh_temp_var("NlrToken");
-            self.set_current_nlr_token(Some(token_var.clone()));
+            let token_var = frame.fresh_temp_var("NlrToken");
+            frame.set_current_nlr_token(Some(token_var.clone()));
             Some(token_var)
         } else {
             None
         };
 
-        // Generate method body expressions.
-        // BT-833: Value types now support Self-threading for field assignments.
-        // Each `:=` produces a new Self{N} snapshot via maps:put (see generate_field_assignment).
-        // Field reads use current_self_var() to reference the latest snapshot.
-        // Filter out @expect directives — they are compile-time only and generate no code.
+        // Generate method body expressions. Value types support Self-threading
+        // for field assignments: each `:=` produces a new Self{N} snapshot via
+        // maps:put (see generate_field_assignment); field reads use
+        // current_self_var() to reference the latest snapshot. Filter out
+        // @expect directives — they are compile-time only and generate no code.
         let body = super::util::collect_body_exprs(&method.body);
 
         let has_nlr = nlr_token_var.is_some();
@@ -1711,17 +1408,21 @@ impl CoreErlangGenerator {
         // If filtering leaves no executable expressions, emit a safe fallback to
         // avoid generating an empty Core Erlang function body which would be
         // syntactically invalid (e.g., `fun (...) ->\n\n`).
-        // BT-1482: Capture result so we can clean up scope/NLR unconditionally,
-        // then propagate error afterwards.
+        // Capture the result so cleanup runs unconditionally before the `?`
+        // below propagates an error, same as on the success path.
         let body_result = if body.is_empty() {
-            Ok(self.generate_vt_empty_body(has_nlr))
+            Ok(frame.generate_vt_empty_body(has_nlr))
         } else {
-            self.generate_vt_body_exprs(&body, has_nlr)
+            frame.generate_vt_body_exprs(&body, has_nlr)
         };
 
-        self.pop_scope();
-        self.current_method_selector = None;
-        self.set_current_nlr_token(None);
+        frame.set_current_nlr_token(None);
+        // `frame` has a `Drop` impl, so it borrows `self` until this explicit
+        // drop (or the end of the function) rather than its last use under
+        // NLL — drop it now so `self` is free again below, and so the scope
+        // pop and selector restore run before `?` propagates an error, not
+        // only at the end of the function.
+        drop(frame);
 
         let body_parts = body_result?;
 
@@ -2566,8 +2267,22 @@ impl CoreErlangGenerator {
             ],
         ];
 
-        // Phase 3: generate foldl lambda body (reuses existing threading helper).
-        let body_doc = self.generate_list_do_body_with_threading(body, &item_var)?;
+        // Phase 3: generate foldl lambda body — ADR 0111 Addendum 15 (Foldl
+        // migration): inlined replacement for the deleted
+        // `generate_list_do_body_with_threading` compat shim, which built
+        // its own second, throwaway `ThreadingPlan::new(self, body, None)`
+        // (documented above as pure and computed identically to `cv_plan`)
+        // purely to pass to `emit_loop_convention_diagnostic` — reusing
+        // `cv_plan` here instead avoids that duplication while keeping the
+        // diagnostic emitted exactly once, at this same relative point.
+        self.emit_loop_convention_diagnostic(&cv_plan, body.span);
+        self.push_scope();
+        if let Some(param) = body.parameters.first() {
+            self.bind_var(&param.name, &item_var);
+        }
+        let (body_doc, _) =
+            self.generate_foldl_loop_body(body, &cv_plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
+        self.pop_scope();
         docs.push(body_doc);
 
         // Phase 4: call foldl, then extract each local as an open `let X = ... in `.
@@ -3409,61 +3124,46 @@ impl CoreErlangGenerator {
                         let core_var = self
                             .lookup_var(&id.name)
                             .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-                        // BT-3159: a class-method self-send on the RHS (`x := self bump`)
-                        // produces an *open* let-chain via `expression_doc_with_open_scope`
-                        // (ending in `... in `, result value carried out-of-band in
-                        // `last_open_scope_result`). Using the plain `expression_doc` here
-                        // and wrapping it in `let core_var = <val_doc> in` left the chain's
-                        // trailing `in` unclosed — an empty value fragment before a doubled
-                        // `in`. Mirrors `try_generate_block_local_plain_let`'s BT-3150 fix:
-                        // keep the open chain (and its `ClassVarsN` rebind) at this level,
-                        // then bind `core_var` to the carried-out result as a separate,
-                        // still-open `let`.
-                        let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
+                        // ADR 0118 phase 5b (BT-3422): a class-method
+                        // self-send on the RHS (`x := self bump`), at any
+                        // nesting depth, threads as a real prelude via
+                        // `threaded_expression` — spliced ahead of this
+                        // `let core_var = ... in` (mirrors
+                        // `try_generate_block_local_plain_let`'s BT-3150
+                        // fix, now built on `ThreadedValue` rather than an
+                        // open-chain side channel).
+                        let frame = self.current_frame();
+                        let tv = self.threaded_expression(value, frame)?;
+                        let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+                        let value_doc = self.threaded_value_doc(&tv.value);
                         self.bind_var(&id.name, &core_var);
-                        let doc = match open_scope {
-                            Some(OpenScopeResult::Value(result_var)) => docvec![
-                                val_doc,
-                                "let ",
-                                leaf::var(core_var.clone()),
-                                " = ",
-                                leaf::var(result_var),
-                                " in ",
-                            ],
-                            Some(OpenScopeResult::NoValue) => docvec![
-                                val_doc,
-                                "let ",
-                                leaf::var(core_var.clone()),
-                                " = 'nil' in ",
-                            ],
-                            None => {
-                                docvec!["let ", leaf::var(core_var.clone()), " = ", val_doc, " in ",]
-                            }
-                        };
-                        preamble.push(doc);
+                        preamble.push(docvec![
+                            prelude_doc,
+                            "let ",
+                            leaf::var(core_var.clone()),
+                            " = ",
+                            value_doc,
+                            " in ",
+                        ]);
                     }
                 }
             } else {
                 let tmp = self.fresh_temp_var("seq");
-                // BT-3159: mirror the assignment arm above — a bare-statement
-                // class-method self-send also produces an open let-chain that must
-                // be closed before wrapping it in `let tmp = <doc> in`.
-                let (val_doc, open_scope) = self.expression_doc_with_open_scope(body_expr)?;
-                let doc = match open_scope {
-                    Some(OpenScopeResult::Value(result_var)) => docvec![
-                        val_doc,
-                        "let ",
-                        leaf::var(tmp),
-                        " = ",
-                        leaf::var(result_var),
-                        " in ",
-                    ],
-                    Some(OpenScopeResult::NoValue) => {
-                        docvec![val_doc, "let ", leaf::var(tmp), " = 'nil' in ",]
-                    }
-                    None => docvec!["let ", leaf::var(tmp), " = ", val_doc, " in ",],
-                };
-                preamble.push(doc);
+                // ADR 0118 phase 5b (BT-3422): mirror the assignment arm
+                // above — a bare-statement class-method self-send also
+                // threads as a real prelude.
+                let frame = self.current_frame();
+                let tv = self.threaded_expression(body_expr, frame)?;
+                let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+                let value_doc = self.threaded_value_doc(&tv.value);
+                preamble.push(docvec![
+                    prelude_doc,
+                    "let ",
+                    leaf::var(tmp),
+                    " = ",
+                    value_doc,
+                    " in ",
+                ]);
             }
         }
 
@@ -3649,63 +3349,66 @@ impl CoreErlangGenerator {
     /// Returns true if the class is a known stdlib type (ADR 0016).
     ///
     /// All stdlib types compile to `bt@stdlib@{snake_case}` modules.
-    /// Derived automatically from `lib/*.bt` via `build.rs` (BT-472).
-    fn is_known_stdlib_type(class_name: &str) -> bool {
-        STDLIB_CLASS_NAMES.contains(&class_name)
-    }
-
-    /// Returns true if `class` defines `doesNotUnderstand:args:` with a
-    /// structural (unquoted) intrinsic body (BT-1763).
     ///
-    /// Such a definition acts as a catch-all DNU handler (e.g. `ErlangModule`,
-    /// `Erlang`) rather than the error-raising default in `ProtoObject`
-    /// (`@primitive "doesNotUnderstand:args:"`).  Both the dispatch function
-    /// and the `has_method` function need this same predicate, so it lives
-    /// here to avoid drift between the two sites.
-    fn class_has_catch_all_dnu(class: &ClassDefinition) -> bool {
-        class.methods.iter().any(|m| {
-            m.selector.name() == "doesNotUnderstand:args:"
-                && m.body.len() == 1
-                && matches!(
-                    &m.body[0].expression,
-                    Expression::Primitive {
-                        is_quoted: false,
-                        ..
-                    }
-                )
-        })
+    /// BT-3435 (ADR 0119 step 0): delegates to
+    /// `ClassHierarchy::is_generated_builtin_class`, the one correct,
+    /// already-parsed answer (from `beamtalk build-stdlib`'s real class
+    /// metadata) — replacing the deleted `STDLIB_CLASS_NAMES` (`build.rs`'s
+    /// file-stem directory scan), which included protocol-only files
+    /// declaring no class and trusted file stems over parsed names (the
+    /// BT-3432 bug shape).
+    fn is_known_stdlib_type(class_name: &str) -> bool {
+        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::is_generated_builtin_class(
+            class_name,
+        )
     }
 
-    /// Computes the compiled module name for a class (ADR 0016 / ADR 0026 / BT-794).
+    /// Computes the compiled module name for a class (ADR 0016 / ADR 0026 /
+    /// BT-794; registry lookup per ADR 0119 / BT-3436).
     ///
     /// Resolution order:
-    /// 1. `class_module_index` — explicit mapping built during two-pass compilation.
-    ///    This correctly handles classes in package subdirectories (e.g. `SchemeEnv`
-    ///    → `bt@sicp_example@scheme@env`).
-    /// 2. Stdlib classes → `bt@stdlib@{snake_case}`
-    /// 3. User-defined classes in package mode → `bt@{package}@{snake_case}`
-    ///    (package prefix extracted from `self.module_name`)
-    /// 4. User-defined classes without package context → `bt@{snake_case}` (legacy)
+    /// 1. [`ClassModuleRegistry::module_for_class`] — built from
+    ///    `class_module_index` (the explicit mapping from two-pass
+    ///    compilation) keyed under this unit's own `PackageId`
+    ///    ([`CoreErlangGenerator::own_package_id`]). This correctly handles
+    ///    classes in package subdirectories (e.g. `SchemeEnv` →
+    ///    `bt@sicp_example@scheme@env`) — no guessing, no fallback tiers.
+    /// 2. On a genuine miss (ADR 0100's open-world policy: an unregistered
+    ///    class reference is a warning, not an error, and must still reach
+    ///    codegen), the existing best-effort convention: stdlib classes →
+    ///    `bt@stdlib@{snake_case}`; a user-defined class in package mode →
+    ///    `bt@{package}@{snake_case}`; otherwise → `bt@{snake_case}`.
+    ///
+    /// [`ClassModuleRegistry::module_for_class`]: beamtalk_core::semantic_analysis::ClassModuleRegistry::module_for_class
     pub fn compiled_module_name(&self, class_name: &str) -> String {
-        if let Some(module) = self.class_module_index().get(class_name) {
-            return module.clone();
+        let pkg = self.own_package_id();
+        if let Some(module) = self
+            .class_module_registry()
+            .module_for_class(&pkg, class_name)
+        {
+            return module.as_str().to_string();
         }
         let snake = super::util::to_module_name(class_name);
         if Self::is_known_stdlib_type(class_name) {
             format!("bt@stdlib@{snake}")
-        } else if let Some(prefix) = super::util::user_package_prefix(&self.module_name) {
-            format!("{prefix}{snake}")
+        } else if let beamtalk_core::semantic_analysis::PackageId::Package(name) = pkg {
+            format!("bt@{name}@{snake}")
         } else {
             format!("bt@{snake}")
         }
     }
 
     /// Computes the compiled module name for a package-qualified class reference
-    /// (ADR 0070 Phase 2).
+    /// (ADR 0070 Phase 2; registry lookup per ADR 0119 / BT-3436).
     ///
     /// When a class reference has an explicit package qualifier (e.g., `json@Parser`),
-    /// the module name is deterministic: `bt@{package}@{snake_case}`. This bypasses
-    /// the `class_module_index` and heuristic resolution used by `compiled_module_name`.
+    /// first queries the registry under the *referenced* package's `PackageId` —
+    /// closing the divergence where a qualified reference to a class in a
+    /// package subdirectory used to disagree with the same class's unqualified
+    /// resolution (ADR 0119 Context item 5). On a registry miss, falls back to
+    /// `resolve_qualified_module_name`'s deterministic `bt@{package}@{snake_case}`
+    /// composition — `resolve_qualified_module_name` itself is unchanged; its
+    /// `None`-arm contract is deliberate and tested (ADR 0119 Decision).
     ///
     /// When no package qualifier is present (`package` is `None`), falls back to
     /// `compiled_module_name` for backward-compatible resolution.
@@ -3715,7 +3418,15 @@ impl CoreErlangGenerator {
         package: Option<&str>,
     ) -> String {
         match package {
-            Some(pkg) => beamtalk_core::ast::resolve_qualified_module_name(class_name, Some(pkg)),
+            Some(pkg) => {
+                let target = beamtalk_core::semantic_analysis::PackageId::Package(pkg.to_string());
+                self.class_module_registry()
+                    .module_for_class(&target, class_name)
+                    .map_or_else(
+                        || beamtalk_core::ast::resolve_qualified_module_name(class_name, Some(pkg)),
+                        |module| module.as_str().to_string(),
+                    )
+            }
             None => self.compiled_module_name(class_name),
         }
     }
@@ -3791,7 +3502,7 @@ impl CoreErlangGenerator {
         let method_branches = self.generate_dispatch_method_branches(class, &mod_name);
 
         // BT-1763: Check whether this class has a catch-all DNU handler.
-        let has_catch_all_dnu = Self::class_has_catch_all_dnu(class);
+        let has_catch_all_dnu = dispatch_spec::class_has_catch_all_dnu(class);
 
         // Default case: extension fallback, then superclass delegation (or DNU)
         let not_found_branch: Document<'static> = if has_catch_all_dnu {
@@ -4212,20 +3923,21 @@ impl CoreErlangGenerator {
         indent: &str,
     ) -> Document<'static> {
         let hint = format!("Expected {expected_arity} argument(s) for {selector}");
-        let indent_doc = || leaf::var(indent.to_string());
-        let selector_doc = || leaf::var(selector.to_string());
+        let sep = docvec!["\n", leaf::var(indent.to_string())];
         docvec![
-            indent_doc(),
-            "let <ArErr0> = call 'beamtalk_error':'new'('arity_mismatch', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n",
-            indent_doc(),
-            "let <ArErr1> = call 'beamtalk_error':'with_selector'(ArErr0, ",
-            selector_doc(),
-            ") in\n",
-            indent_doc(),
-            "let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, ",
-            leaf::binary_lit(hint),
-            ") in\n",
-            indent_doc(),
+            leaf::var(indent.to_string()),
+            super::errors::beamtalk_error_doc(
+                Document::Str("<ArErr0>"),
+                Document::Str("ArErr0"),
+                Document::Str("<ArErr1>"),
+                Document::Str("ArErr1"),
+                Document::Str("<ArErr2>"),
+                "arity_mismatch",
+                Document::Str("call 'beamtalk_tagged_map':'class_of'(State, 'Object')"),
+                leaf::var(selector.to_string()),
+                leaf::binary_lit(hint),
+                sep,
+            ),
             "{'error', ArErr2, State}",
         ]
     }
@@ -4238,20 +3950,21 @@ impl CoreErlangGenerator {
         hint_msg: &str,
         indent: &str,
     ) -> Document<'static> {
-        let indent_doc = || leaf::var(indent.to_string());
-        let selector_doc = || leaf::var(selector.to_string());
+        let sep = docvec!["\n", leaf::var(indent.to_string())];
         docvec![
-            indent_doc(),
-            "let <TyErr0> = call 'beamtalk_error':'new'('type_error', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n",
-            indent_doc(),
-            "let <TyErr1> = call 'beamtalk_error':'with_selector'(TyErr0, ",
-            selector_doc(),
-            ") in\n",
-            indent_doc(),
-            "let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, ",
-            leaf::binary_lit(hint_msg),
-            ") in\n",
-            indent_doc(),
+            leaf::var(indent.to_string()),
+            super::errors::beamtalk_error_doc(
+                Document::Str("<TyErr0>"),
+                Document::Str("TyErr0"),
+                Document::Str("<TyErr1>"),
+                Document::Str("TyErr1"),
+                Document::Str("<TyErr2>"),
+                "type_error",
+                Document::Str("call 'beamtalk_tagged_map':'class_of'(State, 'Object')"),
+                leaf::var(selector.to_string()),
+                leaf::binary_lit(hint_msg),
+                sep,
+            ),
             "{'error', TyErr2, State}",
         ]
     }
@@ -4270,13 +3983,23 @@ impl CoreErlangGenerator {
 
         // BT-1763: If the class has a catch-all DNU handler, it accepts any
         // selector — return true unconditionally.
-        let has_catch_all_dnu = Self::class_has_catch_all_dnu(class);
+        let has_catch_all_dnu = dispatch_spec::class_has_catch_all_dnu(class);
         if has_catch_all_dnu {
-            return Ok(docvec![
-                "'has_method'/1 = fun (_Selector) ->\n",
-                "    'true'\n",
-                "\n",
-            ]);
+            return Ok(dispatch_spec::generate_has_method_from_spec(
+                &[],
+                &DispatchSpec {
+                    reflection: &[],
+                    class_name: &class_name,
+                    superclass: None,
+                    dnu: true,
+                    auto_slots: None,
+                    // BT-3482: value types delegate via SuperclassDelegation::Static
+                    // (a compile-time module call, not a live registry walk),
+                    // so they don't have the class_chain_step re-entrant-walk
+                    // cost the local probe exists to avoid — out of scope here.
+                    emit_local_probe: false,
+                },
+            ));
         }
 
         // BT-447: Class-methods-only classes delegate directly to superclass —
@@ -4287,18 +4010,18 @@ impl CoreErlangGenerator {
             return self.generate_minimal_has_method(class);
         }
 
-        // Build list of all known selectors
-        let mut selectors: Vec<Document<'static>> = vec![
-            Document::Str("'class'"),
-            Document::Str("'respondsTo:'"),
-            Document::Str("'fieldNames'"),
-            Document::Str("'fieldAt:'"),
-            Document::Str("'fieldAt:put:'"),
-            Document::Str("'perform:'"),
-            Document::Str("'perform:withArguments:'"),
+        // Build the reflection selector list — the seven hard-coded
+        // dispatch/3 arms, plus the default `asString` dispatch/3 generates
+        // for classes that don't define it themselves.
+        let mut reflection: Vec<&'static str> = vec![
+            "class",
+            "respondsTo:",
+            "fieldNames",
+            "fieldAt:",
+            "fieldAt:put:",
+            "perform:",
+            "perform:withArguments:",
         ];
-
-        // Include default asString if dispatch/3 generates one
         let has_explicit_as_string = self
             .semantic_facts
             .class_facts(&class_name)
@@ -4309,55 +4032,26 @@ impl CoreErlangGenerator {
                 "True" | "False" | "UndefinedObject" | "Block"
             )
         {
-            selectors.push(Document::Str("'asString'"));
+            reflection.push("asString");
         }
 
-        // Add class-defined methods
-        for method in &class.methods {
-            let mangled = method.selector.name().to_string();
-            selectors.push(leaf::atom(mangled));
-        }
+        let own_methods: Vec<String> = class
+            .methods
+            .iter()
+            .map(|m| m.selector.name().to_string())
+            .collect();
 
-        // BT-923: Add auto-generated getter and with*: setter selectors
-        if let Some(auto) = auto_methods {
-            for field in &auto.getters {
-                selectors.push(leaf::atom(field.clone()));
-            }
-            for field in &auto.setters {
-                let with_sel = AutoSlotMethods::with_star_selector(field);
-                selectors.push(leaf::atom(with_sel));
-            }
-        }
-
-        let false_branch: Document<'static> = if let Some(ref super_mod) = superclass_mod {
-            docvec![
-                "<'false'> when 'true' -> call ",
-                leaf::atom(super_mod.clone()),
-                ":'has_method'(Selector)\n",
-            ]
-        } else {
-            Document::Str("<'false'> when 'true' -> 'false'\n")
-        };
-
-        let doc = docvec![
-            "'has_method'/1 = fun (Selector) ->\n",
-            "    case call 'lists':'member'(Selector, [",
-            join(selectors, &Document::Str(", ")),
-            "]) of\n",
-            "        <'true'> when 'true' -> 'true'\n",
-            "        <'false'> when 'true' ->\n",
-            "            case call 'beamtalk_extensions':'has'(",
-            leaf::atom(class_name),
-            ", Selector) of\n",
-            "                <'true'> when 'true' -> 'true'\n",
-            "                ",
-            false_branch,
-            "            end\n",
-            "    end\n",
-            "\n",
-        ];
-
-        Ok(doc)
+        Ok(dispatch_spec::generate_has_method_from_spec(
+            &own_methods,
+            &DispatchSpec {
+                reflection: &reflection,
+                class_name: &class_name,
+                superclass: superclass_mod.as_deref().map(SuperclassDelegation::Static),
+                dnu: false,
+                auto_slots: auto_methods,
+                emit_local_probe: false,
+            },
+        ))
     }
 
     /// BT-447: Generates a minimal `dispatch/3` for classes with no instance methods.
@@ -4437,322 +4131,19 @@ impl CoreErlangGenerator {
             .superclass_module_name(class.superclass_name())
             .expect("minimal has_method requires superclass");
 
-        let doc = docvec![
-            "'has_method'/1 = fun (Selector) ->\n",
-            "    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'perform:', 'perform:withArguments:']) of\n",
-            "        <'true'> when 'true' -> 'true'\n",
-            "        <'false'> when 'true' ->\n",
-            "            case call 'beamtalk_extensions':'has'(",
-            leaf::atom(class_name),
-            ", Selector) of\n",
-            "                <'true'> when 'true' -> 'true'\n",
-            "                <'false'> when 'true' -> call ",
-            leaf::atom(super_mod),
-            ":'has_method'(Selector)\n",
-            "            end\n",
-            "    end\n",
-            "\n",
-        ];
-
-        Ok(doc)
+        Ok(dispatch_spec::generate_has_method_from_spec(
+            &[],
+            &DispatchSpec {
+                reflection: &["class", "respondsTo:", "perform:", "perform:withArguments:"],
+                class_name: &class_name,
+                superclass: Some(SuperclassDelegation::Static(&super_mod)),
+                dnu: false,
+                auto_slots: None,
+                emit_local_probe: false,
+            },
+        ))
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::core_erlang::CoreErlangGenerator;
-    use crate::core_erlang::value_type_codegen::{AutoSlotMethods, compute_auto_slot_methods};
-    use beamtalk_core::ast::{
-        ClassDefinition, ClassKind, DeclaredKeyword, Identifier, Literal, Module, StateDeclaration,
-    };
-    use beamtalk_core::source_analysis::Span;
-    use beamtalk_core::test_helpers::test_support::make_actor_class;
-
-    fn s() -> Span {
-        Span::new(0, 0)
-    }
-
-    fn make_value_class(name: &str, slots: &[&str]) -> ClassDefinition {
-        let state = slots
-            .iter()
-            .map(|slot_name| StateDeclaration {
-                name: Identifier::new(*slot_name, s()),
-                type_annotation: None,
-                default_value: Some(beamtalk_core::ast::Expression::Literal(
-                    Literal::Integer(0),
-                    s(),
-                )),
-                expect: None,
-                comments: beamtalk_core::ast::CommentAttachment::default(),
-                doc_comment: None,
-                declared_keyword: DeclaredKeyword::default(),
-                span: s(),
-            })
-            .collect();
-        let mut class = ClassDefinition::new(
-            Identifier::new(name, s()),
-            Identifier::new("Value", s()),
-            state,
-            vec![],
-            s(),
-        );
-        // Explicitly set class_kind to avoid relying on constructor inference
-        class.class_kind = ClassKind::Value;
-        class
-    }
-
-    #[test]
-    fn test_with_star_selector_single_char() {
-        assert_eq!(AutoSlotMethods::with_star_selector("x"), "withX:");
-    }
-
-    #[test]
-    fn test_with_star_selector_multi_char() {
-        assert_eq!(
-            AutoSlotMethods::with_star_selector("firstName"),
-            "withFirstName:"
-        );
-    }
-
-    #[test]
-    fn test_compute_auto_slot_methods_actor_returns_none() {
-        let class = make_actor_class("Counter");
-        assert!(
-            compute_auto_slot_methods(&class).is_none(),
-            "actor classes should not get auto slot methods"
-        );
-    }
-
-    #[test]
-    fn test_compute_auto_slot_methods_value_class_returns_getters_setters() {
-        let class = make_value_class("Point", &["x", "y"]);
-        let auto = compute_auto_slot_methods(&class).unwrap();
-        assert!(auto.getters.contains(&"x".to_string()));
-        assert!(auto.getters.contains(&"y".to_string()));
-        assert!(auto.setters.contains(&"x".to_string()));
-        assert!(auto.setters.contains(&"y".to_string()));
-    }
-
-    #[test]
-    fn test_compute_auto_slot_methods_keyword_constructor() {
-        let class = make_value_class("Point", &["x", "y"]);
-        let auto = compute_auto_slot_methods(&class).unwrap();
-        assert_eq!(
-            auto.keyword_constructor,
-            Some("x:y:".to_string()),
-            "should generate keyword constructor selector from slot names"
-        );
-    }
-
-    #[test]
-    fn test_compute_auto_slot_methods_no_slots() {
-        let class = make_value_class("Empty", &[]);
-        let auto = compute_auto_slot_methods(&class).unwrap();
-        assert!(auto.getters.is_empty());
-        assert!(auto.setters.is_empty());
-        assert!(auto.keyword_constructor.is_none());
-    }
-
-    // ─── BT-2998: opaque `native:` representations ──────────────────────────
-
-    fn parse_one_class(source: &str) -> ClassDefinition {
-        beamtalk_core::test_helpers::test_support::parse_bt(source)
-            .classes
-            .into_iter()
-            .next()
-            .expect("source should declare a class")
-    }
-
-    #[test]
-    fn test_bt_2998_has_opaque_native_representation() {
-        use super::has_opaque_native_representation;
-
-        // `native:` + no declared fields — nothing for `basicNew` to build.
-        assert!(has_opaque_native_representation(&parse_one_class(
-            "Value subclass: Uuid native: beamtalk_uuid\n  version -> Integer => self delegate\n"
-        )));
-        // `native:` but carrying its own fields (`Package`, `SupervisionNode`).
-        assert!(!has_opaque_native_representation(&parse_one_class(
-            "Value subclass: Package native: beamtalk_package\n  field: name = nil\n"
-        )));
-        // Plain value type — the ordinary `basicNew` case.
-        assert!(!has_opaque_native_representation(&parse_one_class(
-            "Value subclass: Point\n  field: x = 0\n"
-        )));
-        // Fieldless *non*-native class: `~{'$beamtalk_class' => 'X'}~` is its
-        // complete and correct instance, so it stays constructible.
-        assert!(!has_opaque_native_representation(&parse_one_class(
-            "Value subclass: Marker\n  isMarker -> Boolean => true\n"
-        )));
-    }
-
-    #[test]
-    fn test_bt_2998_constructor_selectors_filter_by_return_type() {
-        use super::native_constructor_selectors;
-
-        let class = parse_one_class(concat!(
-            "Value subclass: DateTime native: beamtalk_datetime\n",
-            "  class new: _ :: Object -> Nil => self error: \"nope\"\n",
-            "  class sealed now -> DateTime => self delegate\n",
-            "  class sealed monotonicNow -> Integer => self delegate\n",
-            "  class sealed year: y :: Integer month: m :: Integer -> DateTime => self delegate\n",
-            "  class sealed parse: s :: String -> Result(DateTime, Error) => self delegate\n",
-            "  year -> Integer => self delegate\n",
-        ));
-        assert_eq!(
-            native_constructor_selectors(&class, "new"),
-            vec![
-                "now".to_string(),
-                "year:month:".to_string(),
-                "parse:".to_string(),
-            ],
-            "only class methods returning the class (directly or nested in a \
-             generic) count; `monotonicNow`, the `-> Nil` `new:` refusal and \
-             the instance-side `year` do not"
-        );
-    }
-
-    #[test]
-    fn test_bt_2998_constructor_selectors_keep_the_other_new() {
-        use super::native_constructor_selectors;
-
-        // `Queue` declares a working `new` but no `new:`, so its `new:`
-        // refusal must point back at `Queue new` rather than claim it has no
-        // constructor at all.
-        let class = parse_one_class(concat!(
-            "Value subclass: Queue native: beamtalk_queue\n",
-            "  class sealed new -> Queue => self delegate\n",
-        ));
-        assert_eq!(
-            native_constructor_selectors(&class, "new:"),
-            vec!["new".to_string()]
-        );
-        assert!(native_constructor_selectors(&class, "new").is_empty());
-    }
-
-    #[test]
-    fn test_bt_2998_constructor_selectors_empty_for_namespace_class() {
-        use super::native_constructor_selectors;
-
-        // Namespace-style native classes (`Console`, `System`, …) have no
-        // constructor to point at.
-        let class = parse_one_class(concat!(
-            "Object subclass: Console native: beamtalk_console\n",
-            "  class sealed log: msg :: String -> Nil => self delegate\n",
-        ));
-        assert!(native_constructor_selectors(&class, "new").is_empty());
-    }
-
-    #[test]
-    fn test_bt_2998_native_new_error_hint_names_constructors() {
-        let class = parse_one_class(concat!(
-            "Value subclass: Uuid native: beamtalk_uuid\n",
-            "  class sealed v4 -> Uuid => self delegate\n",
-            "  class sealed fromString: s :: String -> Uuid => self delegate\n",
-        ));
-        let hint = CoreErlangGenerator::native_new_error_hint(&class, "new");
-        assert_eq!(
-            hint,
-            "Uuid instances are built by the beamtalk_uuid module, not from field \
-             defaults — `new` cannot produce a usable one. Use one of: Uuid v4, \
-             Uuid fromString:"
-        );
-    }
-
-    #[test]
-    fn test_bt_2998_native_new_error_hint_without_constructors() {
-        let class = parse_one_class(concat!(
-            "Object subclass: Console native: beamtalk_console\n",
-            "  class sealed log: msg :: String -> Nil => self delegate\n",
-        ));
-        let hint = CoreErlangGenerator::native_new_error_hint(&class, "new:");
-        assert!(
-            hint.ends_with("`new:` cannot produce a usable one. It has no class-side constructor."),
-            "hint should say there is no constructor. Got: {hint}"
-        );
-    }
-
-    #[test]
-    fn test_bt_2998_native_new_error_hint_caps_long_constructor_lists() {
-        use std::fmt::Write as _;
-
-        let mut source = String::from("Value subclass: Wide native: beamtalk_wide\n");
-        for i in 0..(super::MAX_HINTED_CONSTRUCTORS + 3) {
-            let _ = writeln!(source, "  class sealed make{i} -> Wide => self delegate");
-        }
-        let hint = CoreErlangGenerator::native_new_error_hint(&parse_one_class(&source), "new");
-        assert!(
-            hint.contains("Wide make0, ") && hint.ends_with(", and 3 more"),
-            "hint should cap the list and count the remainder. Got: {hint}"
-        );
-        assert!(
-            !hint.contains("Wide make6"),
-            "hint should not list beyond the cap. Got: {hint}"
-        );
-    }
-
-    #[test]
-    fn test_generate_value_type_module_includes_class_name() {
-        let class = make_value_class("Point", &["x", "y"]);
-        let module = Module {
-            classes: vec![class],
-            method_definitions: Vec::new(),
-            protocols: Vec::new(),
-            type_aliases: Vec::new(),
-            native_declarations: Vec::new(),
-            expressions: Vec::new(),
-            span: s(),
-            file_leading_comments: vec![],
-            file_trailing_comments: Vec::new(),
-        };
-        let mut generator = CoreErlangGenerator::new("point");
-        let doc = generator.generate_value_type_module(&module).unwrap();
-        let output = doc.to_pretty_string();
-        assert!(
-            output.contains("'Point'"),
-            "generated module should reference class name. Got: {output}"
-        );
-        assert!(
-            output.contains("'new'"),
-            "generated module should include new constructor. Got: {output}"
-        );
-    }
-
-    /// BT-3085: `STDLIB_CLASS_NAMES` (this module's `build.rs`-generated
-    /// constant, a raw scan of every `stdlib/src/*.bt` file stem — including
-    /// protocol-only files like `Printable.bt`/`JsonRepresentable.bt` that
-    /// declare no class) must be a superset of every real built-in class
-    /// (`ClassHierarchy::with_builtins()`, built from
-    /// `generated_builtins.rs::is_generated_builtin_class` — the richer,
-    /// `beamtalk build-stdlib`-generated table of *actual* classes).
-    ///
-    /// The one expected exception is `'Future'`: a runtime-only built-in
-    /// with no `stdlib/src/Future.bt` source (see `builtins.rs::is_builtin_class`'s
-    /// doc), so it can never appear in a directory scan.
-    ///
-    /// This is a superset check, not equality, because `STDLIB_CLASS_NAMES`
-    /// also contains protocol-only file stems that never become classes —
-    /// asserting equality would make this test fail on every new protocol
-    /// file. What must never happen is a real class silently missing from
-    /// `STDLIB_CLASS_NAMES`, which would make `is_known_stdlib_type` emit the
-    /// wrong `bt@{snake}` (non-stdlib) module prefix for it instead of
-    /// `bt@stdlib@{snake}`.
-    #[test]
-    fn test_stdlib_class_names_superset_of_builtin_classes() {
-        use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
-
-        let hierarchy = ClassHierarchy::with_builtins();
-        for name in hierarchy.class_names() {
-            if name == "Future" {
-                continue;
-            }
-            assert!(
-                super::STDLIB_CLASS_NAMES.contains(&name.as_str()),
-                "built-in class '{name}' is missing from build.rs's \
-                 STDLIB_CLASS_NAMES (stdlib/src/*.bt directory scan) — expected \
-                 every real generated_builtins.rs class to have a matching \
-                 stdlib/src/{name}.bt file"
-            );
-        }
-    }
-}
+mod tests;

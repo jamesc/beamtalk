@@ -215,7 +215,7 @@ fn test_return_type_no_annotation_no_warning() {
 #[test]
 fn test_expect_dnu_suppresses_dnu_warning() {
     // @expect dnu before a DNU-producing send suppresses the hint.
-    // Real-world use: `self species withAll: result` in Collection.bt.
+    // Real-world use: `self species withAll: result` in collection.bt.
     // Spans must be real for apply_expect_directives to match by span.
     let hierarchy = ClassHierarchy::with_builtins();
 

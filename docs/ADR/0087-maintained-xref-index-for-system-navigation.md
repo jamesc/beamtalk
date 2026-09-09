@@ -35,7 +35,7 @@ Wave 5 (2 parallel): BT-2301   BT-2303
 ```
 
 File-overlap constraints:
-- BT-2302 and BT-2303 both touch `stdlib/src/SystemNavigation.bt` — serialized across waves 4 and 5.
+- BT-2302 and BT-2303 both touch `stdlib/src/system_navigation.bt` — serialized across waves 4 and 5.
 - BT-2300 and BT-2301 both touch `runtime/apps/beamtalk_runtime/src/beamtalk_xref.erl` API surface — serialized across waves 4 and 5.
 
 **Status moved to `Implemented` with BT-2304 (Phase 6).** Phase 6 lit up the
@@ -55,7 +55,7 @@ Every `SystemNavigation` query that needs AST information — `sendersOf:`,
 the runtime→compiler process boundary on each method:
 
 ```text
-SystemNavigation.bt
+system_navigation.bt
   └── (Erlang beamtalk_interface) findSendersIn:selector:        [BT]
         └── beamtalk_interface                                    [Erlang]
               └── beamtalk_compiler:find_senders_in_source/2      [Erlang]
@@ -66,7 +66,7 @@ SystemNavigation.bt
 
 Each query's own docstring already flags this:
 "a maintained `selector -> [sites]` index is a follow-up optimization"
-(`stdlib/src/SystemNavigation.bt:303-306`). At a workspace scale of a few
+(`stdlib/src/system_navigation.bt:303-306`). At a workspace scale of a few
 hundred classes, `sendersOf:` takes seconds per call — fine for an
 on-demand IDE pane, untenable for live-highlight, hover-driven incoming
 calls, or a typo lint that wants to run on every save.
@@ -741,7 +741,7 @@ BT-2228 acceptance criteria. Key entry points:
 - `runtime/apps/beamtalk_runtime/src/beamtalk_class_builder.erl` —
   feeds `methodSource:` per-method source into the xref during install
   (riding through `beamtalk_object_class:start/2`'s `ClassInfo`).
-- `stdlib/src/SystemNavigation.bt` — repoint migrated queries at
+- `stdlib/src/system_navigation.bt` — repoint migrated queries at
   `(Erlang beamtalk_xref) sendersOf:` etc., keeping the on-miss
   fallback to the existing source-scan helpers.
 
@@ -776,5 +776,5 @@ appear in results). Tests assert the additions explicitly.
   owner provenance), 0082 (method-level edit and save — `put_method/4`
   invocation surface), 0084 (class-side runtime method-fun dispatch —
   sourceless-fun edge case)
-- Documentation: `stdlib/src/SystemNavigation.bt`,
+- Documentation: `stdlib/src/system_navigation.bt`,
   `docs/development/surface-parity.md`

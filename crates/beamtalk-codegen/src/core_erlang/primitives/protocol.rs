@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Maps `@primitive "protocolXxx"` declarations in `stdlib/src/Protocol.bt`
+//! Maps `@primitive "protocolXxx"` declarations in `stdlib/src/protocol.bt`
 //! to direct calls into `beamtalk_protocol_registry`.
 
 use beamtalk_cerl_doc::Document;
@@ -14,7 +14,7 @@ use beamtalk_cerl_doc::leaf;
 
 /// Generates Core Erlang for a Protocol class method primitive.
 ///
-/// These back the `@primitive "protocolXxx"` class method bodies in `Protocol.bt`.
+/// These back the `@primitive "protocolXxx"` class method bodies in `protocol.bt`.
 /// Each maps to a direct call to `beamtalk_protocol_registry:Func(Arg)`.
 pub fn generate_protocol_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {

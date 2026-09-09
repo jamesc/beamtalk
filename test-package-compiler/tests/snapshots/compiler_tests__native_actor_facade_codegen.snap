@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, 'has_method'/1, 'method_table'/0, 'class_name'/0, 'superclass'/0, 'dispatch_doWork'/1, 'dispatch_compute:'/2, 'dispatch_ping:'/2, '__beamtalk_meta'/0, 'register_class'/0]
+module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, 'has_method'/1, 'method_table'/0, 'class_name'/0, 'superclass'/0, 'dispatch_doWork'/1, 'dispatch_compute:'/2, 'dispatch_ping:'/2, '__beamtalk_meta'/0, 'has_method_local'/1, 'register_class'/0]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'NativeWorker', 'Actor'}]]
 
@@ -71,7 +71,24 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, 'has_metho
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, ['doWork', 'compute:', 'ping:'])
+    case call 'lists':'member'(Selector, ['doWork', 'compute:', 'ping:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('NativeWorker', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
+            end
+    end
+
+'has_method_local'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['doWork', 'compute:', 'ping:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('NativeWorker', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> 'false'
+            end
+    end
 
 
 'dispatch_doWork'/1 = fun (Self) ->

@@ -145,15 +145,25 @@ describe("WorkspaceClient.classes()", () => {
 
     respondTo(ws, {
       class_list: [
-        { name: "Counter", source_file: "/p/Counter.bt", actor_count: 2 },
-        { name: "Stack", source_file: null, actor_count: 0 },
+        {
+          name: "Counter",
+          source_file: "/p/Counter.bt",
+          actor_count: 2,
+          source_origin: "project",
+        },
+        { name: "Stack", source_file: null, actor_count: 0, source_origin: null },
       ],
     });
 
     const result = await promise;
     expect(result).toEqual([
-      { name: "Counter", source_file: "/p/Counter.bt", actor_count: 2 },
-      { name: "Stack", source_file: undefined, actor_count: 0 },
+      {
+        name: "Counter",
+        source_file: "/p/Counter.bt",
+        actor_count: 2,
+        source_origin: "project",
+      },
+      { name: "Stack", source_file: undefined, actor_count: 0, source_origin: undefined },
     ]);
     client.dispose();
   });
@@ -425,10 +435,10 @@ describe("WorkspaceClient.methods()", () => {
 
     respondTo(ws, {
       methods: [
-        { name: "increment", selector: "increment", side: "instance" },
-        { name: "new", selector: "new", side: "class" },
+        { name: "increment", selector: "increment", side: "instance", line: 14 },
+        { name: "new", selector: "new", side: "class", line: null },
       ],
-      state_vars: ["count"],
+      state_vars: [{ name: "count", line: 5 }],
     });
 
     const result = await promise;
@@ -437,8 +447,27 @@ describe("WorkspaceClient.methods()", () => {
       name: "increment",
       selector: "increment",
       side: "instance",
+      line: 14,
     });
-    expect(result.stateVars).toEqual([{ name: "count" }]);
+    expect(result.stateVars).toEqual([{ name: "count", line: 5 }]);
+    client.dispose();
+  });
+
+  it("normalizes a missing/null line to undefined (BT-3439)", async () => {
+    // A class predating the line-tracking feature, or ClassBuilder-built —
+    // the server sends `line: null` (or omits the key); callers must see
+    // `undefined`, not `null`, for a single `??`/optional-chaining check.
+    const { client, ws } = makeConnectedClient();
+
+    const promise = client.methods("LegacyWidget");
+    respondTo(ws, {
+      methods: [{ name: "render", selector: "render", side: "instance", line: null }],
+      state_vars: [{ name: "width" }],
+    });
+
+    const result = await promise;
+    expect(result.methods[0].line).toBeUndefined();
+    expect(result.stateVars[0].line).toBeUndefined();
     client.dispose();
   });
 });

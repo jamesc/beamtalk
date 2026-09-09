@@ -10,7 +10,7 @@
 // beamtalk_dispatch:lookup/5 an external send uses), so this is a regression
 // test pinning already-correct behavior rather than a fix.
 //
-// See fixtures/bt3202_instance_self_extension.bt for the host class whose
+// See fixtures/bt3202self_ext_host.bt for the host class whose
 // `callSelfExtension` instance method does the self-send.
 
 TestCase subclass: InstanceSelfDispatchExtensionTest

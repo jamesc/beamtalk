@@ -26,13 +26,13 @@ This ADR decides how much of that hierarchy Beamtalk should adopt, given the con
 
 ### Current state (at time of decision)
 
-- `Collection.bt` — abstract superclass, `do:` and `size` as subclass-responsibility, 12 pure-BT shared methods (ADR-0034 Phase 2b, BT-815)
-- `List.bt` — `sealed Collection subclass: List`, Erlang linked list
-- `Set.bt` — `sealed Collection subclass: Set`, Erlang ordsets
-- `Dictionary.bt` — `sealed Collection subclass: Dictionary`, Erlang map
-- `Tuple.bt` — `sealed Collection subclass: Tuple`, Erlang tuple
-- `String.bt` — `sealed Collection subclass: String`, Erlang binary, grapheme-cluster elements
-- No `SequenceableCollection.bt`; precedent set by `Number.bt` for value-type abstract superclass pattern
+- `collection.bt` — abstract superclass, `do:` and `size` as subclass-responsibility, 12 pure-BT shared methods (ADR-0034 Phase 2b, BT-815)
+- `list.bt` — `sealed Collection subclass: List`, Erlang linked list
+- `set.bt` — `sealed Collection subclass: Set`, Erlang ordsets
+- `dictionary.bt` — `sealed Collection subclass: Dictionary`, Erlang map
+- `tuple.bt` — `sealed Collection subclass: Tuple`, Erlang tuple
+- `string.bt` — `sealed Collection subclass: String`, Erlang binary, grapheme-cluster elements
+- No `SequenceableCollection.bt`; precedent set by `number.bt` for value-type abstract superclass pattern
 
 ### Constraints
 
@@ -412,7 +412,7 @@ Pharo's `species` method returns the appropriate result class so `aSet collect: 
 
 ### Neutral
 - Five sealed concrete types: `List`, `Set`, `Dictionary`, `Tuple`, `String` — no new concrete types needed for v0.1
-- Bootstrap ordering unchanged — `Collection.bt` loads after `Object.bt`, before concrete collection types
+- Bootstrap ordering unchanged — `collection.bt` loads after `object.bt`, before concrete collection types
 
 ## Implementation
 
@@ -422,14 +422,14 @@ This ADR documents decisions that are **already implemented** as of 2026-02-23. 
 |-------|-------|--------|-------------|
 | Hierarchy structure | BT-443 (this ADR) | ✅ Accepted | Design decision documented |
 | `addFirst:` primitive | BT-814 | ✅ Implemented | O(1) list cons for accumulator pattern |
-| Abstract Collection protocol | BT-815 | ✅ Implemented | 10 pure-BT methods on `Collection.bt` |
-| `Number.bt` precedent | BT-334 | ✅ Implemented | Abstract numeric superclass pattern |
+| Abstract Collection protocol | BT-815 | ✅ Implemented | 10 pure-BT methods on `collection.bt` |
+| `number.bt` precedent | BT-334 | ✅ Implemented | Abstract numeric superclass pattern |
 
 All ADR-0034 implementation work is now complete:
 
 | Phase | Issue | Status | Description |
 |-------|-------|--------|-------------|
-| Phase 1 | BT-813 | ✅ Done | `Future.bt` and `FileHandle.bt` as `@primitive` stubs |
+| Phase 1 | BT-813 | ✅ Done | `Future.bt` and `file_handle.bt` as `@primitive` stubs |
 | Phase 2a | BT-814 | ✅ Done | `addFirst:` O(1) list cons primitive |
 | Phase 2b | BT-815 | ✅ Done | Abstract Collection protocol in pure Beamtalk |
 | Phase 3 | BT-816 | ✅ Done | Self-host `List` algorithmic ops (`indexOf:`, `eachWithIndex:`) |

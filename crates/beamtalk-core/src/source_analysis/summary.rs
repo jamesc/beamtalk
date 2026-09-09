@@ -155,6 +155,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::Inheritance => "Inheritance",
         DiagnosticCategory::Sendability => "Sendability",
         DiagnosticCategory::NativeDeclarationLocation => "NativeDeclarationLocation",
+        DiagnosticCategory::FileClassNameMismatch => "FileClassNameMismatch",
     }
 }
 

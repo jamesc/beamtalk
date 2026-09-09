@@ -1537,7 +1537,7 @@ mod tests {
 
     #[test]
     fn definition_unary_selector_span_skips_class_sealed_modifiers() {
-        // Real stdlib shape (`Actor.bt`'s `class sealed spawn`): the bare
+        // Real stdlib shape (`actor.bt`'s `class sealed spawn`): the bare
         // selector token has no dedicated AST span, so this exercises the
         // modifier-skipping re-lex.
         let src = "Object subclass: Counter\n  class sealed reset => self\n";

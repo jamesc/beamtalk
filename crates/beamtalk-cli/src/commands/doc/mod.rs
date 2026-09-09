@@ -319,9 +319,9 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         fs::create_dir_all(dir.join("collections/ordered")).unwrap();
-        fs::write(dir.join("Object.bt"), "// stub").unwrap();
-        fs::write(dir.join("collections/Array.bt"), "// stub").unwrap();
-        fs::write(dir.join("collections/ordered/List.bt"), "// stub").unwrap();
+        fs::write(dir.join("object.bt"), "// stub").unwrap();
+        fs::write(dir.join("collections/array.bt"), "// stub").unwrap();
+        fs::write(dir.join("collections/ordered/list.bt"), "// stub").unwrap();
 
         let files = find_source_files(&dir).unwrap();
         assert_eq!(

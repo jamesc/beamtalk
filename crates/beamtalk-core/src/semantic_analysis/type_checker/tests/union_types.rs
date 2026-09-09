@@ -331,6 +331,123 @@ fn union_receiver_nullable_hint_with_non_nil_missing() {
     );
 }
 
+/// BT-3469: the single-culprit union DNU now reuses
+/// `validation.rs::emit_unknown_selector_warning`, which gives union sends a
+/// "did you mean" suggestion for the first time — previously
+/// `infer_union_message_send` built its own message with only a generic
+/// `respondsTo:` hint, never a per-selector suggestion. `String | Nil`
+/// collapses to a single checked member (Nil is skipped), so this exercises
+/// the reused single-subject path, not the multi-member combined message.
+///
+/// Pins the exact message shape: reusing `emit_unknown_selector_warning`
+/// must not silently drop the `(in union ...)` context suffix every union
+/// DNU carried before this change (and that the multi-culprit branch still
+/// builds) — a code-review finding on the PR that introduced this reuse.
+/// Both the union context and the new suggestion must be present together.
+#[test]
+fn union_receiver_single_culprit_dnu_keeps_union_context_and_did_you_mean() {
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("reverssed".into()),
+            vec![],
+        ))],
+        span(),
+    );
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local(
+        "x",
+        InferredType::simple_union(&["String", "UndefinedObject"]),
+    );
+
+    checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    let dnu: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert_eq!(
+        dnu.len(),
+        1,
+        "expected exactly one DNU diagnostic, got: {:?}",
+        checker.diagnostics()
+    );
+    assert_eq!(
+        dnu[0].message.as_str(),
+        "String does not understand 'reverssed' (in union String | Nil)",
+        "the single-culprit message must keep the same union-context \
+         suffix every union DNU carries — see the multi-culprit branch's \
+         message shape just below in the same function"
+    );
+    assert!(
+        dnu[0].hint.is_some(),
+        "union DNU should now carry a did-you-mean suggestion, matching a \
+         bare receiver's DNU: {dnu:?}"
+    );
+}
+
+/// A single-culprit union DNU whose selector has no similar selector on the
+/// culprit's class (`find_similar_selector` returns `None`) must still fall
+/// back to the generic `respondsTo:`/`@expect` hint — the same hint the
+/// multi-culprit branch a few lines below always attaches. Without the
+/// fallback, reusing `emit_unknown_selector_warning` for the single-culprit
+/// case means a "no suggestion" result leaves the diagnostic with no hint at
+/// all, an inconsistency with every other DNU shape (multi-culprit union, or
+/// single-culprit with a nearby selector).
+#[test]
+fn union_receiver_single_culprit_dnu_falls_back_to_generic_hint_with_no_suggestion() {
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("zzzzNoSuchSelectorAtAllzzzz".into()),
+            vec![],
+        ))],
+        span(),
+    );
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local(
+        "x",
+        InferredType::simple_union(&["String", "UndefinedObject"]),
+    );
+
+    checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    let dnu: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert_eq!(
+        dnu.len(),
+        1,
+        "expected exactly one DNU diagnostic, got: {:?}",
+        checker.diagnostics()
+    );
+    assert_eq!(
+        dnu[0].hint.as_deref(),
+        Some("Use `respondsTo:` to check before sending, or `@expect type` to suppress"),
+        "a single-culprit union DNU with no similar selector must still \
+         carry the generic hint, matching the multi-culprit branch: {dnu:?}"
+    );
+}
+
 /// BT-1572: No warning when all union members understand the selector.
 #[test]
 fn union_receiver_no_warning_when_all_understand() {
@@ -416,6 +533,105 @@ fn union_receiver_dynamic_member_no_warning() {
     assert!(
         matches!(ty, InferredType::Dynamic(_)),
         "Return type should be Dynamic when union contains Dynamic, got {ty:?}"
+    );
+}
+
+/// BT-3469: a union member whose ancestor chain is cross-file / unresolved
+/// (`ClassHierarchy::has_cross_file_parent`) is now downgraded to "uncertain"
+/// the same way a bare (non-union) receiver already is — routed through the
+/// shared `receiver_knowledge::classify_receiver` (ADR 0100 Rule 1) instead
+/// of `infer_union_message_send`'s own narrower "unknown class or DNU
+/// override only" check. Before this fix, a cross-file-parent member was
+/// wrongly treated as fully known: it was both named in the DNU message
+/// (the checker cannot actually see whether its unresolved ancestor defines
+/// the selector) and counted toward "no uncertainty", incorrectly promoting
+/// the diagnostic to `Warning` — ADR 0100 Rule 1's "provably failing union"
+/// row requires *no* uncertainty, and an unresolved ancestor is exactly the
+/// kind of incompleteness that row excludes.
+#[test]
+fn bt3469_union_member_with_cross_file_parent_downgrades_to_open() {
+    use crate::semantic_analysis::class_hierarchy::ClassInfo;
+    use std::collections::HashMap;
+
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![ClassInfo {
+        surface_incomplete: false,
+        name: "PartialA".into(),
+        // `MissingAncestor` is never registered — the checker cannot
+        // enumerate PartialA's full method surface.
+        superclass: Some("MissingAncestor".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        handle_scope: None,
+        state: vec![],
+        state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }]);
+
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("widgetize".into()),
+            vec![],
+        ))],
+        span(),
+    );
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    // `String` is closed-and-complete and genuinely doesn't understand
+    // `widgetize`; `PartialA` is the uncertain member.
+    env.set_local("x", InferredType::simple_union(&["PartialA", "String"]));
+
+    checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    let dnu: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert_eq!(
+        dnu.len(),
+        1,
+        "expected exactly one DNU diagnostic (for String only), got: {:?}",
+        checker.diagnostics()
+    );
+    // PartialA legitimately appears in the trailing `(in union ...)`
+    // context (it's still a real member of the union type), but the
+    // *subject* — who is being accused of not responding — must name only
+    // String; PartialA's surface is unresolved, so it must not be listed as
+    // a non-responder.
+    let subject = dnu[0]
+        .message
+        .split("does not understand")
+        .next()
+        .unwrap_or("");
+    assert!(
+        subject.contains("String") && !subject.contains("PartialA"),
+        "PartialA's surface is unresolved — it must not be named as a \
+         non-responder: {}",
+        dnu[0].message
+    );
+    assert_eq!(
+        dnu[0].severity,
+        crate::source_analysis::Severity::Hint,
+        "uncertainty (PartialA's unresolved ancestor) must keep this a Hint, \
+         not the 'provably failing' Warning: {dnu:?}"
     );
 }
 

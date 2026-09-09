@@ -36,7 +36,7 @@
 
 // ===========================================================================
 // BT-2938: a *stdlib-declared* alias (`type SupervisionStrategy = ...`,
-// `stdlib/src/Supervisor.bt`) resolves in this fresh session — which has
+// `stdlib/src/supervisor.bt`) resolves in this fresh session — which has
 // not typed a single `type` declaration yet — for both `:help` and a
 // `::`-typed local, exactly the way a compiled-in stdlib *class* already
 // resolves out of the box. Before this issue, `:help SupervisionStrategy`

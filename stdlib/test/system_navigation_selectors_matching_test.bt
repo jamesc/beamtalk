@@ -7,7 +7,7 @@
 //
 // `selectorsMatching:` is an instance method on `SystemNavigation`, reached
 // via the `default` (or future scoped) constructor. See the note in
-// `beamtalk_implementors_test.bt` for why the class side is constructors
+// `system_navigation_implementors_test.bt` for why the class side is constructors
 // only and queries live on the instance.
 //
 // Behavioural tests (case-insensitive substring match, class-side

@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3163: follow-up to BT-3161 — checks whether the two other call sites
+// generating a non-exhaustive-to-the-compiler boolean `case`
+// (`operators.rs::guarded_op_doc`'s runtime operator guard, and
+// `while_loops.rs`'s loop-condition dispatch) can reach the same erlc
+// `ambiguous_catch_try_state` beam_validator bug as a try body's last
+// statement.
+//
+// Finding: the comparison operator guard (`is_object`) IS reachable — see
+// stdlib/test/fixtures/bt3163comparison_guard_actor.bt — and is now fixed
+// with the same `case_clause_fallback` wildcard clause BT-3161 used. The
+// while-loop condition dispatch is NOT reachable (its case always lives
+// inside a separate `letrec`-bound function, entered via `apply`) — see
+// stdlib/test/fixtures/bt3163while_loop_in_try_actor.bt, which pins that
+// invariant as a regression test.
+
+TestCase subclass: BT3163CaseClauseFallbackTest
+
+  // Comparison operator guard as an ensure: try body's last statement.
+  testComparisonGuardAsLastEnsureStatementCompilesAndMutates =>
+    a := BT3163ComparisonGuardActor spawn
+    self assert: (a compareUnsafe: 3 with: 5) equals: true
+    self assert: a getCount equals: 1
+    self assert: (a compareUnsafe: 5 with: 3) equals: false
+    self assert: a getCount equals: 2
+
+  // NLR fired before the comparison (still the try body's last statement)
+  // is ever reached still passes through the ensure: correctly.
+  testComparisonGuardAsLastEnsureStatementPreservesNlr =>
+    a := BT3163ComparisonGuardActor spawn
+    self
+      assert: (a
+        compareUnsafeNlr: true
+        with: 3
+        with: 5)
+      equals: "early"
+    self assert: a getCount equals: 0
+    self
+      assert: (a
+        compareUnsafeNlr: false
+        with: 3
+        with: 5)
+      equals: "not early"
+    self assert: a getCount equals: 1
+
+  // Regression pin: a whileTrue: loop as an ensure: try body's last
+  // statement still compiles cleanly (see the fixture's doc comment for why
+  // this shape is structurally immune to BT-3161's bug class).
+  testWhileLoopAsLastEnsureStatementCompilesAndMutates =>
+    a := BT3163WhileLoopInTryActor spawn
+    a runUnsafe: true
+    self assert: a getCount equals: 1

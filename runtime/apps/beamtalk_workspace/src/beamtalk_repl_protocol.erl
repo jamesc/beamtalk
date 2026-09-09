@@ -41,6 +41,7 @@ requests, "type"-keyed responses) was removed in BT-2789.
     encode_diagnostics/2,
     encode_codegen/3,
     encode_methods/3,
+    encode_inherited_methods/2,
     encode_class_list/2,
     encode_health/3,
     encode_load_project/5,
@@ -542,16 +543,33 @@ encode_codegen(CoreErlang, Warnings, Msg) ->
 -doc """
 Encode a methods response (BT-2402).
 
-`Methods` is a list of method-descriptor maps and `StateVars` a list of
-instance-variable name binaries for the `methods` op.
+`Methods` and `StateVars` are both lists of descriptor maps for the `methods`
+op — `StateVars` entries carry `name` and `line` (BT-3439: `line` is `null`
+when the class predates line tracking or was built via `ClassBuilder`).
 """.
--spec encode_methods([map()], [binary()], protocol_msg()) -> binary().
+-spec encode_methods([map()], [map()], protocol_msg()) -> binary().
 encode_methods(Methods, StateVars, Msg) ->
     Base = base_response(Msg),
     iolist_to_binary(
         json:encode(Base#{
             <<"methods">> => Methods,
             <<"state_vars">> => StateVars,
+            <<"status">> => [<<"done">>]
+        })
+    ).
+
+-doc """
+Encode an inherited-methods response (BT-3478).
+
+`Methods` is the list of inherited method descriptors (each carrying a
+`defining_class`) for the sidebar's lazily-fetched "Inherited" tree groups.
+""".
+-spec encode_inherited_methods([map()], protocol_msg()) -> binary().
+encode_inherited_methods(Methods, Msg) ->
+    Base = base_response(Msg),
+    iolist_to_binary(
+        json:encode(Base#{
+            <<"methods">> => Methods,
             <<"status">> => [<<"done">>]
         })
     ).

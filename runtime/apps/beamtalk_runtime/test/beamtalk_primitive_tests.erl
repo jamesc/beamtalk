@@ -117,7 +117,7 @@ send_string_only_selector_dnu_on_non_utf8_binary_test_() ->
     end}.
 
 %% ADR 0066: extending a sealed primitive (`String >> byteAt: => ...`) is
-%% legal today for any selector `String.bt` doesn't locally define — which
+%% legal today for any selector `string.bt` doesn't locally define — which
 %% includes every shared selector. `'bt@stdlib@string':dispatch/3` checks the
 %% extension registry *before* delegating to `'bt@stdlib@binary'`, so the
 %% fast path must not route a genuinely non-UTF-8 binary through it when a
@@ -858,7 +858,7 @@ print_string_plain_map_test_() ->
         end}.
 
 print_string_pid_test() ->
-    %% BT-3082: raw pids (the `Pid` class, ADR-documented in Pid.bt) render
+    %% BT-3082: raw pids (the `Pid` class, ADR-documented in pid.bt) render
     %% `#Pid<X.Y.Z>` — liveness-agnostic, distinct from pid_label/1's
     %% liveness-probed `#Actor<>`/`#Dead<>` wire/test-only rendering.
     Result = beamtalk_primitive:print_string(self()),

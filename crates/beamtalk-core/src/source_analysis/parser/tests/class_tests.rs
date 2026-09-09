@@ -605,7 +605,7 @@ fn bt2811_consecutive_cascade_bodied_methods() {
     // BT-2811 completeness check: two cascade-bodied methods immediately
     // adjacent to each other (the exact topology the fix enables — see the
     // removed cascadeBuffer1/cascadeBuffer2 workaround methods in
-    // stdlib/test/fixtures/tier2_stored_block_matrix_actor.bt). Each
+    // stdlib/test/fixtures/tier2stored_block_matrix_actor.bt). Each
     // cascade's own keyword-parsing loop must stop at the next method's
     // boundary without a buffer method in between.
     let source = "Object subclass: C\n  tickTwice: x => self.onTick value: x; value: x\n\n  tickThrice: x => self.onTick value: x; value: x; value: x";

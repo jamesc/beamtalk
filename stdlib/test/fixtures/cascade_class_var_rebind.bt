@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3412: a class method whose non-tail cascade contains a same-class
+// self-send argument used to leave `generate_cascade`'s internal
+// `ClassVarsN` rebind lexically scoped to the cascade's own
+// value-defining subexpression — invisible to the method's own closing
+// `{class_var_result, Result, ClassVarsN}` tuple, producing `unbound
+// variable 'ClassVarsN'` at Core Erlang compile time. Reproduces when: the
+// class declares at least one `classState:` var (only then does the
+// enclosing method's own closing statement attempt to reference
+// `current_class_var()` and thus reach the out-of-scope binding — a class
+// with no `classState:` never wraps in `{class_var_result, ...}`, so the
+// unused-but-out-of-scope binding is silently harmless); and the cascade is
+// *not* the method's own tail expression (here, `nil` follows it).
+//
+// The receiver and log actor live in their own files
+// (cascade_class_var_rebind_receiver.bt, cascade_class_var_rebind_log.bt),
+// since a .bt file may only declare one class.
+
+Object subclass: CascadeClassVarRebind
+  classState: dummy = 0
+
+  class run: log :: CascadeClassVarRebindLog -> Nil =>
+    b := CascadeClassVarRebindReceiver spawn
+    b add: (log record: #first) value: (CascadeClassVarRebind noteViaSelfSend: log); noop
+    nil
+
+  class noteViaSelfSend: log :: CascadeClassVarRebindLog -> Symbol =>
+    log record: #second

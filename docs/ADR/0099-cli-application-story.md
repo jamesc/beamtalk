@@ -18,7 +18,7 @@ Beamtalk has strong foundations for system-level I/O, but **you cannot yet
 write a standalone command-line application** in it. The pieces that exist
 solve adjacent problems:
 
-- **`System`** (`stdlib/src/System.bt`) — env vars, platform detection,
+- **`System`** (`stdlib/src/system.bt`) — env vars, platform detection,
   `pid`, `uniqueId`. Class-side, no instances.
 - **`File`** — full file I/O with lazy streams.
 - **`Subprocess`** (ADR 0051) — bidirectional stdin/stdout/stderr with
@@ -613,7 +613,7 @@ Rough phases; each is independently shippable and testable.
   `nil`, while any *other* `{error, Reason}` raises `#beamtalk_error{}`. Settle
   the write-side error contract too (see Open Questions). `isInteractive` is
   **deferred** (no portable tty check yet — see §1).
-- `stdlib/src/Console.bt`: class-side methods delegating via `(Erlang
+- `stdlib/src/console.bt`: class-side methods delegating via `(Erlang
   beamtalk_console) …`, `Printable`-typed print params, doc comments incl. the
   REPL caveat. `print:`/`printLine:` render via `displayString` (ADR 0094,
   implemented).
@@ -629,7 +629,7 @@ Rough phases; each is independently shippable and testable.
 - Connected mode: carry the argument list inside the REPL-protocol eval request;
   the session evaluator dispatches `Class>>main: List`. One-shot, no node-global
   store.
-- `beamtalk_program.erl` + `stdlib/src/Program.bt`: `commandName`
+- `beamtalk_program.erl` + `stdlib/src/program.bt`: `commandName`
   (`escript:script_name/0` under escript, else `"beamtalk"`). `exit`/`exit:`
   land in Phase 3.
 
@@ -638,7 +638,7 @@ Rough phases; each is independently shippable and testable.
   the status; catch in all three harnesses (run-mode dispatcher, escript
   `main/1`, connected-session evaluator — the last terminates the current
   `Session` (ADR 0081), reports status over the REPL protocol, stops the
-  session's process group, leaves the node up). `stdlib/src/Program.bt`: `class
+  session's process group, leaves the node up). `stdlib/src/program.bt`: `class
   sealed exit -> Nil`, `class sealed exit: code :: Integer -> Nil` (do not
   return). Document the entry-process-only boundary and the supervised-Actor
   restart caveat (§3).
@@ -658,7 +658,7 @@ Rough phases; each is independently shippable and testable.
   the `beamtalk_runtime` `node_owning` application env (set at boot by run-mode
   startup and escript `main/1`; absent on the persistent/connected path);
   absent → **refuse with `#beamtalk_error{}`** pointing at `Program exit:`.
-  `stdlib/src/System.bt`: `class sealed halt -> Nil`, `class sealed halt: code
+  `stdlib/src/system.bt`: `class sealed halt -> Nil`, `class sealed halt: code
   :: Integer -> Nil`.
 - **Implicit code:** harness maps normal return → 0, uncaught
   `#beamtalk_error{}` → stderr + non-zero.
@@ -725,8 +725,8 @@ invocations behave identically. ADR 0061's Status now carries a reciprocal
   - ADR 0010 — Global Objects and Singleton Dispatch (`Transcript` global)
   - ADR 0094 — Object String Representation Protocols (`displayString`)
   - ADR 0027 — Cross-Platform Support (escript on Windows)
-- Existing stdlib: `stdlib/src/System.bt`, `File.bt`, `Subprocess.bt`,
-  `OS.bt`, `TranscriptStream.bt`, `Session.bt`, `Object.bt` (`show:`/`showCr:`)
+- Existing stdlib: `stdlib/src/system.bt`, `file.bt`, `subprocess.bt`,
+  `os.bt`, `transcript_stream.bt`, `session.bt`, `object.bt` (`show:`/`showCr:`)
 - Erlang primitives: `io:put_chars/2`, `io:get_line/1`, `io:format/2`,
   `erlang:halt/1`, escript `main/1`
 - CLI: `crates/beamtalk-cli/src/commands/run.rs` (`validate_class_and_selector`),

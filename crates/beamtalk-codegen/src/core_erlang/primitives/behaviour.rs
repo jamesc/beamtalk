@@ -6,8 +6,8 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Maps `@primitive "classXxx"` (declared in `Behaviour.bt` / `Class.bt`) and
-//! `@primitive "metaclassXxx"` (declared in `Metaclass.bt`) to direct calls
+//! Maps `@primitive "classXxx"` (declared in `behaviour.bt` / `class.bt`) and
+//! `@primitive "metaclassXxx"` (declared in `metaclass.bt`) to direct calls
 //! into `beamtalk_behaviour_intrinsics`. These are thin data-access functions —
 //! hierarchy-walking logic lives in pure Beamtalk.
 //!

@@ -200,12 +200,12 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
-
-            let (body_doc, _) = self.generate_threaded_loop_body(
+            let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
                 &plan,
                 &BodyKind::FoldlBoolPredicate { is_all },
+                &acc_state_var,
+                1,
             )?;
             docs.push(body_doc);
             self.pop_scope();
@@ -214,8 +214,8 @@ impl CoreErlangGenerator {
             let bool_result = self.fresh_temp_var("BoolResult");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(bool_result.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(bool_result.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -287,7 +287,7 @@ impl CoreErlangGenerator {
             "let BoolAcc = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -295,12 +295,12 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(
+        let (body_doc, _) = self.generate_foldl_loop_body(
             body,
             &plan,
             &BodyKind::FoldlBoolPredicate { is_all },
+            &acc_state_var,
+            1,
         )?;
         docs.push(body_doc);
         self.pop_scope();
@@ -391,6 +391,59 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// ADR 0118 phase 4 (BT-3420): compiles `detect:ifNone:`'s `ifNone:`
+    /// handler as a BRANCH ARM seeded from `state_var` — the same
+    /// `generate_conditional_branch_inline` per-frame `ThreadedIr` machinery
+    /// `ifTrue:`/`ifFalse:` branches use — returning a `Document` that
+    /// evaluates to `{value, finalstate}` directly. This is a branch arm,
+    /// not a closure: a self-send or field mutation inside `[...]` threads
+    /// through it the same way it would inside any other conditional
+    /// branch, instead of being compiled as an ordinary Tier 1 closure
+    /// (`apply <fun> ()`) that discards the mutation (or, once wrapped and
+    /// handed to a generic runtime dispatch, crashes).
+    ///
+    /// Falls back to the ordinary closure+apply shape — wrapped in the same
+    /// `{value, state_var}` tuple shape so callers don't need to
+    /// distinguish — when `if_none` is not a literal block (e.g. a variable
+    /// holding one): there is no block AST to inline, so state cannot
+    /// thread through an opaque callable value.
+    fn generate_if_none_branch_tuple(
+        &mut self,
+        if_none: &Expression,
+        state_var: &str,
+    ) -> Result<Document<'static>> {
+        // BT-3151: unconditional (both branches below) — a class-method
+        // self-send here still cannot thread its `ClassVars` mutation
+        // through `detect:ifNone:`'s fold result, branch-arm routing or
+        // not, so it stays a compile error regardless of which shape
+        // `if_none` takes. See `check_bare_list_op_block_self_sends`'s doc
+        // comment for the full rationale.
+        self.check_bare_list_op_block_self_sends(if_none)?;
+        let Expression::Block(block) = if_none.unwrap_parens() else {
+            let none_code = self.expression_doc(if_none)?;
+            let none_result = self.fresh_temp_var("NoneResult");
+            return Ok(docvec![
+                "let ",
+                leaf::var(none_result.clone()),
+                " = apply ",
+                none_code,
+                " () in {",
+                leaf::var(none_result),
+                ", ",
+                leaf::var(state_var.to_string()),
+                "}",
+            ]);
+        };
+        let (branch_doc, _branch_final) =
+            self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+        Ok(docvec![
+            "let StateAcc = ",
+            leaf::var(state_var.to_string()),
+            " in ",
+            branch_doc,
+        ])
+    }
+
     /// BT-1486: Generates code for `list detect:ifNone:` with mutation analysis.
     ///
     /// Without mutations: falls through to runtime dispatch.
@@ -419,6 +472,21 @@ impl CoreErlangGenerator {
 
         if let Some(pred_block) = self.block_needs_mutation_threading(predicate) {
             return self.generate_list_detect_if_none_with_mutations(receiver, pred_block, if_none);
+        }
+        // BT-3420 (ADR 0118 phase 4): the predicate alone may be mutation-
+        // free while the `ifNone:` handler itself contains a self-send or
+        // field mutation (`items detect: [:x | x > 100] ifNone: [self
+        // bumpCount]`) — route through the with-mutations fold so
+        // `generate_list_detect_if_none_with_mutations`'s `ifNone:` handling
+        // (see its own doc comment) threads it, instead of falling to
+        // `generate_detect_if_none_simple`'s bare closure, which silently
+        // drops (or — since that closure closes over a state map ultimately
+        // wrapped and passed to a runtime dispatch — crashes) that mutation.
+        if self.block_needs_mutation_threading(if_none).is_some() {
+            if let Expression::Block(pred_block) = predicate.unwrap_parens() {
+                return self
+                    .generate_list_detect_if_none_with_mutations(receiver, pred_block, if_none);
+            }
         }
 
         // No mutations: fall through to runtime dispatch
@@ -511,14 +579,6 @@ impl CoreErlangGenerator {
         let item_var = Self::to_core_erlang_var(item_param);
         let acc_state_var = self.fresh_temp_var("AccSt");
 
-        // Compile the ifNone block upfront.
-        // BT-3151 review follow-up: `if_none` is compiled as an ordinary
-        // block via `expression_doc` → `generate_block`, independently of
-        // `body`'s own (accepted, documented) fold-threading gap — see
-        // `check_bare_list_op_block_self_sends`'s doc comment.
-        self.check_bare_list_op_block_self_sends(if_none)?;
-        let none_code = self.expression_doc(if_none)?;
-
         if plan.use_tuple_acc {
             // Tuple-accumulator path: {FoundItem, FoundFlag, Var1, ..., VarN}
             let vars_doc = plan.current_vars_doc(self);
@@ -548,14 +608,14 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 3));
-
-            let (body_doc, _) = self.generate_threaded_loop_body(
+            let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
                 &plan,
                 &BodyKind::FoldlDetect {
                     item_var: item_var.clone(),
                 },
+                &acc_state_var,
+                2,
             )?;
             docs.push(body_doc);
             self.pop_scope();
@@ -567,8 +627,15 @@ impl CoreErlangGenerator {
             let none_result = self.fresh_temp_var("NoneResult");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(final_result.clone());
+            if self.loop_mode.in_direct_params_loop {
+                // BT-3151: direct-params loops are a value-type-only
+                // optimization with no actor `State` to thread through the
+                // `ifNone:` handler in the first place (see
+                // `check_bare_list_op_block_self_sends`'s doc comment) —
+                // compiled as an ordinary closure, unaffected by BT-3420.
+                self.check_bare_list_op_block_self_sends(if_none)?;
+                let none_code = self.expression_doc(if_none)?;
+                self.loop_mode.direct_params_list_op_result = Some(final_result.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -604,6 +671,7 @@ impl CoreErlangGenerator {
                 ]);
             } else {
                 let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
+                let if_none_arm = self.generate_if_none_branch_tuple(if_none, &stateacc)?;
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -630,15 +698,9 @@ impl CoreErlangGenerator {
                     leaf::var(found_item.clone()),
                     ", ",
                     leaf::var(stateacc.clone()),
-                    "} <'false'> when 'true' -> let ",
-                    leaf::var(none_result.clone()),
-                    " = apply ",
-                    none_code,
-                    " () in {",
-                    leaf::var(none_result),
-                    ", ",
-                    leaf::var(stateacc),
-                    "} end",
+                    "} <'false'> when 'true' -> ",
+                    if_none_arm,
+                    " end",
                 ]);
             }
             return Ok(Document::Vec(docs));
@@ -673,7 +735,7 @@ impl CoreErlangGenerator {
             ") in let FoundFlag = call 'erlang':'element'(2, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(3, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -681,14 +743,14 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(
+        let (body_doc, _) = self.generate_foldl_loop_body(
             body,
             &plan,
             &BodyKind::FoldlDetect {
                 item_var: item_var.clone(),
             },
+            &acc_state_var,
+            2,
         )?;
         docs.push(body_doc);
         self.pop_scope();
@@ -697,7 +759,6 @@ impl CoreErlangGenerator {
         let found_item = self.fresh_temp_var("FoundItem");
         let found_flag = self.fresh_temp_var("FoundFlag");
         let state_out = self.fresh_temp_var("StOut");
-        let none_result = self.fresh_temp_var("NoneResult");
 
         docs.push(docvec![
             plan.foldl_call_doc(
@@ -724,6 +785,7 @@ impl CoreErlangGenerator {
         ]);
 
         // Case on FoundFlag to decide result.
+        let if_none_arm = self.generate_if_none_branch_tuple(if_none, &state_out)?;
         docs.push(docvec![
             "case ",
             leaf::var(found_flag),
@@ -731,15 +793,9 @@ impl CoreErlangGenerator {
             leaf::var(found_item),
             ", ",
             leaf::var(state_out.clone()),
-            "} <'false'> when 'true' -> let ",
-            leaf::var(none_result.clone()),
-            " = apply ",
-            none_code,
-            " () in {",
-            leaf::var(none_result),
-            ", ",
-            leaf::var(state_out),
-            "} end",
+            "} <'false'> when 'true' -> ",
+            if_none_arm,
+            " end",
         ]);
 
         Ok(Document::Vec(docs))
@@ -799,14 +855,14 @@ impl CoreErlangGenerator {
                 self.bind_var(&param.name, &item_var);
             }
             // Unpack vars starting at index 3 (slot 1 = FoundItem, slot 2 = FoundFlag).
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 3));
-
-            let (body_doc, _) = self.generate_threaded_loop_body(
+            let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
                 &plan,
                 &BodyKind::FoldlDetect {
                     item_var: item_var.clone(),
                 },
+                &acc_state_var,
+                2,
             )?;
             docs.push(body_doc);
             self.pop_scope();
@@ -816,8 +872,8 @@ impl CoreErlangGenerator {
             let class_var = self.fresh_temp_var("DetectRecvClass");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(found_result.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(found_result.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -895,7 +951,7 @@ impl CoreErlangGenerator {
             ") in let FoundFlag = call 'erlang':'element'(2, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(3, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -903,14 +959,14 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(
+        let (body_doc, _) = self.generate_foldl_loop_body(
             body,
             &plan,
             &BodyKind::FoldlDetect {
                 item_var: item_var.clone(),
             },
+            &acc_state_var,
+            2,
         )?;
         docs.push(body_doc);
         self.pop_scope();

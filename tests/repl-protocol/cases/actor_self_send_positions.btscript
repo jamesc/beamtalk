@@ -1,0 +1,122 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E repro for ADR 0118 (BT-3413-BT-3424): actor self-send SYNTACTIC
+// POSITION correctness, driven from a live REPL session.
+//
+// `stdlib/test/actor_self_send_position_matrix_test.bt` already covers this
+// exhaustively via BUnit, but BUnit compiles already-loaded source through
+// the workspace/module pipeline — the REPL evaluates a typed expression
+// through its own separate codegen path (`beamtalk-repl`'s per-expression
+// compile, not a whole module). Every prior phase of this epic fixed a
+// silently-dropped mutation or a runtime crash for one self-send syntactic
+// position; this file exercises a representative sample of those positions
+// end-to-end through the REPL specifically, so a regression in the REPL's
+// own path (not just the module/BUnit path) is caught.
+
+// @load tests/repl-protocol/fixtures/self_send_positions_repl_actor.bt
+
+// ===========================================================================
+// CASCADE ON self (ADR 0118 phase 1b, BT-3416)
+// ===========================================================================
+
+// A cascade on `self` used to silently drop every message's mutation with
+// no crash and no warning — each cascaded send's own actor-state effect
+// now threads correctly.
+
+c1 := SelfSendPositionsReplActor spawn
+// => Actor(SelfSendPositionsReplActor, _)
+
+c1 cascadeOnSelf
+// => [1,2]
+
+c1 getCount
+// => 0
+
+c1 getLog
+// => [1,2]
+
+// ===========================================================================
+// CONDITIONAL AS A SELF-SEND ARGUMENT (ADR 0118 phase 4, BT-3420)
+// ===========================================================================
+
+// A conditional used as a keyword-send argument used to leak the RAW
+// `{Result, State}` tuple into the argument instead of the conditional's
+// own value, so the actor's real state never advanced.
+
+c2 := SelfSendPositionsReplActor spawn
+// => Actor(SelfSendPositionsReplActor, _)
+
+c2 conditionalArgSelfSend: true
+// => 1
+
+c2 getCount
+// => 1
+
+c2 getLog
+// => [1]
+
+c3 := SelfSendPositionsReplActor spawn
+// => Actor(SelfSendPositionsReplActor, _)
+
+c3 conditionalArgSelfSend: false
+// => 0
+
+c3 getCount
+// => 0
+
+c3 getLog
+// => [0]
+
+// ===========================================================================
+// SELF-SEND IN A whileTrue: CONDITION (ADR 0118 phase 3, BT-3419)
+// ===========================================================================
+
+// A self-send used as a binary-op operand inside a whileTrue: CONDITION
+// block used to crash with an arity mismatch — the condition now compiles
+// in the loop's own frame, so its self-send's state advance is available
+// to both the continuing recursive call and the loop's exit.
+
+c4 := SelfSendPositionsReplActor spawn
+// => Actor(SelfSendPositionsReplActor, _)
+
+// Each condition check bumps count first, then compares: count settles at
+// 3 (the check that finally reads false), and the body — which just counts
+// how many times it ran — only runs the two checks that read true.
+c4 whileTrueConditionSelfSend
+// => 2
+
+c4 getCount
+// => 3
+
+// ===========================================================================
+// ORDER-SENSITIVE BINARY OPERAND (ADR 0118 phase 1a, BT-3415)
+// ===========================================================================
+
+// A self-send as the right operand of a binary send used to drop its own
+// mutation while still computing the correct arithmetic result (the return
+// value fed through even before this phase; only the actor's own state
+// mutation was lost) — but the LEFT operand deciding whether the self-send
+// runs at ALL is the behavioural half of the evaluation-order guarantee,
+// not just the arithmetic half. In range: `at:` returns 20 first, then
+// `bumpCount` runs, so the result is `20 + 1` and the mutation lands.
+c5 := SelfSendPositionsReplActor spawn
+// => Actor(SelfSendPositionsReplActor, _)
+
+c5 orderSensitiveBinaryOperandSelfSend: 2
+// => 21
+
+c5 getCount
+// => 1
+
+// Out of range: `at:` raises BEFORE `bumpCount` ever runs, so no mutation
+// lands — reversing the evaluation order would let the self-send's
+// mutation through even on the error path, which this pins against.
+c6 := SelfSendPositionsReplActor spawn
+// => Actor(SelfSendPositionsReplActor, _)
+
+c6 orderSensitiveBinaryOperandSelfSend: 99
+// => ERROR: out of bounds
+
+c6 getCount
+// => 0

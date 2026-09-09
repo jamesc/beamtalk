@@ -12,16 +12,17 @@
 
 use std::fmt::Write as _;
 
+use super::sequencing::PrecompiledScope;
 use super::threaded_ir::{
     FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, render, render_value,
 };
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, PrecompiledScope, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::leaf::{atom, string_lit};
+use beamtalk_cerl_doc::leaf::{atom, int_lit, string_lit};
 use beamtalk_cerl_doc::{Document, join};
 use beamtalk_core::ast::{
     CascadeMessage, ClassDefinition, Expression, ExpressionStatement, Identifier, MessageSelector,
-    StringSegment,
+    Module, StringSegment,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -121,6 +122,23 @@ pub(super) fn collect_body_exprs(body: &[ExpressionStatement]) -> Vec<&Expressio
         .map(|s| &s.expression)
         .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
         .collect()
+}
+
+/// Renders a `usize` index, arity, or size as a Core Erlang integer leaf.
+///
+/// Wraps [`int_lit`] for the many positional-index call sites in
+/// destructuring and pattern-match codegen (`patterns::destructure`,
+/// `patterns::match_lowering`) and block-body array destructuring
+/// (`blocks::generate_block_array_destructure`), where the value comes from
+/// an AST `Vec` length or position and is therefore always non-negative and
+/// far below `i64::MAX`. Saturates rather than panicking on the unreachable
+/// overflow case so codegen never aborts.
+///
+/// BT-3465: split out of `expressions.rs` into this shared leaf module — it
+/// has no generator-state dependency, and is used by three separate
+/// `core_erlang` submodules (CLAUDE.md's no-duplicate-implementations rule).
+pub(super) fn index_lit(n: usize) -> Document<'static> {
+    int_lit(i64::try_from(n).unwrap_or(i64::MAX))
 }
 
 /// BT-940: `'file'` module attribute helper for BEAM stacktrace file names.
@@ -281,6 +299,38 @@ impl CoreErlangGenerator {
         let inner = expr.unwrap_parens();
         let span = inner.span();
 
+        // ADR 0118 phase 4 (BT-3420): an inline-threaded control-flow
+        // construct — `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`, `and:`/`or:`,
+        // the nil-conditional family, or `match:` — that needs mutation
+        // threading is a producer in its own right: its `_with_mutations`/
+        // `generate_match` builder's internal `{Value, NewState}` case
+        // becomes a real prelude via `control_flow_tuple_to_threaded_value`
+        // instead of an opaque tuple `Document` a caller might embed
+        // unwrapped. This closes the row that used to leak that tuple into
+        // an argument position (`self record: (flag ifTrue: [self bump]
+        // ifFalse: [0])`).
+        if let Some(tv) = self.inline_control_flow_producer(inner)? {
+            return Ok(tv);
+        }
+
+        // ADR 0118 phase 5a (BT-3421): a same-class class-method self-send
+        // or a direct class-var assignment at the top level of `expr` —
+        // the class-method-context counterpart of the Actor `is_prelude_producer`
+        // check below. Gated to `frame == FrameId::ROOT`: both underlying
+        // producers (`generate_class_method_self_send`/
+        // `generate_class_var_field_assignment`) still derive their `Bind`'s
+        // frame internally (`self.in_loop_body` / a hardcoded `FrameId::ROOT`,
+        // unchanged by this issue), so this only engages where that
+        // derivation is already known-correct — a class method's own flat
+        // top-level body (`lower_class_method_body`). A class-var self-send
+        // reached from a nested branch frame keeps falling through to the
+        // generic paths below, unchanged from before this issue.
+        if self.in_class_method() {
+            if let Some(tv) = self.class_method_prelude_producer(inner, frame)? {
+                return Ok(tv);
+            }
+        }
+
         if self.is_prelude_producer(inner) {
             let Expression::MessageSend {
                 selector,
@@ -304,13 +354,10 @@ impl CoreErlangGenerator {
         }
 
         if let Some(children) = Self::sequenced_send_children(inner) {
-            let (prelude, scope) = self.sequence_children(&children, frame)?;
-            let doc = self.generate_expression(expr)?;
+            let (mut prelude, scope) = self.sequence_children(&children, frame)?;
+            let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
             self.finish_precompiled_scope(scope)?;
-            return Ok(ThreadedValue {
-                prelude,
-                value: ValueRef::Doc(doc),
-            });
+            return Ok(ThreadedValue { prelude, value });
         }
 
         // ADR 0118 phase 1b: literal-container parents (`ListLiteral`
@@ -321,13 +368,10 @@ impl CoreErlangGenerator {
         // children, then let the parent's own (unaffected) codegen
         // substitute them via `precompiled_subexprs`.
         if let Some(children) = Self::literal_container_children(inner) {
-            let (prelude, scope) = self.sequence_children(&children, frame)?;
-            let doc = self.generate_expression(expr)?;
+            let (mut prelude, scope) = self.sequence_children(&children, frame)?;
+            let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
             self.finish_precompiled_scope(scope)?;
-            return Ok(ThreadedValue {
-                prelude,
-                value: ValueRef::Doc(doc),
-            });
+            return Ok(ThreadedValue { prelude, value });
         }
 
         // ADR 0118 phase 1b: `^ value`, `target := value`, `{a, b} :=
@@ -335,14 +379,12 @@ impl CoreErlangGenerator {
         // sequencing rule applied to the sole child whose evaluation must
         // finish before the parent's own effect (the NLR throw, the
         // assignment's mutation, the `case`) runs.
-        if let Some(value) = Self::single_sequenced_child(inner) {
-            let (prelude, scope) = self.sequence_children(std::slice::from_ref(&value), frame)?;
-            let doc = self.generate_expression(expr)?;
+        if let Some(child) = Self::single_sequenced_child(inner) {
+            let (mut prelude, scope) =
+                self.sequence_children(std::slice::from_ref(&child), frame)?;
+            let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
             self.finish_precompiled_scope(scope)?;
-            return Ok(ThreadedValue {
-                prelude,
-                value: ValueRef::Doc(doc),
-            });
+            return Ok(ThreadedValue { prelude, value });
         }
 
         // ADR 0118 phase 1b: each interpolation segment performs its own
@@ -383,11 +425,45 @@ impl CoreErlangGenerator {
         // as a no-op leaf), so this fallback is a genuine no-op for every
         // shape that still reaches it: byte-identical to the pre-ADR-0118
         // planner's behaviour for those shapes, just without running it.
+        //
+        // ADR 0118 phase 5b (BT-3422): see `generate_expression_as_value`'s
+        // doc comment for the one exception (a mutation-threaded
+        // `do:`/dict-`do:` nested in a direct-params loop) this plain
+        // `Doc(doc)` wrapping does not cover on its own.
+        let mut prelude = Vec::new();
+        let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
+        Ok(ThreadedValue { prelude, value })
+    }
+
+    /// ADR 0118 phase 5b (BT-3422): compiles `expr` via plain
+    /// `generate_expression` and wraps the result as a [`ValueRef`] —
+    /// `ValueRef::Doc` in the common case, but `ValueRef::Literal("'nil'")`
+    /// with the returned `Document` pushed onto `prelude` instead when
+    /// `direct_params_do_open_chain` comes back set: a mutation-threaded
+    /// `do:`/dict-`do:` nested in a direct-params loop
+    /// (`in_direct_params_loop`) leaves its own returned `Document` as an
+    /// open, dangling let-chain and sets that flag rather than returning a
+    /// closed value (BT-3053: several accumulator vars may have been
+    /// rebound, not one meaningful result, so `do:`'s own `nil`
+    /// return-value contract is substituted instead of a name). Every
+    /// `generate_expression` call [`Self::threaded_expression`] itself
+    /// makes (as opposed to ones its producers make internally, already
+    /// self-contained) funnels through this one function so the check
+    /// never has to be repeated at each call site.
+    fn generate_expression_as_value(
+        &mut self,
+        expr: &Expression,
+        span: beamtalk_core::source_analysis::Span,
+        prelude: &mut Vec<ThreadedStmt>,
+    ) -> Result<ValueRef> {
+        self.loop_mode.direct_params_do_open_chain = false;
         let doc = self.generate_expression(expr)?;
-        Ok(ThreadedValue {
-            prelude: Vec::new(),
-            value: ValueRef::Doc(doc),
-        })
+        if self.loop_mode.direct_params_do_open_chain {
+            self.loop_mode.direct_params_do_open_chain = false;
+            prelude.push(ThreadedStmt::Statement(doc, span));
+            return Ok(ValueRef::Literal("'nil'"));
+        }
+        Ok(ValueRef::Doc(doc))
     }
 
     /// The children of a literal-container parent the sequencing rule
@@ -550,6 +626,67 @@ impl CoreErlangGenerator {
         self.in_actor_instance_context() && self.is_dispatching_actor_self_send(expr)
     }
 
+    /// ADR 0118 phase 5a/5b (BT-3421/BT-3422): compiles `expr` (already
+    /// paren-unwrapped) through the class-method-context producers when it
+    /// is, at its own top level, a direct class-var assignment
+    /// (`self.classVar := value`) or a same-class class-method self-send
+    /// (`self someSelector`) — `None` for anything else. Called from
+    /// [`Self::threaded_expression`] (falls through to its generic paths on
+    /// `None`), gated to `self.in_class_method()` alone — `frame` is
+    /// whatever real frame the caller is threading into (ROOT at a class
+    /// method's own flat top level, or a branch/loop frame nested inside
+    /// one), passed straight through to the producer.
+    ///
+    /// A same-class self-send is checked with [`Self::is_class_method_self_send`]
+    /// — selectors in `class_method_selectors()` only — DELIBERATELY
+    /// narrower than [`Self::try_handle_class_method_self_send`]'s own
+    /// condition (any `self` receiver): `generate_message_send`'s real
+    /// dispatch order runs ProtoObject/Object/Block/Dict/List/Boolean/
+    /// spawn-await/Erlang-interop/Logger/class-reference checks BEFORE
+    /// `try_handle_class_method_self_send` ever runs, so `self class` or
+    /// `self isNil` must still reach THOSE handlers, never
+    /// `generate_class_method_self_send` directly — this function has no
+    /// way to replicate that whole priority chain, but a selector the class
+    /// itself declares as a class method can never collide with one of
+    /// those reserved well-known names (the same assumption
+    /// `generate_class_method_last_expr_with_class_vars`/
+    /// `generate_class_method_non_last_expr` already made for this exact
+    /// predicate, pre-dating this issue).
+    fn class_method_prelude_producer(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+    ) -> Result<Option<ThreadedValue>> {
+        if self.is_class_var_assignment(expr) {
+            let Expression::Assignment { target, value, .. } = expr else {
+                unreachable!("is_class_var_assignment guarantees an Assignment");
+            };
+            let Expression::FieldAccess { field, .. } = target.as_ref() else {
+                unreachable!("is_class_var_assignment guarantees a FieldAccess target");
+            };
+            let field_name = field.name.to_string();
+            return Ok(Some(self.generate_class_var_field_assignment(
+                &field_name,
+                value,
+                frame,
+            )?));
+        }
+        if self.is_class_method_self_send(expr) {
+            let Expression::MessageSend {
+                selector,
+                arguments,
+                ..
+            } = expr
+            else {
+                unreachable!("is_class_method_self_send guarantees a MessageSend");
+            };
+            return Ok(Some(
+                self.generate_class_method_self_send(selector, arguments)?,
+            ));
+        }
+        Ok(None)
+    }
+
     /// The children the sequencing rule applies to when `expr` (already
     /// paren-unwrapped) is a message send it covers: the receiver, then
     /// every non-block argument, in evaluation order. `None` for anything
@@ -627,6 +764,39 @@ impl CoreErlangGenerator {
         if Self::is_trivial_subexpr(inner) {
             return false;
         }
+        // ADR 0118 phase 5b (BT-3422): a child an ENCLOSING `sequence_children`
+        // call already registered in `precompiled_subexprs` has already been
+        // dispatched and its prelude already spliced into that outer call's
+        // own prelude — "compiling" it now means only reading the
+        // substitution back (`take_precompiled_subexpr`), which contributes
+        // no further prelude of its own. Without this check, a second,
+        // independent sequencing pass over the SAME children (e.g.
+        // `generate_binary_op` reached through `threaded_expression`'s own
+        // `sequenced_send_children` branch, whose `generate_expression`
+        // recompile of the parent reaches `thread_subexprs` for its
+        // operands) would re-dispatch an Actor self-send a second time and
+        // leave the outer registration's `finish_precompiled_scope` check
+        // failing with "never substituted" (confirmed by a
+        // `just test` failure on exactly this shape during this issue).
+        if self.precompiled_subexprs_contains(inner) {
+            return false;
+        }
+        // ADR 0118 phase 4 (BT-3420): mirrors `threaded_expression`'s new
+        // inline-control-flow producer branch — see its doc comment.
+        if self.inline_control_flow_needs_threading(inner) {
+            return true;
+        }
+        // ADR 0118 phase 5b (BT-3422): mirrors `threaded_expression`'s
+        // `class_method_prelude_producer` branch — a same-class self-send
+        // or a direct class-var assignment, in class-method context, needs
+        // a prelude regardless of nesting depth (a message argument, a
+        // binary operand, a cascade message, ...). A pure predicate check
+        // (not the mutating producer call itself) so this stays a probe.
+        if self.in_class_method()
+            && (self.is_class_var_assignment(inner) || self.is_class_method_self_send(inner))
+        {
+            return true;
+        }
         if self.is_prelude_producer(inner) {
             return true;
         }
@@ -666,69 +836,35 @@ impl CoreErlangGenerator {
 
     /// BT-3396/BT-3414 (ADR 0118 phase 0): `true` if compiling `expr`
     /// through [`Self::threaded_expression`] would give it a non-empty
-    /// prelude, INCLUDING the `and:`/`or:` mutation-threading carve-out
-    /// below — the decision predicate for "does this conditional need
-    /// inlining because of its receiver?"
-    /// (`conditional_needs_mutation_threading`,
-    /// `compile_conditional_receiver`'s own `and:`/`or:` special case).
+    /// prelude — the decision predicate for "does this conditional need
+    /// inlining because of its receiver?" (`conditional_needs_mutation_threading`).
     ///
     /// Formerly `contains_hoistable_self_send`
     /// (`control_flow/conditionals.rs`), backed by the hoist planner's own
     /// walk so a decision and its emission could never disagree. ADR 0118
-    /// phase 2b (BT-3418) deleted that walk; this predicate now shares
+    /// phase 2b (BT-3418) deleted that walk; this predicate shares
     /// [`Self::subexpr_needs_prelude`] with the sequencing rule itself
     /// instead — the same "would compiling this actually produce a
     /// prelude?" question the rule already answers for every one of its
     /// own children — so it still cannot disagree with what compiling
     /// `expr` does, without sharing code with an emitting walk. Lives here
     /// (not `control_flow/conditionals.rs`) because it is now a thin
-    /// wrapper over `subexpr_needs_prelude`. `until phase 6 replaces it`:
-    /// ADR 0118 phase 4 turns a mutation-threaded `and:`/`or:` into a real
-    /// producer, and phase 6 unifies the class-var/actor-state receiver
-    /// positions this predicate still special-cases below.
+    /// wrapper over `subexpr_needs_prelude`.
+    ///
+    /// ADR 0118 phase 4 (BT-3420) deleted this function's own `and:`/`or:`
+    /// carve-out: `subexpr_needs_prelude` now recognizes a nested
+    /// mutation-threaded `and:`/`or:`/nil-conditional/`match:` receiver
+    /// (`((self recordOnce: which) and: [x]) ifTrue:ifFalse:`) directly, via
+    /// [`Self::inline_control_flow_needs_threading`], so the signal this
+    /// carve-out used to restore here is never lost in the first place.
+    /// Phase 6 unifies the remaining class-var/actor-state receiver
+    /// positions this predicate still special-cases below (there are none
+    /// left as of this phase — kept as a thin wrapper for its own call
+    /// sites' sake).
     pub(in crate::core_erlang) fn conditional_receiver_needs_threading(
         &self,
         expr: &Expression,
     ) -> bool {
-        // BT-3402/BT-3396 interaction: `and:`/`or:` is `is_conditional_selector`
-        // (widened by BT-3402), so `sequenced_send_children`/
-        // `subexpr_needs_prelude` treat it as opaque — never recursing into
-        // a bare self-send that is ITS OWN receiver (`(self recordOnce: x)
-        // and: [true]`). That opacity is correct for the sequencing rule
-        // (this exact shape is threaded by `compile_conditional_receiver`'s
-        // own `and:`/`or:` special case instead of the generic rule), but
-        // this predicate is also the decision this conditional's ENCLOSING
-        // caller (`conditional_needs_mutation_threading`) uses to decide
-        // whether ITS receiver needs the inline mutation-threading path at
-        // all. Losing this signal here left the outer conditional wrongly
-        // classified as not needing threading — falling through to plain
-        // generic dispatch, where `and:`/`or:`'s own
-        // `try_generate_boolean_protocol` interception still unconditionally
-        // fires and compiles to a `{Result, NewState}` *tuple* value with no
-        // caller positioned to unwrap it, corrupting the state-version
-        // numbering (`unbound variable 'State1'`). So: explicitly recognize
-        // this exact shape here too — same gate
-        // (`and_or_needs_mutation_threading`) `compile_conditional_receiver`
-        // uses to actually execute it — before falling back to
-        // `subexpr_needs_prelude` for every other shape.
-        if let Expression::MessageSend {
-            receiver: and_or_receiver,
-            selector: MessageSelector::Keyword(parts),
-            arguments,
-            ..
-        } = expr.unwrap_parens()
-        {
-            if parts.len() == 1 && arguments.len() == 1 {
-                let kw = parts[0].keyword.as_str();
-                if kw == "and:" || kw == "or:" {
-                    if let Expression::Block(block) = &arguments[0] {
-                        if self.and_or_needs_mutation_threading(and_or_receiver, block) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
         self.subexpr_needs_prelude(expr)
     }
 
@@ -758,7 +894,7 @@ impl CoreErlangGenerator {
                 _ => None,
             })
             .unwrap_or(version_before);
-        super::render_state_prefix(self.in_hybrid_loop, self.in_loop_body, version)
+        super::render_state_prefix(self.loop_mode.in_hybrid_loop, self.in_loop_body, version)
     }
 
     /// A child the sequencing rule never compiles ahead of its parent: a
@@ -888,94 +1024,67 @@ impl CoreErlangGenerator {
         Ok(scope)
     }
 
-    /// Generates an expression and returns any open-scope result variable that was produced.
-    ///
-    /// BT-1448: Replaces the manual clear-before/read-after pattern on `last_open_scope_result`.
-    /// Some expressions (class method self-sends, class var assignments) produce an open let-chain
-    /// ending with `in ` and set a result variable that the caller must use to close the scope.
-    /// This method encapsulates that side-channel into an explicit return value.
-    pub(super) fn expression_doc_with_open_scope(
+    /// ADR 0118 phase 5b (BT-3422): the self-contained-`Document` replacement for the
+    /// deleted `closed_expression_doc`. Renders `expr`'s prelude and value
+    /// back-to-back through the same [`render`]/[`render_value`] every
+    /// spliced prelude goes through, so the bytes match a spliced prelude
+    /// exactly (a `ClassVars` `Bind` in the prelude stays lexically visible
+    /// to whatever Core Erlang the caller concatenates after this
+    /// `Document` — the pre-ADR-0118 open-let-chain's own contract,
+    /// preserved). Use where the caller has no `Vec<ThreadedStmt>`/
+    /// `Vec<Document>` of its own to splice into (a single expression
+    /// embedded directly as another `Document`'s sub-tree).
+    pub(super) fn threaded_expression_doc(
         &mut self,
         expr: &Expression,
-    ) -> Result<(
-        beamtalk_cerl_doc::Document<'static>,
-        Option<super::OpenScopeResult>,
-    )> {
-        self.last_open_scope_result = None;
-        let doc = self.generate_expression(expr)?;
-        Ok((doc, self.last_open_scope_result.take()))
-    }
-
-    /// Generates an expression as a self-contained doc, closing any open scope.
-    ///
-    /// BT-2350: `expression_doc` forwards to `generate_expression`, which for a
-    /// class-method self-send (or class-var assignment) emits an *open* let-chain
-    /// ending in `... in ` and records the result variable in
-    /// `last_open_scope_result` for the caller to append. When such a doc is used
-    /// directly as the RHS of an enclosing `let X = <doc> in ...` — e.g. the
-    /// `is_last` foldl block bodies (`collect:` / `select:` / `inject:into:` /
-    /// `detect:` / `count:` / …) — the dangling `in` produces invalid Core Erlang
-    /// (`{core_parse_error, …, "syntax error before: in"}`). This helper closes
-    /// the scope by appending the result variable so the doc stands alone.
-    ///
-    /// BT-3053: a `NoValue` chain (a mutation-threaded `do:`/dict-`do:` nested
-    /// in a direct-params loop — several rebound vars, no single result)
-    /// substitutes `do:`'s own `nil` return-value contract rather than
-    /// referencing a variable that doesn't exist.
-    pub(super) fn closed_expression_doc(
-        &mut self,
-        expr: &Expression,
+        frame: FrameId,
     ) -> Result<beamtalk_cerl_doc::Document<'static>> {
-        let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-        Ok(match open_scope {
-            Some(super::OpenScopeResult::Value(result_var)) => {
-                docvec![doc, beamtalk_cerl_doc::leaf::var(result_var)]
-            }
-            Some(super::OpenScopeResult::NoValue) => docvec![doc, "'nil'"],
-            None => doc,
-        })
+        let tv = self.threaded_expression(expr, frame)?;
+        Ok(self.close_threaded_value_doc(tv))
     }
 
-    /// Pushes a non-last, result-discarded statement of a threaded foldl block
-    /// body, closing any class-var open scope **while keeping its `ClassVarsN`
-    /// binding visible** to subsequent statements.
+    /// ADR 0118 phase 5b (BT-3422): the same self-contained rendering as
+    /// [`Self::threaded_expression_doc`], for a caller that already holds a
+    /// [`ThreadedValue`] (a producer's own return value) rather than an
+    /// `Expression` to compile — used at every ambient
+    /// (non-`threaded_expression`) re-entry point a class-var producer has
+    /// (`try_handle_class_method_self_send`, `try_handle_class_reference`,
+    /// `generate_field_assignment`'s class-var branch): these are reached
+    /// through ordinary `generate_expression`, which returns a bare
+    /// `Document` with no prelude side-channel, so the prelude is always
+    /// closed here rather than left open for a caller to propagate.
     ///
-    /// BT-2350: a class self-send emits an open let-chain ending in `… in ` and
-    /// bumps the class-var version *without* rolling it back, so later statements
-    /// reference the new `ClassVarsN`. Closing such a chain by wrapping it inside
-    /// `let _ = (<chain> result_var) in …` (as [`closed_expression_doc`] does)
-    /// would scope `ClassVarsN` away and leave the later reference unbound. So we
-    /// keep the chain at the current level and append `let _ = <result_var> in `
-    /// to discard the value and sequence on. With no open scope this is the
-    /// original `let _ = <expr> in `.
-    ///
-    /// BT-3053: a `NoValue` chain has nothing to bind — its own rebindings are
-    /// already visible to subsequent statements, and (unlike the `Value` case)
-    /// there is no variable to reference in a discard `let`, so the doc is
-    /// pushed as-is with no closing `let _ = ... in` appended at all.
-    pub(super) fn push_discarded_stmt(
+    /// Deliberately does NOT call `ThreadedValue::close` — it renders
+    /// prelude-then-value unconditionally, the same for a self-send at a
+    /// class method's own safe top level and one inside a bare, unthreaded
+    /// block `check_no_unsafe_class_method_self_sends` (`expressions.rs`)
+    /// would reject before this ever runs. BT-3430 investigated making this
+    /// call `close(ctx, CloseContext::Opaque)` for the latter case (its
+    /// intended production use — see `CloseContext::Opaque`'s own doc
+    /// comment) and reporting `VerifyError::StateEffectEscapesExpression`
+    /// as a backstop on top of that predicate: blocked on this function
+    /// having no reliable way to tell the two cases apart post hoc, after
+    /// arbitrary `generate_expression` recursion has already discarded which
+    /// message send (if any) the innermost enclosing block literal is an
+    /// argument to — see that predicate's own doc comment for the full
+    /// finding. Revisit only alongside a redesign that carries real
+    /// block-literal context through this call, not as a follow-up scoped
+    /// to this function alone.
+    // `tv` is taken by value deliberately, matching `ThreadedValue::close`'s
+    // own consuming signature — the `#[must_use]` linear-discipline design
+    // (see `ThreadedValue`'s doc comment) wants "closed" to mean consumed,
+    // not merely read.
+    #[allow(clippy::needless_pass_by_value)]
+    pub(super) fn close_threaded_value_doc(
         &mut self,
-        docs: &mut Vec<beamtalk_cerl_doc::Document<'static>>,
-        expr: &Expression,
-    ) -> Result<()> {
-        let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-        match open_scope {
-            Some(super::OpenScopeResult::Value(result_var)) => {
-                docs.push(doc);
-                docs.push(docvec![
-                    "let _ = ",
-                    beamtalk_cerl_doc::leaf::var(result_var),
-                    " in "
-                ]);
-            }
-            Some(super::OpenScopeResult::NoValue) => {
-                docs.push(doc);
-            }
-            None => {
-                docs.push(docvec!["let _ = ", doc, " in "]);
-            }
+        tv: ThreadedValue,
+    ) -> beamtalk_cerl_doc::Document<'static> {
+        if tv.prelude.is_empty() {
+            return self.threaded_value_doc(&tv.value);
         }
-        Ok(())
+        let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+        let value_doc = self.threaded_value_doc(&tv.value);
+        docvec![prelude_doc, value_doc]
     }
 
     /// Generates an expression and returns whether it set `repl_loop_mutated`.
@@ -1144,6 +1253,21 @@ impl CoreErlangGenerator {
         self.class_identity().is_some_and(ClassIdentity::is_sealed)
     }
 
+    /// Finds the AST class definition currently being generated.
+    ///
+    /// ADR 0119 (BT-3436): replaces the deleted `module_matches_class`, which
+    /// answered this same question by re-deriving and comparing module-name
+    /// strings (and could spuriously match, e.g. `bt@other_pkg@util@math`
+    /// against class `Math`). Under ADR 0040's one-class-per-file rule this
+    /// needs no module-name comparison at all — `self.class_name()` (set once
+    /// per module by `setup_class_identity`) already identifies the class
+    /// being generated directly, so this is a straight identity check against
+    /// `module.classes`, not a lookup.
+    pub(super) fn current_class<'m>(&self, module: &'m Module) -> Option<&'m ClassDefinition> {
+        let current_name = self.class_name();
+        module.classes.iter().find(|c| c.name.name == current_name)
+    }
+
     /// Build the `beamtalk_source` Core Erlang attribute fragment (BT-845/BT-860).
     ///
     /// Returns `, 'beamtalk_source' = ["<path>"]` when `source_path` is set
@@ -1172,131 +1296,9 @@ pub fn to_module_name(class_name: &str) -> String {
     beamtalk_core::ast::to_module_name(class_name)
 }
 
-/// Extracts the user package prefix from a workspace-qualified module name (BT-794).
-///
-/// Given `bt@{package}@{rest}`, returns `Some("bt@{package}@")`.
-/// Returns `None` for stdlib modules (`bt@stdlib@...`), unprefixed names, or
-/// names without a package segment.
-///
-/// # Limitations
-///
-/// This function intentionally returns only the top-level package segment
-/// (`bt@{package}@`), discarding any subdirectory path components. For example,
-/// `bt@sicp@scheme@eval` returns `bt@sicp@` rather than `bt@sicp@scheme@`.
-///
-/// Callers such as `compiled_module_name` use this prefix to construct module
-/// names for referenced classes. This means cross-module references within a
-/// package only produce correct names when the referenced class lives at the
-/// package root (e.g. `bt@{package}@{class}`). Classes nested in subdirectories
-/// (e.g. `bt@{package}@{subdir}@{class}`) cannot be resolved by class name alone
-/// and are not currently supported for inter-class dispatch.
-///
-/// # Examples
-///
-/// ```ignore
-/// assert_eq!(user_package_prefix("bt@bank@account"), Some("bt@bank@".into()));
-/// // Subdirectory segments are stripped — `scheme@` is not preserved:
-/// assert_eq!(user_package_prefix("bt@sicp@scheme@eval"), Some("bt@sicp@".into()));
-/// assert_eq!(user_package_prefix("bt@stdlib@integer"), None);
-/// assert_eq!(user_package_prefix("counter"), None);
-/// assert_eq!(user_package_prefix("bt@counter"), None);
-/// ```
-pub(super) fn user_package_prefix(module_name: &str) -> Option<String> {
-    let rest = module_name.strip_prefix("bt@")?;
-    let (pkg, suffix) = rest.split_once('@')?;
-    if pkg == "stdlib" || suffix.is_empty() {
-        return None;
-    }
-    Some(format!("bt@{pkg}@"))
-}
-
-/// Returns true if `module_name` corresponds to the compiled form of `class_name`.
-///
-/// ADR 0016/0026: Module names may be prefixed with `bt@` (user code),
-/// `bt@stdlib@` (stdlib), `bt@{package}@` (package mode), or unprefixed (legacy/tests).
-/// The unprefixed arm is retained because hand-constructed test-fixture `Module`s use
-/// bare class names (e.g. "counter"); real compilation always emits a `bt@…` prefix.
-pub(super) fn module_matches_class(module_name: &str, class_name: &str) -> bool {
-    let snake = to_module_name(class_name);
-    module_name == snake
-        || module_name == format!("bt@{snake}")
-        || module_name == format!("bt@stdlib@{snake}")
-        || module_name
-            .strip_prefix("bt@")
-            .and_then(|rest| rest.rsplit_once('@'))
-            .is_some_and(|(_, suffix)| suffix == snake)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_module_matches_class_unprefixed() {
-        assert!(module_matches_class("counter", "Counter"));
-    }
-
-    #[test]
-    fn test_module_matches_class_bt_prefix() {
-        assert!(module_matches_class("bt@counter", "Counter"));
-    }
-
-    #[test]
-    fn test_module_matches_class_stdlib_prefix() {
-        assert!(module_matches_class("bt@stdlib@integer", "Integer"));
-    }
-
-    #[test]
-    fn test_module_matches_class_package_prefix() {
-        assert!(module_matches_class("bt@my_app@counter", "Counter"));
-    }
-
-    #[test]
-    fn test_module_matches_class_package_multi_word() {
-        assert!(module_matches_class("bt@my_app@my_counter", "MyCounter"));
-    }
-
-    #[test]
-    fn test_module_matches_class_package_subdirectory() {
-        // bt@my_app@util@math should match class Math (rsplit_once on last @)
-        assert!(module_matches_class("bt@my_app@util@math", "Math"));
-    }
-
-    #[test]
-    fn test_module_matches_class_no_match() {
-        assert!(!module_matches_class("bt@other", "Counter"));
-    }
-
-    #[test]
-    fn test_user_package_prefix_package_mode() {
-        assert_eq!(
-            user_package_prefix("bt@bank@account"),
-            Some("bt@bank@".into())
-        );
-    }
-
-    #[test]
-    fn test_user_package_prefix_deep_path() {
-        assert_eq!(
-            user_package_prefix("bt@sicp@scheme@eval"),
-            Some("bt@sicp@".into())
-        );
-    }
-
-    #[test]
-    fn test_user_package_prefix_stdlib() {
-        assert_eq!(user_package_prefix("bt@stdlib@integer"), None);
-    }
-
-    #[test]
-    fn test_user_package_prefix_unprefixed() {
-        assert_eq!(user_package_prefix("counter"), None);
-    }
-
-    #[test]
-    fn test_user_package_prefix_bt_only() {
-        assert_eq!(user_package_prefix("bt@counter"), None);
-    }
 
     #[test]
     fn test_versioned_var_version_zero_returns_prefix() {
@@ -1334,5 +1336,40 @@ mod tests {
         assert_eq!(ext_var(0), "_Ext0");
         assert_eq!(ext_var(1), "_Ext1");
         assert_eq!(ext_var(42), "_Ext42");
+    }
+
+    #[test]
+    fn bt_3431_regression_current_class_survives_file_class_name_mismatch() {
+        // BT-3431's exact scenario: a `.bt` file whose basename disagrees
+        // with the class it declares (`event.bt` containing `class
+        // ExduraEvent`) used to silently break gen_server self-dispatch and
+        // state-threading codegen. The deleted `module_matches_class`
+        // answered "is this the class I'm generating right now?" by
+        // re-deriving a module name from the *file-path*-derived module
+        // name (`self.module_name`) and comparing it, structurally, against
+        // a candidate built from the *class* name — so a real mismatch made
+        // the class look like "not itself", with no diagnostic at the point
+        // of failure.
+        //
+        // ADR 0119/BT-3436 replaced that comparison outright: `current_class`
+        // identifies the class being generated directly from the parsed AST
+        // (`self.class_name()`, set once per module by
+        // `setup_class_identity` from the class's own declared name), never
+        // by re-deriving and comparing a module-name string — so this exact
+        // mismatch shape can no longer affect self-dispatch identity at all.
+        let source = "Value subclass: ExduraEvent";
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+
+        // The file-path-derived module name ("event", from a hypothetical
+        // `event.bt`) deliberately disagrees with the class-name-derived one
+        // ("exdura_event") — exactly BT-3431's mismatch.
+        let mut generator = CoreErlangGenerator::new("event");
+        generator.setup_class_identity(&module);
+
+        let found = generator
+            .current_class(&module)
+            .expect("current_class must find ExduraEvent despite the file/class name mismatch");
+        assert_eq!(found.name.name, "ExduraEvent");
     }
 }

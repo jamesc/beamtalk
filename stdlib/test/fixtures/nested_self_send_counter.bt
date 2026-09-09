@@ -11,7 +11,7 @@
 //
 // BT-3402: extends the same fixture with self-sends (and direct field
 // mutations) nested inside `and:`/`or:` BLOCK ARGUMENTS specifically.
-// `and:`/`or:` are ordinary self-hosted Boolean methods (Boolean.bt: `and:
+// `and:`/`or:` are ordinary self-hosted Boolean methods (boolean.bt: `and:
 // aBlock => self ifTrue: aBlock ifFalse: [false]`), not compiler
 // intrinsics, so before this fix the block argument compiled as a plain
 // Tier 1 closure: a self-send (or `self.slot :=`) inside it ran, but its

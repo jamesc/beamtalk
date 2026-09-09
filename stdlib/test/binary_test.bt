@@ -33,11 +33,9 @@ TestCase subclass: BinaryTest
 
   testSerializeAndDeserializeBoolean =>
     binTrue := Binary serialize: true
-    @expect type
-    self assert: (Binary deserialize: binTrue)
+    self assert: (Binary deserialize: binTrue) equals: true
     binFalse := Binary serialize: false
-    @expect type
-    self deny: (Binary deserialize: binFalse)
+    self assert: (Binary deserialize: binFalse) equals: false
 
   testSerializeProducesBinary =>
     bin := Binary serialize: 42

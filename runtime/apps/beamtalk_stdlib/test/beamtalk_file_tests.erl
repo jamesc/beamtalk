@@ -2299,6 +2299,56 @@ temp_directory_respects_TMPDIR_test() ->
         end
     end.
 
+%% Nightly macOS regression: `$TMPDIR` is conventionally set WITH a trailing
+%% `/` on macOS (e.g. `/var/folders/xx/yyyyyyyy/T/`), unlike Linux/Windows
+%% temp-dir sources — a caller comparing this value against another path
+%% (e.g. `SubprocessTest>>testOpenWithDir`, which spawns a shell `cd`'d into
+%% this directory and checks its `pwd` output for this value as a
+%% substring) needs one consistent contract, not a platform-dependent
+%% trailing separator.
+temp_directory_strips_trailing_slash_test() ->
+    OrigTmpdir = os:getenv("TMPDIR"),
+    try
+        os:putenv("TMPDIR", "/custom/tmp/path/"),
+        ?assertEqual(<<"/custom/tmp/path">>, beamtalk_file:'tempDirectory'())
+    after
+        case OrigTmpdir of
+            false -> os:unsetenv("TMPDIR");
+            V -> os:putenv("TMPDIR", V)
+        end
+    end.
+
+%% PR #3786 review: a bare Unix root (`"/"`) is correctly left untouched by
+%% `strip_trailing_separator/1`, since stripping it would leave `""`, not an
+%% equivalent path.
+temp_directory_preserves_unix_root_test() ->
+    OrigTmpdir = os:getenv("TMPDIR"),
+    try
+        os:putenv("TMPDIR", "/"),
+        ?assertEqual(<<"/">>, beamtalk_file:'tempDirectory'())
+    after
+        case OrigTmpdir of
+            false -> os:unsetenv("TMPDIR");
+            V -> os:putenv("TMPDIR", V)
+        end
+    end.
+
+%% PR #3786 review: a Windows drive root (`"C:\"`) must also be left
+%% untouched — stripping its trailing separator would leave `"C:"`, which
+%% names the current directory on that drive, not the drive's root, i.e. a
+%% different path, not merely a differently-formatted equivalent one.
+temp_directory_preserves_windows_drive_root_test() ->
+    OrigTmpdir = os:getenv("TMPDIR"),
+    try
+        os:putenv("TMPDIR", "C:\\"),
+        ?assertEqual(<<"C:\\">>, beamtalk_file:'tempDirectory'())
+    after
+        case OrigTmpdir of
+            false -> os:unsetenv("TMPDIR");
+            V -> os:putenv("TMPDIR", V)
+        end
+    end.
+
 temp_directory_falls_back_to_TMP_test() ->
     %% Unset TMPDIR, set TMP, expect TMP's value.
     OrigTmpdir = os:getenv("TMPDIR"),

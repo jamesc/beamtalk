@@ -254,19 +254,19 @@ Honest about the gen_server implementation but leaky as an abstraction. "State" 
 ## Implementation
 
 ### Phase 1: Rename instance-side API
-1. **Object.bt**: Rename intrinsic declarations from `instVarNames`/`instVarAt:`/`instVarAt:put:` to `fieldNames`/`fieldAt:`/`fieldAt:put:`
+1. **object.bt**: Rename intrinsic declarations from `instVarNames`/`instVarAt:`/`instVarAt:put:` to `fieldNames`/`fieldAt:`/`fieldAt:put:`
 2. **Codegen** (`intrinsics.rs`): Update intrinsic name matching for the new selectors
 3. **Runtime** (`beamtalk_object_ops.erl`): Update dispatch clauses for new selector atoms
 4. **Runtime** (`beamtalk_primitive.erl`): Update `is_ivar_method` checks to new names
 5. **Runtime** (`beamtalk_actor.erl`): Update any direct selector references
 
 ### Phase 2: Rename class-side API and declaration syntax
-1. **Behaviour.bt**: Rename `instanceVariableNames` → `fieldNames`, `allInstanceVariableNames` → `allFieldNames`
+1. **behaviour.bt**: Rename `instanceVariableNames` → `fieldNames`, `allInstanceVariableNames` → `allFieldNames`
 2. **Parser**: Rename `classVar:` keyword to `classState:` in class definition parsing
 3. **Runtime** (`beamtalk_object_class.erl`): Rename `instance_variables` field in `#class_state{}` to `fields`; rename `class_variables` to `class_state`; update handle_call clauses for new primitive names
 4. **Runtime** (`beamtalk_class_instantiation.erl`): Update references to `instance_variables` and `class_variables` keys in class spec maps
 5. **Codegen** (`methods.rs`): Update `instance_variables` key in generated class registration maps
-6. **Stdlib**: Update all `classVar:` declarations to `classState:` in `SystemDictionary.bt`, `WorkspaceEnvironment.bt`, `TranscriptStream.bt`
+6. **Stdlib**: Update all `classVar:` declarations to `classState:` in `SystemDictionary.bt`, `WorkspaceEnvironment.bt`, `transcript_stream.bt`
 7. **Tests**: Update test fixtures using `classVar:` (`class_var_point.bt`, `class_var_counter.bt`, `instance_access_counter.bt`)
 
 ### Phase 3: Update tests and docs
@@ -278,7 +278,7 @@ Honest about the gen_server implementation but leaky as an abstraction. "State" 
 
 ### Affected components
 - **Parser**: `classVar:` → `classState:` keyword recognition
-- **Stdlib**: `Object.bt`, `Behaviour.bt`, `SystemDictionary.bt`, `WorkspaceEnvironment.bt`, `TranscriptStream.bt`
+- **Stdlib**: `object.bt`, `behaviour.bt`, `SystemDictionary.bt`, `WorkspaceEnvironment.bt`, `transcript_stream.bt`
 - **Codegen**: `intrinsics.rs`, `methods.rs`
 - **Runtime**: `beamtalk_object_ops.erl`, `beamtalk_primitive.erl`, `beamtalk_actor.erl`, `beamtalk_object_class.erl`, `beamtalk_class_instantiation.erl`
 - **Tests**: `reflection_basic_test.bt`, `beamtalk_object_ops_tests.erl`, `beamtalk_primitive_tests.erl`, `class_var_point.bt`, `class_var_counter.bt`, `instance_access_counter.bt`

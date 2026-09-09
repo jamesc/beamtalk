@@ -11,8 +11,8 @@
 // codegen. See `crates/beamtalk-core/src/codegen/core_erlang/mod.rs`'s
 // `Expression::Return` arm.
 //
-// Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt,
-// fixtures/bt3051_parent.bt, fixtures/bt3051_simple_child.bt.
+// Fixtures: fixtures/bt3047ancestor.bt, fixtures/bt3047driver_plain.bt,
+// fixtures/bt3051parent.bt, fixtures/bt3051simple_child.bt.
 
 TestCase subclass: NlrOpenScopeSelfSendTest
 

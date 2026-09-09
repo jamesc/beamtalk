@@ -233,7 +233,7 @@ actor_methods_test_() ->
                 %% BT-3071: new/new: are back on Actor's class methods —
                 %% lifted from the codegen-injected error stubs into real,
                 %% documented `class sealed new` / `new:` declarations in
-                %% Actor.bt. The compiled body still always raises
+                %% actor.bt. The compiled body still always raises
                 %% instantiation_error, and `check_actor_new_usage`
                 %% (BT-563/BT-1524's own hard compile-time error) still
                 %% rejects `ActorSubclass new` before this method is ever

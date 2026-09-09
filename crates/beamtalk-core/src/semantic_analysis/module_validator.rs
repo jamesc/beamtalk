@@ -106,6 +106,74 @@ pub fn validate_single_definition(module: &Module) -> Vec<Diagnostic> {
     diagnostics
 }
 
+/// Validates that a file's basename agrees with the class it declares,
+/// under Erlang module-name case-folding (BT-3431).
+///
+/// A `.bt` file's Erlang module name is derived from its own file path
+/// (`to_module_name(file_stem)`), independently of the class name declared
+/// inside it (ADR 0016/0026). Every *other* file's reference to this class —
+/// `compiled_module_name`'s registry lookup (ADR 0119 / BT-3436), hot-reload's
+/// file-to-module mapping — resolves through that file-path-derived name, so
+/// a class whose file name disagrees with its own declared name cannot be
+/// dispatched to by name from anywhere else, with no diagnostic at the point
+/// of failure. This check catches the mismatch early, before it reaches
+/// codegen.
+///
+/// (Self-dispatch/state-routing codegen in the *same* file — `gen_server`
+/// callbacks, class-var shadow-writes — no longer depends on this agreement
+/// at all: `CoreErlangGenerator::current_class` identifies "the class I am
+/// generating right now" straight from the parsed `Module` (`ADR 0119`'s
+/// `module_matches_class` replacement), never by re-deriving and comparing a
+/// module name. This validator's continued value is entirely about the
+/// *cross-file* resolution case above.)
+///
+/// Only applies to a file declaring exactly one class (ADR 0040's "one class
+/// per file"); a file with zero or multiple classes is either fine (protocol
+/// file) or already flagged by [`validate_single_definition`], which would
+/// make "the" file/class comparison ambiguous here. `file_stem` is the
+/// caller-supplied basename (without extension) of the file being analysed,
+/// or `None` when there is no real file backing the module (REPL sessions,
+/// in-memory snippets) — the check is skipped in that case.
+#[must_use]
+pub fn check_class_file_name_agreement(
+    module: &Module,
+    file_stem: Option<&str>,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    let Some(stem) = file_stem else {
+        return diagnostics;
+    };
+    if module.classes.len() != 1 {
+        return diagnostics;
+    }
+
+    let class = &module.classes[0];
+    let class_name = class.name.name.as_str();
+    let expected = crate::ast::to_module_name(class_name);
+    let actual = crate::ast::to_module_name(stem);
+
+    if expected != actual {
+        diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "File name '{stem}' does not match declared class '{class_name}'. \
+                     Erlang module names are derived from the file name, so this class \
+                     cannot be recognized as belonging to its own module."
+                ),
+                class.name.span,
+            )
+            .with_hint(format!(
+                "Rename this file to '{expected}.bt' (or '{class_name}.bt') so the file \
+                 name agrees with the class it declares."
+            ))
+            .with_category(crate::source_analysis::DiagnosticCategory::FileClassNameMismatch),
+        );
+    }
+
+    diagnostics
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,5 +300,85 @@ mod tests {
         let diagnostics = validate_single_definition(&module);
         // One error for multiple classes, one for class+protocol mix
         assert_eq!(diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn test_class_file_name_agreement_matching_snake_case() {
+        let source = "Value subclass: ExduraEvent";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let diagnostics = check_class_file_name_agreement(&module, Some("exdura_event"));
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_class_file_name_agreement_matching_pascal_case() {
+        // stdlib convention: file stem is the class name verbatim.
+        let source = "Object subclass: StackFrame";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let diagnostics = check_class_file_name_agreement(&module, Some("StackFrame"));
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_class_file_name_agreement_mismatch_errors() {
+        // BT-3431's literal real-world scenario (`event.bt` / `class
+        // ExduraEvent`) — and BT-3437's registry-facing regression for it:
+        // this validator is what stands between that mismatch and a silent
+        // cross-file dispatch failure now that `compiled_module_name`
+        // resolves other files' references to this class through the
+        // `ClassModuleRegistry` (ADR 0119/BT-3436), which is itself built
+        // from the file-path-derived name — an undetected mismatch here
+        // would mean the registry's module for `ExduraEvent` never matches
+        // what the file's own declared name expects.
+        let source = "Value subclass: ExduraEvent";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let diagnostics = check_class_file_name_agreement(&module, Some("event"));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(diagnostics[0].message.contains("event"));
+        assert!(diagnostics[0].message.contains("ExduraEvent"));
+        assert_eq!(
+            diagnostics[0].category,
+            Some(crate::source_analysis::DiagnosticCategory::FileClassNameMismatch)
+        );
+        assert!(
+            diagnostics[0]
+                .hint
+                .as_ref()
+                .unwrap()
+                .contains("exdura_event")
+        );
+    }
+
+    #[test]
+    fn test_class_file_name_agreement_skips_without_file_stem() {
+        let source = "Value subclass: ExduraEvent";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let diagnostics = check_class_file_name_agreement(&module, None);
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_class_file_name_agreement_skips_multiple_classes() {
+        // Ambiguous which class "the" file name should agree with —
+        // `validate_single_definition` already flags this file separately.
+        let source = "Object subclass: Foo\n\nObject subclass: Bar";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let diagnostics = check_class_file_name_agreement(&module, Some("foo"));
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_class_file_name_agreement_skips_protocol_only_file() {
+        let source = "Protocol define: Awaitable\n  result -> Object";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let diagnostics = check_class_file_name_agreement(&module, Some("awaitable"));
+        assert!(diagnostics.is_empty());
     }
 }

@@ -54,13 +54,43 @@ fn is_type_name_token(kind: Option<&TokenKind>) -> bool {
     matches!(kind, Some(TokenKind::Identifier(_) | TokenKind::Symbol(_)))
 }
 
+/// Returns `true` if the token kind is the `state:` or `field:` keyword that
+/// starts a state/field declaration (see [`Parser::parse_state_declaration`]).
+fn is_state_or_field_keyword(kind: &TokenKind) -> bool {
+    matches!(kind, TokenKind::Keyword(k) if k == "state:" || k == "field:")
+}
+
+/// Returns `true` if the token kind is the `classState:` keyword that starts
+/// a class-variable declaration (see [`Parser::parse_classvar_declaration`]).
+fn is_class_state_keyword(kind: &TokenKind) -> bool {
+    matches!(kind, TokenKind::Keyword(k) if k == "classState:")
+}
+
+/// Returns `true` if the token kind is the `handleScope:` keyword (ADR 0103).
+/// Only ever valid as a class-header clause, parsed before the class body
+/// loop runs (see [`Parser::parse_optional_handle_scope`]); a `handleScope:`
+/// reached *inside* the body loop is a misplaced-clause error.
+fn is_handle_scope_keyword(kind: &TokenKind) -> bool {
+    matches!(kind, TokenKind::Keyword(k) if k == "handleScope:")
+}
+
+/// Returns `true` for a `state:`/`field:`/`classState:` keyword — the set of
+/// declaration-start keywords that (unlike `handleScope:`) can appear
+/// anywhere in a class body, not just its header. BT-3429: single source for
+/// this three-keyword set so [`Parser::is_at_member_boundary`] and
+/// [`Parser::parse_method_body`]'s exit condition can't silently drift apart
+/// from each other or from [`Parser::current_token_could_start_a_declaration`].
+fn is_state_like_declaration_keyword(kind: &TokenKind) -> bool {
+    is_state_or_field_keyword(kind) || is_class_state_keyword(kind)
+}
+
 /// BT-1856 / BT-2829: a consumed declaration-level `@expect category`,
 /// bundled with the doc comment and plain leading comments that sat in its
 /// own leading trivia (see [`Parser::parse_pending_declaration_expect`]).
 /// `Default` (all `None`/empty) means no `@expect` was present.
 #[derive(Default)]
 struct PendingDeclarationExpect {
-    expect: Option<(ExpectCategory, Option<EcoString>, Span)>,
+    expect: Option<(Vec<ExpectCategory>, Option<EcoString>, Span)>,
     doc_comment: Option<String>,
     comments: CommentAttachment,
 }
@@ -75,7 +105,7 @@ impl PendingDeclarationExpect {
     /// `Parser::parse_pending_declaration_expect`).
     fn apply_to(
         self,
-        expect: &mut Option<(ExpectCategory, Option<EcoString>, Span)>,
+        expect: &mut Option<(Vec<ExpectCategory>, Option<EcoString>, Span)>,
         doc_comment: &mut Option<String>,
         comments: &mut CommentAttachment,
     ) {
@@ -253,10 +283,8 @@ impl Parser {
         // trailing trivia instead of the header line's, silently dropping a
         // header-line comment (BT-2942).
         let header_line_end = self.current.saturating_sub(1);
-        let handle_scope_on_new_line = matches!(
-            self.current_kind(),
-            TokenKind::Keyword(k) if k == "handleScope:"
-        ) && self.current_token().has_leading_newline();
+        let handle_scope_on_new_line = is_handle_scope_keyword(self.current_kind())
+            && self.current_token().has_leading_newline();
 
         // Parse optional `handleScope: #symbol` clause (ADR 0103). Appears at
         // the head of the class body, like `native:` is a header clause.
@@ -346,7 +374,7 @@ impl Parser {
     /// Returns the bare symbol as an [`Identifier`] (name without the leading
     /// `#`), or `None` when no clause is present.
     fn parse_optional_handle_scope(&mut self) -> Option<Identifier> {
-        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "handleScope:") {
+        if !is_handle_scope_keyword(self.current_kind()) {
             return None;
         }
         self.advance(); // consume `handleScope:`
@@ -522,8 +550,7 @@ impl Parser {
             let pending = self.parse_pending_declaration_expect();
 
             // Check for state/field declaration: `state: fieldName ...` or `field: fieldName ...`
-            if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:")
-            {
+            if is_state_or_field_keyword(self.current_kind()) {
                 if let Some(mut state_decl) = self.parse_state_declaration() {
                     pending.apply_to(
                         &mut state_decl.expect,
@@ -534,7 +561,7 @@ impl Parser {
                 }
             }
             // Check for class variable declaration: `classState: varName ...`
-            else if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classState:") {
+            else if is_class_state_keyword(self.current_kind()) {
                 if let Some(mut classvar_decl) = self.parse_classvar_declaration() {
                     pending.apply_to(
                         &mut classvar_decl.expect,
@@ -586,7 +613,7 @@ impl Parser {
                         methods.push(method);
                     }
                 }
-            } else if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "handleScope:") {
+            } else if is_handle_scope_keyword(self.current_kind()) {
                 // ADR 0103: `handleScope:` is a header clause parsed *before* the
                 // body (see `parse_optional_handle_scope`). Reaching it here means
                 // it was misplaced after state/method declarations — emit a
@@ -987,57 +1014,179 @@ impl Parser {
     }
 
     /// Parses an `@expect category` or `@expect category "reason"` that
-    /// precedes a declaration (BT-1856, BT-1918).
+    /// precedes a declaration (BT-1856, BT-1918), delegating to
+    /// [`Parser::parse_expect_tail`] for the shared category-list/reason
+    /// grammar (BT-3387).
     ///
-    /// Consumes the `@expect` token, the category identifier, and an
-    /// optional reason string, returning the parsed category, optional
-    /// reason, and the span of the directive. If the category is unknown,
-    /// emits a parse error and returns `ExpectCategory::All` as a fallback
-    /// so parsing can continue.
-    fn parse_declaration_expect(&mut self) -> (ExpectCategory, Option<EcoString>, Span) {
+    /// Unlike the statement-level form (`parse_expect_directive` in
+    /// `expressions.rs`), an unrecognised category here has always fallen
+    /// back to `ExpectCategory::All` rather than becoming a parse error —
+    /// preserved as-is since a declaration always has *some* target to
+    /// attach an `@expect` to (there's no "no valid expression" case to
+    /// recover from, unlike the statement-level form's `Expression::Error`).
+    fn parse_declaration_expect(&mut self) -> (Vec<ExpectCategory>, Option<EcoString>, Span) {
         let start_token = self.advance(); // consume AtExpect
-        let start = start_token.span();
+        let (mut categories, reason, span, _) = self.parse_expect_tail(start_token.span());
+        if categories.is_empty() {
+            categories.push(ExpectCategory::All);
+        }
+        (categories, reason, span)
+    }
 
-        if let TokenKind::Identifier(name) = self.current_kind() {
-            let name = name.clone();
-            let end_token = self.advance();
-            let mut span = start.merge(end_token.span());
-            if let Some(category) = ExpectCategory::from_name(&name) {
-                // BT-1918: Parse optional reason string after category (same line only).
-                let reason = if matches!(self.current_kind(), TokenKind::String(_))
-                    && !self.current_token().has_leading_newline()
-                {
-                    let reason_str = if let TokenKind::String(s) = self.current_kind() {
-                        s.clone()
-                    } else {
-                        unreachable!()
-                    };
-                    let reason_token = self.advance();
-                    span = start.merge(reason_token.span());
-                    Some(reason_str)
+    /// Returns `true` if the current token could start a class-body
+    /// declaration — i.e. matches one of `parse_class_body`'s own
+    /// recognized starts (`state:`/`field:`/`classState:`/`handleScope:`,
+    /// or a method definition). Used by [`Parser::parse_expect_tail`] to
+    /// avoid ever swallowing a real declaration while discarding garbage
+    /// left over from a malformed `@expect` (BT-3387 review follow-up).
+    fn current_token_could_start_a_declaration(&self) -> bool {
+        is_state_like_declaration_keyword(self.current_kind())
+            || is_handle_scope_keyword(self.current_kind())
+            || self.is_at_method_definition()
+    }
+
+    /// Parses the comma-separated category list and optional reason string
+    /// that follow an already-consumed `@expect` token (BT-3387), shared by
+    /// the statement-level (`parse_expect_directive`, `expressions.rs`) and
+    /// declaration-level (`parse_declaration_expect`, above) forms.
+    ///
+    /// `start` is the span of the consumed `@expect` token. A single
+    /// category (`@expect dnu`) is still supported — the list form
+    /// (`@expect unresolved_ffi, type`) lets one directive suppress several
+    /// categories on the same target instead of requiring an artificial
+    /// second expression per category. Unknown category names are skipped
+    /// with a diagnostic (already pushed here). The returned category list
+    /// is empty when nothing valid was found — the last diagnostic message
+    /// pushed is also returned so callers that need to fail (rather than
+    /// fall back to `All`) can reuse it on an `Expression::Error` node
+    /// without pushing a duplicate diagnostic.
+    pub(super) fn parse_expect_tail(
+        &mut self,
+        start: Span,
+    ) -> (
+        Vec<ExpectCategory>,
+        Option<EcoString>,
+        Span,
+        Option<EcoString>,
+    ) {
+        let mut categories = Vec::new();
+        let mut span = start;
+        let mut last_error: Option<EcoString> = None;
+
+        loop {
+            if let TokenKind::Identifier(name) = self.current_kind() {
+                let name = name.clone();
+                let end_token = self.advance();
+                span = start.merge(end_token.span());
+                if let Some(category) = ExpectCategory::from_name(&name) {
+                    categories.push(category);
                 } else {
-                    None
-                };
-                (category, reason, span)
+                    let valid = ExpectCategory::valid_names().join(", ");
+                    let message: EcoString =
+                        format!("unknown @expect category '{name}', valid categories are: {valid}")
+                            .into();
+                    self.diagnostics
+                        .push(Diagnostic::error(message.clone(), span));
+                    last_error = Some(message);
+                }
             } else {
                 let valid = ExpectCategory::valid_names().join(", ");
-                let message =
-                    format!("unknown @expect category '{name}', valid categories are: {valid}");
-                self.diagnostics.push(Diagnostic::error(message, span));
-                // Consume trailing reason string to avoid secondary parse errors.
-                if matches!(self.current_kind(), TokenKind::String(_))
+                let message: EcoString =
+                    format!("@expect must be followed by a category name ({valid})").into();
+                self.diagnostics
+                    .push(Diagnostic::error(message.clone(), span));
+                last_error = Some(message);
+                // Consume one same-line offending token (e.g. `@expect ,` or
+                // `@expect 42`) so it isn't left dangling for the caller —
+                // same class-body-truncation risk the dangling-comma fix
+                // above addresses. Two things must hold, not just same-line:
+                // a token on the *next* line is left alone since that's
+                // plausibly the real next declaration/statement (e.g.
+                // `@expect` with the category simply forgotten, followed by
+                // a normal `state:` on its own line); AND a same-line token
+                // that itself could start a class-body declaration (e.g.
+                // `@expect state: x = 0`, category forgotten with no
+                // separator at all) must ALSO be left alone — otherwise this
+                // swallows the real declaration instead of discarding
+                // garbage, which is worse than the dangling-token bug being
+                // fixed here.
+                if !self.is_at_end()
                     && !self.current_token().has_leading_newline()
+                    && !self.current_token_could_start_a_declaration()
                 {
-                    self.advance();
+                    let bad_token = self.advance();
+                    span = start.merge(bad_token.span());
                 }
-                (ExpectCategory::All, None, span)
+                break;
             }
-        } else {
-            let valid = ExpectCategory::valid_names().join(", ");
-            let message = format!("@expect must be followed by a category name ({valid})");
-            self.diagnostics.push(Diagnostic::error(message, start));
-            (ExpectCategory::All, None, start)
+
+            if !is_comma(self.current_kind()) {
+                // No comma at all — the category list ends here, cleanly.
+                break;
+            }
+
+            // Same-line only, mirroring the reason-string lookahead below:
+            // a comma (or the identifier after it) on the next line is not a
+            // continuation of this directive's category list — e.g. a
+            // trailing comma left over from an aborted edit must not have
+            // the following line's leading identifier (which could
+            // plausibly name a real category, like a variable called
+            // `type`) silently absorbed into the list instead of starting
+            // the next statement.
+            let continues_same_line = !self.current_token().has_leading_newline()
+                && self
+                    .peek_token_at(1)
+                    .is_some_and(|t| !t.has_leading_newline());
+            let comma_token = self.advance();
+            span = start.merge(comma_token.span());
+            if !continues_same_line {
+                // Dangling comma (e.g. a typo or an aborted edit): consume
+                // it here, with a diagnostic, rather than leaving it as the
+                // current token. At the declaration level in particular,
+                // leaving it dangling makes `parse_class_body`'s caller
+                // treat the position as "not a valid declaration" (see the
+                // BT-1918 comment on the reason-string lookahead below,
+                // which this mirrors) and silently drop every subsequent
+                // state/method declaration in the class.
+                let message: EcoString =
+                    "trailing ',' in @expect category list must be followed by another category \
+                     on the same line"
+                        .into();
+                self.diagnostics
+                    .push(Diagnostic::error(message.clone(), span));
+                last_error = Some(message);
+                break;
+            }
         }
+
+        // BT-1918: Parse optional reason string after the category list (same line only).
+        //
+        // Deliberately unconditional — even when nothing valid was found
+        // (`categories` is empty) — matching every pre-BT-3387 `@expect`
+        // parse-error path, all of which attempted this same lookahead
+        // regardless of whether a category identifier was present at all.
+        // Skipping it in the "no identifier" case might look more
+        // conservative, but it isn't: at the declaration level, leaving a
+        // stray trailing token unconsumed there makes `parse_class_body`'s
+        // caller treat it as "not a valid declaration", which silently
+        // truncates the rest of the class body instead of just discarding
+        // one bad reason string — a strictly worse failure mode.
+        let reason = if matches!(self.current_kind(), TokenKind::String(_))
+            && !self.current_token().has_leading_newline()
+        {
+            let reason_str = if let TokenKind::String(s) = self.current_kind() {
+                s.clone()
+            } else {
+                unreachable!()
+            };
+            let reason_token = self.advance();
+            span = start.merge(reason_token.span());
+            Some(reason_str)
+        } else {
+            None
+        };
+
+        (categories, reason, span, last_error)
     }
 
     /// Parses a state/field declaration.
@@ -1129,7 +1278,7 @@ impl Parser {
         let mut comments = self.collect_comment_attachment();
 
         // Consume `classState:`
-        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classState:") {
+        if !is_class_state_keyword(self.current_kind()) {
             return None;
         }
         self.advance();
@@ -1650,7 +1799,7 @@ impl Parser {
             || self.is_at_native_declaration_boundary()
             || self.is_at_method_definition()
             || self.is_at_standalone_method_definition()
-            || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
+            || is_state_like_declaration_keyword(self.current_kind())
     }
 
     /// `is_at_type_alias_definition()`, gated by the same indentation guard
@@ -1741,7 +1890,7 @@ impl Parser {
             // does — see `is_at_declaration_level_expect`'s doc comment.
             && !self.is_at_declaration_level_expect()
             && !self.is_at_standalone_method_definition()
-            && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
+            && !is_state_like_declaration_keyword(self.current_kind())
             && !(self.in_class_body && self.current_token().indentation_after_newline() == Some(0))
         {
             let pos_before = self.current;

@@ -40,6 +40,7 @@ matching `beamtalk_hierarchy`'s own convention.
     find_defining_class/2,
     find_defining_class_method/2,
     collect_flattened_methods/2,
+    collect_flattened_class_methods/2,
     metaclass_method_doc/1
 ]).
 
@@ -177,6 +178,58 @@ collect_flattened_methods(ClassName, ClassPid) ->
         {max_depth_exceeded, {CycleName, _CyclePid, PartialAcc}} ->
             ?LOG_WARNING(
                 "collect_flattened_methods: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, CycleName, ClassName],
+                #{domain => [beamtalk, runtime]}
+            ),
+            PartialAcc;
+        not_found ->
+            %% Unreachable: see find_defining_class/2.
+            erlang:error({unreachable, not_found, ClassName})
+    end.
+
+-doc """
+Walk the class hierarchy collecting class-side methods.
+Returns #{Selector => DefiningClass} — local methods shadow inherited ones.
+
+On depth exhaustion (`?MAX_HIERARCHY_DEPTH`, a hierarchy cycle) returns the
+partial map folded up through the ancestors actually visited before the
+guard tripped (BT-3096) — not `#{}` — and logs a `?LOG_WARNING` naming the
+ancestor where the cycle was detected.
+
+BT-3478: Moved here from `beamtalk_repl_docs` (its only prior caller) so
+`beamtalk_repl_ops_dev`'s "inherited-methods" ws op can reuse the same
+class-side walk instead of a second copy — mirrors `collect_flattened_methods/2`
+above, which made the same move for the instance side under BT-3087.
+""".
+-spec collect_flattened_class_methods(atom(), pid()) -> #{atom() => atom()}.
+collect_flattened_class_methods(ClassName, ClassPid) ->
+    StepFun = fun({CurrentName, CurrentPid, AccMap}, _Depth) ->
+        LocalMethods = gen_server:call(CurrentPid, get_local_class_methods, 5000),
+        LocalFlat = maps:map(fun(_Sel, _Info) -> CurrentName end, LocalMethods),
+        %% AccMap already reflects every closer (lower-depth) ancestor
+        %% winning over farther ones; keep that invariant as this
+        %% (farther) level's LocalFlat is folded in.
+        NewAcc = maps:merge(LocalFlat, AccMap),
+        case gen_server:call(CurrentPid, superclass, 5000) of
+            none ->
+                {found, NewAcc};
+            SuperName ->
+                case beamtalk_class_registry:whereis_class(SuperName) of
+                    undefined -> {found, NewAcc};
+                    SuperPid -> {next, {SuperName, SuperPid, NewAcc}}
+                end
+        end
+    end,
+    case
+        beamtalk_hierarchy:walk_ancestors(
+            {ClassName, ClassPid, #{}}, StepFun, ?MAX_HIERARCHY_DEPTH
+        )
+    of
+        {found, Result} ->
+            Result;
+        {max_depth_exceeded, {CycleName, _CyclePid, PartialAcc}} ->
+            ?LOG_WARNING(
+                "collect_flattened_class_methods: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
                 [?MAX_HIERARCHY_DEPTH, CycleName, ClassName],
                 #{domain => [beamtalk, runtime]}
             ),

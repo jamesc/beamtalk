@@ -17,12 +17,12 @@ Three problems compound this:
 
 1. **The default is worse than Pharo's.** Pharo's `Object>>printOn:` is
    article-aware (`an OrderedCollection`). Beamtalk's default
-   (`Object.bt:92`) is a bare `"a " ++ self class printString` with no vowel
+   (`object.bt:92`) is a bare `"a " ++ self class printString` with no vowel
    handling, so it produces ungrammatical output like `"a Integer"`,
    `"a Object"`.
 
 2. **The good output exists but is unreachable by default.** `Value` already has
-   a structural `inspect` (`Value.bt:63`) that produces
+   a structural `inspect` (`value.bt:63`) that produces
    `ClassName(field: value, ...)` — exactly the descriptor we want. But it is
    wired to `inspect`, and **nothing on the default display path calls
    `inspect`.** The REPL renders Value results by dispatching `printString` as a
@@ -30,7 +30,7 @@ Three problems compound this:
    `beamtalk_runtime_api:print_string/1` if dispatch fails. Actor instances are
    rendered by a separate hard-coded path that bypasses `printString` entirely.
    Either way, the structural output from `inspect` is invisible unless the user
-   explicitly types `someValue inspect`. The `Value.bt` doc comment even *claims*
+   explicitly types `someValue inspect`. The `value.bt` doc comment even *claims*
    `Point new // => Point(x: 0, y: 0)`, but the live REPL shows `a Point`.
 
 3. **Three overlapping protocols with no clear contract.** Beamtalk has
@@ -48,11 +48,11 @@ Three problems compound this:
 
 There are **multiple parallel implementations** that must be reconciled:
 
-- **Compiled stdlib** (`stdlib/src/*.bt`): `Object.bt:92`
+- **Compiled stdlib** (`stdlib/src/*.bt`): `object.bt:92`
   `printString => "a " ++ self class printString`; `displayString` and
-  `inspect` both delegate to `printString`. `Value.bt:63` overrides `inspect`
+  `inspect` both delegate to `printString`. `value.bt:63` overrides `inspect`
   (only) with the structural form, which recursively calls `inspect` on each
-  field (`Value.bt:65`).
+  field (`value.bt:65`).
 - **Runtime object dispatch** (`beamtalk_object_ops.erl:97-130`): handles dispatch
   for actor/object instances. `printString`/`displayString` produce
   `"a ClassName"`; `inspect` *already* produces the structural
@@ -140,7 +140,7 @@ This deliberately keeps the breaking change out of this ADR — see Alternatives
   redesign, which should not block the non-breaking `printString` win.
 
   One concrete consequence for this ADR: the structural renderer recurses into
-  nested fields via **`printString`**, not `inspect`. Today `Value.bt:65` recurses
+  nested fields via **`printString`**, not `inspect`. Today `value.bt:65` recurses
   via `inspect`; since `printString` now produces the same structural output, the
   renderer (and `Value`'s `inspect`, which simply delegates to `printString`) calls
   `printString` on fields. This removes the recursion's dependence on `inspect`,
@@ -234,7 +234,7 @@ because:
 
 Fields are rendered in sorted order for deterministic output, each value rendered
 via its own `printString` (Debug form — strings stay quoted inside structural
-output). This is a deliberate change from today: `Value.bt:65` currently calls
+output). This is a deliberate change from today: `value.bt:65` currently calls
 `(self fieldAt: name) inspect` for nested values, and `beamtalk_object_ops.erl`
 calls `inspect_field` which sends `inspect`. Under the new model, nested rendering
 calls `printString`, and `Value`'s `inspect` simply delegates to `printString`
@@ -276,7 +276,7 @@ is not part of any protocol and its contract change creates no conformance issue
 
 ### 6. Reconcile the two implementations
 
-The compiled stdlib (`Object.bt`, `Value.bt`) and the runtime fallback
+The compiled stdlib (`object.bt`, `value.bt`) and the runtime fallback
 (`beamtalk_object_ops.erl`, `beamtalk_primitive.erl`, `beamtalk_reflection.erl`)
 must produce **byte-identical** output for the same value. The structural
 renderer (format, sorting, bounds, cycle guard) is implemented once as a shared
@@ -468,7 +468,7 @@ deferred independently.
    override `printString` and will not use this renderer.
 2. **`printString` defaults + REPL unification:**
    - Repoint `Value` `printString` to the structural renderer.
-   - Repoint `Object.bt:92` from `"a " ++ ...` to `self class name asString` (bare
+   - Repoint `object.bt:92` from `"a " ++ ...` to `self class name asString` (bare
      class name, no article).
    - Update `beamtalk_object_ops.erl` `printString`/`displayString` clauses to
      produce `Actor(ClassName, pid)` for actors,
@@ -480,7 +480,7 @@ deferred independently.
    - Keep `Pid`/`Port`/`Reference`/`Tuple` delegating to `asString` (already
      consistent — `#Pid<0.123.0>` etc.).
 3. **`displayString`:** keep default-to-`printString`; document the
-   interpolation-hook role in `Object.bt` and the language docs.
+   interpolation-hook role in `object.bt` and the language docs.
 4. **`inspect`:** *out of scope for this ADR.* Left returning `String` (delegating
    to `printString`). Its redesign into a tooling/action verb is a follow-up ADR
    designed against the LiveView surface. The only change here is ensuring `Value`'s
@@ -489,8 +489,8 @@ deferred independently.
 5. **Test migration:** update ~9 BUnit assertions expecting `"a Foo"`, ~123 REPL
    protocol test assertions expecting `#Actor<...>`, and any Rust codegen golden
    tests.
-6. **Docs:** update `Printable.bt`, `Value.bt`/`Object.bt` doc comments (the
-   `Value.bt` comment already claims the structural output — it becomes true),
+6. **Docs:** update `printable.bt`, `value.bt`/`object.bt` doc comments (the
+   `value.bt` comment already claims the structural output — it becomes true),
    `docs/beamtalk-language-features.md`, and `docs/development/surface-parity.md`
    (display output is a cross-surface behaviour).
 
@@ -505,13 +505,13 @@ These were surfaced in review and must be handled or the change introduces laten
 runtime crashes:
 
 1. **Circular migration of `inspect`** *(applies to the deferred follow-up ADR).*
-   `Value.bt:65` calls `(self fieldAt: name) inspect` recursively, and
+   `value.bt:65` calls `(self fieldAt: name) inspect` recursively, and
    `beamtalk_object_ops` `inspect_field` sends `inspect`. **This ADR pre-empts the
    problem** by switching the structural renderer's field recursion to `printString`
    now (while `inspect` still returns a string), so the later `inspect` contract
    change cannot break structural printing.
 2. **Latent gradual-typing crash** *(applies to the deferred follow-up ADR).*
-   `Number.bt:94` (and 13 others) define `inspect -> String => self printString`.
+   `number.bt:94` (and 13 others) define `inspect -> String => self printString`.
    Removing these later makes `42 inspect` return the receiver/inspector, not
    `"42"`; because typing is gradual, any remaining `... ++ x inspect` compiles but
    crashes at runtime. The follow-up ADR must find every
@@ -539,7 +539,7 @@ runtime crashes:
    delegate to it or be deleted. The ADR mandates byte-identical output — three
    independent formatters cannot guarantee that.
 5. **Stale `runtimeCalledSelectors`** *(applies to the deferred follow-up ADR).*
-   `SystemNavigation.bt:2006` lists `#inspect` as a runtime-invoked selector (so
+   `system_navigation.bt:2006` lists `#inspect` as a runtime-invoked selector (so
    `unusedSelectors` doesn't flag `inspect` overrides). This stays correct for now
    (the inspector surface still invokes the method). When `inspect` is repurposed,
    this entry must be re-evaluated.
@@ -548,7 +548,7 @@ runtime crashes:
    (`beamtalk_repl_ops_actors`) that calls `sys:get_state` — unrelated to the
    Beamtalk `inspect` method. When the follow-up repurposes the method as "open
    tooling", the relationship between the two must be documented (and ideally
-   unified) for contributors. `SystemNavigation.bt:2006` `runtimeCalledSelectors`
+   unified) for contributors. `system_navigation.bt:2006` `runtimeCalledSelectors`
    lists `#inspect` and must be re-evaluated at that point.
 
 ## Migration Path
@@ -576,8 +576,8 @@ runtime crashes:
   ADR 0067 (state/field keywords by class kind), ADR 0068 (structural protocol
   conformance — `Printable`), ADR 0023 (string interpolation), ADR 0085 (editor
   live image representation), ADR 0036 (metaclass tower)
-- Code: `stdlib/src/Object.bt:92`, `stdlib/src/Value.bt:63`,
-  `stdlib/src/Printable.bt`, `stdlib/src/String.bt:563`,
+- Code: `stdlib/src/object.bt:92`, `stdlib/src/value.bt:63`,
+  `stdlib/src/printable.bt`, `stdlib/src/string.bt:563`,
   `runtime/apps/beamtalk_runtime/src/beamtalk_object_ops.erl:97`,
   `runtime/apps/beamtalk_workspace/src/beamtalk_repl_json.erl:316`,
   `crates/beamtalk-core/src/codegen/core_erlang/expressions.rs:92`

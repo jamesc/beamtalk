@@ -118,7 +118,7 @@ to_list_non_list_test_() ->
         {"to_list leaves no accumulator messages behind", fun to_list_drains_mailbox_test/0}
     ]}.
 
-%% Build an Interval via direct map construction (matches stdlib/src/Interval.bt).
+%% Build an Interval via direct map construction (matches stdlib/src/interval.bt).
 make_interval(From, To) ->
     #{'$beamtalk_class' => 'Interval', from => From, to => To, step => 1}.
 

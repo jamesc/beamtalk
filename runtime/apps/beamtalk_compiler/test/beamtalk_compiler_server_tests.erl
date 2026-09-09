@@ -317,6 +317,327 @@ remove_class_when_down() ->
     application:start(beamtalk_compiler).
 
 %%% ---------------------------------------------------------------
+%%% BT-3473: Protocol cache (register_protocol, remove_protocol,
+%%% get_protocols), mirroring the class_cache_test_ suite above.
+%%% ---------------------------------------------------------------
+
+protocol_cache_test_() ->
+    {setup, fun start_compiler/0, fun stop_compiler/1, [
+        {"register_protocol → protocol visible in get_protocols", fun register_protocol_visible/0},
+        {"register_protocol twice → overwrites", fun register_protocol_overwrites/0},
+        {"clear_classes → protocol cache emptied too", fun clear_classes_empties_protocols/0},
+        {"register_protocol when server down → no crash", fun register_protocol_when_down/0},
+        {"remove_protocol → protocol no longer in cache", fun remove_protocol_removes/0},
+        {"remove_protocol leaves other protocols untouched", fun remove_protocol_leaves_others/0},
+        {"remove_protocol of unregistered protocol is a no-op",
+            fun remove_protocol_unknown_is_noop/0},
+        {"remove_protocol when server down → no crash", fun remove_protocol_when_down/0},
+        {"beamtalk_protocol_registry:register_protocol/1 notifies the ambient cache",
+            fun protocol_registry_register_notifies_compiler_server/0},
+        {"beamtalk_protocol_registry:unregister_protocol/1 notifies the ambient cache",
+            fun protocol_registry_unregister_notifies_compiler_server/0},
+        {
+            "diagnostics/3 threads protocol_registry so a runtime-seeded protocol "
+            "class entry doesn't shadow the protocol",
+            fun api_diagnostics_protocol_registry_suppresses_false_protocol_mismatch/0
+        },
+        {
+            "compile/2 threads protocol_registry so a runtime-seeded protocol "
+            "class entry doesn't shadow the protocol (BT-3477)",
+            fun api_compile_protocol_registry_suppresses_false_protocol_mismatch/0
+        },
+        {
+            "compile_method/3 threads protocol_registry so a runtime-seeded protocol "
+            "class entry doesn't shadow the protocol (BT-3477)",
+            fun api_compile_method_protocol_registry_suppresses_false_protocol_mismatch/0
+        }
+    ]}.
+
+%% BT-3473: exercises the real cross-app entry point
+%% (`beamtalk_protocol_registry:register_protocol/1`, in `beamtalk_runtime`)
+%% rather than `beamtalk_compiler_server:register_protocol/2` directly, so a
+%% regression in the notification hook itself (not just this module's own
+%% cast handler, already covered above) would fail this test.
+%%
+%% `beamtalk_protocol_registry:init/0` is idempotent (`ensure_protocol_table/0`
+%% only creates the ETS table if absent) — called directly here rather than
+%% starting the whole `beamtalk_runtime` application, which `beamtalk_compiler`
+%% tests have no other reason to depend on.
+protocol_registry_register_notifies_compiler_server() ->
+    beamtalk_protocol_registry:init(),
+    beamtalk_compiler_server:clear_classes(),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'TestBT3473Registry',
+        required_methods => [#{selector => foo, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    Protocols = beamtalk_compiler_server:get_protocols(),
+    ?assertMatch(#{name := 'TestBT3473Registry'}, maps:get('TestBT3473Registry', Protocols)).
+
+%% BT-3473: `unregister_protocol/1` matches by the `module` metadata field
+%% (BT-3105's convention for `remove_class/1` too), so the registered `Info`
+%% must carry one for this test to purge it.
+protocol_registry_unregister_notifies_compiler_server() ->
+    beamtalk_protocol_registry:init(),
+    beamtalk_compiler_server:clear_classes(),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'TestBT3473RegistryB',
+        module => 'test_bt3473_registry_b_mod',
+        required_methods => [],
+        type_params => [],
+        extending => undefined
+    }),
+    ?assert(maps:is_key('TestBT3473RegistryB', beamtalk_compiler_server:get_protocols())),
+
+    ok = beamtalk_protocol_registry:unregister_protocol('test_bt3473_registry_b_mod'),
+
+    ?assertNot(maps:is_key('TestBT3473RegistryB', beamtalk_compiler_server:get_protocols())).
+
+register_protocol_visible() ->
+    beamtalk_compiler_server:clear_classes(),
+    Info = #{name => 'TestProto', required_methods => [#{selector => foo, arity => 0}]},
+    beamtalk_compiler_server:register_protocol('TestProto', Info),
+    Protocols = beamtalk_compiler_server:get_protocols(),
+    ?assertMatch(#{name := 'TestProto'}, maps:get('TestProto', Protocols)).
+
+register_protocol_overwrites() ->
+    beamtalk_compiler_server:clear_classes(),
+    Info1 = #{name => 'TestProto2', required_methods => [#{selector => foo, arity => 0}]},
+    Info2 = #{name => 'TestProto2', required_methods => [#{selector => bar, arity => 1}]},
+    beamtalk_compiler_server:register_protocol('TestProto2', Info1),
+    beamtalk_compiler_server:register_protocol('TestProto2', Info2),
+    Protocols = beamtalk_compiler_server:get_protocols(),
+    ?assertMatch(
+        #{required_methods := [#{selector := bar, arity := 1}]},
+        maps:get('TestProto2', Protocols)
+    ).
+
+clear_classes_empties_protocols() ->
+    Info = #{name => 'TestProto3', required_methods => []},
+    beamtalk_compiler_server:register_protocol('TestProto3', Info),
+    ok = beamtalk_compiler_server:clear_classes(),
+    ?assertEqual(#{}, beamtalk_compiler_server:get_protocols()).
+
+register_protocol_when_down() ->
+    %% Calling register_protocol/2 when the server is not running must not crash.
+    application:stop(beamtalk_compiler),
+    ?assertEqual(
+        ok, beamtalk_compiler_server:register_protocol('TestProtoDown', #{name => 'TestProtoDown'})
+    ),
+    application:start(beamtalk_compiler).
+
+remove_protocol_removes() ->
+    beamtalk_compiler_server:clear_classes(),
+    Info = #{name => 'TestBT3473', required_methods => []},
+    beamtalk_compiler_server:register_protocol('TestBT3473', Info),
+    ?assert(maps:is_key('TestBT3473', beamtalk_compiler_server:get_protocols())),
+
+    ok = beamtalk_compiler_server:remove_protocol('TestBT3473'),
+
+    ?assertNot(maps:is_key('TestBT3473', beamtalk_compiler_server:get_protocols())).
+
+remove_protocol_leaves_others() ->
+    beamtalk_compiler_server:clear_classes(),
+    beamtalk_compiler_server:register_protocol('TestBT3473A', #{
+        name => 'TestBT3473A', required_methods => []
+    }),
+    beamtalk_compiler_server:register_protocol('TestBT3473B', #{
+        name => 'TestBT3473B', required_methods => []
+    }),
+
+    ok = beamtalk_compiler_server:remove_protocol('TestBT3473A'),
+
+    Protocols = beamtalk_compiler_server:get_protocols(),
+    ?assertNot(maps:is_key('TestBT3473A', Protocols)),
+    ?assert(maps:is_key('TestBT3473B', Protocols)).
+
+remove_protocol_unknown_is_noop() ->
+    beamtalk_compiler_server:clear_classes(),
+    ?assertEqual(ok, beamtalk_compiler_server:remove_protocol('TestBT3473NeverRegistered')),
+    ?assertEqual(#{}, beamtalk_compiler_server:get_protocols()).
+
+remove_protocol_when_down() ->
+    %% Calling remove_protocol/1 when the server is not running must not crash.
+    application:stop(beamtalk_compiler),
+    ?assertEqual(ok, beamtalk_compiler_server:remove_protocol('TestBT3473Down')),
+    application:start(beamtalk_compiler).
+
+%% BT-3473: `diagnostics/3`'s ambient `class_hierarchy => true` opt-in used to
+%% surface a runtime-seeded protocol only as a zero-method class-cache entry
+%% — the actual wire shape `beamtalk_protocol_registry:create_protocol_class/2`
+%% produces (no `superclass`, no `method_info`; see that function and
+%% `beamtalk_object_class:init/1`'s `CompilerMeta` handling) — defeating the
+%% BT-2088/BT-3472 nominal-mismatch escape hatch and making every selector on
+%% a protocol-typed receiver look unresolved. Proves both halves: the false
+%% positives reproduce with only `class_hierarchy` seeded (the pre-fix
+%% shape), and disappear once `protocol_registry` carries the same name —
+%% exactly the `TimeoutToken`/`NullTimer` scenario this issue tracks.
+api_diagnostics_protocol_registry_suppresses_false_protocol_mismatch() ->
+    ok = beamtalk_compiler_server:clear_classes(),
+    Source = <<
+        "Value subclass: NullTimer\n"
+        "  cancel -> Boolean => false\n"
+        "  isActive -> Boolean => true\n"
+        "\n"
+        "typed Object subclass: Pool\n"
+        "  make -> TimeoutToken => NullTimer new\n"
+        "  use: t :: TimeoutToken -> Boolean => t cancel\n"
+        "  go -> Boolean => self use: NullTimer new\n"
+    >>,
+    beamtalk_compiler_server:register_class('TimeoutToken', #{
+        is_sealed => true, is_abstract => true
+    }),
+
+    {ok, DiagsBefore} = beamtalk_compiler_server:diagnostics(Source, <<"expression">>, #{
+        class_hierarchy => true
+    }),
+    ?assert(any_message_contains(DiagsBefore, <<"declares return type TimeoutToken">>)),
+    ?assert(any_message_contains(DiagsBefore, <<"does not understand">>)),
+
+    beamtalk_compiler_server:register_protocol('TimeoutToken', #{
+        name => 'TimeoutToken',
+        required_methods => [
+            #{selector => cancel, arity => 0},
+            #{selector => isActive, arity => 0}
+        ],
+        type_params => [],
+        extending => undefined
+    }),
+
+    {ok, DiagsAfter} = beamtalk_compiler_server:diagnostics(Source, <<"expression">>, #{
+        class_hierarchy => true
+    }),
+    ?assertNot(any_message_contains(DiagsAfter, <<"declares return type TimeoutToken">>)),
+    ?assertNot(any_message_contains(DiagsAfter, <<"does not understand">>)).
+
+%% Test-only helper: does any diagnostic's `message` contain `Needle`?
+any_message_contains(Diagnostics, Needle) ->
+    lists:any(
+        fun(D) -> binary:match(maps:get(message, D), Needle) =/= nomatch end,
+        Diagnostics
+    ).
+
+%% Test-only helper: does any plain-binary warning (`compile`/`compile_method`'s
+%% `warnings` field — unlike `diagnostics`' diagnostic maps above) contain
+%% `Needle`?
+any_warning_contains(Warnings, Needle) ->
+    lists:any(fun(W) -> binary:match(W, Needle) =/= nomatch end, Warnings).
+
+%% BT-3477: the `compile/2` sibling of
+%% `api_diagnostics_protocol_registry_suppresses_false_protocol_mismatch` above
+%% — `compile/2` (unlike `diagnostics/3`) runs codegen, which enforces BT-1666's
+%% one-class-per-file rule, so `NullTimer` can't be defined inline alongside
+%% `Pool` the way the diagnostics test does it. Instead `NullTimer` is seeded
+%% into the ambient class cache with a real `method_info` (the wire shape a
+%% class compiled in an earlier REPL turn/another file actually has), standing
+%% in for the cross-file class the issue describes; `compile/2` threads
+%% `class_hierarchy`/`protocol_registry` unconditionally (see
+%% `handle_call({compile, ...})`'s doc), so no opt-in flag is needed here.
+api_compile_protocol_registry_suppresses_false_protocol_mismatch() ->
+    ok = beamtalk_compiler_server:clear_classes(),
+    Source = <<
+        "typed Object subclass: Pool\n"
+        "  make -> TimeoutToken => NullTimer new\n"
+        "  use: t :: TimeoutToken -> Boolean => t cancel\n"
+        "  go -> Boolean => self use: NullTimer new\n"
+    >>,
+    beamtalk_compiler_server:register_class('NullTimer', #{
+        superclass => 'Value',
+        is_sealed => false,
+        is_abstract => false,
+        is_value => true,
+        is_typed => false,
+        fields => [],
+        field_types => #{},
+        method_info => #{
+            cancel => #{arity => 0, param_types => [], return_type => 'Boolean'},
+            isActive => #{arity => 0, param_types => [], return_type => 'Boolean'}
+        },
+        class_method_info => #{},
+        class_variables => []
+    }),
+    beamtalk_compiler_server:register_class('TimeoutToken', #{
+        is_sealed => true, is_abstract => true
+    }),
+
+    {ok, #{warnings := WarningsBefore}} = beamtalk_compiler_server:compile(Source, #{
+        module_name => <<"bt@pool">>
+    }),
+    ?assert(any_warning_contains(WarningsBefore, <<"declares return type TimeoutToken">>)),
+    ?assert(any_warning_contains(WarningsBefore, <<"does not understand">>)),
+
+    beamtalk_compiler_server:register_protocol('TimeoutToken', #{
+        name => 'TimeoutToken',
+        required_methods => [
+            #{selector => cancel, arity => 0},
+            #{selector => isActive, arity => 0}
+        ],
+        type_params => [],
+        extending => undefined
+    }),
+
+    {ok, #{warnings := WarningsAfter}} = beamtalk_compiler_server:compile(Source, #{
+        module_name => <<"bt@pool">>
+    }),
+    ?assertNot(any_warning_contains(WarningsAfter, <<"declares return type TimeoutToken">>)),
+    ?assertNot(any_warning_contains(WarningsAfter, <<"does not understand">>)).
+
+%% BT-3477: the `compile_method/3` sibling of the test above — the live-image
+%% write surface (IDE save / `compile:source:` / REPL `>>`) hits the same
+%% false positive when patching a method onto an already-installed class.
+%% `ClassSource` carries the pre-fix type-mismatch (`make`); the patched
+%% `MethodSource` carries the pre-fix Dnu (`use:`) — both re-checked together
+%% on the merged module.
+api_compile_method_protocol_registry_suppresses_false_protocol_mismatch() ->
+    ok = beamtalk_compiler_server:clear_classes(),
+    ClassSource = <<
+        "typed Object subclass: Pool\n"
+        "  make -> TimeoutToken => NullTimer new\n"
+    >>,
+    MethodSource = <<"use: t :: TimeoutToken -> Boolean =>\n  t cancel">>,
+    beamtalk_compiler_server:register_class('NullTimer', #{
+        superclass => 'Value',
+        is_sealed => false,
+        is_abstract => false,
+        is_value => true,
+        is_typed => false,
+        fields => [],
+        field_types => #{},
+        method_info => #{
+            cancel => #{arity => 0, param_types => [], return_type => 'Boolean'},
+            isActive => #{arity => 0, param_types => [], return_type => 'Boolean'}
+        },
+        class_method_info => #{},
+        class_variables => []
+    }),
+    beamtalk_compiler_server:register_class('TimeoutToken', #{
+        is_sealed => true, is_abstract => true
+    }),
+
+    {ok, #{warnings := WarningsBefore}} = beamtalk_compiler_server:compile_method(
+        ClassSource, MethodSource, #{module_name => <<"bt@pool">>, is_class_method => false}
+    ),
+    ?assert(any_warning_contains(WarningsBefore, <<"declares return type TimeoutToken">>)),
+    ?assert(any_warning_contains(WarningsBefore, <<"does not understand">>)),
+
+    beamtalk_compiler_server:register_protocol('TimeoutToken', #{
+        name => 'TimeoutToken',
+        required_methods => [
+            #{selector => cancel, arity => 0},
+            #{selector => isActive, arity => 0}
+        ],
+        type_params => [],
+        extending => undefined
+    }),
+
+    {ok, #{warnings := WarningsAfter}} = beamtalk_compiler_server:compile_method(
+        ClassSource, MethodSource, #{module_name => <<"bt@pool">>, is_class_method => false}
+    ),
+    ?assertNot(any_warning_contains(WarningsAfter, <<"declares return type TimeoutToken">>)),
+    ?assertNot(any_warning_contains(WarningsAfter, <<"does not understand">>)).
+
+%%% ---------------------------------------------------------------
 %%% ADR 0108 hot-reload re-check trigger (BT-2899): ambient alias cache
 %%% (register_aliases, get_aliases)
 %%% ---------------------------------------------------------------
@@ -454,6 +775,7 @@ noproc_degradation_test_() ->
         {"reindent_method_source/2 when down → {error, noproc, _}",
             fun reindent_method_source_when_down/0},
         {"get_classes/0 when down → #{} (silent fallback)", fun get_classes_when_down/0},
+        {"get_protocols/0 when down → #{} (silent fallback)", fun get_protocols_when_down/0},
         {"get_aliases/0 when down → [] (silent fallback)", fun get_aliases_when_down/0}
     ]}.
 
@@ -514,6 +836,12 @@ reindent_method_source_when_down() ->
 get_classes_when_down() ->
     application:stop(beamtalk_compiler),
     Result = beamtalk_compiler_server:get_classes(),
+    application:start(beamtalk_compiler),
+    ?assertEqual(#{}, Result).
+
+get_protocols_when_down() ->
+    application:stop(beamtalk_compiler),
+    Result = beamtalk_compiler_server:get_protocols(),
     application:start(beamtalk_compiler),
     ?assertEqual(#{}, Result).
 

@@ -11,7 +11,20 @@
 //!
 //! Most class definitions are auto-generated from `stdlib/src/*.bt` by `beamtalk build-stdlib`.
 //! Only runtime-only classes without `.bt` source files (e.g., `Future`) are
-//! defined manually here. `Future` has no source file by design (BT-1057); see BT-507.
+//! defined manually here.
+//!
+//! `Future` has no source file by deliberate design, not by omission (BT-1057,
+//! confirmed BT-3438): ADR 0043 made actor message sends synchronous by
+//! default, so ordinary Beamtalk code no longer receives a `Future` from a
+//! message send, and `Parallel` (`stdlib/src/parallel.bt`) — not `Future` —
+//! is the fan-out/join combinator surface (`all:`/`any:`), chosen specifically
+//! to avoid reintroducing async/await "function coloring". `Future` survives
+//! only as a runtime-internal primitive (`beamtalk_future.erl`) reachable via
+//! BEAM interop, with a fixed, non-extensible protocol (`await`,
+//! `awaitForever`, `await:`, `whenResolved:`, `whenRejected:`) dispatched
+//! directly off the raw pid in `beamtalk_primitive:send_pid/3` — it is not
+//! looked up through the class hierarchy, so a real `Future.bt` would add
+//! metadata without changing dispatch behavior. No combinator ADR is planned.
 
 use super::ClassInfo;
 #[cfg(test)]
@@ -69,6 +82,17 @@ pub(super) fn is_runtime_protected_class(name: &str) -> bool {
     name == "Future" || generated::is_generated_builtin_class(name)
 }
 
+/// Returns true if `name` is a *generated* stdlib class — one with a real
+/// `stdlib/src/*.bt` source file, parsed by `beamtalk build-stdlib`.
+///
+/// Unlike [`is_builtin_class`], this deliberately excludes `Future`: `Future`
+/// has no `.bt` source (BT-1057) and does not compile to a `bt@stdlib@{snake}`
+/// module (ADR 0016), so it is not a "known stdlib type" in the sense
+/// `beamtalk-codegen`'s `is_known_stdlib_type` needs (BT-3435, ADR 0119 step 0).
+pub(super) fn is_generated_builtin_class(name: &str) -> bool {
+    generated::is_generated_builtin_class(name)
+}
+
 /// Returns all built-in class definitions.
 ///
 /// Combines auto-generated definitions from `stdlib/src/*.bt` with runtime-only
@@ -76,10 +100,8 @@ pub(super) fn is_runtime_protected_class(name: &str) -> bool {
 pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
     let mut classes = generated::generated_builtin_classes();
 
-    // Future — runtime-only class (no stdlib/src/Future.bt source).
-    // The stub was removed in BT-1057; the real design is tracked in BT-507.
-    // When BT-507 is resolved and a proper Future.bt is created, remove this
-    // manual entry and let the generated code handle it.
+    // Future — runtime-only class (no stdlib/src/Future.bt source), by
+    // deliberate design; see the module doc comment above (BT-3438).
     classes.insert(
         "Future".into(),
         ClassInfo {
@@ -106,9 +128,9 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
         },
     );
 
-    // Value is already present in the generated set (stdlib/src/Value.bt).
+    // Value is already present in the generated set (stdlib/src/value.bt).
     // Do NOT insert it manually here — that would silently overwrite generated
-    // metadata (methods, state) if Value.bt ever gains them (BT-507, ADR 0042).
+    // metadata (methods, state) if value.bt ever gains them (BT-507, ADR 0042).
 
     classes
 }

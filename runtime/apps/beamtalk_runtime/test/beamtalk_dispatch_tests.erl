@@ -131,7 +131,10 @@ dispatch_test_() ->
             {"compiled dispatch returning 3-tuple error is normalized to 2-tuple",
                 fun test_compiled_dispatch_returns_error_tuple/0},
             {"invoke_method with module=undefined continues to superclass",
-                fun test_invoke_method_module_undefined_continues/0}
+                fun test_invoke_method_module_undefined_continues/0},
+            %% BT-3482: class_chain_step's per-node probe must stay O(depth)
+            {"class_chain_step probes has_method_local/2 exactly once per level",
+                fun test_class_chain_step_probe_cost_is_linear_in_depth/0}
         ]
     end}.
 
@@ -1359,4 +1362,235 @@ test_super_no_superclass() ->
         ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result)
     after
         gen_server:stop(Pid)
+    end.
+
+%%% ============================================================================
+%%% BT-3482: class_chain_step per-node probe cost regression
+%%% ============================================================================
+
+-doc """
+Regression test for BT-3482: `class_chain_step/6`'s per-node probe must
+answer "does *this exact class* define `Selector`", never "does this class
+or any ancestor" — otherwise every level's `dispatch/4` re-entry via
+`super/5` repeats the (already inflated) probe cost of the level above it,
+turning the documented ~O(depth) hierarchy walk into O(depth²) for the
+common unoverridden-selector case.
+
+Builds a chain of `Depth` compiled stub classes mirroring real actor codegen
+(BT-3467's `SuperclassDelegation::Dynamic`): each class's `has_method/1`
+delegates to its superclass dynamically via `beamtalk_dispatch:responds_to/2`
+(so a `respondsTo:`-facing caller still sees a hot-reloaded ancestor
+immediately), while `has_method_local/1` (BT-3482) never delegates — only
+the class actually defining the selector answers `true`. Only the deepest
+class in the chain defines `bt3482DeepMethod` locally.
+
+Traces `beamtalk_object_class:has_method_local/2` and `has_method/2` across
+one `beamtalk_dispatch:lookup/5` call for the inherited selector and asserts:
+- `has_method_local/2` is called exactly `Depth` times — one per hierarchy
+  level, the O(depth) contract `class_chain_step/6` is supposed to uphold.
+- `has_method/2` (the dynamic-delegating fallback) is never called at all —
+  confirming the per-node probe doesn't fall back to the eager/delegating
+  form BT-3467 introduced.
+""".
+test_class_chain_step_probe_cost_is_linear_in_depth() ->
+    Depth = 6,
+    Chain = bt3482_build_chain(Depth),
+    #{names := Names} = Chain,
+    try
+        LeafClass = hd(Names),
+        State = #{'$beamtalk_class' => LeafClass},
+        Self = make_ref(),
+        TestPid = self(),
+
+        %% A process can't be its own call tracer (self-traced call events
+        %% are never delivered) — run the lookup in a worker and trace that
+        %% worker instead, mirroring
+        %% beamtalk_behaviour_intrinsics_rename_to_tests's Worker/{tracer, Self} pattern.
+        Worker = spawn(fun() ->
+            receive
+                go ->
+                    R = beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, LeafClass),
+                    TestPid ! {bt3482_result, R}
+            end
+        end),
+        1 = erlang:trace(Worker, true, [call, {tracer, TestPid}]),
+        1 = erlang:trace_pattern({beamtalk_object_class, has_method_local, 2}, true, [global]),
+        1 = erlang:trace_pattern({beamtalk_object_class, has_method, 2}, true, [global]),
+
+        Worker ! go,
+        Result =
+            receive
+                {bt3482_result, R} -> R
+            after 5000 ->
+                erlang:error(bt3482_worker_timeout)
+            end,
+
+        _ = erlang:trace_pattern({beamtalk_object_class, has_method_local, 2}, false, [global]),
+        _ = erlang:trace_pattern({beamtalk_object_class, has_method, 2}, false, [global]),
+        (try
+            erlang:trace(Worker, false, [call])
+        catch
+            error:badarg -> ok
+        end),
+
+        Calls = bt3482_drain_trace_calls(),
+        LocalProbeCount = length([1 || {has_method_local, 2} <- Calls]),
+        DynamicProbeCount = length([1 || {has_method, 2} <- Calls]),
+
+        ?assertMatch({reply, bt3482_deep_result, _}, Result),
+        ?assertEqual(Depth, LocalProbeCount),
+        ?assertEqual(0, DynamicProbeCount)
+    after
+        bt3482_teardown_chain(Chain)
+    end.
+
+%% Builds a Depth-long chain of compiled stub classes 'Bt3482Class1' (leaf) ..
+%% 'Bt3482ClassDepth' (root, superclass none). Only the root class defines
+%% `bt3482DeepMethod` — every other class's dispatch/4 falls through to
+%% `beamtalk_dispatch:super/5` for any other selector, exactly like real
+%% codegen's default dispatch case (`generate_dispatch_default_case`).
+-spec bt3482_build_chain(pos_integer()) -> #{names := [atom()], mods := [atom()]}.
+bt3482_build_chain(Depth) ->
+    % elp:fixme W0023 intentional atom creation
+    Names = [list_to_atom("Bt3482Class" ++ integer_to_list(I)) || I <- lists:seq(1, Depth)],
+    % elp:fixme W0023 intentional atom creation
+    Mods = [
+        list_to_atom("bt3482_class" ++ integer_to_list(I) ++ "_stub")
+     || I <- lists:seq(1, Depth)
+    ],
+    lists:foreach(
+        fun(I) -> bt3482_start_class(I, Depth, Names, Mods) end,
+        lists:seq(1, Depth)
+    ),
+    #{names => Names, mods => Mods}.
+
+bt3482_start_class(I, Depth, Names, Mods) ->
+    ClassName = lists:nth(I, Names),
+    ModName = lists:nth(I, Mods),
+    IsDefiner = I =:= Depth,
+    Superclass =
+        case I of
+            Depth -> none;
+            _ -> lists:nth(I + 1, Names)
+        end,
+    Forms = bt3482_stub_forms(ModName, ClassName, Superclass, IsDefiner),
+    {ok, ModName, Bin} = compile:forms(Forms),
+    {module, ModName} = code:load_binary(ModName, atom_to_list(ModName) ++ ".beam", Bin),
+    {ok, _Pid} = beamtalk_object_class:start_link(ClassName, #{
+        module => ModName,
+        superclass => Superclass,
+        instance_methods => #{},
+        instance_variables => []
+    }).
+
+%% Abstract forms for one stub class module. `IsDefiner` classes handle
+%% `bt3482DeepMethod` directly and short-circuit both `has_method/1` and
+%% `has_method_local/1` to true for it; every other class delegates
+%% `has_method/1` dynamically to `Superclass` (mirroring
+%% SuperclassDelegation::Dynamic) but `has_method_local/1` never delegates.
+bt3482_stub_forms(ModName, ClassName, Superclass, IsDefiner) ->
+    DispatchClauses =
+        case IsDefiner of
+            true ->
+                [
+                    {clause, 3,
+                        [
+                            {atom, 3, bt3482DeepMethod},
+                            {var, 3, '_Args'},
+                            {var, 3, '_Self'},
+                            {var, 3, 'State'}
+                        ],
+                        [], [
+                            {tuple, 3, [
+                                {atom, 3, reply}, {atom, 3, bt3482_deep_result}, {var, 3, 'State'}
+                            ]}
+                        ]},
+                    bt3482_default_dispatch_clause(ClassName)
+                ];
+            false ->
+                [bt3482_default_dispatch_clause(ClassName)]
+        end,
+    HasMethodClauses =
+        case IsDefiner of
+            true ->
+                [
+                    {clause, 4, [{atom, 4, bt3482DeepMethod}], [], [{atom, 4, true}]},
+                    {clause, 4, [{var, 4, '_'}], [], [{atom, 4, false}]}
+                ];
+            false ->
+                [
+                    {clause, 4, [{var, 4, 'Selector'}], [], [
+                        {call, 4, {remote, 4, {atom, 4, beamtalk_dispatch}, {atom, 4, responds_to}},
+                            [
+                                {var, 4, 'Selector'}, {atom, 4, Superclass}
+                            ]}
+                    ]}
+                ]
+        end,
+    HasMethodLocalClauses =
+        case IsDefiner of
+            true ->
+                [
+                    {clause, 5, [{atom, 5, bt3482DeepMethod}], [], [{atom, 5, true}]},
+                    {clause, 5, [{var, 5, '_'}], [], [{atom, 5, false}]}
+                ];
+            false ->
+                [{clause, 5, [{var, 5, '_Selector'}], [], [{atom, 5, false}]}]
+        end,
+    [
+        {attribute, 1, module, ModName},
+        {attribute, 2, export, [{dispatch, 4}, {has_method, 1}, {has_method_local, 1}]},
+        {function, 3, dispatch, 4, DispatchClauses},
+        {function, 4, has_method, 1, HasMethodClauses},
+        {function, 5, has_method_local, 1, HasMethodLocalClauses}
+    ].
+
+%% dispatch(Selector, Args, Self, State) ->
+%%     beamtalk_dispatch:super(Selector, Args, Self, State, ClassName).
+bt3482_default_dispatch_clause(ClassName) ->
+    {clause, 3, [{var, 3, 'Selector'}, {var, 3, 'Args'}, {var, 3, 'Self'}, {var, 3, 'State'}], [], [
+            {call, 3, {remote, 3, {atom, 3, beamtalk_dispatch}, {atom, 3, super}}, [
+                {var, 3, 'Selector'},
+                {var, 3, 'Args'},
+                {var, 3, 'Self'},
+                {var, 3, 'State'},
+                {atom, 3, ClassName}
+            ]}
+        ]}.
+
+bt3482_teardown_chain(#{names := Names, mods := Mods}) ->
+    lists:foreach(
+        fun(ClassName) ->
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                undefined ->
+                    ok;
+                Pid ->
+                    (try
+                        gen_server:stop(Pid)
+                    catch
+                        _:_ -> ok
+                    end)
+            end
+        end,
+        Names
+    ),
+    lists:foreach(
+        fun(ModName) ->
+            code:purge(ModName),
+            code:delete(ModName)
+        end,
+        Mods
+    ).
+
+%% Drains this process's mailbox of {trace, _, call, {beamtalk_object_class, F, Args}}
+%% messages into a [{F, Arity}] list, in call order.
+bt3482_drain_trace_calls() ->
+    bt3482_drain_trace_calls([]).
+
+bt3482_drain_trace_calls(Acc) ->
+    receive
+        {trace, _Pid, call, {beamtalk_object_class, F, Args}} ->
+            bt3482_drain_trace_calls([{F, length(Args)} | Acc])
+    after 0 ->
+        lists:reverse(Acc)
     end.

@@ -430,7 +430,7 @@ compile_method_patch_registers_alias_dependency_test_() ->
 %% class's own reconstructed source (`beamtalk_workspace_meta:get_class_source/1`,
 %% keyed by class name) — it does NOT include a `type Name = ...` alias
 %% declared as a *sibling* of the class in its originating source file (the
-%% same `stdlib/src/Ets.bt` shape `compile_class_definition_result/2` and
+%% same `stdlib/src/ets.bt` shape `compile_class_definition_result/2` and
 %% `compile_protocol_definition_result/2` were fixed for). A method-reload
 %% compile must not clobber the real alias-xref edge a prior `:load`
 %% registered, even though this compile's own `referenced_aliases` omits
@@ -891,7 +891,7 @@ protocol_definition_repl_inline_registers_alias_dependency_test_() ->
 %% beamtalk_alias_xref edge that came from a FILE-LOCAL type alias — one
 %% declared in the same source file as the class/protocol, never entered
 %% into the REPL session's own known_type_alias_sources (mirrors the real
-%% `stdlib/src/Ets.bt` shape: a `type Name = ...` alias and a class
+%% `stdlib/src/ets.bt` shape: a `type Name = ...` alias and a class
 %% referencing it, both declared in the same file).
 %%====================================================================
 

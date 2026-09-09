@@ -97,10 +97,7 @@ impl CoreErlangGenerator {
         // NOTE: This requires the .bt file to have an explicit class definition
         // like "Counter subclass: LoggingCounter" (see tests/fixtures/logging_counter.bt).
         // Module-level expressions without a class definition take the base class path below.
-        let current_class = module.classes.iter().find(|c| {
-            use super::super::util::module_matches_class;
-            module_matches_class(&self.module_name, &c.name.name)
-        });
+        let current_class = self.current_class(module);
 
         // Check if we have a superclass that's not Actor (base class)
         // When true, we'll call the parent's init to inherit state fields
@@ -846,10 +843,7 @@ impl CoreErlangGenerator {
 
         // BT-1949/BT-1951: Find typed-no-default fields (leaf + ancestors) for
         // post-initialize validation.
-        let current_class = module.classes.iter().find(|c| {
-            use super::super::util::module_matches_class;
-            module_matches_class(&self.module_name, &c.name.name)
-        });
+        let current_class = self.current_class(module);
         let leaf_class_name =
             current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
         let success_body =
@@ -1522,10 +1516,7 @@ impl CoreErlangGenerator {
 
         // BT-1642: Use the clean Beamtalk class name for lifecycle telemetry
         // metadata, matching how dispatch traces report class names.
-        let current_class = module.classes.iter().find(|c| {
-            use super::super::util::module_matches_class;
-            module_matches_class(&self.module_name, &c.name.name)
-        });
+        let current_class = self.current_class(module);
         let class_name = current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
 
         let doc = docvec![

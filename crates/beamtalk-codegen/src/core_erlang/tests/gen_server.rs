@@ -2702,8 +2702,8 @@ fn test_class_method_local_var_assignment_of_self_class_method() {
 fn test_class_method_local_var_after_class_var_mutation() {
     // BT-1201 follow-up (reviewer feedback): a class var mutation (`self.cv := expr`) preceding
     // a local var assignment (`x := plainExpr`) must NOT incorrectly treat the local var RHS as
-    // an open-scope expression. The stale `last_open_scope_result` from the field assignment
-    // must be cleared before processing the local var's RHS.
+    // a class-var-producing expression. Any stale producer state left over from the field
+    // assignment must not leak into processing the local var's RHS.
     //
     // Pattern: class a => self.cv := 1. x := self b. x
     // Without the clear, x would be bound to the field-assignment's result var, not `self b`.
@@ -2806,9 +2806,10 @@ fn test_class_method_self_send_as_local_var_assignment_rhs_in_while_loop_compile
     // within the same iteration (`result := result + x`) — the same
     // "self-send return value matters" shape that made blanket-rejecting
     // `Foldl*` bodies wrong (see `test_class_method_self_send_as_collect_transform_still_compiles`).
-    // So this is fixed as a compile bug (use `expression_doc_with_open_scope`,
-    // mirroring BT-1397's fix for the same shape inside blocks generally), not
-    // folded into the reject list. `self.runs` not accumulating across
+    // So this is fixed as a compile bug (thread the self-send's class-var
+    // mutation ahead of the assignment's own compile, mirroring BT-1397's fix
+    // for the same shape inside blocks generally), not folded into the reject
+    // list. `self.runs` not accumulating across
     // iterations is the same pre-existing, tracked `Letrec` limitation as
     // always (this test only pins that it compiles and runs without crashing).
     let src = "Value subclass: DriverAssign\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aList =>\n    i := 1\n    result := 0\n    [i <= aList size] whileTrue: [\n      x := self bump\n      result := result + x\n      i := i + 1\n    ]\n    result";
@@ -2831,11 +2832,12 @@ fn test_class_method_self_send_as_local_var_assignment_rhs_in_while_loop_compile
 
 #[test]
 fn test_do_assigned_to_discarded_local_in_direct_params_loop_still_emits_foldl() {
-    // BT-3150 review follow-up: `try_generate_block_local_plain_let`'s new
-    // open-scope-aware fix (above) initially discarded `val_doc` entirely in
-    // the `OpenScopeResult::NoValue` arm instead of emitting it first (unlike
-    // the `Value` arm right above it). `NoValue` is produced by a mutation-
-    // threaded `do:` nested inside a direct-params outer loop (BT-1329/
+    // BT-3150 review follow-up: `try_generate_block_local_plain_let`'s
+    // producer-aware fix (above) initially discarded `val_doc` entirely in
+    // the direct-params-loop "no single value" arm instead of emitting it
+    // first (unlike the ordinary-value arm right above it). That arm fires
+    // for a mutation-threaded `do:` nested inside a direct-params outer loop
+    // (BT-1329/
     // BT-3053, see `test_do_nested_in_direct_params_loop` in
     // `control_flow/list_ops/tests.rs` for the bare-statement variant this
     // adapts) — there, `val_doc` isn't just "a value", it's the entire
@@ -3174,8 +3176,8 @@ fn test_class_method_self_send_in_block_compiles_when_class_has_no_class_vars() 
     // `compute_class_var_mutating_selectors` only has this class's own
     // `class_methods` to analyze), so it conservatively treats any such
     // self-send as unsafe. That conservatism is unsound as a blanket rule:
-    // `stdlib/src/Subprocess.bt` self-sends `spawnWith:` (inherited from
-    // `Actor`, `stdlib/src/Actor.bt`) from inside a `tryDo:` block, and
+    // `stdlib/src/subprocess.bt` self-sends `spawnWith:` (inherited from
+    // `Actor`, `stdlib/src/actor.bt`) from inside a `tryDo:` block, and
     // `just build` failed on it once this guard landed.
     //
     // The fix: gate the whole check on the class actually declaring class
@@ -3319,7 +3321,7 @@ fn test_class_method_self_send_in_each_with_index_block_is_compile_error() {
     // BT-3151 review follow-up: `eachWithIndex:` desugars to `inject:into:`
     // (`try_generate_each_with_index`, `enumeration_ops.rs`) only when the
     // user block needs mutation threading; a bare self-send-only block falls
-    // through to `Collection.bt`'s own self-hosted `eachWithIndex:` — a
+    // through to `collection.bt`'s own self-hosted `eachWithIndex:` — a
     // same-process, in-process call, same as every other list-op call site.
     let src = "Value subclass: DriverEachWithIndex\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x\n  class run: aList =>\n    aList eachWithIndex: [:item :i | self check: item]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -4711,7 +4713,7 @@ fn test_method_xref_baked_into_register_class() {
     // BT-3073: `Counter` no longer carries synthetic class-side rows for
     // `new`/`new:`/`spawn`/`spawnWith:` — BT-3071/BT-3072 lifted those bodies
     // into real, source-backed class methods on `Actor` itself
-    // (`stdlib/src/Actor.bt`), so a subclass like `Counter` genuinely
+    // (`stdlib/src/actor.bt`), so a subclass like `Counter` genuinely
     // *inherits* them rather than *defining* them, and its own methodXref
     // carries no row for them at all (the honest Smalltalk answer — see
     // BT-2614, which introduced the now-removed rows). Bound the methodXref
@@ -4756,6 +4758,49 @@ fn test_method_xref_baked_into_register_class() {
             "`{sel}` is inherited from Actor and must not appear as a Counter class-side row. Got:\n{mx_seg}"
         );
     }
+}
+
+/// BT-3439: `register_class/0` bakes a `stateVarXref` field into the
+/// `BuilderState` map, the state-var analogue of `methodXref` — one row per
+/// declared instance variable, carrying its name and 1-based declaration
+/// line. Covers both a defaulted `state:` slot and a typed slot with *no*
+/// default value (`state: name :: Type`, no `= ...`) — the exact shape the
+/// VS Code sidebar's `findStateVarDeclaration` regex fails to match (BT-3439
+/// investigation), which is precisely why this baked line data exists: so
+/// `beamtalk.navigateToStateVar` no longer needs that regex to succeed.
+#[test]
+fn test_state_var_xref_baked_into_register_class() {
+    let src = concat!(
+        "Actor subclass: Widget\n",            // line 1
+        "  state: count = 0\n",                // line 2
+        "  state: engine :: WorkflowEngine\n", // line 3 (no default, `::` type)
+        "\n",
+        "  increment =>\n",
+        "    self.count := self.count + 1\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("widget").with_source(src))
+        .expect("codegen should succeed");
+
+    assert!(
+        code.contains("'stateVarXref' => ["),
+        "Should bake a stateVarXref list. Got:\n{code}"
+    );
+    let sv_start = code
+        .find("'stateVarXref' => [")
+        .expect("stateVarXref present");
+    let sv_tail = &code[sv_start..];
+    let sv_seg = &sv_tail[..sv_tail.find("'classState'").unwrap_or(sv_tail.len())];
+
+    assert!(
+        sv_seg.contains("'name' => 'count', 'line' => 2"),
+        "count should be recorded at line 2. Got:\n{sv_seg}"
+    );
+    assert!(
+        sv_seg.contains("'name' => 'engine', 'line' => 3"),
+        "a defaultless, `::`-typed slot should still be recorded, at line 3. Got:\n{sv_seg}"
+    );
 }
 
 /// ADR 0087 Phase 6 (BT-2304): compiler-generated auto-accessors for a
@@ -6011,6 +6056,198 @@ fn test_generate_has_method_from_expression_based_module() {
     );
 }
 
+// ── BT-3467: actor has_method/1 matches value-type has_method/1 ────────────
+//
+// `gen_server::dispatch::generate_has_method` (actor) and
+// `value_type_codegen::generate_primitive_has_method` (value type) implement
+// the same reflection surface — "does this class understand `Selector`,
+// locally, via a foreign extension, or via an ancestor?" — and had drifted:
+// the actor version never checked the extension registry, never delegated
+// to its superclass, and never short-circuited for a catch-all-DNU class,
+// so `respondsTo:` answered differently for an actor than for a value type
+// given the identical situation. Both now render through the same
+// `DispatchSpec`-driven emitter (`dispatch_spec::generate_has_method_from_spec`).
+// These three tests — an extension method, an inherited method, and a
+// DNU-catch-all class — pinned the pre-fix divergence in an earlier revision
+// of this same file; they now assert the corrected, unified behavior.
+
+/// A minimal actor `ClassDefinition` for `has_method` pinning tests — same
+/// shape as the literal built in `test_generate_has_method_lists_primary_class_methods`
+/// above, factored out since three tests below each need one with a
+/// different method list.
+fn actor_class_def(
+    name: &str,
+    superclass: &str,
+    methods: Vec<MethodDefinition>,
+) -> ClassDefinition {
+    ClassDefinition {
+        name: Identifier::new(name, Span::new(0, 0)),
+        superclass: Some(Identifier::new(superclass, Span::new(0, 0))),
+        superclass_package: None,
+        class_kind: ClassKind::Actor,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: None,
+        state: vec![],
+        methods,
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        span: Span::new(0, 0),
+    }
+}
+
+fn module_with_class(class: ClassDefinition) -> Module {
+    Module {
+        classes: vec![class],
+        type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
+        expressions: vec![],
+        method_definitions: Vec::new(),
+        protocols: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    }
+}
+
+fn unary_method(name: &str) -> MethodDefinition {
+    MethodDefinition {
+        selector: MessageSelector::Unary(name.into()),
+        parameters: vec![],
+        body: vec![bare(Expression::Literal(
+            Literal::Integer(0),
+            Span::new(0, 0),
+        ))],
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        is_class_method: false,
+        kind: MethodKind::Primary,
+        expect: None,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: Span::new(0, 0),
+    }
+}
+
+/// A `doesNotUnderstand:args:` method whose body is a structural (unquoted)
+/// intrinsic (BT-1763) — the shape `class_has_catch_all_dnu` recognizes as a
+/// catch-all DNU handler (e.g. `Erlang`/`ErlangModule` in stdlib), as
+/// opposed to a regular Beamtalk-body DNU override (e.g. `TimeoutProxy`),
+/// which does *not* count.
+fn catch_all_dnu_method() -> MethodDefinition {
+    MethodDefinition {
+        selector: MessageSelector::Keyword(vec![
+            KeywordPart::new("doesNotUnderstand:", Span::new(0, 0)),
+            KeywordPart::new("args:", Span::new(0, 0)),
+        ]),
+        parameters: vec![
+            ParameterDefinition {
+                name: Identifier::new("selector", Span::new(0, 0)),
+                type_annotation: None,
+            },
+            ParameterDefinition {
+                name: Identifier::new("args", Span::new(0, 0)),
+                type_annotation: None,
+            },
+        ],
+        body: vec![bare(Expression::Primitive {
+            name: "erlangModuleLookup".into(),
+            is_quoted: false,
+            is_intrinsic: true,
+            is_inferred: false,
+            span: Span::new(0, 0),
+        })],
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        is_class_method: false,
+        kind: MethodKind::Primary,
+        expect: None,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: Span::new(0, 0),
+    }
+}
+
+#[test]
+fn test_generate_has_method_actor_checks_extension_registry() {
+    // Value-type has_method/1 always checks `beamtalk_extensions:has/2` for
+    // a selector it doesn't recognize locally (`generate_primitive_has_method`),
+    // so `anActor respondsTo: #anExtensionMethod` and `aValue respondsTo:
+    // #anExtensionMethod` must answer the same way for the identical
+    // situation. BT-3467: actor has_method/1 now consults the extension
+    // registry too, via the shared `DispatchSpec` emitter.
+    let class = actor_class_def("Counter", "Actor", vec![unary_method("increment")]);
+    let module = module_with_class(class);
+    let generator = CoreErlangGenerator::new("counter");
+    let doc = generator.generate_has_method(&module).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("call 'beamtalk_extensions':'has'('Counter', Selector)"),
+        "actor has_method/1 must consult the extension registry, matching \
+         value-type has_method/1. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_generate_has_method_actor_delegates_to_superclass() {
+    // Value-type has_method/1 delegates to its superclass module for a
+    // selector it doesn't recognize locally, so an inherited method reports
+    // `respondsTo:` true. BT-3467: actor has_method/1 now does the same
+    // reflection — an inherited selector answers `respondsTo:` true — but
+    // *dynamically*, via `beamtalk_dispatch:responds_to/2`'s live
+    // class-registry walk (the same mechanism actor message dispatch and
+    // `respondsTo:` already use), not a compile-time module reference — see
+    // `SuperclassDelegation`'s doc comment. A subclass no longer answers
+    // `respondsTo:` false for a selector only an ancestor defines, and stays
+    // correct across a hot-reloaded ancestor (BT-845).
+    let class = actor_class_def("Counter", "Actor", vec![unary_method("increment")]);
+    let module = module_with_class(class);
+    let generator = CoreErlangGenerator::new("counter");
+    let doc = generator.generate_has_method(&module).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')"),
+        "actor has_method/1 must delegate to its superclass *by class name*, \
+         through beamtalk_dispatch:responds_to/2's live registry walk, not a \
+         compiled module reference. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_generate_has_method_actor_honors_catch_all_dnu() {
+    // A class whose doesNotUnderstand:args: is a structural (unquoted)
+    // intrinsic (BT-1763, e.g. Erlang/ErlangModule) accepts every selector —
+    // value-type has_method/1 short-circuits to `true` unconditionally for
+    // such a class. BT-3467: actor has_method/1 now does the same, via the
+    // shared `DispatchSpec` emitter. BT-3482: actor has_method/1 also emits
+    // a has_method_local/1 sibling — the strictly-local probe used by
+    // beamtalk_dispatch:class_chain_step/6 — which short-circuits to true
+    // too, since a catch-all-DNU class handles every selector at its own
+    // dispatch/4.
+    let class = actor_class_def("Proxy", "Actor", vec![catch_all_dnu_method()]);
+    let module = module_with_class(class);
+    let generator = CoreErlangGenerator::new("proxy");
+    let doc = generator.generate_has_method(&module).unwrap();
+    let output = doc.to_pretty_string();
+    assert_eq!(
+        output,
+        "'has_method'/1 = fun (_Selector) ->\n    'true'\n\n\
+         'has_method_local'/1 = fun (_Selector) ->\n    'true'\n\n",
+        "actor has_method/1 must short-circuit to true for a catch-all-DNU \
+         class, matching value-type has_method/1. Got:\n{output}"
+    );
+}
+
 #[test]
 fn test_generate_safe_dispatch_structure() {
     // safe_dispatch/3 must wrap dispatch/4 in a try/catch that returns the
@@ -6373,9 +6610,9 @@ fn test_nested_letrec_self_send_buried_in_conditional_compiles() {
     // (`loop_body_threads_class_vars`) is narrowly top-level-only by
     // design — recursing into a conditional buried inside a `Letrec` body
     // is exactly the shape that predicate was narrowed to exclude (the
-    // `class_var_subexpr.bt` `tickInLoopConditional` regression documented
+    // `class_var_sub_expr.bt` `tickInLoopConditional` regression documented
     // on `loop_body_threads_class_vars` itself), and it's also the shape
-    // `class_var_subexpr_test.bt`'s
+    // `class_var_sub_expr_test.bt`'s
     // `testTickInLoopConditionalCompilesAndRuns` already pins as
     // accepted, silently-non-threading behavior at a single loop level
     // (BT-2308, out of BT-3172's scope). The inner loop was never going to
@@ -6797,6 +7034,38 @@ fn bt3392_self_dispatch_nested_in_binary_op_operand_threads_state_and_compiles_t
 }
 
 #[test]
+fn bt3433_pure_block_arg_state_mutation_does_not_leak_state_version_and_compiles_through_erlc() {
+    // BT-3433: a generic keyword message (not a recognized control-flow
+    // intrinsic) taking two block-literal arguments, where the FIRST block
+    // has no direct field write and no *captured local* mutation (so
+    // `generate_block` picks the plain/Tier-1 path, not
+    // `generate_block_stateful`, and `validate_stored_closure`'s
+    // `field_writes` guard never fires) but its own last statement is a
+    // conditional whose true-branch invokes a Block *stored in a field*
+    // (`self.callback value: v`) — the same shape `WorkflowWatcher>>doReload`'s
+    // `ifOk:ifError:` block compiles to (`self.onReload value:value:`
+    // inside a nested `ifFalse:`). Invoking a stored Block is conservatively
+    // treated as possibly Tier 2 (it might itself thread new actor state
+    // back), so the conditional's own state threading bumps `state_version`
+    // — deliberately visible to later statements *inside that same block*
+    // — but the block is a separate Core Erlang `fun`, so the bump must not
+    // survive once `generate_block` returns. Before the fix, it did: the
+    // method's own final `{reply, _, StateN}` (and the sibling `ifError:`
+    // block, if it read state) referenced a `StateN` never bound outside
+    // the first block's closure — an unbound variable `erlc` failure
+    // discovered compiling a real actor.
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: callback = nil\n\n  trigger: x =>\n    x\n      ifOk: [:v |\n        true\n          ifTrue: [self.callback value: v]\n          ifFalse: [nil]\n      ]\n      ifError: [:e |\n        nil\n      ]\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3433_pure_block_arg_state_mutation").with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert_compiles_through_erlc("bt3433_pure_block_arg_state_mutation", &code);
+}
+
+#[test]
 fn bt3392_binary_op_hoist_does_not_reorder_past_a_non_self_send_operand() {
     // BT-3392 code review finding: `(self.items at: idx) + (self
     // bumpCount)` — the left operand is a message send but NOT a self-send,
@@ -7122,15 +7391,25 @@ fn bt3415_ffi_receiver_is_not_sequenced_but_its_self_send_argument_is() {
 }
 
 #[test]
-fn bt3415_early_return_reply_state_is_the_post_prelude_state_not_the_values_inner_mint() {
-    // Adversarial review finding on #3717: `^ 1 + ((self flagTrue) ifTrue:
-    // [1] ifFalse: [2])` — the conditional receiver's dispatch chain mints
-    // `State1` INSIDE the conditional's own closed document
-    // (`compile_conditional_receiver`'s `HoistSink::OpenDocs`), so reading
-    // `current_state_var()` after the value's compile put an unbound
-    // `State1` in the reply. The `^` arm must reply with the state after
-    // the PRELUDE (here: none — `State`), exactly as the pre-ADR-0118 read
-    // order did.
+fn bt3415_early_return_reply_state_threads_the_conditionals_own_mutation() {
+    // Adversarial review finding on #3717, superseded by ADR 0118 phase 4
+    // (BT-3420): `^ 1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])` — before
+    // BT-3420, the conditional receiver's dispatch chain minted `State1`
+    // INSIDE the conditional's own closed document
+    // (`compile_conditional_receiver`'s open let-chain), invisible to the
+    // `^` arm's `current_state_var()` read, so the reply fell back to the
+    // stale pre-conditional `State` — `flagTrue`'s mutation compiled and
+    // ran, but the method's own reply (and any state read afterward)
+    // couldn't see it. BT-3420 makes the mutation-threaded `ifTrue:ifFalse:`
+    // a real `ThreadedValue` producer whose prelude — including the
+    // receiver's own hoisted `flagTrue` dispatch — splices into the `^`
+    // arm's `single_sequenced_child` sequencing, so the reply now correctly
+    // carries the prelude's own final version: `State1` from the
+    // receiver's hoisted `flagTrue` dispatch, then `State2` from
+    // `control_flow_tuple_to_threaded_value`'s own wrap of the
+    // `ifTrue:ifFalse:` construct's `{Value, NewState}` tuple (matching
+    // `bt3415_early_return_reply_state_follows_the_prelude_when_there_is_one`'s
+    // shape) — instead of the discarding `State`.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  go: i =>\n    ^ 1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])\n    0\n\n  internal flagTrue =>\n    self.count := self.count + 1\n    true\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -7140,8 +7419,10 @@ fn bt3415_early_return_reply_state_is_the_post_prelude_state_not_the_values_inne
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
-        code.contains("{'reply', _ReturnValue, State}"),
-        "the reply must use the state after the (empty) prelude, not the value's inner State1. Got:\n{code}"
+        code.contains("{'reply', _ReturnValue, State2}"),
+        "the reply must carry the prelude's final State2 (flagTrue's own \
+         mutation, threaded through the conditional receiver, then the \
+         conditional's own wrap), not the stale pre-conditional State. Got:\n{code}"
     );
     assert_compiles_through_erlc("bt3415_early_return_post_prelude_state", &code);
 }
@@ -7324,7 +7605,7 @@ fn bt3415_registering_the_same_subexpression_twice_is_never_silent() {
         .expect("one statement")
         .expression;
     let mut generator = CoreErlangGenerator::new("bt3415_double_registration");
-    let mut scope = super::super::PrecompiledScope::new();
+    let mut scope = super::super::sequencing::PrecompiledScope::new();
     generator
         .register_precompiled_subexpr(&mut scope, expr, Document::Str("'a'"), false)
         .expect("first registration succeeds");
@@ -7435,52 +7716,62 @@ fn bt3416_self_dispatch_in_later_interpolation_segment_now_threads_after_earlier
 }
 
 // BT-3414 (ADR 0118 phase 0): three shapes from the ADR's 47-shape self-send
-// position probe (§Context) PANIC the ThreadedIr verifier today rather than
-// merely crashing at runtime or silently dropping a mutation. A debug-build
-// verifier panic (`report_threaded_ir_verify_errors`'s `debug_assert!`,
-// control_flow/mod.rs) aborts the WHOLE test-binary invocation, so — unlike
-// every other row in the same probe — these three cannot live in a BUnit
-// `.bt` fixture (see stdlib/test/fixtures/self_send_position_counter.bt's
-// header comment); they are pinned here as `#[should_panic]` unit tests
-// instead. Each names the ADR 0118 phase expected to turn it into ordinary,
-// compiling, correct code.
+// position probe (§Context) PANICKED the ThreadedIr verifier (rather than
+// merely crashing at runtime or silently dropping a mutation) before ADR
+// 0118 phase 3 (BT-3419). A debug-build verifier panic
+// (`report_threaded_ir_verify_errors`'s `debug_assert!`, control_flow/mod.rs)
+// aborts the WHOLE test-binary invocation, so — unlike every other row in
+// the same probe — the two BT-3419 closes cannot live in a BUnit `.bt`
+// fixture (see stdlib/test/fixtures/self_send_position_counter.bt's header
+// comment); they are pinned here. The third (`bt3414_bare_and_inside_if_true_branch_inside_do_body`,
+// below) is a different shape — a bare-receiver `and:` inside an `ifTrue:`
+// inside a `do:` body — still open for a later phase (ADR 0118's own
+// "Out of Scope" note for phase 3: "Inline-threaded control flow in
+// expression position").
 
 #[test]
-#[should_panic(expected = "ThreadedIr verify")]
-#[cfg(debug_assertions)]
-fn bt3414_self_send_in_and_receiver_inside_while_true_condition_panics_verifier() {
+fn bt3414_self_send_in_and_receiver_inside_while_true_condition_now_compiles_and_threads_state() {
     // `[i := i + 1. (self bumpCount) > 0 and: [i < 3]] whileTrue: [nil]` —
     // a self-send as the RECEIVER of an inline-threaded `and:`, itself the
-    // whileTrue: CONDITION block's last expression. The condition compiles
-    // outside the loop's own ThreadedIr frame, so the self-send's `Bind`
-    // lands somewhere the verifier's frame-flow check cannot see when the
-    // loop later references its version: `UnboundVersion`. ADR 0118 phase 3
-    // (`ConditionalLoop` carries its condition as IR) closes this row.
+    // whileTrue: CONDITION block's last expression. Before ADR 0118 phase 3
+    // (BT-3419), `generate_while_true`'s mode selection only inspected the
+    // BODY's own mutations (trivially none — `[nil]`), so this fell to the
+    // simple (non-threading) codegen path, which compiled the condition as
+    // a genuine stateful Tier-2 closure and panicked the verifier
+    // (`UnboundVersion`). Now: `generate_while_true` also checks the
+    // condition (`condition_has_state_effects`), routing this into the
+    // mutation-threading path, and every iteration's `bumpCount` dispatch
+    // correctly advances the actor's `count` field.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    i := 0\n    [\n      i := i + 1\n      (self bumpCount) > 0 and: [i < 3]\n    ] whileTrue: [nil]\n    i\n\n  internal bumpCount =>\n    self.count := self.count + 1\n    self.count\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let _ = generate_module(
+    let code = generate_module(
         &module,
         CodegenOptions::new("bt3414_and_receiver_self_send_in_while_condition")
             .with_workspace_mode(true),
-    );
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert_compiles_through_erlc("bt3414_and_receiver_self_send_in_while_condition", &code);
 }
 
 #[test]
-#[should_panic(expected = "ThreadedIr verify")]
-#[cfg(debug_assertions)]
-fn bt3414_self_send_as_and_receiver_alone_inside_while_true_condition_panics_verifier() {
+fn bt3414_self_send_as_and_receiver_alone_inside_while_true_condition_now_compiles_and_threads_state()
+ {
     // `[i := i + 1. (self flagTrue) and: [i < 3]] whileTrue: [nil]` — same
     // shape as above with a bare self-send (no binary-op wrapper) as the
-    // `and:` receiver. Also `UnboundVersion`; also closed by ADR 0118
-    // phase 3.
+    // `and:` receiver. Also closed by ADR 0118 phase 3 (BT-3419).
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    i := 0\n    [\n      i := i + 1\n      (self flagTrue) and: [i < 3]\n    ] whileTrue: [nil]\n    i\n\n  internal flagTrue =>\n    self.count := self.count + 1\n    true\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let _ = generate_module(
+    let code = generate_module(
         &module,
         CodegenOptions::new("bt3414_bare_and_receiver_self_send_in_while_condition")
             .with_workspace_mode(true),
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert_compiles_through_erlc(
+        "bt3414_bare_and_receiver_self_send_in_while_condition",
+        &code,
     );
 }
 

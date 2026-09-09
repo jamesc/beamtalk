@@ -12,7 +12,7 @@ zip, group_by, partition, intersperse, take, drop, sort_with,
 from_to — including error cases.
 
 Note: index_of/2 and each_with_index/2 were removed in BT-816
-(self-hosted in pure Beamtalk in List.bt).
+(self-hosted in pure Beamtalk in list.bt).
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

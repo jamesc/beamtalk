@@ -228,7 +228,7 @@ No such method is introduced now. Users who need cluster registration today can 
 
 **Pharo / Squeak.** `SmalltalkImage current at: #MyService put: anObject` — a single global `SystemDictionary`. Gives ergonomic name lookup but has no restart semantics (Smalltalk has no processes in the OTP sense). We adopt the *ergonomics* (Symbol-keyed lookup feels Smalltalk-native) but ground the semantics in OTP restart behavior.
 
-**In-Beamtalk precedent.** The `named:` class-method convention is already established: `Package named: "stdlib"` (`stdlib/src/Package.bt`) and `AtomicCounter named: #hits` (`stdlib/src/AtomicCounter.bt`) both use Symbol-keyed constructors that resolve a runtime entity by name. `Actor named:` extends the same convention to processes.
+**In-Beamtalk precedent.** The `named:` class-method convention is already established: `Package named: "stdlib"` (`stdlib/src/package.bt`) and `AtomicCounter named: #hits` (`stdlib/src/atomic_counter.bt`) both use Symbol-keyed constructors that resolve a runtime entity by name. `Actor named:` extends the same convention to processes.
 
 **Newspeak.** Module instances are composed through explicit slot wiring; there is no global registry. Beamtalk's package namespacing already covers module composition; process identity is a different concern and belongs in a registry.
 
@@ -398,8 +398,8 @@ Make `Actor` references internally subscribe to exit signals and transparently u
 **Implementation risk: `Result(Self, ...)`.** ADR 0079's typed `class named:` declaration uses `Self` as a type argument to a generic (`Result(Self, Error)`). `Self` and parameterised types both exist in the typechecker (ADR-adjacent commit `facc2d52`), but no current stdlib code combines them — `grep -r 'Result(Self' stdlib/src/` returns no matches. If the typechecker doesn't already substitute `Self` correctly inside generic type arguments, this ADR's typed lookup needs a small targeted typechecker fix (extending the existing `Self`-substitution code path to recurse into generic arguments). It is not a redesign — `Self` semantics are already defined; this is a missing case. Phase 0 of implementation should be a one-line typechecker probe to determine whether the fix is needed before the API work begins.
 
 **Affected components:**
-- **Stdlib (`stdlib/src/Actor.bt`):** add `spawnAs:`, `spawnWith:as:`, `registerAs:`, `unregister`, `registeredName`, `isRegistered`, `class named:`, `class allRegistered`. The `class named:` method follows the existing `Package named:` / `AtomicCounter named:` convention. `allRegistered` returns resolved `Actor` proxies (parallel to `Class allClasses`, ADR/BT-1953).
-- **Stdlib (`stdlib/src/SupervisionSpec.bt`):** add `name` field and `withName:` / multi-keyword combinators. `childSpec` selects a new `startFn = #spawnAs:` (or `#spawnWith:as:`) when `name` is set, since the existing `#spawn` / `#spawnWith:` selectors don't carry a name argument.
+- **Stdlib (`stdlib/src/actor.bt`):** add `spawnAs:`, `spawnWith:as:`, `registerAs:`, `unregister`, `registeredName`, `isRegistered`, `class named:`, `class allRegistered`. The `class named:` method follows the existing `Package named:` / `AtomicCounter named:` convention. `allRegistered` returns resolved `Actor` proxies (parallel to `Class allClasses`, ADR/BT-1953).
+- **Stdlib (`stdlib/src/supervision_spec.bt`):** add `name` field and `withName:` / multi-keyword combinators. `childSpec` selects a new `startFn = #spawnAs:` (or `#spawnWith:as:`) when `name` is set, since the existing `#spawn` / `#spawnWith:` selectors don't carry a name argument.
 - **Runtime (`runtime/apps/beamtalk_runtime/src/beamtalk_actor.erl`):** intrinsics for register/unregister/whereis, reserved-name check, and `spawnAs/2` (name-only) + `spawnWithAs/3` (args + name) entry points that delegate to the existing `start_link/3` with `{local, Name}`. **Add a `'$beamtalk_actor' => ClassName` marker to the process dictionary in `init/1`** — this is the basis for `allRegistered` filtering (`is_beamtalk_actor(Pid)` becomes a fast `erlang:process_info(Pid, dictionary)` lookup) and unlocks future tooling that needs to distinguish Beamtalk actors from raw OTP processes (debugger filtering, observer integration).
 - **Runtime (`beamtalk_actor.erl` send-site or new proxy module):** name-resolving proxy. The cheapest implementation is a tagged record `#beamtalk_named_actor{name = Atom, class = ClassName}` that the existing actor send site recognises and dispatches via `gen_server:call(Name, ...)` instead of `gen_server:call(Pid, ...)`. OTP's `gen_server:call/2` accepts a registered atom directly, so no extra runtime work beyond the recognition branch.
 - **Runtime (`beamtalk_supervisor.erl`):** translate `#spawnAs:` / `#spawnWith:as:` startFns from the child spec into the appropriate `start_link({local, Name}, Module, Args)` call.
@@ -450,7 +450,7 @@ Teardown methods (`Actor stop`, `Actor kill`, `Supervisor stop`, `unregister`) d
 |---|---|---|---|
 | 1 | [BT-1986](https://linear.app/beamtalk/issue/BT-1986) | 0 | Typechecker: verify `Result(Self, Error)` works in generic position |
 | 2 | [BT-1987](https://linear.app/beamtalk/issue/BT-1987) | 1 | Runtime: intrinsics + `$beamtalk_actor` marker + `spawnAs` entry |
-| 3 | [BT-1988](https://linear.app/beamtalk/issue/BT-1988) | 2 | Stdlib: `Actor.bt` named-registration API |
+| 3 | [BT-1988](https://linear.app/beamtalk/issue/BT-1988) | 2 | Stdlib: `actor.bt` named-registration API |
 | 4 | [BT-1989](https://linear.app/beamtalk/issue/BT-1989) | 2 | Stdlib: `SupervisionSpec withName:` combinators |
 | 5 | [BT-1990](https://linear.app/beamtalk/issue/BT-1990) | 3 | Runtime: proxy dispatch + supervisor wiring + restart-survival tests |
 | 6 | [BT-1991](https://linear.app/beamtalk/issue/BT-1991) | 4 | E2E btscript + language-features docs |
@@ -519,7 +519,7 @@ bounded-naming guidance rather than establishing a new one; its docs should
 repeat the same caution given to `spawnAs:`/`registerAs:`.
 
 **Affected components (addition to Implementation, above):**
-- `stdlib/src/DynamicSupervisor.bt`: `startChild: args name: aSymbol ->
+- `stdlib/src/dynamic_supervisor.bt`: `startChild: args name: aSymbol ->
   Result(C, Error)`, using the same error shape as `spawnAs:`/`registerAs:`
   (`name_registered`/`type_error`/`reserved_name`, per the Errors table
   above).

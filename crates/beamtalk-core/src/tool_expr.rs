@@ -146,7 +146,7 @@ pub fn flush_expr(filter: FlushFilter<'_>) -> String {
 /// `confirmDestructive:` keyword would need to (ADR 0113 "Decision"); every
 /// scoped filter appends ` confirmDestructive: true` to the same
 /// `Workspace flush: <filter>` expression `flush_expr` already builds for
-/// that filter, reusing `WorkspaceInterface.bt`'s
+/// that filter, reusing `workspace_interface.bt`'s
 /// `flush: filter confirmDestructive: confirmDestructive` keyword form.
 ///
 /// Per the ADR's Surface section, this is the caller's confirmation gate for

@@ -373,7 +373,7 @@ TestCase subclass: InspectorTest
   // === evaluate: — value Result contract, actor_eval_unsupported (ADR 0095 §1, §7) ===
   //
   // The value `evaluate:` *happy path* needs the compiler port, which the BUnit
-  // harness does not start (see beamtalk_senders_test.bt:94 for the same caveat),
+  // harness does not start (see system_navigation_senders_test.bt:94 for the same caveat),
   // so it is covered by the REPL e2e btscript
   // (tests/repl-protocol/cases/inspector_evaluate.btscript). Here we verify the
   // safe contract: `evaluate:` always returns a `Result` and never crashes, even

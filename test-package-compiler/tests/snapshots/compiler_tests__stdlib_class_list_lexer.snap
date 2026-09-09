@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: output
 ---
-Token { kind: Identifier("sealed"), span: Span { start: 208, end: 214 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test List class compilation as a value type (not gen_server)."), Whitespace("\n"), LineComment("// Mirrors lib/List.bt exactly — new/0 should return [] (empty list)."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("sealed"), span: Span { start: 208, end: 214 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test List class compilation as a value type (not gen_server)."), Whitespace("\n"), LineComment("// Mirrors lib/list.bt exactly — new/0 should return [] (empty list)."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("Object"), span: Span { start: 215, end: 221 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Keyword("subclass:"), span: Span { start: 222, end: 231 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("List"), span: Span { start: 232, end: 236 }, leading_trivia: [], trailing_trivia: [] }

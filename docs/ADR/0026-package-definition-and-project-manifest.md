@@ -595,7 +595,7 @@ The `[run] entry =` field continues to work for scripts and tools (short-running
 - `crates/beamtalk-cli/src/commands/run.rs` — OTP application start path
 - `runtime/apps/beamtalk_runtime/src/beamtalk_supervisor.erl` — supervisor ETS registry (`register_root/1`, `get_root/0`)
 - `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_interface_primitives.erl` — `rootSupervisor/0`
-- `stdlib/src/WorkspaceInterface.bt` — `supervisor` method
+- `stdlib/src/workspace_interface.bt` — `supervisor` method
 
 ### References
 

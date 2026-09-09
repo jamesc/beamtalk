@@ -11,12 +11,12 @@ A SICP-inspired metacircular Scheme interpreter written in Beamtalk, demonstrati
 
 | File | Class | Role |
 |------|-------|------|
-| `symbol.bt` | `SchemeSymbol` | Distinct symbol type for identifier lookup |
-| `reader.bt` | `SchemeReader` | Tokenise + parse s-expression strings into AST |
-| `env.bt` | `SchemeEnv` | Actor-based lexical environment with parent chain |
-| `lambda.bt` | `SchemeLambda` | Closure: captures params, body, and defining env |
-| `eval.bt` | `SchemeEval` | Metacircular evaluator with special-form dispatch |
-| `printer.bt` | `SchemePrinter` | Convert evaluated values back to Scheme notation |
+| `scheme_symbol.bt` | `SchemeSymbol` | Distinct symbol type for identifier lookup |
+| `scheme_reader.bt` | `SchemeReader` | Tokenise + parse s-expression strings into AST |
+| `scheme_env.bt` | `SchemeEnv` | Actor-based lexical environment with parent chain |
+| `scheme_lambda.bt` | `SchemeLambda` | Closure: captures params, body, and defining env |
+| `scheme_eval.bt` | `SchemeEval` | Metacircular evaluator with special-form dispatch |
+| `scheme_printer.bt` | `SchemePrinter` | Convert evaluated values back to Scheme notation |
 | `scheme_test.bt` | `SchemeTest` | BUnit test suite |
 
 ## Supported Syntax

@@ -1,0 +1,366 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ClassBuilder — Fluent builder for creating and registering Beamtalk classes.
+///
+/// ClassBuilder is an Actor subclass — each builder instance is a short-lived
+/// gen_server process that accumulates configuration via cascaded messages.
+/// The `register` method is a terminal operation: it registers the class with
+/// the runtime, stops the builder process, and returns the new class object.
+///
+/// Codegen emits Core Erlang that calls ClassBuilder directly — the Beamtalk
+/// snippet below is conceptual:
+/// ```beamtalk
+/// Object classBuilder
+///   name: #Counter;
+///   fields: #{ #count => 0 };
+///   methods: #{ #increment => [...], #value => [...] };
+///   register
+/// ```
+///
+/// ## References
+/// * ADR 0038: `docs/ADR/0038-subclass-classbuilder-protocol.md`
+/// * Pattern: `stdlib/src/actor.bt` (ClassBuilder is Actor subclass)
+typed Actor subclass: ClassBuilder
+  state: className :: Symbol | Nil = nil
+  state: superclassRef :: Object | Nil = nil
+  state: fieldSpecs :: Dictionary = #{}
+  state: methodSpecs :: Dictionary = #{}
+  state: modifiers :: List(Symbol) = #()
+  state: backingModule :: Symbol | Nil = nil
+  state: methodSource :: Dictionary = #{}
+  state: classMethods :: Dictionary = #{}
+  state: classMethodSource :: Dictionary = #{}
+  state: classState :: Dictionary = #{}
+  state: methodSignatures :: Dictionary = #{}
+  state: classMethodSignatures :: Dictionary = #{}
+  state: methodReturnTypes :: Dictionary = #{}
+  state: classMethodReturnTypes :: Dictionary = #{}
+  state: methodDocs :: Dictionary = #{}
+  state: classMethodDocs :: Dictionary = #{}
+  state: classDoc :: String | Nil = nil
+  state: meta :: Dictionary | Nil = nil
+  state: isConstructible :: Boolean | Nil = nil
+
+  /// Set the class name (a Symbol).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder name: #Counter
+  /// ```
+  name: aSymbol :: Symbol -> Symbol => self.className := aSymbol
+
+  /// Set the superclass reference.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder superclass: Object
+  /// ```
+  superclass: aClass :: Object -> Object => self.superclassRef := aClass
+
+  // === Bulk configuration (used by codegen) ===
+
+  /// Set all fields at once (used by codegen).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder fields: #{ #count => 0 }
+  /// ```
+  fields: aDict :: Dictionary -> Dictionary => self.fieldSpecs := aDict
+
+  /// Set all methods at once (used by codegen).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder methods: #{ #increment => fun }
+  /// ```
+  methods: aDict :: Dictionary -> Dictionary => self.methodSpecs := aDict
+
+  /// Set per-method source text as a `selector => source string` map.
+  ///
+  /// Populated automatically by the compiler from block-literal method
+  /// bodies (BT-2246) so builder-defined classes are visible to
+  /// `SystemNavigation` source-text queries, just like file-defined ones.
+  /// Methods built from computed/non-literal funs have no source literal
+  /// and are simply omitted (known-present but unindexable).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder methodSource: #{ #increment => "increment => self.count := self.count + 1" }
+  /// ```
+  methodSource: aDict :: Dictionary -> Dictionary => self.methodSource := aDict
+
+  /// Set all class-side methods at once (ADR 0084, BT-2267).
+  ///
+  /// Each value is a class-method block whose body the compiler lowers with
+  /// the class-method calling convention (`fun(ClassSelf, ClassVars, ...)`),
+  /// so class-variable mutations thread correctly and `super`/`self` resolve.
+  /// The runtime installs them as runtime class-method funs (BT-2266).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classMethods: #{ #bump => [:self | self.total := self.total + 1] }
+  /// ```
+  classMethods: aDict :: Dictionary -> Dictionary => self.classMethods := aDict
+
+  /// Set per-class-method source text as a `selector => source string` map.
+  ///
+  /// The class-side counterpart of `methodSource:`. Populated automatically by
+  /// the compiler from `classMethods:` block-literal bodies (BT-2270) so
+  /// builder-defined class methods are visible to `SystemNavigation`
+  /// source-text queries on the class side (BT-2195), just like file-defined
+  /// ones. Class methods built from computed/non-literal funs have no source
+  /// literal and are simply omitted (known-present but unindexable).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classMethodSource: #{ #bump => "bump => self.total := self.total + 1" }
+  /// ```
+  classMethodSource: aDict :: Dictionary -> Dictionary =>
+    self.classMethodSource := aDict
+
+  /// Set class-variable initial values (ADR 0084, BT-2267).
+  ///
+  /// The class-side counterpart of `fields:`. Named `classVars:` rather than
+  /// `classState:` because `classState:` is a reserved class-variable
+  /// declaration keyword (it cannot be a method selector), mirroring how the
+  /// instance-side setter is `fields:`, not the reserved `field:`/`state:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classVars: #{ #total => 0 }
+  /// ```
+  classVars: aDict :: Dictionary -> Dictionary => self.classState := aDict
+
+  /// Set instance-method display signatures as a `selector => signature` map
+  /// (ADR 0084, BT-2268).
+  ///
+  /// These are the human-readable signatures shown by `:help` (e.g.
+  /// `"increment -> Integer"`). The file-defined path derives them from the
+  /// method AST; the builder path supplies them explicitly so programmatically
+  /// built classes reach `:help` parity.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder methodSignatures: #{ #increment => "increment -> Integer" }
+  /// ```
+  methodSignatures: aDict :: Dictionary -> Dictionary =>
+    self.methodSignatures := aDict
+
+  /// Set class-side method display signatures as a `selector => signature` map
+  /// (ADR 0084, BT-2268).
+  ///
+  /// The class-side counterpart of `methodSignatures:`, shown by `:help` for
+  /// class methods.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classMethodSignatures: #{ #default => "default -> Counter" }
+  /// ```
+  classMethodSignatures: aDict :: Dictionary -> Dictionary =>
+    self.classMethodSignatures := aDict
+
+  /// Set instance-method return-type metadata as a `selector => type` map
+  /// (ADR 0084, BT-2268).
+  ///
+  /// Mirrors the return-type channel the compiler emits for file-defined
+  /// classes so reflective type queries return the same data for
+  /// builder-defined ones.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder methodReturnTypes: #{ #increment => #Integer }
+  /// ```
+  methodReturnTypes: aDict :: Dictionary -> Dictionary =>
+    self.methodReturnTypes := aDict
+
+  /// Set class-side method return-type metadata as a `selector => type` map
+  /// (ADR 0084, BT-2268).
+  ///
+  /// The class-side counterpart of `methodReturnTypes:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classMethodReturnTypes: #{ #default => #Counter }
+  /// ```
+  classMethodReturnTypes: aDict :: Dictionary -> Dictionary =>
+    self.classMethodReturnTypes := aDict
+
+  /// Set per-method doc comments as a `selector => doc string` map
+  /// (ADR 0084, BT-2268).
+  ///
+  /// These are the doc comments reflected by documentation queries and shown in
+  /// `:help`, matching the doc channel the compiler emits for file-defined
+  /// classes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder methodDocs: #{ #increment => "Add one to the count." }
+  /// ```
+  methodDocs: aDict :: Dictionary -> Dictionary => self.methodDocs := aDict
+
+  /// Set per-class-method doc comments as a `selector => doc string` map
+  /// (ADR 0084, BT-2268).
+  ///
+  /// The class-side counterpart of `methodDocs:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classMethodDocs: #{ #default => "Build a fresh counter." }
+  /// ```
+  classMethodDocs: aDict :: Dictionary -> Dictionary =>
+    self.classMethodDocs := aDict
+
+  /// Set the class-level doc comment (ADR 0084, BT-2268).
+  ///
+  /// Reflected by documentation queries on the class, matching the `classDoc`
+  /// channel the compiler emits for file-defined classes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder classDoc: "A simple mutable counter."
+  /// ```
+  classDoc: aString :: String -> String => self.classDoc := aString
+
+  /// Set the class meta map (ADR 0084, BT-2268).
+  ///
+  /// The meta map carries static class metadata (flags, fields, method info)
+  /// that the runtime reads during registration. Left unset, the runtime falls
+  /// back to reading the backing module's `__beamtalk_meta/0`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder meta: #{ #is_abstract => false }
+  /// ```
+  meta: aDict :: Dictionary -> Dictionary => self.meta := aDict
+
+  /// Set whether instances of the class can be created via `new` / `new:`
+  /// (ADR 0084, BT-2268).
+  ///
+  /// File-defined classes infer this from the `new => self error:` pattern;
+  /// the builder path sets it explicitly. Leaving it unset (`nil`) lets the
+  /// runtime compute constructibility lazily, as it does for primitive classes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder isConstructible: false
+  /// ```
+  isConstructible: aBoolean :: Boolean -> Boolean =>
+    self.isConstructible := aBoolean
+
+  // === Incremental mutation (browser use case) ===
+
+  /// Add a single field with a default value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder addField: #name default: 'Rex'
+  /// ```
+  addField: aName :: Symbol default: aValue :: Object -> Dictionary =>
+    self.fieldSpecs := self.fieldSpecs at: aName put: aValue
+
+  /// Add a single instance method from a block body (the "browser" use case).
+  ///
+  /// The incremental counterpart of `methods:`. It writes the same
+  /// `methodSpecs` map the bulk setter populates, so a class can be assembled
+  /// one method at a time before `register`. In a `classBuilder … register`
+  /// cascade the compiler lowers the block argument exactly as it lowers a
+  /// `methods:` map value — the method is installed as a compiler-generated
+  /// runtime fun, not a naive closure (BT-873). A computed (non-literal) fun is
+  /// stored verbatim and dispatches with the `fun(Self, Args…)` convention.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder addMethod: #answer body: [:self | 42]
+  /// ```
+  addMethod: aSelector :: Symbol body: aBlock :: Object -> Dictionary =>
+    self.methodSpecs := self.methodSpecs at: aSelector put: aBlock
+
+  /// Add a single class-side method from a block body (ADR 0084, BT-2267).
+  ///
+  /// The incremental counterpart of `classMethods:`. It writes the same
+  /// `classMethods` map, so a class can gain class methods one at a time before
+  /// `register`. In a `classBuilder … register` cascade the compiler lowers the
+  /// block with the class-method calling convention (`fun(ClassSelf, ClassVars,
+  /// …)`) so class-variable mutations thread and `super`/`self` resolve, just
+  /// like a `classMethods:` map value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder addClassMethod: #bump body: [:self | self.total := self.total + 1]
+  /// ```
+  addClassMethod: aSelector :: Symbol body: aBlock :: Object -> Dictionary =>
+    self.classMethods := self.classMethods at: aSelector put: aBlock
+
+  /// Add a single class variable with a default value (ADR 0084, BT-2267).
+  ///
+  /// The incremental counterpart of `classVars:`. It writes the same
+  /// `classState` map. Named `addClassState:default:` rather than
+  /// `addClassVar:default:` for symmetry with the `classState:` declaration
+  /// keyword used on file-defined classes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder addClassState: #total default: 0
+  /// ```
+  addClassState: aName :: Symbol default: aValue :: Object -> Dictionary =>
+    self.classState := self.classState at: aName put: aValue
+
+  /// Remove a single instance method before `register` (live-editing parity).
+  ///
+  /// Drops the selector from the `methodSpecs` map. A no-op when the selector
+  /// was never added.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder removeMethod: #answer
+  /// ```
+  removeMethod: aSelector :: Symbol -> Dictionary =>
+    self.methodSpecs := self.methodSpecs removeKey: aSelector
+
+  /// Remove a single class-side method before `register` (live-editing parity).
+  ///
+  /// Drops the selector from the `classMethods` map. A no-op when the selector
+  /// was never added.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder removeClassMethod: #bump
+  /// ```
+  removeClassMethod: aSelector :: Symbol -> Dictionary =>
+    self.classMethods := self.classMethods removeKey: aSelector
+
+  // === Modifiers and native linkage ===
+
+  /// Apply a class modifier (#abstract, #sealed, #typed, #internal).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder modifier: #sealed
+  /// ```
+  modifier: aSymbol :: Symbol -> List(Symbol) =>
+    self.modifiers := self.modifiers add: aSymbol
+
+  /// Set the backing Erlang module for a native Actor class.
+  ///
+  /// When set, the `register` call will link this Beamtalk class to the
+  /// named Erlang module, enabling `self delegate` dispatch.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder native: #beamtalk_subprocess
+  /// ```
+  native: anErlangModule :: Symbol -> Symbol =>
+    self.backingModule := anErlangModule
+
+  // === Registration ===
+
+  /// Register the class with the runtime and return the new class object.
+  /// Stops the builder process after registration — the builder is
+  /// single-use and should not be retained.
+  ///
+  /// Called from compiled module init, wires the BEAM module's pre-compiled
+  /// methods into the class gen_server. If the class already exists (hot
+  /// reload), updates the existing gen_server state via `update_class/2`
+  /// rather than failing.
+  register -> Object => @intrinsic classBuilderRegister

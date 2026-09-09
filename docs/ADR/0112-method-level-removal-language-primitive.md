@@ -379,7 +379,7 @@ Considered and deferred, not rejected outright. Symmetric with `compile:source:`
 
 | Layer | Addition |
 |---|---|
-| `stdlib/src/Behaviour.bt` | `removeSelector:` and `removeSelector:ifAbsent:`, sealed, backed by new `@primitive`s (`classRemoveSelector`, `classRemoveSelectorIfAbsent`). |
+| `stdlib/src/behaviour.bt` | `removeSelector:` and `removeSelector:ifAbsent:`, sealed, backed by new `@primitive`s (`classRemoveSelector`, `classRemoveSelectorIfAbsent`). |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_behaviour_intrinsics.erl` | New primitive functions. Unlike `classRemoveFromSystemByName/1` (which refuses before acting), these install unconditionally — no receiver-side check. Branch on where the selector resolves (extension vs. local, per *Extension methods* above), then call either `beamtalk_extensions:unregister/2` (relaxed for class-side, see above) or `beamtalk_repl_eval:remove_method/3` (relaxed to permit stdlib for this caller, see above) based on which metaclass tag `Self` carries. Let the ChangeLog-append layer derive `flushable`/`not_flushable_reason` from `sourceFile`, same as a patch. |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_eval.erl` / `beamtalk_repl_loader.erl` | Relax `remove_method/3`'s hardcoded stdlib refusal so it's reachable from `removeSelector:` while `revert:`-of-an-add keeps refusing (see above) — no new function, an existing one gains a caller-aware conditional. |
 | ChangeLog append path (wherever ADR 0082's `compile:source:`/`newClass:at:` append their entries — `beamtalk_repl_eval`/`beamtalk_workspace_changelog`) | `"remove-method"` kind + `side` field support. |

@@ -25,4 +25,10 @@ Token { kind: AtExpect, span: Span { start: 599, end: 606 }, leading_trivia: [Wh
 Token { kind: Identifier("type"), span: Span { start: 607, end: 611 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Integer("42"), span: Span { start: 612, end: 614 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("unknownMessage"), span: Span { start: 615, end: 629 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 630, end: 630 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: AtExpect, span: Span { start: 750, end: 757 }, leading_trivia: [Whitespace("\n\n"), LineComment("// BT-3387: a single @expect can list multiple categories, suppressing all"), Whitespace("\n"), LineComment("// of them on the same following expression"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("dnu"), span: Span { start: 758, end: 761 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: BinarySelector(","), span: Span { start: 761, end: 762 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("type"), span: Span { start: 763, end: 767 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Integer("42"), span: Span { start: 768, end: 770 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("unknownMessage"), span: Span { start: 771, end: 785 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 786, end: 786 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

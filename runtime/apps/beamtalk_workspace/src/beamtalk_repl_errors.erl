@@ -59,6 +59,7 @@ Used by protocol handlers and op modules.
     ensure_structured_error/1,
     ensure_structured_error/2,
     format_name/1,
+    normalize_diagnostic/1,
     safe_to_existing_atom/1
 ]).
 
@@ -408,3 +409,36 @@ is_known_error_reason(_) ->
 -doc "Format a name for error messages.".
 -spec format_name(term()) -> binary().
 format_name(Name) -> beamtalk_text:to_binary(Name).
+
+-doc """
+Normalise a compiler diagnostic term to a plain map with guaranteed keys.
+
+Single authority for the 3-clause dispatch shared by `format_diagnostic_text/1`
+(beamtalk_repl_compiler) and `diagnostic_to_error_map/2` (beamtalk_repl_ops_load):
+both were re-implementing the same `is_map`/`is_binary`/fallback pattern, so if
+the compiler changes the diagnostic shape (e.g. renames `line` to `line_number`)
+both files would need parallel edits with no mechanical link.
+
+Always returns `message`. Includes `line` (integer) and `hint` (binary) only when
+present in the source map.
+""".
+-spec normalize_diagnostic(term()) ->
+    #{message := binary(), line => integer(), hint => binary()}.
+normalize_diagnostic(D) when is_map(D) ->
+    Msg = maps:get(message, D, <<"Unknown error">>),
+    Base = #{message => Msg},
+    % elp:fixme W0032 maps:find with complex branch logic
+    Base1 =
+        case maps:find(line, D) of
+            {ok, Line} when is_integer(Line) -> Base#{line => Line};
+            _ -> Base
+        end,
+    % elp:fixme W0032 maps:find with complex branch logic
+    case maps:find(hint, D) of
+        {ok, Hint} when is_binary(Hint) -> Base1#{hint => Hint};
+        _ -> Base1
+    end;
+normalize_diagnostic(D) when is_binary(D) ->
+    #{message => D};
+normalize_diagnostic(D) ->
+    #{message => iolist_to_binary(io_lib:format("~p", [D]))}.

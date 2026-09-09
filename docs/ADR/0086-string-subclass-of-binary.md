@@ -307,7 +307,7 @@ Rejected because String is already a Collection — if Binary is between Collect
 ### Negative
 - String gains byte-level methods it didn't have before (`byteAt:`, `byteSize`, `part:size:`, `concat:`) — minor, they're useful
 - Hierarchy change: `String` moves from `Collection > String` to `Collection > Binary > String` — any code checking `superclass` will see `Binary` instead of `Collection`
-- `Binary size:` class method removed in favor of `size` instance method — breaking change for existing `Binary size: x` call sites (only 2 files affected: `stdlib/src/Binary.bt` and `stdlib/test/binary_test.bt`)
+- `Binary size:` class method removed in favor of `size` instance method — breaking change for existing `Binary size: x` call sites (only 2 files affected: `stdlib/src/binary.bt` and `stdlib/test/binary_test.bt`)
 - Collection methods on Binary may surprise users: `aBinary collect: [:b | b]` returns a List of integers, not a Binary — the return type changes when going from collection back to concrete type
 - Modifies ADR 0037's hierarchy — inserting a layer the original design explicitly avoided
 
@@ -353,7 +353,7 @@ Rejected because String is already a Collection — if Binary is between Collect
 
 ### Migration steps
 1. Add deprecation warning on `Binary size:` class method pointing to instance `size`
-2. Update all `Binary size:` call sites in stdlib and examples (2 files: `Binary.bt`, `binary_test.bt`)
+2. Update all `Binary size:` call sites in stdlib and examples (2 files: `binary.bt`, `binary_test.bt`)
 3. Remove deprecated `Binary size:` class method after one release cycle
 
 ## Implementation Tracking

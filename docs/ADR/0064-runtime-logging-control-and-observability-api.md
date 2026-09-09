@@ -474,7 +474,7 @@ A dedicated new singleton class for logging configuration. Rejected because it a
 **Affected components:** `crates/beamtalk-core/src/codegen/core_erlang/` (Logger call recognition + inline emission), `beamtalk_logger.erl` (unchanged for FFI), stdlib tests, e2e tests
 
 ### Phase 1: Core API on BeamtalkInterface (M)
-- Create new `beamtalk_logging_config.erl` in `beamtalk_runtime` app — this keeps logging configuration in the Runtime Context, not the stdlib Object System Context. `BeamtalkInterface.bt` delegates logging methods via `(Erlang beamtalk_logging_config)`, the same way it delegates introspection methods via `(Erlang beamtalk_interface)`
+- Create new `beamtalk_logging_config.erl` in `beamtalk_runtime` app — this keeps logging configuration in the Runtime Context, not the stdlib Object System Context. `beamtalk_interface.bt` delegates logging methods via `(Erlang beamtalk_logging_config)`, the same way it delegates introspection methods via `(Erlang beamtalk_interface)`
 - Implement: `logLevel/0`, `logLevel/1`, `debugTargets/0`, `enableDebug/1`, `disableDebug/1`, `activeDebugTargets/0`, `disableAllDebug/0`, `loggerInfo/0`
 - `logLevel/1` sets OTP primary log level (same as current `Logger setLevel:`)
 - Add subsystem name registry (symbol → module list map)
@@ -482,11 +482,11 @@ A dedicated new singleton class for logging configuration. Rejected because it a
 - Add per-actor debug via `logger:set_process_level/2` (detects actor references by tuple shape)
 - Add debug target tracking ETS table
 - Add user class → BEAM module resolution via class registry
-- Update `BeamtalkInterface.bt` with Erlang FFI calls to `beamtalk_logging_config`
+- Update `beamtalk_interface.bt` with Erlang FFI calls to `beamtalk_logging_config`
 - Deprecate `Logger setLevel:` (keep working, add `?LOG_WARNING` suggesting `Beamtalk logLevel:`)
 - EUnit tests for all new functions
 
-**Affected components:** `runtime/apps/beamtalk_runtime/src/beamtalk_logging_config.erl` (new), `stdlib/src/BeamtalkInterface.bt`, `runtime/apps/beamtalk_stdlib/src/beamtalk_logger.erl` (deprecation warning)
+**Affected components:** `runtime/apps/beamtalk_runtime/src/beamtalk_logging_config.erl` (new), `stdlib/src/beamtalk_interface.bt`, `runtime/apps/beamtalk_stdlib/src/beamtalk_logger.erl` (deprecation warning)
 
 ### Phase 2: `beamtalk workspace logs` CLI Command (M)
 - Add `logs` subcommand to `beamtalk-cli`
@@ -503,7 +503,7 @@ A dedicated new singleton class for logging configuration. Rejected because it a
 - Add `--format json|text` flag to `beamtalk workspace logs` CLI command
 - EUnit tests
 
-**Affected components:** `runtime/apps/beamtalk_runtime/src/beamtalk_logging_config.erl`, `stdlib/src/BeamtalkInterface.bt`, `runtime/rebar.config` (new dep), `crates/beamtalk-cli/src/commands/logs.rs`
+**Affected components:** `runtime/apps/beamtalk_runtime/src/beamtalk_logging_config.erl`, `stdlib/src/beamtalk_interface.bt`, `runtime/rebar.config` (new dep), `crates/beamtalk-cli/src/commands/logs.rs`
 
 ### Phase 4: MCP Debug Target (S)
 - Wire `#mcp` subsystem symbol to Rust-side tracing filter

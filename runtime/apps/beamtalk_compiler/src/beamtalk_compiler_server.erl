@@ -35,6 +35,9 @@ to avoid temp files on disk (BT-48).
     register_class/2,
     remove_class/1,
     get_classes/0,
+    register_protocol/2,
+    remove_protocol/1,
+    get_protocols/0,
     register_aliases/1,
     get_aliases/0,
     resolve_completion_type/1,
@@ -51,7 +54,8 @@ to avoid temp files on disk (BT-48).
     class_state_field_defaults/2,
     reindent_method_source/2,
     find_selector_send_spans/3,
-    find_definition_selector_spans/5
+    find_definition_selector_spans/5,
+    build_class_module_index_in_source/3
 ]).
 
 %% gen_server callbacks
@@ -79,6 +83,25 @@ to avoid temp files on disk (BT-48).
     %% cache and shares this exact limitation (BT-2916); see its doc for the
     %% full rationale, which applies here unchanged.
     classes = #{} :: #{atom() => map()},
+    %% BT-3473: Accumulated protocol metadata cache, mirroring `classes`
+    %% above but populated via `register_protocol/2`/`remove_protocol/1`
+    %% casts from `beamtalk_protocol_registry:register_protocol/1` /
+    %% `unregister_protocol/1` instead of class (de)registration. Maps
+    %% protocol name atom -> its `register_protocol/1` `Info` map (`name`,
+    %% `required_methods`, `type_params`, `extending`, ...). Threaded into
+    %% `diagnostics/3` alongside `classes` (same `class_hierarchy => true`
+    %% opt-in — see that function's moduledoc) so the runtime-seeded checker
+    %% path can recognise a cross-file protocol instead of only ever seeing
+    %% its synthetic zero-method class-cache entry, which used to defeat the
+    %% BT-2088/BT-3472 nominal-mismatch escape hatch and made every selector
+    %% on a protocol-typed receiver look unresolved. Not recovered on init —
+    %% unlike `classes`' `recover_from_beam_modules/0`, there is no equivalent
+    %% "enumerate every registered protocol in the live image" recovery path
+    %% today, so a compiler-server restart starts with an empty cache until
+    %% the next protocol (re-)registration repopulates it. Shares `classes`'
+    %% no-removal-on-session-disconnect limitation (BT-2916) for the same
+    %% reason: this is a single node-global accumulator, not per-session.
+    protocols = #{} :: #{atom() => map()},
     %% ADR 0108 hot-reload re-check trigger (BT-2899): ambient session type
     %% alias cache, keyed by alias name -> its reparseable `type Name =
     %% <expansion>` source line. Mirrors `classes` above: threaded into
@@ -258,6 +281,16 @@ Options:
   writing to `beamtalk_compiler_server' state, so a hypothetical signature
   never becomes visible to any other request. See
   `beamtalk_recheck:trigger_pending/5', the one caller that needs this.
+
+  BT-3473: the ambient protocol-registry cache (`register_protocol/2`'s
+  accumulator) rides this same opt-in — whenever the ambient class cache is
+  threaded (the `true' case; a map() overlay only ever replaces the class
+  side), `State#state.protocols' is threaded alongside it as the request's
+  `protocol_registry'. Without this, a protocol registered in another file
+  reaches the checker only as a zero-method class-cache entry (see
+  `beamtalk_protocol_registry:create_protocol_class/2'), which defeats the
+  BT-2088/BT-3472 nominal-mismatch escape hatch and makes every selector on
+  a protocol-typed receiver look unresolved.
 """.
 -spec diagnostics(binary(), binary(), map()) ->
     {ok, [map()]} | {error, [binary()]}.
@@ -271,12 +304,12 @@ version() ->
 
 -ifdef(TEST).
 -doc """
-Clear all cached class metadata *and* the ambient alias cache (test use
-only).
+Clear all cached class metadata, the ambient protocol cache, and the
+ambient alias cache (test use only).
 
-ADR 0050 Phase 3 / ADR 0108 (BT-2899): used for test isolation — call before
-tests that need a clean ambient cache. Synchronous so the next compile sees
-both caches empty.
+ADR 0050 Phase 3 / ADR 0108 (BT-2899) / BT-3473: used for test isolation —
+call before tests that need a clean ambient cache. Synchronous so the next
+compile sees all three caches empty.
 """.
 -spec clear_classes() -> ok.
 clear_classes() ->
@@ -642,6 +675,32 @@ categorize_methods(Source, ClassName) ->
     end.
 
 -doc """
+Build the class→module-name index for a single `src/**/*.bt` file (BT-3441)
+— see `beamtalk_compiler_port:build_class_module_index_in_source/4' for the
+full wire shape. Backs the REPL/workspace cold-load fallback for
+`class_module_index' (ADR 0050,
+`beamtalk_repl_ops_load:build_source_class_module_index/1'). Returns
+`{ok, ModuleName, ClassNames}' on success; a bad `relative_path' returns
+`{error, invalid_path_segment, Message}'; transport failures return
+`{error, port_error | noproc | timeout, Message}'.
+""".
+-spec build_class_module_index_in_source(binary(), binary(), binary()) ->
+    {ok, binary(), [binary()]} | {error, atom(), binary()}.
+build_class_module_index_in_source(Source, RelativePath, PackageName) ->
+    try
+        gen_server:call(
+            ?MODULE,
+            {build_class_module_index_in_source, Source, RelativePath, PackageName},
+            30000
+        )
+    catch
+        exit:{noproc, _} ->
+            {error, noproc, <<"Compiler server is not available">>};
+        exit:{timeout, _} ->
+            {error, timeout, <<"Compiler server timed out">>}
+    end.
+
+-doc """
 Field-level default-value presence for `ClassName''s `state:'/`field:'
 declarations in `Source' (ADR 0082 extension, BT-3254).
 
@@ -740,6 +799,59 @@ mirroring `register_class/2`'s degrade-silently contract.
 get_classes() ->
     try
         gen_server:call(?MODULE, get_classes, 5000)
+    catch
+        exit:{noproc, _} -> #{};
+        exit:{timeout, _} -> #{}
+    end.
+
+-doc """
+Register a protocol with its metadata in the compiler server cache
+(BT-3473), mirroring `register_class/2`.
+
+Fire-and-forget cast. Silently dropped if the server is not running.
+Production caller: `beamtalk_protocol_registry:register_protocol/1` (in
+`beamtalk_runtime`), called on every protocol (re-)registration.
+""".
+-spec register_protocol(atom(), map()) -> ok.
+register_protocol(ProtocolName, Info) ->
+    try
+        gen_server:cast(?MODULE, {register_protocol, ProtocolName, Info})
+    catch
+        _:_ -> ok
+    end,
+    ok.
+
+-doc """
+Remove a protocol from the compiler server's ambient protocol cache
+(BT-3473), mirroring `remove_class/1`.
+
+Not called from production code: `beamtalk_protocol_registry:unregister_protocol/1`
+(the real caller, in `beamtalk_runtime`) intentionally bypasses this wrapper
+with a raw `gen_server:cast(beamtalk_compiler_server, {remove_protocol, ProtocolName})`,
+for the identical wrong-direction-dependency reason documented on
+`remove_class/1`. This exported function exists for same-app callers and is
+exercised directly by its own tests.
+""".
+-spec remove_protocol(atom()) -> ok.
+remove_protocol(ProtocolName) ->
+    try
+        gen_server:cast(?MODULE, {remove_protocol, ProtocolName})
+    catch
+        _:_ -> ok
+    end,
+    ok.
+
+-doc """
+Return the current ambient protocol cache map (`register_protocol/2`'s
+accumulator, BT-3473), mirroring `get_classes/0`.
+
+Used directly by tests. Returns an empty map (not an error) if the server is
+not running, mirroring `register_class/2`'s degrade-silently contract.
+""".
+-spec get_protocols() -> #{atom() => map()}.
+get_protocols() ->
+    try
+        gen_server:call(?MODULE, get_protocols, 5000)
     catch
         exit:{noproc, _} -> #{};
         exit:{timeout, _} -> #{}
@@ -888,9 +1000,17 @@ handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From,
     %% unconditional overwrite here would silently drop stdlib aliases from
     %% that caller's more complete list. This is purely a backstop for a
     %% caller that doesn't bother passing one.
+    %%
+    %% BT-3477: the ambient protocol cache rides the same unconditional
+    %% injection as `class_hierarchy` — see `handle_call({compile, ...})`'s
+    %% identical addition below for why this can't stay opt-in the way
+    %% diagnostics/3's is.
     Options1 = maps:merge(
         #{known_type_aliases => alias_source_list(State#state.aliases)},
-        Options#{class_hierarchy => State#state.classes}
+        Options#{
+            class_hierarchy => State#state.classes,
+            protocol_registry => State#state.protocols
+        }
     ),
     Result = beamtalk_compiler_port:compile_expression(
         State#state.port, Source, ModuleName, KnownVars, Options1
@@ -901,7 +1021,10 @@ handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, 
     %% `compile_expression` clause above — same reasoning applies here.
     Options1 = maps:merge(
         #{known_type_aliases => alias_source_list(State#state.aliases)},
-        Options#{class_hierarchy => State#state.classes}
+        Options#{
+            class_hierarchy => State#state.classes,
+            protocol_registry => State#state.protocols
+        }
     ),
     Result = beamtalk_compiler_port:compile_expression_trace(
         State#state.port, Source, ModuleName, KnownVars, Options1
@@ -919,15 +1042,24 @@ handle_call({compile, Source, Options}, _From, State) ->
     %% the alias table it's checking against actually includes earlier-turn
     %% aliases — this is the fix for the BT-2912 concrete repro (`type Point
     %% = Integer` then `Actor subclass: Point` in a later turn/`:load`).
+    %%
+    %% BT-3477: the ambient protocol cache rides the same unconditional
+    %% injection as `class_hierarchy` above — a live `compile` of a class
+    %% whose method signature references a cross-file protocol needs it for
+    %% the same nominal-mismatch/Dnu escape hatch BT-3473 wired for
+    %% diagnostics/3.
     Options1 = Options#{
         class_hierarchy => State#state.classes,
+        protocol_registry => State#state.protocols,
         known_type_aliases => alias_source_list(State#state.aliases)
     },
     Result = do_compile(State#state.port, Source, Options1),
     {reply, Result, State};
 handle_call({compile_method, ClassSource, MethodSource, Options}, _From, State) ->
+    %% BT-3477: see `handle_call({compile, ...})`'s identical comment above.
     Options1 = Options#{
         class_hierarchy => State#state.classes,
+        protocol_registry => State#state.protocols,
         known_type_aliases => alias_source_list(State#state.aliases)
     },
     Result = do_compile_method(State#state.port, ClassSource, MethodSource, Options1),
@@ -974,13 +1106,26 @@ handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
     %% this request's class hierarchy instead of `State#state.classes` — the
     %% overlay never gets written into `State`, so it is visible to this one
     %% request only, never to any other caller of this gen_server.
-    {Classes, Aliases} =
+    %%
+    %% BT-3473: the ambient protocol cache rides the same opt-in as `Aliases`
+    %% above — an overlay only ever replaces the *class* hierarchy (BT-3109's
+    %% "splice a pending signature" use case has no protocol-side
+    %% equivalent), so `State#state.protocols` is used verbatim in both the
+    %% `true` and `Overlay` arms.
+    {Classes, Aliases, Protocols} =
         case maps:get(class_hierarchy, Options, false) of
-            true -> {State#state.classes, alias_source_list(State#state.aliases)};
-            false -> {#{}, []};
-            Overlay when is_map(Overlay) -> {Overlay, alias_source_list(State#state.aliases)}
+            true ->
+                {
+                    State#state.classes,
+                    alias_source_list(State#state.aliases),
+                    State#state.protocols
+                };
+            false ->
+                {#{}, [], #{}};
+            Overlay when is_map(Overlay) ->
+                {Overlay, alias_source_list(State#state.aliases), State#state.protocols}
         end,
-    Result = do_diagnostics(State#state.port, Source, Mode, Classes, Aliases),
+    Result = do_diagnostics(State#state.port, Source, Mode, Classes, Aliases, Protocols),
     {reply, Result, State};
 handle_call({find_senders_in_source, Source, Selector}, _From, State) ->
     Result = beamtalk_compiler_port:find_senders_in_source(
@@ -1051,6 +1196,13 @@ handle_call({class_state_field_defaults, Source, ClassName}, _From, State) ->
         State#state.port, Source, ClassName
     ),
     {reply, Result, State};
+handle_call(
+    {build_class_module_index_in_source, Source, RelativePath, PackageName}, _From, State
+) ->
+    Result = beamtalk_compiler_port:build_class_module_index_in_source(
+        State#state.port, Source, RelativePath, PackageName
+    ),
+    {reply, Result, State};
 handle_call({reindent_method_source, Source, BaseIndent}, _From, State) ->
     Result = beamtalk_compiler_port:reindent_method_source(
         State#state.port, Source, BaseIndent
@@ -1060,13 +1212,15 @@ handle_call(version, _From, State) ->
     Result = do_version(State#state.port),
     {reply, Result, State};
 handle_call(clear_classes, _From, State) ->
-    {reply, ok, State#state{classes = #{}, aliases = #{}}};
+    {reply, ok, State#state{classes = #{}, aliases = #{}, protocols = #{}}};
 handle_call({inject_diagnostics_failure, Reason}, _From, State) ->
     {reply, ok, State#state{diagnostics_fault = Reason}};
 handle_call(inject_diagnostics_exit, _From, State) ->
     {reply, ok, State#state{diagnostics_exit_fault = true}};
 handle_call(get_classes, _From, State) ->
     {reply, State#state.classes, State};
+handle_call(get_protocols, _From, State) ->
+    {reply, State#state.protocols, State};
 handle_call(get_aliases, _From, State) ->
     {reply, alias_source_list(State#state.aliases), State};
 handle_call({register_aliases, AliasSources}, _From, State) ->
@@ -1093,6 +1247,16 @@ handle_cast({remove_class, ClassName}, State) ->
     %% BT-3105: Drop a removed class from the ambient cache.
     NewClasses = maps:remove(ClassName, State#state.classes),
     {noreply, State#state{classes = NewClasses}};
+handle_cast({register_protocol, ProtocolName, Info}, State) ->
+    %% BT-3473: Accumulate protocol metadata; overwrite on re-registration,
+    %% mirroring register_class/2's cast handler above.
+    NewProtocols = maps:put(ProtocolName, Info, State#state.protocols),
+    {noreply, State#state{protocols = NewProtocols}};
+handle_cast({remove_protocol, ProtocolName}, State) ->
+    %% BT-3473: Drop an unregistered protocol from the ambient cache,
+    %% mirroring remove_class/1's cast handler above.
+    NewProtocols = maps:remove(ProtocolName, State#state.protocols),
+    {noreply, State#state{protocols = NewProtocols}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -1315,14 +1479,23 @@ do_compile(Port, Source, Options) ->
             0 -> Request4;
             _ -> Request4#{class_hierarchy => Classes}
         end,
+    %% BT-3477: likewise inject the ambient protocol cache, mirroring
+    %% `Classes' above — see handle_call({compile, ...})'s doc for why this
+    %% is unconditional (not opt-in like diagnostics/3's).
+    Protocols = maps:get(protocol_registry, Options, #{}),
+    Request6 =
+        case map_size(Protocols) of
+            0 -> Request5;
+            _ -> Request5#{protocol_registry => Protocols}
+        end,
     %% ADR 0108 hot-reload re-check trigger (BT-2899): likewise inject the
     %% ambient session alias cache — see handle_call({compile, ...})'s doc
     %% for why this is unconditional (not opt-in like diagnostics/3's).
     Aliases = maps:get(known_type_aliases, Options, []),
     RequestFinal =
         case Aliases of
-            [] -> Request5;
-            _ -> Request5#{known_type_aliases => Aliases}
+            [] -> Request6;
+            _ -> Request6#{known_type_aliases => Aliases}
         end,
     case send_port_request(Port, RequestFinal, 30000) of
         {ok, Response} ->
@@ -1391,13 +1564,20 @@ do_compile_method(Port, ClassSource, MethodSource, Options) ->
             0 -> Request4;
             _ -> Request4#{class_hierarchy => Classes}
         end,
+    %% BT-3477: see do_compile/3's identical addition.
+    Protocols = maps:get(protocol_registry, Options, #{}),
+    Request6 =
+        case map_size(Protocols) of
+            0 -> Request5;
+            _ -> Request5#{protocol_registry => Protocols}
+        end,
     %% ADR 0108 hot-reload re-check trigger (BT-2899): see do_compile/3's
     %% identical addition.
     Aliases = maps:get(known_type_aliases, Options, []),
     RequestFinal =
         case Aliases of
-            [] -> Request5;
-            _ -> Request5#{known_type_aliases => Aliases}
+            [] -> Request6;
+            _ -> Request6#{known_type_aliases => Aliases}
         end,
     case send_port_request(Port, RequestFinal, 30000) of
         {ok, Response} ->
@@ -1422,13 +1602,16 @@ do_compile_method(Port, ClassSource, MethodSource, Options) ->
 %% `"method"' mode, which stays class-context-free by design. `Aliases' is
 %% the ambient session type-alias cache (ADR 0108 hot-reload re-check
 %% trigger, BT-2899), same opt-in and same `"method"'-mode exclusion.
-do_diagnostics(Port, Source, Mode, Classes, Aliases) ->
+%% `Protocols' is the ambient protocol-registry cache (BT-3473), same opt-in
+%% and same `"method"'-mode exclusion as `Classes'/`Aliases'.
+do_diagnostics(Port, Source, Mode, Classes, Aliases, Protocols) ->
     Request = #{
         command => diagnostics,
         source => Source,
         mode => Mode,
         class_hierarchy => Classes,
-        known_type_aliases => Aliases
+        known_type_aliases => Aliases,
+        protocol_registry => Protocols
     },
     case send_port_request(Port, Request, 30000) of
         {ok, Response} ->

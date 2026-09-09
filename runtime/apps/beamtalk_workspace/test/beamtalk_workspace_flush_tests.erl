@@ -157,6 +157,8 @@ unit_test_() ->
         fun resolve_new_path_derives_snake_case_style_from_old_path/0,
         %% BT-3526 Windows regression (filename:join/2 drive-letter case bug)
         fun resolve_new_path_preserves_drive_letter_case/0,
+        %% Nightly Windows regression: filename:dirname/1 normalizes `\` to `/`
+        fun resolve_new_path_preserves_backslash_separators/0,
         fun resolve_new_path_derives_path_with_no_directory/0,
         fun resolve_new_path_derives_path_at_filesystem_root/0
     ].
@@ -3455,6 +3457,37 @@ resolve_new_path_preserves_drive_letter_case() ->
         [Entry] = beamtalk_workspace_changelog:flushable_pending(),
         ?assertEqual(
             <<"C:/proj/src/Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry)
+        )
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+%% Nightly Windows regression: a derived new path must preserve `old_path`'s
+%% backslash directory separators verbatim (e.g. `C:\proj\src` stays
+%% `C:\proj\src`, never rewritten to `C:/proj/src`) — `filename:dirname/1`
+%% always normalizes `\` to `/` in its output (per its own implementation
+%% and doc example: `filename:dirname("\\usr\\src/kalle.erl")` returns
+%% `"/usr/src"`), which is why `derive_new_path/3` uses the OS-independent
+%% `raw_dirname/1` instead. This assertion holds on any host, since
+%% `raw_dirname/1` recognizes both `/` and `\` as separators unconditionally
+%% rather than only when `os:type/0` reports `win32`.
+resolve_new_path_preserves_backslash_separators() ->
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        Input = rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            <<"C:\\proj\\src\\Counter.bt">>,
+            undefined,
+            [rename_site(<<"C:\\proj\\src\\Counter.bt">>, 0, 7, <<"Accumulator">>, <<"Counter">>)]
+        ),
+        {ok, _} = beamtalk_workspace_changelog:append(Input),
+        [Entry] = beamtalk_workspace_changelog:flushable_pending(),
+        ?assertEqual(
+            <<"C:\\proj\\src/Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry)
         )
     after
         stop(Pid),

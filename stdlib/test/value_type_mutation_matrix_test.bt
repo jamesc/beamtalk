@@ -36,6 +36,11 @@
 // asserts un-gated.
 
 TestCase subclass: ValueTypeMutationMatrixTest
+  // BT-3483: backing field for the TestCase-context axis-4 fragments below
+  // (`fragStateFieldToDoNonLastReadWrite` / `fragStateFieldIfTrueNonLastReadWrite:`).
+  // A fresh test instance per test method means this never bleeds across
+  // assertions, same as `MutationCorpusValue`'s own `total` field.
+  field: total = 0
 
   // Each fixture exposes the SAME fragment method names; these helpers build a
   // fresh instance per cell so state cannot bleed between assertions.
@@ -77,6 +82,25 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // pattern) instead of discarding it in the C12 catch-all. Kept as a
   // switch for documentation/bisection.
   bt3178ActorSelfSendInConditionalPending => false
+
+  // Pending switch for BT-3484: a genuine `Value subclass:` can never write
+  // `self.field :=` — it's a hard, unconditional compile error (ADR 0042;
+  // `check_value_slot_assignment` fires for every value-type instance method
+  // regardless of position), so `mutation_corpus_value.bt` cannot carry a
+  // `stateFieldToDoNonLastReadWrite`/`stateFieldIfTrueNonLastReadWrite:`
+  // analogue the way `mutation_corpus_actor.bt` does. The ONLY route by which
+  // `self.field := value` compiles under `CodeGenContext::ValueType` today is
+  // the BT-1533 TestCase exemption (TestCase is itself a Value subclass, but
+  // exempted from the immutability check) — hence `fragStateFieldToDoNonLastReadWrite`
+  // below, living directly on this TestCase, rather than in the fixture file.
+  // Exercising that path end-to-end (BT-3483's whole point) found BT-3484:
+  // the loop shape silently drops the field mutation (compiles, but returns
+  // the ORIGINAL unmodified `self`), and the conditional shape (`ifTrue:`)
+  // fails to compile at all (`unbound variable 'SelfN'` from erlc) — see that
+  // fragment's own doc comment for why no `fragStateFieldIfTrue...` fixture
+  // exists here. This switch gates the one cell that DOES compile, until
+  // BT-3484 lands.
+  bt3484ValueTypeFieldWriteThreadingPending => true
 
   // ── TestCase-context fragments (the test class is itself a value-type) ──────
   // `frag` prefix keeps BUnit from treating them as test methods.
@@ -134,6 +158,28 @@ TestCase subclass: ValueTypeMutationMatrixTest
     sum := 0
     1 to: 3 do: [:i | 1 to: 3 do: [:j | sum := sum + j]]
     sum
+
+  // BT-3176 axis 4 (BT-3483): the TestCase-context analogue of
+  // mutation_corpus_actor.bt's stateFieldToDoNonLastReadWrite — mutating this
+  // TestCase's own `total` field (via the BT-1533 value-type exemption)
+  // instead of an outer local. See bt3484ValueTypeFieldWriteThreadingPending
+  // above: this compiles but currently returns the ORIGINAL (unthreaded)
+  // `self`, so its assertion is skipped until BT-3484 lands.
+  //
+  // There is NO `fragStateFieldIfTrueNonLastReadWrite:` analogue here (the
+  // conditional shape of the same bug): unlike the loop shape, that one
+  // doesn't just compute a wrong value — it fails erlc outright with
+  // `unbound variable 'SelfN'`, which would break compilation of this whole
+  // file. It's tracked directly in BT-3484's own repro instead of as a fixture.
+  fragStateFieldToDoNonLastReadWrite =>
+    seen := 0
+    1
+      to: 5
+      do: [:i |
+        self.total := self.total + i
+        seen := seen + 1
+      ]
+    self.total
 
   // ════════════════════════════════════════════════════════════════════════
   //  to:do:  (construct) — BT-2308 regression cells
@@ -586,6 +632,18 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testStateFieldToDoNonLastReadWriteActor =>
     self assert: self actorCorpus stateFieldToDoNonLastReadWrite equals: 15
 
+  // BT-3483/BT-3484: the TestCase-context (value-type) analogue. Currently
+  // broken — the loop's own carried-accumulator plumbing never threads the
+  // value-type `Self` binding a field write produces, so this silently
+  // returns the field's ORIGINAL value (0) instead of 15. Skipped until
+  // BT-3484 lands; see fragStateFieldToDoNonLastReadWrite's doc comment above.
+  testStateFieldToDoNonLastReadWriteTestCase =>
+    self bt3484ValueTypeFieldWriteThreadingPending
+      ifTrue: [
+        ^self skip: "BT-3484: value-type self.field := inside to:do: silently drops the mutation"
+      ]
+    self assert: self fragStateFieldToDoNonLastReadWrite equals: 15
+
   testClassVarToDoNonLastReadWriteClassMethod =>
     self assert: MutationCorpusClassMethod classVarToDoNonLastReadWrite equals: 15
 
@@ -608,7 +666,8 @@ TestCase subclass: ValueTypeMutationMatrixTest
   //  stdlib/test/actor_self_send_position_matrix_test.bt for the full
   //  position matrix this corpus axis samples from, and
   //  docs/ADR/0118-expression-level-state-threading-preludes.md for the
-  //  phase each `adr0118*Pending` switch corresponds to.
+  //  phase each row below was fixed by (all phases have landed; every row
+  //  asserts the ground-truth behaviour unconditionally).
   // ════════════════════════════════════════════════════════════════════════
   testBinaryOperandSelfSendReadWriteActor =>
     self assert: self actorCorpus binaryOperandSelfSendReadWrite equals: 2
@@ -619,31 +678,19 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testAssignRhsSubExprSelfSendReadWriteActor =>
     self assert: self actorCorpus assignRhsSubExprSelfSendReadWrite equals: 101
 
-  // ADR 0118 phase 1b: cascade on self.
-  adr0118Phase1bCascadeOnSelfPending => false
-
+  // ADR 0118 phase 1b (BT-3416): cascade on self.
   testCascadeOnSelfReadWriteActor =>
-    self adr0118Phase1bCascadeOnSelfPending ifTrue: [
-      self assert: self actorCorpus cascadeOnSelfReadWrite equals: 0
-    ] ifFalse: [self assert: self actorCorpus cascadeOnSelfReadWrite equals: 2]
+    self assert: self actorCorpus cascadeOnSelfReadWrite equals: 2
 
-  // ADR 0118 phase 3: self-send as a whileTrue: CONDITION binary-op operand.
-  adr0118Phase3WhileTrueConditionSelfSendPending => true
-
+  // ADR 0118 phase 3 (BT-3419): self-send as a whileTrue: CONDITION
+  // binary-op operand.
   testWhileTrueConditionSelfSendReadWriteActor =>
-    self adr0118Phase3WhileTrueConditionSelfSendPending
-      ifTrue: [
-        self should: [
-          self actorCorpus whileTrueConditionSelfSendReadWrite
-        ] raise: #arity_mismatch
-      ]
-      ifFalse: [
-        self assert: self actorCorpus whileTrueConditionSelfSendReadWrite equals: 3
-      ]
+    self assert: self actorCorpus whileTrueConditionSelfSendReadWrite equals: 3
 
-  // ADR 0118 phase 2a: self-send in a match: arm.
-  adr0118Phase2aMatchArmSelfSendPending => true
-
+  // ADR 0118 phase 4 (BT-3420): self-send in a match: arm — fixed by phase
+  // 4's inline-threaded control flow producer, not phase 2a (see
+  // stdlib/test/actor_self_send_position_matrix_test.bt's
+  // `testMatchArmSelfSendMatchingArm` comment for why).
   testMatchArmSelfSendReadWriteActorMatching =>
     self assert: (self actorCorpus matchArmSelfSendReadWrite: 1) equals: 2
 

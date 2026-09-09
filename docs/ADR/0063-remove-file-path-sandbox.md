@@ -27,7 +27,7 @@ In practice, any Beamtalk application that needs to work with the real filesyste
 - Uses `Erlang filename absname:` for path resolution
 - Uses `Erlang os cmd:` for hook execution in directories
 
-**`dot_env.bt`** — loads `.env` files:
+**`dot_scheme_env.bt`** — loads `.env` files:
 - Uses `Erlang file read_file:` instead of `File readAll:` because env file paths may be absolute
 
 **`config.bt`** — resolves workspace root:
@@ -357,5 +357,5 @@ Relative-path code is unaffected — this is a pure relaxation of restrictions.
 - `runtime/apps/beamtalk_stdlib/test/beamtalk_file_tests.erl` — tests to update
 - `runtime/apps/beamtalk_runtime/src/beamtalk_error.erl` — error message generation to clean up
 - `../symphony/src/workspace_manager.bt` — exemplar of FFI workaround pattern
-- `../symphony/src/dot_env.bt` — exemplar of FFI workaround pattern
+- `../symphony/src/dot_scheme_env.bt` — exemplar of FFI workaround pattern
 - `../symphony/src/config.bt` — exemplar of FFI workaround pattern

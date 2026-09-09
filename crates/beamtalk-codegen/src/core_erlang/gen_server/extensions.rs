@@ -32,6 +32,7 @@
 //! a target known to be an `Actor` subclass gets the 3-arity state-threading
 //! shape.
 
+use super::super::method_frame::{MethodBoundary, MethodFrame};
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
@@ -214,201 +215,173 @@ impl CoreErlangGenerator {
             ext.class_name.name.as_str(),
         )));
 
-        let result = if target_is_actor {
-            self.generate_actor_extension_fun(ext)
+        let boundary = if target_is_actor {
+            MethodBoundary::Actor
         } else {
-            self.generate_value_extension_fun(ext)
+            MethodBoundary::ValueType
         };
+        let result = self.generate_extension_fun_body(ext, boundary);
 
         self.set_class_identity(prev_identity);
         result
     }
 
-    /// Generates a 2-arity value/primitive extension fun:
-    /// `fun (_ExtArgs, Self) -> let P0 = hd(_ExtArgs) in ... <body>`.
+    /// Generates the callable fun body for a foreign extension method — the
+    /// value/primitive-target 2-arity shape
+    /// `fun (_ExtArgs, Self) -> let P0 = hd(_ExtArgs) in ... <body>` for
+    /// [`MethodBoundary::ValueType`], or the actor-target 3-arity shape
+    /// `fun (_ExtArgs, Self, State) -> let P0 = hd(_ExtArgs) in ...
+    /// {Result, NewState}` for [`MethodBoundary::Actor`]. `boundary` is the
+    /// only thing [`generate_extension_fun`](Self::generate_extension_fun)
+    /// varies by target class kind — both shapes bind `self`/parameters
+    /// identically via [`MethodFrame`] and disagree only in how the body is
+    /// lowered and what shape it returns.
     ///
-    /// Mirrors `generate_value_type_method`: `Self` is the receiver (version 0,
-    /// so body field/`self` reads resolve to the `Self` parameter) and user
-    /// parameters are bound from positions in the `Args` list. The body returns
-    /// a plain value (no state threading) per the value-type calling convention.
-    fn generate_value_extension_fun(
+    /// The value-type shape mirrors `generate_value_type_method`: `Self` is
+    /// the receiver (version 0, so body field/`self` reads resolve to the
+    /// `Self` parameter) and the body returns a plain value (no state
+    /// threading). The actor shape mirrors the sealed-method actor body:
+    /// generated with a reply tuple (`{Result, State}`) so the actor
+    /// dispatch path can unwrap and thread state, matching
+    /// `apply ExtFun(Args, Self, State)` — converted to the extension
+    /// calling convention's `{Result, NewState}` 2-tuple before returning
+    /// (see `beamtalk_dispatch:invoke_extension/6` and the simulation-test
+    /// funs).
+    fn generate_extension_fun_body(
         &mut self,
         ext: &StandaloneMethodDefinition,
+        boundary: MethodBoundary,
     ) -> Result<Document<'static>> {
         let method = &ext.method;
         let prev_context = self.context;
-        self.context = CodeGenContext::ValueType;
-        self.reset_self_version();
-        self.push_scope();
-        self.current_method_params.clear();
-        // BT-2709: Reset arithmetic fast-path parameter-type tracking.
-        self.clear_method_param_types();
-        // BT-2728: Thread the TARGET class's declared state-field types (resolved
-        // via the class hierarchy — the target is foreign, so its AST state is
-        // unavailable here) so an object-typed `self.<field>` operator dispatches
-        // to the field type's operator, matching in-class methods. Primitive and
-        // untyped fields stay bare (no regression); an unknown target clears to
-        // the bare-BIF status quo.
+        self.context = match boundary {
+            MethodBoundary::Actor => CodeGenContext::Actor,
+            MethodBoundary::ValueType => CodeGenContext::ValueType,
+            MethodBoundary::ClassMethod => {
+                unreachable!("extension funs are never class methods")
+            }
+        };
+        // Thread the TARGET class's declared state-field types (resolved via
+        // the class hierarchy — the target is foreign, so its AST state is
+        // unavailable here) so an object-typed `self.<field>` operator
+        // dispatches to the field type's operator, matching in-class
+        // methods. Primitive and untyped fields stay bare (no regression);
+        // an unknown target clears to the bare-BIF status quo.
         self.set_extension_target_field_types(ext.class_name.name.as_str());
-        let prev_selector = self.current_method_selector.take();
-        self.current_method_selector = Some(method.selector.name().to_string());
 
-        let arg_prelude = self.bind_extension_params(method);
+        let (mut frame, param_vars) = MethodFrame::enter(
+            self,
+            method.selector.name().as_str(),
+            &method.parameters,
+            boundary,
+        );
+        let arg_prelude = Self::extension_params_prelude_doc(&param_vars);
 
-        let needs_nlr = self
+        let needs_nlr = frame
             .semantic_facts
             .has_block_nlr_or_walk(&method.span, &method.body);
         let nlr_token_var = if needs_nlr {
-            let token_var = self.fresh_temp_var("NlrToken");
-            self.set_current_nlr_token(Some(token_var.clone()));
+            let token_var = frame.fresh_temp_var("NlrToken");
+            frame.set_current_nlr_token(Some(token_var.clone()));
             Some(token_var)
         } else {
             None
         };
 
-        let body = super::super::util::collect_body_exprs(&method.body);
-        let has_nlr = nlr_token_var.is_some();
-        let body_result = if body.is_empty() {
-            Ok(self.generate_vt_empty_body(has_nlr))
-        } else {
-            self.generate_vt_body_exprs(&body, has_nlr)
-        };
-
-        self.pop_scope();
-        self.current_method_selector = prev_selector;
-        self.set_current_nlr_token(None);
-        self.context = prev_context;
-
-        let body_parts = body_result?;
-        let body_doc = Document::Vec(body_parts);
-
-        let fun_doc = if let Some(token_var) = nlr_token_var {
-            let catch_vars = self.wrap_value_type_body_with_nlr_catch(&token_var);
-            docvec![
-                "fun (_ExtArgs, Self) ->",
-                nest(INDENT, docvec![line(), arg_prelude]),
-                "\n",
-                catch_vars.format_try_prefix(),
-                body_doc,
-                catch_vars.format_catch_suffix(),
-            ]
-        } else {
-            docvec![
-                "fun (_ExtArgs, Self) ->",
-                nest(INDENT, docvec![line(), arg_prelude]),
-                "\n",
-                body_doc,
-            ]
-        };
-
-        Ok(self.maybe_annotate_extension_fun(fun_doc, method.span))
-    }
-
-    /// Generates a 3-arity actor extension fun:
-    /// `fun (_ExtArgs, Self, State) -> let P0 = hd(_ExtArgs) in ... {Result, NewState}`.
-    ///
-    /// Mirrors the sealed-method actor body shape: the body is generated with a
-    /// reply tuple (`{Result, State}`) so the actor dispatch path can unwrap and
-    /// thread state, matching `apply ExtFun(Args, Self, State)`.
-    fn generate_actor_extension_fun(
-        &mut self,
-        ext: &StandaloneMethodDefinition,
-    ) -> Result<Document<'static>> {
-        let method = &ext.method;
-        let prev_context = self.context;
-        self.context = CodeGenContext::Actor;
-        self.reset_state_version();
-        self.push_scope();
-        self.current_method_params.clear();
-        // BT-2709: Reset arithmetic fast-path parameter-type tracking.
-        self.clear_method_param_types();
-        // BT-2728: Thread the TARGET class's declared state-field types (resolved
-        // via the class hierarchy — the target is foreign, so its AST state is
-        // unavailable here) so an object-typed `self.<field>` operator dispatches
-        // to the field type's operator, matching in-class methods. Primitive and
-        // untyped fields stay bare (no regression); an unknown target clears to
-        // the bare-BIF status quo.
-        self.set_extension_target_field_types(ext.class_name.name.as_str());
-
-        let arg_prelude = self.bind_extension_params(method);
-
-        let needs_nlr = self
-            .semantic_facts
-            .has_block_nlr_or_walk(&method.span, &method.body);
-        let nlr_token_var = if needs_nlr {
-            let token_var = self.fresh_temp_var("NlrToken");
-            self.set_current_nlr_token(Some(token_var.clone()));
-            Some(token_var)
-        } else {
-            None
-        };
-
-        let lowered = self.lower_method_definition_body_with_reply(method);
-        self.set_current_nlr_token(None);
-
-        let stmts = match lowered {
-            Ok(stmts) => stmts,
-            Err(e) => {
-                self.pop_scope();
-                self.context = prev_context;
-                return Err(e);
+        // Each arm captures its own `Result` (rather than using `?` inside
+        // the match) so `frame`'s `Drop` and the `context` restore below run
+        // unconditionally before the error, if any, propagates — same as
+        // the two hand-rolled prologues this replaces.
+        let fun_doc_result: Result<Document<'static>> = match boundary {
+            MethodBoundary::ValueType => {
+                let body = super::super::util::collect_body_exprs(&method.body);
+                let has_nlr = nlr_token_var.is_some();
+                let body_result = if body.is_empty() {
+                    Ok(frame.generate_vt_empty_body(has_nlr))
+                } else {
+                    frame.generate_vt_body_exprs(&body, has_nlr)
+                };
+                frame.set_current_nlr_token(None);
+                body_result.map(|body_parts| {
+                    let body_doc = Document::Vec(body_parts);
+                    if let Some(token_var) = &nlr_token_var {
+                        let catch_vars = frame.wrap_value_type_body_with_nlr_catch(token_var);
+                        docvec![
+                            "fun (_ExtArgs, Self) ->",
+                            nest(INDENT, docvec![line(), arg_prelude]),
+                            "\n",
+                            catch_vars.format_try_prefix(),
+                            body_doc,
+                            catch_vars.format_catch_suffix(),
+                        ]
+                    } else {
+                        docvec![
+                            "fun (_ExtArgs, Self) ->",
+                            nest(INDENT, docvec![line(), arg_prelude]),
+                            "\n",
+                            body_doc,
+                        ]
+                    }
+                })
+            }
+            MethodBoundary::Actor => {
+                let lowered = frame.lower_method_definition_body_with_reply(method);
+                frame.set_current_nlr_token(None);
+                lowered.map(|stmts| {
+                    // (ADR 0111 Addendum 4/6): prepend a real `NlrCatch`
+                    // stmt and verify+render once, instead of rendering the
+                    // body then wrapping the `Document`. Extension funs are
+                    // standalone functions (not inside case arms), so no
+                    // letrec is needed.
+                    let span = method
+                        .body
+                        .first()
+                        .map_or_else(|| method.span, |s| s.expression.span());
+                    let body_doc = frame.prepend_nlr_catch_and_render(
+                        stmts,
+                        nlr_token_var.as_deref(),
+                        span,
+                        false,
+                    );
+                    // The actor method body generator emits a gen_server
+                    // `{reply, Result, NewState}` 3-tuple. The extension
+                    // calling convention expects the `{Result, NewState}`
+                    // 2-tuple, so convert the 3-tuple to the 2-tuple.
+                    let converted_body = docvec![
+                        "let _ExtReply = ",
+                        body_doc,
+                        line(),
+                        "in {call 'erlang':'element'(2, _ExtReply), call 'erlang':'element'(3, _ExtReply)}",
+                    ];
+                    docvec![
+                        "fun (_ExtArgs, Self, State) ->",
+                        nest(INDENT, docvec![line(), arg_prelude]),
+                        "\n",
+                        nest(INDENT, docvec![line(), converted_body]),
+                    ]
+                })
+            }
+            MethodBoundary::ClassMethod => {
+                unreachable!("extension funs are never class methods")
             }
         };
 
-        // BT-3171 (ADR 0111 Addendum 4/6): prepend a real `NlrCatch` stmt and
-        // verify+render once, instead of rendering the body then wrapping the
-        // `Document`. Extension funs are standalone functions (not inside
-        // case arms), so no letrec is needed.
-        let span = method
-            .body
-            .first()
-            .map_or_else(|| method.span, |s| s.expression.span());
-        let body_doc =
-            self.prepend_nlr_catch_and_render(stmts, nlr_token_var.as_deref(), span, false);
-
-        self.pop_scope();
+        // `frame` drops here (pops the scope, restores the selector) on
+        // both the success and error paths alike.
+        drop(frame);
         self.context = prev_context;
 
-        // The actor method body generator emits a gen_server `{reply, Result,
-        // NewState}` 3-tuple. The extension calling convention expects the
-        // `{Result, NewState}` 2-tuple (`fun(Args, Self, State) -> {Result,
-        // NewState}` — see beamtalk_dispatch:invoke_extension/6 and the
-        // simulation-test funs), so convert the 3-tuple to the 2-tuple.
-        let converted_body = docvec![
-            "let _ExtReply = ",
-            body_doc,
-            line(),
-            "in {call 'erlang':'element'(2, _ExtReply), call 'erlang':'element'(3, _ExtReply)}",
-        ];
-
-        let fun_doc = docvec![
-            "fun (_ExtArgs, Self, State) ->",
-            nest(INDENT, docvec![line(), arg_prelude]),
-            "\n",
-            nest(INDENT, docvec![line(), converted_body]),
-        ];
-
+        let fun_doc = fun_doc_result?;
         Ok(self.maybe_annotate_extension_fun(fun_doc, method.span))
     }
 
-    /// Binds each user parameter of `method` from the `_ExtArgs` list, returning
-    /// the `let P0 = hd(_ExtArgs) in let P1 = hd(tl(_ExtArgs)) in ...` prelude.
-    ///
-    /// Each parameter is bound via `fresh_var` so body references resolve to the
-    /// generated Core Erlang variable, and recorded in `current_method_params`
-    /// for `@primitive` codegen consistency with the regular method paths.
-    /// Returns [`Document::Nil`] for unary methods (no parameters).
-    fn bind_extension_params(
-        &mut self,
-        method: &beamtalk_core::ast::MethodDefinition,
-    ) -> Document<'static> {
-        let mut parts: Vec<Document<'static>> = Vec::with_capacity(method.parameters.len());
-        for (i, param) in method.parameters.iter().enumerate() {
-            let var_name = self.fresh_var(&param.name.name);
-            self.current_method_params.push(var_name.clone());
-            // BT-2709: Record declared type for the arithmetic fast path.
-            self.record_method_param_type(&param.name.name, param.type_annotation.as_ref());
-
+    /// Builds the `let P0 = hd(_ExtArgs) in let P1 = hd(tl(_ExtArgs)) in ...`
+    /// prelude that binds each already-[`MethodFrame`]-bound parameter
+    /// variable in `param_vars` (declaration order) from the `_ExtArgs`
+    /// list. Returns [`Document::Nil`] for unary methods (no parameters).
+    fn extension_params_prelude_doc(param_vars: &[String]) -> Document<'static> {
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(param_vars.len());
+        for (i, var_name) in param_vars.iter().enumerate() {
             // Access the i-th element of _ExtArgs: hd(tl(tl(...(_ExtArgs))))
             let mut access: Document<'static> = Document::Str("_ExtArgs");
             for _ in 0..i {
@@ -416,12 +389,12 @@ impl CoreErlangGenerator {
             }
             parts.push(docvec![
                 "let <",
-                leaf::var(var_name),
+                leaf::var(var_name.clone()),
                 "> = call 'erlang':'hd'(",
                 access,
                 ") in",
             ]);
-            if i + 1 < method.parameters.len() {
+            if i + 1 < param_vars.len() {
                 parts.push(line());
             }
         }

@@ -517,7 +517,7 @@ Nav new
 
 #[test]
 fn new_on_actor_subclass_no_longer_dnu() {
-    // BT-3071: Actor.bt now declares real `class sealed new` / `new:`
+    // BT-3071: actor.bt now declares real `class sealed new` / `new:`
     // methods (lifted from the codegen-injected error stubs), so `new`
     // resolves like any other inherited class method — no DNU from the
     // TypeChecker here, and this is correct: the send is not "unknown", it
@@ -616,8 +616,9 @@ fn metatype_renders_as_source_spelling_in_diagnostics() {
 
 // ---------------------------------------------------------------------------
 // Regression: code-review findings on the metaclass-aware inference PR
-// (BT-2255 / ADR 0083). See inference.rs `is_equality_comparison_op`,
-// `class_object_tower_return`, `InferredType::meta`, and the union-send path.
+// (BT-2255 / ADR 0083). See `source_analysis::is_equality_operator`
+// (BT-3462), inference.rs `class_object_tower_return`, `InferredType::meta`,
+// and the union-send path.
 // ---------------------------------------------------------------------------
 
 /// Like `infer_send_on_local` but also returns the does-not-understand

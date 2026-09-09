@@ -34,6 +34,92 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 
+// ─── BodyKind ─────────────────────────────────────────────────────────────────
+
+/// Controls how `generate_threaded_loop_body` handles the final expression.
+///
+/// ADR 0111 Addendum 15: `Letrec` (the only non-`Foldl*` variant) was
+/// deleted — `while_loops.rs`/`counted_loops.rs` now lower onto
+/// `ThreadedStmt::ConditionalLoop` via `generate_letrec_body_ir` instead of
+/// this enum's own dispatch — leaving every remaining variant a `Foldl*`
+/// shape by construction, not a naming accident.
+#[allow(clippy::enum_variant_names)]
+pub(in crate::core_erlang) enum BodyKind {
+    /// Foldl `do:` body: final accumulator is `StateAcc{N}`.
+    FoldlDo,
+
+    /// Foldl `collect:` body: final accumulator is `{[Result | AccList], StateAcc{N}}`.
+    FoldlCollect,
+
+    /// Foldl `select:`/`reject:` body: last expression becomes a predicate;
+    /// a `case` expression conditionally includes the item.
+    FoldlFilter {
+        /// The item variable used to include in the result list.
+        item_var: String,
+        /// When `true`, negates the predicate (for `reject:`).
+        negate: bool,
+    },
+
+    /// Foldl `inject:into:` body: final accumulator is `{NewAcc, StateAcc{N}}`.
+    FoldlInject,
+
+    /// Foldl `anySatisfy:`/`allSatisfy:` body: last expression becomes a predicate;
+    /// a `case` expression updates a boolean accumulator.
+    /// Accumulator is `{BoolAcc, StateAcc{N}}`.
+    FoldlBoolPredicate {
+        /// When `true`, semantics = `allSatisfy:` (start `true`, set `false` on failure).
+        /// When `false`, semantics = `anySatisfy:` (start `false`, set `true` on match).
+        is_all: bool,
+    },
+
+    /// BT-1486: Foldl `detect:` / `detect:ifNone:` body: last expression becomes a predicate;
+    /// a `case` expression updates the found-item accumulator on first match.
+    /// Accumulator is `{FoundItem, FoundFlag, StateAcc{N}}`.
+    FoldlDetect {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1486: Foldl `count:` body: last expression becomes a predicate;
+    /// a `case` expression increments the count accumulator on match.
+    /// Accumulator is `{Count, StateAcc{N}}`.
+    FoldlCount,
+
+    /// BT-1487: Foldl `takeWhile:` body: last expression becomes a predicate;
+    /// a `case` expression includes the item only while the predicate holds.
+    /// Once the predicate returns false, all subsequent elements are excluded.
+    /// Accumulator is `{ResultList, StillTaking, StateVars...}`.
+    FoldlTakeWhile {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1487: Foldl `dropWhile:` body: last expression becomes a predicate;
+    /// a `case` expression drops elements while the predicate holds.
+    /// Once the predicate returns false, all subsequent elements are included.
+    /// Accumulator is `{ResultList, StillDropping, StateVars...}`.
+    FoldlDropWhile {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1487: Foldl `partition:` body: last expression becomes a predicate;
+    /// a `case` expression routes the item to one of two lists.
+    /// Accumulator is `{MatchList, NoMatchList, StateVars...}`.
+    FoldlPartition {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1487: Foldl `groupBy:` body: last expression is the key function result;
+    /// each element is grouped by its key into a map.
+    /// Accumulator is `{Map, StateVars...}`.
+    FoldlGroupBy {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+}
+
 /// Emits the Core Erlang preamble that binds a receiver to a guaranteed-list
 /// variable (BT-524 `is_list` guard):
 ///

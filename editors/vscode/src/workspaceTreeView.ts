@@ -2,18 +2,46 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { extractMethodDocComment, extractStateVarInfo } from "./textUtils";
+import { GenerationTracker } from "./generationTracker";
+import {
+  type DeclarationRef,
+  findSymbolPosition,
+  resolveDeclarationOffsetSync,
+} from "./symbolLookup";
+import {
+  extractMethodDocComment,
+  extractStateVarDocComment,
+  extractStateVarInfo,
+} from "./textUtils";
 import type {
   ActorInfo,
   BindingsMap,
   ClassInfo,
+  ClassOrigin,
   ConnectionState,
+  InheritedMethodInfo,
   MethodInfo,
-  StateVarInfo,
   PushEvent,
+  StateVarInfo,
   TypeAliasInfo,
   WorkspaceClient,
 } from "./workspaceClient";
+
+/** Every class origin the Workspace Explorer can filter by (BT-2552 badges). */
+export const ALL_CLASS_ORIGINS: readonly ClassOrigin[] = ["project", "dependency", "stdlib"];
+
+/**
+ * True for a `source_status` that the backend documents as having no
+ * openable source at all — `synthetic` (a compiler-generated accessor) or
+ * `unindexed_runtime_fun` (a native/runtime-only method, e.g. one injected
+ * for every `Actor subclass:` to support supervision — see
+ * beamtalk_repl_ops_browse.erl's own "no openable source" doc comment).
+ * Neither can be hovered or navigated to via source-text search: there is
+ * no declaration anywhere to find.
+ */
+function hasNoOpenableSource(status: MethodInfo["source_status"]): boolean {
+  return status === "synthetic" || status === "unindexed_runtime_fun";
+}
 
 // ─── Node Types ───────────────────────────────────────────────────────────────
 
@@ -79,6 +107,28 @@ export interface MethodItemNode {
   readonly kind: "method-item";
   readonly method: MethodInfo;
   readonly classInfo: ClassInfo;
+  /**
+   * BT-3478: set only for an entry under an `InheritedMethodGroupNode` — the
+   * ancestor class that actually declares the method (shown in the item's
+   * description/tooltip). `classInfo` above is that same defining class's
+   * info (so "Go to Definition" opens its real source, not the receiving
+   * subclass's), not the class the "Inherited" group is nested under.
+   */
+  readonly definingClass?: string;
+}
+
+/**
+ * One of the two collapsed-by-default "Inherited" groups (BT-3478), sibling
+ * to the existing `MethodGroupNode`s — same tree depth, not a per-superclass
+ * sub-tree. Unlike `MethodGroupNode`, this carries no embedded methods: its
+ * children are fetched lazily, only when the group itself is expanded, via
+ * the `inherited-methods` op (kept off the eager per-class-item `methods`
+ * fetch on purpose).
+ */
+export interface InheritedMethodGroupNode {
+  readonly kind: "inherited-method-group";
+  readonly side: "instance" | "class";
+  readonly classInfo: ClassInfo;
 }
 
 export interface StateGroupNode {
@@ -115,6 +165,7 @@ export type WorkspaceNode =
   | StateVarItemNode
   | MethodGroupNode
   | MethodItemNode
+  | InheritedMethodGroupNode
   | InspectFieldNode;
 
 // ─── Singleton section nodes (stable references for onDidChangeTreeData) ─────
@@ -154,6 +205,13 @@ export class WorkspaceTreeDataProvider
   private bindings: BindingsMap = {};
   private actors: ActorInfo[] = [];
   private classes: ClassInfo[] = [];
+  /**
+   * Origins the "Classes" section shows. Defaults to all three (no
+   * filtering) — see `setClassOriginFilter`. A class with no `source_origin`
+   * (an older server that predates the field) is always shown regardless of
+   * this filter, so it never silently disappears.
+   */
+  private classOriginFilter: ReadonlySet<ClassOrigin> = new Set(ALL_CLASS_ORIGINS);
   /** ADR 0108 Phase 8 (BT-2903): every loaded package's declared `type` aliases. */
   private typeAliases: TypeAliasInfo[] = [];
   private disposed = false;
@@ -162,12 +220,30 @@ export class WorkspaceTreeDataProvider
 
   /** Cached inspect results keyed by "actor:<pid>". */
   private readonly inspectCache = new Map<string, Record<string, unknown>>();
+  /**
+   * Guards `inspectCache` against a stale-write race: a `getChildren`
+   * `inspect()` fetch in flight when a "spawned"/"stopped" push invalidates
+   * the same pid must not overwrite that invalidation once it resolves.
+   */
+  private readonly inspectGen = new GenerationTracker();
 
   /** Cached methods+stateVars results keyed by class name. */
   private readonly methodsCache = new Map<
     string,
     { methods: MethodInfo[]; stateVars: StateVarInfo[] }
   >();
+  /** Guards `methodsCache` against the same stale-write race, keyed by class name. */
+  private readonly methodsGen = new GenerationTracker();
+
+  /**
+   * Cached inherited-methods results keyed by class name (BT-3478). Holds
+   * both instance- and class-side entries together — the two
+   * `InheritedMethodGroupNode`s for the same class share one fetch, split by
+   * `side` when building each group's children.
+   */
+  private readonly inheritedMethodsCache = new Map<string, InheritedMethodInfo[]>();
+  /** Guards `inheritedMethodsCache` against the same stale-write race as `methodsGen`. */
+  private readonly inheritedMethodsGen = new GenerationTracker();
 
   private readonly disposeHandlers: Array<() => void> = [];
 
@@ -218,7 +294,14 @@ export class WorkspaceTreeDataProvider
 
     if (!client) {
       this.sessionId = null;
-      this._resetState("disconnected");
+      // Skip a redundant full-tree fire if we're already disconnected — e.g.
+      // `connectWorkspace`/`disconnectWorkspace` call `workspaceWsClient.dispose()`
+      // (which synchronously drives this same client's still-registered
+      // `onConnectionChange("disconnected")` below, already firing a reset)
+      // immediately followed by `setClient(null)` on the very next line.
+      if (this.connectionState !== "disconnected") {
+        this._resetState("disconnected");
+      }
       return;
     }
 
@@ -230,8 +313,10 @@ export class WorkspaceTreeDataProvider
       } else if (state === "disconnected") {
         this._resetState("disconnected");
       } else {
-        // reconnecting — keep stale data visible but fire to update description
-        this._onDidChangeTreeData.fire(undefined);
+        // reconnecting — keep stale data visible, but only the root item's
+        // description ("Reconnecting…") actually changed, so refresh just
+        // that node rather than forcing every expanded node to re-fetch.
+        this._onDidChangeTreeData.fire(CONNECTED_ROOT);
       }
     });
     this.disposeHandlers.push(disposeConn);
@@ -284,6 +369,22 @@ export class WorkspaceTreeDataProvider
     }
   }
 
+  /** The origins currently shown in the "Classes" section. */
+  get classFilter(): ReadonlySet<ClassOrigin> {
+    return this.classOriginFilter;
+  }
+
+  /**
+   * Restrict the "Classes" section to the given origins (stdlib/project/dependency).
+   * An empty set is treated as "no filter" (show everything) rather than an
+   * empty tree — a filter picker with nothing checked is more useful reset to
+   * its default than left showing zero classes.
+   */
+  setClassOriginFilter(origins: ReadonlySet<ClassOrigin>): void {
+    this.classOriginFilter = origins.size > 0 ? new Set(origins) : new Set(ALL_CLASS_ORIGINS);
+    this._onDidChangeTreeData.fire(CLASSES_SECTION);
+  }
+
   /** Refresh all sections by re-fetching actors, classes, and bindings. */
   async refresh(): Promise<void> {
     if (!this.client || this.connectionState !== "connected") {
@@ -291,6 +392,13 @@ export class WorkspaceTreeDataProvider
     }
     this.inspectCache.clear();
     this.methodsCache.clear();
+    this.inheritedMethodsCache.clear();
+    // Discard any per-item fetch (actor inspect / class methods) still in
+    // flight from before this wholesale clear — without this, one resolving
+    // afterward would repopulate the cache with a pre-refresh result.
+    this.inspectGen.bumpAll();
+    this.methodsGen.bumpAll();
+    this.inheritedMethodsGen.bumpAll();
     await this._fetchInitialData(this.client);
   }
 
@@ -337,6 +445,8 @@ export class WorkspaceTreeDataProvider
         return this._methodGroupItem(element);
       case "method-item":
         return this._methodItem(element);
+      case "inherited-method-group":
+        return this._inheritedMethodGroupItem(element);
       case "inspect-field":
         return this._inspectFieldItem(element);
     }
@@ -370,7 +480,7 @@ export class WorkspaceTreeDataProvider
         return this.actors.map((info) => ({ kind: "actor-item" as const, info }));
 
       case "classes-section":
-        return this.classes.map((info) => ({ kind: "class-item" as const, info }));
+        return this._filteredClasses().map((info) => ({ kind: "class-item" as const, info }));
 
       case "type-aliases-section":
         return this.typeAliases.map((info) => ({ kind: "type-alias-item" as const, info }));
@@ -385,10 +495,16 @@ export class WorkspaceTreeDataProvider
         if (!activeClient || this.connectionState !== "connected") {
           return [];
         }
+        // Captured before the request so a "spawned"/"stopped" push that
+        // invalidates this same pid while inspect() is in flight is detected
+        // once it resolves, instead of overwriting the invalidation.
+        const token = this.inspectGen.token(cacheKey);
         try {
           const state = await activeClient.inspect(element.info.pid);
-          // Guard: client may have changed while inspect was in-flight
+          // Guard: client may have changed, or this pid's cache entry may
+          // have been invalidated, while inspect() was in-flight.
           if (this.client !== activeClient) return [];
+          if (!this.inspectGen.isCurrent(cacheKey, token)) return [];
           this.inspectCache.set(cacheKey, state);
           return this._inspectFields(state, cacheKey);
         } catch {
@@ -405,10 +521,17 @@ export class WorkspaceTreeDataProvider
         if (!activeClient || this.connectionState !== "connected") {
           return [];
         }
+        // Captured before the request so a "classes/loaded" or
+        // "classes/removed" push that invalidates this same class while
+        // methods() is in flight is detected once it resolves, instead of
+        // overwriting the invalidation with a stale pre-reload result.
+        const token = this.methodsGen.token(element.info.name);
         try {
           const result = await activeClient.methods(element.info.name);
-          // Guard: client may have changed while methods() was in-flight
+          // Guard: client may have changed, or this class's cache entry may
+          // have been invalidated, while methods() was in-flight.
           if (this.client !== activeClient) return [];
+          if (!this.methodsGen.isCurrent(element.info.name, token)) return [];
           this.methodsCache.set(element.info.name, result);
           return this._classChildren(result, element.info);
         } catch {
@@ -421,6 +544,31 @@ export class WorkspaceTreeDataProvider
 
       case "method-group":
         return element.methods;
+
+      case "inherited-method-group": {
+        const className = element.classInfo.name;
+        const cached = this.inheritedMethodsCache.get(className);
+        if (cached) {
+          return this._inheritedMethodItems(cached, element.side);
+        }
+        const activeClient = this.client;
+        if (!activeClient || this.connectionState !== "connected") {
+          return [];
+        }
+        // Same in-flight-invalidation guard as the local "class-item" fetch
+        // above, keyed by class name (shared by both sides' groups, since
+        // one fetch covers both).
+        const token = this.inheritedMethodsGen.token(className);
+        try {
+          const result = await activeClient.inheritedMethods(className);
+          if (this.client !== activeClient) return [];
+          if (!this.inheritedMethodsGen.isCurrent(className, token)) return [];
+          this.inheritedMethodsCache.set(className, result);
+          return this._inheritedMethodItems(result, element.side);
+        } catch {
+          return [];
+        }
+      }
 
       default:
         return [];
@@ -441,14 +589,34 @@ export class WorkspaceTreeDataProvider
       return item;
     }
     if (element.kind === "method-item") {
-      item.tooltip =
+      // BT-3444: a `synthetic` method (a compiler-generated accessor) or an
+      // `unindexed_runtime_fun` one (a native/runtime-only method the
+      // backend explicitly documents as having "no openable source" —
+      // beamtalk_repl_ops_browse.erl) has no declaration anywhere in
+      // source, so the LSP-hover / doc-comment lookups below would only
+      // ever fail (there is nothing at any position to hover over or read
+      // a `///` comment from) — go straight to the wire-supplied
+      // signature/doc (BT-2735's synthetic-only resolution — always empty
+      // for `unindexed_runtime_fun`, hence the fallback wording below)
+      // instead of paying for two guaranteed-empty lookups.
+      if (hasNoOpenableSource(element.method.source_status)) {
+        item.tooltip = this._appendDefiningClass(
+          this._noSourceMethodTooltip(element.method),
+          element.definingClass
+        );
+        return item;
+      }
+      item.tooltip = this._appendDefiningClass(
         (await this._lspHoverTooltip(
           element.classInfo.source_file,
           element.method.selector,
-          element.method.side === "class" ? "class-method" : "method"
+          element.method.side === "class" ? "class-method" : "method",
+          { side: element.method.side, declaredLine: element.method.line }
         )) ??
-        (await this._methodDocCommentTooltip(element)) ??
-        this._methodTooltipFallback(element.method);
+          (await this._methodDocCommentTooltip(element)) ??
+          this._methodTooltipFallback(element.method),
+        element.definingClass
+      );
       return item;
     }
     if (element.kind === "state-item") {
@@ -461,74 +629,88 @@ export class WorkspaceTreeDataProvider
   private async _lspHoverTooltip(
     sourceFile: string | undefined,
     symbol: string,
-    kind: "class" | "method" | "class-method" | "field"
+    kind: "class" | "method" | "class-method",
+    decl?: { side?: "instance" | "class"; declaredLine?: number }
   ): Promise<vscode.MarkdownString | undefined> {
     if (!sourceFile || sourceFile === "unknown") return undefined;
     try {
       const uri = vscode.Uri.file(sourceFile);
-      await vscode.workspace.openTextDocument(uri);
+      const doc = await vscode.workspace.openTextDocument(uri);
 
-      // Use the LSP document symbol provider to find the exact position — no regex.
+      // Fast path: locate the declaration the same way `navigateToMethod` /
+      // `navigateToStateVar` already do (BT-3439's real-line-first, then
+      // regex, then plain text-search chain) and hover at that single
+      // position directly. This skips `executeDocumentSymbolProvider`
+      // entirely — a full-file symbol computation that every sidebar hover
+      // otherwise paid for on top of the hover request itself. Since
+      // `resolveTreeItem` is only ever invoked once per tree item, an
+      // attempt slow enough to outlast the mouse's dwell time effectively
+      // never shows a tooltip at all rather than just showing one late.
+      const fastOffset = this._declarationOffset(doc.getText(), kind, symbol, decl);
+      if (fastOffset !== -1) {
+        const fast = await this._hoverAt(uri, doc.positionAt(fastOffset));
+        if (fast) return fast;
+      }
+
+      // Fallback: the LSP document symbol provider finds the exact position
+      // (used when there's no declared line yet, or the fast text search
+      // missed — e.g. a class compiled before BT-3439's real-line field).
       const docSymbols = await vscode.commands.executeCommand<
         vscode.DocumentSymbol[] | vscode.SymbolInformation[]
       >("vscode.executeDocumentSymbolProvider", uri);
-
-      const pos = this._findSymbolPosition(docSymbols ?? [], symbol, kind);
+      const pos = findSymbolPosition(docSymbols ?? [], symbol, kind);
       if (!pos) return undefined;
-
-      const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
-        "vscode.executeHoverProvider",
-        uri,
-        pos
-      );
-      if (!hovers || hovers.length === 0) return undefined;
-      const md = new vscode.MarkdownString();
-      for (const hover of hovers) {
-        const contents = Array.isArray(hover.contents) ? hover.contents : [hover.contents];
-        for (const c of contents) {
-          if (typeof c === "string") md.appendMarkdown(c);
-          else if (c && "value" in c && c.value) md.appendMarkdown(c.value);
-        }
-      }
-      return md.value ? md : undefined;
+      return await this._hoverAt(uri, pos);
     } catch {
       return undefined;
     }
   }
 
-  /** Find the position of a class, method, or field symbol from document symbols. */
-  private _findSymbolPosition(
-    symbols: vscode.DocumentSymbol[] | vscode.SymbolInformation[],
-    name: string,
-    kind: "class" | "method" | "class-method" | "field"
-  ): vscode.Position | undefined {
-    const targetKind =
+  /**
+   * Resolve a class/method declaration to a text offset via source search —
+   * no LSP round trip (see `resolveDeclarationOffsetSync`). State-var hover
+   * ("field") never reaches here: the `state-item` case in `resolveTreeItem`
+   * goes through `_stateVarTooltip` instead, which reads source text
+   * directly, so this only ever needs to handle the two kinds
+   * `_lspHoverTooltip` is actually called with.
+   */
+  private _declarationOffset(
+    text: string,
+    kind: "class" | "method" | "class-method",
+    symbol: string,
+    decl?: { side?: "instance" | "class"; declaredLine?: number }
+  ): number {
+    const ref: DeclarationRef =
       kind === "class"
-        ? [vscode.SymbolKind.Class]
-        : kind === "field"
-          ? [vscode.SymbolKind.Field]
-          : [vscode.SymbolKind.Method, vscode.SymbolKind.Function];
+        ? { kind: "class", name: symbol }
+        : {
+            kind: "method",
+            side: decl?.side ?? (kind === "class-method" ? "class" : "instance"),
+            selector: symbol,
+          };
+    return resolveDeclarationOffsetSync(text, ref, decl?.declaredLine);
+  }
 
-    for (const sym of symbols) {
-      // Class symbols are named "ClassName (class)" per ADR 0013 — strip the suffix for matching.
-      const symBaseName =
-        sym.kind === vscode.SymbolKind.Class ? sym.name.replace(/ \(class\)$/, "") : sym.name;
-      if (targetKind.includes(sym.kind) && symBaseName === name) {
-        if ("range" in sym) {
-          // DocumentSymbol
-          return sym.selectionRange.start;
-        } else {
-          // SymbolInformation
-          return sym.location.range.start;
-        }
-      }
-      // Recurse into children (DocumentSymbol only)
-      if ("children" in sym && sym.children.length > 0) {
-        const found = this._findSymbolPosition(sym.children, name, kind);
-        if (found) return found;
+  /** Run the hover provider at a position and flatten the result into one MarkdownString. */
+  private async _hoverAt(
+    uri: vscode.Uri,
+    pos: vscode.Position
+  ): Promise<vscode.MarkdownString | undefined> {
+    const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+      "vscode.executeHoverProvider",
+      uri,
+      pos
+    );
+    if (!hovers || hovers.length === 0) return undefined;
+    const md = new vscode.MarkdownString();
+    for (const hover of hovers) {
+      const contents = Array.isArray(hover.contents) ? hover.contents : [hover.contents];
+      for (const c of contents) {
+        if (typeof c === "string") md.appendMarkdown(c);
+        else if (c && "value" in c && c.value) md.appendMarkdown(c.value);
       }
     }
-    return undefined;
+    return md.value ? md : undefined;
   }
 
   private _classTooltipFallback(info: ClassInfo): vscode.MarkdownString {
@@ -541,10 +723,46 @@ export class WorkspaceTreeDataProvider
     return md;
   }
 
+  /**
+   * BT-3478: append the defining-class attribution line to an inherited
+   * method's tooltip. A no-op (returns `tooltip` unchanged) for a local
+   * method, where `definingClass` is `undefined`.
+   */
+  private _appendDefiningClass(
+    tooltip: vscode.MarkdownString,
+    definingClass: string | undefined
+  ): vscode.MarkdownString {
+    if (!definingClass) return tooltip;
+    tooltip.appendMarkdown(`\n\n_Inherited from ${definingClass}_`);
+    return tooltip;
+  }
+
   private _methodTooltipFallback(method: MethodInfo): vscode.MarkdownString {
     return new vscode.MarkdownString(
       `**${method.selector}**\n\n_${method.side === "instance" ? "instance-side" : "class-side"}_`
     );
+  }
+
+  /**
+   * BT-3444: tooltip for a method with no openable source — `synthetic` (a
+   * compiler-generated accessor) or `unindexed_runtime_fun` (a
+   * native/runtime-only method). Built entirely from the `methods` ws op's
+   * wire-supplied `signature`/`doc` (resolved server-side for `synthetic`
+   * rows only, BT-2735 — always absent for `unindexed_runtime_fun`) — never
+   * a file read or LSP round trip, since there is no declaration in source
+   * to read one from.
+   */
+  private _noSourceMethodTooltip(method: MethodInfo): vscode.MarkdownString {
+    const md = new vscode.MarkdownString(`**${method.signature ?? method.selector}**`);
+    const reason =
+      method.source_status === "synthetic" ? "compiler-generated" : "no source available";
+    md.appendMarkdown(
+      `\n\n_${method.side === "instance" ? "instance-side" : "class-side"} · ${reason}_`
+    );
+    if (method.doc) {
+      md.appendMarkdown(`\n\n${method.doc}`);
+    }
+    return md;
   }
 
   /**
@@ -582,13 +800,17 @@ export class WorkspaceTreeDataProvider
     try {
       const uri = vscode.Uri.file(classInfo.source_file);
       const doc = await vscode.workspace.openTextDocument(uri);
-      const info = extractStateVarInfo(doc.getText(), stateVar.name);
-      if (!info) return fallback;
+      const text = doc.getText();
+      const info = extractStateVarInfo(text, stateVar.name);
+      const docComment = extractStateVarDocComment(text, stateVar.name);
+      if (!info && !docComment) return fallback;
       const md = new vscode.MarkdownString(`**${stateVar.name}**`);
-      if (info.defaultValue !== undefined) {
+      if (info?.defaultValue !== undefined) {
         md.appendMarkdown(`\n\nDefault: \`${info.defaultValue}\``);
       }
-      if (info.comment) {
+      if (docComment) {
+        md.appendMarkdown(`\n\n${docComment}`);
+      } else if (info?.comment) {
         md.appendMarkdown(`\n\n${info.comment}`);
       }
       return md;
@@ -648,13 +870,34 @@ export class WorkspaceTreeDataProvider
   }
 
   private _classesSectionItem(): vscode.TreeItem {
-    const count = this.classes.length;
+    const total = this.classes.length;
+    const shown = this._filteredClasses().length;
+    const isFiltered = shown !== total;
     // Collapsed by default per ADR 0046 (avoid information overload for newcomers)
     const item = new vscode.TreeItem("Classes", vscode.TreeItemCollapsibleState.Collapsed);
-    item.description = count > 0 ? `(${count} loaded)` : "(none)";
-    item.iconPath = new vscode.ThemeIcon("symbol-class");
-    item.contextValue = "classes-section";
+    if (total === 0) {
+      item.description = "(none)";
+    } else if (isFiltered) {
+      item.description = `(${shown} of ${total})`;
+    } else {
+      item.description = `(${total} loaded)`;
+    }
+    item.iconPath = new vscode.ThemeIcon(isFiltered ? "filter" : "symbol-class");
+    // A distinct contextValue when a filter is active lets view/item/context
+    // menus (package.json) offer a "Clear Filter" action only when there is
+    // one to clear.
+    item.contextValue = isFiltered ? "classes-section-filtered" : "classes-section";
     return item;
+  }
+
+  /** The classes currently visible under "Classes", after `classOriginFilter`. */
+  private _filteredClasses(): ClassInfo[] {
+    if (this.classOriginFilter.size >= ALL_CLASS_ORIGINS.length) {
+      return this.classes;
+    }
+    return this.classes.filter(
+      (c) => c.source_origin === undefined || this.classOriginFilter.has(c.source_origin)
+    );
   }
 
   // ADR 0108 Phase 8 (BT-2903): "Type Aliases (N)" — a sibling section to
@@ -720,7 +963,15 @@ export class WorkspaceTreeDataProvider
   private _typeAliasItem(node: TypeAliasItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.info.name, vscode.TreeItemCollapsibleState.None);
     item.iconPath = new vscode.ThemeIcon("symbol-interface");
-    item.contextValue = "type-alias-item";
+    const hasSource = !!node.info.source_file && node.info.source_file !== "unknown";
+    item.contextValue = hasSource ? "type-alias-item" : "type-alias-item-no-source";
+    if (hasSource) {
+      item.command = {
+        command: "beamtalk.navigateToTypeAlias",
+        title: "Go to Definition",
+        arguments: [node],
+      };
+    }
     if (node.info.expansion) {
       item.description = `= ${node.info.expansion}`;
     }
@@ -753,11 +1004,58 @@ export class WorkspaceTreeDataProvider
     return item;
   }
 
+  /**
+   * BT-3478: collapsed-by-default sibling to `_methodGroupItem` — the count
+   * isn't known until expanded (lazy fetch), unlike the local groups, so
+   * this never auto-expands even when non-empty.
+   */
+  private _inheritedMethodGroupItem(node: InheritedMethodGroupNode): vscode.TreeItem {
+    const label =
+      node.side === "instance" ? "Inherited Instance Methods" : "Inherited Class Methods";
+    const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
+    item.iconPath = new vscode.ThemeIcon(
+      node.side === "instance" ? "symbol-method" : "symbol-namespace"
+    );
+    item.contextValue = "inherited-method-group";
+    return item;
+  }
+
   private _methodItem(node: MethodItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.method.selector, vscode.TreeItemCollapsibleState.None);
+    // BT-3444: a `synthetic` method (e.g. a `Value subclass:`'s
+    // compiler-generated field accessor) or an `unindexed_runtime_fun` one
+    // (a native/runtime-only method — e.g. HTTPClient class>>supervisionSpec,
+    // injected for every Actor subclass to support supervision, with no
+    // corresponding text anywhere in HTTPClient.bt) has no user-written
+    // declaration anywhere in the class's source file, unlike every other
+    // row here — badge it visibly distinct (gear icon + muted description)
+    // and never wire up "Go to Definition", which would otherwise fail to
+    // find the selector in source and surface a "not found" message
+    // (BT-3439's navigateToMethod) — previously only `synthetic` got this
+    // treatment, so an `unindexed_runtime_fun` row looked like a normal,
+    // clickable method that silently did nothing useful. Mirrors the
+    // LiveView IDE method list's `derived` badge for the same fact (BT-2714).
+    // BT-3478: for an inherited entry, attribute the defining class as a
+    // label (never a tree level — the "Inherited" groups stay flat).
+    const definingSuffix = node.definingClass ? ` · ${node.definingClass}` : "";
+    if (node.method.source_status === "synthetic") {
+      item.iconPath = new vscode.ThemeIcon("gear");
+      item.description = `compiler-generated${definingSuffix}`;
+      item.contextValue = "method-item-synthetic";
+      return item;
+    }
+    if (node.method.source_status === "unindexed_runtime_fun") {
+      item.iconPath = new vscode.ThemeIcon("gear");
+      item.description = `no source available${definingSuffix}`;
+      item.contextValue = "method-item-unindexed";
+      return item;
+    }
     item.iconPath = new vscode.ThemeIcon("symbol-method");
     const hasSource = !!node.classInfo.source_file && node.classInfo.source_file !== "unknown";
     item.contextValue = hasSource ? "method-item" : "method-item-no-source";
+    if (node.definingClass) {
+      item.description = node.definingClass;
+    }
     if (hasSource) {
       item.command = {
         command: "beamtalk.navigateToMethod",
@@ -833,7 +1131,42 @@ export class WorkspaceTreeDataProvider
         classInfo,
         methods: toMethodItems(classSide),
       },
+      // BT-3478: flat sibling groups, same depth as the two above — lazily
+      // fetched only when expanded (see getChildren's "inherited-method-group"
+      // case), not eagerly built here like the local groups.
+      { kind: "inherited-method-group" as const, side: "instance", classInfo },
+      { kind: "inherited-method-group" as const, side: "class", classInfo },
     ];
+  }
+
+  /**
+   * Build inherited method-item nodes for one side of an
+   * `InheritedMethodGroupNode` (BT-3478), from the full (both-sides) fetch
+   * result cached per receiving class.
+   *
+   * `classInfo` on each node is the *defining* class's info, looked up from
+   * the already-loaded "Classes" section — not the receiving class the
+   * group is nested under — so `beamtalk.navigateToMethod` opens the real
+   * declaration (and correctly finds no source, matching the local-method
+   * "no source" affordance, if the defining class isn't loaded/known).
+   */
+  private _inheritedMethodItems(
+    all: InheritedMethodInfo[],
+    side: "instance" | "class"
+  ): MethodItemNode[] {
+    return all
+      .filter((m) => m.side === side)
+      .map((m) => ({
+        kind: "method-item" as const,
+        method: m,
+        classInfo: this._findClassInfo(m.definingClass),
+        definingClass: m.definingClass,
+      }));
+  }
+
+  /** Look up a loaded class's info by name, falling back to a source-less stub. */
+  private _findClassInfo(name: string): ClassInfo {
+    return this.classes.find((c) => c.name === name) ?? { name };
   }
 
   private _inspectFields(state: Record<string, unknown>, parentId: string): InspectFieldNode[] {
@@ -878,6 +1211,10 @@ export class WorkspaceTreeDataProvider
     this.typeAliases = [];
     this.inspectCache.clear();
     this.methodsCache.clear();
+    this.inheritedMethodsCache.clear();
+    this.inspectGen.bumpAll();
+    this.methodsGen.bumpAll();
+    this.inheritedMethodsGen.bumpAll();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -940,15 +1277,25 @@ export class WorkspaceTreeDataProvider
           this.actors.push(event.data);
         }
         this.inspectCache.delete(`actor:${event.data.pid}`);
+        this.inspectGen.bump(`actor:${event.data.pid}`);
         this._onDidChangeTreeData.fire(ACTORS_SECTION);
       } else if (event.event === "stopped") {
         this.actors = this.actors.filter((a) => a.pid !== event.data.pid);
         this.inspectCache.delete(`actor:${event.data.pid}`);
+        this.inspectGen.bump(`actor:${event.data.pid}`);
         this._onDidChangeTreeData.fire(ACTORS_SECTION);
       }
     } else if (event.channel === "classes" && event.event === "loaded") {
       // Invalidate cached methods for the reloaded class — its methods may have changed.
       this.methodsCache.delete(event.data.class);
+      this.methodsGen.bump(event.data.class);
+      // BT-3478: also invalidate its own inherited-methods entry. Known gap
+      // (shared with the local-methods cache above): reloading an ancestor
+      // does not invalidate a subclass's cached inherited view — a full
+      // hierarchy walk on every reload wasn't justified for this op's
+      // initial ship; `refresh()` / reconnect always sees the current state.
+      this.inheritedMethodsCache.delete(event.data.class);
+      this.inheritedMethodsGen.bump(event.data.class);
       // Re-fetch the full class list — the event only carries the new class name,
       // not the complete list with actor_count metadata.
       // Use a generation counter to discard stale responses when multiple
@@ -969,6 +1316,18 @@ export class WorkspaceTreeDataProvider
         .catch(() => {
           // Transient failure: next class-loaded event will retry.
         });
+    } else if (event.channel === "classes" && event.event === "removed") {
+      // BT-2531 (server-side) fires this when a class's process shuts down
+      // (e.g. `removeFromSystem`/unload) — remove it immediately rather than
+      // waiting for a "loaded" event that will never come for this class.
+      // Unlike "loaded", no re-fetch is needed: the removed class is simply
+      // absent from the list, no new metadata to read.
+      this.classes = this.classes.filter((c) => c.name !== event.data.class);
+      this.methodsCache.delete(event.data.class);
+      this.methodsGen.bump(event.data.class);
+      this.inheritedMethodsCache.delete(event.data.class);
+      this.inheritedMethodsGen.bump(event.data.class);
+      this._onDidChangeTreeData.fire(CLASSES_SECTION);
     }
   }
 }

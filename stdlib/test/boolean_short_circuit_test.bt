@@ -13,7 +13,7 @@
 // produce" — see docs/development/architecture-principles.md § 7
 // (Consistency-Test Disposition Rule). Value-correctness for these same
 // selectors is covered end-to-end against real compiled True/False/Boolean
-// (stdlib/src/True.bt, False.bt, Boolean.bt) by
+// (stdlib/src/true.bt, false.bt, boolean.bt) by
 // stdlib/bootstrap-test/booleans.btscript; this file adds the
 // short-circuit proof that file's comments claimed but didn't verify.
 //

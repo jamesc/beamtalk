@@ -35,8 +35,7 @@ respectively.
     regenerate_native_class_header/1,
     native_generated_include_dir/1,
     build_source_class_module_index/1,
-    source_module_name/3,
-    extract_all_bt_classes/1,
+    relative_bt_path/2,
     read_package_name/1,
     extract_bt_class_info/1,
     sort_bt_files_by_deps/1,
@@ -1537,7 +1536,8 @@ header_content_matches(HrlPath, Content) ->
     end.
 
 -doc """
-Build a class→module index from the project's `src/**/*.bt` source (BT-2671).
+Build a class→module index from the project's `src/**/*.bt` source (BT-2671,
+reimplemented on the compiler port for BT-3441).
 
 This is the source-AST-derived index that gives the cold-load path full parity
 with the CLI: on a clean load the project's own classes are not yet registered,
@@ -1546,17 +1546,22 @@ native module referencing `?BT_CLASS_MODULE_Foo` for a same-package class would
 fail to compile. By scanning source we always include every class defined in the
 package being loaded.
 
-For each `src/*.bt` file, every `Super subclass: Class` declaration maps to the
-package-qualified module atom `bt@<pkg>@<relative@path>`, mirroring the CLI's
-`build.rs` (`build_class_module_index` + `compute_relative_module`). The package
-name is read from `beamtalk.toml`; subdirectory segments under `src/` become `@`
-segments, each snake-cased via `beamtalk_repl_loader:to_snake_case/1` — the same
-transform the Rust `core_erlang:to_module_name/1` applies, so the module atom is
-byte-identical to the one the CLI build produces (casing parity).
+For each `src/*.bt` file, `beamtalk_compiler:build_class_module_index_in_source/3`
+parses the file with the real grammar (every declared class, not just the first
+`Super subclass: Class` a regex happens to match) and computes the
+package-qualified module atom `bt@<pkg>@<relative@path>` via the shared
+`relative_module_segments` leaf the CLI's own `build_class_module_index`
+(`build.rs`) uses — so this index and a `beamtalk build` of the same project can
+never diverge on either class extraction or module-name casing (BT-3441; see
+CLAUDE.md's "No duplicate implementations" rule). The package name is read from
+`beamtalk.toml`.
 
 Returns an empty map (no entries, never a crash) when the package name cannot be
 determined or `src/` is absent — the caller then falls back to the live registry
-alone, exactly the previous behaviour.
+alone, exactly the previous behaviour. A single file that fails to index (an
+`invalid_path_segment` from a filename outside `[A-Za-z0-9_]`, or a transport
+failure) is skipped with a logged warning rather than failing the whole index —
+the same best-effort contract the previous implementation had.
 """.
 -spec build_source_class_module_index(string()) -> #{binary() => binary()}.
 build_source_class_module_index(ProjectRoot) ->
@@ -1567,31 +1572,61 @@ build_source_class_module_index(ProjectRoot) ->
             SrcDir = filename:join(ProjectRoot, "src"),
             BtFiles = find_bt_files(SrcDir),
             lists:foldl(
-                fun(Path, Acc) ->
-                    ModuleName = source_module_name(Path, SrcDir, PackageName),
-                    Classes = extract_all_bt_classes(Path),
-                    lists:foldl(
-                        fun(ClassName, InnerAcc) ->
-                            InnerAcc#{ClassName => ModuleName}
-                        end,
-                        Acc,
-                        Classes
-                    )
-                end,
+                fun(Path, Acc) -> index_bt_file(Path, SrcDir, PackageName, Acc) end,
                 #{},
                 BtFiles
             )
     end.
 
--doc """
-Compute the package-qualified module atom binary for a `src/` .bt file.
+%% Index one `src/**/*.bt` file's classes into `Acc` via the compiler port
+%% (BT-3441). Best-effort: an unreadable file, an indexing failure, or a
+%% compiler-port transport failure is logged and skipped rather than failing
+%% the whole cold-load index.
+-spec index_bt_file(string(), string(), binary(), #{binary() => binary()}) ->
+    #{binary() => binary()}.
+index_bt_file(Path, SrcDir, PackageName, Acc) ->
+    case file:read_file(Path) of
+        {error, Reason} ->
+            ?LOG_WARNING(
+                "build-source-class-module-index: could not read ~s: ~p",
+                [Path, Reason],
+                #{domain => [beamtalk, runtime]}
+            ),
+            Acc;
+        {ok, Source} ->
+            RelativePath = relative_bt_path(Path, SrcDir),
+            case
+                beamtalk_compiler:build_class_module_index_in_source(
+                    Source, RelativePath, PackageName
+                )
+            of
+                {ok, ModuleName, Classes} ->
+                    lists:foldl(
+                        fun(ClassName, InnerAcc) -> InnerAcc#{ClassName => ModuleName} end,
+                        Acc,
+                        Classes
+                    );
+                {error, Reason, Message} ->
+                    ?LOG_WARNING(
+                        "build-source-class-module-index: skipping ~s (~p): ~s",
+                        [Path, Reason, Message],
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    Acc
+            end
+    end.
 
-Mirrors the CLI's `compute_relative_module` (build.rs): the file's path relative
-to `src/` becomes `@`-joined snake-cased segments, prefixed with `bt@<pkg>@`.
-E.g. `src/util/http_response.bt` in package `web` → `bt@web@util@http_response`.
+-doc """
+`Path`'s file-system path relative to `SrcDir`, `/`-joined with the file
+extension left intact (e.g. `src/util/http_response.bt` under `src/` →
+`<<"util/http_response.bt">>`) — the `relative_path` the compiler port's
+`build_class_module_index_in_source` uses to derive the module-name segments
+(BT-3441). Only locates the relative path; the module-name casing rule itself
+lives entirely on the Rust side (`relative_module_segments`), never
+re-derived here.
 """.
--spec source_module_name(string(), string(), binary()) -> binary().
-source_module_name(Path, SrcDir, PackageName) ->
+-spec relative_bt_path(string(), string()) -> binary().
+relative_bt_path(Path, SrcDir) ->
     AbsPath = filename:absname(Path),
     AbsSrc = filename:absname(SrcDir),
     SrcParts = filename:split(AbsSrc),
@@ -1599,55 +1634,14 @@ source_module_name(Path, SrcDir, PackageName) ->
     RelSegments =
         case lists:prefix(SrcParts, PathParts) of
             true ->
-                Rel = lists:nthtail(length(SrcParts), PathParts),
-                drop_ext_segments(Rel);
+                lists:nthtail(length(SrcParts), PathParts);
             false ->
-                %% Defensive: fall back to the bare stem if the file is somehow
-                %% not under src/ (find_bt_files only returns files under it).
-                [filename:basename(Path, ".bt")]
+                %% Defensive: fall back to the bare basename if the file is
+                %% somehow not under src/ (find_bt_files only returns files
+                %% under it).
+                [filename:basename(Path)]
         end,
-    SnakeSegments = [beamtalk_repl_loader:to_snake_case(S) || S <- RelSegments],
-    iolist_to_binary(["bt@", PackageName, "@", lists:join("@", SnakeSegments)]).
-
-%% Strip the `.bt` extension from the final path segment.
--spec drop_ext_segments([string()]) -> [string()].
-drop_ext_segments([]) ->
-    [];
-drop_ext_segments(Segments) ->
-    Last = lists:last(Segments),
-    lists:droplast(Segments) ++ [filename:rootname(Last, ".bt")].
-
--doc """
-Extract all declared class names from a .bt source file (BT-2671).
-
-Unlike `extract_bt_class_info/1` (which returns only the first declaration),
-this returns every `Super subclass: Class` class name in the file, so a source
-file declaring multiple classes contributes all of them to the cold-load index.
-Returns binaries; an unreadable file yields an empty list.
-""".
--spec extract_all_bt_classes(string()) -> [binary()].
-extract_all_bt_classes(Path) ->
-    case file:read_file(Path) of
-        {ok, Bin} ->
-            %% Anchor to the start of a line (`multiline`) so only real top-level
-            %% `Super subclass: Class` declarations match — a `subclass:` token
-            %% embedded mid-line inside a string literal or comment (e.g. help
-            %% text) is ignored. Without this, `global` would collect such
-            %% false positives and a later file could overwrite the correct
-            %% class→module mapping in the cold-load index.
-            case
-                re:run(
-                    Bin,
-                    <<"^\\w+\\s+subclass:\\s+(\\w+)">>,
-                    [{capture, [1], binary}, global, multiline]
-                )
-            of
-                {match, Matches} -> [C || [C] <- Matches];
-                nomatch -> []
-            end;
-        {error, _} ->
-            []
-    end.
+    iolist_to_binary(lists:join("/", RelSegments)).
 
 -doc """
 Read the `[package] name` field from `<ProjectRoot>/beamtalk.toml`.
@@ -1908,36 +1902,22 @@ structured_file_errors(Path, Reason) ->
 
 -doc "Convert a single compiler diagnostic map to a structured error map.".
 -spec diagnostic_to_error_map(binary(), term()) -> map().
-diagnostic_to_error_map(PathBin, D) when is_map(D) ->
-    Msg = maps:get(message, D, <<"Unknown error">>),
-    ErrMap0 = #{
-        <<"path">> => PathBin,
-        <<"kind">> => <<"compile_error">>,
-        <<"message">> => Msg
-    },
-    ErrMap1 =
-        % elp:fixme W0032 maps:find with complex branch logic
-        case maps:find(line, D) of
-            {ok, Line} when is_integer(Line) -> ErrMap0#{<<"line">> => Line};
-            _ -> ErrMap0
-        end,
-    % elp:fixme W0032 maps:find with complex branch logic
-    case maps:find(hint, D) of
-        {ok, Hint} when is_binary(Hint) -> ErrMap1#{<<"hint">> => Hint};
-        _ -> ErrMap1
-    end;
-diagnostic_to_error_map(PathBin, D) when is_binary(D) ->
-    #{
-        <<"path">> => PathBin,
-        <<"kind">> => <<"compile_error">>,
-        <<"message">> => D
-    };
 diagnostic_to_error_map(PathBin, D) ->
-    #{
+    Norm = beamtalk_repl_errors:normalize_diagnostic(D),
+    Base = #{
         <<"path">> => PathBin,
         <<"kind">> => <<"compile_error">>,
-        <<"message">> => iolist_to_binary(io_lib:format("~p", [D]))
-    }.
+        <<"message">> => maps:get(message, Norm)
+    },
+    Base1 =
+        case maps:find(line, Norm) of
+            {ok, Line} -> Base#{<<"line">> => Line};
+            error -> Base
+        end,
+    case maps:find(hint, Norm) of
+        {ok, Hint} -> Base1#{<<"hint">> => Hint};
+        error -> Base1
+    end.
 
 -doc """
 Collect collision warnings for the loaded classes after a file load.

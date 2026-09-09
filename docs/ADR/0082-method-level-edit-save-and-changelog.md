@@ -14,7 +14,7 @@ We do not have a path for this. Today:
 - `>>` mutates the in-memory class and never touches disk
 - `ClassName reload` (ADR 0040) recompiles the whole `.bt` file *from* disk into memory — one direction only
 - `load-source` (browser internal op) compiles a full class source string into memory — also memory-only
-- `Counter sourceFile` (Behaviour.bt:287) records the file association per class, so memory→disk is *addressable* but not *implemented*
+- `Counter sourceFile` (behaviour.bt:287) records the file association per class, so memory→disk is *addressable* but not *implemented*
 - No op exists to write a single method, the whole class, or any subset back to its source file
 
 Without an explicit decision, any browser "Save" button has to choose silently between (a) memory-only patching that disappears on workspace restart, (b) write-through that mutates the user's git tree on every keystroke save, or (c) something in between. Each choice has implications for ADR 0004 (memory-only hot reload), ADR 0017 (browser IDE), ADR 0024 (LSP/runtime coherence), and ADR 0046 (VSCode coexistence).
@@ -457,8 +457,8 @@ See steelman above. Pharo's Monticello uses overlay files for package deltas wit
 | `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl` | The `>>` patch install chokepoint (already exists, 259 LOC). Hook the install path to (1) read+parse `sourceFile` to capture span and `prev_source`, (2) install in memory, (3) emit ChangeEntry. Flushability check (project-tree containment) gates the emit. |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | **No changes — no new workspace-side ops.** All operations are reached via the existing `evaluate` op, which receives a Beamtalk expression constructed by the calling layer (MCP / LSP / REPL CLI / browser). See *Rationale: why no new REPL ops* below. |
 | `stdlib/src/Workspace.bt` | New facade methods: `flush`, `flush:`, `changes` (returns ChangeLog), `newClass:at:`. Four methods total — pending-state queries live on the ChangeLog object (`changes notEmpty`, `changes dirtyMethods`, etc.), matching Pharo's `Smalltalk changes` idiom. |
-| `stdlib/src/Behaviour.bt` | Two new class-side methods: `compile: aSym source: aString` (durable, logs) and `tryCompile: aSym source: aString` (ephemeral, no log). `compile:source:` is the underlying primitive that the existing `>>` patcher form desugars to (ADR 0066 parser rule updated). Both share the same compile-and-install path; only `compile:source:` emits a ChangeEntry. MCP tools call these directly with body values, avoiding fragile string-construction of `>>` expressions. |
-| `stdlib/src/ChangeLog.bt` (new) | The navigable ChangeLog object: `size`, `isEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:`. Backed by `beamtalk_workspace_changelog.erl` via FFI. |
+| `stdlib/src/behaviour.bt` | Two new class-side methods: `compile: aSym source: aString` (durable, logs) and `tryCompile: aSym source: aString` (ephemeral, no log). `compile:source:` is the underlying primitive that the existing `>>` patcher form desugars to (ADR 0066 parser rule updated). Both share the same compile-and-install path; only `compile:source:` emits a ChangeEntry. MCP tools call these directly with body values, avoiding fragile string-construction of `>>` expressions. |
+| `stdlib/src/change_log.bt` (new) | The navigable ChangeLog object: `size`, `isEmpty`, `do:`, `select:`, `dirtyMethods`, `revert:`, `clear`, `flushKinds:`. Backed by `beamtalk_workspace_changelog.erl` via FFI. |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | New meta-commands: `:flush`, `:flush <Class>`, `:changes`, `:dirty`. Each is a CLI-side shortcut that constructs the equivalent Beamtalk expression (e.g. `:flush` → `Workspace flush`) and submits via the existing `evaluate` op — no new workspace-side dispatch. |
 | `crates/beamtalk-mcp/src/server.rs` | New tools: `save_method`, `save_class`, `try_method`, `flush`, `list_changes`, `dirty_methods`. Each tool implementation takes typed args, constructs the corresponding Beamtalk expression (see Surface table), and submits it via the existing `evaluate` pathway — there is no workspace-side op to dispatch. The MCP layer is purely a typed front for the language. MCP-issued logged patches are auto-tagged `author_kind: agent` (passed as metadata on the eval submission). |
 | `crates/beamtalk-lsp/src/server.rs` | Handle `workspace/executeCommand` for `flush` and `save_class` by constructing the Beamtalk expression and submitting via `evaluate`. Emit `workspace/applyEdit` *to* clients on flush events received from the runtime. |
@@ -528,7 +528,7 @@ For ADR 0046 (VSCode sidebar): no migration. The sidebar gains a "pending change
   - BT-2281 — Phase 0: byte-span resolver + corpus round-trip validation spike
   - BT-2282 — Phase 1: ChangeLog gen_server + two-part on-disk persistence
   - BT-2283 — Phase 1: `Behaviour compile:source:` / `tryCompile:source:` + install-hook ChangeEntry
-  - BT-2284 — Phase 1: `Workspace changes` + `ChangeLog.bt` collection protocol
+  - BT-2284 — Phase 1: `Workspace changes` + `change_log.bt` collection protocol
   - BT-2285 — Phase 1: `Workspace newClass:at:` — new-class creation + validation
   - BT-2286 — Phase 2: `Workspace flush` — splice, atomicity, external-edit detection
   - BT-2287 — Phase 3: REPL meta-commands `:flush` / `:changes` / `:dirty`

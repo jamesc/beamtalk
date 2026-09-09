@@ -84,7 +84,7 @@ TestCase subclass: CharacterTest
   // (LF, CR, TAB) must return a genuine 1-byte string containing that
   // codepoint — not the 2-character decimal string "10"/"13"/"9".
   //
-  // Root cause: Character is `Integer subclass:` (Character.bt), so a
+  // Root cause: Character is `Integer subclass:` (character.bt), so a
   // Character value is a bare, untagged integer at the BEAM level — the
   // runtime `beamtalk_primitive:class_of/1` and `module_for_value/1` both
   // match `is_integer/1` unconditionally and cannot distinguish a
@@ -126,7 +126,7 @@ TestCase subclass: CharacterTest
     self assert: (Character value: 10) printString equals: ((Erlang unicode) characters_to_binary: #(36, 10))
     self assert: (Character value: 9) printString equals: ((Erlang unicode) characters_to_binary: #(36, 9))
 
-  // BT-3214: `uppercase`/`lowercase` (Character.bt: `-> Character`) chained
+  // BT-3214: `uppercase`/`lowercase` (character.bt: `-> Character`) chained
   // into a further send hits the identical bug as `Character value:` —
   // `$a uppercase`'s receiver is a MessageSend, not a literal, so
   // `$a uppercase asString` was misrouted to Integer>>asString the same way

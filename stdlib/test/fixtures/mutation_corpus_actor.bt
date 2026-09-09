@@ -275,7 +275,7 @@ Actor subclass: MutationCorpusActor
   // outer local assigned earlier in the try body — BT-3161 Flavor B / E5's
   // shape (`ambiguous_catch_try_state`), folded into the shared corpus so the
   // metamorphic/matrix harnesses cover it too, not just the dedicated
-  // bt3161_nested_conditional_actor.bt fixture. The value-type/class-method
+  // bt3161nested_conditional_actor.bt fixture. The value-type/class-method
   // analogue (mutation_corpus_value.bt/mutation_corpus_class_method.bt's own
   // copies of this fragment) was fixed by BT-3177.
   ensureNestedConditionalLastReadWrite: flag =>
@@ -320,7 +320,7 @@ Actor subclass: MutationCorpusActor
   // The try body's LAST statement is a self-send that mutates state — BT-3161
   // Flavor A's exact shape, folded into the shared corpus so the
   // metamorphic/matrix harnesses cover it too, not just the dedicated
-  // bt3161_self_send_actor.bt fixture. The class-method analogue
+  // bt3161self_send_actor.bt fixture. The class-method analogue
   // (mutation_corpus_class_method.bt's own copy of this fragment) was fixed
   // by BT-3177.
   onDoSelfSendLastReadWrite =>

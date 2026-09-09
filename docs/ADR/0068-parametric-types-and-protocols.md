@@ -403,7 +403,7 @@ r map: myBlock    // Block type params unknown → R = Dynamic → Result(Dynami
 - `Block(A, R)` — one-argument block with arg type `A`, returning `R`
 - `Block(A, B, R)` — two-argument block with arg types `A` and `B`, returning `R`
 
-The last type parameter is always the return type; all preceding ones are argument types. `Block.bt` itself is not modified to declare type params — the type checker handles Block as a built-in generic form, similar to how TypeScript treats function types `(a: A) => R` specially rather than as a generic class.
+The last type parameter is always the return type; all preceding ones are argument types. `block.bt` itself is not modified to declare type params — the type checker handles Block as a built-in generic form, similar to how TypeScript treats function types `(a: A) => R` specially rather than as a generic class.
 
 This special-casing is limited to `Block` only. All other generic types are regular declaration-site generics.
 
@@ -993,7 +993,7 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 - Update chain-resolution in `beamtalk_repl_ops_dev.erl` to substitute type params when caller context provides concrete types
 
 **Phase 1e: Stdlib Annotations (M)**
-- Update `Result.bt`: `Result(T, E)`, fields `:: T` / `:: E`, method return types
+- Update `result.bt`: `Result(T, E)`, fields `:: T` / `:: E`, method return types
 - Update collection classes: `Array(E)`, `Dictionary(K, V)`, `Set(E)`
 - Update `Block` types if applicable
 
@@ -1082,7 +1082,7 @@ No migration is required. Both features are purely additive:
 - **Generics:** Existing classes without type parameters continue working unchanged. Adding `(T, E)` to a class definition is opt-in. Existing `:: Result` annotations remain valid (equivalent to `:: Result(Dynamic, Dynamic)`).
 - **Protocols:** Protocol definitions are new syntax. Existing code is not affected. Conformance is automatic — classes don't need `implements:` declarations.
 
-The only stdlib change is updating `Result.bt` and collection classes to declare their type parameters and update field/method annotations. This is a non-breaking change — the runtime behavior is identical (type erasure).
+The only stdlib change is updating `result.bt` and collection classes to declare their type parameters and update field/method annotations. This is a non-breaking change — the runtime behavior is identical (type erasure).
 
 ## References
 

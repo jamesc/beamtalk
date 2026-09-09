@@ -6,12 +6,12 @@
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! Unlike the foldl list-ops in the sibling modules, these two enumeration
-//! selectors are *self-hosted* in `Collection.bt` on top of `inject:into:`. A
+//! selectors are *self-hosted* in `collection.bt` on top of `inject:into:`. A
 //! plain dispatch to those methods cannot thread an actor's `State` back out of the
 //! block, so a mutating block silently lost its writes — and, once the selectors
 //! were classified as state-threading, the block was emitted as a stateful
 //! `{Value, State}`-tuple fun whose arity no longer matched the un-threaded
-//! `Collection.bt` method, crashing with `badarity`.
+//! `collection.bt` method, crashing with `badarity`.
 //!
 //! Rather than re-derive the full `lists:foldl` threading machinery for two more
 //! selectors (and, for `do:separatedBy:`, a *second* block), we desugar each call
@@ -40,9 +40,9 @@
 //! the threaded `State` (see [`CoreErlangGenerator::finalize_enumeration_fold`]).
 //!
 //! Non-mutating calls return `None` here and fall through to the ordinary dispatch
-//! to the `Collection.bt` method, preserving existing behaviour.
+//! to the `collection.bt` method, preserving existing behaviour.
 
-use super::super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+use super::super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{
@@ -121,12 +121,12 @@ fn inlined_body(body: &[ExpressionStatement]) -> Vec<Expression> {
 
 impl CoreErlangGenerator {
     /// Returns `true` if `block` mutates field/local state in a way that requires
-    /// threading (and so cannot be served by a plain dispatch to the `Collection.bt`
-    /// method). Mirrors the per-block analysis in `control_flow_has_mutations`.
+    /// threading (and so cannot be served by a plain dispatch to the `collection.bt`
+    /// method). BT-3423: shares [`Self::block_arg_needs_threading`] — the same
+    /// combinator `control_flow_has_mutations` and
+    /// `conditional_needs_mutation_threading` use for their own per-block check.
     fn enumeration_block_needs_threading(&self, block: &Block) -> bool {
-        let analysis = block_analysis::analyze_block(block);
-        self.needs_mutation_threading(&analysis)
-            || self.body_has_list_op_cross_scope_mutations(block)
+        self.block_arg_needs_threading(block)
     }
 
     /// Returns `true` when the desugared fold threads actor `State`: an actor
@@ -134,14 +134,14 @@ impl CoreErlangGenerator {
     ///
     /// The desugar itself fires in *every* context (so the stateful block is consumed
     /// by the fold and never dispatched as a mismatched-arity fun to the un-threaded
-    /// `Collection.bt` method). But only an actor fold yields the `{Acc, NewState}`
+    /// `collection.bt` method). But only an actor fold yields the `{Acc, NewState}`
     /// reply-tuple shape that [`Self::finalize_enumeration_fold`]'s `{'nil', NewState}`
     /// re-projection and the `get_control_flow_threaded_vars` `__local__` extraction
     /// rely on. Value types, class methods and the REPL thread captured locals through
     /// different fold shapes, and a fold nested in a direct-params loop yields an open
     /// let-chain rather than a tuple, so those keep the plain fold result.
     pub(in crate::core_erlang) fn enumeration_threads_actor_state(&self) -> bool {
-        matches!(self.context, CodeGenContext::Actor) && !self.in_direct_params_loop
+        matches!(self.context, CodeGenContext::Actor) && !self.loop_mode.in_direct_params_loop
     }
 
     /// Lowers a synthetic `inject:into:` send (already threading state) to the value
@@ -191,7 +191,7 @@ impl CoreErlangGenerator {
 
     /// BT-2703: Desugars `receiver eachWithIndex: [:elem :idx | body]` into a
     /// threaded `inject:into:` fold when the block mutates state. Returns `None`
-    /// (so the caller dispatches to the `Collection.bt` method as before) for
+    /// (so the caller dispatches to the `collection.bt` method as before) for
     /// non-literal callables, the wrong block arity, or a non-mutating block.
     pub(in crate::core_erlang) fn try_generate_each_with_index(
         &mut self,
@@ -206,7 +206,7 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
         if !self.enumeration_block_needs_threading(user_block) {
-            // BT-3151: falling through to `Collection.bt`'s own self-hosted
+            // BT-3151: falling through to `collection.bt`'s own self-hosted
             // `eachWithIndex:` (built on `do:`) — a same-process, in-process
             // call, same as the other list-op call sites. See
             // `check_bare_list_op_block_self_sends`'s doc comment.
@@ -242,7 +242,7 @@ impl CoreErlangGenerator {
     /// BT-2703: Desugars `receiver do: [:elem | body] separatedBy: [sep]` into a
     /// threaded `inject:into:` fold when either block mutates state, threading the
     /// "between elements" flag through the accumulator. Returns `None` (so the
-    /// caller dispatches to the `Collection.bt` method as before) for non-literal
+    /// caller dispatches to the `collection.bt` method as before) for non-literal
     /// callables, the wrong block arities, or two non-mutating blocks.
     pub(in crate::core_erlang) fn try_generate_do_separated_by(
         &mut self,
@@ -262,7 +262,7 @@ impl CoreErlangGenerator {
         if !self.enumeration_block_needs_threading(element_block)
             && !self.enumeration_block_needs_threading(separator_block)
         {
-            // BT-3151: falling through to `Collection.bt`'s own self-hosted
+            // BT-3151: falling through to `collection.bt`'s own self-hosted
             // `do:separatedBy:` (built on `inject:into:`) — same-process,
             // in-process call. See `check_bare_list_op_block_self_sends`'s
             // doc comment.

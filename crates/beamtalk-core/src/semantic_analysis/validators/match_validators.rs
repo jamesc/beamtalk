@@ -206,8 +206,8 @@ fn visit_assignment_in_match_arm(expr: &Expression, diagnostics: &mut Vec<Diagno
 /// These are exempted from the general hierarchy-based leaf check below:
 /// several of them are *nominally* non-leaf in `ClassHierarchy` for reasons
 /// that have nothing to do with runtime dispatch ambiguity — `Boolean` has
-/// stdlib subclasses `True`/`False` (`stdlib/src/True.bt`,
-/// `stdlib/src/False.bt`) purely to hang `ifTrue:`/`ifFalse:` double-dispatch
+/// stdlib subclasses `True`/`False` (`stdlib/src/true.bt`,
+/// `stdlib/src/false.bt`) purely to hang `ifTrue:`/`ifFalse:` double-dispatch
 /// methods off of, not because a plain `true`/`false` atom carries any
 /// distinguishing runtime tag — Phase A's `x :: Boolean` still means exactly
 /// "is this value `'true'` or `'false'`", tested as one BIF-style guard, not
@@ -828,7 +828,7 @@ mod tests {
 
     /// `Boolean` is an explicitly-named Phase A primitive (ADR 0107 Decision
     /// §Phase A scope) even though it has nominal stdlib subclasses `True`/
-    /// `False` (`stdlib/src/True.bt`, `stdlib/src/False.bt`) — those exist to
+    /// `False` (`stdlib/src/true.bt`, `stdlib/src/false.bt`) — those exist to
     /// hang `ifTrue:`/`ifFalse:` double-dispatch methods off of, not because
     /// `true`/`false` atoms carry a distinguishing runtime tag. Regression
     /// test for the bug where a naive hierarchy-only leaf check would wrongly

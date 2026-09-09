@@ -47,7 +47,8 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     class_state_field_defaults/2,
     reindent_method_source/2,
     find_selector_send_spans/3,
-    find_definition_selector_spans/5
+    find_definition_selector_spans/5,
+    build_class_module_index_in_source/3
 ]).
 
 -doc """
@@ -522,6 +523,31 @@ pre-BT-3239 flat, alphabetical listing rather than erroring.
     {ok, [map()]} | {error, atom(), binary()}.
 categorize_methods(Source, ClassName) ->
     beamtalk_compiler_server:categorize_methods(Source, ClassName).
+
+-doc """
+Build the class→module-name index for a single `src/**/*.bt` file (BT-3441).
+
+Given the file's source text, its path relative to the project's `src/`
+directory (extension included, `/`-joined — e.g. `<<"util/http_response.bt">>`),
+and the project's package name, parses the file with the real grammar and
+computes the package-qualified module atom the CLI's own index build would
+produce for it — see `beamtalk_compiler_server:build_class_module_index_in_source/3'
+for the full doc. Backs `beamtalk_repl_ops_load:build_source_class_module_index/1'
+(the REPL/workspace cold-load fallback for `class_module_index`, ADR 0050),
+replacing that module's former independent regex scan + hand-rolled
+snake-casing.
+
+Returns `{ok, ModuleName, ClassNames}` on success. Resolution failures (a
+`relative_path` segment outside `[A-Za-z0-9_]`) return
+`{error, invalid_path_segment, Message}`; transport failures return
+`{error, noproc | timeout | port_error, Message}`.
+""".
+-spec build_class_module_index_in_source(binary(), binary(), binary()) ->
+    {ok, binary(), [binary()]} | {error, atom(), binary()}.
+build_class_module_index_in_source(Source, RelativePath, PackageName) ->
+    beamtalk_compiler_server:build_class_module_index_in_source(
+        Source, RelativePath, PackageName
+    ).
 
 -doc """
 Field-level default-value presence for `ClassName''s `state:'/`field:'

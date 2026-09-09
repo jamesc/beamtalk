@@ -8,7 +8,7 @@
 //
 // `methodsMatching:` is an instance method on `SystemNavigation`, reached
 // via the `default` (or future scoped) constructor. The class-side surface
-// stays constructors-only — see the note in `beamtalk_implementors_test.bt`
+// stays constructors-only — see the note in `system_navigation_implementors_test.bt`
 // for why query iteration runs on the instance.
 //
 // Behavioural assertions in this file scope themselves to a single class

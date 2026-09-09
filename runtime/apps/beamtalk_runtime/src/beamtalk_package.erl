@@ -280,7 +280,7 @@ find_app_for_package(PkgName, [{AppName, _Desc, _Vsn} | Rest]) ->
 Build a Package tagged map from OTP application metadata.
 
 Returns a map with `$beamtalk_class => 'Package'` so the runtime
-dispatches instance methods defined in Package.bt.
+dispatches instance methods defined in package.bt.
 """.
 -spec build_package_info(atom(), binary()) -> map().
 build_package_info(AppName, PkgName) ->

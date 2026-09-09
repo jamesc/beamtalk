@@ -246,7 +246,7 @@ metaChain size
 // => 3
 
 // BT-3073: actor `new`/`new:`/`spawn`/`spawnWith:` are real, source-backed
-// class methods declared once on `Actor` (`stdlib/src/Actor.bt`) — a
+// class methods declared once on `Actor` (`stdlib/src/actor.bt`) — a
 // subclass like `Counter` (loaded above, defines neither) *inherits* them
 // rather than defining its own. `implementorsOf:` does not walk inheritance
 // (see the `#class` check above), so `Actor` is an implementor of all four

@@ -36,88 +36,17 @@
 //! - **Await messages**: `future await` → Blocking future resolution
 //! - **Super sends**: `super methodName:` → Parent class dispatch
 
+use super::control_flow::{Closure, FieldWriteSite};
+use super::expr_shape::is_character_typed_receiver;
 use super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
 };
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Expression, Literal, MessageSelector, WellKnownSelector};
+use beamtalk_core::ast::{Expression, MessageSelector, WellKnownSelector};
 use beamtalk_core::source_analysis::Span;
-
-/// Strips any number of `Parenthesized` wrappers to expose the syntactic
-/// shape underneath — `(expr)`, `((expr))`, etc. all see through to `expr`.
-///
-/// Parentheses carry no runtime meaning (they only affect parse-time
-/// precedence), so any codegen specialization that pattern-matches on the
-/// *syntactic shape* of an expression (as [`is_character_typed_receiver`]
-/// does) must look past them or a receiver as simple as `(Character value:
-/// 10) asString` — parenthesized only to disambiguate the keyword send from
-/// the trailing unary `asString` — would silently miss the fast path.
-fn unwrap_parens(expr: &Expression) -> &Expression {
-    let mut current = expr;
-    while let Expression::Parenthesized { expression, .. } = current {
-        current = expression;
-    }
-    current
-}
-
-/// BT-3214 (extends BT-2095): true if `expr`'s static type is Character,
-/// determined purely from its syntactic shape — no general static type
-/// inference exists in codegen, so this recognizes exactly the syntactic
-/// forms that `Character.bt` declares as producing a Character: a Character
-/// literal (`$A`), the class factory `Character value:`, and the two
-/// instance methods with a `-> Character` return type, `uppercase` and
-/// `lowercase` (applied recursively, since their own receiver must itself
-/// be Character-typed — e.g. `$a uppercase lowercase`).
-///
-/// This distinction matters because Character values are bare integers at
-/// the BEAM level (`Character` is declared `Integer subclass:`), so the
-/// runtime `beamtalk_primitive:class_of/1` and `module_for_value/1` both
-/// match `is_integer/1` unconditionally and route to `Integer`'s BIF module
-/// — they cannot tell a Character-tagged integer from a `SmallInteger`,
-/// because there is no runtime tag to tell them apart. BT-2095 fixed this
-/// for the literal case (`$A asString`) by special-casing the receiver's
-/// AST shape at codegen. `(Character value: 10) asString` and `$a uppercase
-/// asString` are the same problem: the receiver is statically Character
-/// (per the sender's declared `-> Character` return type) but was not
-/// recognized because it isn't a literal, so it fell through to the generic
-/// runtime-dispatch path and was misrouted to `Integer>>asString`,
-/// producing `"10"` instead of a genuine 1-byte LF string. Recognizing
-/// these additional shapes closes that gap without requiring general
-/// static type inference in codegen.
-fn is_character_typed_receiver(expr: &Expression) -> bool {
-    match unwrap_parens(expr) {
-        Expression::Literal(Literal::Character(_), _) => true,
-        Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            ..
-        } => {
-            let is_value_factory_call = arguments.len() == 1
-                && matches!(
-                    selector,
-                    MessageSelector::Keyword(parts)
-                        if parts.len() == 1 && parts[0].keyword == "value:"
-                )
-                && matches!(
-                    unwrap_parens(receiver),
-                    Expression::ClassReference { name, package: None, .. }
-                        if name.name == "Character"
-                );
-            let is_character_returning_unary_send = arguments.is_empty()
-                && matches!(
-                    selector,
-                    MessageSelector::Unary(name) if name == "uppercase" || name == "lowercase"
-                )
-                && is_character_typed_receiver(receiver);
-            is_value_factory_call || is_character_returning_unary_send
-        }
-        _ => false,
-    }
-}
 
 impl CoreErlangGenerator {
     /// BT-2816: Generates the `<{'error', ..., _}>` case clauses shared by all
@@ -239,320 +168,6 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates a comma-separated argument list for function/message calls.
-    ///
-    /// This is a shared helper that eliminates the repeated pattern of iterating
-    /// over arguments with comma separation found throughout dispatch codegen.
-    /// Captures a comma-separated argument list as a `Document` (ADR 0018 bridge).
-    ///
-    /// BT-1935: Uses `expression_doc_with_open_scope` to detect and close any
-    /// open let-chains produced by class method self-sends used as arguments.
-    /// Without this, an argument like `(self classMethod: x)` embeds an open
-    /// `let ... in ` chain inside the argument list, producing invalid Core Erlang.
-    ///
-    /// **WARNING (BT-1937):** This helper closes open let-chains inline and
-    /// rolls back `class_var_version`, which causes class-var mutations
-    /// performed by sub-expression class method self-sends to be silently
-    /// dropped. Use this only for actor-context dispatch sites that never
-    /// observe such open scopes (their args cannot mutate class vars). For
-    /// class-method-context dispatch sites, use
-    /// [`capture_args_with_preamble`](Self::capture_args_with_preamble) and
-    /// emit the returned preamble before the dispatch call so the
-    /// `ClassVarsN` bindings remain in scope at the outer level.
-    fn capture_argument_list_doc(&mut self, arguments: &[Expression]) -> Result<Document<'static>> {
-        let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                parts.push(Document::Str(", "));
-            }
-            let saved_cv = self.class_var_version();
-            let (doc, open_scope) = self.expression_doc_with_open_scope(arg)?;
-            match open_scope {
-                Some(OpenScopeResult::Value(result_var)) => {
-                    // Close the open scope inline: the let-chain + result_var forms
-                    // a valid closed expression (e.g., `let X = ... in X`).
-                    // Roll back class var version since the ClassVarsN binding is
-                    // scoped inside the closed expression and not visible to
-                    // subsequent code.
-                    self.set_class_var_version(saved_cv);
-                    parts.push(docvec![doc, leaf::var(result_var)]);
-                }
-                // BT-3053: e.g. a message argument that's itself `items do:
-                // [...]` nested in a direct-params loop — no single value,
-                // substitute do:'s own `nil` contract.
-                Some(OpenScopeResult::NoValue) => {
-                    self.set_class_var_version(saved_cv);
-                    parts.push(docvec![doc, "'nil'"]);
-                }
-                None => {
-                    parts.push(doc);
-                }
-            }
-        }
-        Ok(Document::Vec(parts))
-    }
-
-    /// BT-1937: Captures a sequence of sub-expressions, preserving left-to-right
-    /// evaluation order **even when only some sub-expressions produce open scopes**
-    /// from class method self-sends.
-    ///
-    /// Returns `(preamble, docs)` where `docs` is one document per input
-    /// expression in the same order. If no sub-expression produces an open
-    /// scope, the preamble is `Document::Nil` and each `doc` is the inline
-    /// expression document — there is no hoisting overhead in the common case.
-    ///
-    /// If at least one sub-expression produces an open scope, **every**
-    /// sub-expression is hoisted into the preamble in order:
-    /// - Sub-expressions with their own open scope contribute their existing
-    ///   let-chain (no rebinding — `result_var` is already in scope after the
-    ///   chain).
-    /// - Plain sub-expressions get a fresh `let _Var<i> = ... in ` binding.
-    ///
-    /// This is the key to preserving evaluation order: without the unconditional
-    /// hoist, a hoisted later sub-expression would execute its preamble before
-    /// the inline earlier sub-expression in the call site — reversing the
-    /// observable order of side effects (BT-1937 review feedback).
-    ///
-    /// `class_var_version` is NOT rolled back. Subsequent code (the call,
-    /// later sub-expressions, following statements) will see the advanced
-    /// version, so references to `ClassVars` pick up earlier mutations.
-    pub(super) fn capture_subexpr_sequence(
-        &mut self,
-        exprs: &[&Expression],
-        prefix: &str,
-    ) -> Result<(Document<'static>, Vec<Document<'static>>)> {
-        // First pass: split each sub-expression into (its_preamble, its_doc).
-        let mut splits: Vec<(Document<'static>, Document<'static>)> =
-            Vec::with_capacity(exprs.len());
-        for expr in exprs {
-            splits.push(self.split_subexpr_for_preamble(expr)?);
-        }
-
-        let (any_hoisted, preamble_parts, docs) = self.hoist_subexpr_splits(splits, prefix);
-        if any_hoisted {
-            Ok((Document::Vec(preamble_parts), docs))
-        } else {
-            Ok((Document::Nil, docs))
-        }
-    }
-
-    /// BT-3406 review follow-up: shared "decide once, hoist all or none" step
-    /// behind both [`capture_subexpr_sequence`](Self::capture_subexpr_sequence)
-    /// and `generate_cascade_args` (`expressions.rs`) — see the doc on
-    /// `capture_subexpr_sequence` for the evaluation-order invariant this
-    /// preserves.
-    ///
-    /// Given per-sub-expression `(preamble, value_doc)` splits (as produced by
-    /// [`split_subexpr_for_preamble`](Self::split_subexpr_for_preamble) or
-    /// `generate_field_assignment_open`), returns:
-    /// - `(false, vec![], value_docs)` if no sub-expression needs hoisting —
-    ///   `value_docs` are the original docs, safe to inline as-is.
-    /// - `(true, preamble_parts, value_docs)` if at least one sub-expression
-    ///   opened a scope — every sub-expression has been hoisted in order (a
-    ///   plain one via a fresh `let <prefix>N = ... in`, an already-open one
-    ///   by forwarding its existing preamble), and `value_docs` reference the
-    ///   hoisted results. The caller is responsible for splicing
-    ///   `preamble_parts` into its own preamble in order.
-    pub(super) fn hoist_subexpr_splits(
-        &mut self,
-        splits: Vec<(Document<'static>, Document<'static>)>,
-        prefix: &str,
-    ) -> (bool, Vec<Document<'static>>, Vec<Document<'static>>) {
-        let any_hoisted = splits.iter().any(|(p, _)| !matches!(p, Document::Nil));
-
-        if !any_hoisted {
-            let docs: Vec<_> = splits.into_iter().map(|(_, d)| d).collect();
-            return (false, Vec::new(), docs);
-        }
-
-        let mut preamble_parts: Vec<Document<'static>> = Vec::with_capacity(splits.len());
-        let mut var_docs: Vec<Document<'static>> = Vec::with_capacity(splits.len());
-        for (expr_preamble, expr_doc) in splits {
-            if matches!(expr_preamble, Document::Nil) {
-                let (binding, var) = self.bind_subexpr_to_temp(prefix, expr_doc);
-                preamble_parts.push(binding);
-                var_docs.push(leaf::var(var));
-            } else {
-                preamble_parts.push(expr_preamble);
-                var_docs.push(expr_doc);
-            }
-        }
-
-        (true, preamble_parts, var_docs)
-    }
-
-    /// The one temp-binding step behind every "hoist an earlier
-    /// sub-expression so a later one's effects can run ahead of it" rule:
-    /// mints a fresh `<prefix>N` temp and returns the `let <temp> = <doc>
-    /// in ` binding plus the temp's name. Shared by
-    /// [`Self::hoist_subexpr_splits`] (the class-method open-scope
-    /// protocol, BT-3406) and `threaded_expression`'s sequencing rule
-    /// (ADR 0118 §Decision 3, BT-3415) so the two cannot drift.
-    pub(super) fn bind_subexpr_to_temp(
-        &mut self,
-        prefix: &str,
-        doc: Document<'static>,
-    ) -> (Document<'static>, String) {
-        let var = self.fresh_temp_var(prefix);
-        let binding = docvec!["let ", leaf::var(var.clone()), " = ", doc, " in "];
-        (binding, var)
-    }
-
-    /// BT-1937: Captures an argument list using
-    /// [`capture_subexpr_sequence`](Self::capture_subexpr_sequence) and joins
-    /// the resulting docs with commas. Convenience wrapper for the common
-    /// "no receiver, just args" pattern.
-    ///
-    /// Returns `(preamble, args_doc)` where `args_doc` is comma-separated.
-    pub(super) fn capture_args_with_preamble(
-        &mut self,
-        arguments: &[Expression],
-    ) -> Result<(Document<'static>, Document<'static>)> {
-        let exprs: Vec<&Expression> = arguments.iter().collect();
-        let (preamble, var_docs) = self.capture_subexpr_sequence(&exprs, "Arg")?;
-        Ok((preamble, Self::join_docs_with_commas(var_docs)))
-    }
-
-    /// BT-1942: Binds every argument expression to a fresh temp var via a
-    /// preamble, returning `(preamble, arg_refs, any_open_scope)`.
-    ///
-    /// Use this when an argument list is referenced multiple times in the
-    /// generated code (e.g., both branches of an inline `case ... of`),
-    /// to avoid double-evaluating side-effecting arguments and to hoist any
-    /// open let-chain produced by class method self-sends.
-    ///
-    /// Unlike [`capture_args_with_preamble`](Self::capture_args_with_preamble),
-    /// this always emits let-bindings in the preamble (even in the fast path
-    /// with no open scopes) so the returned `arg_refs` are pure variable
-    /// references with no side effects.
-    ///
-    /// `any_open_scope` is `true` if any argument produced an open let-chain
-    /// from a class method self-send — the caller should then propagate the
-    /// scope upward via `last_open_scope_result`.
-    pub(super) fn bind_args_to_temps(
-        &mut self,
-        arguments: &[Expression],
-        prefix: &str,
-    ) -> Result<(Document<'static>, Vec<Document<'static>>, bool)> {
-        let mut preamble_parts: Vec<Document<'static>> = Vec::new();
-        let mut arg_refs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
-        let mut any_open_scope = false;
-        for arg in arguments {
-            let (arg_doc, open_scope) = self.expression_doc_with_open_scope(arg)?;
-            let arg_var = self.fresh_temp_var(prefix);
-            match open_scope {
-                Some(OpenScopeResult::Value(result_var)) => {
-                    any_open_scope = true;
-                    preamble_parts.push(arg_doc);
-                    preamble_parts.push(docvec![
-                        "let ",
-                        leaf::var(arg_var.clone()),
-                        " = ",
-                        leaf::var(result_var),
-                        " in ",
-                    ]);
-                }
-                // BT-3053: no single value — substitute do:'s own `nil` contract.
-                Some(OpenScopeResult::NoValue) => {
-                    any_open_scope = true;
-                    preamble_parts.push(arg_doc);
-                    preamble_parts.push(docvec![
-                        "let ",
-                        leaf::var(arg_var.clone()),
-                        " = 'nil' in ",
-                    ]);
-                }
-                None => {
-                    preamble_parts.push(docvec![
-                        "let ",
-                        leaf::var(arg_var.clone()),
-                        " = ",
-                        arg_doc,
-                        " in ",
-                    ]);
-                }
-            }
-            arg_refs.push(leaf::var(arg_var));
-        }
-        let preamble = if preamble_parts.is_empty() {
-            Document::Nil
-        } else {
-            Document::Vec(preamble_parts)
-        };
-        Ok((preamble, arg_refs, any_open_scope))
-    }
-
-    /// BT-1937: Joins a list of documents into a comma-separated `Document::Vec`.
-    fn join_docs_with_commas(docs: Vec<Document<'static>>) -> Document<'static> {
-        let mut parts: Vec<Document<'static>> = Vec::with_capacity(docs.len() * 2);
-        for (i, doc) in docs.into_iter().enumerate() {
-            if i > 0 {
-                parts.push(Document::Str(", "));
-            }
-            parts.push(doc);
-        }
-        Document::Vec(parts)
-    }
-
-    /// BT-1937: Splits a sub-expression into a hoisted preamble and the
-    /// document used in its enclosing call/literal/operator.
-    ///
-    /// If the sub-expression produces an open let-chain (e.g., a class method
-    /// self-send that mutates class vars), the chain becomes the preamble and
-    /// the value used at the use site is just the result variable. Otherwise
-    /// the preamble is `Document::Nil` and the original doc is used directly.
-    /// `class_var_version` is NOT rolled back when a preamble is produced —
-    /// the `ClassVarsN` binding remains in scope at the outer level so
-    /// subsequent code (later args, the enclosing call, following statements)
-    /// can reference the new version.
-    pub(super) fn split_subexpr_for_preamble(
-        &mut self,
-        expr: &Expression,
-    ) -> Result<(Document<'static>, Document<'static>)> {
-        let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-        match open_scope {
-            Some(OpenScopeResult::Value(result_var)) => Ok((expr_doc, leaf::var(result_var))),
-            // BT-3053: no single value — substitute do:'s own `nil` contract.
-            Some(OpenScopeResult::NoValue) => Ok((expr_doc, Document::Str("'nil'"))),
-            None => Ok((Document::Nil, expr_doc)),
-        }
-    }
-
-    /// BT-1937: Wraps a closed dispatch `call_doc` with an optional hoisted
-    /// preamble from [`capture_args_with_preamble`](Self::capture_args_with_preamble)
-    /// or from a receiver's open scope.
-    ///
-    /// If `preamble` is `Document::Nil`, returns `call_doc` unchanged (the
-    /// original closed-expression behavior).
-    ///
-    /// If `preamble` is non-empty, returns
-    /// `preamble + let _ResultVar = call_doc in ` (an open let-chain) and
-    /// stores `_ResultVar` in `last_open_scope_result`. The enclosing
-    /// expression context (statement, local-var binding, outer message send)
-    /// must close or further propagate the open scope so that the `ClassVarsN`
-    /// bindings stay visible to subsequent code.
-    pub(super) fn finalize_dispatch_with_preamble(
-        &mut self,
-        preamble: Document<'static>,
-        call_doc: Document<'static>,
-        result_prefix: &str,
-    ) -> Document<'static> {
-        if matches!(preamble, Document::Nil) {
-            return call_doc;
-        }
-        let result_var = self.fresh_temp_var(result_prefix);
-        let doc = docvec![
-            preamble,
-            "let ",
-            leaf::var(result_var.clone()),
-            " = ",
-            call_doc,
-            " in ",
-        ];
-        self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
-        doc
-    }
-
     /// BT-412/BT-2007: Wrap a class-method call that may return either a
     /// plain value or a `{'class_var_result', Result, NewClassVars}` tuple,
     /// threading the new class-var binding and exposing the unwrapped result.
@@ -571,16 +186,19 @@ impl CoreErlangGenerator {
     ///                  end in
     /// ```
     ///
-    /// Leaves the let-scope open (caller provides the continuation expression)
-    /// and records `_Unwrapped` as `last_open_scope_result` so enclosing
-    /// contexts can reference it. Shared by the local-class-method branch
-    /// (branch 1) and the BT-2007 inherited-dispatch branch in
+    /// ADR 0118 phase 5a/5b (BT-3421/BT-3422): returns a [`ThreadedValue`]
+    /// whose prelude carries the real `ClassVars` `Bind` this call rebinds —
+    /// `_Unwrapped` is the value, with no consuming body of its own. Callers
+    /// splice the prelude into their own frame, or close it
+    /// ([`Self::close_threaded_value_doc`]) so `ClassVarsN` stays visible to
+    /// the continuation. Shared by the local-class-method branch (branch 1)
+    /// and the BT-2007 inherited-dispatch branch in
     /// [`generate_class_method_self_send`](Self::generate_class_method_self_send).
     pub(super) fn emit_class_var_result_unwrap(
         &mut self,
-        args_preamble: Document<'static>,
+        args_prelude: Vec<ThreadedStmt>,
         call_doc: Document<'static>,
-    ) -> Document<'static> {
+    ) -> ThreadedValue {
         let call_result = self.fresh_temp_var("CMR");
         let cv = self.current_class_var();
         // BT-3148: the version numbers driving both verify() and the real
@@ -668,23 +286,28 @@ impl CoreErlangGenerator {
             "class-var rebind from inherited self-dispatch result",
             beamtalk_core::source_analysis::Span::default(),
         );
-        let bind_doc = {
-            let mut ctx = super::threaded_ir::RenderCtx::new(self);
-            super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
-        };
 
         let result = self.fresh_temp_var("Unwrapped");
         let wrapped_res = self.fresh_temp_var("WR");
         let plain_res = self.fresh_temp_var("PR");
 
-        let doc = docvec![
-            args_preamble,
+        // ADR 0118 phase 5a: the call-setup and unwrap steps stay opaque
+        // `Statement`s (the SAME `Document` text this function always built,
+        // byte-for-byte); `bind` is no longer rendered eagerly into the
+        // middle of one big `Document` — it is a real, un-rendered
+        // `ThreadedStmt::Bind` in the returned prelude, so the class-var
+        // mutation this call rebinds is visible to whichever `ThreadedIr`
+        // frame the caller splices the prelude into (ADR 0118 §Decision 4),
+        // not just to this producer's own isolated `construct_and_verify_class_var_bind`
+        // check above.
+        let call_stmt_doc = docvec![
             "let ",
             leaf::var(call_result.clone()),
             " = ",
             call_doc,
             " in ",
-            bind_doc,
+        ];
+        let unwrap_stmt_doc = docvec![
             "let ",
             leaf::var(result.clone()),
             " = case ",
@@ -699,8 +322,15 @@ impl CoreErlangGenerator {
             leaf::var(plain_res),
             " end in ",
         ];
-        self.last_open_scope_result = Some(OpenScopeResult::Value(result));
-        doc
+        let span = beamtalk_core::source_analysis::Span::default();
+        let mut prelude = args_prelude;
+        prelude.push(ThreadedStmt::Statement(call_stmt_doc, span));
+        prelude.push(bind);
+        prelude.push(ThreadedStmt::Statement(unwrap_stmt_doc, span));
+        ThreadedValue {
+            prelude,
+            value: ValueRef::Var(result),
+        }
     }
 
     /// BT-3168 (ADR 0111 Addendum 9, Questions 2/3): rebinds `ClassVarsN`
@@ -812,7 +442,7 @@ impl CoreErlangGenerator {
                 Some(WellKnownSelector::Class) => {
                     // BT-1937: Hoist any side effects in the receiver expression
                     // (none for a literal, but capture preserves the contract).
-                    let (preamble, _) = self.capture_subexpr_sequence(&[receiver], "CharCls")?;
+                    let (preamble, _) = self.thread_subexprs(&[receiver], "CharCls")?;
                     // Resolve to the Character class object so equality with
                     // the `Character` class reference holds — `class_of_object`
                     // for raw integer 65 would otherwise return Integer's
@@ -820,24 +450,16 @@ impl CoreErlangGenerator {
                     let call_doc = Document::Str(
                         "call 'beamtalk_primitive':'class_of_object_by_name'('Character')",
                     );
-                    return Ok(self.finalize_dispatch_with_preamble(
-                        preamble,
-                        call_doc,
-                        "CharClsRes",
-                    ));
+                    return Ok(self.close_prelude(&preamble, call_doc, "CharClsRes"));
                 }
                 Some(WellKnownSelector::RespondsTo) => {
                     let exprs: [&Expression; 2] = [receiver, &arguments[0]];
-                    let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "CharResp")?;
-                    let _recv = docs.remove(0);
-                    let sel_doc = docs.remove(0);
+                    let mut seq = self.sequence_call(&exprs, "CharResp")?;
+                    let _recv = seq.next();
+                    let sel_doc = seq.next();
                     let call_doc =
                         docvec!["call 'bt@stdlib@character':'has_method'(", sel_doc, ")"];
-                    return Ok(self.finalize_dispatch_with_preamble(
-                        preamble,
-                        call_doc,
-                        "CharRespRes",
-                    ));
+                    return Ok(seq.close(self, call_doc, "CharRespRes"));
                 }
                 Some(
                     WellKnownSelector::Perform
@@ -958,9 +580,9 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "CharDisp")?;
-        let actual_receiver = docs.remove(0);
-        let args_doc = Self::join_docs_with_commas(docs);
+        let mut seq = self.sequence_call(&all_exprs, "CharDisp")?;
+        let actual_receiver = seq.next();
+        let args_doc = Self::join_docs_with_commas(seq.rest());
 
         let call_doc = docvec![
             "call 'bt@stdlib@character':'dispatch'(",
@@ -972,7 +594,7 @@ impl CoreErlangGenerator {
             ")"
         ];
 
-        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "CharDispRes"))
+        Ok(seq.close(self, call_doc, "CharDispRes"))
     }
 
     /// Generates a cast (fire-and-forget) message send (BT-920).
@@ -1037,15 +659,9 @@ impl CoreErlangGenerator {
         let doc = docvec![
             "let ",
             leaf::var(discard_var),
-            " = call ",
-            leaf::atom(module),
-            ":'safe_dispatch'(",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "], ",
-            leaf::var(current_state),
-            ") in 'ok'",
+            " = ",
+            Self::safe_dispatch_call_doc(module, selector_atom, args_doc, current_state),
+            " in 'ok'",
         ];
 
         Ok(doc)
@@ -1073,9 +689,9 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "Cast")?;
-        let actual_receiver = docs.remove(0);
-        let args_doc = Self::join_docs_with_commas(docs);
+        let mut seq = self.sequence_call(&all_exprs, "Cast")?;
+        let actual_receiver = seq.next();
+        let args_doc = Self::join_docs_with_commas(seq.rest());
 
         let call_doc = docvec![
             "call 'beamtalk_message_dispatch':'cast'(",
@@ -1087,7 +703,7 @@ impl CoreErlangGenerator {
             "])",
         ];
 
-        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "CastRes"))
+        Ok(seq.close(self, call_doc, "CastRes"))
     }
 
     /// Generates unified runtime dispatch via `beamtalk_message_dispatch:send/3` (BT-430).
@@ -1130,9 +746,9 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&all_exprs, "Disp")?;
-        let actual_receiver = docs.remove(0);
-        let args_doc = Self::join_docs_with_commas(docs);
+        let mut seq = self.sequence_call(&all_exprs, "Disp")?;
+        let actual_receiver = seq.next();
+        let args_doc = Self::join_docs_with_commas(seq.rest());
 
         let call_doc = docvec![
             "call 'beamtalk_message_dispatch':'send'(",
@@ -1144,7 +760,7 @@ impl CoreErlangGenerator {
             "])"
         ];
 
-        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "DispRes"))
+        Ok(seq.close(self, call_doc, "DispRes"))
     }
 
     /// Handles spawn, spawnWith:, await, awaitForever, and await: intrinsics.
@@ -1486,8 +1102,13 @@ impl CoreErlangGenerator {
             // deadlock. The class actor is already processing the outer call, so
             // routing through class_send would deadlock on gen_server:call.
             if self.in_class_method() && name.name == self.class_name() && pkg.is_none() {
-                let doc = self.generate_class_method_self_send(selector, arguments)?;
-                return Ok(Some(doc));
+                // ADR 0118 phase 5b (BT-3422): reached through ordinary
+                // `generate_expression`/`generate_message_send` (not
+                // `threaded_expression`'s own producer recognition), so the
+                // producer's prelude is closed inline into a self-contained
+                // `Document` here rather than left open.
+                let tv = self.generate_class_method_self_send(selector, arguments)?;
+                return Ok(Some(self.close_threaded_value_doc(tv)));
             }
             if self.workspace_mode() && self.context == CodeGenContext::Repl {
                 // REPL top-level: check session bindings first
@@ -1559,8 +1180,11 @@ impl CoreErlangGenerator {
         }
         if let Expression::Identifier(id) = receiver {
             if id.name == "self" {
-                let doc = self.generate_class_method_self_send(selector, arguments)?;
-                return Ok(Some(doc));
+                // ADR 0118 phase 5b (BT-3422): reached through ordinary
+                // `generate_expression`, not `threaded_expression`'s own
+                // producer recognition — close the prelude inline.
+                let tv = self.generate_class_method_self_send(selector, arguments)?;
+                return Ok(Some(self.close_threaded_value_doc(tv)));
             }
         }
         Ok(None)
@@ -1571,12 +1195,22 @@ impl CoreErlangGenerator {
     /// Used by both `self` sends and explicit class name sends (BT-773) within
     /// class methods. Generates direct module function calls to avoid deadlock
     /// since class methods execute inside a `gen_server:call` handler.
+    ///
+    /// ADR 0118 phase 5b (BT-3422): returns a [`ThreadedValue`] whose
+    /// prelude is real `ThreadedStmt`s throughout — every branch threads
+    /// its arguments via [`Self::thread_args`] and either folds the
+    /// resulting prelude into its own class-var `Bind`
+    /// ([`Self::emit_class_var_result_unwrap`]) or, for a branch with no
+    /// class-var `Bind` of its own (instantiation intrinsics, reflective
+    /// primitives, auto-exports, the slot constructor), closes the
+    /// argument prelude into a self-contained call `Document`
+    /// ([`Self::close_prelude`]) and wraps it as a pure `ThreadedValue`.
     #[allow(clippy::too_many_lines)] // Multiple dispatch branches (BT-773/BT-893/BT-996/BT-2003/BT-2007) share args-capture scaffolding.
-    fn generate_class_method_self_send(
+    pub(super) fn generate_class_method_self_send(
         &mut self,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Document<'static>> {
+    ) -> Result<ThreadedValue> {
         let selector_atom = selector.name().to_string();
 
         // ADR 0084 / BT-2267: inside a programmatic ClassBuilder class-method fun
@@ -1587,9 +1221,12 @@ impl CoreErlangGenerator {
         // spawn) still use the process-dict-backed helpers (no export needed).
         if let Some(builder_class) = self.builder_class_method_class() {
             if let Some(doc) = self.try_instantiation_intrinsic(&selector_atom, arguments)? {
-                return Ok(doc);
+                return Ok(ThreadedValue {
+                    prelude: Vec::new(),
+                    value: ValueRef::Doc(doc),
+                });
             }
-            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
             let call_doc = docvec![
                 "call 'beamtalk_class_dispatch':'class_self_dispatch_local'(",
@@ -1615,7 +1252,7 @@ impl CoreErlangGenerator {
             // does NOT roll back class_var_version, so the snapshot we take
             // afterwards (`cv`) reflects the post-args version — that is the
             // ClassVars binding to thread into the callee.
-            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
             let comma = if arguments.is_empty() { "" } else { ", " };
 
@@ -1634,9 +1271,8 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
-            let doc = self.emit_class_var_result_unwrap(args_preamble, call_doc);
-            // NOTE: scope is OPEN — caller provides continuation
-            return Ok(doc);
+            // NOTE: prelude is OPEN — caller splices or open-scope-converts it.
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
         }
         // BT-996: Auto-generated keyword constructor for Value subclass: classes.
         // `ClassName slot: value` inside a class method routes here when the selector
@@ -1652,7 +1288,7 @@ impl CoreErlangGenerator {
             // BT-1937: Hoist preambles from sub-expression class var mutations
             // in the args. cv is read AFTER capture_args_with_preamble so it
             // reflects the post-args ClassVars version.
-            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
             let comma = if arguments.is_empty() { "" } else { ", " };
             // BT-1408: Hash long keyword constructor atoms to stay within
@@ -1669,14 +1305,21 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
-            return Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "Slot"));
+            let doc = self.close_prelude(&args_preamble, call_doc, "Slot");
+            return Ok(ThreadedValue {
+                prelude: Vec::new(),
+                value: ValueRef::Doc(doc),
+            });
         }
         // BT-893: Instantiation selectors (new, new:, spawn, spawnWith:) must bypass
         // gen_server to avoid deadlock — route through class_self_new/class_self_spawn
         // (and BT-2004's class_self_spawn_as/class_self_spawn_with for the named-
         // registration variants).
         if let Some(doc) = self.try_instantiation_intrinsic(&selector_atom, arguments)? {
-            return Ok(doc);
+            return Ok(ThreadedValue {
+                prelude: Vec::new(),
+                value: ValueRef::Doc(doc),
+            });
         }
 
         // BT-3057: Behaviour-protocol reflective primitives (`superclass`,
@@ -1702,7 +1345,7 @@ impl CoreErlangGenerator {
         if let Some(fun_name) =
             class_self_send_reflective_primitive(&selector_atom, arguments.len())
         {
-            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let comma = if arguments.is_empty() { "" } else { ", " };
             let call_doc = docvec![
                 "call 'beamtalk_behaviour_intrinsics':",
@@ -1713,11 +1356,11 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
-            return Ok(self.finalize_dispatch_with_preamble(
-                args_preamble,
-                call_doc,
-                "ReflectivePrimitive",
-            ));
+            let doc = self.close_prelude(&args_preamble, call_doc, "ReflectivePrimitive");
+            return Ok(ThreadedValue {
+                prelude: Vec::new(),
+                value: ValueRef::Doc(doc),
+            });
         }
 
         // BT-2007: Inherited class method — walk the hierarchy at runtime and
@@ -1741,7 +1384,7 @@ impl CoreErlangGenerator {
             // BT-1937: Hoist preambles from sub-expression class var mutations.
             let module = self.module_name.clone();
             let fun_name = selector_atom.replace(':', "");
-            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
 
             let call_doc = docvec![
                 "call ",
@@ -1752,10 +1395,14 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
-            return Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassFn"));
+            let doc = self.close_prelude(&args_preamble, call_doc, "ClassFn");
+            return Ok(ThreadedValue {
+                prelude: Vec::new(),
+                value: ValueRef::Doc(doc),
+            });
         }
 
-        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+        let (args_preamble, args_doc) = self.thread_args(arguments)?;
         let cv = self.current_class_var();
         // BT-3047 / ADR 0109 amendment: derive the target class from `ClassSelf`
         // (closure-captured, so correct even when this self-send executes inside a
@@ -1775,21 +1422,21 @@ impl CoreErlangGenerator {
             args_doc,
             "])"
         ];
-        let doc = self.emit_class_var_result_unwrap(args_preamble, call_doc);
-        // NOTE: scope is OPEN — caller provides continuation (matches the
-        // local-class-method branch above; `last_open_scope_result` is set).
-        Ok(doc)
+        // NOTE: prelude stays real `ThreadedStmt`s here — the caller splices
+        // it into its own frame or closes it (matches the local-class-method
+        // branch above).
+        Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc))
     }
 
     /// BT-3047 / ADR 0109 amendment: the class-name expression derived from
     /// `ClassSelf` (closure-captured, so correct even inside a block executing in
     /// a foreign class's process), for inlining at instantiation-intrinsic call
-    /// sites. Deliberately inlined rather than let-bound: `finalize_dispatch_with_preamble`
-    /// treats *any* non-`Nil` preamble as an open let-chain the caller must
-    /// continue (setting `last_open_scope_result`), which only the argument-hoisting
-    /// preamble from `capture_args_with_preamble` is guaranteed to be consumed
-    /// correctly for — a zero-argument call (e.g. bare `self new`) produces a
-    /// `Nil` args preamble and must stay a *closed* expression. Recomputing this
+    /// sites. Deliberately inlined rather than let-bound: `close_prelude`
+    /// treats *any* non-empty prelude as needing a closing `let` the caller
+    /// must produce, which only the argument-hoisting prelude from
+    /// `thread_args` is guaranteed to be consumed correctly for — a
+    /// zero-argument call (e.g. bare `self new`) produces an empty args
+    /// prelude and must stay a *closed* expression. Recomputing this
     /// cheap expression (a suffix check + `binary_to_existing_atom`) inline at
     /// each use — up to three times per call site for the `spawn`/`spawnAs:`/
     /// `spawnWith:as:` intrinsics, which also resolve `is_abstract` — is
@@ -1847,7 +1494,7 @@ impl CoreErlangGenerator {
         match selector_atom {
             "new" | "new:" => {
                 // BT-1937: Hoist preambles from sub-expression class var mutations.
-                let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+                let (args_preamble, args_doc) = self.thread_args(arguments)?;
                 let call_doc = docvec![
                     "call 'beamtalk_class_instantiation':'class_self_new'(",
                     Self::class_self_name_doc(),
@@ -1857,14 +1504,10 @@ impl CoreErlangGenerator {
                     args_doc,
                     "])"
                 ];
-                Ok(Some(self.finalize_dispatch_with_preamble(
-                    args_preamble,
-                    call_doc,
-                    "NewRes",
-                )))
+                Ok(Some(self.close_prelude(&args_preamble, call_doc, "NewRes")))
             }
             "spawn" | "spawnWith:" => {
-                let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+                let (args_preamble, args_doc) = self.thread_args(arguments)?;
                 let call_doc = docvec![
                     "call 'beamtalk_class_instantiation':'class_self_spawn'(",
                     Self::class_self_name_doc(),
@@ -1878,8 +1521,8 @@ impl CoreErlangGenerator {
                     args_doc,
                     "])"
                 ];
-                Ok(Some(self.finalize_dispatch_with_preamble(
-                    args_preamble,
+                Ok(Some(self.close_prelude(
+                    &args_preamble,
                     call_doc,
                     "SpawnRes",
                 )))
@@ -1916,7 +1559,7 @@ impl CoreErlangGenerator {
         selector_atom: &'static str,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+        let (args_preamble, args_doc) = self.thread_args(arguments)?;
         let call_doc = docvec![
             "call 'beamtalk_class_instantiation':'",
             Document::Str(helper),
@@ -1932,7 +1575,7 @@ impl CoreErlangGenerator {
             args_doc,
             ")"
         ];
-        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, result_prefix))
+        Ok(self.close_prelude(&args_preamble, call_doc, result_prefix))
     }
 
     /// Generates synchronous self-dispatch for actor self-sends (BT-330).
@@ -2093,15 +1736,9 @@ impl CoreErlangGenerator {
         let error_clause = self.generate_self_dispatch_error_clause("SelfError", &selector_atom);
 
         let doc = docvec![
-            "case call ",
-            leaf::atom(module),
-            ":'safe_dispatch'(",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "], ",
-            leaf::var(current_state),
-            ") of ",
+            "case ",
+            Self::safe_dispatch_call_doc(module, selector_atom, args_doc, current_state),
+            " of ",
             "<{'reply', ",
             leaf::var(result_var.clone()),
             ", ",
@@ -2303,15 +1940,9 @@ impl CoreErlangGenerator {
                 docvec![
                     "let ",
                     leaf::var(dispatch_var.clone()),
-                    " = case call ",
-                    leaf::atom(module),
-                    ":'safe_dispatch'(",
-                    leaf::atom(selector_atom),
-                    ", [",
-                    args_doc,
-                    "], ",
-                    leaf::var(current_state),
-                    ") of ",
+                    " = case ",
+                    Self::safe_dispatch_call_doc(module, selector_atom, args_doc, current_state),
+                    " of ",
                 ]
             };
 
@@ -2457,246 +2088,6 @@ impl CoreErlangGenerator {
 
         Ok(doc)
     }
-    ///
-    /// This is used to detect state mutations that require threading through
-    /// control flow constructs.
-    pub(super) fn is_field_assignment(expr: &Expression) -> bool {
-        if let Expression::Assignment { target, .. } = expr {
-            if let Expression::FieldAccess { receiver, .. } = target.as_ref() {
-                if let Expression::Identifier(recv_id) = receiver.as_ref() {
-                    return recv_id.name == "self";
-                }
-            }
-        }
-        false
-    }
-
-    /// BT-2797: Checks if an expression is a self-field access (`self.field`).
-    ///
-    /// Used to scope the runtime Tier 1/Tier 2 discrimination for block value
-    /// calls (`self.field value: ...`) to exactly the shape that needs it — a
-    /// block stored in an instance field, whose Tier-ness can't be known
-    /// statically since it may have been assigned from a different method.
-    pub(super) fn is_self_field_access(expr: &Expression) -> bool {
-        if let Expression::FieldAccess { receiver, .. } = expr {
-            if let Expression::Identifier(recv_id) = receiver.as_ref() {
-                return recv_id.name == "self";
-            }
-        }
-        false
-    }
-
-    /// Checks if an expression is a class variable assignment (`self.classVar := value`).
-    pub(super) fn is_class_var_assignment(&self, expr: &Expression) -> bool {
-        if !self.in_class_method() {
-            return false;
-        }
-        if let Expression::Assignment { target, .. } = expr {
-            if let Expression::FieldAccess {
-                receiver, field, ..
-            } = target.as_ref()
-            {
-                if let Expression::Identifier(recv_id) = receiver.as_ref() {
-                    return recv_id.name == "self"
-                        && self.class_var_names().contains(field.name.as_str());
-                }
-            }
-        }
-        false
-    }
-
-    /// Checks if an expression is a self-send to a class method (BT-412).
-    /// These need special scoping in class method bodies because they may
-    /// update `ClassVars` via `let ClassVarsN = ... in` which must not be wrapped.
-    pub(super) fn is_class_method_self_send(&self, expr: &Expression) -> bool {
-        if !self.in_class_method() || self.class_method_selectors().is_empty() {
-            return false;
-        }
-        if let Expression::MessageSend {
-            receiver, selector, ..
-        } = expr
-        {
-            if let Expression::Identifier(id) = receiver.as_ref() {
-                if id.name == "self" {
-                    let sel_atom = selector.name().to_string();
-                    return self.class_method_selectors().contains(&sel_atom);
-                }
-            }
-        }
-        false
-    }
-
-    /// Checks if an expression is a local variable assignment (`identifier := value`).
-    pub(super) fn is_local_var_assignment(expr: &Expression) -> bool {
-        if let Expression::Assignment { target, .. } = expr {
-            matches!(target.as_ref(), Expression::Identifier(_))
-        } else {
-            false
-        }
-    }
-
-    /// Checks if an expression is a super message send (`super methodName:`).
-    pub(super) fn is_super_message_send(expr: &Expression) -> bool {
-        if let Expression::MessageSend { receiver, .. } = expr {
-            matches!(receiver.as_ref(), Expression::Super(_))
-        } else {
-            false
-        }
-    }
-
-    /// BT-245: Checks if an expression is a self-send in actor context.
-    /// These may mutate actor state and need state threading in loop bodies.
-    /// BT-920: Excludes cast sends (`self method!`), which are fire-and-forget
-    /// and must not thread state through the loop accumulator.
-    pub(super) fn is_actor_self_send(&self, expr: &Expression) -> bool {
-        if self.context != super::CodeGenContext::Actor {
-            return false;
-        }
-        if let Expression::MessageSend {
-            receiver, is_cast, ..
-        } = expr
-        {
-            if *is_cast {
-                return false;
-            }
-            if let Expression::Identifier(id) = receiver.as_ref() {
-                return id.name == "self";
-            }
-        }
-        false
-    }
-
-    /// BT-1420: Checks if an expression is a self-send that goes through `safe_dispatch`
-    /// (or sealed dispatch) and returns `{reply, Result, NewState}`.
-    ///
-    /// Excludes self-sends with selectors that are intercepted by handlers before
-    /// `try_handle_self_dispatch` in `generate_message_send`:
-    /// - Binary operators (`+`, `-`, `*`, etc.)
-    /// - `asType:` (compile-time erasure)
-    /// - `ProtoObject` messages (`class`, `perform:`, `perform:withArguments:`)
-    /// - Object reflection (`fieldAt:`, `fieldAt:put:`, `fieldNames`, `respondsTo:`)
-    /// - Nil protocol (`isNil`, `notNil`, `ifNil:`, etc.)
-    /// - Identity (`yourself`, `hash`)
-    /// - Error signaling (`error:`)
-    /// - Block evaluation (`value`, `value:`, `repeat`, `whileTrue:`, etc.)
-    pub(super) fn is_dispatching_actor_self_send(&self, expr: &Expression) -> bool {
-        if !self.is_actor_self_send(expr) {
-            return false;
-        }
-        if let Expression::MessageSend { selector, .. } = expr {
-            return Self::selector_dispatches_via_self(selector);
-        }
-        true
-    }
-
-    /// The selector half of [`Self::is_dispatching_actor_self_send`]'s
-    /// check — extracted (ADR 0118 phase 1b, BT-3416) so a caller that
-    /// already knows the receiver is a bare `self` without owning an
-    /// `Expression::MessageSend` node to hand back (a cascade message,
-    /// whose selector/arguments come from `CascadeMessage` — see
-    /// `util.rs`'s `cascade_self_dispatch_messages`) can reuse the exact
-    /// same rule instead of copying it (CLAUDE.md: no duplicate
-    /// implementations).
-    ///
-    /// Excludes selectors that are intercepted by handlers before
-    /// `try_handle_self_dispatch` in `generate_message_send`:
-    /// - Binary operators (`+`, `-`, `*`, etc.)
-    /// - `asType:` (compile-time erasure)
-    /// - `ProtoObject` messages (`class`, `perform:`, `perform:withArguments:`)
-    /// - Object reflection (`fieldAt:`, `fieldAt:put:`, `fieldNames`, `respondsTo:`)
-    /// - Nil protocol (`isNil`, `notNil`, `ifNil:`, etc.)
-    /// - Identity (`yourself`, `hash`)
-    /// - Error signaling (`error:`)
-    /// - Block evaluation (`value`, `value:`, `repeat`, `whileTrue:`, etc.)
-    pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
-        // Binary operators are always intercepted by generate_binary_op
-        if matches!(selector, MessageSelector::Binary(_)) {
-            return false;
-        }
-        // BT-2065/BT-2071/BT-2073: Well-known selectors that the intrinsics
-        // layer **unconditionally** handles before `try_handle_self_dispatch`.
-        // Covers ProtoObject (`class`, `perform:`/`perform:withArguments:`/
-        // `performLocally:withArguments:`), Object reflection (`respondsTo:`,
-        // `fieldAt:`, `fieldAt:put:`, `fieldNames`), Nil protocol
-        // (`isNil`/`notNil`/`ifNil:`/`ifNotNil:`/`ifNil:ifNotNil:`/
-        // `ifNotNil:ifNil:`), exception handling (`on:do:`, `ensure:`),
-        // block application (`value`/`value:`/`value:value:`/
-        // `value:value:value:`), block loops (`repeat`/`whileTrue:`/
-        // `whileFalse:`), object identity (`hash`) and error signaling
-        // (`error:`).
-        //
-        // NOTE: Boolean conditionals (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`)
-        // are NOT included here — `try_generate_boolean_protocol` returns
-        // `Ok(None)` (falls through) when no mutation-threading is needed,
-        // allowing the send to reach self-dispatch.
-        if let Some(wk) = selector.well_known() {
-            if matches!(
-                wk,
-                WellKnownSelector::Class
-                    | WellKnownSelector::RespondsTo
-                    | WellKnownSelector::IsNil
-                    | WellKnownSelector::NotNil
-                    | WellKnownSelector::IfNil
-                    | WellKnownSelector::IfNotNil
-                    | WellKnownSelector::IfNilIfNotNil
-                    | WellKnownSelector::IfNotNilIfNil
-                    | WellKnownSelector::OnDo
-                    | WellKnownSelector::Value
-                    | WellKnownSelector::ValueColon
-                    | WellKnownSelector::ValueValue
-                    | WellKnownSelector::ValueValueValue
-                    | WellKnownSelector::WhileTrue
-                    | WellKnownSelector::WhileFalse
-                    | WellKnownSelector::Repeat
-                    | WellKnownSelector::Ensure
-                    | WellKnownSelector::Hash
-                    | WellKnownSelector::Error
-                    | WellKnownSelector::FieldAt
-                    | WellKnownSelector::FieldAtPut
-                    | WellKnownSelector::FieldNames
-                    | WellKnownSelector::Perform
-                    | WellKnownSelector::PerformWithArgs
-                    | WellKnownSelector::PerformLocallyWithArgs
-            ) {
-                return false;
-            }
-        }
-        // Remaining intrinsics not modelled as `WellKnownSelector` variants
-        // — these are class-specific or compile-time-only constructs that
-        // do not warrant universal selector classification.
-        let name = selector.name();
-        if matches!(
-            name.as_str(),
-            // asType: (compile-time erasure)
-            "asType:"
-            // Identity
-            | "yourself"
-        ) {
-            return false;
-        }
-        true
-    }
-
-    /// Checks if an expression is an `error:` message send.
-    ///
-    /// Since `erlang:error/1` never returns (always throws an exception),
-    /// expressions ending with `error:` should not be wrapped in reply tuples.
-    pub(super) fn is_error_message_send(expr: &Expression) -> bool {
-        // BT-2073: classify via the well-known enum so a future rename of the
-        // `Error` variant forces this site to update too. The classifier
-        // guarantees keyword/arity = 1, but we still gate on arguments.len()
-        // for the same defensive reason the original predicate did.
-        if let Expression::MessageSend {
-            selector,
-            arguments,
-            ..
-        } = expr
-        {
-            return matches!(selector.well_known(), Some(WellKnownSelector::Error))
-                && arguments.len() == 1;
-        }
-        false
-    }
 
     /// BT-2797: Generates the RHS `Document` for a `self.field := value`
     /// assignment, special-casing a block literal with field writes (and no
@@ -2756,17 +2147,18 @@ impl CoreErlangGenerator {
     /// The caller is responsible for closing the expression (generating the body
     /// that uses the new state).
     ///
-    /// BT-3180: the plain-`State` branch below carries `ThreadedIr`
-    /// instrumentation (`check_simple_field_bind_invariant`, reused from
-    /// `expressions.rs`) around its `next_state_var()` mint — chosen over
-    /// promoting the mint to a real `Bind` (like the class-var branch
-    /// already does): this function's `Document` is hand-built and returned
-    /// directly to 7 different call sites with their own surrounding glue
-    /// (loop bodies, conditional arms, intrinsics), so replacing it with a
-    /// `ThreadedStmt::Bind` would touch every one of those emission paths
-    /// and require re-verifying the whole snapshot corpus for a version-mint
-    /// site that was never actually producing wrong output — instrumentation
-    /// only, matching BT-3139's precedent for this construct family.
+    /// BT-3466: the plain `Actor`/`ValueType` tail (the `else` fallthrough
+    /// below) is now a thin `Closure::Open` call into
+    /// [`Self::lower_field_write`] — the single lowering core this,
+    /// `expressions.rs`'s `generate_field_assignment` (`Closure::Closed`),
+    /// and `control_flow::conditionals`'s `lower_field_assignment_bind` (the
+    /// un-rendered-`Bind`-push consumption style) all now share. Before this
+    /// issue this branch was hand-built and Actor-only — a `ValueType` field
+    /// write reaching it (from inside a loop/conditional/block body) would
+    /// have silently threaded through the actor `State`/`StateAcc` map, a
+    /// variable that does not exist in a value-type method, instead of
+    /// `Self` — the missing `ValueType` arm `lower_field_write`'s
+    /// [`FieldWriteSite`] dispatch now supplies.
     pub(super) fn generate_field_assignment_open(
         &mut self,
         expr: &Expression,
@@ -2777,8 +2169,9 @@ impl CoreErlangGenerator {
                 // write directly inside a Letrec loop body that threads
                 // `ClassVars` through the loop's own recursive tail call —
                 // threaded via the SAME shared helper the method's own
-                // top-frame write uses (`lower_class_var_field_assignment_bind`),
-                // but tagged with the loop's real, already-minted frame
+                // top-frame write uses (`lower_class_var_field_assignment_bind`,
+                // reached through `lower_field_write`'s `ClassVar` arm), but
+                // tagged with the loop's real, already-minted frame
                 // (`current_branch_frame()`) instead of `FrameId::ROOT`, per
                 // Question 2's resolution. `loop_threads_class_vars` scopes
                 // this to exactly the Letrec loop-body call path — see its
@@ -2786,33 +2179,39 @@ impl CoreErlangGenerator {
                 // Foldl body, conditional, or block literal (all of which
                 // still hit `reject_class_var_field_assignment` below,
                 // unchanged).
-                if self.is_class_var_assignment(expr) && self.loop_threads_class_vars {
+                if self.is_class_var_assignment(expr) && self.loop_mode.loop_threads_class_vars {
                     let frame = self.current_branch_frame();
-                    let (preamble_doc, bind, val_var) =
-                        self.lower_class_var_field_assignment_bind(&field.name, value, frame)?;
-                    let bind_doc = {
-                        let mut ctx = super::threaded_ir::RenderCtx::new(self);
-                        super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
-                    };
-                    return Ok((docvec![preamble_doc, bind_doc], val_var));
+                    return self.lower_field_write(
+                        FieldWriteSite::ClassVar,
+                        Closure::Open,
+                        &field.name,
+                        value,
+                        frame,
+                    );
                 }
                 self.reject_class_var_field_assignment(expr, field)?;
                 // BT-1342: Full-extract mode — rebind field param instead of maps:put.
                 // When the field is in hybrid_mutated_fields, the field has been extracted
                 // to a direct fun parameter. We rebind it to a fresh variable and update
                 // the readonly params map so subsequent reads use the new variable.
-                if self.in_hybrid_loop && self.hybrid_mutated_fields.contains(field.name.as_str()) {
+                if self.loop_mode.in_hybrid_loop
+                    && self
+                        .loop_mode
+                        .hybrid_mutated_fields
+                        .contains(field.name.as_str())
+                {
                     let val_var = self.fresh_temp_var("Val");
                     // Snapshot field params before evaluating RHS so nested field
                     // assignments (e.g. `self.x := (self.y := 42)`) don't leak
                     // inner updates past the outer assignment.
-                    let saved_field_params = self.hybrid_readonly_field_params.clone();
+                    let saved_field_params = self.loop_mode.hybrid_readonly_field_params.clone();
                     let val_doc = self.expression_doc(value)?;
-                    self.hybrid_readonly_field_params = saved_field_params;
+                    self.loop_mode.hybrid_readonly_field_params = saved_field_params;
                     let new_field_var = self
                         .fresh_temp_var(&format!("{}Field", Self::to_core_erlang_var(&field.name)));
                     // Update the param map so subsequent reads use the new var.
-                    self.hybrid_readonly_field_params
+                    self.loop_mode
+                        .hybrid_readonly_field_params
                         .insert(field.name.to_string(), new_field_var.clone());
                     return Ok((
                         docvec![
@@ -2830,80 +2229,27 @@ impl CoreErlangGenerator {
                     ));
                 }
 
-                let val_var = self.fresh_temp_var("Val");
-                let current_state = self.current_state_var();
-                let source_state_version = self.state_version();
-                let val_doc = self.generate_field_assignment_value_doc(value)?;
-
-                let new_state = self.next_state_var();
-                let target_state_version = self.state_version();
-                // BT-3180: this "open" (non-last-position) sibling of
-                // `generate_field_assignment`'s plain-State branch had no
-                // `ThreadedIr` instrumentation around its `next_state_var()`
-                // mint — most of this function's call sites sit outside any
-                // backfilled `Vec<ThreadedStmt>` body sequence, so nothing
-                // else ever isolated-verifies this version step.
-                self.check_simple_field_bind_invariant(
-                    super::threaded_ir::VersionPrefix::State,
-                    source_state_version,
-                    target_state_version,
-                    "actor State open field-assignment version bind",
-                    value.span(),
+                // BT-3466: `ValueType` gains the `Self`-threading arm it
+                // lacked before this issue (see this function's own doc
+                // comment) — `FieldWriteSite::for_context` is the same
+                // dispatch `generate_field_assignment`'s (the `Closed`
+                // sibling's) plain-write default uses.
+                let site = FieldWriteSite::for_context(self.context);
+                // BT-884: `lower_field_write` returns the val var so callers
+                // (e.g. cascade codegen) can reference the assigned value
+                // after hoisting the binding.
+                return self.lower_field_write(
+                    site,
+                    Closure::Open,
+                    &field.name,
+                    value,
+                    FrameId::ROOT,
                 );
-
-                let doc = docvec![
-                    "let ",
-                    leaf::var(val_var.clone()),
-                    " = ",
-                    val_doc,
-                    " in let ",
-                    leaf::var(new_state),
-                    " = call 'maps':'put'(",
-                    leaf::atom(field.name.clone()),
-                    ", ",
-                    leaf::var(val_var.clone()),
-                    ", ",
-                    leaf::var(current_state),
-                    ") in ",
-                ];
-
-                // BT-884: Return the val var so callers (e.g. cascade codegen) can
-                // reference the assigned value after hoisting the binding.
-                return Ok((doc, val_var));
             }
         }
         Err(CodeGenError::Internal(
             "generate_field_assignment_open called on non-field-assignment expression".to_string(),
         ))
-    }
-
-    /// BT-1324: Checks if an expression is `self fieldAt: <name> put: <value>` in actor context.
-    /// These need state threading via maps:put, similar to field assignments.
-    pub(super) fn is_self_field_at_put(&self, expr: &Expression) -> bool {
-        if self.context != super::CodeGenContext::Actor {
-            return false;
-        }
-        if let Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            ..
-        } = expr
-        {
-            if let Expression::Identifier(id) = receiver.as_ref() {
-                // BT-2073: classify via the well-known enum. The classifier
-                // already guarantees the two-part keyword shape; arguments.len()
-                // is checked defensively for parser-shape consistency.
-                if id.name == "self"
-                    && self.lookup_var("self").is_none()
-                    && matches!(selector.well_known(), Some(WellKnownSelector::FieldAtPut))
-                    && arguments.len() == 2
-                {
-                    return true;
-                }
-            }
-        }
-        false
     }
 
     /// BT-1324: Generates the opening part of a `self fieldAt: name put: value` with state threading.
@@ -2994,7 +2340,7 @@ impl CoreErlangGenerator {
         // export, so this must not use the compiled `beamtalk_dispatch:super/5`
         // instance path below.
         if let Some(builder_class) = self.builder_class_method_class() {
-            let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
             let call_doc = docvec![
                 "call 'beamtalk_class_dispatch':'class_self_dispatch'(",
@@ -3007,7 +2353,10 @@ impl CoreErlangGenerator {
                 args_doc,
                 "])"
             ];
-            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
+            // ADR 0118 phase 5b (BT-3422): reached through ordinary
+            // `generate_expression` — close the producer's prelude inline.
+            let tv = self.emit_class_var_result_unwrap(args_preamble, call_doc);
+            return Ok(self.close_threaded_value_doc(tv));
         }
 
         let class_name = self.class_name();
@@ -3180,7 +2529,7 @@ impl CoreErlangGenerator {
         // BT-1937: Capture receiver + arg as one ordered sequence so
         // left-to-right evaluation order is preserved.
         let exprs: [&Expression; 2] = [receiver, &arguments[0]];
-        let (preamble, mut docs) = self.capture_subexpr_sequence(&exprs, "Lookup")?;
+        let (preamble, mut docs) = self.thread_subexprs(&exprs, "Lookup")?;
         let arg_doc = docs.pop().expect("arg");
         let actual_receiver = docs.pop().expect("receiver");
 
@@ -3191,7 +2540,7 @@ impl CoreErlangGenerator {
             arg_doc,
             ")"
         ];
-        Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "MethodLookup"))
+        Ok(self.close_prelude(&preamble, call_doc, "MethodLookup"))
     }
 
     /// Generates a binding-aware class method call (ADR 0019 Phase 3).
@@ -3235,29 +2584,19 @@ impl CoreErlangGenerator {
         // once (fixing a pre-existing double-compilation of `args_doc` in both
         // `case` branches) and so open let-chains from class method self-sends
         // propagate to the surrounding scope.
-        let (arg_preamble, arg_refs, any_open_scope) =
-            self.bind_args_to_temps(arguments, "BindArg")?;
+        let (arg_prelude, arg_refs) = self.thread_args_bound(arguments, "BindArg")?;
         let args_doc = Self::join_docs_with_commas(arg_refs);
 
         // BT-1639: Build the class-side fallback: direct call or gen_server
         let class_fallback: Document<'static> =
-            if let Some(info) = self.direct_call_eligible.get(class_name) {
-                if info.selectors.contains(&raw) {
-                    let safe_fn = super::selector_mangler::safe_class_method_fn_name(&raw);
-                    let comma = if arguments.is_empty() { "" } else { ", " };
-                    docvec![
-                        "call ",
-                        leaf::atom(info.module_name.clone()),
-                        ":",
-                        leaf::atom(safe_fn),
-                        "('nil', ~{}~",
-                        comma,
-                        args_doc.clone(),
-                        ")"
-                    ]
-                } else {
-                    self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
-                }
+            if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw) {
+                let safe_fn = super::selector_mangler::safe_class_method_fn_name(&raw);
+                Self::direct_class_method_call_doc(
+                    module_name,
+                    safe_fn,
+                    args_doc.clone(),
+                    arguments.is_empty(),
+                )
             } else {
                 self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
             };
@@ -3323,23 +2662,16 @@ impl CoreErlangGenerator {
             " end"
         ];
 
-        // BT-1942: Propagate open scope upward if any arg mutated class vars.
-        if any_open_scope {
-            let result_var = self.fresh_temp_var("BindClassRes");
-            let doc = docvec![
-                lookup_binding,
-                arg_preamble,
-                "let ",
-                leaf::var(result_var.clone()),
-                " = ",
-                case_doc,
-                " in ",
-            ];
-            self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
-            Ok(doc)
-        } else {
-            Ok(docvec![lookup_binding, arg_preamble, case_doc])
-        }
+        // ADR 0118 phase 5b: thread the lookup binding ahead of the arg
+        // prelude (same order the pre-migration code built by hand), then
+        // close — this function returns a bare `Document`, so any `ClassVars`
+        // mutation an argument performed cannot stay visible beyond it.
+        let mut prelude = vec![ThreadedStmt::Statement(
+            lookup_binding,
+            beamtalk_core::source_analysis::Span::default(),
+        )];
+        prelude.extend(arg_prelude);
+        Ok(self.close_prelude(&prelude, case_doc, "BindClassRes"))
     }
 
     /// Generates workspace-mode class send for actor/value-type methods.
@@ -3358,14 +2690,8 @@ impl CoreErlangGenerator {
         let raw_selector = selector.name().to_string();
 
         // BT-1639: Direct call optimization for sealed class methods
-        if let Some(info) = self.direct_call_eligible.get(class_name) {
-            if info.selectors.contains(&raw_selector) {
-                return self.generate_direct_class_method_call(
-                    &info.module_name.clone(),
-                    &raw_selector,
-                    arguments,
-                );
-            }
+        if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw_selector) {
+            return self.generate_direct_class_method_call(&module_name, &raw_selector, arguments);
         }
 
         // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
@@ -3376,8 +2702,7 @@ impl CoreErlangGenerator {
         // args, preserving "receiver first, then args" message-send semantics.
         // Then bind args to temp vars so they are evaluated once and their open
         // let-chains propagate upward.
-        let (arg_preamble, arg_refs, any_open_scope) =
-            self.bind_args_to_temps(arguments, "WsArg")?;
+        let (arg_prelude, arg_refs) = self.thread_args_bound(arguments, "WsArg")?;
         let args_doc = Self::join_docs_with_commas(arg_refs);
 
         let lookup_binding = docvec![
@@ -3395,31 +2720,18 @@ impl CoreErlangGenerator {
             "<",
             leaf::var(class_pid_var.clone()),
             "> when 'true' -> ",
-            "call 'beamtalk_object_class':'class_send'(",
-            leaf::var(class_pid_var),
-            ", ",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "]) end"
+            Self::class_send_call_doc(&class_pid_var, selector_atom, args_doc),
+            " end"
         ];
 
-        if any_open_scope {
-            let result_var = self.fresh_temp_var("WsClassRes");
-            let doc = docvec![
-                lookup_binding,
-                arg_preamble,
-                "let ",
-                leaf::var(result_var.clone()),
-                " = ",
-                case_doc,
-                " in ",
-            ];
-            self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
-            Ok(doc)
-        } else {
-            Ok(docvec![lookup_binding, arg_preamble, case_doc])
-        }
+        // ADR 0118 phase 5b: see the analogous binding-send helper above —
+        // this function also returns a bare `Document`, so close.
+        let mut prelude = vec![ThreadedStmt::Statement(
+            lookup_binding,
+            beamtalk_core::source_analysis::Span::default(),
+        )];
+        prelude.extend(arg_prelude);
+        Ok(self.close_prelude(&prelude, case_doc, "WsClassRes"))
     }
 
     /// Generates a class-level method call (BT-215).
@@ -3452,14 +2764,8 @@ impl CoreErlangGenerator {
         let raw_selector = selector.name().to_string();
 
         // BT-1639: Check if this class method is eligible for direct call optimization.
-        if let Some(info) = self.direct_call_eligible.get(class_name) {
-            if info.selectors.contains(&raw_selector) {
-                return self.generate_direct_class_method_call(
-                    &info.module_name.clone(),
-                    &raw_selector,
-                    arguments,
-                );
-            }
+        if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw_selector) {
+            return self.generate_direct_class_method_call(&module_name, &raw_selector, arguments);
         }
 
         // Fallback: gen_server dispatch via class_send
@@ -3468,7 +2774,7 @@ impl CoreErlangGenerator {
         // BT-1937: Hoist preambles from sub-expression class var mutations.
         let selector_atom = super::selector_mangler::safe_class_method_selector(&raw_selector);
         let class_pid_var = self.fresh_var("ClassPid");
-        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
+        let (args_preamble, args_doc) = self.thread_args(arguments)?;
 
         let call_doc = docvec![
             "let ",
@@ -3476,16 +2782,10 @@ impl CoreErlangGenerator {
             " = call 'beamtalk_class_registry':'whereis_class'(",
             leaf::atom(class_name.to_string()),
             ") in ",
-            "call 'beamtalk_object_class':'class_send'(",
-            leaf::var(class_pid_var),
-            ", ",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "])"
+            Self::class_send_call_doc(&class_pid_var, selector_atom, args_doc),
         ];
 
-        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "ClassCall"))
+        Ok(self.close_prelude(&args_preamble, call_doc, "ClassCall"))
     }
 
     /// BT-1639: Generates a direct function call to a sealed class method.
@@ -3505,22 +2805,39 @@ impl CoreErlangGenerator {
         // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
         // BT-1937: Hoist preambles from sub-expression class var mutations.
         let safe_fn = super::selector_mangler::safe_class_method_fn_name(selector);
-        let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
-        let comma = if arguments.is_empty() { "" } else { ", " };
+        let (args_preamble, args_doc) = self.thread_args(arguments)?;
+        let call_doc = Self::direct_class_method_call_doc(
+            module_name.to_string(),
+            safe_fn,
+            args_doc,
+            arguments.is_empty(),
+        );
 
+        Ok(self.close_prelude(&args_preamble, call_doc, "DirectCall"))
+    }
+
+    /// Builds the `call Module:safe_fn('nil', ~{}~, Args...)` direct-call
+    /// fragment shared by [`Self::generate_direct_class_method_call`] and
+    /// `generate_binding_aware_class_send`'s already-threaded-args inline
+    /// direct-call branch.
+    fn direct_class_method_call_doc(
+        module_name: String,
+        safe_fn: String,
+        args_doc: Document<'static>,
+        args_empty: bool,
+    ) -> Document<'static> {
+        let comma = if args_empty { "" } else { ", " };
         // Core Erlang empty map is ~{}~ (not #{} which is Erlang source syntax)
-        let call_doc = docvec![
+        docvec![
             "call ",
-            leaf::atom(module_name.to_string()),
+            leaf::atom(module_name),
             ":",
             leaf::atom(safe_fn),
             "('nil', ~{}~",
             comma,
             args_doc,
             ")"
-        ];
-
-        Ok(self.finalize_dispatch_with_preamble(args_preamble, call_doc, "DirectCall"))
+        ]
     }
 
     /// BT-1639: Generates the `gen_server` `class_send` fallback for binding-aware dispatch.
@@ -3540,14 +2857,43 @@ impl CoreErlangGenerator {
             " = call 'beamtalk_class_registry':'whereis_class'(",
             leaf::atom(class_name.to_string()),
             ") in ",
+            Self::class_send_call_doc(&class_pid_var, class_selector, args_doc),
+        ]
+    }
+
+    /// Builds the shared `call
+    /// 'beamtalk_object_class':'class_send'(ClassPid, Selector, [Args])`
+    /// fragment — the runtime `gen_server` dispatch every class-send fallback
+    /// eventually reaches, once a live `ClassPid` is in hand.
+    fn class_send_call_doc(
+        class_pid_var: &str,
+        selector_atom: String,
+        args_doc: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
             "call 'beamtalk_object_class':'class_send'(",
-            leaf::var(class_pid_var),
+            leaf::var(class_pid_var.to_string()),
             ", ",
-            leaf::atom(class_selector),
+            leaf::atom(selector_atom),
             ", [",
             args_doc,
             "])"
         ]
+    }
+
+    /// Shared `direct_call_eligible` gate — returns the target module name
+    /// when `class_name`/`raw_selector` is eligible for the sealed-class
+    /// direct-call optimization (no class variables, no `gen_server`
+    /// round-trip needed). Used by every direct-call gate check
+    /// (`generate_binding_aware_class_send`, `generate_workspace_class_send`,
+    /// `generate_class_method_call`) instead of each repeating the same
+    /// `.get(class_name)` / `.selectors.contains(...)` lookup.
+    fn direct_call_eligible_module(&self, class_name: &str, raw_selector: &str) -> Option<String> {
+        self.direct_call_eligible.get(class_name).and_then(|info| {
+            info.selectors
+                .contains(raw_selector)
+                .then(|| info.module_name.to_string())
+        })
     }
 
     /// BT-851: Pre-scans a class for self-sends that pass Tier 2 (stateful) block arguments.
@@ -3936,65 +3282,86 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         if self.is_class_sealed() {
             let selector_name = selector.name().to_string();
-            if self.sealed_method_selectors().contains(&selector_name) {
-                let self_var = self.fresh_temp_var("SealedSelf");
+            // The `make_self`/`let DispatchVar = case call Module:...`
+            // scaffolding is identical whichever sealed callee is chosen below —
+            // only the callee expression (`callee_doc`) differs.
+            let self_var = self.fresh_temp_var("SealedSelf");
+            let callee_doc = if self.sealed_method_selectors().contains(&selector_name) {
                 let comma = if no_args { "" } else { ", " };
                 docvec![
-                    "let ",
-                    leaf::var(self_var.clone()),
-                    " = call 'beamtalk_actor':'make_self'(",
-                    leaf::var(current_state.to_string()),
-                    ") in let ",
-                    leaf::var(dispatch_var.to_string()),
-                    " = case call ",
                     leaf::atom(module.to_string()),
                     ":",
                     leaf::atom(super::selector_mangler::sealed_fn_name(&selector_name)),
                     "(",
                     args_doc,
                     comma,
-                    leaf::var(self_var),
+                    leaf::var(self_var.clone()),
                     ", ",
                     leaf::var(current_state.to_string()),
-                    ") of "
+                    ")"
                 ]
             } else {
-                let self_var = self.fresh_temp_var("SealedSelf");
                 docvec![
-                    "let ",
-                    leaf::var(self_var.clone()),
-                    " = call 'beamtalk_actor':'make_self'(",
-                    leaf::var(current_state.to_string()),
-                    ") in let ",
-                    leaf::var(dispatch_var.to_string()),
-                    " = case call ",
                     leaf::atom(module.to_string()),
                     ":'dispatch'(",
                     leaf::atom(selector_atom.to_string()),
                     ", [",
                     args_doc,
                     "], ",
-                    leaf::var(self_var),
+                    leaf::var(self_var.clone()),
                     ", ",
                     leaf::var(current_state.to_string()),
-                    ") of "
+                    ")"
                 ]
-            }
+            };
+            docvec![
+                "let ",
+                leaf::var(self_var),
+                " = call 'beamtalk_actor':'make_self'(",
+                leaf::var(current_state.to_string()),
+                ") in let ",
+                leaf::var(dispatch_var.to_string()),
+                " = case call ",
+                callee_doc,
+                " of "
+            ]
         } else {
             docvec![
                 "let ",
                 leaf::var(dispatch_var.to_string()),
-                " = case call ",
-                leaf::atom(module.to_string()),
-                ":'safe_dispatch'(",
-                leaf::atom(selector_atom.to_string()),
-                ", [",
-                args_doc,
-                "], ",
-                leaf::var(current_state.to_string()),
-                ") of "
+                " = case ",
+                Self::safe_dispatch_call_doc(
+                    module.to_string(),
+                    selector_atom.to_string(),
+                    args_doc,
+                    current_state.to_string()
+                ),
+                " of "
             ]
         }
+    }
+
+    /// BT-920/BT-403: builds the shared `call Module:'safe_dispatch'(Selector,
+    /// [Args], State)` fragment used by every non-sealed self-dispatch call
+    /// site (self-cast, discarding self-dispatch, open self-dispatch, and the
+    /// Tier 2 dispatch call above).
+    fn safe_dispatch_call_doc(
+        module: impl Into<String>,
+        selector_atom: impl Into<String>,
+        args_doc: Document<'static>,
+        state_var: String,
+    ) -> Document<'static> {
+        docvec![
+            "call ",
+            leaf::atom(module),
+            ":'safe_dispatch'(",
+            leaf::atom(selector_atom),
+            ", [",
+            args_doc,
+            "], ",
+            leaf::var(state_var),
+            ")"
+        ]
     }
 }
 
@@ -4048,7 +3415,7 @@ pub(super) fn is_class_auto_export_selector(selector_atom: &str, arity: usize) -
 ///
 /// Unlike `is_class_auto_export_selector`'s raw module exports, these
 /// selectors are ordinary `@primitive`-backed methods inherited from
-/// `Behaviour`/`Class` (see `stdlib/src/Behaviour.bt`) that non-self-send
+/// `Behaviour`/`Class` (see `stdlib/src/behaviour.bt`) that non-self-send
 /// dispatch resolves via `try_class_chain_fallthrough`'s
 /// `beamtalk_dispatch:lookup/5` walk — a walk that itself is not reachable
 /// from inside the class's own process (it round-trips through
@@ -4086,623 +3453,4 @@ pub(super) fn class_self_send_reflective_primitive(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        class_self_send_reflective_primitive, is_character_typed_receiver,
-        is_class_auto_export_selector,
-    };
-    use crate::core_erlang::CoreErlangGenerator;
-    use beamtalk_core::ast::{
-        Expression, Identifier, KeywordPart, Literal, MessageSelector, MethodDefinition,
-        TypeAnnotation,
-    };
-    use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
-    use std::collections::BTreeSet;
-
-    fn s() -> Span {
-        Span::new(0, 0)
-    }
-
-    /// BT-2029 / BT-3057: the classifier must stay in sync with the actual
-    /// reachable auto-exports on generated class modules. `class_name/0` is
-    /// reachable via plain self-send and must short-circuit to a direct call;
-    /// `superclass` moved to `class_self_send_reflective_primitive` (BT-3057)
-    /// because its raw export returns a bare atom instead of a class object,
-    /// so it must NOT be classified as an auto-export here anymore.
-    /// `methods/0` does not exist on the current codegen (an earlier mistaken
-    /// inclusion); `method_table/0` and `has_method/1` are codegen-internal
-    /// reflection APIs with no Beamtalk surface and must NOT be classified as
-    /// auto-exports (they would compile to a direct call that users cannot
-    /// reach anyway, but including them would bypass the structured DNU path
-    /// that catches typos). Arity mismatches must also return false so that,
-    /// e.g., `self class_name: X` does not get hijacked into a direct call to
-    /// the 0-arity `class_name/0`.
-    #[test]
-    fn is_class_auto_export_selector_matches_reachable_exports() {
-        assert!(is_class_auto_export_selector("class_name", 0));
-
-        // BT-3057: superclass now routes through the reflective-primitive
-        // path (its raw export is unwrapped and identity-broken), not here.
-        assert!(!is_class_auto_export_selector("superclass", 0));
-
-        // Codegen-internal, not reachable via Beamtalk self-send.
-        assert!(!is_class_auto_export_selector("method_table", 0));
-        assert!(!is_class_auto_export_selector("has_method", 1));
-        assert!(!is_class_auto_export_selector("register_class", 0));
-        assert!(!is_class_auto_export_selector("__beamtalk_meta", 0));
-
-        // Historical mistake — `methods/0` is not emitted by the current
-        // codegen, so classifying it as auto-export would produce a call
-        // to a non-existent function.
-        assert!(!is_class_auto_export_selector("methods", 0));
-
-        // Arity mismatches must not match.
-        assert!(!is_class_auto_export_selector("superclass", 1));
-        assert!(!is_class_auto_export_selector("class_name", 1));
-
-        // Arbitrary user selectors must fall through to inherited dispatch.
-        assert!(!is_class_auto_export_selector("increment", 0));
-        assert!(!is_class_auto_export_selector("at:put:", 2));
-    }
-
-    /// BT-3057: `superclass` and `includesSelector:` must route to their
-    /// real `beamtalk_behaviour_intrinsics` implementations so a
-    /// class-method self-send produces the same value non-self-send dispatch
-    /// would (a genuine `#beamtalk_object{}` for `superclass`, a proper
-    /// dispatch instead of DNU for `includesSelector:`). Selectors whose
-    /// intrinsic is not deadlock-safe from inside the class's own process
-    /// (`subclasses`, `allSubclasses` — see the function doc) must NOT
-    /// appear here; arity mismatches must not match either.
-    #[test]
-    fn class_self_send_reflective_primitive_matches_safe_selectors_only() {
-        assert_eq!(
-            class_self_send_reflective_primitive("superclass", 0),
-            Some("classSuperclass")
-        );
-        assert_eq!(
-            class_self_send_reflective_primitive("includesSelector:", 1),
-            Some("classIncludesSelector")
-        );
-
-        // Arity mismatches must not match.
-        assert_eq!(class_self_send_reflective_primitive("superclass", 1), None);
-        assert_eq!(
-            class_self_send_reflective_primitive("includesSelector:", 0),
-            None
-        );
-
-        // Not deadlock-safe (unconditional gen_server:call in the intrinsic) —
-        // must stay off this list until audited/fixed.
-        assert_eq!(class_self_send_reflective_primitive("subclasses", 0), None);
-        assert_eq!(
-            class_self_send_reflective_primitive("allSubclasses", 0),
-            None
-        );
-
-        // Arbitrary user selectors must fall through to inherited dispatch.
-        assert_eq!(class_self_send_reflective_primitive("increment", 0), None);
-    }
-
-    /// BT-3018 / ADR 0109: `File open:…do:` is lowered at the call site so the
-    /// user's block runs in the caller rather than the File class `gen_server`.
-    /// The interception is keyed on the *unqualified* stdlib `File` — a
-    /// package-qualified `mylib@File` is an unrelated class that happens to
-    /// share the name, and must keep reaching its own implementation.
-    #[test]
-    fn block_scoped_file_open_is_lowered_only_for_unqualified_file() {
-        /// Lowers `[package@]File <keywords>` with one argument per keyword.
-        fn lower(package: Option<&str>, keywords: &[&str]) -> String {
-            let mut generator = CoreErlangGenerator::new("test");
-            let receiver = Expression::ClassReference {
-                name: Identifier::new("File", s()),
-                package: package.map(|p| Identifier::new(p, s())),
-                span: s(),
-            };
-            let selector = MessageSelector::Keyword(
-                keywords.iter().map(|k| KeywordPart::new(*k, s())).collect(),
-            );
-            let arguments: Vec<_> = keywords
-                .iter()
-                .map(|k| Expression::Identifier(Identifier::new(k.trim_end_matches(':'), s())))
-                .collect();
-            generator
-                .generate_message_send(&receiver, &selector, &arguments)
-                .unwrap()
-                .to_pretty_string()
-        }
-
-        // Both intercepted selectors, so dropping either from the `matches!`
-        // list fails here rather than silently reintroducing the deadlock.
-        for keywords in [&["open:", "do:"][..], &["open:", "mode:", "do:"][..]] {
-            let selector_atom = keywords.concat();
-
-            let unqualified = lower(None, keywords);
-            assert!(
-                unqualified.contains("'native_call'(")
-                    && unqualified.contains("'beamtalk_file'")
-                    && unqualified.contains(&format!("'{selector_atom}'")),
-                "unqualified File {selector_atom} should lower to a native_call in the \
-                 caller. Got: {unqualified}"
-            );
-            assert!(
-                !unqualified.contains("class_send"),
-                "the block must not reach the class gen_server. Got: {unqualified}"
-            );
-
-            // A package-qualified receiver keeps the ordinary class-send path:
-            // asserted positively, so an empty or otherwise-shaped lowering
-            // cannot pass by merely lacking the stdlib module name.
-            let qualified = lower(Some("mylib"), keywords);
-            assert!(
-                !qualified.contains("'beamtalk_file'"),
-                "mylib@File {selector_atom} is a different class and must not be \
-                 redirected to the stdlib File shim. Got: {qualified}"
-            );
-            assert!(
-                qualified.contains("class_send"),
-                "mylib@File {selector_atom} should fall through to a normal class \
-                 send. Got: {qualified}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_generate_message_send_unary_uses_dispatch() {
-        let mut generator = CoreErlangGenerator::new("test");
-        let receiver = Expression::Identifier(Identifier::new("counter", s()));
-        let selector = MessageSelector::Unary("increment".into());
-        let doc = generator
-            .generate_message_send(&receiver, &selector, &[])
-            .unwrap();
-        let output = doc.to_pretty_string();
-        assert!(
-            output.contains("beamtalk_message_dispatch':'send'("),
-            "unary send should use unified dispatch. Got: {output}"
-        );
-        assert!(
-            output.contains("'increment'"),
-            "should include selector atom. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_generate_cast_send_non_actor_routes_via_cast() {
-        let mut generator = CoreErlangGenerator::new("test");
-        let receiver = Expression::Identifier(Identifier::new("other", s()));
-        let selector = MessageSelector::Unary("doIt".into());
-        let doc = generator
-            .generate_cast_send(&receiver, &selector, &[])
-            .unwrap();
-        let output = doc.to_pretty_string();
-        assert!(
-            output.contains("beamtalk_message_dispatch':'cast'("),
-            "non-actor cast send should route through cast/3. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_generate_super_send_uses_beamtalk_dispatch() {
-        let mut generator = CoreErlangGenerator::new("test");
-        let selector = MessageSelector::Unary("initialize".into());
-        let doc = generator.generate_super_send(&selector, &[]).unwrap();
-        let output = doc.to_pretty_string();
-        assert!(
-            output.contains("beamtalk_dispatch':'super'("),
-            "super send should use beamtalk_dispatch:super. Got: {output}"
-        );
-        assert!(
-            output.contains("'initialize'"),
-            "should include selector. Got: {output}"
-        );
-    }
-
-    /// BT-2252: in a value/primitive context the generated fun is
-    /// `fun(Args, Self) -> Result` with no `State` binding, so `super` must
-    /// lower to `super_value/4` rather than the state-threading `super/5`.
-    /// Referencing the absent `State` produced invalid Core Erlang
-    /// (variable 'State' is unbound).
-    #[test]
-    fn test_generate_super_send_value_context_uses_super_value() {
-        let mut generator = CoreErlangGenerator::new("test");
-        generator.context = crate::core_erlang::CodeGenContext::ValueType;
-        let selector = MessageSelector::Unary("printString".into());
-        let doc = generator.generate_super_send(&selector, &[]).unwrap();
-        let output = doc.to_pretty_string();
-        assert!(
-            output.contains("beamtalk_dispatch':'super_value'("),
-            "value-context super should route to super_value/4. Got: {output}"
-        );
-        assert!(
-            !output.contains("State"),
-            "value-context super must not reference an unbound State. Got: {output}"
-        );
-        assert!(
-            output.contains("'printString'"),
-            "should include selector. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_generate_actor_spawn_non_repl() {
-        let mut generator = CoreErlangGenerator::new("test");
-        let doc = generator
-            .generate_actor_spawn_qualified("Counter", None, None)
-            .unwrap();
-        let output = doc.to_pretty_string();
-        assert!(
-            output.contains("'spawn'()"),
-            "spawn should call spawn/0. Got: {output}"
-        );
-        assert!(
-            output.contains("counter"),
-            "spawn should reference module. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_generate_message_send_keyword_includes_selector() {
-        let mut generator = CoreErlangGenerator::new("test");
-        let receiver = Expression::Identifier(Identifier::new("obj", s()));
-        let selector = MessageSelector::Keyword(vec![
-            KeywordPart::new("at:", s()),
-            KeywordPart::new("put:", s()),
-        ]);
-        let arguments = vec![
-            Expression::Literal(Literal::Integer(1), s()),
-            Expression::Literal(Literal::Integer(2), s()),
-        ];
-        let doc = generator
-            .generate_message_send(&receiver, &selector, &arguments)
-            .unwrap();
-        let output = doc.to_pretty_string();
-        assert!(
-            output.contains("'at:put:'"),
-            "keyword send should combine selector parts. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_generate_message_send_binary_op_addition() {
-        let mut generator = CoreErlangGenerator::new("test");
-        let receiver = Expression::Literal(Literal::Integer(3), s());
-        let selector = MessageSelector::Binary("+".into());
-        let arguments = vec![Expression::Literal(Literal::Integer(4), s())];
-        let doc = generator
-            .generate_message_send(&receiver, &selector, &arguments)
-            .unwrap();
-        let output = doc.to_pretty_string();
-        assert!(
-            output.contains("erlang':'+'("),
-            "binary + should compile to erlang arithmetic. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_generate_cast_send_actor_self_uses_safe_dispatch() {
-        let mut generator = CoreErlangGenerator::new("test");
-        generator.context = crate::core_erlang::CodeGenContext::Actor;
-        let receiver = Expression::Identifier(Identifier::new("self", s()));
-        let selector = MessageSelector::Unary("doIt".into());
-        let doc = generator
-            .generate_cast_send(&receiver, &selector, &[])
-            .unwrap();
-        let output = doc.to_pretty_string();
-        assert!(
-            output.contains("safe_dispatch"),
-            "actor self cast should use safe_dispatch. Got: {output}"
-        );
-        assert!(
-            output.contains("'ok'"),
-            "actor self cast should return 'ok'. Got: {output}"
-        );
-    }
-
-    /// BT-1475: Self-cast inside a block must route through the actor mailbox,
-    /// not call `safe_dispatch` directly, because the block may execute in a
-    /// different process (Timer callback, cross-actor callback).
-    #[test]
-    fn test_generate_cast_send_actor_self_in_block_uses_mailbox() {
-        let mut generator = CoreErlangGenerator::new("test");
-        generator.context = crate::core_erlang::CodeGenContext::Actor;
-        generator.block_depth = 1; // Simulate being inside a block
-        let receiver = Expression::Identifier(Identifier::new("self", s()));
-        let selector = MessageSelector::Unary("bump".into());
-        let doc = generator
-            .generate_cast_send(&receiver, &selector, &[])
-            .unwrap();
-        let output = doc.to_pretty_string();
-        assert!(
-            output.contains("beamtalk_message_dispatch"),
-            "self cast inside block should route through mailbox. Got: {output}"
-        );
-        assert!(
-            output.contains("cast"),
-            "self cast inside block should use cast dispatch. Got: {output}"
-        );
-        assert!(
-            !output.contains("safe_dispatch"),
-            "self cast inside block must NOT use safe_dispatch. Got: {output}"
-        );
-    }
-
-    /// BT-3214: `is_character_typed_receiver` must recognize both syntactic
-    /// shapes that statically produce a Character — a literal (`$A`) and a
-    /// `Character value:` factory call — including through any number of
-    /// parenthesizations, since `(Character value: 10) asString` parses the
-    /// factory call as `Parenthesized(MessageSend(..))`. Everything else
-    /// (plain integers, other class factory methods, a package-qualified
-    /// `Character`) must NOT match, or the codegen would incorrectly route
-    /// an actual Integer/other-class receiver through Character's dispatch.
-    #[test]
-    fn is_character_typed_receiver_matches_literal_and_value_factory() {
-        let char_literal = Expression::Literal(Literal::Character('A'), s());
-        assert!(is_character_typed_receiver(&char_literal));
-
-        let character_value_call = Expression::MessageSend {
-            receiver: Box::new(Expression::ClassReference {
-                name: Identifier::new("Character", s()),
-                package: None,
-                span: s(),
-            }),
-            selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", s())]),
-            arguments: vec![Expression::Literal(Literal::Integer(10), s())],
-            is_cast: false,
-            span: s(),
-        };
-        assert!(is_character_typed_receiver(&character_value_call));
-
-        // The reported bug's exact shape: `(Character value: 10)` as a
-        // parenthesized receiver of a further send (`asString`).
-        let parenthesized_once = Expression::Parenthesized {
-            expression: Box::new(character_value_call.clone()),
-            span: s(),
-        };
-        assert!(is_character_typed_receiver(&parenthesized_once));
-
-        // Nested parens must also see through.
-        let parenthesized_twice = Expression::Parenthesized {
-            expression: Box::new(parenthesized_once),
-            span: s(),
-        };
-        assert!(is_character_typed_receiver(&parenthesized_twice));
-
-        // A parenthesized literal must match too (`($A) asString`).
-        let parenthesized_literal = Expression::Parenthesized {
-            expression: Box::new(char_literal),
-            span: s(),
-        };
-        assert!(is_character_typed_receiver(&parenthesized_literal));
-    }
-
-    /// BT-3214: `uppercase`/`lowercase` also have a declared `-> Character`
-    /// return type (`Character.bt`), so a chain like `$a uppercase asString`
-    /// hits the identical bug as `(Character value: 10) asString` — the
-    /// receiver of `asString` (`$a uppercase`) is statically Character but
-    /// isn't a literal or a `value:` call. The check must recurse: applying
-    /// `uppercase`/`lowercase` to an already Character-typed receiver stays
-    /// Character-typed, however deep the chain (`$a uppercase lowercase`).
-    #[test]
-    fn is_character_typed_receiver_recurses_through_uppercase_lowercase() {
-        fn unary_send(receiver: Expression, selector: &str) -> Expression {
-            Expression::MessageSend {
-                receiver: Box::new(receiver),
-                selector: MessageSelector::Unary(selector.into()),
-                arguments: vec![],
-                is_cast: false,
-                span: s(),
-            }
-        }
-
-        let char_literal = Expression::Literal(Literal::Character('a'), s());
-        let uppercased = unary_send(char_literal.clone(), "uppercase");
-        assert!(is_character_typed_receiver(&uppercased));
-
-        // Chains recurse arbitrarily deep.
-        let round_tripped = unary_send(uppercased, "lowercase");
-        assert!(is_character_typed_receiver(&round_tripped));
-
-        // Also recognized on a `Character value:` receiver, not just a literal.
-        let value_call = Expression::MessageSend {
-            receiver: Box::new(Expression::ClassReference {
-                name: Identifier::new("Character", s()),
-                package: None,
-                span: s(),
-            }),
-            selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", s())]),
-            arguments: vec![Expression::Literal(Literal::Integer(97), s())],
-            is_cast: false,
-            span: s(),
-        };
-        assert!(is_character_typed_receiver(&unary_send(
-            value_call,
-            "uppercase"
-        )));
-
-        // A non-Character-returning unary selector on a Character receiver
-        // must NOT match — only `uppercase`/`lowercase` are Character-typed.
-        assert!(!is_character_typed_receiver(&unary_send(
-            char_literal.clone(),
-            "asInteger"
-        )));
-
-        // `uppercase` on a receiver that is NOT itself Character-typed must
-        // not match — recursion must terminate on a real Character source,
-        // not accept any arbitrarily nested `uppercase` send.
-        let int_literal = Expression::Literal(Literal::Integer(97), s());
-        assert!(!is_character_typed_receiver(&unary_send(
-            int_literal,
-            "uppercase"
-        )));
-    }
-
-    /// BT-3214: enforces the invariant `is_character_typed_receiver` depends
-    /// on — that its hardcoded selector set (`value:` as the class factory,
-    /// `uppercase`/`lowercase` as the Character-returning instance methods)
-    /// is *exactly* the set of methods `stdlib/src/Character.bt` declares
-    /// with a `-> Character` return type. This is the enforcing test
-    /// architecture-principles.md requires for any "must stay in sync"
-    /// coupling: parses the real `Character.bt` off disk and fails loudly if
-    /// a future edit adds, removes, or renames a Character-returning method
-    /// there without updating the codegen recognizer to match — silent drift
-    /// here would silently reopen the exact bug this issue fixes for the new
-    /// method (dispatch misrouted to Integer's BIF module).
-    #[test]
-    fn character_bt_character_returning_methods_match_codegen_recognizer() {
-        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates/")
-            .parent()
-            .expect("repo root")
-            .to_path_buf();
-        let character_bt_path = repo_root.join("stdlib/src/Character.bt");
-        let Ok(source) = std::fs::read_to_string(&character_bt_path) else {
-            eprintln!(
-                "skipping: {} not present in this checkout",
-                character_bt_path.display()
-            );
-            return;
-        };
-
-        let tokens = lex_with_eof(&source);
-        let (module, diags) = parse(tokens);
-        assert!(
-            diags.iter().all(|d| d.severity != Severity::Error),
-            "Character.bt must parse without errors: {diags:?}"
-        );
-
-        let character_class = module
-            .classes
-            .iter()
-            .find(|c| c.name.name == "Character")
-            .expect("Character.bt must define the Character class");
-
-        let returns_character = |method: &MethodDefinition| -> bool {
-            matches!(
-                &method.return_type,
-                Some(TypeAnnotation::Simple(id)) if id.name == "Character"
-            )
-        };
-
-        let class_side: BTreeSet<String> = character_class
-            .class_methods
-            .iter()
-            .filter(|m| returns_character(m))
-            .map(|m| m.selector.name().to_string())
-            .collect();
-        let instance_side: BTreeSet<String> = character_class
-            .methods
-            .iter()
-            .filter(|m| returns_character(m))
-            .map(|m| m.selector.name().to_string())
-            .collect();
-
-        assert_eq!(
-            class_side,
-            BTreeSet::from(["value:".to_string()]),
-            "is_character_typed_receiver's class-side factory-method list \
-             (\"value:\") no longer matches Character.bt's actual \
-             `-> Character` class methods — update the recognizer in \
-             dispatch_codegen.rs to match"
-        );
-        assert_eq!(
-            instance_side,
-            BTreeSet::from(["uppercase".to_string(), "lowercase".to_string()]),
-            "is_character_typed_receiver's instance-side selector list \
-             (\"uppercase\", \"lowercase\") no longer matches Character.bt's \
-             actual `-> Character` instance methods — update the recognizer \
-             in dispatch_codegen.rs to match"
-        );
-    }
-
-    #[test]
-    fn is_character_typed_receiver_rejects_non_character_shapes() {
-        // A bare integer literal is not Character-typed.
-        assert!(!is_character_typed_receiver(&Expression::Literal(
-            Literal::Integer(10),
-            s()
-        )));
-
-        // A different class's factory method must not match.
-        let other_factory = Expression::MessageSend {
-            receiver: Box::new(Expression::ClassReference {
-                name: Identifier::new("Integer", s()),
-                package: None,
-                span: s(),
-            }),
-            selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", s())]),
-            arguments: vec![Expression::Literal(Literal::Integer(10), s())],
-            is_cast: false,
-            span: s(),
-        };
-        assert!(!is_character_typed_receiver(&other_factory));
-
-        // A different selector on Character itself must not match — only
-        // the `value:` factory is statically known to return Character.
-        let wrong_selector = Expression::MessageSend {
-            receiver: Box::new(Expression::ClassReference {
-                name: Identifier::new("Character", s()),
-                package: None,
-                span: s(),
-            }),
-            selector: MessageSelector::Unary("someOtherMethod".into()),
-            arguments: vec![],
-            is_cast: false,
-            span: s(),
-        };
-        assert!(!is_character_typed_receiver(&wrong_selector));
-
-        // A package-qualified `Character` is a different, user-defined class
-        // that merely shares the name — must not be special-cased.
-        let package_qualified = Expression::MessageSend {
-            receiver: Box::new(Expression::ClassReference {
-                name: Identifier::new("Character", s()),
-                package: Some(Identifier::new("mylib", s())),
-                span: s(),
-            }),
-            selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", s())]),
-            arguments: vec![Expression::Literal(Literal::Integer(10), s())],
-            is_cast: false,
-            span: s(),
-        };
-        assert!(!is_character_typed_receiver(&package_qualified));
-    }
-
-    /// BT-3214: codegen for `(Character value: 10) asString` must emit a
-    /// direct call to `bt@stdlib@character:dispatch/3`, not fall through to
-    /// the generic runtime-dispatch path (which would key on `is_integer/1`
-    /// and misroute to `bt@stdlib@integer`, producing `"10"` instead of a
-    /// genuine 1-byte LF string).
-    #[test]
-    fn character_value_factory_receiver_dispatches_to_character_module() {
-        let mut generator = CoreErlangGenerator::new("test");
-        let receiver = Expression::Parenthesized {
-            expression: Box::new(Expression::MessageSend {
-                receiver: Box::new(Expression::ClassReference {
-                    name: Identifier::new("Character", s()),
-                    package: None,
-                    span: s(),
-                }),
-                selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", s())]),
-                arguments: vec![Expression::Literal(Literal::Integer(10), s())],
-                is_cast: false,
-                span: s(),
-            }),
-            span: s(),
-        };
-        let selector = MessageSelector::Unary("asString".into());
-        let output = generator
-            .generate_message_send(&receiver, &selector, &[])
-            .unwrap()
-            .to_pretty_string();
-
-        assert!(
-            output.contains("'bt@stdlib@character':'dispatch'"),
-            "expected direct Character dispatch, got: {output}"
-        );
-        assert!(
-            !output.contains("beamtalk_message_dispatch"),
-            "must not fall through to generic runtime dispatch (which would \
-             misroute via is_integer/1 to Integer). Got: {output}"
-        );
-    }
-}
+mod tests;

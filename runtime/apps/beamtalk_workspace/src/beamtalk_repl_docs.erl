@@ -962,52 +962,10 @@ format_class_side_output(ClassName, Modifiers, OwnCM, InhCMGrouped, ProtoGrouped
 Walk the class hierarchy collecting class-side methods.
 Returns #{Selector => DefiningClass} — local methods shadow inherited ones.
 
-On depth exhaustion (`?MAX_HIERARCHY_DEPTH`, a hierarchy cycle) returns the
-partial map folded up through the ancestors actually visited before the
-guard tripped (BT-3096) — not `#{}` — and logs a `?LOG_WARNING` naming the
-ancestor where the cycle was detected.
-
-BT-3087: Built on `beamtalk_hierarchy:walk_ancestors/3` (the shared depth
-guard + cycle warning) rather than a hand-rolled recursion, matching the
-instance-side `collect_flattened_methods/2` (now in `beamtalk_hierarchy_docs`)
-and every other consolidated hierarchy walker.
+BT-3478: Delegates to `beamtalk_hierarchy_docs:collect_flattened_class_methods/2`,
+moved there so `beamtalk_repl_ops_dev`'s "inherited-methods" ws op can reuse it —
+mirrors the instance-side `collect_flattened_methods/2` delegate below (BT-3087).
 """.
 -spec collect_flattened_class_methods(atom(), pid()) -> #{atom() => atom()}.
 collect_flattened_class_methods(ClassName, ClassPid) ->
-    StepFun = fun({CurrentName, CurrentPid, AccMap}, _Depth) ->
-        LocalMethods = gen_server:call(CurrentPid, get_local_class_methods, 5000),
-        LocalFlat = maps:map(fun(_Sel, _Info) -> CurrentName end, LocalMethods),
-        %% AccMap already reflects every closer (lower-depth) ancestor
-        %% winning over farther ones; keep that invariant as this
-        %% (farther) level's LocalFlat is folded in.
-        NewAcc = maps:merge(LocalFlat, AccMap),
-        case beamtalk_runtime_api:superclass(CurrentPid) of
-            none ->
-                {found, NewAcc};
-            SuperName ->
-                case beamtalk_runtime_api:whereis_class(SuperName) of
-                    undefined -> {found, NewAcc};
-                    SuperPid -> {next, {SuperName, SuperPid, NewAcc}}
-                end
-        end
-    end,
-    case
-        beamtalk_hierarchy:walk_ancestors(
-            {ClassName, ClassPid, #{}}, StepFun, ?MAX_HIERARCHY_DEPTH
-        )
-    of
-        {found, Result} ->
-            Result;
-        {max_depth_exceeded, {CycleName, _CyclePid, PartialAcc}} ->
-            ?LOG_WARNING(
-                "collect_flattened_class_methods: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleName, ClassName],
-                #{domain => [beamtalk, runtime]}
-            ),
-            PartialAcc;
-        not_found ->
-            %% Unreachable: StepFun above always resolves to {found, _} — a
-            %% `none` superclass or an unregistered ancestor is translated to
-            %% a terminal {found, NewAcc}, never a bare `none` node.
-            erlang:error({unreachable, not_found, ClassName})
-    end.
+    beamtalk_hierarchy_docs:collect_flattened_class_methods(ClassName, ClassPid).

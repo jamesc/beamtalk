@@ -34,6 +34,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     reindent_method_source/3,
     find_selector_send_spans/4,
     find_definition_selector_spans/6,
+    build_class_module_index_in_source/4,
     close/1
 ]).
 
@@ -138,13 +139,23 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
             0 -> Request2;
             _ -> Request2#{class_hierarchy => ClassHierarchy}
         end,
+    %% BT-3477: forward the ambient protocol cache alongside `class_hierarchy'
+    %% above — see `beamtalk_compiler_server:handle_call/3`'s
+    %% `{compile_expression, ...}` clause for why both ride the same
+    %% unconditional injection.
+    ProtocolRegistry = maps:get(protocol_registry, Options, #{}),
+    Request3a =
+        case map_size(ProtocolRegistry) of
+            0 -> Request3;
+            _ -> Request3#{protocol_registry => ProtocolRegistry}
+        end,
     %% BT-1670: Forward module_name override for inline class definitions
     %% so package-mode produces consistent module names across all paths.
     ModuleNameOverride = maps:get(module_name, Options, undefined),
     Request4 =
         case ModuleNameOverride of
-            undefined -> Request3;
-            _ -> Request3#{module_name => ModuleNameOverride}
+            undefined -> Request3a;
+            _ -> Request3a#{module_name => ModuleNameOverride}
         end,
     %% ADR 0108 Phase 8 (BT-2902): forward earlier-turn alias declarations.
     KnownTypeAliases = maps:get(known_type_aliases, Options, []),
@@ -235,6 +246,14 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
             0 -> Request2;
             _ -> Request2#{class_hierarchy => ClassHierarchy}
         end,
+    %% BT-3477: forward the ambient protocol cache, mirroring
+    %% `compile_expression/5` above.
+    ProtocolRegistry = maps:get(protocol_registry, Options, #{}),
+    Request3a =
+        case map_size(ProtocolRegistry) of
+            0 -> Request3;
+            _ -> Request3#{protocol_registry => ProtocolRegistry}
+        end,
     %% ADR 0108 Phase 8 (BT-2902), BT-2956: forward earlier-turn/ambient alias
     %% declarations, mirroring `compile_expression/5` above — without this,
     %% `::` annotations in traced expressions can never resolve an alias
@@ -242,8 +261,8 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
     KnownTypeAliases = maps:get(known_type_aliases, Options, []),
     Request =
         case KnownTypeAliases of
-            [] -> Request3;
-            _ -> Request3#{known_type_aliases => KnownTypeAliases}
+            [] -> Request3a;
+            _ -> Request3a#{known_type_aliases => KnownTypeAliases}
         end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of
@@ -1411,6 +1430,99 @@ handle_class_state_field_defaults_response(#{status := error, reason := Reason} 
     {error, Reason, Message};
 handle_class_state_field_defaults_response(Other) ->
     ?LOG_ERROR("Unexpected class-state-field-defaults response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, port_error, <<"Unexpected compiler response">>}.
+
+-doc """
+Build the class→module-name index for a single `src/**/*.bt` file (BT-3441).
+
+Backs the REPL/workspace cold-load fallback for `class_module_index' (ADR
+0050) — `beamtalk_repl_ops_load:build_source_class_module_index/1' calls
+this once per project source file instead of independently re-parsing class
+declarations with a regex and re-deriving the module-name casing rule in
+Erlang. `Source' is the file's raw text, `RelativePath' is its path relative
+to `src/' (extension included, `/'-joined — e.g. `<<"util/http_response.bt">>'),
+and `PackageName' is the project's package name (e.g. `<<"web">>'). The
+compiler port parses `Source' with the real grammar and computes the module
+name via the same shared leaf (`relative_module_segments') the CLI's own
+`build_class_module_index'/`compute_relative_module' use, so the result is
+byte-identical to what a full `beamtalk build' would produce for the same
+file.
+
+Returns `{ok, ModuleName, ClassNames}' on success (`ClassNames' may be
+empty for a file that declares no class). `RelativePath' is always derived
+from a real on-disk project file, never client input, but a path segment
+outside `[A-Za-z0-9_]' comes back as `{error, invalid_path_segment,
+Message}' rather than a crash — the caller skips that file's contribution
+to the cold-load index (see that function's doc for the "never crash"
+fallback contract). Transport failures (port down, timeout) return
+`{error, port_error, Message}'.
+""".
+-spec build_class_module_index_in_source(port(), binary(), binary(), binary()) ->
+    {ok, binary(), [binary()]} | {error, atom(), binary()}.
+build_class_module_index_in_source(Port, Source, RelativePath, PackageName) when
+    is_binary(Source), is_binary(RelativePath), is_binary(PackageName)
+->
+    Request = #{
+        command => build_class_module_index_in_source,
+        source => Source,
+        relative_path => RelativePath,
+        package_name => PackageName
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_build_class_module_index_in_source_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (class module index)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, port_error, <<"Compiler port response is malformed">>}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during class-module-index query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, port_error, <<"Compiler port exited unexpectedly">>}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (class module index)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, port_error, <<"Compiler port timed out">>}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (class module index)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, port_error, <<"Compiler port is not available">>}
+    end;
+build_class_module_index_in_source(_Port, _Source, _RelativePath, _PackageName) ->
+    {error, bad_argument, <<
+        "build_class_module_index_in_source: source/relative_path/package_name must be binaries"
+    >>}.
+
+-spec handle_build_class_module_index_in_source_response(term()) ->
+    {ok, binary(), [binary()]} | {error, atom(), binary()}.
+handle_build_class_module_index_in_source_response(
+    #{status := ok, module_name := ModuleName, classes := Classes}
+) when is_binary(ModuleName), is_list(Classes) ->
+    {ok, ModuleName, Classes};
+handle_build_class_module_index_in_source_response(#{status := error, reason := Reason} = Resp) ->
+    Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
+    {error, Reason, Message};
+handle_build_class_module_index_in_source_response(Other) ->
+    ?LOG_ERROR("Unexpected class-module-index response", #{
         domain => [beamtalk, runtime], response => Other
     }),
     {error, port_error, <<"Unexpected compiler response">>}.

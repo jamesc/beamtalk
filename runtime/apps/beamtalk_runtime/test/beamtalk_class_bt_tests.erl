@@ -22,7 +22,7 @@ and class registration. Models beamtalk_metaclass_bt_tests.erl.
 dispatch_classbuilder_returns_dnu_test() ->
     %% ADR 0038 Phase 1: dispatch still returns DNU even though has_method/1 returns true.
     %% has_method/1 returning true makes Class respondsTo: #classBuilder answer true, but
-    %% the actual implementation is deferred to Phase 2 (ClassBuilder.bt stdlib module).
+    %% the actual implementation is deferred to Phase 2 (class_builder.bt stdlib module).
     State = #{},
     {error, Error, RetState} = beamtalk_class_bt:dispatch('classBuilder', [], self(), State),
     ?assertEqual(does_not_understand, Error#beamtalk_error.kind),
@@ -54,7 +54,7 @@ dispatch_unknown_with_args_test() ->
     ?assertEqual('Class', Error#beamtalk_error.class).
 
 dispatch_name_selector_returns_dnu_test() ->
-    %% 'name' is not handled in Phase 1; Phase 2 (Class.bt) provides it
+    %% 'name' is not handled in Phase 1; Phase 2 (class.bt) provides it
     State = #{},
     {error, Error, _} = beamtalk_class_bt:dispatch('name', [], self(), State),
     ?assertEqual(does_not_understand, Error#beamtalk_error.kind).

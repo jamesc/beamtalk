@@ -624,12 +624,12 @@ mod tests {
         std::fs::create_dir_all(root.join("collections/ordered")).unwrap();
 
         std::fs::write(
-            root.join("numeric/Integer.bt"),
+            root.join("numeric/integer.bt"),
             "Value subclass: Integer\n  + other => @primitive\n",
         )
         .unwrap();
         std::fs::write(
-            root.join("collections/ordered/List.bt"),
+            root.join("collections/ordered/list.bt"),
             "Object subclass: List\n  size => @primitive\n",
         )
         .unwrap();
@@ -662,7 +662,7 @@ mod tests {
         let root = temp.path();
         std::fs::create_dir_all(root.join("numeric")).unwrap();
         std::fs::write(
-            root.join("numeric/Integer.bt"),
+            root.join("numeric/integer.bt"),
             "Value subclass: Integer\n  + other => @primitive\n",
         )
         .unwrap();

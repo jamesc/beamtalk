@@ -463,6 +463,42 @@ fn test_bt906_class_module_index_overrides_heuristic_for_spawn() {
     );
 }
 
+// ── ADR 0119 / BT-3436: `own_package_id` ────────────────────────────────
+
+#[test]
+fn test_own_package_id_stdlib_module() {
+    use beamtalk_core::semantic_analysis::PackageId;
+    let generator = CoreErlangGenerator::new("bt@stdlib@ordered_collection");
+    assert_eq!(generator.own_package_id(), PackageId::Stdlib);
+}
+
+#[test]
+fn test_own_package_id_package_module_preserves_subdirectory_free_name() {
+    use beamtalk_core::semantic_analysis::PackageId;
+    // A deep subdirectory module still yields the top-level package name —
+    // `own_package_id` only needs to identify *which* package this
+    // generation unit belongs to, not its position within it.
+    let generator = CoreErlangGenerator::new("bt@sicp@scheme@env");
+    assert_eq!(
+        generator.own_package_id(),
+        PackageId::Package("sicp".to_string())
+    );
+}
+
+#[test]
+fn test_own_package_id_single_file_module() {
+    use beamtalk_core::semantic_analysis::PackageId;
+    let generator = CoreErlangGenerator::new("bt@counter");
+    assert_eq!(generator.own_package_id(), PackageId::SingleFile);
+}
+
+#[test]
+fn test_own_package_id_unprefixed_test_fixture_module() {
+    use beamtalk_core::semantic_analysis::PackageId;
+    let generator = CoreErlangGenerator::new("counter");
+    assert_eq!(generator.own_package_id(), PackageId::SingleFile);
+}
+
 #[test]
 fn test_generate_actor_new_error_methods() {
     // BT-217: Actor classes must export and generate new/0 and new/1 error methods
@@ -2839,6 +2875,49 @@ fn test_self_call_error_branch_sealed_direct_call_breadcrumb() {
         reraise_with_breadcrumb.is_match(&code),
         "generate_direct_sealed_call must thread the selector/class \
          breadcrumb into reraise/4. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_sealed_method_logger_call_tags_own_selector() {
+    // BT-3479 (PR #3810 review follow-up): generate_sealed_method_functions_doc
+    // now enters its prologue via MethodFrame::enter(..., MethodBoundary::Actor),
+    // which sets current_method_selector unconditionally. Before that, the
+    // hand-rolled prologue for sealed-method functions never set it, so a
+    // Logger call inside a sealed method picked up whatever selector (or
+    // None) generate_dispatch's per-method cleanup had already reset it to —
+    // try_generate_logger_intrinsic falls back to the literal atom 'unknown'
+    // when current_method_selector is None (see intrinsics.rs).
+    //
+    // Pins that a Logger call inside a sealed method's own body is tagged
+    // with that method's own selector, not 'unknown'.
+    let src = concat!(
+        "sealed Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  setup =>\n",
+        "    Logger info: \"starting\"\n",
+    );
+    let code = codegen_source(src);
+
+    // Confirm this actually reached the sealed-method-function codegen path
+    // (generate_sealed_method_functions_doc), not some other shape.
+    assert!(
+        code.contains("'__sealed_setup'"),
+        "Test setup must exercise generate_sealed_method_functions_doc \
+         (the '__sealed_setup' standalone function). Got:\n{code}"
+    );
+
+    assert!(
+        code.contains("'beamtalk_selector' => 'setup'"),
+        "Logger call inside a sealed method must tag beamtalk_selector with \
+         the method's own selector ('setup'), not fall back to 'unknown'. \
+         Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'beamtalk_selector' => 'unknown'"),
+        "Logger call inside a sealed method must not tag beamtalk_selector \
+         as 'unknown' — that was the pre-MethodFrame regression this test \
+         pins. Got:\n{code}"
     );
 }
 

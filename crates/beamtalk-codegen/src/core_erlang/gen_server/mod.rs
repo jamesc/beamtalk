@@ -31,4 +31,4 @@ mod spawn;
 mod state;
 
 pub(in crate::core_erlang) use methods::BodyExprKind;
-pub(in crate::core_erlang) use methods::MetaProvenance;
+pub(in crate::core_erlang) use methods::extract_package_from_module_name;

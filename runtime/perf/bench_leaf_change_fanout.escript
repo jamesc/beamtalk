@@ -104,7 +104,7 @@ part_a_real_hierarchy_shape() ->
     ok.
 
 %% Counts real `subclass:` declarations only — stdlib doc comments (`///`
-%% lines) routinely show hypothetical subclass examples (e.g. `Actor.bt`
+%% lines) routinely show hypothetical subclass examples (e.g. `actor.bt`
 %% documents `/// Actor subclass: Counter`) that are not actual class
 %% definitions and must not be counted as such. `SubclassRe` is compiled once
 %% by the caller and reused across every file, rather than recompiled per

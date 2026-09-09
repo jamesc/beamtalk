@@ -315,12 +315,12 @@ fn stage_mixed_project() -> Option<PathBuf> {
 /// lookup because both fixture projects are pre-loaded at the start of
 /// the parity suite.)
 const TEST_RUNNER_CLASSES: &[(&str, &str)] = &[
-    ("PassingRunnerTest", "passing_test.bt"),
-    ("AssertFailRunnerTest", "asserting_fail_test.bt"),
-    ("SetupErrorRunnerTest", "setup_error_test.bt"),
-    ("TeardownErrorRunnerTest", "teardown_error_test.bt"),
-    ("ActorStateRunnerTest", "actor_state_test.bt"),
-    ("TempDirRunnerTest", "temp_dir_test.bt"),
+    ("PassingRunnerTest", "passing_runner_test.bt"),
+    ("AssertFailRunnerTest", "assert_fail_runner_test.bt"),
+    ("SetupErrorRunnerTest", "setup_error_runner_test.bt"),
+    ("TeardownErrorRunnerTest", "teardown_error_runner_test.bt"),
+    ("ActorStateRunnerTest", "actor_state_runner_test.bt"),
+    ("TempDirRunnerTest", "temp_dir_runner_test.bt"),
 ];
 
 /// Map a `TestCase` class name to the staged test file that defines it.

@@ -1,32 +1,34 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-import * as crypto from "node:crypto";
 import { execFile } from "node:child_process";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { planDocumentRetarget, type DocumentMovedParams } from "./documentMoved";
-import { findMethodDeclaration, findStateVarDeclaration } from "./textUtils";
 import {
   LanguageClient,
   type LanguageClientOptions,
   RevealOutputChannelOn,
   type ServerOptions,
 } from "vscode-languageclient/node";
+import { type DocumentMovedParams, planDocumentRetarget } from "./documentMoved";
 import { InspectorPanel } from "./inspectorPanel";
+import { resolveDeclarationOffset } from "./symbolLookup";
+import { classNameToStdlibFilename } from "./textUtils";
 import { TranscriptViewProvider } from "./transcriptView";
+import type { ClassInfo, ClassOrigin, LogEntry } from "./workspaceClient";
 import { WorkspaceClient } from "./workspaceClient";
-import type { LogEntry } from "./workspaceClient";
 import type {
   ActorItemNode,
   BindingItemNode,
   ClassItemNode,
   MethodItemNode,
   StateVarItemNode,
+  TypeAliasItemNode,
 } from "./workspaceTreeView";
-import { WorkspaceTreeDataProvider } from "./workspaceTreeView";
+import { ALL_CLASS_ORIGINS, WorkspaceTreeDataProvider } from "./workspaceTreeView";
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.LogOutputChannel | undefined;
@@ -49,6 +51,16 @@ const LOG_LEVELS = [
 type LogLevel = (typeof LOG_LEVELS)[number];
 let workspaceTreeProvider: WorkspaceTreeDataProvider | undefined;
 let transcriptViewProvider: TranscriptViewProvider | undefined;
+
+/** `context.workspaceState` key persisting the "Classes" section's origin filter. */
+const CLASS_FILTER_STATE_KEY = "beamtalk.classOriginFilter";
+
+/** QuickPick label for each class origin (BT-2552 badges), in menu display order. */
+const CLASS_ORIGIN_LABELS: Record<ClassOrigin, string> = {
+  project: "Project",
+  dependency: "Dependencies",
+  stdlib: "Standard Library",
+};
 
 /** The active WorkspaceClient, set when a workspace port file is detected. */
 let workspaceWsClient: WorkspaceClient | undefined;
@@ -138,8 +150,7 @@ function lspIsOnPath(): Promise<boolean> {
 async function resolveServerPath(context: vscode.ExtensionContext): Promise<ResolvedServerPath> {
   const config = vscode.workspace.getConfiguration("beamtalk");
   const projectRoot = findProjectRoot();
-  const expandVars = (s: string) =>
-    projectRoot ? s.replace(/\$\{workspaceFolder\}/g, projectRoot) : s;
+  const expandVars = (s: string) => expandWorkspaceFolder(s, projectRoot);
   const override = expandVars(config.get<string>("server.path", "").trim());
   const beamtalkBin = expandVars(config.get<string>("binary.path", "").trim()) || "beamtalk";
   let warning: string | undefined;
@@ -192,6 +203,23 @@ async function resolveServerPath(context: vscode.ExtensionContext): Promise<Reso
 }
 
 /**
+ * Resolve `beamtalk.stdlibSourceDir` for `initializationOptions`.
+ *
+ * Expands a leading `${workspaceFolder}` (the server itself only resolves
+ * bare relative paths against its discovered project roots, so a literal
+ * `${workspaceFolder}` placeholder must be substituted client-side). Empty
+ * when unset, which tells the server to fall back to sysroot auto-discovery.
+ */
+function resolveStdlibSourceDir(): string {
+  const config = vscode.workspace.getConfiguration("beamtalk");
+  const configured = config.get<string>("stdlibSourceDir", "").trim();
+  if (!configured) {
+    return "";
+  }
+  return expandWorkspaceFolder(configured, findProjectRoot());
+}
+
+/**
  * TextDocumentContentProvider for `beamtalk-stdlib://` virtual URIs.
  *
  * Fetches content from the LSP server via the `beamtalk-lsp/fetchContent`
@@ -212,6 +240,45 @@ class StdlibContentProvider implements vscode.TextDocumentContentProvider {
       outputChannel?.warn(`Failed to fetch stdlib content for ${uri}: ${message}`);
       return `// Failed to load ${uri.toString()}\n// ${message}\n`;
     }
+  }
+}
+
+/**
+ * Open a stdlib class's source via the `beamtalk-stdlib://` virtual URI
+ * scheme, for sidebar navigation commands. The runtime's `list-classes`/
+ * `methods` ops never report a real `source_file` for compiled-in stdlib
+ * classes (they simply don't track one) — this is the same fallback the LSP
+ * already uses for Ctrl+click go-to-definition on a stdlib reference inside
+ * a real file (`stdlibSourceDir`/sysroot auto-discovery), just entered from
+ * a class name instead of a code reference.
+ *
+ * Calls `beamtalk-lsp/fetchContent` directly first (rather than going
+ * straight to `openTextDocument`) so a wrong filename guess or a
+ * disconnected LSP is detected as a clean failure here — `openTextDocument`
+ * on a `beamtalk-stdlib://` URI never rejects on its own; `StdlibContentProvider`
+ * deliberately returns friendly placeholder comment text instead, for
+ * LSP-initiated navigation where a raw VS Code error tab would be worse.
+ *
+ * Returns undefined if the class isn't stdlib-origin, no filename guess is
+ * possible, or the guessed file doesn't exist — callers should fall back to
+ * their normal "source not available" handling.
+ */
+async function openStdlibDocumentForClass(
+  classInfo: ClassInfo
+): Promise<vscode.TextDocument | undefined> {
+  if (classInfo.source_origin !== "stdlib" || !client) return undefined;
+  const uriString = `beamtalk-stdlib:///${classNameToStdlibFilename(classInfo.name)}`;
+  try {
+    await client.sendRequest<{ content: string }>("beamtalk-lsp/fetchContent", {
+      uri: uriString,
+    });
+  } catch {
+    return undefined;
+  }
+  try {
+    return await vscode.workspace.openTextDocument(vscode.Uri.parse(uriString));
+  } catch {
+    return undefined;
   }
 }
 
@@ -381,6 +448,9 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
     outputChannel,
     traceOutputChannel,
     revealOutputChannelOn: RevealOutputChannelOn.Never,
+    initializationOptions: {
+      stdlibSourceDir: resolveStdlibSourceDir(),
+    },
   };
 
   client = new LanguageClient("beamtalk", "Beamtalk Language Server", serverOptions, clientOptions);
@@ -457,6 +527,18 @@ function findProjectRoot(): string | null {
     }
   }
   return folders[0].uri.fsPath;
+}
+
+/**
+ * Expand a literal `${workspaceFolder}` placeholder in a settings value.
+ *
+ * VS Code only expands `${workspaceFolder}` in launch.json/tasks.json, not
+ * in arbitrary settings values, so callers that accept paths like
+ * `${workspaceFolder}/target/debug/beamtalk` must expand it themselves.
+ * Returns `value` unchanged when no project root is found.
+ */
+function expandWorkspaceFolder(value: string, projectRoot: string | null): string {
+  return projectRoot ? value.replace(/\$\{workspaceFolder\}/g, projectRoot) : value;
 }
 
 // ─── Log output formatting (BT-1433) ─────────────────────────────────────────
@@ -721,21 +803,15 @@ async function captureSessionId(
   }
 }
 
-export { findMethodDeclaration, findStateVarDeclaration } from "./textUtils";
-
 function replCommand(): string {
   const config = vscode.workspace.getConfiguration("beamtalk");
   const ephemeral = config.get<boolean>("repl.ephemeral", false);
   // beamtalk.binary.path lets dev builds point to e.g. ./target/debug/beamtalk
   // so that `beamtalk repl` picks up freshly-compiled Erlang runtime code.
-  let beamtalkBin = config.get<string>("binary.path", "").trim() || "beamtalk";
-  // VS Code does not expand ${workspaceFolder} in settings values, only in
-  // launch.json/tasks.json. Expand it here so users can write paths like
-  // "${workspaceFolder}/target/debug/beamtalk" in their settings.
-  const projectRoot = findProjectRoot();
-  if (projectRoot) {
-    beamtalkBin = beamtalkBin.replace(/\$\{workspaceFolder\}/g, projectRoot);
-  }
+  const beamtalkBin = expandWorkspaceFolder(
+    config.get<string>("binary.path", "").trim() || "beamtalk",
+    findProjectRoot()
+  );
   // Quote the binary path in case it contains spaces (e.g. "/path/to my/beamtalk").
   const quoted = beamtalkBin.includes(" ") ? `"${beamtalkBin}"` : beamtalkBin;
   return ephemeral ? `${quoted} repl -e` : `${quoted} repl`;
@@ -952,6 +1028,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   workspaceTreeProvider = new WorkspaceTreeDataProvider();
   context.subscriptions.push(workspaceTreeProvider);
 
+  // Restore the "Classes" filter from the last session in this workspace, if any.
+  const persistedClassFilter = context.workspaceState.get<ClassOrigin[]>(CLASS_FILTER_STATE_KEY);
+  const isPersistedFilterActive =
+    !!persistedClassFilter &&
+    persistedClassFilter.length > 0 &&
+    persistedClassFilter.length < ALL_CLASS_ORIGINS.length;
+  if (isPersistedFilterActive) {
+    workspaceTreeProvider.setClassOriginFilter(new Set(persistedClassFilter));
+  }
+  void vscode.commands.executeCommand(
+    "setContext",
+    "beamtalk.classFilterActive",
+    isPersistedFilterActive
+  );
+
   context.subscriptions.push(
     vscode.window.createTreeView("beamtalk.workspaceExplorer", {
       treeDataProvider: workspaceTreeProvider,
@@ -979,6 +1070,46 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.refreshWorkspace", () => {
       void workspaceTreeProvider?.refresh();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.filterClasses", async () => {
+      if (!workspaceTreeProvider) return;
+      const current = workspaceTreeProvider.classFilter;
+      const picks: Array<vscode.QuickPickItem & { origin: ClassOrigin }> = ALL_CLASS_ORIGINS.map(
+        (origin) => ({
+          label: CLASS_ORIGIN_LABELS[origin],
+          origin,
+          picked: current.has(origin),
+        })
+      );
+      const selected = await vscode.window.showQuickPick(picks, {
+        canPickMany: true,
+        title: "Filter Classes",
+        placeHolder: "Show classes from… (nothing checked shows everything)",
+      });
+      // undefined means the picker was dismissed (Escape) — leave the filter as-is.
+      if (selected === undefined) return;
+      const origins = new Set<ClassOrigin>(selected.map((pick) => pick.origin));
+      workspaceTreeProvider.setClassOriginFilter(origins);
+      await context.workspaceState.update(
+        CLASS_FILTER_STATE_KEY,
+        origins.size > 0 ? [...origins] : undefined
+      );
+      void vscode.commands.executeCommand(
+        "setContext",
+        "beamtalk.classFilterActive",
+        origins.size > 0 && origins.size < ALL_CLASS_ORIGINS.length
+      );
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.clearClassFilter", async () => {
+      workspaceTreeProvider?.setClassOriginFilter(new Set());
+      await context.workspaceState.update(CLASS_FILTER_STATE_KEY, undefined);
+      void vscode.commands.executeCommand("setContext", "beamtalk.classFilterActive", false);
     })
   );
 
@@ -1022,47 +1153,84 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.openClassSource", async (node?: ClassItemNode) => {
       const sourceFile = node?.info.source_file;
-      if (!sourceFile || sourceFile === "unknown") {
-        await vscode.window.showInformationMessage("Source not available for this class.");
-        return;
-      }
-      const uri = vscode.Uri.file(sourceFile);
       let document: vscode.TextDocument;
-      try {
-        document = await vscode.workspace.openTextDocument(uri);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        await vscode.window.showErrorMessage(`Could not open source: ${sourceFile}: ${msg}`);
-        return;
+      if (sourceFile && sourceFile !== "unknown") {
+        try {
+          document = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await vscode.window.showErrorMessage(`Could not open source: ${sourceFile}: ${msg}`);
+          return;
+        }
+      } else {
+        // No real source_file recorded — the runtime doesn't track one for
+        // compiled-in stdlib classes. Try the LSP's beamtalk-stdlib:// virtual
+        // URI scheme before giving up.
+        const stdlibDoc = node?.info ? await openStdlibDocumentForClass(node.info) : undefined;
+        if (!stdlibDoc) {
+          await vscode.window.showInformationMessage("Source not available for this class.");
+          return;
+        }
+        document = stdlibDoc;
       }
 
       const className = node?.info.name;
       if (!className) return;
 
-      // Find the class declaration position via regex.
-      // Note: executeDocumentSymbolProvider is not used here because openTextDocument
-      // does not trigger textDocument/didOpen to the LSP — symbols are only available
-      // for files already open in an editor. The regex is the reliable primary approach.
-      let position: vscode.Position | undefined;
-      const text = document.getText();
-      const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      // Beamtalk class declarations use `SuperClass subclass: ClassName` syntax.
-      const pattern = new RegExp(`\\bsubclass:\\s+(${escaped})(?=\\s|$)`, "g");
-      let classMatch = pattern.exec(text);
-      while (classMatch !== null) {
-        const lineStart = text.lastIndexOf("\n", classMatch.index) + 1;
-        const linePrefix = text.slice(lineStart, classMatch.index).trimStart();
-        if (!linePrefix.startsWith("//")) {
-          position = document.positionAt(classMatch.index + classMatch[0].indexOf(className));
-          break;
-        }
-        classMatch = pattern.exec(text);
-      }
+      // Same three-tier resolver as navigateToMethod/navigateToStateVar/hover
+      // (regex first — cheap, no LSP round trip needed for the common case —
+      // then the document-symbol-provider fallback for whatever shape defeats it).
+      const declOffset = await resolveDeclarationOffset(document, {
+        kind: "class",
+        name: className,
+      });
+      const position = declOffset === -1 ? undefined : document.positionAt(declOffset);
 
       await vscode.window.showTextDocument(document, {
         selection: position ? new vscode.Range(position, position) : undefined,
       });
     })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "beamtalk.navigateToTypeAlias",
+      async (node?: TypeAliasItemNode) => {
+        const sourceFile = node?.info.source_file;
+        if (!sourceFile || sourceFile === "unknown") {
+          await vscode.window.showInformationMessage("Source not available for this type alias.");
+          return;
+        }
+        const uri = vscode.Uri.file(sourceFile);
+        let document: vscode.TextDocument;
+        try {
+          document = await vscode.workspace.openTextDocument(uri);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await vscode.window.showErrorMessage(`Could not open source: ${sourceFile}: ${msg}`);
+          return;
+        }
+
+        const aliasName = node?.info.name;
+        if (!aliasName) return;
+
+        // Same resolver as openClassSource — no xref line is tracked for
+        // aliases (ADR 0108 Phase 8: `TypeAliasInfo` carries no `line`), and
+        // no document-symbol fallback exists yet either (the Rust
+        // document-symbols provider doesn't emit alias symbols), so this is
+        // regex-only in practice today; the resolver still tries the
+        // document-symbol tier for forward compatibility if that changes.
+        const declOffset = await resolveDeclarationOffset(document, {
+          kind: "type-alias",
+          name: aliasName,
+        });
+        const position = declOffset === -1 ? undefined : document.positionAt(declOffset);
+
+        await vscode.window.showTextDocument(document, {
+          selection: position ? new vscode.Range(position, position) : undefined,
+        });
+      }
+    )
   );
 
   context.subscriptions.push(
@@ -1097,32 +1265,50 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("beamtalk.navigateToMethod", async (node: MethodItemNode) => {
       const { classInfo, method } = node;
 
-      // Only navigate if the runtime recorded a source file path.
-      // "unknown" means the class was defined in the REPL or loaded without a path.
       const sourceFile = classInfo.source_file;
-      if (!sourceFile || sourceFile === "unknown") {
-        await vscode.window.showInformationMessage(
-          `No source file recorded for class ${classInfo.name}`
-        );
-        return;
-      }
-
-      const uri = vscode.Uri.file(sourceFile);
       let document: vscode.TextDocument;
-      try {
-        document = await vscode.workspace.openTextDocument(uri);
-      } catch {
-        await vscode.window.showInformationMessage(
-          `Cannot open source for ${classInfo.name}: ${sourceFile}`
-        );
-        return;
+      if (sourceFile && sourceFile !== "unknown") {
+        try {
+          document = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
+        } catch {
+          await vscode.window.showInformationMessage(
+            `Cannot open source for ${classInfo.name}: ${sourceFile}`
+          );
+          return;
+        }
+      } else {
+        // No real source_file recorded — the runtime doesn't track one for
+        // compiled-in stdlib classes. Try the LSP's beamtalk-stdlib:// virtual
+        // URI scheme before giving up.
+        const stdlibDoc = await openStdlibDocumentForClass(classInfo);
+        if (!stdlibDoc) {
+          await vscode.window.showInformationMessage(
+            `No source file recorded for class ${classInfo.name}`
+          );
+          return;
+        }
+        document = stdlibDoc;
       }
+      const uri = document.uri;
 
-      // Find the method declaration position by scanning line by line.
-      // Beamtalk declarations: `class selector =>` (class-side), `selector =>` (instance-side).
-      // LSP go-to-definition is used *after* showTextDocument below for precise navigation.
+      // BT-3439: prefer the real declaration line from beamtalk_xref's
+      // compiled index over guessing via source-text regex/search — the
+      // regex (methodHeadPattern) can miss syntax it doesn't understand yet,
+      // so only fall back to the regex/text-search path when no real line is
+      // available (a class compiled before this field existed, or a
+      // ClassBuilder-built class with no compiler to derive one from) or the
+      // line is stale (the file was edited since the class was last
+      // compiled/reloaded). LSP go-to-definition is used *after*
+      // showTextDocument below for precise navigation either way.
       const text = document.getText();
-      let declOffset = findMethodDeclaration(text, method.selector, method.side);
+      let declOffset = await resolveDeclarationOffset(
+        document,
+        { kind: "method", side: method.side, selector: method.selector },
+        method.line
+      );
+      // Last resort: a bare substring search, which can land on an unrelated
+      // mention (e.g. a doc-comment usage example) — only reached if the
+      // real line, regex, and document-symbol provider all came up empty.
       if (declOffset === -1) declOffset = text.indexOf(method.selector);
       if (declOffset === -1) {
         await vscode.window.showInformationMessage(
@@ -1169,24 +1355,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         const { classInfo, stateVar } = node;
         const sourceFile = classInfo.source_file;
-        if (!sourceFile || sourceFile === "unknown") {
-          await vscode.window.showInformationMessage(
-            `No source file recorded for class ${classInfo.name}`
-          );
-          return;
-        }
-        const uri = vscode.Uri.file(sourceFile);
         let document: vscode.TextDocument;
-        try {
-          document = await vscode.workspace.openTextDocument(uri);
-        } catch {
-          await vscode.window.showInformationMessage(
-            `Cannot open source for ${classInfo.name}: ${sourceFile}`
-          );
-          return;
+        if (sourceFile && sourceFile !== "unknown") {
+          try {
+            document = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
+          } catch {
+            await vscode.window.showInformationMessage(
+              `Cannot open source for ${classInfo.name}: ${sourceFile}`
+            );
+            return;
+          }
+        } else {
+          // No real source_file recorded — the runtime doesn't track one for
+          // compiled-in stdlib classes. Try the LSP's beamtalk-stdlib:// virtual
+          // URI scheme before giving up.
+          const stdlibDoc = await openStdlibDocumentForClass(classInfo);
+          if (!stdlibDoc) {
+            await vscode.window.showInformationMessage(
+              `No source file recorded for class ${classInfo.name}`
+            );
+            return;
+          }
+          document = stdlibDoc;
         }
+        // BT-3439: prefer the real declaration line from beamtalk_xref's
+        // compiled index — see the analogous comment in navigateToMethod.
         const text = document.getText();
-        let declOffset = findStateVarDeclaration(text, stateVar.name);
+        let declOffset = await resolveDeclarationOffset(
+          document,
+          { kind: "field", name: stateVar.name },
+          stateVar.line
+        );
+        // Last resort: a bare substring search.
         if (declOffset === -1) declOffset = text.indexOf(stateVar.name);
         if (declOffset === -1) {
           await vscode.window.showInformationMessage(

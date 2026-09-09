@@ -334,10 +334,10 @@ io_capture_reset_does_not_affect_unrelated_processes_test() ->
 %% === is_stdlib_path tests ===
 
 is_stdlib_path_relative_lib_test() ->
-    ?assert(beamtalk_repl_loader:is_stdlib_path("stdlib/src/Integer.bt")).
+    ?assert(beamtalk_repl_loader:is_stdlib_path("stdlib/src/integer.bt")).
 
 is_stdlib_path_absolute_test() ->
-    ?assert(beamtalk_repl_loader:is_stdlib_path("/workspace/project/stdlib/src/Integer.bt")).
+    ?assert(beamtalk_repl_loader:is_stdlib_path("/workspace/project/stdlib/src/integer.bt")).
 
 is_stdlib_path_non_lib_test() ->
     ?assertNot(beamtalk_repl_loader:is_stdlib_path("src/MyClass.bt")).
@@ -351,12 +351,12 @@ is_stdlib_path_lib_without_trailing_slash_test() ->
 
 is_stdlib_path_libs_prefix_test() ->
     %% "stdlib/srcs/" is NOT the same as "stdlib/src/"
-    ?assertNot(beamtalk_repl_loader:is_stdlib_path("stdlib/srcs/Integer.bt")).
+    ?assertNot(beamtalk_repl_loader:is_stdlib_path("stdlib/srcs/integer.bt")).
 
 is_stdlib_path_embedded_lib_test() ->
     %% Path with /stdlib/src/ deeper in the tree
     ?assert(
-        beamtalk_repl_loader:is_stdlib_path("/home/user/projects/beamtalk/stdlib/src/String.bt")
+        beamtalk_repl_loader:is_stdlib_path("/home/user/projects/beamtalk/stdlib/src/string.bt")
     ).
 
 is_stdlib_path_empty_test() ->
@@ -1309,14 +1309,14 @@ trigger_hot_reload_atom_name_v2_test() ->
 
 is_stdlib_path_abs_v2_test() ->
     ?assertEqual(
-        true, beamtalk_repl_loader:is_stdlib_path("/home/user/project/stdlib/src/Integer.bt")
+        true, beamtalk_repl_loader:is_stdlib_path("/home/user/project/stdlib/src/integer.bt")
     ).
 
 is_stdlib_path_not_stdlib_test() ->
     ?assertEqual(false, beamtalk_repl_loader:is_stdlib_path("/home/user/src/main.bt")).
 
 is_stdlib_path_rel_lib_v2_test() ->
-    ?assertEqual(true, beamtalk_repl_loader:is_stdlib_path("stdlib/src/String.bt")).
+    ?assertEqual(true, beamtalk_repl_loader:is_stdlib_path("stdlib/src/string.bt")).
 
 %% ===================================================================
 %% should_purge_module edge cases (BT-627)

@@ -100,6 +100,19 @@ impl ClassHierarchy {
     pub fn is_runtime_protected_class(name: &str) -> bool {
         builtins::is_runtime_protected_class(name)
     }
+    /// Returns true if the given class name is a *generated* stdlib built-in
+    /// class — one with a real `stdlib/src/*.bt` source file, parsed by
+    /// `beamtalk build-stdlib` (as opposed to a runtime-only built-in like
+    /// `Future`, which has no source file — see [`Self::is_builtin_class`]).
+    ///
+    /// BT-3435 (ADR 0119 step 0): this is the one correct, already-parsed
+    /// answer to "is this a known stdlib class" — `beamtalk-codegen`'s
+    /// `is_known_stdlib_type` delegates to it instead of the deleted
+    /// `STDLIB_CLASS_NAMES` file-stem directory scan.
+    #[must_use]
+    pub fn is_generated_builtin_class(name: &str) -> bool {
+        builtins::is_generated_builtin_class(name)
+    }
     /// Build a selector-to-index map from a method vec.
     fn build_selector_index(methods: &[MethodInfo]) -> HashMap<EcoString, usize> {
         let mut index = HashMap::with_capacity(methods.len());

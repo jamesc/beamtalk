@@ -127,6 +127,22 @@ pub enum WellKnownSelector {
     PerformWithArgs,
     /// `performLocally:withArguments:` — execute a class method in the caller's process.
     PerformLocallyWithArgs,
+
+    // --- Actor timeout ---
+    /// `withTimeout:` — BT-3462: an `Actor` (or subclass) send wrapped with an
+    /// explicit reply timeout. Only the type checker's transparency rule
+    /// (`inference.rs`) special-cases this selector by name today; it is not
+    /// codegen-intrinsified.
+    WithTimeout,
+
+    // --- Indexed access ---
+    /// `at:` — BT-3462: indexed/keyed element access. Recognised by the type
+    /// checker for `Tuple`'s literal-index element-type narrowing
+    /// (`infer_literal_index_tuple_at`); every receiver class implements its
+    /// own `at:` primitive in codegen (`List`, `Dictionary`, `String`, …), so
+    /// this variant only classifies the selector *name*, not a single
+    /// universal codegen lowering.
+    At,
 }
 
 impl WellKnownSelector {
@@ -167,6 +183,8 @@ impl WellKnownSelector {
             Self::Perform => "perform:",
             Self::PerformWithArgs => "perform:withArguments:",
             Self::PerformLocallyWithArgs => "performLocally:withArguments:",
+            Self::WithTimeout => "withTimeout:",
+            Self::At => "at:",
         }
     }
 
@@ -209,6 +227,8 @@ impl WellKnownSelector {
             "perform:" => Some(Self::Perform),
             "perform:withArguments:" => Some(Self::PerformWithArgs),
             "performLocally:withArguments:" => Some(Self::PerformLocallyWithArgs),
+            "withTimeout:" => Some(Self::WithTimeout),
+            "at:" => Some(Self::At),
             _ => None,
         }
     }
@@ -243,7 +263,9 @@ impl WellKnownSelector {
             | Self::Ensure
             | Self::Error
             | Self::FieldAt
-            | Self::Perform => 1,
+            | Self::Perform
+            | Self::WithTimeout
+            | Self::At => 1,
             Self::IfNilIfNotNil
             | Self::IfNotNilIfNil
             | Self::IfTrueIfFalse
@@ -284,34 +306,32 @@ impl WellKnownSelector {
 }
 
 /// BT-3385: returns `true` if a block-literal argument at `arg_index` for
-/// `selector` is state-threaded by codegen's Value-type / class-method
-/// captured-local mutation threading — ADR 0041's "known inline call
-/// sites" for the loop/list-op family, plus BT-1392/BT-2359's conditional
-/// threading for `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`. When `true`, a
-/// reassignment to an outer local captured inside that block position is
-/// threaded back to the caller and visible after the call returns, rather
-/// than being lost.
+/// `selector` forms a *nested loop/fold shape* that
+/// `beamtalk-codegen`'s `block_arg_for_selector`/`nested_loop_or_fold_body`
+/// (`core_erlang/control_flow/mod.rs`) recognizes for its own nested-mutation
+/// / class-var-loss detection — deliberately narrower than, and NOT derived
+/// from, `beamtalk_core::state_threading_selectors::is_state_threaded_block_arg`
+/// (the canonical "which selectors thread which block-argument positions"
+/// table, BT-3423 / ADR 0118 §7): that broader table also covers
+/// conditionals (`ifTrue:`/`ifNotNil:`/`and:`/`or:`/…) and exception
+/// selectors (`on:do:`/`ensure:`), each of which has its own dedicated
+/// `_with_mutations`/`_with_mutations`-style generator reached through a
+/// different codegen path, never through `nested_loop_or_fold_body`'s
+/// generic loop/fold walk — widening THIS function to match would change
+/// what `nested_loop_or_fold_body` classifies as a nested loop/fold, which
+/// is exactly the kind of codegen-shape change BT-3423 (a decision-only
+/// refactor) must not make.
 ///
-/// Single source of truth for this table, extracted here (below both
-/// consumers in the dependency graph) specifically so they can never
-/// silently drift, per CLAUDE.md's "No duplicate implementations" rule:
-/// - `beamtalk-codegen`'s `block_arg_for_selector`
-///   (`core_erlang/control_flow/mod.rs`) uses it to decide which block
-///   argument to compile via the state-threading path, for the loop/
-///   list-op family.
-/// - `beamtalk-lint`'s `DeadAssignment` check (`dead_block_assignment.rs`)
-///   uses it to skip warning about a reassignment in one of these
-///   positions.
-///
-/// The `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` entries have no equivalent
-/// single call site in codegen to unify with — that threading is dedicated
-/// codegen (BT-1392/BT-2359 in `value_type_codegen.rs`), not a lookup
-/// table — so their conformance instead rests on the existing runtime
-/// test corpus that exercises exactly this shape
+/// The `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` entries exist here (despite
+/// the caveat above) only because `block_arg_for_selector` excludes them
+/// explicitly before ever consulting this table — see its doc comment.
+/// Their own threading is dedicated codegen (BT-1392/BT-2359 in
+/// `value_type_codegen.rs`), not this lookup; conformance instead rests on
+/// the existing runtime test corpus that exercises exactly this shape
 /// (`stdlib/test/conditional_local_mutation_test.bt`,
 /// `stdlib/test/value_type_mutation_matrix_test.bt`): if that codegen ever
 /// regressed, those tests would fail independently of this table.
-pub fn is_state_threaded_block_arg(selector: &str, arg_index: usize) -> bool {
+pub fn is_loop_or_fold_block_arg(selector: &str, arg_index: usize) -> bool {
     match selector {
         "whileTrue:" | "whileFalse:" | "do:" | "collect:" | "select:" | "reject:"
         | "anySatisfy:" | "allSatisfy:" | "detect:" | "count:" | "takeWhile:" | "dropWhile:"
@@ -364,6 +384,8 @@ mod tests {
         WellKnownSelector::Perform,
         WellKnownSelector::PerformWithArgs,
         WellKnownSelector::PerformLocallyWithArgs,
+        WellKnownSelector::WithTimeout,
+        WellKnownSelector::At,
     ];
 
     #[test]

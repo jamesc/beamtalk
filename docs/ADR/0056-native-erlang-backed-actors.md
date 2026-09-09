@@ -31,7 +31,7 @@ Both approaches share these problems:
 ### Current State
 
 ```beamtalk
-// TranscriptStream.bt today — FFI wrapper calls
+// transcript_stream.bt today — FFI wrapper calls
 Actor subclass: TranscriptStream
   classState: current = nil
 
@@ -51,7 +51,7 @@ The backing `beamtalk_transcript_stream.erl` implements the full `gen_server` be
 Similarly for `Subprocess`:
 
 ```beamtalk
-// Subprocess.bt today — FFI wrapper calls
+// subprocess.bt today — FFI wrapper calls
 Actor subclass: Subprocess
   writeLine: data -> Nil =>
     (Erlang beamtalk_subprocess) 'writeLine:': self data: data
@@ -142,7 +142,7 @@ Method bodies that are `=> self delegate` are **delegation declarations** — th
 `delegate` is a real `sealed` method defined on `Actor`, following Pharo's `ffiCall:` pattern:
 
 ```beamtalk
-// Actor.bt
+// actor.bt
 /// Delegate to the native backing module.
 /// The compiler transforms this call on native: classes.
 /// Calling on a non-native Actor raises an error.
@@ -159,7 +159,7 @@ The method is `sealed` to prevent user-defined Actor subclasses from accidentall
 
 ```text
 warning: native delegate method 'readLine:' has no return type annotation
-  --> Subprocess.bt:8
+  --> subprocess.bt:8
   |
 8 |   readLine: timeout => self delegate
   |   ^^^^^^^^^^^^^^^^^^
@@ -186,7 +186,7 @@ Unlike Pharo's `ffiLibraryName` (a class-side method), Beamtalk uses `native:` a
 `native:` is a keyword argument on `subclass:` that flows through the ClassBuilder protocol (ADR 0038). ClassBuilder gains a `native:` method:
 
 ```beamtalk
-// ClassBuilder.bt — added
+// class_builder.bt — added
 /// Set the backing Erlang module for native delegation.
 native: anErlangModule =>
   backingModule := anErlangModule
@@ -702,7 +702,7 @@ Rejected because it conflates two different mechanisms (BIF-level primitives and
 
 ### Phase 0 — Hand-Written Facade (80% Solution, No Compiler Changes)
 
-**Status: partially complete.** `beamtalk_subprocess.erl` (hand-written gen_server), `Subprocess.bt` (FFI stubs), and the `generated_builtins.rs` entry are already in place and all tests pass.
+**Status: partially complete.** `beamtalk_subprocess.erl` (hand-written gen_server), `subprocess.bt` (FFI stubs), and the `generated_builtins.rs` entry are already in place and all tests pass.
 
 The primary remaining Phase 0 deliverable is documentation: write and publish the facade shape (`spawn/1`, `has_method/1`, dispatch functions) as the library author protocol so external authors can hand-write their own facades today, before Phase 1 ships.
 
@@ -716,7 +716,7 @@ The primary remaining Phase 0 deliverable is documentation: write and publish th
 - Store the backing module name on the `ClassDefinition` AST node
 - Add `native:` method to ClassBuilder (both `.bt` and Erlang backing)
 - Recognize `self delegate` in the AST of `native:` classes → generate `sync_send` facade dispatch
-- Define `delegate` method on `Actor.bt` with error fallback
+- Define `delegate` method on `actor.bt` with error fallback
 - Validate: `state:` declarations on `native:` actors produce a compile error
 - Warn: `self delegate` methods without a return type annotation
 - Generate facade module: `spawn/1`, `spawnWith:`, `has_method/1`, dispatch functions for `self delegate` methods
@@ -728,8 +728,8 @@ The primary remaining Phase 0 deliverable is documentation: write and publish th
 
 ### Phase 2 — Stdlib Migration
 
-- Migrate `Subprocess.bt` from FFI wrappers to `native: beamtalk_subprocess` with `self delegate`
-- Migrate `TranscriptStream.bt` from FFI wrappers to `native: beamtalk_transcript_stream` with `self delegate`
+- Migrate `subprocess.bt` from FFI wrappers to `native: beamtalk_subprocess` with `self delegate`
+- Migrate `transcript_stream.bt` from FFI wrappers to `native: beamtalk_transcript_stream` with `self delegate`
 - Remove public wrapper functions from `beamtalk_subprocess.erl` and `beamtalk_transcript_stream.erl` — retain only gen_server callbacks
 - Remove `has_method/1` and `dispatch/3` exports from both modules
 - **TranscriptStream deadlock safety:** The process-dictionary `dispatch/3` path in `beamtalk_transcript_stream.erl` exists because the current FFI shims run _inside_ the compiled actor's `handle_call` — calling `gen_server:call` back to the same process would deadlock. With `native:`, this architecture changes: the backing gen_server IS the process, and `self delegate` sends messages from the _caller's_ process via `sync_send`. The backing `handle_call/3` clauses (which already exist and are self-contained — they call internal functions like `buffer_text/2` directly, with no gen_server re-entry) handle requests without deadlock risk. The process-dictionary `dispatch/3` and FFI shims become dead code
@@ -754,10 +754,10 @@ The primary remaining Phase 0 deliverable is documentation: write and publish th
 - `crates/beamtalk-core/src/codegen/core_erlang/gen_server/` — new `native_facade.rs` generating `spawn/1`, `has_method/1`, dispatch functions
 - `crates/beamtalk-core/src/semantic_analysis/` — recognize `self delegate` in `native:` class methods; validate no `state:` on `native:` classes
 - `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs` — remove hardcoded `Subprocess`, `TranscriptStream`
-- `stdlib/src/Actor.bt` — add `delegate` method with error fallback
-- `stdlib/src/ClassBuilder.bt` — add `native:` setter method and `state: backingModule`
-- `stdlib/src/Subprocess.bt` — replace FFI with `native: beamtalk_subprocess` + `self delegate`
-- `stdlib/src/TranscriptStream.bt` — replace FFI with `native: beamtalk_transcript_stream` + `self delegate`
+- `stdlib/src/actor.bt` — add `delegate` method with error fallback
+- `stdlib/src/class_builder.bt` — add `native:` setter method and `state: backingModule`
+- `stdlib/src/subprocess.bt` — replace FFI with `native: beamtalk_subprocess` + `self delegate`
+- `stdlib/src/transcript_stream.bt` — replace FFI with `native: beamtalk_transcript_stream` + `self delegate`
 - `runtime/apps/beamtalk_stdlib/src/beamtalk_subprocess.erl` — remove public wrapper functions; retain gen_server callbacks
 - `runtime/apps/beamtalk_stdlib/src/beamtalk_transcript_stream.erl` — remove public wrapper functions; retain gen_server callbacks
 

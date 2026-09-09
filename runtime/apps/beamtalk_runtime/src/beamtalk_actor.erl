@@ -249,7 +249,7 @@ handle_getValue([], State) ->
     reserved_name/1
 ]).
 
-%% Beamtalk stdlib FFI shims for Actor.bt named registration (ADR 0079, BT-1988)
+%% Beamtalk stdlib FFI shims for actor.bt named registration (ADR 0079, BT-1988)
 %% Selectors are re-derived by beamtalk_erlang_proxy from the first keyword;
 %% these names deliberately differ from the runtime `spawnAs/2,3` entry points
 %% so they do not collide at the FFI dispatch layer.
@@ -2676,7 +2676,7 @@ to `Result error: ...`.
 %%% ============================================================================
 %%% Beamtalk stdlib FFI shims (ADR 0079 BT-1988; BT-3072 for doSpawn/doSpawnWith)
 %%%
-%%% These functions back `stdlib/src/Actor.bt`'s `spawn`/`spawnWith:` and
+%%% These functions back `stdlib/src/actor.bt`'s `spawn`/`spawnWith:` and
 %%% named-registration API via `(Erlang beamtalk_actor)` FFI calls. They take
 %%% the class object (or actor instance) as the first argument.
 %%%

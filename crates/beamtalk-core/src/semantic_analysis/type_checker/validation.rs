@@ -22,13 +22,44 @@ use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::string_utils::edit_distance;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
 use ecow::EcoString;
 
 use super::sendability;
 use super::type_resolver;
+use super::types::{AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass};
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
+
+/// Outcome of walking a `Union`-typed argument's members against one
+/// expected simple type, via [`TypeChecker::classify_union_members`] +
+/// [`TypeChecker::is_type_compatible`].
+///
+/// BT-3462: shared by [`TypeChecker::check_argument_types`] and
+/// [`TypeChecker::check_ffi_argument_types`] (`inference.rs`) — before this,
+/// both independently re-derived the same "skip if unclassifiable, skip if
+/// every member is compatible, otherwise report the incompatible members"
+/// decision from a raw `classify_union_members` call, with a "mirrors
+/// `check_argument_types`'s Union handling" comment standing in for a shared
+/// implementation (CLAUDE.md § No duplicate implementations). Diagnostic
+/// *message* text still differs per call site (an FFI signature vs. a
+/// declared Beamtalk method), so only the classification — not the
+/// diagnostic construction — is shared here.
+pub(super) enum UnionArgCompat {
+    /// Every member is compatible with the expected type — no diagnostic.
+    AllCompatible,
+    /// The union contains a member `classify_union_members` can't reason
+    /// about conservatively (Dynamic/Union/Meta/Never) — skip.
+    Unclassifiable,
+    /// `compat` members were compatible; `incompatible` names the rest, for
+    /// the diagnostic hint text. `compat == 0` distinguishes "no member
+    /// compatible" (a `warning`) from "some members compatible" (a `hint`)
+    /// at both call sites.
+    SomeIncompatible {
+        compat: usize,
+        incompatible: Vec<EcoString>,
+    },
+}
 
 impl TypeChecker {
     /// Classify how well a union's known members match a predicate.
@@ -67,6 +98,28 @@ impl TypeChecker {
         Some((compatible, member_names.len(), incompatible))
     }
 
+    /// Classifies a `Union` argument's members against `expected`, per
+    /// [`UnionArgCompat`].
+    pub(super) fn classify_union_arg_compat(
+        members: &[InferredType],
+        expected: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) -> UnionArgCompat {
+        let Some((compat, total, incompatible)) = Self::classify_union_members(members, |m| {
+            Self::is_type_compatible(m, expected, hierarchy)
+        }) else {
+            return UnionArgCompat::Unclassifiable;
+        };
+        if compat == total {
+            UnionArgCompat::AllCompatible
+        } else {
+            UnionArgCompat::SomeIncompatible {
+                compat,
+                incompatible,
+            }
+        }
+    }
+
     /// Collect deduplicated missing protocol methods across union members.
     fn collect_missing_protocol_methods(
         members: &[InferredType],
@@ -97,6 +150,7 @@ impl TypeChecker {
     /// maps the class method's parameter types (e.g., `T`) against the concrete
     /// argument types (e.g., `Integer`) to infer the class's type arguments.
     /// Unresolved params default to `Dynamic`.
+    #[allow(clippy::too_many_lines)] // one branch per receiver-knowledge shape — irreducible
     pub(super) fn check_class_side_send(
         &mut self,
         class_name: &EcoString,
@@ -157,7 +211,7 @@ impl TypeChecker {
             //    (`infer_constructor_type` keeps the result Dynamic for them).
             //  * Actor subclasses — they are spawned (`spawn` / `spawnWith:`),
             //    not `new`'d. In the common case this exclusion is now moot for
-            //    `new`/`new:` specifically: Actor.bt declares real `class sealed
+            //    `new`/`new:` specifically: actor.bt declares real `class sealed
             //    new` / `new:` (BT-3071), so `has_class_method` above is already
             //    `true` and this whole block is skipped before reaching here. It
             //    stays as defense-in-depth for a partially-unresolved hierarchy
@@ -174,7 +228,15 @@ impl TypeChecker {
                 || (is_factory_selector && hierarchy.resolves_selector(class_name, selector));
             if !has_class_chain_method {
                 self.emit_unknown_selector_warning(
-                    class_name, class_name, selector, span, hierarchy, true,
+                    class_name,
+                    class_name,
+                    selector,
+                    span,
+                    hierarchy,
+                    true,
+                    Severity::Hint,
+                    None,
+                    None,
                 );
             }
         }
@@ -524,6 +586,9 @@ impl TypeChecker {
                             span,
                             hierarchy,
                             false,
+                            Severity::Hint,
+                            None,
+                            None,
                         );
                     }
                 }
@@ -551,6 +616,9 @@ impl TypeChecker {
                 span,
                 hierarchy,
                 false,
+                Severity::Hint,
+                None,
+                None,
             );
         }
     }
@@ -1353,17 +1421,20 @@ impl TypeChecker {
                     }
                 }
                 InferredType::Union { members, .. } => {
-                    // BT-1832: Check all union members against the expected type.
-                    let Some((compat, total, incompatible)) =
-                        Self::classify_union_members(members, |m| {
-                            Self::is_type_compatible(m, &expected_structural, hierarchy)
-                        })
-                    else {
-                        continue; // Contains Dynamic — skip
+                    // BT-1832 / BT-3462: check every union member against the
+                    // expected type via the shared classification.
+                    let (compat, incompatible) = match Self::classify_union_arg_compat(
+                        members,
+                        &expected_structural,
+                        hierarchy,
+                    ) {
+                        UnionArgCompat::AllCompatible | UnionArgCompat::Unclassifiable => continue,
+                        UnionArgCompat::SomeIncompatible {
+                            compat,
+                            incompatible,
+                            ..
+                        } => (compat, incompatible),
                     };
-                    if compat == total {
-                        continue; // All match → pass
-                    }
                     let param_pos = i + 1;
                     let union_display = arg_ty
                         .display_for_diagnostic()
@@ -2540,6 +2611,15 @@ impl TypeChecker {
                 .unwrap_or_else(|| EcoString::from("Dynamic"));
             let mut env = TypeEnv::new();
             env.set_local("self", InferredType::known(class.name.name.clone()));
+            // BT-3469 (item 3) documented, without fixing, that this call
+            // makes the module's dependency direction cyclic: `inference/`
+            // already calls into `validation.rs` (`check_argument_types`,
+            // `check_instance_selector`, …), and this is `validation.rs`
+            // calling back into `inference/`'s `infer_expr`. Left as-is
+            // here — see BT-3481 for the follow-up that decides whether to
+            // eliminate it (thread the default value's already-inferred
+            // type through from the caller) or document it as a deliberate
+            // exception.
             let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
             match &inferred {
                 InferredType::Known {
@@ -2956,12 +3036,137 @@ impl TypeChecker {
         (Self::inferred_type_to_string(&resolved), deps)
     }
 
-    /// Emit a warning diagnostic for an unknown selector.
-    /// `display_name` is the type the user wrote (e.g. a singleton `#infinity`),
-    /// used only in the message text. `class_name` is the type we resolve
-    /// selectors and "did you mean" suggestions against (e.g. `Symbol` for a
-    /// singleton — BT-2679). They coincide for ordinary class receivers.
-    fn emit_unknown_selector_warning(
+    // ── BT-3469: renderers for facts `inference/` detects ──────────────
+    //
+    // Each of these four takes the plain data record `inference/` built
+    // (see `types.rs`'s "diagnostic facts" section) and turns it into the
+    // `Diagnostic` this file already owns constructing every other
+    // diagnostic with — `inference/` no longer builds a `Diagnostic`
+    // directly at these four sites.
+
+    /// Render an [`AssignmentTypeMismatch`] detected by
+    /// `inference::infer_assignment`'s annotation-vs-inferred check.
+    pub(super) fn emit_assignment_type_mismatch(
+        &mut self,
+        mismatch: &AssignmentTypeMismatch,
+        span: Span,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "Type mismatch: declared as {}, got {}",
+                    mismatch.declared_display, mismatch.inferred_display
+                ),
+                span,
+            )
+            .with_category(DiagnosticCategory::Type)
+            .with_hint(format!(
+                "The right-hand side has type {} which is not assignable to {}",
+                mismatch.inferred_display, mismatch.declared_display
+            )),
+        );
+    }
+
+    /// Render a [`CrossObjectFieldMutation`] detected by
+    /// `inference::infer_assignment`'s `FieldAccess` target arm. The
+    /// `withField:` suggestion's selector-capitalisation is message text,
+    /// so it's built here rather than at the detection site.
+    pub(super) fn emit_cross_object_field_mutation(
+        &mut self,
+        mutation: &CrossObjectFieldMutation,
+        span: Span,
+    ) {
+        let with_sel = {
+            let mut chars = mutation.field_name.chars();
+            match chars.next() {
+                None => "with:".to_string(),
+                Some(first) => {
+                    let cap: String = first.to_uppercase().collect();
+                    format!("with{}{}:", cap, chars.as_str())
+                }
+            }
+        };
+        let recv_name = &mutation.receiver_name;
+        let field_name = &mutation.field_name;
+        self.diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "Cannot assign to `{recv_name}.{field_name}` — objects cannot mutate another object's state"
+                ),
+                span,
+            )
+            .with_hint(format!(
+                "Use `{recv_name} := {recv_name} {with_sel} newValue` to get an updated copy"
+            ))
+            .with_category(DiagnosticCategory::Type),
+        );
+    }
+
+    /// Render the BT-2623 improper-cons-tail fact
+    /// (`InferredType::improper_cons_tail_display`) detected by
+    /// `inference::infer_list_literal`.
+    pub(super) fn emit_improper_cons_tail(&mut self, tail_display: &str, span: Span) {
+        self.diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "Cons tail of a list literal is {tail_display}, not a List — this builds an improper list"
+                ),
+                span,
+            )
+            .with_hint(format!(
+                "A `[head | tail]` tail must be a List; {tail_display} would form an improper list at runtime"
+            ))
+            .with_category(DiagnosticCategory::Type),
+        );
+    }
+
+    /// Render a BT-1914 [`DynamicInTypedClass`] fact detected by
+    /// `inference::post_process_expr_type`.
+    pub(super) fn emit_dynamic_in_typed_class(&mut self, fact: &DynamicInTypedClass, span: Span) {
+        self.diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "expression inferred as Dynamic in typed class `{}` ({})",
+                    fact.class_name, fact.description
+                ),
+                span,
+            )
+            .with_hint("Add a type annotation or use `@expect type` to suppress if intentional")
+            .with_category(DiagnosticCategory::Type),
+        );
+    }
+
+    /// Emit a diagnostic for an unknown selector, at the caller-chosen
+    /// `severity`. `display_name` is the type the user wrote (e.g. a
+    /// singleton `#infinity`), used only in the message text. `class_name`
+    /// is the type we resolve selectors and "did you mean" suggestions
+    /// against (e.g. `Symbol` for a singleton — BT-2679). They coincide for
+    /// ordinary class receivers.
+    ///
+    /// `severity` exists because this is also the single-missing-member
+    /// case's diagnostic builder for [`TypeChecker::infer_union_message_send`]
+    /// (BT-3469) — a union send the checker can *prove* fails (every member
+    /// closed, none responds) is a `Warning` per ADR 0100 Rule 1's
+    /// "provably failing union" row, while every other caller here passes
+    /// `Hint`. Reusing this method, rather than a second copy, is what keeps
+    /// the message shape and "did you mean" suggestion identical between a
+    /// bare receiver's DNU and a union's single-culprit DNU.
+    ///
+    /// `context_suffix`, when `Some`, is appended verbatim after the "does
+    /// not understand '<selector>'" clause — the union call site (BT-3469)
+    /// uses it for `" (in union A | B)"` so a union's single-culprit DNU
+    /// keeps the same receiver context every other union DNU carries; every
+    /// other caller passes `None`.
+    ///
+    /// `fallback_hint`, when `Some`, is attached verbatim whenever
+    /// [`Self::find_similar_selector`] finds no "did you mean" suggestion —
+    /// this keeps every DNU shape carrying actionable advice: the union
+    /// multi-culprit branch a few lines below always attaches the generic
+    /// `respondsTo:`/`@expect` hint, and a single-culprit union DNU should
+    /// too when it has no nearby selector to suggest. Bare-receiver callers
+    /// pass `None` here, keeping their existing no-fallback behavior.
+    #[allow(clippy::too_many_arguments)] // display/lookup name split (BT-2679) + severity/context (BT-3469) + fallback hint
+    pub(super) fn emit_unknown_selector_warning(
         &mut self,
         display_name: &EcoString,
         class_name: &EcoString,
@@ -2969,18 +3174,29 @@ impl TypeChecker {
         span: Span,
         hierarchy: &ClassHierarchy,
         is_class_side: bool,
+        severity: Severity,
+        context_suffix: Option<&str>,
+        fallback_hint: Option<&str>,
     ) {
         let side = if is_class_side { " class" } else { "" };
+        let suffix = context_suffix.unwrap_or("");
         let message: EcoString =
-            format!("{display_name}{side} does not understand '{selector}'").into();
+            format!("{display_name}{side} does not understand '{selector}'{suffix}").into();
 
-        let mut diag = Diagnostic::hint(message, span).with_category(DiagnosticCategory::Dnu);
+        let mut diag = match severity {
+            Severity::Warning => Diagnostic::warning(message, span),
+            _ => Diagnostic::hint(message, span),
+        }
+        .with_category(DiagnosticCategory::Dnu);
 
-        // Try to suggest similar selectors
+        // Try to suggest similar selectors; fall back to the caller-supplied
+        // generic hint, if any, when no suggestion was found.
         if let Some(suggestion) =
             Self::find_similar_selector(class_name, selector, hierarchy, is_class_side)
         {
             diag = diag.with_hint(format!("Did you mean '{suggestion}'?"));
+        } else if let Some(hint) = fallback_hint {
+            diag = diag.with_hint(hint);
         }
 
         self.diagnostics.push(diag);

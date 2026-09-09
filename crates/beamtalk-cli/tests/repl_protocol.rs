@@ -1600,7 +1600,7 @@ supervisor = \"E2EOtpRootSup\"\n";
 \n\
 Supervisor subclass: E2EOtpRootSup\n\
   class children -> List => #()\n";
-    fs::write(src_dir.join("e2e_otp_root_sup.bt"), supervisor_src)
+    fs::write(src_dir.join("e2eotp_root_sup.bt"), supervisor_src)
         .expect("Failed to write supervisor source");
 
     // Build the project using the beamtalk binary

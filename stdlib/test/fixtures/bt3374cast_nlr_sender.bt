@@ -1,0 +1,76 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3374: `^self otherMethod` (non-local return of a non-Nil self-call)
+// nested one block deep (`ifTrue: [^self otherMethod]`) used to silently
+// drop the nested call's effects when the enclosing method was dispatched
+// as a cast (`!`) from a foreign process — e.g. an `onExit:` callback.
+//
+// Root cause: `Expression::Return`'s NLR-throw codegen
+// (`crates/beamtalk-codegen/src/core_erlang/mod.rs`) only threaded a
+// self-send's *new* actor state through `generate_self_dispatch_open` for
+// the TOP-LEVEL `^self foo` shape (unnested — see
+// `actor_nlr_self_dispatch.bt`/`actor_early_return_unpack_test.bt`, BT-1432).
+// One block deeper, the generic AST-directed path fell through to
+// `generate_self_dispatch`'s *closed* form instead, which computes the
+// nested call's `Result` but discards its `NewState` — so the NLR throw's
+// `{'$bt_nlr', Token, Value, State}` tuple carried the state from BEFORE
+// the nested call, silently undoing every mutation it made. The nested
+// call's body still ran — its effects just vanished the instant the `^`
+// unwound. Confirmed to affect both cast (`handle_cast`) and sync
+// (`handle_call`) dispatch: the generated method body is shared between
+// both (`safe_dispatch`/`dispatch`, invoked identically by `handle_call`
+// and `handle_cast`), so the codegen bug was never call/cast-specific —
+// only which dispatch mode first surfaced it in practice.
+//
+// The victim actor (BT3374Probe) that triggers the `onExit:` callback
+// lives in fixtures/bt3374probe.bt — each class
+// must be in its own .bt file.
+
+Actor subclass: BT3374CastNlrSender
+  state: victim = nil
+  state: debugLog = #()
+
+  debugLog => self.debugLog
+
+  bringUp =>
+    self configureVictim
+    self
+
+  configureVictim =>
+    self.debugLog := self.debugLog add: "configureVictim start"
+    self.victim := BT3374Probe spawn
+    self.victim onExit: [:reason | self childExited: reason!]
+    self.debugLog := self.debugLog add: "configureVictim end"
+    self
+
+  // The bug's exact trigger: `^self configureVictim` nested one block deep
+  // (inside `ifTrue:`), in a method only ever invoked as a cast (`!`) from
+  // the `onExit:` callback above — a foreign process.
+  childExited: reason =>
+    reason notNil ifTrue: [^self configureVictim]
+    self
+
+  // Same nested-NLR-self-send shape, but reachable only via an ordinary
+  // synchronous self-send from another process (`handle_call` dispatch) —
+  // BT-3374's acceptance criteria requires this NOT regress.
+  reconfigureIfRequested: reason =>
+    reason notNil ifTrue: [^self configureVictim]
+    self
+
+  // C0b regression coverage: `^self otherMethod` nested in an `ifTrue:`
+  // branch that ALSO has a sibling `self.field := ...` mutation, so
+  // `control_flow_has_mutations` routes the branch through
+  // `generate_conditional_branch_inline`'s `ThreadedIr`/`StateAcc` path
+  // instead of the plain AST-directed `Expression::Return` handler — the
+  // codegen arm this exercises (`conditionals.rs`'s C0b) is distinct from
+  // the one `childExited:reason:`/`reconfigureIfRequested:` above hit.
+  reconfigureWithMarker: reason =>
+    reason notNil
+      ifTrue: [
+        self.debugLog := self.debugLog add: "marker"
+        ^self configureVictim
+      ]
+    self
+
+  victim => self.victim

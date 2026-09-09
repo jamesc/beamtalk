@@ -5,6 +5,7 @@
 //! `takeWhile:`, `dropWhile:`, `partition:`, `groupBy:`, and `sort:`.
 
 use super::super::super::intrinsics::validate_block_arity_exact;
+use super::super::super::threaded_ir::ThreadedStmt;
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use beamtalk_cerl_doc::Document;
@@ -119,10 +120,13 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
-
-            let (body_doc, _) =
-                self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlCount)?;
+            let (body_doc, _) = self.generate_foldl_loop_body(
+                body,
+                &plan,
+                &BodyKind::FoldlCount,
+                &acc_state_var,
+                1,
+            )?;
             docs.push(body_doc);
             self.pop_scope();
 
@@ -130,8 +134,8 @@ impl CoreErlangGenerator {
             let count_result = self.fresh_temp_var("CountResult");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(count_result.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(count_result.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -203,7 +207,7 @@ impl CoreErlangGenerator {
             "let CountAcc = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -211,9 +215,8 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlCount)?;
+        let (body_doc, _) =
+            self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlCount, &acc_state_var, 1)?;
         docs.push(body_doc);
         self.pop_scope();
 
@@ -352,10 +355,13 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
-
-            let (body_doc, _) =
-                self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlCollect)?;
+            let (body_doc, _) = self.generate_foldl_loop_body(
+                body,
+                &plan,
+                &BodyKind::FoldlCollect,
+                &acc_state_var,
+                1,
+            )?;
             docs.push(body_doc);
             self.pop_scope();
 
@@ -365,8 +371,8 @@ impl CoreErlangGenerator {
             let final_list = self.fresh_temp_var("FinalList");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(final_list.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(final_list.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -454,7 +460,7 @@ impl CoreErlangGenerator {
             "let AccList = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -462,10 +468,8 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
         let (body_doc, _) =
-            self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlCollect)?;
+            self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlCollect, &acc_state_var, 1)?;
         docs.push(body_doc);
         self.pop_scope();
 
@@ -678,10 +682,13 @@ impl CoreErlangGenerator {
             if body.parameters.len() >= 2 {
                 self.bind_var(&body.parameters[1].name, "Item");
             }
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
-
-            let (body_doc, _) =
-                self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlInject)?;
+            let (body_doc, _) = self.generate_foldl_loop_body(
+                body,
+                &plan,
+                &BodyKind::FoldlInject,
+                &acc_state_var,
+                1,
+            )?;
             docs.push(body_doc);
             self.pop_scope();
 
@@ -690,10 +697,10 @@ impl CoreErlangGenerator {
 
             // Extract each updated local var from tuple positions 2..N.
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&result_var, 2, self);
-            if self.in_direct_params_loop {
+            if self.loop_mode.in_direct_params_loop {
                 // BT-1329: Skip StateAcc repack. Emit open let-chain so variable rebindings
                 // escape to the outer scope. Store the result var for the caller.
-                self.direct_params_list_op_result = Some(acc_out.clone());
+                self.loop_mode.direct_params_list_op_result = Some(acc_out.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(result_var.clone()),
@@ -772,7 +779,7 @@ impl CoreErlangGenerator {
             "let Acc = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -783,10 +790,8 @@ impl CoreErlangGenerator {
         if body.parameters.len() >= 2 {
             self.bind_var(&body.parameters[1].name, "Item");
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
         let (body_doc, _) =
-            self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlInject)?;
+            self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlInject, &acc_state_var, 1)?;
         docs.push(body_doc);
         self.pop_scope();
 
@@ -929,14 +934,14 @@ impl CoreErlangGenerator {
                 self.bind_var(&param.name, &item_var);
             }
             // Unpack state vars starting at position 3 (after AccList and StillTaking).
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 3));
-
-            let (body_doc, _) = self.generate_threaded_loop_body(
+            let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
                 &plan,
                 &BodyKind::FoldlTakeWhile {
                     item_var: item_var.clone(),
                 },
+                &acc_state_var,
+                2,
             )?;
             docs.push(body_doc);
             self.pop_scope();
@@ -946,8 +951,8 @@ impl CoreErlangGenerator {
             let final_list = self.fresh_temp_var("FinalList");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(final_list.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(final_list.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -1029,7 +1034,7 @@ impl CoreErlangGenerator {
             ") in let StillTaking = call 'erlang':'element'(2, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(3, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -1037,14 +1042,14 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(
+        let (body_doc, _) = self.generate_foldl_loop_body(
             body,
             &plan,
             &BodyKind::FoldlTakeWhile {
                 item_var: item_var.clone(),
             },
+            &acc_state_var,
+            2,
         )?;
         docs.push(body_doc);
         self.pop_scope();
@@ -1187,14 +1192,14 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 3));
-
-            let (body_doc, _) = self.generate_threaded_loop_body(
+            let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
                 &plan,
                 &BodyKind::FoldlDropWhile {
                     item_var: item_var.clone(),
                 },
+                &acc_state_var,
+                2,
             )?;
             docs.push(body_doc);
             self.pop_scope();
@@ -1204,8 +1209,8 @@ impl CoreErlangGenerator {
             let final_list = self.fresh_temp_var("FinalList");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(final_list.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(final_list.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -1287,7 +1292,7 @@ impl CoreErlangGenerator {
             ") in let StillDropping = call 'erlang':'element'(2, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(3, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -1295,14 +1300,14 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(
+        let (body_doc, _) = self.generate_foldl_loop_body(
             body,
             &plan,
             &BodyKind::FoldlDropWhile {
                 item_var: item_var.clone(),
             },
+            &acc_state_var,
+            2,
         )?;
         docs.push(body_doc);
         self.pop_scope();
@@ -1447,14 +1452,14 @@ impl CoreErlangGenerator {
                 self.bind_var(&param.name, &item_var);
             }
             // State vars start at position 3 (after MatchList and NoMatchList).
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 3));
-
-            let (body_doc, _) = self.generate_threaded_loop_body(
+            let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
                 &plan,
                 &BodyKind::FoldlPartition {
                     item_var: item_var.clone(),
                 },
+                &acc_state_var,
+                2,
             )?;
             docs.push(body_doc);
             self.pop_scope();
@@ -1467,8 +1472,8 @@ impl CoreErlangGenerator {
             let result_tuple = self.fresh_temp_var("PartResult");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(result_tuple.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(result_tuple.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -1578,7 +1583,7 @@ impl CoreErlangGenerator {
             ") in let NoMatchList = call 'erlang':'element'(2, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(3, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -1586,14 +1591,14 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(
+        let (body_doc, _) = self.generate_foldl_loop_body(
             body,
             &plan,
             &BodyKind::FoldlPartition {
                 item_var: item_var.clone(),
             },
+            &acc_state_var,
+            2,
         )?;
         docs.push(body_doc);
         self.pop_scope();
@@ -1753,14 +1758,14 @@ impl CoreErlangGenerator {
                 self.bind_var(&param.name, &item_var);
             }
             // State vars start at position 2 (after GroupMap).
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
-
-            let (body_doc, _) = self.generate_threaded_loop_body(
+            let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
                 &plan,
                 &BodyKind::FoldlGroupBy {
                     item_var: item_var.clone(),
                 },
+                &acc_state_var,
+                1,
             )?;
             docs.push(body_doc);
             self.pop_scope();
@@ -1770,8 +1775,8 @@ impl CoreErlangGenerator {
             let final_map = self.fresh_temp_var("FinalMap");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-            if self.in_direct_params_loop {
-                self.direct_params_list_op_result = Some(final_map.clone());
+            if self.loop_mode.in_direct_params_loop {
+                self.loop_mode.direct_params_list_op_result = Some(final_map.clone());
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -1851,7 +1856,7 @@ impl CoreErlangGenerator {
             "let GroupMap = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -1859,14 +1864,14 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        let (body_doc, _) = self.generate_threaded_loop_body(
+        let (body_doc, _) = self.generate_foldl_loop_body(
             body,
             &plan,
             &BodyKind::FoldlGroupBy {
                 item_var: item_var.clone(),
             },
+            &acc_state_var,
+            1,
         )?;
         docs.push(body_doc);
         self.pop_scope();
@@ -2095,7 +2100,31 @@ impl CoreErlangGenerator {
                     leaf::var(pred_result),
                 ]);
             } else {
+                // BT-3420 (ADR 0118 phase 4): a non-last, non-assignment
+                // statement in the comparator body — e.g. a bare `self
+                // bumpCount` before the trailing `a < b` — has no state
+                // threading of its own here; thread any nested (or bare)
+                // actor self-send ahead via `thread_ahead` and put the
+                // result back into the process-dict key so it survives past
+                // this comparator invocation, the same way the field/local
+                // assignment arms above do via their own `current`/`put`
+                // pair.
+                let frame = self.current_frame();
+                let mut prelude: Vec<ThreadedStmt> = Vec::new();
+                let scope = self.thread_ahead(expr, &mut prelude, frame)?;
                 let doc = self.generate_expression(expr)?;
+                self.finish_precompiled_scope(scope)?;
+                if !prelude.is_empty() {
+                    docs.push(self.threaded_prelude_doc(&prelude));
+                    let current = self.current_state_var();
+                    docs.push(docvec![
+                        "let _ = call 'erlang':'put'(",
+                        state_key_doc.clone(),
+                        ", ",
+                        leaf::var(current),
+                        ") in ",
+                    ]);
+                }
                 docs.push(docvec!["let _ = ", doc, " in "]);
             }
         }

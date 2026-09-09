@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3412 review follow-up: regression test for the cascade-receiver variant
+// of the ClassVars-rebind scoping bug. See
+// stdlib/test/fixtures/cascade_class_var_rebind_receiver_position.bt for the
+// fixture and full context. This test compiling at all is itself most of
+// the regression coverage; the assertion additionally confirms the
+// self-send receiver actually ran.
+
+TestCase subclass: CascadeClassVarRebindReceiverPositionTest
+
+  testNonTailCascadeWithSelfSendReceiverCompilesInKeywordClassMethod =>
+    log := CascadeClassVarRebindLog spawn
+    CascadeClassVarRebindReceiverPosition run: log
+    self assert: log entries equals: #(#spawned)

@@ -157,7 +157,7 @@ load_compiled_stdlib_modules() ->
 -doc """
 Load protocol-only modules from the stdlib app env (BT-1766).
 
-Protocol-only files (e.g. Printable.bt) define structural protocols but
+Protocol-only files (e.g. printable.bt) define structural protocols but
 contain no class definition. They are compiled to BEAM modules with on_load
 callbacks that register the protocol with beamtalk_protocol_registry.
 Since they have no class, they are not in the `classes` env key and must

@@ -4,7 +4,7 @@
 //! Basic list iteration operations: `do:` and `collect:`.
 
 use super::super::super::intrinsics::validate_block_arity_exact;
-use super::super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result};
+use super::super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -80,28 +80,28 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            // Unpack vars from the tuple accumulator: element(1..N, StateAcc).
-            docs.push(plan.generate_tuple_unpack_docs(self, "StateAcc", 1));
-
+            // Unpack vars from the tuple accumulator (element(1..N, StateAcc))
+            // and lower the body, merged into ONE verified `Threaded` node.
             let (body_doc, _) =
-                self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
             docs.push(body_doc);
             self.pop_scope();
 
             // After foldl: extract vars from result tuple, repack into StateAcc.
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
-            let result_doc = if self.in_direct_params_loop {
+            let result_doc = if self.loop_mode.in_direct_params_loop {
                 // BT-1329: In direct-params loop context, skip StateAcc repack and omit
                 // trailing 'nil'. The extracted vars are left as open let-bindings so they
                 // escape to the outer scope (the caller chains the next expression directly).
-                // BT-1448/BT-3053: Signal open scope with no single value (multiple
-                // accumulator vars may have been rebound; `do:` itself always answers
-                // `nil`) so the annotation guard in generate_expression does not wrap
-                // this open let-chain in `( ... -| [...] )`, and a consumer that needs
-                // to reference a value substitutes `do:`'s own `nil` contract instead
-                // of a nonexistent variable.
-                self.last_open_scope_result = Some(OpenScopeResult::NoValue);
+                // BT-1448/BT-3053/ADR 0118 phase 5b (BT-3422): Signal open scope with no
+                // single value (multiple accumulator vars may have been rebound; `do:`
+                // itself always answers `nil`) so the annotation guard in
+                // generate_expression does not wrap this open let-chain in `( ... -|
+                // [annotation] )`, and `threaded_expression`'s generic fallback
+                // (`generate_expression_as_value`) substitutes `do:`'s own `nil` contract
+                // instead of referencing a nonexistent variable.
+                self.loop_mode.direct_params_do_open_chain = true;
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -184,9 +184,9 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
 
-        let (body_doc, _) = self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+        let (body_doc, _) =
+            self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
         docs.push(body_doc);
         self.pop_scope();
 
@@ -287,11 +287,15 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            // Unpack vars starting at index 2 (slot 1 is AccList).
-            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
-
-            let (body_doc, _) =
-                self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlCollect)?;
+            // Unpack vars starting at index 2 (slot 1 is AccList), merged
+            // with the body into ONE verified `Threaded` node.
+            let (body_doc, _) = self.generate_foldl_loop_body(
+                body,
+                &plan,
+                &BodyKind::FoldlCollect,
+                &acc_state_var,
+                1,
+            )?;
             docs.push(body_doc);
             self.pop_scope();
 
@@ -307,10 +311,10 @@ impl CoreErlangGenerator {
             let (str_binding, str_result) =
                 self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
-            if self.in_direct_params_loop {
+            if self.loop_mode.in_direct_params_loop {
                 // BT-1329: Skip StateAcc repack. Emit open let-chain so variable rebindings
                 // escape to the outer scope. Store the result var for the caller.
-                self.direct_params_list_op_result = Some(str_result);
+                self.loop_mode.direct_params_list_op_result = Some(str_result);
                 docs.push(docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -395,7 +399,7 @@ impl CoreErlangGenerator {
             "let AccList = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
-            leaf::var(acc_state_var),
+            leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
 
@@ -403,10 +407,9 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &item_var);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
 
         let (body_doc, _) =
-            self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlCollect)?;
+            self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlCollect, &acc_state_var, 1)?;
         docs.push(body_doc);
         self.pop_scope();
 

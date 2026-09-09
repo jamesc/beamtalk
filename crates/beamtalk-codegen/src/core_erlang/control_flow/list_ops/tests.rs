@@ -1577,7 +1577,7 @@ fn test_sort_pure_generates_beamtalk_list_sort_with() {
 //
 // When a block mutates actor state (field or local), `eachWithIndex:` and
 // `do:separatedBy:` desugar into an `inject:into:` fold so the mutations are
-// correctly threaded.  Non-mutating blocks fall through to the `Collection.bt`
+// correctly threaded.  Non-mutating blocks fall through to the `collection.bt`
 // dispatch.  The selector still appears in the generated method metadata, so
 // negative assertions must target the *dispatch body*, not the whole module.
 //
@@ -1635,7 +1635,7 @@ fn test_each_with_index_local_mutation_desugars_in_actor() {
 #[test]
 fn test_each_with_index_pure_block_falls_through() {
     // A block that does not mutate any state must NOT desugar; it dispatches to
-    // the Collection.bt method (covers the `!needs_threading` early-return).
+    // the collection.bt method (covers the `!needs_threading` early-return).
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items eachWithIndex: [:item :i | item + i]\n";
     let code = codegen(src);
     assert!(
@@ -1651,7 +1651,7 @@ fn test_each_with_index_pure_block_falls_through() {
 #[test]
 fn test_each_with_index_wrong_arity_block_falls_through() {
     // A 1-arg block (wrong arity for eachWithIndex:) must not desugar; the
-    // Collection.bt method will raise the correct runtime error (covers the
+    // collection.bt method will raise the correct runtime error (covers the
     // arity guard in try_generate_each_with_index). Body is a pure expression
     // (not a `self.field :=` mutation) — see BT-2792, which made a mutating
     // block that falls through to normal dispatch a compile-time error.
@@ -1757,7 +1757,7 @@ fn test_do_separated_by_separator_block_mutation_desugars_in_actor() {
 #[test]
 fn test_do_separated_by_pure_blocks_fall_through() {
     // When both blocks are pure the call must NOT desugar; it dispatches to
-    // the Collection.bt method (covers the both-pure early-return in
+    // the collection.bt method (covers the both-pure early-return in
     // try_generate_do_separated_by).
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items do: [:item | item + 1] separatedBy: [nil]\n";
     let code = codegen(src);
@@ -1795,7 +1795,7 @@ fn test_each_with_index_degenerate_param_names_falls_through() {
 fn test_each_with_index_non_literal_callable_falls_through() {
     // A block *variable* (not a literal `[ … ]`) cannot be desugared — the
     // synthetic AST builders need the actual parameter names and body, so the
-    // call dispatches to Collection.bt as an ordinary callable send.
+    // call dispatches to collection.bt as an ordinary callable send.
     //
     // Body is a pure expression, not a `self.field :=` mutation: storing a
     // self-mutating block in a local and invoking it later is now a
@@ -2146,9 +2146,9 @@ fn test_do_nested_in_direct_params_loop() {
     // The outer loop sets in_direct_params_loop=true, which causes
     // generate_list_do_with_mutations to hit the tuple-acc + in_direct_params_loop
     // branch (basic_ops.rs lines 94-112): StateAcc repack is skipped, an open
-    // let-chain is emitted, and last_open_scope_result is set to
-    // Some(OpenScopeResult::NoValue) (BT-3053) so the outer loop can chain the
-    // next expression directly.
+    // let-chain is emitted, and direct_params_do_open_chain is set to true
+    // (BT-3053/ADR 0118 phase 5b) so the outer loop can chain the next
+    // expression directly.
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2186,8 +2186,8 @@ fn test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
     // BT-3053: `^` (Expression::Return, compiled via the NLR-throw path since
     // it's inside a block) fed the *direct result* of a mutation-threaded
     // `do:` nested inside a direct-params loop — the exact shape that used to
-    // reference the bare `"_"` sentinel as if it were a bound variable
-    // (`last_open_scope_result` was `Option<String>` before this fix, and
+    // reference the bare `"_"` sentinel as if it were a bound variable (the
+    // producer-state field was a plain `Option<String>` before this fix, and
     // `"_"` did double duty as both a real name and a "still open, no value"
     // flag). Before the fix this produced `call 'erlang':'throw'({'$bt_nlr',
     // Token, _, State})` — a reference to an unbound `_`. After the fix, the

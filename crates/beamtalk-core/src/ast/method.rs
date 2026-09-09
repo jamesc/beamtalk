@@ -111,12 +111,14 @@ pub struct MethodDefinition {
     pub kind: MethodKind,
     /// Optional `@expect` directive attached to this method declaration (BT-1856, BT-1918).
     ///
-    /// When present, diagnostics matching this category that fire on the
-    /// method declaration are suppressed. If no matching diagnostic fires,
-    /// a "stale @expect" warning is emitted. The span is the source location
-    /// of the `@expect category` directive itself (for stale warnings).
-    /// The optional reason string is included in stale warnings for context.
-    pub expect: Option<(ExpectCategory, Option<EcoString>, Span)>,
+    /// When present, diagnostics matching any of these categories that fire
+    /// on the method declaration are suppressed (BT-3387: a single directive
+    /// may list more than one category, e.g. `@expect unresolved_ffi, type`).
+    /// If none of the categories match a diagnostic, a "stale @expect"
+    /// warning is emitted. The span is the source location of the
+    /// `@expect category` directive itself (for stale warnings). The
+    /// optional reason string is included in stale warnings for context.
+    pub expect: Option<(Vec<ExpectCategory>, Option<EcoString>, Span)>,
     /// Non-doc comments (`//` and `/* */`) appearing before this method.
     pub comments: CommentAttachment,
     /// Doc comment attached to this method (`///` lines).

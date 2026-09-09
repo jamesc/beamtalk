@@ -255,7 +255,7 @@ For each rejected alternative, the strongest possible argument from each cohort.
 
 ### Neutral
 - Execution order (parent-first) matches Java, Kotlin, Swift constructor chaining
-- `Actor.bt` defines `initialize -> Nil => nil`, so the chain always terminates cleanly
+- `actor.bt` defines `initialize -> Nil => nil`, so the chain always terminates cleanly
 - BT-1949's post-initialize check in `handle_continue` is extended to validate all inherited fields
 
 ## Implementation

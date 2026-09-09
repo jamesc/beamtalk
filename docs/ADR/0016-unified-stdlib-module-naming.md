@@ -113,7 +113,7 @@ beamtalk_set:dispatch(Selector, Args, X);           % beamtalk_ prefix
 
 A developer seeing `beamtalk_set.beam` in ebin cannot tell whether it's:
 - Hand-written Erlang (like `beamtalk_actor.erl` in runtime), or
-- Compiled from `.bt` (like `stdlib/src/Set.bt` in stdlib)
+- Compiled from `.bt` (like `stdlib/src/set.bt` in stdlib)
 
 **5. "Primitive" conflates two orthogonal concepts.**
 
@@ -168,7 +168,7 @@ The `@` separator provides clear visual distinction from hand-written Erlang run
 | `bt@stdlib@*.beam` | Stdlib compiled from `stdlib/src/*.bt` | `runtime/apps/beamtalk_stdlib/ebin/` |
 | `bt@*.beam` | User code compiled from `*.bt` | User's project `ebin/` |
 
-This makes the two-layer architecture explicit: `bt@stdlib@list` (Beamtalk stdlib API compiled from `stdlib/src/List.bt`) wraps `beamtalk_list_ops` (Erlang FFI in runtime) via `@primitive` pragmas. The runtime provides the bare-metal operations; the stdlib provides the Beamtalk-level class interface.
+This makes the two-layer architecture explicit: `bt@stdlib@list` (Beamtalk stdlib API compiled from `stdlib/src/list.bt`) wraps `beamtalk_list_ops` (Erlang FFI in runtime) via `@primitive` pragmas. The runtime provides the bare-metal operations; the stdlib provides the Beamtalk-level class interface.
 
 ### Why `@` separator?
 

@@ -78,7 +78,7 @@ TestCase subclass: DictionaryTest
     // Tier 2 (stateful) block reaching it via perform: hit a raw arity crash
     // in beamtalk_map:do_with_key/2 instead of a clear diagnostic.
     // keysAndValuesDo: delegates to doWithKey: (`self doWithKey: block` in
-    // Dictionary.bt), so it inherits the same fix.
+    // dictionary.bt), so it inherits the same fix.
     count := 0
     statefulBlock := [:k :v | count := count + v]
     self should: [

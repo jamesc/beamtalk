@@ -57,3 +57,36 @@ Actor subclass: ActorCollectCounter
   doubleAllAssignThenClass: items =>
     result := items collect: [:item | self processItem: item]
     result class
+
+  // BT-3425: same self-send collect: shape as doubleAllAssignThenClass:
+  // above, but computed INSIDE an ifTrue:/ifFalse: branch (bound to a local
+  // first) rather than at the method's top level — narrower variant that
+  // BT-3383's fix and regression test did not cover.
+  doubleAllInsideBranchAssignThenClass: items when: flag =>
+    (flag
+      ifTrue: [
+        result := items collect: [:item | self processItem: item]
+        result class
+      ]
+      ifFalse: [nil])
+
+  // BT-3425 (review finding on the fix's first version): a captured LOCAL
+  // other than the collect:'s own assignment target — mutated inside the
+  // collect: block, not via a field write — must also be re-threaded
+  // correctly out of the ifTrue: branch, not left bound to its stale
+  // pre-branch value. `localCount` is bumped once per item inside the
+  // block; `result` (the collect: RHS assigned to a local first) is a
+  // different local from `localCount`.
+  countLocalInsideBranchThenReturnLocal: items when: flag =>
+    localCount := 0
+    (flag
+      ifTrue: [
+        result := items
+          collect: [:item |
+            localCount := localCount + 1
+            item * 2
+          ]
+        result
+      ]
+      ifFalse: [nil])
+    localCount
