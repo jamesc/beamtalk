@@ -17,6 +17,54 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Identifier, MatchArm};
 
+/// Which of [`CoreErlangGenerator::generate_type_pattern`]'s runtime-test
+/// shapes a class name selects — see that method's doc for the full
+/// strategy breakdown. A class name absent from [`TYPE_TESTS`] (an ordinary
+/// actor, `Supervisor`/`DynamicSupervisor` subclass, or tagged `Value`
+/// subclass) falls through to
+/// [`CoreErlangGenerator::dispatch_type_pattern_strategy`]'s
+/// hierarchy-dependent default — that choice needs a `self.class_hierarchy`
+/// lookup, not just the name, so it cannot be a static table entry (BT-3474).
+#[derive(Clone, Copy)]
+enum TypeTest {
+    /// A guard-safe boolean-returning BIF (`is_binary`, `is_integer`, `is_float`,
+    /// `is_list`, `is_function`, `is_pid`, `is_reference`, `is_port`).
+    Bif(&'static str),
+    /// `Tuple` — any tuple except the reserved actor/supervisor 4-tuple tags.
+    Tuple,
+    /// `Symbol` — `is_atom` minus `nil`/`true`/`false`.
+    Symbol,
+    /// `Boolean` — exact `'true'`/`'false'` literal match.
+    Boolean,
+    /// `True`/`False`/`Nil`/`UndefinedObject` — exact single-atom match.
+    Atom(&'static str),
+    /// `Dictionary` — tagged-class test for the "no `$beamtalk_class` key" tag.
+    UntaggedMap,
+}
+
+/// BT-3474: data table replacing `dispatch_type_pattern_strategy`'s
+/// class-name match arms for every class whose runtime-test shape depends
+/// only on the name (not on `self.class_hierarchy`, unlike the actor/
+/// supervisor/generic-tagged-class fallback — see [`TypeTest`]'s doc).
+static TYPE_TESTS: &[(&str, TypeTest)] = &[
+    ("String", TypeTest::Bif("is_binary")),
+    ("Integer", TypeTest::Bif("is_integer")),
+    ("Float", TypeTest::Bif("is_float")),
+    ("List", TypeTest::Bif("is_list")),
+    ("Block", TypeTest::Bif("is_function")),
+    ("Pid", TypeTest::Bif("is_pid")),
+    ("Reference", TypeTest::Bif("is_reference")),
+    ("Port", TypeTest::Bif("is_port")),
+    ("Tuple", TypeTest::Tuple),
+    ("Symbol", TypeTest::Symbol),
+    ("Boolean", TypeTest::Boolean),
+    ("True", TypeTest::Atom("true")),
+    ("False", TypeTest::Atom("false")),
+    ("Nil", TypeTest::Atom("nil")),
+    ("UndefinedObject", TypeTest::Atom("nil")),
+    ("Dictionary", TypeTest::UntaggedMap),
+];
+
 impl CoreErlangGenerator {
     /// Compiles a single `Pattern::Type` match arm (`binding :: ClassName ->
     /// body`) — ADR 0107 Phase A / BT-2855.
@@ -145,6 +193,13 @@ impl CoreErlangGenerator {
     /// runtime-test strategies — factored out purely to keep
     /// `generate_type_pattern` itself under the line-count lint; see that
     /// function's doc comment for the full strategy breakdown.
+    ///
+    /// BT-3474: `class_name` is looked up in [`TYPE_TESTS`] first — a class
+    /// name whose test shape depends only on the name, not on
+    /// `self.class_hierarchy`, is table-driven via [`Self::render_type_test`].
+    /// The fallback below (actor/supervisor/generic tagged-class) stays a
+    /// hand-written default: it needs a hierarchy lookup a static table
+    /// keyed by name alone cannot express.
     fn dispatch_type_pattern_strategy(
         &mut self,
         match_var: &str,
@@ -152,67 +207,67 @@ impl CoreErlangGenerator {
         bound_success: Document<'static>,
         rest_doc: &Document<'static>,
     ) -> Document<'static> {
-        match class_name {
-            "String" => Self::wrap_bif_test(match_var, "is_binary", bound_success, rest_doc),
-            "Integer" => Self::wrap_bif_test(match_var, "is_integer", bound_success, rest_doc),
-            "Float" => Self::wrap_bif_test(match_var, "is_float", bound_success, rest_doc),
-            "List" => Self::wrap_bif_test(match_var, "is_list", bound_success, rest_doc),
-            "Block" => Self::wrap_bif_test(match_var, "is_function", bound_success, rest_doc),
-            "Pid" => Self::wrap_bif_test(match_var, "is_pid", bound_success, rest_doc),
-            "Reference" => Self::wrap_bif_test(match_var, "is_reference", bound_success, rest_doc),
-            "Port" => Self::wrap_bif_test(match_var, "is_port", bound_success, rest_doc),
-            "Tuple" => self.wrap_tuple_test(match_var, bound_success, rest_doc),
-            "Symbol" => Self::wrap_symbol_test(match_var, bound_success, rest_doc),
-            "Boolean" => self.wrap_boolean_test(match_var, bound_success, rest_doc),
-            "True" => self.wrap_single_atom_test(match_var, "true", bound_success, rest_doc),
-            "False" => self.wrap_single_atom_test(match_var, "false", bound_success, rest_doc),
-            "Nil" | "UndefinedObject" => {
-                self.wrap_single_atom_test(match_var, "nil", bound_success, rest_doc)
-            }
-            "Dictionary" => self.wrap_class_tag_test(
+        if let Some((_, test)) = TYPE_TESTS.iter().find(|(name, _)| *name == class_name) {
+            return self.render_type_test(*test, match_var, bound_success, rest_doc);
+        }
+
+        // BT-2855: an actor reference is a 4-tuple (`{'beamtalk_object',
+        // ClassAtom, ModuleAtom, Pid}`), not a map — the tagged-class
+        // `is_map` check would never match a live actor instance, silently
+        // miscompiling the single most common kind of leaf class in real
+        // Beamtalk programs.
+        //
+        // BT-2882: `is_actor_subclass`/`is_supervisor_subclass`/
+        // `is_dynamic_supervisor_subclass` are verified to resolve correctly
+        // even when `class_name`'s Actor/Supervisor ancestor is declared in a
+        // different file (or several files away) — see their doc comments in
+        // `hierarchy_queries.rs` and the
+        // `..._resolves_through_cross_file_stub_chain` codegen tests in
+        // `tests/control_flow.rs`.
+        let is_actor = self
+            .class_hierarchy
+            .as_ref()
+            .is_some_and(|h| h.is_actor_subclass(class_name));
+        // BT-2870: a Supervisor/DynamicSupervisor subclass reference is a
+        // *different* 4-tuple, tagged `'beamtalk_supervisor'` (or
+        // transiently `'beamtalk_supervisor_new'`) rather than
+        // `'beamtalk_object'` — same reasoning as the actor case above, just
+        // a different reserved tag.
+        let is_supervisor = self.class_hierarchy.as_ref().is_some_and(|h| {
+            h.is_supervisor_subclass(class_name) || h.is_dynamic_supervisor_subclass(class_name)
+        });
+        if is_actor {
+            self.wrap_actor_class_tag_test(match_var, class_name, bound_success, rest_doc)
+        } else if is_supervisor {
+            self.wrap_supervisor_class_tag_test(match_var, class_name, bound_success, rest_doc)
+        } else {
+            self.wrap_class_tag_test(
                 match_var,
-                Document::Str("'undefined'"),
+                leaf::atom(class_name.to_string()),
                 bound_success,
                 rest_doc,
-            ),
-            other => {
-                // BT-2855: an actor reference is a 4-tuple
-                // (`{'beamtalk_object', ClassAtom, ModuleAtom, Pid}`), not a
-                // map — the tagged-class `is_map` check would never match a
-                // live actor instance, silently miscompiling the single
-                // most common kind of leaf class in real Beamtalk programs.
-                //
-                // BT-2882: `is_actor_subclass`/`is_supervisor_subclass`/
-                // `is_dynamic_supervisor_subclass` are verified to resolve
-                // correctly even when `other`'s Actor/Supervisor ancestor is
-                // declared in a different file (or several files away) —
-                // see their doc comments in `hierarchy_queries.rs` and the
-                // `..._resolves_through_cross_file_stub_chain` codegen tests
-                // in `tests/control_flow.rs`.
-                let is_actor = self
-                    .class_hierarchy
-                    .as_ref()
-                    .is_some_and(|h| h.is_actor_subclass(other));
-                // BT-2870: a Supervisor/DynamicSupervisor subclass reference
-                // is a *different* 4-tuple, tagged `'beamtalk_supervisor'`
-                // (or transiently `'beamtalk_supervisor_new'`) rather than
-                // `'beamtalk_object'` — same reasoning as the actor case
-                // above, just a different reserved tag.
-                let is_supervisor = self.class_hierarchy.as_ref().is_some_and(|h| {
-                    h.is_supervisor_subclass(other) || h.is_dynamic_supervisor_subclass(other)
-                });
-                if is_actor {
-                    self.wrap_actor_class_tag_test(match_var, other, bound_success, rest_doc)
-                } else if is_supervisor {
-                    self.wrap_supervisor_class_tag_test(match_var, other, bound_success, rest_doc)
-                } else {
-                    self.wrap_class_tag_test(
-                        match_var,
-                        leaf::atom(other.to_string()),
-                        bound_success,
-                        rest_doc,
-                    )
-                }
+            )
+        }
+    }
+
+    /// BT-3474: dispatches a [`TypeTest`] to its renderer — the single
+    /// match [`TYPE_TESTS`]-driven strategies share, replacing what was a
+    /// 14-arm match keyed directly on class-name string literals.
+    fn render_type_test(
+        &mut self,
+        test: TypeTest,
+        match_var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        match test {
+            TypeTest::Bif(bif) => Self::wrap_bif_test(match_var, bif, success, rest),
+            TypeTest::Tuple => self.wrap_tuple_test(match_var, success, rest),
+            TypeTest::Symbol => Self::wrap_symbol_test(match_var, success, rest),
+            TypeTest::Boolean => self.wrap_boolean_test(match_var, success, rest),
+            TypeTest::Atom(atom) => self.wrap_single_atom_test(match_var, atom, success, rest),
+            TypeTest::UntaggedMap => {
+                self.wrap_class_tag_test(match_var, Document::Str("'undefined'"), success, rest)
             }
         }
     }
