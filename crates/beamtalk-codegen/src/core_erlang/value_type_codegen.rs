@@ -30,7 +30,7 @@ use beamtalk_core::ast::{
     Module, TypeAnnotation, WellKnownSelector,
 };
 
-/// BT-3484: which extra trailing slot (if any) a value-type/class-method
+/// which extra trailing slot (if any) a value-type/class-method
 /// Letrec loop's `{'nil', StateAcc, …}` result tuple carries at position 3.
 ///
 /// The two are mutually exclusive by construction — `ClassVars` threading
@@ -43,10 +43,10 @@ pub(in crate::core_erlang) enum VtLoopExtraSlot {
     /// `{'nil', StateAcc}` — no extra slot (also every `Foldl*`-shaped
     /// construct, whose accumulator has no such slot at all).
     None,
-    /// BT-3168: `{'nil', StateAcc, ClassVars}` — a class-method loop that
+    /// `{'nil', StateAcc, ClassVars}` — a class-method loop that
     /// threads a class-var mutation through its own recursive tail call.
     ClassVars,
-    /// BT-3484: `{'nil', StateAcc, Self{N}}` — a value-type instance-method
+    /// `{'nil', StateAcc, Self{N}}` — a value-type instance-method
     /// loop that threads a `self.field := ...` mutation through its own
     /// recursive tail call.
     ValueSelf,
@@ -64,18 +64,18 @@ enum VtBodyExprKind {
     LocalAssignment,
     /// `{a, b} := expr` — destructure assignment.
     DestructureAssignment,
-    /// Non-last `do:` loop that mutates captured outer locals (BT-1053).
+    /// Non-last `do:` loop that mutates captured outer locals.
     DoWithLocalThreading,
     /// Non-last `to:do:` / `to:by:do:` / `timesRepeat:` counted loop that mutates
-    /// captured outer locals (BT-2308).
+    /// captured outer locals.
     CountedLoopWithLocalThreading,
     /// `collect:` / `select:` / `reject:` / `inject:into:` foldl list-op that mutates
-    /// captured outer locals (BT-2342). Unlike the loops, element 1 of the threaded
+    /// captured outer locals. Unlike the loops, element 1 of the threaded
     /// `{value, StateAcc}` tuple is a *meaningful* result (the collected/folded value).
     FoldlListOpWithLocalThreading,
-    /// Non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` with local mutations (BT-1392).
+    /// Non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` with local mutations.
     ConditionalWithLocalThreading,
-    /// BT-3484: non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` whose branch
+    /// non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` whose branch
     /// writes a value-type `self.field := ...` but mutates NO outer local —
     /// so [`ConditionalWithLocalThreading`](Self::ConditionalWithLocalThreading)
     /// does not catch it, yet it still needs the same inline-`case` treatment
@@ -83,17 +83,17 @@ enum VtBodyExprKind {
     /// [`CoreErlangGenerator::is_conditional_with_vt_self_field_threading`]
     /// for why this is a separate kind rather than a widening of that one.
     ConditionalWithSelfFieldThreading,
-    /// Non-last block value with captured mutations (BT-1213).
+    /// Non-last block value with captured mutations.
     BlockWithCapturedMutations(Vec<String>),
-    /// Non-last `whileTrue:` / `whileFalse:` with local mutations (BT-1609).
+    /// Non-last `whileTrue:` / `whileFalse:` with local mutations.
     WhileWithLocalThreading,
-    /// Non-last `on:do:`/`ensure:` with local mutations (BT-3177).
+    /// Non-last `on:do:`/`ensure:` with local mutations.
     ExceptionConstructWithLocalThreading,
     /// Regular expression with no special Self-threading needs.
     Pure,
 }
 
-/// BT-3159: Intermediate pieces for one arm (true or false) of a vt-conditional's
+/// Intermediate pieces for one arm (true or false) of a vt-conditional's
 /// open-scope case, before the arm's final return value is finalized.
 ///
 /// Finalizing (via [`CoreErlangGenerator::finish_vt_conditional_branch`]) is deferred
@@ -111,14 +111,14 @@ struct VtBranchPieces {
     /// `Some(version)` if a class-method self-send in this arm's body advanced the
     /// class-var version past the baseline it started from.
     cv_mutated_version: Option<usize>,
-    /// BT-3484: `Some(version)` if a value-type `self.field := ...` write in
+    /// `Some(version)` if a value-type `self.field:=...` write in
     /// this arm's body advanced the `SelfVt` version past the baseline it
     /// started from — the `Self` mirror of `cv_mutated_version`, and the
     /// input to the trailing `Self{N}` tuple slot both arms must agree on.
     self_mutated_version: Option<usize>,
 }
 
-/// BT-3159/BT-3484: the `ClassVars`/`SelfVt` version numbers live immediately
+/// the `ClassVars`/`SelfVt` version numbers live immediately
 /// BEFORE a value-type conditional's `case` — captured once, then handed to
 /// every arm so both are true siblings starting from the same baseline, and
 /// to the post-`case` rebind so the merged version is the single successor of
@@ -129,7 +129,7 @@ struct VtCondBaseline {
     self_vt: usize,
 }
 
-/// BT-3159/BT-3484: which trailing slots a value-type conditional's
+/// which trailing slots a value-type conditional's
 /// branch-merge tuple carries. Each is set when EITHER arm mutated that
 /// storage — both arms must then carry the slot, since the `element/N`
 /// extraction after the `case` is fixed at compile time and runs whichever
@@ -140,7 +140,7 @@ struct VtCondSlots {
     self_vt: bool,
 }
 
-/// BT-2998: the class-side selectors that actually produce an instance of
+/// the class-side selectors that actually produce an instance of
 /// `class`, for the `instantiation_error` hint raised by `rejected` .
 ///
 /// A class method counts when its declared return type mentions the class
@@ -171,11 +171,11 @@ fn native_constructor_selectors(class: &ClassDefinition, rejected: &str) -> Vec<
         .collect()
 }
 
-/// How many constructors the BT-2998 `instantiation_error` hint names before
+/// How many constructors the `instantiation_error` hint names before
 /// it stops. `DateTime` — the widest in the stdlib — declares seven.
 const MAX_HINTED_CONSTRUCTORS: usize = 6;
 
-/// Whether `annotation` names `class_name` at any depth (BT-2998).
+/// Whether `annotation` names `class_name` at any depth.
 ///
 /// `Self` counts too: in return position it resolves to the receiver class.
 fn type_mentions_class(annotation: &TypeAnnotation, class_name: &str) -> bool {
@@ -207,7 +207,7 @@ fn type_mentions_class(annotation: &TypeAnnotation, class_name: &str) -> bool {
 }
 
 impl CoreErlangGenerator {
-    /// Generates a value type module (BT-213).
+    /// Generates a value type module.
     ///
     /// Value types are plain Erlang terms (maps/records) with no process.
     /// They are created with `new` and `new:`, not `spawn`.
@@ -246,7 +246,7 @@ impl CoreErlangGenerator {
         &mut self,
         module: &Module,
     ) -> Result<Document<'static>> {
-        // BT-213: Set context to ValueType for this module
+        // Set context to ValueType for this module
         self.context = CodeGenContext::ValueType;
 
         let class = module
@@ -257,7 +257,7 @@ impl CoreErlangGenerator {
         // Set class identity early so that class_name() returns the AST
         // class name rather than deriving from the module name.
         self.set_class_identity(Some(ClassIdentity::new(&class.name.name)));
-        // BT-2710 follow-up: record field declared types so `self.<field>`
+        // record field declared types so `self.<field>`
         // comparisons/arithmetic on object-typed fields route through the guard.
         self.set_class_field_types(&class.state);
 
@@ -279,7 +279,7 @@ impl CoreErlangGenerator {
                 .and_then(|cf| cf.class_method_index("new:"))
                 .is_some_and(|i| class.class_methods[i].kind == MethodKind::Primary);
 
-        // BT-923: Compute auto-generated slot methods for `Value subclass:` classes.
+        // Compute auto-generated slot methods for `Value subclass:` classes.
         // This is `None` for `ClassKind::Object` and `ClassKind::Actor`.
         let auto_methods = compute_auto_slot_methods(class);
 
@@ -323,7 +323,7 @@ impl CoreErlangGenerator {
             docs.push(Document::Str("\n"));
         }
 
-        // BT-923: Auto-generate getter and with*: setter functions for Value subclass:
+        // Auto-generate getter and with*: setter functions for Value subclass:
         let class_name_for_kw = self.class_name().clone();
         if let Some(ref auto) = auto_methods {
             for field in &auto.getters {
@@ -340,7 +340,7 @@ impl CoreErlangGenerator {
         // (superclass delegation chain — same pattern as actors)
         docs.push(self.generate_primitive_dispatch(class, auto_methods.as_ref())?);
         docs.push(Document::Str("\n"));
-        // BT-446: Generate dispatch/4 for actor hierarchy walk.
+        // Generate dispatch/4 for actor hierarchy walk.
         // The dispatch service only calls modules that export dispatch/4.
         docs.push(self.generate_dispatch_4(class)?);
         docs.push(Document::Str("\n"));
@@ -350,14 +350,14 @@ impl CoreErlangGenerator {
         // Generate superclass/0 for reflection
         docs.push(self.generate_superclass_function(module)?);
 
-        // BT-411: Generate class-side method functions
+        // Generate class-side method functions
         if !class.class_methods.is_empty() {
             docs.push(self.generate_class_method_functions(class)?);
             docs.push(Document::Str("\n"));
         }
 
-        // BT-923: Auto-generate keyword constructor for Value subclass:
-        // BT-1559: Value sub-subclasses delegate to new: to include inherited fields.
+        // Auto-generate keyword constructor for Value subclass:
+        // Value sub-subclasses delegate to new: to include inherited fields.
         let is_sub_subclass = class.class_kind == ClassKind::Value && {
             let sc = class.superclass_name();
             sc != "Value" && sc != "none"
@@ -380,12 +380,12 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-246: Register value type class with the class system for dynamic dispatch
+        // Register value type class with the class system for dynamic dispatch
         // Value types never need supervisionSpec synthesis (they are not actors).
         docs.push(self.generate_register_class(module, false)?);
         docs.push(Document::Str("\n"));
 
-        // BT-942: Generate __beamtalk_meta/0 for zero-process reflection
+        // Generate __beamtalk_meta/0 for zero-process reflection
         docs.push(self.generate_meta_function(module, false)?);
 
         // Module end
@@ -423,7 +423,7 @@ impl CoreErlangGenerator {
             parts.push(leaf::fname(mangled, arity));
         }
 
-        // BT-923: Auto-generated getter and with*: setter exports for Value subclass:
+        // Auto-generated getter and with*: setter exports for Value subclass:
         if let Some(auto) = auto_methods {
             for field in &auto.getters {
                 parts.push(leaf::fname(field.clone(), 1));
@@ -435,7 +435,7 @@ impl CoreErlangGenerator {
             if let Some(ref kw_sel) = auto.keyword_constructor {
                 let num_slots = class.state.len();
                 let arity = num_slots + 2; // ClassSelf + ClassVars + N slot args
-                // BT-1408: Hash long keyword constructor atoms to stay within Erlang's 255-char atom limit.
+                // Hash long keyword constructor atoms to stay within Erlang's 255-char atom limit.
                 let safe_fn = super::selector_mangler::safe_class_method_fn_name(kw_sel);
                 parts.push(leaf::fname(safe_fn, arity));
             }
@@ -444,20 +444,20 @@ impl CoreErlangGenerator {
         // All value types export dispatch/3 and has_method/1
         // for runtime dispatch via superclass delegation chain
         parts.push(Document::Str("'dispatch'/3"));
-        // BT-446: All value types also export dispatch/4 for actor hierarchy walk.
+        // All value types also export dispatch/4 for actor hierarchy walk.
         parts.push(Document::Str("'dispatch'/4"));
         parts.push(Document::Str("'has_method'/1"));
 
         // All classes export superclass/0 for reflection
         parts.push(Document::Str("'superclass'/0"));
 
-        // BT-246: Value types register with class system for dynamic dispatch
+        // Value types register with class system for dynamic dispatch
         parts.push(Document::Str("'register_class'/0"));
 
-        // BT-942: Static reflection metadata for zero-process queries
+        // Static reflection metadata for zero-process queries
         parts.push(Document::Str("'__beamtalk_meta'/0"));
 
-        // BT-411: Class method exports
+        // Class method exports
         for method in &class.class_methods {
             if method.kind == MethodKind::Primary {
                 let arity = method.parameters.len() + 2; // +2 for ClassSelf + ClassVars
@@ -480,15 +480,15 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
         exports: Document<'static>,
     ) -> Document<'static> {
-        // BT-586: Generate spec attributes from type annotations
-        // BT-2909/BT-2932: use the generator's cross-module-aware alias
+        // Generate spec attributes from type annotations
+        // use the generator's cross-module-aware alias
         // registry (this module's own `type_aliases` merged with any
         // pre-loaded aliases from other modules in the same compilation
         // unit — see `CoreErlangGenerator::alias_registry`'s doc) so an
         // alias-named annotation resolves to a `user_type` reference (ADR
         // 0108) instead of falling through to `any()`, regardless of which
         // module declared the alias.
-        // BT-2940: tracks which alias names the specs/type alias below
+        // tracks which alias names the specs/type alias below
         // actually reference, so `generate_alias_type_attrs` only emits
         // `-type` declarations for those (plus transitive deps) instead of
         // every pre-loaded alias in the compilation unit.
@@ -502,7 +502,7 @@ impl CoreErlangGenerator {
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
-        // BT-1156: Generate -type t() alias for Value classes with state: declarations.
+        // Generate -type t() alias for Value classes with state: declarations.
         let class_name_for_type = self.class_name();
         let type_alias_opt = spec_codegen::generate_type_alias(
             class,
@@ -518,7 +518,7 @@ impl CoreErlangGenerator {
         let type_alias_suffix: Document<'static> =
             type_alias_opt.map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
-        // BT-2909: every class module that could contain a `user_type`
+        // every class module that could contain a `user_type`
         // reference must also declare the matching named `-type` in the same
         // module attribute list (an `erlc` compile error otherwise) — empty
         // for a module with no `type_aliases`, so this is a no-op change for
@@ -529,9 +529,9 @@ impl CoreErlangGenerator {
             spec_codegen::format_alias_type_attributes(&alias_type_attrs)
                 .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
-        // BT-745: Build beamtalk_class attribute for dependency-ordered bootstrap
+        // Build beamtalk_class attribute for dependency-ordered bootstrap
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
-        // BT-845/BT-860/BT-940: Source-path and file attributes for stacktraces
+        // Source-path and file attributes for stacktraces
         let source_path_attr = self.source_path_attr();
         let file_attr = self.file_attr();
 
@@ -559,7 +559,7 @@ impl CoreErlangGenerator {
     ///
     /// - Non-instantiable primitives (Integer, String, etc.): raises `instantiation_error`
     /// - Collection primitives (Dictionary, List, Tuple): returns empty native value
-    /// - `native:` classes carrying no declared fields (BT-2998): raises `instantiation_error`
+    /// - `native:` classes carrying no declared fields: raises `instantiation_error`
     /// - Other value types: creates an instance map with `$beamtalk_class` and defaults
     fn generate_value_type_new(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
@@ -569,12 +569,12 @@ impl CoreErlangGenerator {
         if let Some(empty_val) = Self::collection_empty_value(class_name.as_str()) {
             return Ok(Self::generate_collection_new(empty_val));
         }
-        // BT-2998: a hollow-instance `new` is worse than no `new` at all.
+        // a hollow-instance `new` is worse than no `new` at all.
         if has_opaque_native_representation(class) {
             return Ok(Self::generate_native_new_error(class, "new", 0));
         }
 
-        // BT-1559: For Value sub-subclasses (superclass is not "Value" itself),
+        // For Value sub-subclasses (superclass is not "Value" itself),
         // chain to the parent's new/0 and merge own fields on top.  This ensures
         // inherited fields are included in the default instance map.
         // Only applies to ClassKind::Value — Object subclasses don't chain.
@@ -682,7 +682,7 @@ impl CoreErlangGenerator {
         });
 
         if let Some(prim_name) = prim_name {
-            // BT-1548: basicNew intrinsic = standard value constructor.
+            // basicNew intrinsic = standard value constructor.
             // Generate the normal auto-generated new/0 (map constructor) instead
             // of trying to inline a BIF. The class_new/2 function (generated
             // separately by generate_class_method_functions) handles class-side
@@ -725,7 +725,7 @@ impl CoreErlangGenerator {
     /// - Non-instantiable primitives: raises `instantiation_error`
     /// - Dictionary: returns `InitArgs` directly (dictionary IS a map)
     /// - List, Tuple: raises `instantiation_error` (no meaningful init-from-map)
-    /// - `native:` classes carrying no declared fields (BT-2998): raises `instantiation_error`
+    /// - `native:` classes carrying no declared fields: raises `instantiation_error`
     /// - Other value types: merges initialization arguments with defaults
     fn generate_value_type_new_with_args(
         &mut self,
@@ -743,7 +743,7 @@ impl CoreErlangGenerator {
         if Self::collection_empty_value(class_name.as_str()).is_some() {
             return self.generate_primitive_new_error(class_name.as_str(), "new:", 1);
         }
-        // BT-2998: `new:` merges over what `new` builds, so an opaque native
+        // `new:` merges over what `new` builds, so an opaque native
         // representation leaves it just as hollow — same error, same guidance.
         if has_opaque_native_representation(class) {
             return Ok(Self::generate_native_new_error(class, "new:", 1));
@@ -792,7 +792,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-2998: generates a `new`/`new:` function that raises `instantiation_error`
+    /// generates a `new`/`new:` function that raises `instantiation_error`
     /// for a `native:` class whose instances only the backing module can build.
     ///
     /// The hint names the class's own class-side constructors (see
@@ -832,7 +832,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-2998: the hint text baked into [`Self::generate_native_new_error`].
+    /// the hint text baked into [`Self::generate_native_new_error`].
     ///
     /// Split out so it can be asserted on directly — in the emitted Core Erlang
     /// it is a binary literal, i.e. a per-byte segment list.
@@ -889,10 +889,10 @@ impl CoreErlangGenerator {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // BT-923: Auto-generated slot methods for `Value subclass:` classes
+    // Auto-generated slot methods for `Value subclass:` classes
     // ──────────────────────────────────────────────────────────────────────────
 
-    // ── BT-1445: Unified value-type method body classification ─────────
+    // ── Unified value-type method body classification ─────────
 
     /// Classify a value-type body expression for Self-threading dispatch.
     ///
@@ -949,7 +949,7 @@ impl CoreErlangGenerator {
         has_nlr: bool,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<()> {
-        // BT-2308/BT-2342/BT-2361: A last expression that is a local-threading construct —
+        // A last expression that is a local-threading construct —
         // a loop (whileTrue:/whileFalse:, to:do:/to:by:do:/timesRepeat:), a foldl list-op
         // (collect:/select:/reject:/inject:into:), or a read+write conditional — yields a
         // `{value, StateAcc}` tuple. In last position the threaded locals don't escape, so
@@ -966,7 +966,7 @@ impl CoreErlangGenerator {
         }
 
         if has_nlr {
-            // BT-854: NLR methods return {Result, Self{N}} tuple so
+            // NLR methods return {Result, Self{N}} tuple so
             // the normal and NLR catch paths produce the same shape.
             let tmp = self.fresh_temp_var("BodyResult");
             let val_doc = self.expression_doc(expr)?;
@@ -983,7 +983,7 @@ impl CoreErlangGenerator {
                 "}\n",
             ]);
         } else {
-            // ADR 0089 (BT-2348): splice the expression Document directly. The typed
+            // ADR 0089: splice the expression Document directly. The typed
             // leaves the expression is built from carry the Core Erlang structure, so
             // there is no raw rendered fragment to re-wrap in `leaf::var`.
             let expr_doc = self.expression_doc(expr)?;
@@ -995,7 +995,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// BT-2308/BT-2342/BT-2349: Emits a last-position threading construct (loop or foldl
+    /// Emits a last-position threading construct (loop or foldl
     /// list-op yielding a `{value, StateAcc}` tuple) as an open let chain that binds the
     /// logical value (element 1) to a fresh result var, returning that var name.
     ///
@@ -1005,7 +1005,7 @@ impl CoreErlangGenerator {
     /// (which wraps it in `{class_var_result, Result, ClassVarsN}` when class vars were
     /// mutated).
     ///
-    /// BT-3168 (ADR 0111 Addendum 9, Question 3): when `expr` is a
+    /// ADR 0111 Addendum 9, Question 3: when `expr` is a
     /// Letrec-shaped loop (`whileTrue:`/`whileFalse:`/`to:do:`/`to:by:do:`/
     /// `timesRepeat:`) that threads a `ClassVars` mutation through its own
     /// recursive tail call, ALSO extracts `ClassVars` from element 3 and
@@ -1044,7 +1044,7 @@ impl CoreErlangGenerator {
                 let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
                 body_parts.push(docvec!["    ", rebind_doc, "\n"]);
             }
-            // BT-3484: the value-type `Self` mirror — without this a
+            // the value-type `Self` mirror — without this a
             // `self.field :=`-mutating loop in last/return position would
             // compile and run, but the method's own returned `Self` (and the
             // `{Result, Self{N}}` NLR tuple) would carry the pre-loop
@@ -1058,7 +1058,7 @@ impl CoreErlangGenerator {
         Ok(result_var)
     }
 
-    /// BT-2308/BT-2342: Returns `true` if `expr` evaluates to a `{value, StateAcc}` threaded
+    /// Returns `true` if `expr` evaluates to a `{value, StateAcc}` threaded
     /// tuple in value-type / class-method context, whose element 1 is the logical result and
     /// element 2 is the `StateAcc` map of mutated outer locals.
     ///
@@ -1066,7 +1066,7 @@ impl CoreErlangGenerator {
     /// - the local-threading **loops** — `whileTrue:`/`whileFalse:` and the counted loops
     ///   `to:do:`/`to:by:do:`/`timesRepeat:` — whose element 1 is `'nil'`;
     /// - the foldl **list-ops** — `collect:`/`select:`/`reject:`/`inject:into:` — whose
-    ///   element 1 is the meaningful collected/folded result (BT-2342).
+    ///   element 1 is the meaningful collected/folded result.
     ///
     /// Used both to unwrap such a construct as a method's last expression
     /// ([`Self::emit_vt_last_expr`]) and to detect a threading-construct assignment RHS
@@ -1076,7 +1076,7 @@ impl CoreErlangGenerator {
     ///
     /// `do:` is excluded — its value-type codegen already returns a bare `nil`.
     pub(in crate::core_erlang) fn expr_yields_vt_threaded_tuple(&self, expr: &Expression) -> bool {
-        // BT-2359: a threading construct used as a (parenthesized) assignment RHS —
+        // a threading construct used as a (parenthesized) assignment RHS —
         // `_r := (1 to: 5 do: [...])` — wraps the construct in `Expression::Parenthesized`.
         // Peel the wrappers so the `{value, StateAcc}` predicates (which only match
         // `MessageSend`) see the real construct.
@@ -1120,11 +1120,11 @@ impl CoreErlangGenerator {
             let is_last = i == body_len - 1;
 
             // Early return (^) at the method body level — emit value and stop generating.
-            // Note: ^ inside a block is handled via the NLR throw mechanism (BT-754).
+            // Note: ^ inside a block is handled via the NLR throw mechanism.
             if matches!(kind, VtBodyExprKind::EarlyReturn) {
                 if let Expression::Return { value, .. } = expr {
                     if has_nlr {
-                        // BT-854: NLR methods return {Result, Self{N}} tuple so
+                        // NLR methods return {Result, Self{N}} tuple so
                         // the normal and NLR catch paths produce the same shape.
                         let tmp = self.fresh_temp_var("EarlyResult");
                         let val_doc = self.expression_doc(value)?;
@@ -1177,7 +1177,7 @@ impl CoreErlangGenerator {
         match kind {
             VtBodyExprKind::EarlyReturn => unreachable!("handled before dispatch"),
             VtBodyExprKind::FieldAssignment => {
-                // BT-833/BT-900: Value type field assignment.
+                // Value type field assignment.
                 // Non-last: open Self-threading let chain so Self{N} stays in scope.
                 // Last: return the updated Self (not the assigned value).
                 let doc = self.generate_vt_field_assignment_open(expr)?;
@@ -1185,7 +1185,7 @@ impl CoreErlangGenerator {
                 if is_last {
                     let final_self = self.current_self_var();
                     if has_nlr {
-                        // BT-854: NLR methods return {Self{N}, Self{N}} tuple.
+                        // NLR methods return {Self{N}, Self{N}} tuple.
                         body_parts.push(docvec![
                             "    {",
                             leaf::var(final_self.clone()),
@@ -1199,7 +1199,7 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::LocalAssignment => {
-                // BT-2342/BT-2359: a threading construct (value-type loop / foldl list-op
+                // a threading construct (value-type loop / foldl list-op
                 // yielding `{value, StateAcc}`) or a read+write conditional as the RHS
                 // threads its mutations through the tuple. Bind the target to the logical
                 // value (element 1) and rebind the threaded siblings from the StateAcc
@@ -1224,7 +1224,7 @@ impl CoreErlangGenerator {
                 if is_last {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
-                    // BT-744: Local variable assignment — create a proper Core Erlang
+                    // Local variable assignment — create a proper Core Erlang
                     // let binding so the variable is accessible in subsequent expressions.
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::Identifier(id) = target.as_ref() {
@@ -1267,7 +1267,7 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::DoWithLocalThreading => {
-                // BT-1053: Non-last `do:` loop that mutates captured outer locals.
+                // Non-last `do:` loop that mutates captured outer locals.
                 if is_last {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
@@ -1276,12 +1276,12 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::ConditionalWithLocalThreading => {
-                // BT-1392: Non-last conditional with captured local mutations.
-                // BT-2342: In last position the block is stateful (it reads+writes an outer
+                // Non-last conditional with captured local mutations.
+                // In last position the block is stateful (it reads+writes an outer
                 // local), so the normal dispatch (`True>>ifTrue:`) would call the block with
                 // 0 args and crash. Inline the conditional as a `case` returning the branch's
                 // logical value instead — the threaded locals don't need to escape in last
-                // position. BT-2375: route through the shared `emit_vt_last_expr` like the loop
+                // position — route through the shared `emit_vt_last_expr` like the loop
                 // / foldl-list-op last branches — it dispatches the conditional through the same
                 // unified `emit_threaded_last` emitter, so the dedicated `emit_vt_conditional_last`
                 // wrapper is redundant.
@@ -1293,11 +1293,11 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::ConditionalWithSelfFieldThreading => {
-                // BT-3484: non-last, this is exactly the shape
+                // non-last, this is exactly the shape
                 // `generate_vt_conditional_open`'s new `Self` slot handles.
                 // In LAST position it deliberately falls through to the
                 // ordinary last-expression path, which reproduces the
-                // pre-BT-3484 `FieldAssignmentInUnsupportedBlock` diagnostic
+                // `FieldAssignmentInUnsupportedBlock` diagnostic
                 // — see
                 // `is_conditional_with_vt_self_field_threading`'s doc comment
                 // for why a clean compile error is the right answer there
@@ -1310,7 +1310,7 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::WhileWithLocalThreading => {
-                // BT-1609: Non-last whileTrue:/whileFalse: with captured local mutations.
+                // Non-last whileTrue:/whileFalse: with captured local mutations.
                 if is_last {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
@@ -1319,7 +1319,7 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::ExceptionConstructWithLocalThreading => {
-                // BT-3177: Non-last on:do:/ensure: with captured local
+                // Non-last on:do:/ensure: with captured local
                 // mutations. Last position is not yet wired through the
                 // shared `ThreadedExpr` emitter (`emit_threaded_last` has no
                 // on:do:/ensure: case) — tracked as a follow-up; today's
@@ -1333,7 +1333,7 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::CountedLoopWithLocalThreading => {
-                // BT-2308: to:do:/to:by:do:/timesRepeat: with captured local mutations.
+                // to:do:/to:by:do:/timesRepeat: with captured local mutations.
                 // In last position emit_vt_last_expr unwraps the {'nil', StateAcc} tuple.
                 if is_last {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
@@ -1343,7 +1343,7 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::FoldlListOpWithLocalThreading => {
-                // BT-2342: collect:/select:/reject:/inject:into: with captured local
+                // collect:/select:/reject:/inject:into: with captured local
                 // mutations. These emit a `{value, StateAcc}` tuple where element 1 is the
                 // meaningful result. In last position emit_vt_last_expr unwraps element 1;
                 // in non-last position we extract the threaded locals (discarding the value).
@@ -1355,7 +1355,7 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::BlockWithCapturedMutations(mutations) => {
-                // BT-1213: Non-last block value with captured mutations.
+                // Non-last block value with captured mutations.
                 if is_last {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
@@ -1387,7 +1387,7 @@ impl CoreErlangGenerator {
     ///
     /// Value type methods are pure functions that take Self as first parameter
     /// and return a new instance (immutable semantics).
-    /// ADR 0101 / BT-2720: Build the body of a `self delegate` method on a
+    /// ADR 0101: Build the body of a `self delegate` method on a
     /// `native:` Object as a call through the unified FFI boundary.
     ///
     /// Lowers to:
@@ -1516,12 +1516,12 @@ impl CoreErlangGenerator {
 
         let body_parts = body_result?;
 
-        // BT-940: Annotate the `fun` expression (not just the body) with source line.
+        // Annotate the `fun` expression (not just the body) with source line.
         // Annotating only the body would create invalid double-annotation when the body
         // is itself a single annotated MessageSend expression: `( ( e -| [...] ) -| [...] )`.
         let line_annotation = self.span_to_line(method.span);
 
-        // BT-754/BT-764: Wrap the method body in try/catch to catch non-local
+        // Wrap the method body in try/catch to catch non-local
         // returns thrown by ^ inside block closures.
         let body_doc = Document::Vec(body_parts);
         let params_doc = join(params.into_iter().map(leaf::var), &Document::Str(", "));
@@ -1546,7 +1546,7 @@ impl CoreErlangGenerator {
         Ok(docvec![leaf::fname(mangled, arity), " = ", fun_doc, "\n",])
     }
 
-    /// BT-833: Generates an open Self-threading let chain for a non-last field assignment.
+    /// Generates an open Self-threading let chain for a non-last field assignment.
     ///
     /// For `self.field := value`, produces:
     /// ```erlang
@@ -1596,7 +1596,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1213: Generate an open let-chain for a non-last `[block_withmutations] value`
+    /// Generate an open let-chain for a non-last `[block_withmutations] value`
     /// in `ValueType` context. Each assignment in the block body becomes a top-level
     /// `let Var = val in\n` so the mutation is visible to subsequent expressions.
     fn generate_vt_block_value_open(
@@ -1692,15 +1692,15 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
-    /// BT-1053: Returns `true` if `expr` is a `do:` message send with a literal
+    /// Returns `true` if `expr` is a `do:` message send with a literal
     /// block that, in `ValueType` context, captures and mutates outer local variables.
     ///
-    /// Used by `generate_value_type_method` and `lower_class_method_body` (BT-1414;
-    /// BT-3164 renamed the latter from `generate_class_method_body`)
+    /// Used by `generate_value_type_method` and `lower_class_method_body`
+    /// (renamed from `generate_class_method_body`)
     /// to select the open-let-chain path for non-last `do:` loops so the mutated
     /// locals are visible to subsequent exprs.
     pub(in crate::core_erlang) fn is_do_with_vt_local_threading(&self, expr: &Expression) -> bool {
-        // BT-1414: Allow class methods regardless of module context (Actor classes
+        // Allow class methods regardless of module context (Actor classes
         // have context=Actor but class methods still need local-map threading).
         if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
@@ -1721,7 +1721,7 @@ impl CoreErlangGenerator {
         false
     }
 
-    /// BT-1609: Returns `true` if `expr` is a `whileTrue:` or `whileFalse:` message send
+    /// Returns `true` if `expr` is a `whileTrue:` or `whileFalse:` message send
     /// whose body block captures and mutates outer local variables in value-type context.
     ///
     /// Uses the same `needs_mutation_threading` check that the while-loop codegen uses
@@ -1742,7 +1742,7 @@ impl CoreErlangGenerator {
             ..
         } = expr
         {
-            // BT-2073: Match `whileTrue:` / `whileFalse:` via the `WellKnownSelector` enum.
+            // Match `whileTrue:` / `whileFalse:` via the `WellKnownSelector` enum.
             if matches!(
                 selector.well_known(),
                 Some(WellKnownSelector::WhileTrue | WellKnownSelector::WhileFalse)
@@ -1761,7 +1761,7 @@ impl CoreErlangGenerator {
                     } else {
                         None
                     };
-                    // BT-3484: see the analogous comment in
+                    // see the analogous comment in
                     // `is_counted_loop_with_vt_local_threading`.
                     return !self
                         .compute_threaded_locals_for_loop(body, condition)
@@ -1773,7 +1773,7 @@ impl CoreErlangGenerator {
         false
     }
 
-    /// BT-1609: Generates a non-last `whileTrue:` / `whileFalse:` loop (with value-type
+    /// Generates a non-last `whileTrue:` / `whileFalse:` loop (with value-type
     /// captured local threading) as an **open let chain**.
     ///
     /// The while loop returns `{'nil', StateAcc}`. This method:
@@ -1785,7 +1785,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-3168: computed BEFORE `expression_doc` runs the loop's own
+        // computed BEFORE `expression_doc` runs the loop's own
         // codegen (which, via `with_branch_context`, restores
         // `class_var_version` to its pre-loop value by the time this call
         // returns) — this predicate itself doesn't need that, but keeping it
@@ -1805,7 +1805,7 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// BT-1609/BT-2308: Shared open-let-chain extraction for non-last value-type loops
+    /// Shared open-let-chain extraction for non-last value-type loops
     /// that return a `{'nil', StateAcc}` tuple (`whileTrue:`/`whileFalse:` and the counted
     /// loops `to:do:`/`to:by:do:`/`timesRepeat:`).
     ///
@@ -1813,7 +1813,7 @@ impl CoreErlangGenerator {
     /// 2. Extracts the `StateAcc` from element 2
     /// 3. Extracts each threaded local from the `StateAcc` via `maps:get`, rebinding the
     ///    variable names in scope so subsequent code sees the updated values
-    /// 4. BT-3168 (ADR 0111 Addendum 9, Question 3) / BT-3484: when
+    /// 4. ADR 0111 Addendum 9, Question 3: when
     ///    `extra_slot` is not [`VtLoopExtraSlot::None`], ALSO extracts the
     ///    loop's trailing element 3 and rebinds it — `ClassVars` via
     ///    [`CoreErlangGenerator::rebind_class_vars_from_doc`], the value-type
@@ -1824,7 +1824,7 @@ impl CoreErlangGenerator {
     ///    `do:`/`collect:`/`select:`/`inject:into:` caller
     ///    (`generate_vt_foldl_list_op_open`/`generate_value_type_do_open`) —
     ///    those Foldl-shaped constructs' accumulator has no matching slot
-    ///    yet (BT-3169).
+    ///    yet.
     ///
     /// When there are no threaded locals AND no extra slot, falls back
     /// to sequencing the loop as a side effect (`let _seqN = <loop> in`).
@@ -1892,7 +1892,7 @@ impl CoreErlangGenerator {
                 let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
                 parts.push(docvec!["    ", rebind_doc, "\n"]);
             }
-            // BT-3484: same slot, same position — the loop's own trailing
+            // same slot, same position — the loop's own trailing
             // `Self` becomes the method's new live `Self{N}` for every
             // statement after the loop.
             VtLoopExtraSlot::ValueSelf => {
@@ -1905,7 +1905,7 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
-    /// BT-2342: Returns the threaded local variable names for any value-type threading
+    /// Returns the threaded local variable names for any value-type threading
     /// construct that yields a `{value, StateAcc}` tuple (a `whileTrue:`/`whileFalse:` or
     /// counted loop, or a `collect:`/`select:`/`reject:`/`inject:into:` foldl list-op).
     ///
@@ -1916,7 +1916,7 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> Vec<String> {
-        // BT-2359: peel `Expression::Parenthesized` so a parenthesized construct
+        // peel `Expression::Parenthesized` so a parenthesized construct
         // (`(1 to: 5 do: [...])`) reports the same threaded locals its codegen packed.
         let expr = expr.unwrap_parens();
         if self.is_while_with_vt_local_threading(expr) {
@@ -1932,7 +1932,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2342: Emits a value-type local assignment whose RHS is a threading construct
+    /// Emits a value-type local assignment whose RHS is a threading construct
     /// returning a `{value, StateAcc}` tuple (a loop or foldl list-op).
     ///
     /// Binds the target variable to element 1 (the construct's logical value), then rebinds
@@ -1948,16 +1948,16 @@ impl CoreErlangGenerator {
         value: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
-        // BT-3168 (ADR 0111 Addendum 9, Question 3) / BT-3484: which extra
+        // ADR 0111 Addendum 9, Question 3: which extra
         // trailing slot `value` carries as an explicit 3rd tuple element,
         // when it is a Letrec-shaped construct (while/counted loop) —
         // see the analogous comment on `emit_vt_threaded_tuple_unwrap_to_var`.
         // Always `None` for a `Foldl*` construct
         // (`vt_construct_extra_slot`'s own doc comment) — the class-var half
-        // of that shape is handled by the BT-3169 refresh below instead.
+        // of that shape is handled by the refresh below instead.
         let extra_slot = self.vt_construct_extra_slot(value);
         let span = value.span();
-        // BT-3169: captured before generating `value` so a class-method
+        // captured before generating `value` so a class-method
         // self-send inside a `Foldl*` construct (its own accumulator
         // threading, ADR 0111 Addendum 9 Question 6) can be detected —
         // `class_var_version` only ever advances from class-method-specific
@@ -1975,7 +1975,7 @@ impl CoreErlangGenerator {
             rhs_doc,
             " in\n",
         ]);
-        // BT-3169: `value`'s own returned Document is now bound opaquely to
+        // `value`'s own returned Document is now bound opaquely to
         // `tuple_var` above — any class-var rebind a self-send inside a
         // `Foldl*` construct performed (its own post-accumulator
         // `ClassVarsN`) is confined to that `let`'s RHS and unreachable from
@@ -2036,7 +2036,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-3168/BT-3484: extract the loop's own trailing slot from element
+        // extract the loop's own trailing slot from element
         // 3 and rebind it, same as the non-last-statement / last-position
         // consumers.
         match extra_slot {
@@ -2056,7 +2056,7 @@ impl CoreErlangGenerator {
         Ok(core_var)
     }
 
-    /// BT-2308: Returns `true` if `expr` is a `to:do:` / `to:by:do:` / `timesRepeat:`
+    /// Returns `true` if `expr` is a `to:do:` / `to:by:do:` / `timesRepeat:`
     /// counted loop whose body block captures and mutates outer local variables in
     /// value-type or class-method context.
     ///
@@ -2073,7 +2073,7 @@ impl CoreErlangGenerator {
         let Some(body) = Self::counted_loop_body_block(expr) else {
             return false;
         };
-        // BT-3484: a loop whose ONLY mutation is `self.field := ...` still
+        // a loop whose ONLY mutation is `self.field:=...` still
         // returns a threaded tuple (`{'nil', StateAcc, Self{N}}`) that must
         // be unpacked here — before this issue it had no threaded locals, so
         // this predicate said `false` and the loop's result was sequenced
@@ -2082,14 +2082,14 @@ impl CoreErlangGenerator {
             || self.loop_body_threads_value_self(body)
     }
 
-    /// BT-3168 (ADR 0111 Addendum 9, Questions 3/4) / BT-3484: which extra
+    /// ADR 0111 Addendum 9, Questions 3/4: which extra
     /// trailing slot the loop construct `expr`'s result tuple carries —
     /// non-`None` only for the Letrec-shaped constructs (`whileTrue:`/
     /// `whileFalse:`, `to:do:`/`to:by:do:`/`timesRepeat:`).
     /// `do:`/`collect:`/`select:`/`inject:into:` (Foldl-shaped) never match
     /// here even when class-var-mutating — their accumulator has no matching
     /// tuple slot (Question 6) — and a value-type `self.field :=` inside one
-    /// is likewise out of scope (BT-3484 covers the Letrec shape only).
+    /// is likewise out of scope: only the Letrec shape is covered here.
     /// Shares [`CoreErlangGenerator::loop_body_threads_class_vars`] and
     /// [`CoreErlangGenerator::loop_body_threads_value_self`] with
     /// `ThreadingPlan::new_impl` (`control_flow/plan.rs`) so the routing
@@ -2122,7 +2122,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2308: Returns the body block of a counted loop message send
+    /// Returns the body block of a counted loop message send
     /// (`timesRepeat:`, `to:do:`, `to:by:do:`), or `None` if `expr` is not one.
     fn counted_loop_body_block(expr: &Expression) -> Option<&Block> {
         let Expression::MessageSend {
@@ -2147,7 +2147,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2308: Generates a non-last counted loop (`to:do:`/`to:by:do:`/`timesRepeat:`)
+    /// Generates a non-last counted loop (`to:do:`/`to:by:do:`/`timesRepeat:`)
     /// with value-type captured local threading as an **open let chain**, extracting the
     /// threaded locals from the loop's `{'nil', StateAcc}` result (see
     /// [`Self::emit_vt_loop_open_extraction`]).
@@ -2155,7 +2155,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-3168: see the analogous comment in `generate_vt_while_open`.
+        // see the analogous comment in `generate_vt_while_open`.
         let extra_slot = self.vt_construct_extra_slot(expr);
         // Generate the counted loop expression (returns {'nil', StateAcc} tuple).
         let loop_doc = self.expression_doc(expr)?;
@@ -2172,7 +2172,7 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// BT-2342/BT-2359: Returns `true` if `expr` is a `collect:` / `select:` / `reject:` /
+    /// Returns `true` if `expr` is a `collect:` / `select:` / `reject:` /
     /// `inject:into:` / `count:` / `detect:` / `detect:ifNone:` foldl list-op whose body
     /// block captures and mutates outer local variables in value-type or class-method context.
     ///
@@ -2193,7 +2193,7 @@ impl CoreErlangGenerator {
         !self.compute_threaded_locals_for_loop(body, None).is_empty()
     }
 
-    /// BT-2342/BT-2359: Returns the body block of a foldl list-op message send
+    /// Returns the body block of a foldl list-op message send
     /// (`collect:`, `select:`, `reject:`, `inject:into:`, `count:`, `detect:`,
     /// `detect:ifNone:`), or `None` if `expr` is not one.
     ///
@@ -2227,7 +2227,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2342: Generates a non-last foldl list-op (`collect:`/`select:`/`reject:`/
+    /// Generates a non-last foldl list-op (`collect:`/`select:`/`reject:`/
     /// `inject:into:`) with value-type captured local threading as an **open let chain**,
     /// extracting the threaded locals from the list-op's `{value, StateAcc}` result (see
     /// [`Self::emit_vt_loop_open_extraction`]).
@@ -2246,10 +2246,10 @@ impl CoreErlangGenerator {
         Ok(self.emit_vt_loop_open_extraction(
             loop_doc,
             &threaded_locals,
-            // BT-3168: Foldl-shaped constructs never thread `ClassVars`
-            // through this tuple slot — that's BT-3169's territory
-            // (Question 6's `{ClassVars, StateAcc}` accumulator shape) —
-            // and, per BT-3484, no value-type `Self` slot either.
+            // Foldl-shaped constructs never thread `ClassVars`
+            // through this tuple slot (Question 6's `{ClassVars, StateAcc}`
+            // accumulator shape governs that separately) — nor is there a
+            // value-type `Self` slot either.
             VtLoopExtraSlot::None,
             expr.span(),
             "FoldlListOpResult",
@@ -2257,7 +2257,7 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// BT-1609: Returns the threaded local variable names for a `whileTrue:` / `whileFalse:`
+    /// Returns the threaded local variable names for a `whileTrue:` / `whileFalse:`
     /// expression, or an empty Vec if none.
     fn get_while_threaded_locals(&self, expr: &Expression) -> Vec<String> {
         let Expression::MessageSend {
@@ -2279,7 +2279,7 @@ impl CoreErlangGenerator {
         self.compute_threaded_locals_for_loop(body, condition)
     }
 
-    /// BT-1053/BT-1414: Generates a non-last `do:` loop (with value-type/class-method
+    /// Generates a non-last `do:` loop (with value-type/class-method
     /// captured local threading) as an **open let chain**.
     ///
     /// Unlike the closed form (which buries the extracted locals inside `_seqN = (... 'nil')`)
@@ -2306,7 +2306,7 @@ impl CoreErlangGenerator {
             _ => return Ok(Document::Nil),
         };
 
-        // BT-1053 / Copilot review: validate that the block has exactly 1 parameter,
+        // Validate that the block has exactly 1 parameter,
         // matching the check in the normal generate_list_do path.
         validate_block_arity_exact(
             block_expr,
@@ -2315,7 +2315,7 @@ impl CoreErlangGenerator {
             "The do: block must take exactly one argument: [:each | ...]",
         )?;
 
-        // BT-3169: a second, throwaway `ThreadingPlan` — constructed purely to
+        // a second, throwaway `ThreadingPlan` — constructed purely to
         // read `threads_class_vars`/`initial_class_var` (both pure functions
         // of the current generator state and `body`, computed identically to
         // the one `generate_list_do_body_with_threading` builds internally
@@ -2369,7 +2369,7 @@ impl CoreErlangGenerator {
         let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
         let item_var = Self::to_core_erlang_var(item_param);
 
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, StateAcc}
         // tuple, unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -2452,7 +2452,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// BT-1392: Returns `true` if `expr` is an `ifTrue:`, `ifFalse:`, or `ifTrue:ifFalse:`
+    /// Returns `true` if `expr` is an `ifTrue:`, `ifFalse:`, or `ifTrue:ifFalse:`
     /// message send where at least one block argument writes to a local variable that is
     /// already bound in the enclosing scope, in value-type or class-method context.
     ///
@@ -2495,7 +2495,7 @@ impl CoreErlangGenerator {
         false
     }
 
-    /// BT-3484: `true` if `expr` is a value-type instance-method
+    /// `true` if `expr` is a value-type instance-method
     /// `self.field := ...` write — the shape that threads `Self{N}`
     /// (`FieldWriteSite::ValueType`).
     ///
@@ -2509,7 +2509,7 @@ impl CoreErlangGenerator {
             && Self::is_field_assignment(expr)
     }
 
-    /// BT-3484: `true` if `expr` is an `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
+    /// `true` if `expr` is an `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
     /// whose branch block(s) contain a value-type `self.field := ...` write.
     ///
     /// Deliberately SEPARATE from
@@ -2521,7 +2521,7 @@ impl CoreErlangGenerator {
     /// (last position) or emit an `erlc`-rejected reference to a branch-scoped
     /// `Self{N}` (assign RHS), both strictly worse than the clean
     /// `FieldAssignmentInUnsupportedBlock` diagnostic those shapes produce
-    /// today (confirmed empirically while validating this issue). BT-3484 is
+    /// today (confirmed empirically). This is
     /// scoped to the NON-LAST statement position — the shape its repros
     /// cover, and the only one `generate_vt_conditional_open` (the sole
     /// consumer of this predicate, via
@@ -2554,7 +2554,7 @@ impl CoreErlangGenerator {
         })
     }
 
-    /// BT-3484: `true` if any TOP-LEVEL statement of `block` is a value-type
+    /// `true` if any TOP-LEVEL statement of `block` is a value-type
     /// `self.field := ...` write.
     ///
     /// Top-level-only for the same reason
@@ -2571,7 +2571,7 @@ impl CoreErlangGenerator {
             .any(|e| self.is_vt_self_field_assignment(e))
     }
 
-    /// BT-1392: Returns the list of local variables written in `block` that are already
+    /// Returns the list of local variables written in `block` that are already
     /// bound in the enclosing scope. This is scope-aware — it checks `lookup_var` to
     /// distinguish "reassigning outer x" from "defining new local y".
     fn outer_scope_mutations_in_block(&self, block: &beamtalk_core::ast::Block) -> Vec<String> {
@@ -2587,7 +2587,7 @@ impl CoreErlangGenerator {
         result
     }
 
-    /// BT-2342/BT-2349: Emits a read+write conditional (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
+    /// Emits a read+write conditional (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
     /// whose branch blocks read+write an outer local) as an inline `case` binding its logical
     /// value to a fresh result var, pushed onto `body_parts` as an open let chain
     /// (`let CondVal = case ... in\n`). Returns the result var name.
@@ -2667,7 +2667,7 @@ impl CoreErlangGenerator {
         Ok(Some(result_var))
     }
 
-    /// BT-2342: Inlines a conditional branch's block body, returning the block's logical
+    /// Inlines a conditional branch's block body, returning the block's logical
     /// value (its last expression) rather than the mutated-local tuple that
     /// [`Self::generate_vt_conditional_branch`] produces.
     ///
@@ -2703,7 +2703,7 @@ impl CoreErlangGenerator {
                     Expression::Assignment { value, .. } => value.as_ref(),
                     other => *other,
                 };
-                // BT-2342: a threading construct (loop / foldl list-op mutating captured
+                // a threading construct (loop / foldl list-op mutating captured
                 // locals) here yields a `{value, StateAcc}` tuple. The branch value is its
                 // logical result — element 1 — not the raw tuple. The threaded locals don't
                 // need to escape in value position, so unwrap without extracting them.
@@ -2725,7 +2725,7 @@ impl CoreErlangGenerator {
             } else if Self::is_local_var_assignment(body_expr) {
                 if let Expression::Assignment { target, value, .. } = body_expr {
                     if let Expression::Identifier(id) = target.as_ref() {
-                        // BT-2342: a threading-construct RHS returns a `{value, StateAcc}`
+                        // a threading-construct RHS returns a `{value, StateAcc}`
                         // tuple. Bind the target to element 1 and rebind the threaded locals
                         // from the StateAcc, so both the assigned value and the mutated locals
                         // are visible to later statements in this branch — rather than binding
@@ -2749,7 +2749,7 @@ impl CoreErlangGenerator {
                     }
                 }
             } else if self.expr_yields_vt_threaded_tuple(body_expr) {
-                // BT-2342: a non-last loop / foldl list-op that mutates captured locals returns
+                // a non-last loop / foldl list-op that mutates captured locals returns
                 // a `{value, StateAcc}` tuple. Extract and rebind the threaded locals so later
                 // statements in this branch see the updates (the value itself is discarded).
                 let extra_slot = self.vt_construct_extra_slot(body_expr);
@@ -2773,7 +2773,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
-    /// BT-1392: Generates a non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` with captured
+    /// Generates a non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` with captured
     /// local mutations as an **open let chain** in value-type or class-method context.
     ///
     /// Generates an inline `case` expression where:
@@ -2810,7 +2810,7 @@ impl CoreErlangGenerator {
                 }
             }
         }
-        // BT-3484: a branch whose only mutation is `self.field := ...` has
+        // a branch whose only mutation is `self.field:=...` has
         // no outer-scope LOCAL mutation, but still needs this inline-`case`
         // treatment — without it the block falls through to the generic Tier
         // 1 closure path, which rejects a field write outright
@@ -2834,12 +2834,12 @@ impl CoreErlangGenerator {
             " in ",
         ]);
 
-        // BT-3159: capture the class-var version before generating either arm so both
+        // capture the class-var version before generating either arm so both
         // are true siblings (each starts from the same baseline, mirroring
         // `with_branch_context`'s restore-only-no-reset discipline) and so a
         // class-method self-send inside an arm (`x := self bump`) can be detected by
         // comparing the version before/after that arm's own generation.
-        // BT-3484: `self_vt` is the `SelfVt` mirror of the same capture.
+        // `self_vt` is the `SelfVt` mirror of the same capture.
         let baseline = VtCondBaseline {
             class_vars: self.class_var_version(),
             self_vt: self.self_version(),
@@ -2855,7 +2855,7 @@ impl CoreErlangGenerator {
             return Ok(Document::Vec(docs));
         };
 
-        // BT-3159/BT-3484: a class var (resp. `Self`) is threaded through the
+        // a class var (resp. `Self`) is threaded through the
         // case's return tuple iff either arm mutated one — both arms must
         // agree on the return shape since the `element/N` extraction after the
         // case is fixed at compile time and runs regardless of which arm
@@ -2942,13 +2942,13 @@ impl CoreErlangGenerator {
         Ok(Some(pair))
     }
 
-    /// BT-3177: whether `expr` is an `on:do:`/`ensure:` whose try/handler/
+    /// whether `expr` is an `on:do:`/`ensure:` whose try/handler/
     /// cleanup blocks mutate an outer local, in value-type or class-method
     /// context. Unlike [`Self::is_conditional_with_vt_local_threading`] and
     /// its loop/foldl siblings, `on:do:`/`ensure:`'s own codegen
     /// (`exception_handling.rs`'s `generate_on_do_with_mutations`/
     /// `generate_ensure_with_mutations`) is already context-agnostic since
-    /// BT-3177's `exception_body_outer_state` fix — it needs no separate
+    /// `exception_body_outer_state` — it needs no separate
     /// vt-specific construction, only its returned `{Result, StateAcc}`
     /// tuple unpacked here at the non-last-position call site (see
     /// [`Self::generate_vt_exception_construct_open`]).
@@ -2971,7 +2971,7 @@ impl CoreErlangGenerator {
             && self.get_control_flow_threaded_vars(expr).is_some()
     }
 
-    /// BT-3177: emits a non-last `on:do:`/`ensure:` that mutates captured
+    /// emits a non-last `on:do:`/`ensure:` that mutates captured
     /// outer locals, in value-type or class-method context, as an open let
     /// chain — binds the construct's own `{Result, StateAcc}` tuple, then
     /// rebinds each mutated outer local from `StateAcc`'s `__local__` keys.
@@ -3019,7 +3019,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// BT-2359: Emits a threading conditional (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` whose
+    /// Emits a threading conditional (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` whose
     /// branches read+write a captured outer local) used as the RHS of an assignment to a
     /// *different* local — `_r := flag ifTrue: [x := 5. 42] ifFalse: [0]` — binding the
     /// assignment target (`_r`) to the conditional's logical branch value and rebinding each
@@ -3154,7 +3154,7 @@ impl CoreErlangGenerator {
         Ok(core_var)
     }
 
-    /// BT-2359: Builds a conditional branch for the assign-RHS path, inlining the block body
+    /// Builds a conditional branch for the assign-RHS path, inlining the block body
     /// and returning `{LogicalValue, Mut1, ..., MutN}` — the branch's logical value followed by
     /// the post-branch values of every threaded outer-local in `all_mutations`.
     fn build_vt_conditional_value_and_mutations(
@@ -3186,7 +3186,7 @@ impl CoreErlangGenerator {
                 if Self::is_local_var_assignment(body_expr) {
                     if let Expression::Assignment { target, value, .. } = body_expr {
                         if let Expression::Identifier(id) = target.as_ref() {
-                            // BT-2359: a nested threading construct as the assignment RHS —
+                            // a nested threading construct as the assignment RHS —
                             // mirror the method-body / branch-value paths so the outer local
                             // is rebound (loop/foldl via emit_vt_threaded_local_assignment,
                             // conditional via emit_vt_conditional_assign_rhs) instead of being
@@ -3216,7 +3216,7 @@ impl CoreErlangGenerator {
                         }
                     }
                 } else if self.expr_yields_vt_threaded_tuple(body_expr) {
-                    // BT-2359: a non-last threaded loop/foldl that mutates a captured local
+                    // a non-last threaded loop/foldl that mutates a captured local
                     // returns {value, StateAcc}; extract and rebind the threaded locals so a
                     // later expression in this branch sees the update (value discarded).
                     let extra_slot = self.vt_construct_extra_slot(body_expr);
@@ -3242,7 +3242,7 @@ impl CoreErlangGenerator {
             if Self::is_local_var_assignment(last_expr) {
                 if let Expression::Assignment { target, value, .. } = last_expr {
                     if let Expression::Identifier(id) = target.as_ref() {
-                        // BT-2359: a threaded construct as the final assignment RHS rebinds the
+                        // a threaded construct as the final assignment RHS rebinds the
                         // target via element 1 of its {value, StateAcc} tuple and threads any
                         // sibling local; the block value is the rebound target.
                         let rhs = value.unwrap_parens();
@@ -3276,7 +3276,7 @@ impl CoreErlangGenerator {
                     self.expression_doc(last_expr)?
                 }
             } else if self.expr_yields_vt_threaded_tuple(last_expr) {
-                // BT-2359: a threaded construct as the block's logical value — its result is
+                // a threaded construct as the block's logical value — its result is
                 // element 1 of the {value, StateAcc} tuple, not the raw tuple. The threaded
                 // locals don't need to escape in value position, so unwrap without extracting.
                 let tuple_var = self.fresh_temp_var("BranchThreadedResult");
@@ -3309,7 +3309,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
-    /// BT-2359: Pass-through branch for the assign-RHS path — the conditional's logical value
+    /// Pass-through branch for the assign-RHS path — the conditional's logical value
     /// is `'nil'` (the absent branch's run-time result) and every threaded outer-local keeps
     /// its current (pre-conditional) value: `{'nil', Mut1, ..., MutN}`.
     fn build_vt_conditional_passthrough_with_value(
@@ -3344,7 +3344,7 @@ impl CoreErlangGenerator {
         } = baseline;
         self.push_scope();
         self.set_class_var_version(cv_before);
-        // BT-3484: `self_version` gets the identical save/reset/restore
+        // `self_version` gets the identical save/reset/restore
         // discipline as `class_var_version` here, and for the identical
         // reason — the two arms are true SIBLINGS: each must start from the
         // same baseline `Self{N}` (so both arms' `maps:put` chains source
@@ -3381,7 +3381,7 @@ impl CoreErlangGenerator {
         let mut preamble: Vec<Document<'static>> = Vec::new();
         for body_expr in &body {
             if self.is_vt_self_field_assignment(body_expr) {
-                // BT-3484: a value-type `self.field := ...` write. Emitted as
+                // a value-type `self.field:=...` write. Emitted as
                 // an OPEN let-chain (`let _Val = … in let Self{N} =
                 // maps:put(…) in `) spliced straight into this arm's
                 // preamble, NOT as the `let _seqN = <closed expr> in ` the
@@ -3389,7 +3389,7 @@ impl CoreErlangGenerator {
                 // the new `Self{N}` binding inside its own `let`'s RHS, so
                 // neither a later statement in this same branch nor the
                 // arm's own return tuple can see it — the compile-time
-                // `unbound variable 'Self1'` half of BT-3484.
+                // `unbound variable 'Self1'` failure this construction avoids.
                 let (doc, _val_var) = self.generate_field_assignment_open(body_expr)?;
                 preamble.push(doc);
             } else if Self::is_local_var_assignment(body_expr) {
@@ -3398,13 +3398,13 @@ impl CoreErlangGenerator {
                         let core_var = self
                             .lookup_var(&id.name)
                             .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-                        // ADR 0118 phase 5b (BT-3422): a class-method
+                        // ADR 0118 phase 5b: a class-method
                         // self-send on the RHS (`x := self bump`), at any
                         // nesting depth, threads as a real prelude via
                         // `threaded_expression` — spliced ahead of this
                         // `let core_var = ... in` (mirrors
-                        // `try_generate_block_local_plain_let`'s BT-3150
-                        // fix, now built on `ThreadedValue` rather than an
+                        // `try_generate_block_local_plain_let`'s approach,
+                        // built on `ThreadedValue` rather than an
                         // open-chain side channel).
                         let frame = self.current_frame();
                         let tv = self.threaded_expression(value, frame)?;
@@ -3423,7 +3423,7 @@ impl CoreErlangGenerator {
                 }
             } else {
                 let tmp = self.fresh_temp_var("seq");
-                // ADR 0118 phase 5b (BT-3422): mirror the assignment arm
+                // ADR 0118 phase 5b: mirror the assignment arm
                 // above — a bare-statement class-method self-send also
                 // threads as a real prelude.
                 let frame = self.current_frame();
@@ -3483,7 +3483,7 @@ impl CoreErlangGenerator {
             .collect()
     }
 
-    /// BT-3159/BT-3484: Combines an arm's preamble with its finalized return value,
+    /// Combines an arm's preamble with its finalized return value,
     /// appending a trailing `ClassVars` slot when `any_cv_mutated` and/or a trailing
     /// `Self{N}` slot when `any_self_mutated` (each carrying this arm's own resulting
     /// version if it mutated that storage, else the unchanged baseline) — i.e. when
@@ -3497,7 +3497,7 @@ impl CoreErlangGenerator {
     /// is defined rather than assumed.
     ///
     /// When both flags are `false`, this renders byte-identically to the
-    /// pre-BT-3159 shape (bare value for one mutation, `{v1, v2, ...}` tuple otherwise).
+    /// original shape (bare value for one mutation, `{v1, v2,...}` tuple otherwise).
     fn finish_vt_conditional_branch(
         pieces: VtBranchPieces,
         slots: VtCondSlots,
@@ -3537,7 +3537,7 @@ impl CoreErlangGenerator {
                 filled += 1;
             }
             if any_self_mutated {
-                // BT-3484: this arm's own resulting `Self` — its mutated
+                // this arm's own resulting `Self` — its mutated
                 // version if the arm performed a `self.field := ...` write,
                 // else the baseline (unchanged) version live before the
                 // `case`. Both arms carry the slot whenever EITHER does, for
@@ -3558,7 +3558,7 @@ impl CoreErlangGenerator {
 
     /// Appends `let VAR = <result_var>` or `let VAR = element(N, <result_var>)` bindings
     /// to `docs`, updating the scope so subsequent expressions see the new variable
-    /// names. When `any_cv_mutated` (BT-3159), also mints and binds a fresh outer
+    /// names. When `any_cv_mutated`, also mints and binds a fresh outer
     /// `ClassVarsN` from the case result's trailing tuple element, so a class-var
     /// mutation made inside either arm is visible — and, via `class_var_mutated`'s
     /// sticky flag, correctly reflected in the method's own `{class_var_result, ...}`
@@ -3618,7 +3618,7 @@ impl CoreErlangGenerator {
             next_slot += 1;
         }
         if any_self_mutated {
-            // BT-3484: the merged `Self` becomes the method's new LIVE
+            // the merged `Self` becomes the method's new LIVE
             // `Self{N}` for every statement after the conditional — the
             // direct counterpart of Actor's `let State1 = element(2, _CF10)
             // in`. `set_self_version(self_before)` first so the minted name
@@ -3678,21 +3678,20 @@ impl CoreErlangGenerator {
     ///
     /// All stdlib types compile to `bt@stdlib@{snake_case}` modules.
     ///
-    /// BT-3435 (ADR 0119 step 0): delegates to
+    /// ADR 0119 step 0: delegates to
     /// `ClassHierarchy::is_generated_builtin_class`, the one correct,
     /// already-parsed answer (from `beamtalk build-stdlib`'s real class
     /// metadata) — replacing the deleted `STDLIB_CLASS_NAMES` (`build.rs`'s
     /// file-stem directory scan), which included protocol-only files
-    /// declaring no class and trusted file stems over parsed names (the
-    /// BT-3432 bug shape).
+    /// declaring no class and trusted file stems over parsed names.
     fn is_known_stdlib_type(class_name: &str) -> bool {
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::is_generated_builtin_class(
             class_name,
         )
     }
 
-    /// Computes the compiled module name for a class (ADR 0016 / ADR 0026 /
-    /// BT-794; registry lookup per ADR 0119 / BT-3436).
+    /// Computes the compiled module name for a class (ADR 0016 / ADR 0026;
+    /// registry lookup per ADR 0119).
     ///
     /// Resolution order:
     /// 1. [`ClassModuleRegistry::module_for_class`] — built from
@@ -3727,7 +3726,7 @@ impl CoreErlangGenerator {
     }
 
     /// Computes the compiled module name for a package-qualified class reference
-    /// (ADR 0070 Phase 2; registry lookup per ADR 0119 / BT-3436).
+    /// (ADR 0070 Phase 2; registry lookup per ADR 0119).
     ///
     /// When a class reference has an explicit package qualifier (e.g., `json@Parser`),
     /// first queries the registry under the *referenced* package's `PackageId` —
@@ -3766,7 +3765,7 @@ impl CoreErlangGenerator {
     /// all stdlib types → `bt@stdlib@{snake_case}`.
     ///
     /// For user-defined classes in package mode, uses `bt@{package}@{snake_case}`
-    /// prefix (BT-794).
+    /// prefix.
     fn superclass_module_name(&self, superclass: &str) -> Option<String> {
         if superclass == "ProtoObject" {
             return None;
@@ -3783,10 +3782,10 @@ impl CoreErlangGenerator {
     /// selectors, and delegates to superclass dispatch/3 for inherited methods.
     /// Only raises `does_not_understand` at the hierarchy root (`ProtoObject`).
     ///
-    /// BT-447: For classes with zero instance methods (e.g., File), generates a
+    /// For classes with zero instance methods (e.g., File), generates a
     /// minimal stub that handles only `class` and `respondsTo:`, delegating
     /// everything else to the superclass.
-    #[allow(clippy::too_many_lines)] // BT-1763: DNU catch-all logic adds essential branches
+    #[allow(clippy::too_many_lines)] // DNU catch-all logic adds essential branches
     fn generate_primitive_dispatch(
         &mut self,
         class: &ClassDefinition,
@@ -3796,7 +3795,7 @@ impl CoreErlangGenerator {
         let mod_name = self.module_name.clone();
         let superclass_mod = self.superclass_module_name(class.superclass_name());
 
-        // BT-447: Class-methods-only classes skip protocol boilerplate —
+        // Class-methods-only classes skip protocol boilerplate —
         // but only when there are no auto-generated slot methods either.
         let has_auto_instance_methods =
             auto_methods.is_some_and(|a| !a.getters.is_empty() || !a.setters.is_empty());
@@ -3811,7 +3810,7 @@ impl CoreErlangGenerator {
             .is_some_and(|cf| cf.has_instance_method("asString"));
         let as_string_branch = Self::generate_dispatch_as_string_branch(&class_name, has_as_string);
 
-        // BT-924: User-defined value objects (ClassKind::Value) store slots in the
+        // User-defined value objects (ClassKind::Value) store slots in the
         // underlying map and support read-only reflection via fieldAt: and fieldNames.
         // Stdlib primitive types (ClassKind::Object) have no map slots — block both.
         let is_value_class = class.class_kind == ClassKind::Value;
@@ -3829,7 +3828,7 @@ impl CoreErlangGenerator {
         // Route each class-defined method to its individual function
         let method_branches = self.generate_dispatch_method_branches(class, &mod_name);
 
-        // BT-1763: Check whether this class has a catch-all DNU handler.
+        // Check whether this class has a catch-all DNU handler.
         let has_catch_all_dnu = dispatch_spec::class_has_catch_all_dnu(class);
 
         // Default case: extension fallback, then superclass delegation (or DNU)
@@ -3877,9 +3876,9 @@ impl CoreErlangGenerator {
             "            end\n",
             // asString (conditional)
             as_string_branch,
-            // fieldNames — BT-924: delegates to beamtalk_reflection for value objects
+            // fieldNames — delegates to beamtalk_reflection for value objects
             field_names_branch,
-            // fieldAt: — BT-924: reads from map for value objects, error for primitives
+            // fieldAt: — reads from map for value objects, error for primitives
             field_at_branch,
             // fieldAt:put:
             "        <'fieldAt:put:'> when 'true' ->\n",
@@ -3906,7 +3905,7 @@ impl CoreErlangGenerator {
             ":'dispatch'(PwaSel, PwaArgs, Self)\n",
             // Class-defined method branches
             Document::Vec(method_branches),
-            // BT-923: Auto-generated getter and with*: dispatch arms
+            // Auto-generated getter and with*: dispatch arms
             Document::Vec(
                 auto_methods
                     .map(|a| Self::generate_auto_slot_dispatch_arms(&mod_name, a))
@@ -4006,7 +4005,7 @@ impl CoreErlangGenerator {
     /// Generates dispatch case arms for all class-defined instance methods.
     ///
     /// Each arm routes to the module-level function for that method, unwrapping
-    /// `{Result, State}` tuples for NLR-capable methods (BT-854).
+    /// `{Result, State}` tuples for NLR-capable methods.
     fn generate_dispatch_method_branches(
         &self,
         class: &ClassDefinition,
@@ -4021,7 +4020,7 @@ impl CoreErlangGenerator {
                 "> when 'true' ->\n",
             ]);
 
-            // BT-854: Methods with NLR return {Result, State} tuple — unwrap via case.
+            // Methods with NLR return {Result, State} tuple — unwrap via case.
             let has_nlr = self
                 .semantic_facts
                 .has_block_nlr_or_walk(&method.span, &method.body);
@@ -4064,7 +4063,7 @@ impl CoreErlangGenerator {
             ];
 
             if has_nlr {
-                // BT-854: Unwrap {Result, State} tuple from NLR-capable method
+                // Unwrap {Result, State} tuple from NLR-capable method
                 method_branches.push(docvec![
                     "            case ",
                     call_doc,
@@ -4077,7 +4076,7 @@ impl CoreErlangGenerator {
         method_branches
     }
 
-    /// Generates the `dispatch/4` function for a value type (BT-446).
+    /// Generates the `dispatch/4` function for a value type.
     ///
     /// The dispatch service (`beamtalk_dispatch:invoke_method/6`) only calls
     /// modules that export `dispatch/4`. Without this, compiled value type
@@ -4309,7 +4308,7 @@ impl CoreErlangGenerator {
         let class_name = self.class_name().clone();
         let superclass_mod = self.superclass_module_name(class.superclass_name());
 
-        // BT-1763: If the class has a catch-all DNU handler, it accepts any
+        // If the class has a catch-all DNU handler, it accepts any
         // selector — return true unconditionally.
         let has_catch_all_dnu = dispatch_spec::class_has_catch_all_dnu(class);
         if has_catch_all_dnu {
@@ -4321,7 +4320,7 @@ impl CoreErlangGenerator {
                     superclass: None,
                     dnu: true,
                     auto_slots: None,
-                    // BT-3482: value types delegate via SuperclassDelegation::Static
+                    // value types delegate via SuperclassDelegation::Static
                     // (a compile-time module call, not a live registry walk),
                     // so they don't have the class_chain_step re-entrant-walk
                     // cost the local probe exists to avoid — out of scope here.
@@ -4330,7 +4329,7 @@ impl CoreErlangGenerator {
             ));
         }
 
-        // BT-447: Class-methods-only classes delegate directly to superclass —
+        // Class-methods-only classes delegate directly to superclass —
         // but only when there are no auto-generated slot methods either.
         let has_auto_instance_methods =
             auto_methods.is_some_and(|a| !a.getters.is_empty() || !a.setters.is_empty());
@@ -4382,7 +4381,7 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// BT-447: Generates a minimal `dispatch/3` for classes with no instance methods.
+    /// Generates a minimal `dispatch/3` for classes with no instance methods.
     ///
     /// Handles `class`, `respondsTo:`, `perform:`, and `perform:withArguments:`
     /// locally, then checks extensions and delegates everything else to the
@@ -4445,7 +4444,7 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// BT-447: Generates a minimal `has_method/1` for classes with no instance methods.
+    /// Generates a minimal `has_method/1` for classes with no instance methods.
     ///
     /// Checks `class`, `respondsTo:`, `perform:`, `perform:withArguments:`,
     /// then extensions, then delegates to superclass.

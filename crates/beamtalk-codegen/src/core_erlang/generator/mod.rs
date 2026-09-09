@@ -34,14 +34,14 @@ use beamtalk_cerl_doc::{Document, INDENT, docvec, leaf, line, nest};
 use beamtalk_core::source_analysis::Diagnostic;
 use ecow::EcoString;
 
-/// Code generation context (BT-213).
+/// Code generation context.
 ///
 /// Determines how expressions are compiled based on the execution environment:
 /// - **Actor**: Process-based with mutable state, async messaging
 /// - **`ValueType`**: Plain maps with immutable semantics, sync function calls
 /// - **Repl**: Interactive evaluation with bindings map
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// BT-3340: widened from `pub(crate)` — `beamtalk-repl` sets `context` to
+// widened from `pub(crate)` — `beamtalk-repl` sets `context` to
 // `CodeGenContext::Repl` on the generator it owns.
 pub enum CodeGenContext {
     /// Generating code for an actor class (`gen_server` with async messaging).
@@ -74,7 +74,7 @@ pub enum CodeGenContext {
 /// - [`intrinsics`] - Compiler intrinsics (block, `ProtoObject`, `Object`, list iteration)
 /// - [`operators`] - Binary operator code generation
 ///
-/// # Context Structs (BT-1461)
+/// # Context Structs
 ///
 /// Fields are organized into context-specific groups to reduce the cognitive
 /// load of the god object:
@@ -88,14 +88,14 @@ pub enum CodeGenContext {
     clippy::struct_excessive_bools,
     reason = "Generator flags are context switches, not configuration"
 )]
-// BT-3340: widened from `pub(crate)` to `pub` (ADR 0117 Decision step 2),
+// widened from `pub(crate)` to `pub` (ADR 0117 Decision step 2),
 // which brought this struct under the `missing_debug_implementations` lint
 // (public-only). Not deriving `Debug`: several fields (e.g.
 // `PrimitiveBindingTable`) are internal codegen state with no existing
 // `Debug` impl, and this struct was never meant to be inspected/printed —
 // only constructed and driven through its own methods.
 #[allow(missing_debug_implementations)]
-// BT-3340: widened from `pub(crate)` — the standalone `beamtalk-repl` crate
+// widened from `pub(crate)` — the standalone `beamtalk-repl` crate
 // (ADR 0117 Decision step 2) builds `CoreErlangGenerator` directly and reads
 // its REPL-relevant state. Its many other fields stay module-private; only
 // this struct and the specific members `beamtalk-repl` touches are `pub`.
@@ -104,13 +104,13 @@ pub struct CoreErlangGenerator {
     pub module_name: EcoString,
     /// Variable binding and scope management.
     pub(in crate::core_erlang) var_context: VariableContext,
-    /// State threading for field assignments. BT-3131: `VersionCounter` is the
+    /// State threading for field assignments. `VersionCounter` is the
     /// single implementation shared with `ClassContext::class_var_version` and
     /// `ValueTypeContext::self_version` (formerly `StateThreading`).
     pub(in crate::core_erlang) state_threading: VersionCounter,
-    /// BT-153: Whether we're inside a loop body (use `StateAcc` instead of `State`)
+    /// Whether we're inside a loop body (use `StateAcc` instead of `State`)
     pub(in crate::core_erlang) in_loop_body: bool,
-    /// BT-3146 (ADR 0111 Addendum 5, §Branch-context version discipline):
+    /// ADR 0111 Addendum 5, §Branch-context version discipline:
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per
     /// [`Self::enter_branch_context`] call — every `with_branch_context` arm
     /// (conditional branch, `on:do:`/`ensure:` body, loop body) gets its own
@@ -128,27 +128,27 @@ pub struct CoreErlangGenerator {
     /// variable maps) that only have meaning while compiling a loop body,
     /// grouped into one `control_flow`-owned value. See [`LoopMode`].
     pub(in crate::core_erlang) loop_mode: LoopMode,
-    /// BT-213: Code generation context (`Actor`, `ValueType`, or `Repl`).
+    /// Code generation context (`Actor`, `ValueType`, or `Repl`).
     /// Determines variable naming and method dispatch strategy.
-    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` sets this to
+    // widened from `pub(crate)` — `beamtalk-repl` sets this to
     // `CodeGenContext::Repl` around its own generation calls.
     pub context: CodeGenContext,
-    /// BT-1475: Nesting depth of block (closure) bodies.
+    /// Nesting depth of block (closure) bodies.
     /// When > 0, self-cast sends in Actor context must route through the
     /// actor mailbox (`beamtalk_message_dispatch:cast/3`) instead of calling
     /// `safe_dispatch` directly, because the block may execute in a different
     /// process (e.g. Timer callback, cross-actor callback).
     pub(in crate::core_erlang) block_depth: usize,
-    /// BT-101: Original source text for extracting method source.
+    /// Original source text for extracting method source.
     pub(in crate::core_erlang) source_text: Option<String>,
-    /// BT-295: Primitive binding table from compiled stdlib (ADR 0007).
+    /// Primitive binding table from compiled stdlib (ADR 0007).
     /// Used by `generate_primitive()` for method body compilation via static methods.
     #[allow(dead_code)] // stored for future call-site optimization with static typing
     pub(in crate::core_erlang) primitive_bindings: PrimitiveBindingTable,
-    /// BT-295: Parameters of the current method being compiled (if any).
+    /// Parameters of the current method being compiled (if any).
     /// Used by `Expression::Primitive` to generate dispatch argument lists.
     pub(in crate::core_erlang) current_method_params: Vec<String>,
-    /// BT-2709: Declared types of the current method's parameters, keyed by
+    /// Declared types of the current method's parameters, keyed by
     /// **source** parameter name → simple type name (e.g. `"other" -> "Number"`).
     /// Used by the arithmetic fast-path classifier
     /// (`receiver_is_statically_numeric`) to drop the runtime `is_number` guard
@@ -158,7 +158,7 @@ pub struct CoreErlangGenerator {
     /// annotations never leak into the next.
     pub(in crate::core_erlang) current_method_param_types:
         std::collections::HashMap<String, String>,
-    /// BT-2710 follow-up: maps an instance field's source name → its declared
+    /// Maps an instance field's source name → its declared
     /// `Simple` type name, for the operator fast-path classifiers. Lets a
     /// `self.<field>` read with an explicit **non-primitive** (object) type be
     /// routed through the runtime guard so it dispatches (e.g. `self.lo < x`
@@ -169,7 +169,7 @@ pub struct CoreErlangGenerator {
     /// at value-type / actor class entry; cleared in extension bodies (which
     /// don't carry the target class's field types).
     pub(in crate::core_erlang) current_class_field_types: std::collections::HashMap<String, String>,
-    /// ADR 0118 phase 1a (BT-3415): sub-expressions `threaded_expression`'s
+    /// ADR 0118 phase 1a: sub-expressions `threaded_expression`'s
     /// sequencing rule (`util.rs`) has already compiled — each one's value
     /// (a sequencing temp, or a state-effecting producer's pure result
     /// reference) keyed by the sub-expression's paren-unwrapped `Span`.
@@ -186,7 +186,7 @@ pub struct CoreErlangGenerator {
     ///
     /// This started as the phase-1a substitution mechanism for the one
     /// parent kind the sequencing rule covered (message sends, incl. binary
-    /// operators); ADR 0118 phase 2b (BT-3418) deleted the planner-driven
+    /// operators); ADR 0118 phase 2b deleted the planner-driven
     /// consumers this used to run alongside (`hoisted_self_send_results`/
     /// `hoisted_field_reads`), so this is now the ONLY substitution
     /// mechanism a `threaded_expression`/`thread_ahead` caller relies on.
@@ -194,16 +194,16 @@ pub struct CoreErlangGenerator {
         beamtalk_core::source_analysis::Span,
         sequencing::PrecompiledSubexpr,
     >,
-    /// BT-845/BT-860: Source file path to embed as `beamtalk_source` module attribute.
+    /// Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     pub(in crate::core_erlang) source_path: Option<String>,
-    /// BT-851: Tier 2 block parameters for the current method being compiled.
+    /// Tier 2 block parameters for the current method being compiled.
     ///
     /// When a method parameter name is in this set, `value:` / `value:value:` calls
     /// on that parameter use the stateful Tier 2 protocol:
     /// `apply _Fun(Args..., State) → {Result, NewState}`.
     pub(in crate::core_erlang) tier2_block_params: std::collections::HashSet<String>,
-    /// BT-2797: Local variables in the current method/block body known to hold
+    /// Local variables in the current method/block body known to hold
     /// a Tier 2 block value — i.e. a `var := [block]` assignment where the
     /// block literal has captured-local or field mutations, *and* every later
     /// reference to `var` in the same body is a safe `value`/`value:`/etc.
@@ -216,7 +216,7 @@ pub struct CoreErlangGenerator {
     /// `generate_block`/`validate_stored_closure` compile-time diagnostic
     /// instead, since no known call site would thread state through it.
     pub(in crate::core_erlang) tier2_local_vars: std::collections::HashSet<String>,
-    /// BT-2815: For each name in `tier2_local_vars` whose assigned block's
+    /// For each name in `tier2_local_vars` whose assigned block's
     /// only mutation is a captured outer local (not a field write), the
     /// names of those captured locals — mirrors what `captured_mutations_for_block`
     /// computes for an inline block literal, but keyed by variable name so a
@@ -228,48 +228,48 @@ pub struct CoreErlangGenerator {
     /// block literal receiver.
     pub(in crate::core_erlang) tier2_local_var_captured_mutations:
         std::collections::HashMap<String, Vec<String>>,
-    /// BT-851: Pre-scanned Tier 2 block info for the current class.
+    /// Pre-scanned Tier 2 block info for the current class.
     ///
     /// Maps method selector → list of parameter indices that receive Tier 2 blocks
     /// from self-sends within the same class. Populated by `scan_class_for_tier2_blocks`
     /// before method body generation.
     pub(in crate::core_erlang) tier2_method_info: std::collections::HashMap<String, Vec<usize>>,
-    /// BT-855: Diagnostic warnings emitted during code generation.
+    /// Diagnostic warnings emitted during code generation.
     ///
     /// Collected during generation and returned to callers via
     /// [`generate_module_with_warnings`]. Examples include stateful blocks
     /// passed to Erlang call sites where mutations will be silently dropped.
     pub(crate) codegen_warnings: Vec<Diagnostic>,
-    /// BT-1288: Pre-computed semantic facts from the pre-codegen analysis pass.
+    /// Pre-computed semantic facts from the pre-codegen analysis pass.
     /// Used for block profile lookups and dispatch classification.
     pub(in crate::core_erlang) semantic_facts: beamtalk_core::semantic_analysis::SemanticFacts,
-    /// BT-1343: Whether codegen diagnostics are enabled (`BEAMTALK_CODEGEN_DIAGNOSTICS=1`).
+    /// Whether codegen diagnostics are enabled (`BEAMTALK_CODEGEN_DIAGNOSTICS=1`).
     /// When true, emits `Diagnostic::hint` for calling convention choices, dynamic dispatch
     /// fallbacks, non-local returns, and other codegen decisions.
     pub(in crate::core_erlang) codegen_diagnostics_enabled: bool,
-    /// BT-1343: Whether `StateAcc` fallback should be promoted to warning (`BEAMTALK_WARN_STATEACC=1`).
+    /// Whether `StateAcc` fallback should be promoted to warning (`BEAMTALK_WARN_STATEACC=1`).
     pub(in crate::core_erlang) warn_stateacc: bool,
-    /// BT-1435: Selector name of the method currently being compiled.
+    /// Selector name of the method currently being compiled.
     /// Used by Logger intrinsics to inject `beamtalk_selector` metadata.
     pub(in crate::core_erlang) current_method_selector: Option<String>,
-    /// ADR 0065 / BT-1457: Whether the current class is a Server subclass.
+    /// ADR 0065: Whether the current class is a Server subclass.
     /// When true, `generate_handle_info` dispatches to `handleInfo:` with
     /// log-and-continue error semantics instead of the default ignore-all stub.
     pub(in crate::core_erlang) is_server_subclass: bool,
-    /// BT-1639: Pre-computed direct-call eligible class methods.
+    /// Pre-computed direct-call eligible class methods.
     ///
     /// Maps class name → `DirectCallClassInfo` for sealed classes whose class methods
     /// can be called directly (without `gen_server` dispatch). Computed from the class
     /// hierarchy in `generate_module_with_warnings`.
     pub(in crate::core_erlang) direct_call_eligible:
         std::collections::HashMap<String, DirectCallClassInfo>,
-    /// BT-1461: REPL-specific codegen state. `Some` when in REPL mode.
+    /// REPL-specific codegen state. `Some` when in REPL mode.
     pub(in crate::core_erlang) repl_context: Option<ReplContext>,
-    /// BT-1461: Class/actor-specific codegen state. `Some` when compiling a class.
+    /// Class/actor-specific codegen state. `Some` when compiling a class.
     pub(in crate::core_erlang) class_context: Option<ClassContext>,
-    /// BT-1461: Value-type-specific codegen state. `Some` when compiling value types.
+    /// Value-type-specific codegen state. `Some` when compiling value types.
     pub(in crate::core_erlang) value_type_context: Option<ValueTypeContext>,
-    /// BT-1951: Snapshot of the class hierarchy for this generation (ADR 0078).
+    /// Snapshot of the class hierarchy for this generation (ADR 0078).
     ///
     /// Populated by `generate_module_with_warnings` before codegen begins. Used by
     /// actor `handle_continue` generation to walk the superclass chain and emit
@@ -283,7 +283,7 @@ pub struct CoreErlangGenerator {
     /// ADR 0098 Phase 3: producing compound OTP version (`<release>-<erts>`),
     /// baked into `__beamtalk_meta`. Supplied by the CLI; `None` omits the key.
     pub(in crate::core_erlang) otp_release: Option<EcoString>,
-    /// BT-2932: cross-module-aware alias registry for this generation —
+    /// cross-module-aware alias registry for this generation —
     /// this module's own `type_aliases` merged with any pre-loaded aliases
     /// from other modules in the same compilation unit
     /// (`CodegenOptions::pre_loaded_aliases`). Populated by
@@ -300,7 +300,7 @@ pub struct CoreErlangGenerator {
     /// no-op for the common case.
     pub(in crate::core_erlang) alias_registry:
         beamtalk_core::semantic_analysis::alias_registry::AliasRegistry,
-    /// BT-3217 (ADR 0115 Phase 2): per-expression inferred types (keyed by
+    /// ADR 0115 Phase 2: per-expression inferred types (keyed by
     /// file-absolute `Span`), sourced from the driver's handed-off
     /// `AnalysisResult::type_map` when `CodegenOptions::with_analysis` was
     /// used, or from `infer_types_and_returns` in the self-sufficient path
@@ -313,7 +313,7 @@ pub struct CoreErlangGenerator {
     /// unit-test-only paths); `recv_type` degrades safely to `dynamic` in
     /// that case, matching the runtime live-patch path's precedent.
     pub(in crate::core_erlang) type_map: beamtalk_core::semantic_analysis::TypeMap,
-    /// BT-3249: keys of methods whose `return_type` was set by the return-type
+    /// keys of methods whose `return_type` was set by the return-type
     /// writeback pass (`apply_return_type_writeback_from_map`) rather than
     /// typed by the user — the same map used to build `module`/`module_owned`
     /// (whichever this generation's `generate_module_with_warnings` ended up
@@ -331,7 +331,7 @@ pub struct CoreErlangGenerator {
 
 impl CoreErlangGenerator {
     /// Creates a new code generator for the given module name.
-    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` constructs its
+    // widened from `pub(crate)` — `beamtalk-repl` constructs its
     // own generator.
     pub fn new(module_name: &str) -> Self {
         Self {
