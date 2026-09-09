@@ -4,6 +4,7 @@
 //! `compute_relative_module` and manifest-driven package/module naming tests: package module names, subdirectories, `build_dev/ebin` layout, app-file generation, and declared-alias metadata (including forward-slash path normalization).
 
 use super::*;
+use crate::commands::util::to_forward_slash;
 
 #[test]
 fn test_compute_relative_module_flat() {
@@ -299,19 +300,19 @@ fn test_build_alias_metadata_preserves_declaration_order() {
 #[test]
 fn test_to_forward_slash_normalizes_backslashes() {
     let path = Utf8PathBuf::from("stdlib/src\\ets.bt");
-    assert_eq!(to_forward_slash(&path), "stdlib/src/ets.bt");
+    assert_eq!(to_forward_slash(path.as_str()), "stdlib/src/ets.bt");
 }
 
 #[test]
 fn test_to_forward_slash_normalizes_all_backslash_components() {
     let path = Utf8PathBuf::from("stdlib\\src\\ets.bt");
-    assert_eq!(to_forward_slash(&path), "stdlib/src/ets.bt");
+    assert_eq!(to_forward_slash(path.as_str()), "stdlib/src/ets.bt");
 }
 
 #[test]
 fn test_to_forward_slash_leaves_forward_slash_paths_unchanged() {
     let path = Utf8PathBuf::from("stdlib/src/ets.bt");
-    assert_eq!(to_forward_slash(&path), "stdlib/src/ets.bt");
+    assert_eq!(to_forward_slash(path.as_str()), "stdlib/src/ets.bt");
 }
 
 #[test]

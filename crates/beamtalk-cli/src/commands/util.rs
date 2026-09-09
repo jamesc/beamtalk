@@ -13,6 +13,8 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::time::SystemTime;
 
+pub(crate) use beamtalk_cli::path_util::to_forward_slash;
+
 /// Escape HTML special characters.
 ///
 /// Shared by `commands/doc` and `commands/registry` — both render third-party

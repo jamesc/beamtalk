@@ -31,6 +31,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+use crate::commands::util::to_forward_slash;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -263,10 +264,7 @@ impl BeamCompiler {
         }
 
         // Build -pa arguments: only compiler ebin needed (contains beamtalk_build_worker)
-        #[cfg(windows)]
-        let compiler_path = paths.compiler_ebin.to_string_lossy().replace('\\', "/");
-        #[cfg(not(windows))]
-        let compiler_path = paths.compiler_ebin.display().to_string();
+        let compiler_path = to_forward_slash(&paths.compiler_ebin.display().to_string());
 
         let pa_args = vec!["-pa".to_string(), compiler_path];
 

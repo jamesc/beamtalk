@@ -933,6 +933,7 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::util::to_forward_slash;
     use tempfile::TempDir;
 
     fn utf8(dir: &TempDir) -> Utf8PathBuf {
@@ -1259,7 +1260,7 @@ git = "g"
         run_git(path, &["add", "."]);
         run_git(path, &["commit", "-m", "index"]);
 
-        let mut s = root.as_str().replace('\\', "/");
+        let mut s = to_forward_slash(root.as_str());
         if !s.starts_with('/') {
             s.insert(0, '/');
         }

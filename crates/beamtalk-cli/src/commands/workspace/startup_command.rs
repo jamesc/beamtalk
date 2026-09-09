@@ -13,6 +13,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::commands::util::to_forward_slash;
+
 use beamtalk_cli::repl_startup::{BeamPaths, beam_pa_args};
 
 #[cfg(windows)]
@@ -41,14 +43,7 @@ pub(super) fn write_cookie_args_file(workspace_id: &str, cookie: &str) -> Result
 /// Erlang on Windows expects forward slashes in `-pa` arguments, not backslashes.
 /// See BT-661 for details on this Windows-specific issue.
 pub(super) fn path_to_erlang_arg(path: &Path) -> String {
-    #[cfg(windows)]
-    {
-        path.to_string_lossy().replace('\\', "/")
-    }
-    #[cfg(not(windows))]
-    {
-        path.to_string_lossy().into_owned()
-    }
+    to_forward_slash(&path.to_string_lossy())
 }
 
 /// Build a `Command` for starting a detached BEAM workspace node.

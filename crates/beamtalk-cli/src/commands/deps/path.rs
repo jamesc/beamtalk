@@ -689,6 +689,7 @@ pub(crate) fn build_dep_class_index(
 mod tests {
     use super::super::test_support::*;
     use super::*;
+    use crate::commands::util::to_forward_slash;
     use std::fs;
     use tempfile::TempDir;
 
@@ -810,7 +811,7 @@ utils = { path = "utils" }"#,
 
         // dep_a depends on my_app (circular)
         // Use forward slashes for TOML compatibility on Windows
-        let project_root_str = project_root.as_str().replace('\\', "/");
+        let project_root_str = to_forward_slash(project_root.as_str());
         write_manifest(
             &dep_dir,
             "dep_a",

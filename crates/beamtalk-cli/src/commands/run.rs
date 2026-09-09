@@ -29,6 +29,7 @@ use beamtalk_cli::repl_startup;
 use super::beam_environment::BeamEnvironment;
 use super::build_layout::BuildLayout;
 use super::manifest;
+use super::util::to_forward_slash;
 use super::workspace;
 
 /// Compile and run a beamtalk package.
@@ -734,19 +735,11 @@ fn ensure_otp_app_in_workspace(
     let pid = std::process::id();
     let client_node = format!("beamtalk_run_rpc_{pid}@localhost");
 
-    #[cfg(windows)]
     let ebin_escaped =
-        crate::beam_compiler::escape_erlang_string(&ebin_dir.to_string_lossy().replace('\\', "/"));
-    #[cfg(not(windows))]
-    let ebin_escaped = crate::beam_compiler::escape_erlang_string(&ebin_dir.to_string_lossy());
-
-    #[cfg(windows)]
-    let project_path_escaped = crate::beam_compiler::escape_erlang_string(
-        &project_root.to_string_lossy().replace('\\', "/"),
-    );
-    #[cfg(not(windows))]
-    let project_path_escaped =
-        crate::beam_compiler::escape_erlang_string(&project_root.to_string_lossy());
+        crate::beam_compiler::escape_erlang_string(&to_forward_slash(&ebin_dir.to_string_lossy()));
+    let project_path_escaped = crate::beam_compiler::escape_erlang_string(&to_forward_slash(
+        &project_root.to_string_lossy(),
+    ));
 
     let eval_cmd = format!(
         "rpc:call('{workspace_node}', code, add_path, [\"{ebin_escaped}\"]), \

@@ -20,6 +20,7 @@ use miette::Result;
 use tracing::debug;
 
 use super::build_layout::BuildLayout;
+use super::util::to_forward_slash;
 
 /// Everything needed to set up a BEAM node for a Beamtalk project.
 ///
@@ -122,15 +123,7 @@ impl BeamEnvironment {
         let mut args = Vec::with_capacity(self.code_paths.len() * 2);
         for path in &self.code_paths {
             args.push(std::ffi::OsString::from("-pa"));
-            #[cfg(windows)]
-            {
-                let escaped = path.as_str().replace('\\', "/");
-                args.push(std::ffi::OsString::from(escaped));
-            }
-            #[cfg(not(windows))]
-            {
-                args.push(std::ffi::OsString::from(path.as_str()));
-            }
+            args.push(std::ffi::OsString::from(to_forward_slash(path.as_str())));
         }
         args
     }

@@ -628,6 +628,7 @@ fn commit_and_push_index(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::util::to_forward_slash;
     use camino::Utf8PathBuf;
     use serial_test::serial;
     use tempfile::TempDir;
@@ -789,7 +790,7 @@ mod tests {
     }
 
     fn file_url(path: &std::path::Path) -> String {
-        let mut s = path.display().to_string().replace('\\', "/");
+        let mut s = to_forward_slash(&path.display().to_string());
         if !s.starts_with('/') {
             s.insert(0, '/');
         }
