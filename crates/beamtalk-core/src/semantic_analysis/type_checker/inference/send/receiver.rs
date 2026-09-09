@@ -1197,6 +1197,10 @@ impl TypeChecker {
                     only_missing.clone()
                 };
                 let display_name = InferredType::class_name_for_diagnostic(only_missing.as_str());
+                // Every DNU shape carries actionable advice, so pass the
+                // same generic hint the multi-culprit branch below always
+                // attaches — it's used only when no "did you mean"
+                // suggestion is found.
                 self.emit_unknown_selector_warning(
                     &display_name,
                     &suggestion_class,
@@ -1206,6 +1210,9 @@ impl TypeChecker {
                     false,
                     severity,
                     Some(&format!(" (in union {union_display})")),
+                    Some(
+                        "Use `respondsTo:` to check before sending, or `@expect type` to suppress",
+                    ),
                 );
             } else {
                 // Multiple non-responding members: `emit_unknown_selector_warning`
