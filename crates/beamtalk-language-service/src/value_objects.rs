@@ -297,7 +297,7 @@ pub struct ParameterInfo {
 /// **DDD Context:** Language Service — Value Object
 ///
 /// Used to surface inferred return-type annotations as VS Code quick-fixes
-/// (BT-1067, ADR 0045 Phase 1b). Each action describes a single text
+/// (ADR 0045 Phase 1b). Each action describes a single text
 /// insertion: `new_text` inserted at byte offset `insert_at` in the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeAction {
@@ -329,7 +329,7 @@ impl CodeAction {
 }
 
 /// A call-hierarchy target — the method-level symbol surfaced by
-/// `textDocument/prepareCallHierarchy` (BT-2243).
+/// `textDocument/prepareCallHierarchy`.
 ///
 /// **DDD Context:** Language Service — Value Object
 ///
@@ -406,7 +406,7 @@ pub enum DocumentSymbolKind {
     ClassMethod,
     /// A state variable (field).
     Field,
-    /// A `// === Name ===` section-divider method category (BT-2601):
+    /// A `// === Name ===` section-divider method category:
     /// a container symbol grouping the methods between one divider and the
     /// next (or the end of the class), surfaced only when the class's source
     /// actually contains at least one divider.

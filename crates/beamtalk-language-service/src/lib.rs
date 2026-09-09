@@ -3,7 +3,7 @@
 
 //! Language service API for IDE integration.
 //!
-//! **DDD Context:** Language Service (ADR 0117 step 5, BT-3361 — its own
+//! **DDD Context:** Language Service (ADR 0117 step 5 — its own
 //! crate, depending on `beamtalk-core`'s Compilation context, never the
 //! reverse; see `docs/development/architecture-principles.md` §1)
 //!
@@ -52,14 +52,14 @@
 //! ```
 
 mod project_index;
-// BT-3342 (ADR 0117 Decision step 3): the query-provider modules
+// ADR 0117 Decision step 3: the query-provider modules
 // (`completion_provider`, `definition_provider`, `hover_provider`, ...) that
 // used to be the sibling top-level `queries` module — merged in here because
 // both were the single Language Service DDD context split into two Rust
 // modules with a two-way, previously-unenforced cycle between them (this
 // orchestrator called into the providers for query behavior; the providers
 // imported result/protocol types — `Position`, `Location`, `Completion`, ...
-// — defined below). BT-3361 (ADR 0117 Decision step 5) moved this whole
+// — defined below). ADR 0117 Decision step 5 moved this whole
 // module tree — `language_service` and its `queries` submodule — out of
 // `beamtalk-core` verbatim into this crate; call sites across the workspace
 // were updated from `beamtalk_core::language_service::`/
@@ -144,8 +144,8 @@ pub trait LanguageService {
     fn document_symbols(&self, file: &Utf8PathBuf) -> Vec<DocumentSymbol>;
 
     /// Returns folding ranges for a file: one per `// === Name ===` section
-    /// divider category (BT-3237), plus one per class body and one per
-    /// method body (BT-3260) — see
+    /// divider category, plus one per class body and one per
+    /// method body — see
     /// [`crate::queries::folding_range_provider`] for why the latter exist
     /// (indentation-equivalent folding, so registering this provider at all
     /// doesn't regress a divider-less file's fold arrows). Empty only for a
@@ -157,7 +157,7 @@ pub trait LanguageService {
     /// Returns code actions available at the given byte range in a file.
     ///
     /// Returns "Add annotation: -> `ClassName`" quick-fixes for unannotated
-    /// methods whose return type can be inferred by the `TypeChecker` (BT-1067).
+    /// methods whose return type can be inferred by the `TypeChecker`.
     /// Should respond in <50ms for typical file sizes.
     fn code_actions(&self, file: &Utf8PathBuf, start: u32, end: u32) -> Vec<CodeAction>;
 }
@@ -174,7 +174,7 @@ pub struct SimpleLanguageService {
     project_index: ProjectIndex,
     /// Native type registry for Erlang FFI typed completions (ADR 0075).
     native_types: Option<std::sync::Arc<NativeTypeRegistry>>,
-    /// Whether workspace preload has completed with full coverage (BT-2796).
+    /// Whether workspace preload has completed with full coverage.
     ///
     /// When `true`, diagnostics are computed with
     /// `KnowledgeScope::ProjectComplete` — the `ProjectIndex` holds every
@@ -184,17 +184,17 @@ pub struct SimpleLanguageService {
     /// finishes within its file budget; stays `false` if the budget was
     /// exhausted (coverage would be partial).
     project_complete: bool,
-    /// Whether the workspace has package dependencies (BT-2794 pre-WS3 guard).
+    /// Whether the workspace has package dependencies (pre-WS3 guard).
     has_package_dependencies: bool,
     /// Per-category diagnostic severity overrides from the workspace's
-    /// `beamtalk.toml` `[diagnostics]` section (ADR 0100 Rule 3, BT-2800).
+    /// `beamtalk.toml` `[diagnostics]` section (ADR 0100 Rule 3).
     /// Empty (the default) preserves today's Rule 1 completeness-ladder
     /// defaults — the same behaviour as before this field existed. Set by
     /// the LSP server after loading `beamtalk.toml` from each workspace
     /// root, so the LSP agrees with `beamtalk build` on diagnostic severity.
     diagnostics_overrides: beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
     /// Whether the LSP server's startup workspace preload is currently
-    /// in-flight (BT-3433).
+    /// in-flight.
     ///
     /// A `didOpen`/`didChange` for a file racing preload can compute and
     /// publish diagnostics against a `ProjectIndex` that is only partially
@@ -237,7 +237,7 @@ struct FileData {
 /// annotations (state/class-var/param/return, alias RHS), superclass clauses,
 /// `extending:` targets, type-parameter bounds, and constructor/type-pattern
 /// class names. `Expression` covers everything else (locals, message args,
-/// fields, class-literal references, declaration names). BT-2919: this lets
+/// fields, class-literal references, declaration names). This lets
 /// callers like [`SimpleLanguageService::unresolved_type_reference_at`] detect
 /// "cursor is on a name that must be a class/alias, but isn't a known one yet"
 /// without waiting for the name to resolve.
@@ -281,7 +281,7 @@ impl SimpleLanguageService {
         }
     }
 
-    /// Declare that workspace preload completed with full coverage (BT-2796).
+    /// Declare that workspace preload completed with full coverage.
     ///
     /// After this, diagnostics run with `KnowledgeScope::ProjectComplete`.
     /// Only call when the preload walked every project source file — a
@@ -292,9 +292,9 @@ impl SimpleLanguageService {
         self.project_complete = complete;
     }
 
-    /// Returns whether workspace preload completed with full coverage (BT-2796).
+    /// Returns whether workspace preload completed with full coverage.
     ///
-    /// ADR 0108 Phase 8 (BT-2901): the LSP server consults this before
+    /// ADR 0108 Phase 8: the LSP server consults this before
     /// answering `textDocument/references` for a type-alias name — when
     /// `false`, files outside the current build graph haven't contributed
     /// their alias reference sites yet, so the response may be incomplete
@@ -304,7 +304,7 @@ impl SimpleLanguageService {
         self.project_complete
     }
 
-    /// Declare whether the workspace has package dependencies (BT-2794).
+    /// Declare whether the workspace has package dependencies.
     ///
     /// Pre-WS3, dependency extension contributions are invisible, so when
     /// true (and the project is complete) the receiver-knowledge classifier
@@ -314,21 +314,21 @@ impl SimpleLanguageService {
     }
 
     /// Declare whether the LSP server's startup workspace preload is
-    /// currently in-flight (BT-3433). See the `preload_in_progress` field
+    /// currently in-flight. See the `preload_in_progress` field
     /// doc for why `Backend::publish_diagnostics` consults this.
     pub fn set_preload_in_progress(&mut self, in_progress: bool) {
         self.preload_in_progress = in_progress;
     }
 
     /// Returns whether the LSP server's startup workspace preload is
-    /// currently in-flight (BT-3433).
+    /// currently in-flight.
     #[must_use]
     pub fn is_preload_in_progress(&self) -> bool {
         self.preload_in_progress
     }
 
     /// Sets the `[diagnostics]` severity-override table loaded from the
-    /// workspace's `beamtalk.toml` (ADR 0100 Rule 3, BT-2800).
+    /// workspace's `beamtalk.toml` (ADR 0100 Rule 3).
     ///
     /// Called by the LSP server once per workspace root after loading and
     /// parsing `beamtalk.toml`. An empty table (the default) is a no-op —
@@ -361,19 +361,19 @@ impl SimpleLanguageService {
         &self.project_index
     }
 
-    /// Marks `file` as a stdlib source (BT-2959) so its aliases are stamped
+    /// Marks `file` as a stdlib source so its aliases are stamped
     /// with the stdlib package marker instead of the same-project marker.
     /// Safe to call before or after [`Self::update_file`] — a file indexed
-    /// first is re-stamped in place (BT-2961) — see
+    /// first is re-stamped in place — see
     /// [`ProjectIndex::mark_stdlib_file`].
     pub fn mark_stdlib_file(&mut self, file: Utf8PathBuf) {
         self.project_index.mark_stdlib_file(file);
     }
 
-    /// Sets the real package name for each known workspace root (BT-2960).
+    /// Sets the real package name for each known workspace root.
     /// Safe to call before or after files under a root are indexed —
     /// already-stamped aliases are re-stamped against the new root map
-    /// (BT-2961) — see [`ProjectIndex::set_root_packages`].
+    /// — see [`ProjectIndex::set_root_packages`].
     pub fn set_root_packages(&mut self, root_packages: Vec<(Utf8PathBuf, EcoString)>) {
         self.project_index.set_root_packages(root_packages);
     }
@@ -438,7 +438,7 @@ impl SimpleLanguageService {
         self.files.get(file).map(|data| data.source.clone())
     }
 
-    /// BT-2243: Classify the cursor for a
+    /// Classify the cursor for a
     /// `textDocument/prepareCallHierarchy` request and return a
     /// [`CallHierarchyTarget`], or `None` when the cursor is not on a
     /// recognisable method symbol.
@@ -533,7 +533,7 @@ impl SimpleLanguageService {
         None
     }
 
-    /// BT-2243: find every *call site* of `selector_name` across every
+    /// Find every *call site* of `selector_name` across every
     /// indexed file — sends only, no method-definition headers.
     ///
     /// Used by the LSP `callHierarchy/incomingCalls` cold-file fallback
@@ -563,15 +563,14 @@ impl SimpleLanguageService {
         Self::method_header_selector_span(method, source).unwrap_or(method.span)
     }
 
-    /// BT-2239: Classify the cursor for a Find-References request and
+    /// Classify the cursor for a Find-References request and
     /// return the equivalent [`NavQuery`], or `None` when the cursor is
     /// on a local identifier that can't be expressed as a runtime
     /// navigation query.
     ///
     /// Public so `beamtalk-lsp` can build runtime-delegate requests with
     /// the *same* classification logic the AST walker uses — keeping the
-    /// two modes in lockstep is a foundational invariant of the epic
-    /// (BT-2215).
+    /// two modes in lockstep is a foundational invariant of the epic.
     ///
     /// Returns:
     /// * `Some(NavQuery::SendersOf(selector))` when the cursor is on a
@@ -601,7 +600,7 @@ impl SimpleLanguageService {
         if self.project_index.hierarchy().has_class(&ident.name) {
             return Some(NavQuery::ReferencesTo(ident.name));
         }
-        // ADR 0108 Phase 8 (BT-2901): deliberately `None` for a type-alias
+        // ADR 0108 Phase 8: deliberately `None` for a type-alias
         // name, even though `find_references` (the cold-file AST path)
         // does resolve aliases — type aliases erase entirely at compile
         // time (no BEAM artifact carries the name), so the live runtime's
@@ -613,7 +612,7 @@ impl SimpleLanguageService {
     }
 
     /// Returns the type alias name at `position`, if the identifier there is
-    /// a known alias (ADR 0108 Phase 8, BT-2901).
+    /// a known alias (ADR 0108 Phase 8).
     ///
     /// Used by the LSP server for two things: (1) deciding whether a
     /// `textDocument/references` response needs the "coverage may be
@@ -644,7 +643,7 @@ impl SimpleLanguageService {
     ///
     /// Single-AST-walk combination of [`Self::alias_name_at`] and
     /// [`Self::unresolved_type_reference_at`] for the LSP `references()`
-    /// incompleteness-warning gate (BT-2919).
+    /// incompleteness-warning gate.
     ///
     /// The two checks are mutually exclusive at a given cursor — an alias
     /// name that already resolves can't also count as "unresolved" — so
@@ -671,10 +670,10 @@ impl SimpleLanguageService {
     /// a syntactic type-reference position (a type annotation, superclass
     /// clause, `extending:` target, type-param bound, or constructor/type
     /// pattern class name) that does **not** resolve to any known class,
-    /// protocol, or alias (BT-2919).
+    /// protocol, or alias.
     ///
-    /// This is the counterpart to [`Self::alias_name_at`] for the gap BT-2919
-    /// identified: `alias_name_at` (and the `has_class`/`has_alias` routing
+    /// This is the counterpart to [`Self::alias_name_at`] for the gap
+    /// this fills: `alias_name_at` (and the `has_class`/`has_alias` routing
     /// gate in [`Self::find_references`]) can only recognize a name that's
     /// *already* registered in the project index — but if the name's own
     /// declaring file hasn't been indexed yet (preload hasn't reached it, or
@@ -699,7 +698,7 @@ impl SimpleLanguageService {
         (!known).then_some(ident.name)
     }
 
-    /// BT-2240: Find the **declaration sites** (method-definition headers)
+    /// Find the **declaration sites** (method-definition headers)
     /// for the given selector across every indexed file.
     ///
     /// Used by the LSP to overlay declarations onto runtime-attached
@@ -719,7 +718,7 @@ impl SimpleLanguageService {
         )
     }
 
-    /// BT-2240: Find the **class declaration sites** (the class-name token
+    /// Find the **class declaration sites** (the class-name token
     /// at the definition) for the given class or protocol name across every
     /// indexed file.
     ///
@@ -741,14 +740,14 @@ impl SimpleLanguageService {
         )
     }
 
-    /// BT-2241: Classify the cursor for a `textDocument/implementation`
+    /// Classify the cursor for a `textDocument/implementation`
     /// request and return the equivalent [`NavQuery::ImplementorsOf`], or
     /// `None` when the cursor is not on a selector.
     ///
     /// Public so `beamtalk-lsp` builds the runtime-delegate request with
     /// the *same* classification logic the AST walker uses — keeping the
     /// runtime and cold-file modes in lockstep is a foundational invariant
-    /// of the epic (BT-2215).
+    /// of the epic.
     ///
     /// Unlike [`Self::references_query_at`], goto-implementation only
     /// resolves selectors (not class names) — "implementations of a class"
@@ -784,7 +783,7 @@ impl SimpleLanguageService {
         None
     }
 
-    /// BT-2241: Find every class that defines `selector_name` across all
+    /// Find every class that defines `selector_name` across all
     /// indexed files. Mirrors `SystemNavigation default implementorsOf:`
     /// semantics — local definitions only, both instance- and class-side.
     ///
@@ -804,7 +803,7 @@ impl SimpleLanguageService {
         )
     }
 
-    /// BT-2242: Classify the cursor for a `textDocument/prepareTypeHierarchy`
+    /// Classify the cursor for a `textDocument/prepareTypeHierarchy`
     /// request and return the class name plus its declaration site, or
     /// `None` when the cursor is not on a known class name.
     ///
@@ -843,7 +842,7 @@ impl SimpleLanguageService {
         Some((class_name, declaration))
     }
 
-    /// BT-2242: Find the declaration site of `class_name`, scanning every
+    /// Find the declaration site of `class_name`, scanning every
     /// indexed file for a `ClassDefinition` whose name matches.
     ///
     /// The returned [`Location::span`] is the *class-name span* (e.g. the
@@ -857,9 +856,9 @@ impl SimpleLanguageService {
     /// [`Self::type_hierarchy_prepare_at`]; navigation just doesn't have a
     /// jump target).
     ///
-    /// BT-2317: resolution delegates to
+    /// Resolution delegates to
     /// [`definition_provider::find_class_or_protocol_declaration`], the same
-    /// helper goto-definition uses, so the BT-1933 protocol/class shadowing
+    /// helper goto-definition uses, so the protocol/class shadowing
     /// rule applies on this path too. When a name is defined as both a real
     /// class and a synthetic protocol (across separate files), the real class
     /// wins; a protocol declaration is only returned when the hierarchy marks
@@ -873,7 +872,7 @@ impl SimpleLanguageService {
         )
     }
 
-    /// BT-2242: Resolve the supertype chain of `class_name` to declaration
+    /// Resolve the supertype chain of `class_name` to declaration
     /// locations. Mirrors `Behaviour superclassChain` (the stdlib query
     /// `typeHierarchy/supertypes` is wired to) — returns the names paired
     /// with their declaration site when one exists in the indexed corpus.
@@ -895,7 +894,7 @@ impl SimpleLanguageService {
             .collect()
     }
 
-    /// BT-2242: Resolve all transitive subtypes of `class_name`. Mirrors
+    /// Resolve all transitive subtypes of `class_name`. Mirrors
     /// `Behaviour allSubclasses` (the stdlib query
     /// `typeHierarchy/subtypes` is wired to) — returns the names paired
     /// with their declaration site when one exists in the indexed corpus.
@@ -963,7 +962,7 @@ impl SimpleLanguageService {
     ///
     /// For unary and binary selectors, `MessageSelector` carries no span for
     /// the selector token itself, so we recover it by scanning the header
-    /// text with [`Self::method_header_selector_span`] (BT-1941). The result
+    /// text with [`Self::method_header_selector_span`]. The result
     /// is exact: clicks on modifiers (`sealed` / `internal` / `class`),
     /// `->` punctuation, whitespace, parameter names/types, return types,
     /// and body expressions are all rejected — only the selector token
@@ -989,7 +988,7 @@ impl SimpleLanguageService {
     }
 
     /// Computes the exact source span of a method definition's selector
-    /// token(s) (BT-1941). Used for the `selection_range` on
+    /// token(s). Used for the `selection_range` on
     /// `CallHierarchyItem` ([`Self::method_header_selection_span`]) and, for
     /// unary/binary selectors, for the offset containment check in
     /// [`Self::offset_in_method_header_selector`].
@@ -1158,14 +1157,14 @@ impl SimpleLanguageService {
             }
         }
 
-        // BT-1936: Check protocol definitions (name, extending, type-param bounds, method sigs)
+        // Check protocol definitions (name, extending, type-param bounds, method sigs)
         for protocol in &file_data.module.protocols {
             if let Some(ident) = Self::find_identifier_in_protocol(protocol, offset_val) {
                 return Some(ident);
             }
         }
 
-        // ADR 0108 Phase 8 (BT-2901): Check type alias declarations (the
+        // ADR 0108 Phase 8: Check type alias declarations (the
         // alias name itself, and any name referenced in its RHS
         // annotation) so goto-definition/find-references work when the
         // cursor is on the declaration site, e.g. `type RestartStrategy =
@@ -1204,7 +1203,7 @@ impl SimpleLanguageService {
 
     /// Walk a class definition looking for an identifier at the given offset.
     ///
-    /// Covers: class name, superclass, type-parameter bounds (BT-1936), state /
+    /// Covers: class name, superclass, type-parameter bounds, state /
     /// class-variable type annotations, and method bodies (parameters, return
     /// type, body statements).
     fn find_identifier_in_class(
@@ -1257,7 +1256,7 @@ impl SimpleLanguageService {
     /// Walk a protocol definition looking for an identifier at the given offset.
     ///
     /// Covers: protocol name, `extending:` target, type-parameter bounds, and
-    /// method signature type annotations (both instance and class-side). (BT-1936)
+    /// method signature type annotations (both instance and class-side).
     fn find_identifier_in_protocol(
         protocol: &beamtalk_core::ast::ProtocolDefinition,
         offset_val: u32,
@@ -1366,7 +1365,7 @@ impl SimpleLanguageService {
     /// e.g., `Printable` in `Logger(T :: Printable)` or `Mapper(T :: Printable)`.
     /// The parameter name itself (e.g., `T`) is intentionally not returned —
     /// type-parameter names are local to their declaration and have no global
-    /// definition to navigate to. (BT-1936)
+    /// definition to navigate to.
     fn find_identifier_in_type_params(
         type_params: &[beamtalk_core::ast::TypeParamDecl],
         offset_val: u32,
@@ -1506,7 +1505,7 @@ impl SimpleLanguageService {
             Expression::Match { value, arms, .. } => Self::find_identifier_in_expr(value, offset)
                 .or_else(|| {
                     arms.iter().find_map(|arm| {
-                        // BT-1940: walk pattern, guard, and body so that
+                        // Walk pattern, guard, and body so that
                         // goto-definition on a class name inside a constructor
                         // pattern (`Result ok: v`) or inside a `when:` guard
                         // navigates to the class declaration. Keeps parity with
@@ -1533,7 +1532,7 @@ impl SimpleLanguageService {
     }
 
     /// Recursively searches for a class name identifier inside a destructuring
-    /// pattern. (BT-1940)
+    /// pattern.
     ///
     /// Only `Pattern::Constructor` carries a class identifier (`Result` in
     /// `Result ok: v`). All other variants just host nested patterns, which we
@@ -1589,8 +1588,8 @@ impl SimpleLanguageService {
                     // The binding (e.g. `path` in `path :: String`) is a
                     // local variable, not a class reference — this function
                     // only navigates class identifiers. Go-to-definition on
-                    // the binding itself is deferred to BT-2855, which is
-                    // when it becomes a fully navigable scope entry.
+                    // the binding itself is deferred until it becomes a
+                    // fully navigable scope entry.
                     None
                 }
             }
@@ -1687,11 +1686,11 @@ impl LanguageService for SimpleLanguageService {
         let (class_hierarchy_result, hierarchy_diags) =
             beamtalk_core::semantic_analysis::ClassHierarchy::build(&module);
         if let Ok(mut class_hierarchy) = class_hierarchy_result {
-            // BT-1933: Register protocol definitions as synthetic class entries
+            // Register protocol definitions as synthetic class entries
             // so LSP features (completions, has_class) work with protocol names.
             class_hierarchy.register_protocol_classes(&module);
 
-            // BT-2796: A file with parse errors may have an under-recovered
+            // A file with parse errors may have an under-recovered
             // method surface (error recovery can drop method definitions).
             // Mark its classes so cross-file consumers of this file's
             // hierarchy never emit unresolved-selector hints against a
@@ -1707,7 +1706,7 @@ impl LanguageService for SimpleLanguageService {
             self.project_index
                 .update_file(file.clone(), &class_hierarchy);
 
-            // BT-2795: Track this file's standalone extension definitions so
+            // Track this file's standalone extension definitions so
             // other files' diagnostics see them (cross-file extension
             // visibility, ADR 0066 / ADR 0100 Rule 2 WS1).
             let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
@@ -1715,7 +1714,7 @@ impl LanguageService for SimpleLanguageService {
             self.project_index
                 .set_file_extensions(file.clone(), extensions);
 
-            // ADR 0108 Phase 8 (BT-2901): track this file's `type`
+            // ADR 0108 Phase 8: track this file's `type`
             // declarations in the project-wide alias registry, so
             // completions/goto-definition/find-references/hover can resolve
             // alias names cross-file the same way they resolve classes.
@@ -1724,12 +1723,12 @@ impl LanguageService for SimpleLanguageService {
             self.project_index
                 .update_file_aliases(file.clone(), alias_infos);
 
-            // BT-2950: track this file's `Protocol define: ...` declarations
+            // Track this file's `Protocol define: ...` declarations
             // too, so `extending:`/conformance checks against a protocol
             // declared in a different project file or indexed dependency
             // resolve during LSP diagnostics — mirrors the alias tracking
-            // immediately above (BT-2910 already wired the CLI `build`/`lint`
-            // side of this; this closes the LSP parity gap).
+            // immediately above (the CLI `build`/`lint` side of this is
+            // already wired; this closes the LSP parity gap).
             let protocol_infos =
                 beamtalk_core::semantic_analysis::ProtocolRegistry::extract_protocol_infos(&module);
             self.project_index
@@ -1768,20 +1767,20 @@ impl LanguageService for SimpleLanguageService {
     fn diagnostics(&self, file: &Utf8PathBuf) -> Vec<Diagnostic> {
         self.get_file(file)
             .map(|data| {
-                // BT-2009: Use the unified diagnostic pipeline so that LSP
+                // Use the unified diagnostic pipeline so that LSP
                 // diagnostics match CLI diagnostics. Cross-file classes from
                 // the ProjectIndex are passed so type checking, @expect
                 // directives, and all post-analysis passes run identically.
                 let cross_file_classes = self.project_index.cross_file_class_infos_for(file);
-                // BT-2027: Stdlib source files must be analysed with
+                // Stdlib source files must be analysed with
                 // `stdlib_mode = true` so the "conflicts with a stdlib class"
-                // shadowing check (BT-738) doesn't flag every class the file
+                // shadowing check doesn't flag every class the file
                 // legitimately defines.
                 let mut options = beamtalk_core::CompilerOptions::default();
                 if self.project_index.is_stdlib_file(file) {
                     options.stdlib_mode = true;
                 }
-                // BT-2796: After a full-coverage workspace preload the
+                // After a full-coverage workspace preload the
                 // ProjectIndex holds every project file's classes, so the
                 // injected knowledge is project-complete.
                 if self.project_complete {
@@ -1789,7 +1788,7 @@ impl LanguageService for SimpleLanguageService {
                         beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
                 }
                 options.has_package_dependencies = self.has_package_dependencies;
-                // BT-2951: `current_package` so `AliasRegistry::add_pre_loaded`'s
+                // `current_package` so `AliasRegistry::add_pre_loaded`'s
                 // seeding-boundary exclusion (ADR 0108 Phase 5) actually has
                 // real package data to filter `pre_loaded_aliases` on below —
                 // without this, every entry's `package` looks unset from the
@@ -1800,29 +1799,29 @@ impl LanguageService for SimpleLanguageService {
                 // `ProjectIndex::alias_package_for_file`'s doc.
                 options.current_package =
                     Some(self.project_index.alias_package_for_file(file).to_string());
-                // BT-2795: Cross-file extensions from the ProjectIndex are
+                // Cross-file extensions from the ProjectIndex are
                 // passed so a same-project `ClassName >> selector` defined in
                 // another file resolves instead of producing a false Dnu hint.
                 let cross_file_extensions = self.project_index.cross_file_extensions_for(file);
-                // BT-2928: Cross-file type aliases from the ProjectIndex, so a
+                // Cross-file type aliases from the ProjectIndex, so a
                 // `type Name = ...` declared in another project file resolves
                 // instead of leaving `Dynamic (dynamic receiver)` behind —
                 // mirrors `cross_file_classes` immediately above.
                 let pre_loaded_aliases = self.project_index.cross_file_alias_infos_for(file);
-                // BT-2950: Cross-file protocol declarations from the
+                // Cross-file protocol declarations from the
                 // ProjectIndex, so `extending:`/conformance checks against a
                 // `Protocol define: Name ...` declared in another project
                 // file or dependency resolve instead of degrading to
                 // "unknown protocol" — parity with the CLI's `build`/`lint`
-                // wiring (BT-2910), mirrors `cross_file_classes` above.
+                // wiring, mirrors `cross_file_classes` above.
                 let pre_loaded_protocols = self.project_index.cross_file_protocol_infos_for(file);
-                // BT-1846/BT-1847: a `stubs/lists.bt` opened directly in an
+                // A `stubs/lists.bt` opened directly in an
                 // editor must not be diagnosed as if it were an ordinary
                 // src/ file — `declare native:` is only legal there. See
                 // `ProjectIndex::is_stub_file`'s doc for why this can't be a
                 // tracked-membership check like `is_stdlib_file`.
                 let is_stub_file = self.project_index.is_stub_file(file);
-                // BT-3431: file basename (without extension), so the shared
+                // File basename (without extension), so the shared
                 // pipeline can validate it agrees with the class declared
                 // here — see `ProjectDiagnosticContext::source_file_stem`'s doc.
                 let source_file_stem = file.file_stem().map(std::string::ToString::to_string);
@@ -1833,7 +1832,7 @@ impl LanguageService for SimpleLanguageService {
                     pre_loaded_aliases,
                     cross_file_extensions,
                     native_type_registry: self.native_types.clone(),
-                    // BT-2800: apply the same `beamtalk.toml` `[diagnostics]`
+                    // Apply the same `beamtalk.toml` `[diagnostics]`
                     // severity-override table `beamtalk build` uses, so the
                     // LSP never disagrees with the CLI about a diagnostic's
                     // severity.
@@ -1858,12 +1857,12 @@ impl LanguageService for SimpleLanguageService {
         };
 
         // Determine the current file's package for cross-package visibility filtering
-        // (ADR 0071, BT-1703).
+        // (ADR 0071).
         let current_package = self.project_index.package_for_file(file);
 
         // Use project-wide hierarchy for completions (cross-file class awareness)
         // ADR 0075: Pass native type registry for typed Erlang FFI completions
-        // ADR 0108 Phase 8 (BT-2901): Pass the project-wide alias registry so
+        // ADR 0108 Phase 8: Pass the project-wide alias registry so
         // alias names are offered alongside class/protocol names in
         // type-annotation position.
         crate::queries::completion_provider::compute_completions_with_aliases(
@@ -1880,7 +1879,7 @@ impl LanguageService for SimpleLanguageService {
     fn hover(&self, file: &Utf8PathBuf, position: Position) -> Option<HoverInfo> {
         let file_data = self.get_file(file)?;
 
-        // ADR 0108 Phase 8 (BT-2901): `ProjectIndex` now tracks a
+        // ADR 0108 Phase 8: `ProjectIndex` tracks a
         // project-wide `AliasRegistry` (see `update_file`), so an
         // alias-typed value's hover resolves and renders
         // `AliasName (expansion)` instead of falling back to its bare
@@ -1933,10 +1932,10 @@ impl LanguageService for SimpleLanguageService {
         }
 
         // 2. Try selector-based go-to-definition at a method *definition
-        //    header* (BT-1939): cursor on the selector in `bar => ...`,
+        //    header*: cursor on the selector in `bar => ...`,
         //    `+ other => ...`, or `at: i put: v => ...`. Navigate to the
         //    nearest overridden parent method. This mirrors the header path
-        //    added to `find_references` in BT-1938 and reuses its helper.
+        //    added to `find_references` and reuses its helper.
         //
         //    We use `find_overridden_method_definition` rather than the
         //    general-purpose receiver lookup because the latter has a
@@ -2019,7 +2018,7 @@ impl LanguageService for SimpleLanguageService {
         };
 
         // If the identifier is a class, protocol, or type-alias name, use
-        // class-aware references. ADR 0108 Phase 8 (BT-2901): aliases are
+        // class-aware references. ADR 0108 Phase 8: aliases are
         // never registered into `ClassHierarchy` (they're a peer namespace,
         // collision-checked against it instead), so `has_class` alone can't
         // see them — the `alias_registry().has_alias` check closes that gap.
@@ -2027,7 +2026,7 @@ impl LanguageService for SimpleLanguageService {
         // the declaration site and RHS references), so it already handles
         // an alias name correctly once routed here.
         //
-        // BT-2919: also route here when the cursor is in a syntactic
+        // Also route here when the cursor is in a syntactic
         // type-reference position (annotation, superclass, `extending:`,
         // type-param bound, constructor/type pattern) even if the name
         // *doesn't* resolve to a known class/protocol/alias yet — e.g. the
@@ -2145,7 +2144,7 @@ impl LanguageService for SimpleLanguageService {
                     method.selector.name(),
                     is_class_method,
                 );
-                // BT-2022: inferred map stores InferredType; use
+                // The inferred map stores InferredType; use
                 // `display_for_diagnostic()` so user-facing annotations render
                 // source-friendly names (e.g., `Nil` instead of `UndefinedObject`).
                 if let Some(inferred_ty) = inferred.get(&key) {

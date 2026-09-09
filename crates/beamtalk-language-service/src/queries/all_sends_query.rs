@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Language Service
 //!
-//! Backs `SystemNavigation unimplementedSelectors` (BT-2206). Where
+//! Backs `SystemNavigation unimplementedSelectors`. Where
 //! [`crate::queries::senders_query`] filters by one known selector, this query
 //! collects EVERY [`Expression::MessageSend`] and [`Cascade`] message in a
 //! single pass — selector name, 1-based line number (relative to the input
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn erlang_class_protocol_selector_is_other_not_ffi() {
-        // BT-3079 regression: `Erlang class` must NOT be reported as an FFI
+        // `Erlang class` must NOT be reported as an FFI
         // call to a module named "class" — it dispatches to the class
         // protocol (metaclass), like `Erlang new`, `Erlang printString`, etc.
         let hits = find_all_sends_in_source("meta => Erlang class");
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn package_qualified_erlang_is_other_not_ffi() {
-        // BT-3079 regression: `json@Erlang lists` names a package-scoped
+        // `json@Erlang lists` names a package-scoped
         // `Erlang` class, not the compiler's built-in FFI bridge, so it must
         // not be tagged `ErlangFfi`.
         let hits = find_all_sends_in_source("go => json@Erlang lists");
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn erlang_ffi_cascade_reuses_module_across_messages() {
-        // BT-3079 regression: `(Erlang lists) reverse: xs; flatten: xs` — the
+        // `(Erlang lists) reverse: xs; flatten: xs` — the
         // shared cascade receiver resolves to FFI module `lists` once and
         // both cascade messages (including the second, which never sees the
         // receiver syntactically) must carry it.
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn erlang_class_protocol_cascade_is_other_not_ffi() {
-        // BT-3079 regression: `Erlang class; foo` — the shared cascade
+        // `Erlang class; foo` — the shared cascade
         // receiver's first message is the class-protocol selector `class`,
         // so neither cascade message may be tagged FFI.
         let hits = find_all_sends_in_source("meta => Erlang class; foo");

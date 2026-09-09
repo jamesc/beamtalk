@@ -144,15 +144,15 @@ fn find_references_rejects_click_on_parameter_name_in_header() {
     );
 }
 
-// ── BT-1941: tightened unary/binary selector-span precision ────────
+// ── tightened unary/binary selector-span precision ────────
 
 #[test]
 fn find_references_rejects_click_on_sealed_modifier_in_header() {
     // Clicking on the `sealed` modifier keyword must NOT be treated as
-    // a click on the selector `bar`. Before BT-1941 the coarse
+    // a click on the selector `bar`: the coarse
     // "inside method.span, before the first param/return-type/body"
-    // rule was permissive here because `method.span.start()` is
-    // captured before modifiers are consumed.
+    // rule alone would be permissive here, since `method.span.start()`
+    // is captured before modifiers are consumed.
     let mut service = SimpleLanguageService::new();
     let file = Utf8PathBuf::from("test.bt");
 
@@ -183,9 +183,9 @@ fn find_references_rejects_click_on_sealed_modifier_in_header() {
 fn find_references_rejects_click_on_arrow_in_header() {
     // Clicking on the `->` punctuation between a unary selector and its
     // return type annotation must NOT be treated as a click on the
-    // selector. Before BT-1941 this was permissive because `->` falls
-    // inside `method.span` but outside the return-type annotation's own
-    // span.
+    // selector: the coarse span check alone would be permissive here
+    // because `->` falls inside `method.span` but outside the
+    // return-type annotation's own span.
     let mut service = SimpleLanguageService::new();
     let file = Utf8PathBuf::from("test.bt");
 
@@ -378,7 +378,7 @@ fn find_references_from_binary_method_header_with_modifier() {
 
 #[test]
 fn find_references_from_method_header_named_after_modifier_keyword() {
-    // Edge case called out in BT-1941: a unary method whose selector
+    // Edge case: a unary method whose selector
     // name is itself a modifier keyword. `class => ...` parses with
     // `is_class_method == false` because the parser's own lookahead
     // (`is_fat_arrow_or_return_type`) resolves the ambiguity in favour

@@ -32,7 +32,7 @@ use beamtalk_core::semantic_analysis;
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 
-/// Project-level context for the unified diagnostic pipeline (BT-2009).
+/// Project-level context for the unified diagnostic pipeline.
 ///
 /// Bundles all optional inputs that vary between the CLI compiler and the LSP.
 /// Both callers construct a `ProjectDiagnosticContext` and pass it to
@@ -53,14 +53,14 @@ pub struct ProjectDiagnosticContext<'a> {
     pub pre_loaded_protocols:
         Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     /// Pre-loaded type alias definitions from other source files in the same
-    /// package (BT-2928, ADR 0108). Mirrors `pre_loaded_protocols` — seeded
+    /// package (ADR 0108). Mirrors `pre_loaded_protocols` — seeded
     /// into the `AliasRegistry` before the current module's own aliases are
     /// registered, so a `type Name = ...` declared in a different file
     /// resolves cross-file the same way a cross-file class reference already
     /// does. Empty for callers that don't (yet) supply project-wide alias
     /// metadata — the pipeline degrades to today's same-file-only resolution.
     pub pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
-    /// Project-wide standalone extension definitions (BT-2795, ADR 0066).
+    /// Project-wide standalone extension definitions (ADR 0066).
     /// Registered into the class hierarchy so cross-file
     /// `ClassName >> selector` extensions resolve instead of producing
     /// false `Dnu` hints. May include the current file's own entries —
@@ -74,7 +74,7 @@ pub struct ProjectDiagnosticContext<'a> {
     /// Whether to promote transitive dependency usage warnings to errors.
     pub strict_deps: bool,
     /// Per-category diagnostic severity overrides from `beamtalk.toml`'s
-    /// `[diagnostics]` section (ADR 0100 Rule 3, BT-2800). Empty when the
+    /// `[diagnostics]` section (ADR 0100 Rule 3). Empty when the
     /// package has no manifest or no `[diagnostics]` section — absence
     /// preserves today's Rule 1 completeness-ladder defaults. Applied here,
     /// inside the shared pipeline, so the CLI (`beamtalk build`) and the LSP
@@ -82,7 +82,7 @@ pub struct ProjectDiagnosticContext<'a> {
     /// `beamtalk_core::compilation::diagnostics_policy::apply_diagnostics_table`.
     pub diagnostics_overrides: beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
     /// Whether the file being analysed lives under a project's `stubs/`
-    /// directory (ADR 0075, BT-1846/BT-1847) — `declare native:` is only
+    /// directory (ADR 0075) — `declare native:` is only
     /// legal there. Callers derive this from the file path they're about to
     /// analyse (e.g. `SimpleLanguageService::diagnostics`); defaulting to
     /// `false` matches `AnalysisContext::is_stub_file`'s own default, so a
@@ -93,14 +93,14 @@ pub struct ProjectDiagnosticContext<'a> {
     /// when there is no real file backing the module (REPL sessions,
     /// in-memory snippets). Used by
     /// [`check_class_file_name_agreement`](beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement)
-    /// (BT-3431) to validate that the file name agrees with the class it
+    /// to validate that the file name agrees with the class it
     /// declares — a mismatch silently breaks self-dispatch codegen with no
     /// other diagnostic. Callers derive this from the file path they're
     /// about to analyse, mirroring `is_stub_file` above.
     pub source_file_stem: Option<String>,
 }
 
-/// Unified post-analysis diagnostic pipeline (BT-2009).
+/// Unified post-analysis diagnostic pipeline.
 ///
 /// Runs semantic analysis followed by all post-analysis passes (stdlib name
 /// shadowing, collision detection, transitive dep usage, unresolved-class
@@ -111,7 +111,7 @@ pub struct ProjectDiagnosticContext<'a> {
 /// # Arguments
 ///
 /// * `module` - The parsed AST
-/// * `source` - The module's raw source text (BT-3240: needed to give the
+/// * `source` - The module's raw source text (needed to give the
 ///   near-miss-divider check an accurate comment span — see
 ///   `beamtalk_core::near_miss_divider::scan_source`'s doc)
 /// * `initial_diagnostics` - Pre-analysis diagnostics (parse + any earlier passes,
@@ -134,7 +134,7 @@ pub fn compute_project_diagnostics(
 
 /// [`compute_project_diagnostics`], additionally returning the
 /// [`AnalysisResult`](beamtalk_core::semantic_analysis::AnalysisResult) the pipeline's
-/// `analyse_full` call produced (BT-3123).
+/// `analyse_full` call produced.
 ///
 /// Callers that go on to run codegen for the same module (e.g. the CLI build
 /// pipeline) should use this variant and thread the returned `AnalysisResult`
@@ -152,7 +152,7 @@ pub fn compute_project_diagnostics_with_analysis(
     let mut diagnostics = initial_diagnostics;
 
     // Run semantic analysis with the richest available context.
-    // BT-2928: thread `pre_loaded_aliases` through so a cross-file/package
+    // Thread `pre_loaded_aliases` through so a cross-file/package
     // type alias resolves the same way a cross-file class reference already
     // does — see `AnalysisContext::pre_loaded_aliases`'s doc.
     let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
@@ -164,13 +164,13 @@ pub fn compute_project_diagnostics_with_analysis(
         .with_cross_file_extensions(&ctx.cross_file_extensions)
         .with_is_stub_file(ctx.is_stub_file);
     let mut analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
-    // BT-3123: diagnostics are consumed below (and by every downstream pass
+    // Diagnostics are consumed below (and by every downstream pass
     // in this pipeline); take them out of `analysis_result` so the rest of
     // `AnalysisResult` (hierarchy, semantic facts, inferred return types,
     // alias registry) can be handed to codegen without cloning it.
     diagnostics.extend(std::mem::take(&mut analysis_result.diagnostics));
 
-    // BT-3431: Validate that the file name agrees with the class it
+    // Validate that the file name agrees with the class it
     // declares — a mismatch silently breaks self-dispatch codegen (see
     // `check_class_file_name_agreement`'s doc) with no other diagnostic.
     diagnostics.extend(
@@ -180,7 +180,7 @@ pub fn compute_project_diagnostics_with_analysis(
         ),
     );
 
-    // BT-1732: Enrich unresolved class warnings with dependency package hints.
+    // Enrich unresolved class warnings with dependency package hints.
     if let Some(registry) = ctx.dep_registry {
         for diag in &mut diagnostics {
             if diag.category == Some(DiagnosticCategory::UnresolvedClass) {
@@ -206,7 +206,7 @@ pub fn compute_project_diagnostics_with_analysis(
         }
     }
 
-    // BT-738: Warn when user code shadows a stdlib class name.
+    // Warn when user code shadows a stdlib class name.
     if !ctx.options.stdlib_mode {
         let mut stdlib_shadow_diags = Vec::new();
         beamtalk_core::semantic_analysis::check_stdlib_name_shadowing(
@@ -216,8 +216,8 @@ pub fn compute_project_diagnostics_with_analysis(
         diagnostics.extend(stdlib_shadow_diags);
     }
 
-    // BT-1653 / ADR 0070 Phase 3: Cross-package class collision detection
-    // and BT-1654: transitive dependency usage warnings.
+    // ADR 0070 Phase 3: Cross-package class collision detection
+    // and transitive dependency usage warnings.
     if let Some(registry) = ctx.dep_registry {
         beamtalk_core::semantic_analysis::check_collision_at_use_sites(
             module,
@@ -232,27 +232,27 @@ pub fn compute_project_diagnostics_with_analysis(
         );
     }
 
-    // BT-782: Apply @expect directives to suppress matching diagnostics.
-    // BT-3384: this pipeline never runs `beamtalk_lint::run_lint_passes`
+    // Apply @expect directives to suppress matching diagnostics.
+    // This pipeline never runs `beamtalk_lint::run_lint_passes`
     // (that's `beamtalk lint`-only), so a lint-only `@expect` category (e.g.
     // `dead_assignment`) must not be validated for staleness here — see
     // `apply_expect_directives_excluding_lint_only`'s doc.
     apply_expect_directives_excluding_lint_only(module, &mut diagnostics);
 
-    // ADR 0100 Rule 3 (BT-2793 / BT-2800): apply the package's `[diagnostics]`
+    // ADR 0100 Rule 3: apply the package's `[diagnostics]`
     // table last, after `@expect` suppression and ahead of any
     // `--warnings-as-errors`-style promotion pass a caller runs over this
     // function's result. A no-op (empty table) when the package has no
     // manifest or no `[diagnostics]` section. Living here — inside the one
     // pipeline both the CLI compiler and the LSP call — is what makes
     // `beamtalk build` and the LSP agree on severity for every diagnostic
-    // category by construction, closing the BT-2800 surface-parity gap.
+    // category by construction, closing the surface-parity gap.
     diagnostics = beamtalk_core::compilation::diagnostics_policy::apply_diagnostics_table(
         diagnostics,
         &ctx.diagnostics_overrides,
     );
 
-    // BT-3240: near-miss `// === Name ===` section-divider comments (typoed
+    // Near-miss `// === Name ===` section-divider comments (typoed
     // `=` run lengths, too-short runs, or a `///`/`/* */` comment where the
     // divider convention requires a plain `//` line) get no signal anywhere
     // today — they silently fall back to an ordinary comment and the
@@ -260,14 +260,14 @@ pub fn compute_project_diagnostics_with_analysis(
     // lint pass in the standalone `beamtalk-lint` crate (`beamtalk
     // lint`-only), this one check also runs here so it reaches the LSP's
     // live diagnostics too — see `beamtalk_core::near_miss_divider::check_near_miss_dividers`'s
-    // doc (BT-3340: this check stays a `beamtalk-core` leaf module rather
+    // doc (this check stays a `beamtalk-core` leaf module rather
     // than moving to `beamtalk-lint` with the rest, precisely so this call
     // doesn't need a new crate dependency) for why. Scans
     // `source` directly (not `module`) so the diagnostic's span is the
     // comment's own line, not the AST's (inaccurate, see that doc) token span.
     //
     // Deliberately appended *after* both `apply_expect_directives` and
-    // `apply_diagnostics_table` (adversarial review, BT-3240) rather than
+    // `apply_diagnostics_table` rather than
     // mixed into `diagnostics` beforehand:
     // - `apply_expect_directives` matches an `@expect` directive to a
     //   diagnostic by `target_span.contains(diag.span)`, where `target_span`
@@ -280,7 +280,7 @@ pub fn compute_project_diagnostics_with_analysis(
     // - `apply_diagnostics_table` promotes/demotes purely by
     //   `DiagnosticCategory`, not by which pass produced a diagnostic. Two
     //   pre-existing `semantic_analysis` checks (`check_effect_free_statements`,
-    //   BT-951; the BT-2140 redundant-type-annotation check) also emit
+    //   the redundant-type-annotation check) also emit
     //   `Severity::Lint` diagnostics tagged `DiagnosticCategory::Lint` and
     //   *do* need the table applied to them (a project's `[diagnostics] lint
     //   = "..."` must still control those) — so this can't be solved by
@@ -294,7 +294,7 @@ pub fn compute_project_diagnostics_with_analysis(
     (diagnostics, analysis_result)
 }
 
-// BT-3361 (ADR 0117 Decision step 5): `compute_diagnostics`,
+// ADR 0117 Decision step 5: `compute_diagnostics`,
 // `compute_diagnostics_with_known_vars`, `apply_expect_directives`, and
 // `apply_expect_directives`'s private helpers moved to
 // `beamtalk_core::compilation::diagnostics_policy` and are re-exported here
@@ -360,7 +360,7 @@ fn run_diagnostic_pipeline(
 ) -> Vec<Diagnostic> {
     let mut all_diagnostics = parse_diagnostics;
     all_diagnostics.extend(analysis_diagnostics);
-    // BT-3384: the REPL never runs `beamtalk_lint::run_lint_passes` either —
+    // The REPL never runs `beamtalk_lint::run_lint_passes` either —
     // see `apply_expect_directives_excluding_lint_only`'s doc.
     apply_expect_directives_excluding_lint_only(module, &mut all_diagnostics);
     beamtalk_core::compilation::diagnostics_policy::apply_diagnostics_table(
@@ -380,9 +380,9 @@ fn run_diagnostic_pipeline(
 /// request handlers). `diagnostics_overrides` is the package's `beamtalk.toml`
 /// `[diagnostics]` severity-override table (ADR 0100 Rule 3); applying it
 /// here — after `@expect` suppression, mirroring the order
-/// [`compute_project_diagnostics`] uses — closes the BT-2839 surface-parity
-/// gap: a package that sets `dnu = "error"` now fails `beamtalk build`, shows
-/// an `Error` in the LSP (BT-2800), *and* shows an `Error` at the REPL,
+/// [`compute_project_diagnostics`] uses — closes the surface-parity
+/// gap: a package that sets `dnu = "error"` fails `beamtalk build`, shows
+/// an `Error` in the LSP, *and* shows an `Error` at the REPL,
 /// instead of a REPL-only soft `Hint`. Pass an empty table (the `Default`)
 /// for callers with no manifest context, which is a complete no-op.
 #[must_use]
@@ -406,8 +406,7 @@ pub fn compute_diagnostics_with_known_vars_and_classes(
 }
 
 /// Computes diagnostics with pre-defined REPL variables, pre-loaded classes,
-/// and pre-loaded type aliases from earlier REPL turns (ADR 0108 Phase 8,
-/// BT-2902).
+/// and pre-loaded type aliases from earlier REPL turns (ADR 0108 Phase 8).
 ///
 /// Mirrors [`compute_diagnostics_with_known_vars_and_classes`] — see its doc
 /// — with `pre_loaded_aliases` additionally injected into the `AliasRegistry`
@@ -438,7 +437,7 @@ pub fn compute_diagnostics_with_known_vars_classes_and_aliases(
 
 /// [`compute_diagnostics_with_known_vars_classes_and_aliases`], additionally
 /// returning the alias names this compile's annotations transitively
-/// referenced (ADR 0108 hot-reload re-check trigger, BT-2899).
+/// referenced (ADR 0108 hot-reload re-check trigger).
 ///
 /// Used by the compiler port's `compile`/`compile_method`/`diagnostics`
 /// handlers, which need this set to populate the Erlang-side alias-name →
@@ -470,7 +469,7 @@ pub fn compute_diagnostics_and_referenced_aliases(
 }
 
 /// [`compute_diagnostics_and_referenced_aliases`], additionally returning the
-/// full [`AnalysisResult`](semantic_analysis::AnalysisResult) (BT-3123) —
+/// full [`AnalysisResult`](semantic_analysis::AnalysisResult) —
 /// class hierarchy, semantic facts, and inferred method return types,
 /// alongside `referenced_aliases` (still reachable as a field on the result).
 ///
@@ -497,7 +496,7 @@ pub fn compute_diagnostics_and_analysis(
         .with_pre_loaded_protocols(pre_loaded_protocols)
         .with_pre_loaded_aliases(pre_loaded_aliases);
     let mut analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, ctx);
-    // BT-3123: diagnostics are consumed by `run_diagnostic_pipeline` below;
+    // Diagnostics are consumed by `run_diagnostic_pipeline` below;
     // take them out so the rest of `analysis_result` can be returned for
     // codegen without cloning it.
     let analysis_diagnostics = std::mem::take(&mut analysis_result.diagnostics);
@@ -558,7 +557,7 @@ mod tests {
 
     #[test]
     fn compute_diagnostics_no_error_for_field_assignment_in_field_stored_block() {
-        // BT-2797: self.onTick := [:x | self.sum := 0] must NOT emit the
+        // self.onTick := [:x | self.sum := 0] must NOT emit the
         // stored-closure field error — unlike the local-var case above
         // (compute_diagnostics_emits_error_for_field_assignment_in_stored_block,
         // still unaffected), a block stored into a *field* is unconditionally
@@ -582,8 +581,8 @@ mod tests {
 
     #[test]
     fn compute_diagnostics_no_warning_for_captured_variable_mutation_in_stored_block() {
-        // BT-856 (ADR 0041 Phase 3): Captured variable mutations in stored blocks are
-        // now supported via the Tier 2 stateful block protocol (BT-852). No warning needed.
+        // ADR 0041 Phase 3: Captured variable mutations in stored blocks are
+        // supported via the Tier 2 stateful block protocol. No warning needed.
         let source = "count := 0. myBlock := [count := count + 1]";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
@@ -665,9 +664,9 @@ mod tests {
         );
     }
 
-    /// BT-2839 (ADR 0100 Rule 3 surface-parity gap): the REPL's diagnostics
+    /// ADR 0100 Rule 3 surface parity: the REPL's diagnostics
     /// entry point must apply the `[diagnostics]` table exactly like
-    /// `beamtalk build` (BT-2793) and the LSP (BT-2800) — a `dnu = "error"`
+    /// `beamtalk build` and the LSP — a `dnu = "error"`
     /// override promotes the default `Hint` on an unresolved selector to
     /// `Error`, and an empty table (no manifest) is a complete no-op.
     #[test]
@@ -714,7 +713,7 @@ mod tests {
         );
     }
 
-    // ── BT-563 / BT-1524: Actor subclass new/new: errors ──
+    // ── Actor subclass new/new: errors ──
 
     #[test]
     fn error_actor_subclass_new() {
@@ -801,7 +800,7 @@ mod tests {
         );
     }
 
-    // ── BT-563: Field name validation ──
+    // ── Field name validation ──
 
     #[test]
     fn warn_unknown_field_in_new() {
@@ -855,7 +854,7 @@ mod tests {
         );
     }
 
-    // ── BT-563: Class variable access ──
+    // ── Class variable access ──
 
     #[test]
     fn warn_undefined_classvar() {
@@ -983,7 +982,7 @@ mod tests {
         );
     }
 
-    // ── BT-631: Empty method body warnings ──
+    // ── Empty method body warnings ──
 
     #[test]
     fn error_empty_instance_method_body() {
@@ -1046,7 +1045,7 @@ mod tests {
         assert!(error.unwrap().hint.is_some(), "Error should have a hint");
     }
 
-    // ── BT-782: @expect directive ──
+    // ── @expect directive ──
 
     #[test]
     fn expect_dnu_suppresses_dnu_hint() {
@@ -1116,11 +1115,11 @@ mod tests {
         );
     }
 
-    // ── BT-1273: @expect type covers method-not-found at type-erasure boundaries ──
+    // ── @expect type covers method-not-found at type-erasure boundaries ──
 
     #[test]
     fn expect_type_suppresses_dnu_hint() {
-        // BT-1273: @expect type suppresses DNU hints in addition to type-mismatch warnings.
+        // @expect type suppresses DNU hints in addition to type-mismatch warnings.
         let source = "@expect type\n42 unknownMethod";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
@@ -1145,7 +1144,7 @@ mod tests {
 
     #[test]
     fn expect_type_stale_when_neither_type_nor_dnu() {
-        // BT-1273: @expect type is still stale when there is no type or DNU diagnostic.
+        // @expect type is still stale when there is no type or DNU diagnostic.
         let source = "@expect type\n42";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
@@ -1177,7 +1176,7 @@ mod tests {
         );
     }
 
-    // ── BT-3387: combined `@expect cat1, cat2` form ──
+    // ── Combined `@expect cat1, cat2` form ──
 
     #[test]
     fn expect_combined_categories_suppresses_dnu() {
@@ -1211,7 +1210,7 @@ mod tests {
 
     #[test]
     fn expect_combined_categories_unknown_name_skipped_valid_still_applies() {
-        // BT-3387: a typo mixed into a category list should still report an
+        // A typo mixed into a category list should still report an
         // "unknown @expect category" error for the bad name, while the
         // other, valid name in the same directive still suppresses.
         let source = "@expect selfcapture, dnu\n42 foo";
@@ -1237,7 +1236,7 @@ mod tests {
 
     #[test]
     fn expect_combined_categories_comma_does_not_continue_across_a_newline() {
-        // Review follow-up on BT-3387: a trailing comma at the end of an
+        // A trailing comma at the end of an
         // @expect line (e.g. a typo or an aborted edit) must not have the
         // next line's leading identifier silently absorbed into the
         // category list just because it happens to spell a real category
@@ -1274,12 +1273,12 @@ mod tests {
 
     #[test]
     fn expect_combined_categories_dangling_comma_does_not_truncate_class_body() {
-        // BT-3387 review follow-up: a trailing comma at the end of a
+        // A trailing comma at the end of a
         // declaration-level `@expect` line must not be left dangling —
         // `parse_class_body`'s caller treats a stray `,` as "not a valid
         // declaration" and would otherwise silently drop every subsequent
         // state/method declaration in the class (the same failure mode the
-        // BT-1918 comment on the reason-string lookahead guards against).
+        // reason-string lookahead guards against).
         let source = "\
 Object subclass: Foo
   @expect dnu,
@@ -1452,7 +1451,7 @@ Object subclass: Foo
 
     #[test]
     fn expect_combined_categories_on_method_declaration_round_trips() {
-        // BT-3387's motivating case: a combined @expect on a method
+        // The motivating case: a combined @expect on a method
         // declaration (the form that previously required splitting into two
         // methods, since stacking two separate `@expect` lines before a
         // declaration was rejected outright).
@@ -1477,7 +1476,7 @@ typed Object subclass: MyTyped
 
     #[test]
     fn expect_with_no_category_on_declaration_does_not_truncate_class_body() {
-        // BT-3387 review follow-up: a category-less `@expect` (not even an
+        // A category-less `@expect` (not even an
         // invalid category name) followed by a stray token, e.g. a reason
         // string with nothing to attach to, must not derail parsing of the
         // rest of the class body. `parse_expect_tail`'s reason-string
@@ -1515,9 +1514,9 @@ Object subclass: Foo
         );
     }
 
-    // ── BT-1476: Dead block assignment warning + @expect dead_assignment ──
+    // ── Dead block assignment warning + @expect dead_assignment ──
 
-    // ── BT-1476: @expect dead_assignment parsing and stale detection ──
+    // ── @expect dead_assignment parsing and stale detection ──
 
     #[test]
     fn expect_dead_assignment_stale_when_no_diagnostic() {
@@ -1552,11 +1551,11 @@ Object subclass: Foo
         );
     }
 
-    // ── BT-1856: Declaration-level @expect ──────────────────────────────────────
+    // ── Declaration-level @expect ──────────────────────────────────────
 
     #[test]
     fn typed_state_no_default_no_warning() {
-        // BT-1947: A type annotation replaces the need for a default value.
+        // A type annotation replaces the need for a default value.
         // `state: deps :: OrchestratorDeps` (no default) should produce no
         // uninitialized warning.
         let source = "\
@@ -1707,7 +1706,7 @@ Object subclass: Bar
         );
     }
 
-    // ── BT-1918: TypeAnnotation category ──
+    // ── TypeAnnotation category ──
 
     #[test]
     fn expect_type_annotation_suppresses_missing_annotation() {
@@ -1779,7 +1778,7 @@ typed Object subclass: MyTyped
         );
     }
 
-    // ── BT-1918: @expect reason strings ──
+    // ── @expect reason strings ──
 
     #[test]
     fn expect_with_reason_parses_correctly() {
@@ -1856,7 +1855,7 @@ typed Object subclass: MyTyped
         );
     }
 
-    // ── BT-1923: Drift prevention — every Warning/Hint must have a category ──
+    // ── Drift prevention — every Warning/Hint must have a category ──
 
     /// Compiles a source snippet and returns only the Warning/Hint diagnostics.
     fn warnings_and_hints(source: &str) -> Vec<Diagnostic> {
@@ -1875,7 +1874,7 @@ typed Object subclass: MyTyped
             .collect()
     }
 
-    /// BT-1923: Every Warning/Hint/Lint diagnostic MUST have a category.
+    /// Every Warning/Hint/Lint diagnostic MUST have a category.
     ///
     /// This test compiles source snippets that trigger diagnostics from every
     /// compiler phase (parser, name resolver, semantic analysis, type checker,
@@ -1919,12 +1918,12 @@ typed Object subclass: MyTyped
             // ── Lint validator: always-true condition ──
             ("always-true condition", "true ifTrue: [1] ifFalse: [2]"),
             // Note: "actor new" (`Actor subclass: A ... A new`) used to live here as
-            // a Warning/Hint exemplar, but BT-3071 lifted Actor's `new`/`new:` into
+            // a Warning/Hint exemplar, but a later change lifted Actor's `new`/`new:` into
             // real, hierarchy-resolvable `class sealed new`/`new:` declarations on
             // actor.bt — so the TypeChecker no longer treats the send as unknown and
             // stops contributing a Warning/Hint diagnostic for it (the DNU-style
             // secondary signal this snippet exercised). The actual "use spawn, not
-            // new" protection is untouched: `check_actor_new_usage` (BT-563/BT-1524)
+            // new" protection is untouched: `check_actor_new_usage`
             // still raises a hard compile Error independent of hierarchy resolution
             // — see `semantic_analysis::tests::test_actor_new_error_in_standalone_method`
             // and `error_actor_subclass_new` below — just not a Warning/Hint/Lint this
@@ -1965,7 +1964,7 @@ typed Object subclass: MyTyped
         );
     }
 
-    /// BT-1923: Sanity check — the drift prevention snippets actually produce diagnostics.
+    /// Sanity check — the drift prevention snippets actually produce diagnostics.
     ///
     /// If this test fails, it means the snippets no longer trigger any warnings/hints,
     /// which would make the category assertion vacuously true (and useless).
@@ -1978,7 +1977,7 @@ typed Object subclass: MyTyped
                 "Object subclass: Foo\n  bar => x := 42. 0",
             ),
             ("always-true condition", "true ifTrue: [1] ifFalse: [2]"),
-            // "actor new" removed (BT-3071) — see the matching note in
+            // "actor new" removed — see the matching note in
             // `all_warnings_and_hints_have_categories` above; it no longer produces
             // a Warning/Hint/Lint diagnostic now that Actor's `new`/`new:` are real,
             // resolvable class methods, only the unrelated hard compile Error this
@@ -1999,7 +1998,7 @@ typed Object subclass: MyTyped
         }
     }
 
-    // ── BT-2010: @expect inside block bodies ──────────────────────────────────
+    // ── @expect inside block bodies ──────────────────────────────────
 
     #[test]
     fn expect_dnu_inside_block_body_suppresses_dnu() {
@@ -2116,11 +2115,11 @@ Object subclass: Foo
         );
     }
 
-    // ── BT-2009: Unified pipeline consistency ──────────────────────────────────
+    // ── Unified pipeline consistency ──────────────────────────────────
 
     #[test]
     fn project_diagnostics_matches_legacy_path() {
-        // BT-2009: The unified `compute_project_diagnostics` must produce the
+        // The unified `compute_project_diagnostics` must produce the
         // same diagnostics as the old `compute_diagnostics_with_native_types`
         // when given equivalent inputs (no cross-file classes, no dep registry).
         let source = "42 unknownMethod";
@@ -2158,7 +2157,7 @@ Object subclass: Foo
 
     #[test]
     fn project_diagnostics_expect_type_in_typed_class() {
-        // BT-2009: This is the exact case that previously diverged between CLI
+        // This is the exact case that previously diverged between CLI
         // and LSP. In a typed class, calling a method with no return annotation
         // triggers "expression inferred as Dynamic". `@expect type` must
         // suppress that warning in both pipelines.
@@ -2188,7 +2187,7 @@ typed Object subclass: Caller
 
     #[test]
     fn project_diagnostics_with_cross_file_classes() {
-        // BT-2009: When cross-file class metadata is provided, the unified
+        // When cross-file class metadata is provided, the unified
         // pipeline should use it for type checking. This verifies the
         // cross-file classes are actually threaded through to semantic analysis.
 
@@ -2228,7 +2227,7 @@ Object subclass: Helper
 
     #[test]
     fn project_diagnostics_surfaces_near_miss_divider() {
-        // BT-3240: `compute_project_diagnostics` (the LSP-facing pipeline)
+        // `compute_project_diagnostics` (the LSP-facing pipeline)
         // must actually surface a near-miss-divider finding, not just the
         // lint module's own unit tests in isolation.
         let source = "Object subclass: Foo\n  // === Section ====\n  bar => 1\n";
@@ -2249,7 +2248,7 @@ Object subclass: Helper
 
     #[test]
     fn project_diagnostics_lint_error_override_does_not_promote_near_miss_divider() {
-        // BT-3240 (adversarial review): `apply_diagnostics_table` keys
+        // `apply_diagnostics_table` keys
         // purely on `DiagnosticCategory`, regardless of a diagnostic's
         // starting severity — so a project that sets `[diagnostics] lint =
         // "error"` must not be able to promote the near-miss-divider
@@ -2289,7 +2288,7 @@ Object subclass: Helper
 
     #[test]
     fn project_diagnostics_stdlib_shadowing_in_non_stdlib_mode() {
-        // BT-2009: The unified pipeline should run stdlib name shadowing
+        // The unified pipeline should run stdlib name shadowing
         // checks when stdlib_mode is false.
         let source = "Object subclass: Integer\n  foo => 42";
         let tokens = lex_with_eof(source);
@@ -2315,7 +2314,7 @@ Object subclass: Helper
 
     #[test]
     fn project_diagnostics_no_stdlib_shadowing_in_stdlib_mode() {
-        // BT-2009: The unified pipeline should NOT run stdlib name shadowing
+        // The unified pipeline should NOT run stdlib name shadowing
         // checks when stdlib_mode is true.
         let source = "Object subclass: Integer\n  foo => 42";
         let tokens = lex_with_eof(source);

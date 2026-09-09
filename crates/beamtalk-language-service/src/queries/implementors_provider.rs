@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Implementors provider for the language service (BT-2241).
+//! Implementors provider for the language service.
 //!
 //! **DDD Context:** Language Service
 //!
@@ -45,8 +45,6 @@
 //!
 //! # References
 //!
-//! - BT-2241 (this provider)
-//! - BT-2215 (delegate-nav epic), BT-2239 (foundation)
 //! - ADR 0066 (open-class extension methods)
 
 use crate::Location;
@@ -60,7 +58,7 @@ use camino::Utf8PathBuf;
 /// Inherited methods are not reported; this matches `SystemNavigation
 /// implementorsOf:`. Returns an empty vector when no class defines the
 /// selector — callers must not fall through to a "find references"
-/// behaviour on empty (per BT-2239's runtime-trust rule, the fallback to
+/// behaviour on empty (per the runtime-trust rule, the fallback to
 /// AST has already happened by the time we're here).
 ///
 /// The returned `Location::span` is the full `MethodDefinition::span`. LSP

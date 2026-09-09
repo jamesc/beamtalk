@@ -55,7 +55,7 @@ pub fn find_definition_in_module(module: &Module, name: &str) -> Option<Span> {
 /// 2. Class definition matching the identifier name in any indexed file
 /// 3. Protocol definition matching the identifier name in any indexed file —
 ///    but *only* when the hierarchy marks the name as a synthetic protocol
-///    class entry (BT-1933). This prevents a preindexed real class (from
+///    class entry. This prevents a preindexed real class (from
 ///    `with_stdlib` / `with_project_index`) from being shadowed by an open
 ///    protocol with the same name when the real class source file isn't
 ///    present in `files`.
@@ -75,19 +75,19 @@ pub fn find_definition_cross_file<'a>(
     }
 
     // 2. Class or protocol definition in the project index, honouring the
-    //    BT-1933 protocol/class shadowing rule.
+    //    protocol/class shadowing rule.
     find_class_or_protocol_declaration(name, project_index, files)
 }
 
 /// Resolve the declaration site of a class or protocol `name`, applying the
-/// BT-1933 protocol/class shadowing rule.
+/// protocol/class shadowing rule.
 ///
-/// BT-1933 registers protocol names as synthetic class entries, so
+/// Protocol names are registered as synthetic class entries, so
 /// [`ClassHierarchy::has_class`] returns true for both real classes and
 /// protocols. We walk the indexed files once looking for a real class
 /// declaration — that wins unconditionally. Otherwise, fall back to a protocol
 /// match only when the hierarchy explicitly marks the name as a protocol class
-/// ([`ClassHierarchy::is_protocol_class`], BT-1936).
+/// ([`ClassHierarchy::is_protocol_class`]).
 ///
 /// Built-in/stdlib classes can still have source files (e.g. `stdlib/src/*.bt`),
 /// so we always search indexed files for a concrete declaration span.
@@ -98,7 +98,7 @@ pub fn find_definition_cross_file<'a>(
 ///
 /// This is the single source of truth for class/protocol declaration
 /// resolution, shared by [`find_definition_cross_file`] (goto-definition) and
-/// the language-service type-hierarchy path (BT-2242 / BT-2317), so the two
+/// the language-service type-hierarchy path, so the two
 /// agree on which declaration a name resolves to.
 #[must_use]
 pub fn find_class_or_protocol_declaration<'a>(
@@ -107,8 +107,8 @@ pub fn find_class_or_protocol_declaration<'a>(
     files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
 ) -> Option<Location> {
     if !project_index.hierarchy().has_class(name) {
-        // ADR 0108 Phase 8 (BT-2901): `name` isn't a class or protocol
-        // (BT-1933 registers protocols as synthetic class entries, so
+        // ADR 0108 Phase 8: `name` isn't a class or protocol
+        // (protocols are registered as synthetic class entries, so
         // `has_class` already covers both) — try the alias namespace next.
         // Type aliases are never registered into `ClassHierarchy` (they're
         // a peer namespace, collision-checked against it instead — see
@@ -142,8 +142,8 @@ pub fn find_class_or_protocol_declaration<'a>(
     protocol_match.filter(|_| project_index.hierarchy().is_protocol_class(name))
 }
 
-/// Resolve the declaration site of a type alias `name` (ADR 0108 Phase 8,
-/// BT-2901) — the alias-namespace counterpart to the class/protocol lookup
+/// Resolve the declaration site of a type alias `name` (ADR 0108 Phase 8)
+/// — the alias-namespace counterpart to the class/protocol lookup
 /// in [`find_class_or_protocol_declaration`], which calls this as its
 /// fallback when `name` isn't known to the [`ClassHierarchy`].
 ///
@@ -242,8 +242,8 @@ pub fn find_method_definition_cross_file_with_receiver<'a>(
 /// `receiver_class`, without the cross-class global-search fallback used by
 /// [`find_method_definition_cross_file_with_receiver`].
 ///
-/// This is the scoped lookup needed for "Go to Definition on a method header"
-/// (BT-1939): given the enclosing class's superclass, return the nearest
+/// This is the scoped lookup needed for "Go to Definition on a method header":
+/// given the enclosing class's superclass, return the nearest
 /// ancestor that defines the selector, or `None` if no ancestor does. The
 /// global fallback present in the standard receiver-based lookup must be
 /// disabled here, because it would otherwise navigate back to the current
@@ -259,7 +259,7 @@ pub fn find_method_definition_cross_file_with_receiver<'a>(
 /// module's AST directly; the MRO walk itself still uses
 /// [`ClassHierarchy::superclass_chain`] to produce the class ordering.
 ///
-/// # Complexity (BT-1943)
+/// # Complexity
 ///
 /// This is a single-pass implementation: each file is walked *at most once*
 /// per request, regardless of MRO length. We first collect a workspace-wide
@@ -306,7 +306,8 @@ pub fn find_overridden_method_definition<'a>(
     // automatically the best possible answer and no later file can beat it.
     // Return early to avoid an unnecessary full-workspace scan in the
     // typical "immediate parent defines the method" case. This preserves
-    // the early-exit behaviour the pre-BT-1943 implementation had.
+    // the early-exit behaviour a per-MRO-class re-walk would give, without
+    // its cost for deep MRO chains.
     let nearest = receiver_class.class_name.as_str();
     let mut candidates: HashMap<EcoString, Location> = HashMap::new();
     for (file_path, module) in files {
@@ -413,7 +414,7 @@ fn collect_method_definitions_in_module(
 /// a [`ReceiverClassContext`] suitable for passing to
 /// [`find_overridden_method_definition`].
 ///
-/// This powers "Go to Definition on a method header" (BT-1939): when the
+/// This powers "Go to Definition on a method header": when the
 /// cursor is on the selector in a method definition header, the desired
 /// navigation target is the overridden parent method. Callers detect the
 /// header click separately (via `offset_in_method_header_selector`) and then
@@ -445,7 +446,7 @@ pub fn resolve_enclosing_superclass_context(
 
 /// Resolve receiver class context for a selector lookup at the given offset.
 ///
-/// `native_types` (BT-2887, ADR 0075) lets a receiver whose type came from an
+/// `native_types` (ADR 0075) lets a receiver whose type came from an
 /// FFI call (e.g. `x := Erlang lists reverse: y`) resolve to its typed
 /// return, so go-to-definition on `x someMethod` isn't left registry-blind.
 /// `None` preserves the previous behaviour.
@@ -838,7 +839,7 @@ pub struct NativeDelegateInfo {
     /// `open:args:`). Used to resolve the matching `handle_call` clause line in
     /// the backing `.erl` source via [`handle_call_clause_line`], so the LSP's
     /// go-to-implementation lands on the same clause the System Browser's
-    /// native-source jump does (BT-2582).
+    /// native-source jump does.
     pub selector: EcoString,
 }
 
@@ -900,7 +901,7 @@ pub fn check_native_delegate<'a>(
 /// `beamtalk_repl_ops_browse:clause_selector/1`. Both implementations are pinned
 /// to the shared conformance corpus at
 /// `runtime/apps/beamtalk_workspace/test/fixtures/handle_call_clause_corpus.json`
-/// (BT-2582) so the LSP's go-to-implementation and the System Browser's
+/// so the LSP's go-to-implementation and the System Browser's
 /// native-source jump resolve the same clause for the same selector.
 ///
 /// It mirrors the Erlang regex
@@ -1441,11 +1442,11 @@ mod tests {
         assert!(result.is_none());
     }
 
-    // BT-1936: Goto-definition for protocol names.
+    // Goto-definition for protocol names.
     //
-    // BT-1933 already registers protocol names as synthetic class entries in
+    // Protocol names are registered as synthetic class entries in
     // `ClassHierarchy`, so `has_class("Printable")` returns true. These tests
-    // verify that `find_definition_cross_file` now returns the protocol's
+    // verify that `find_definition_cross_file` returns the protocol's
     // declaration span (from `module.protocols`) rather than falling through
     // to `None` after not finding a matching `ClassDefinition`.
 
@@ -1530,7 +1531,7 @@ mod tests {
         assert_eq!(loc.span, module_class.classes[0].name.span);
     }
 
-    // ---- ADR 0108 Phase 8 (BT-2901): goto-definition for type aliases ----
+    // ---- ADR 0108 Phase 8: goto-definition for type aliases ----
 
     /// Registers `module`'s type aliases into `index` for `file` — mirrors
     /// `hierarchy_with_protocols`'s role for the class/protocol tests above.
@@ -1607,7 +1608,7 @@ mod tests {
 
     #[test]
     fn resolve_receiver_class_context_with_native_registry_resolves_ffi_typed_receiver() {
-        // BT-2887: a receiver whose type came from an FFI call only resolves
+        // A receiver whose type came from an FFI call only resolves
         // when a NativeTypeRegistry is supplied.
         use beamtalk_core::semantic_analysis::type_checker::TypeProvenance;
         use beamtalk_core::semantic_analysis::type_checker::native_type_registry::{
@@ -1684,7 +1685,6 @@ mod tests {
 
     #[test]
     fn goto_definition_prefers_preindexed_real_class_over_open_protocol() {
-        // Regression for CodeRabbit finding on BT-1936:
         // A preindexed real class (e.g. from stdlib) whose source file is NOT
         // passed into `files` must not be shadowed by an open protocol that
         // happens to share a name. Returning `None` here is correct: we know a
@@ -1723,7 +1723,7 @@ mod tests {
         );
     }
 
-    // ── BT-1943: single-pass find_overridden_method_definition ─────────────
+    // ── single-pass find_overridden_method_definition ─────────────
     //
     // These tests exercise the optimized single-pass implementation. The key
     // invariants the rewrite must preserve are:
@@ -1733,7 +1733,7 @@ mod tests {
     //   2. Correct nearest-ancestor precedence when multiple ancestors define
     //      the selector (closer wins).
     //   3. No regressions on the single-class and single-file cases covered
-    //      by the BT-1939 test suite above.
+    //      by the test suite above.
     //
     // The "deep MRO × many files" test is the worst case that prompted the
     // optimization: 100 files, each adding one link to a 100-class chain, and
@@ -1743,8 +1743,8 @@ mod tests {
 
     #[test]
     fn find_overridden_strict_mro_only_ignores_unrelated_class_with_same_selector() {
-        // Regression guard: ensures the rewrite preserves the BT-1939
-        // strict-MRO-only invariant. Class `Sibling` is unrelated to
+        // Regression guard: ensures the single-pass implementation preserves
+        // the strict-MRO-only invariant. Class `Sibling` is unrelated to
         // `Child`'s ancestry but defines the same selector — it must be
         // ignored even though the single-pass walk sees it.
         let file = Utf8PathBuf::from("test.bt");
@@ -1888,7 +1888,7 @@ mod tests {
 
     #[test]
     fn find_overridden_deep_mro_many_files_returns_top_of_chain() {
-        // BT-1943 worst case: deep MRO across many files. Build a chain
+        // Worst case: deep MRO across many files. Build a chain
         // Class0 <- Class1 <- ... <- Class99, each in its own file, with
         // `greet` defined only on `Class0`. From `Class99`, the MRO walk
         // must traverse 100 classes and resolve to `Class0`.
@@ -1953,7 +1953,7 @@ mod tests {
     #[ignore = "wall-clock timing — opt in via `cargo test -- --ignored` for \
                 BT-1943 perf regression checks"]
     fn find_overridden_deep_mro_many_files_under_target_latency() {
-        // BT-1943: verify the optimization actually meets the <10ms target
+        // Verify the optimization actually meets the <10ms target
         // for the worst-case shape described above. Wall-clock assertions
         // are inherently noisy on shared CI runners, so this test is
         // `#[ignore]`d by default and only runs when opted in via
@@ -2017,7 +2017,7 @@ mod tests {
         );
     }
 
-    // BT-2582: `handle_call` clause-selector resolution shared between the LSP
+    // `handle_call` clause-selector resolution shared between the LSP
     // (this module) and the runtime (`beamtalk_repl_ops_browse:clause_selector/1`).
 
     #[test]
@@ -2101,7 +2101,7 @@ mod tests {
         assert_eq!(handle_call_clause_line(content, "close"), None);
     }
 
-    /// BT-2582 conformance: every case in the shared corpus must resolve the
+    /// Conformance: every case in the shared corpus must resolve the
     /// same selector here as the runtime's `clause_selector/1` does. The corpus
     /// is the single source of truth both implementations are pinned to; the
     /// Erlang side asserts the identical cases in
