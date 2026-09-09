@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Corpus-wide validation for `// === Name ===` method-category dividers
-//! (BT-2601's recognizer, exercised here at BT-2626's stdlib-wide curation
-//! scale).
+//! (the recognizer, exercised here at stdlib-wide curation scale).
 //!
 //! [`method_category`](super::method_category) documents two silent-failure
 //! modes that a hand-written (or AI-curated) divider can fall into with no
@@ -24,7 +23,7 @@
 //! the real recognizer ([`parse_divider_name`], [`categorize_methods`]) —
 //! not a reimplementation of the rule — so it can't silently drift from what
 //! the LSP outline/cockpit/REPL actually do. It complements (does not
-//! replace) BT-3240's proposed editor-time lint: this is the regression gate
+//! replace) the near-miss-divider lint's editor-time check: this is the regression gate
 //! that keeps the corpus itself honest.
 
 use crate::source_analysis::corpus_test_support::{corpus_files, corpus_present, read_corpus_file};
@@ -115,7 +114,7 @@ fn corpus_has_no_near_miss_dividers() {
         near_misses.join("\n")
     );
 
-    // Sanity: BT-2626 put several hundred real dividers into the stdlib. If
+    // Sanity: the stdlib has several hundred real dividers. If
     // this drops to near zero, the raw scan (or the corpus walk) silently
     // broke rather than the corpus actually losing its dividers.
     assert!(
@@ -175,7 +174,7 @@ fn corpus_has_no_empty_named_categories() {
     );
 }
 
-/// BT-3240: the near-miss-divider lint's source-text scan
+/// The near-miss-divider lint's source-text scan
 /// (`crate::near_miss_divider::check_near_miss_dividers`) agrees with this suite's own
 /// raw scan (`corpus_has_no_near_miss_dividers`, above) — every
 /// divider-shaped comment anywhere in the corpus parses cleanly, so the

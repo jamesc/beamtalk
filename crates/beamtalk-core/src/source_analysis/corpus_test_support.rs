@@ -7,7 +7,7 @@
 //! `examples/`" — the byte-span round-trip proof
 //! ([`super::method_span_corpus_tests`], ADR 0082 Phase 0) and the
 //! method-category divider validation
-//! ([`super::method_category_corpus_tests`], BT-2626) both walk the same
+//! ([`super::method_category_corpus_tests`]) both walk the same
 //! corpus. This module is the single place that knows where the corpus lives
 //! and how to walk it, so the two suites can't drift on what "the corpus"
 //! means (see `docs/development/architecture-principles.md` § Duplication &
@@ -15,7 +15,7 @@
 //!
 //! [`MethodTarget`]/[`enumerate_methods`] are `pub(crate)` (rather than
 //! `pub(super)` like the rest of this module) because `crate::unparse`'s
-//! corpus conformance tests (BT-3346) also need "every method in `module`,
+//! corpus conformance tests also need "every method in `module`,
 //! identified by class/selector/side" to drive [`super::method_span`]
 //! resolution — the same shared-leaf reasoning, just crossing the
 //! `source_analysis`/`unparse` boundary instead of staying within

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Assignment/return/message-send unparsing, synthesized methods, blank-line
-//! preservation (BT-987), method-body comment indentation, class-side method
+//! preservation, method-body comment indentation, class-side method
 //! prefix placement, file trailing comments, match-expression formatting, and
 //! map-literal formatting.
 
@@ -183,7 +183,7 @@ fn method_with_leading_comment_in_body() {
     assert_eq!(output, "compute =>\n  // the result\n  x");
 }
 
-// --- Blank line preservation (BT-987) ---
+// --- Blank line preservation ---
 
 #[test]
 fn method_body_blank_line_preserved() {

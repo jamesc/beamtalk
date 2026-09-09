@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tests for `type Name = ...` type alias declarations (ADR 0108, Phase 1, BT-2894).
+//! Tests for `type Name = ...` type alias declarations (ADR 0108, Phase 1).
 use super::*;
 
 // ==========================================================================
@@ -102,7 +102,7 @@ fn parse_type_alias_doc_comment() {
 
 #[test]
 fn parse_type_alias_own_adjacent_doc_comment_not_falsely_unattached() {
-    // BT-2924 regression (secondary bug): a `type` alias with a
+    // Regression: a `type` alias with a
     // directly-adjacent `///` doc comment (no blank line) must attach
     // cleanly and must NOT be reported as unattached, even when an earlier,
     // unrelated `///` block (meant for a different declaration further down)
@@ -157,7 +157,7 @@ fn parse_type_alias_after_class_definition() {
 }
 
 // ==========================================================================
-// `internal` modifier (ADR 0071, ADR 0108 Phase 5, BT-2898)
+// `internal` modifier (ADR 0071, ADR 0108 Phase 5)
 // ==========================================================================
 
 #[test]
@@ -341,7 +341,7 @@ fn type_as_binary_expression_inside_deep_method_body_does_not_truncate() {
     // Regression test for a bug found in review: `is_at_type_alias_definition()`
     // was checked in `parse_method_body`'s loop guard (and `is_at_member_boundary`)
     // with no indentation guard, unlike the sibling `is_at_method_definition()`
-    // check in the same function (BT-1294). A deeply indented line starting
+    // check in the same function. A deeply indented line starting
     // with `type <Uppercase> =` — e.g. `type` used as an ordinary variable,
     // sent the unary message `Port` — token-matches the type-alias lookahead
     // and would falsely end the body early, treating the line as a

@@ -6,7 +6,7 @@
 use super::*;
 
 // ==========================================================================
-// Generic type annotation parsing (ADR 0068, BT-1568)
+// Generic type annotation parsing (ADR 0068)
 // ==========================================================================
 
 #[test]
@@ -312,7 +312,7 @@ fn parse_generic_union_with_generic_member() {
 }
 
 // ========================================================================
-// Protocol Definition Tests (ADR 0068, Phase 2a — BT-1578)
+// Protocol Definition Tests (ADR 0068, Phase 2a)
 // ========================================================================
 
 #[test]
@@ -532,7 +532,7 @@ fn parse_protocol_identifier_in_expression_context() {
 
 #[test]
 fn parse_protocol_class_method_unary() {
-    // BT-1611: Protocol with a class method requirement
+    // Protocol with a class method requirement
     let module = parse_ok(
         "Protocol define: Serializable
   asString -> String
@@ -560,7 +560,7 @@ fn parse_protocol_class_method_unary() {
 
 #[test]
 fn parse_protocol_class_method_only() {
-    // BT-1611: Protocol with only class methods
+    // Protocol with only class methods
     let module = parse_ok(
         "Protocol define: Factory
   class create -> Self",
@@ -573,7 +573,7 @@ fn parse_protocol_class_method_only() {
 
 #[test]
 fn parse_protocol_mixed_instance_and_class_methods() {
-    // BT-1611: Protocol with interleaved instance and class method signatures
+    // Protocol with interleaved instance and class method signatures
     let module = parse_ok(
         "Protocol define: Configurable
   config -> Map
@@ -601,7 +601,7 @@ fn parse_protocol_class_definition_named_protocol() {
     assert_eq!(module.classes[0].name.name, "Protocol");
 }
 
-// ---- BT-1577: Superclass type argument parsing ----
+// ---- Superclass type argument parsing ----
 
 #[test]
 fn parse_superclass_type_args_single_param() {
@@ -952,7 +952,7 @@ fn parse_qualified_lowercase_after_at_is_error() {
 }
 
 // ========================================================================
-// Package-qualified standalone method definitions (ADR 0070 Phase 2, BT-1651)
+// Package-qualified standalone method definitions (ADR 0070 Phase 2)
 // ========================================================================
 
 #[test]
@@ -1001,7 +1001,7 @@ fn parse_unqualified_standalone_method_has_no_package() {
 }
 
 // ========================================================================
-// Package-qualified superclass in class definitions (ADR 0070 Phase 2, BT-1651)
+// Package-qualified superclass in class definitions (ADR 0070 Phase 2)
 // ========================================================================
 
 #[test]
@@ -1033,7 +1033,7 @@ fn parse_unqualified_superclass_has_no_package() {
 
 #[test]
 fn parse_self_class_return_type() {
-    // BT-1952: `Self class` metatype annotation
+    // `Self class` metatype annotation
     let module = parse_ok(
         "Object subclass: Foo
   class -> Self class => @primitive \"class\"",
@@ -1047,7 +1047,7 @@ fn parse_self_class_return_type() {
 
 #[test]
 fn parse_self_class_type_name() {
-    // BT-1952: type_name() returns "Self class"
+    // type_name() returns "Self class"
     let ann = TypeAnnotation::SelfClass {
         span: crate::source_analysis::Span::new(0, 0),
     };
@@ -1056,7 +1056,7 @@ fn parse_self_class_type_name() {
 
 #[test]
 fn parse_self_class_union_return_type() {
-    // BT-1952: `-> Self class | Nil` should be recognized as a method definition
+    // `-> Self class | Nil` should be recognized as a method definition
     let module = parse_ok(
         "Object subclass: Bar
   maybeClass -> Self class | Nil => nil",
@@ -1071,11 +1071,11 @@ fn parse_self_class_union_return_type() {
     );
 }
 
-// ---- BT-2034: <ClassName> class metatype annotations ----
+// ---- <ClassName> class metatype annotations ----
 
 #[test]
 fn parse_class_of_field_annotation() {
-    // BT-2034: `Actor class | Nil` field annotation parses as Union(ClassOf, Nil)
+    // `Actor class | Nil` field annotation parses as Union(ClassOf, Nil)
     let module = parse_ok(
         "typed Value subclass: Spec
   field: cls :: Actor class | Nil = nil",
@@ -1097,7 +1097,7 @@ fn parse_class_of_field_annotation() {
 
 #[test]
 fn parse_class_of_return_type() {
-    // BT-2034: `-> Actor class` return type parses as ClassOf
+    // `-> Actor class` return type parses as ClassOf
     let module = parse_ok(
         "Object subclass: Foo
   actorClass -> Actor class => self actorClass",
@@ -1114,7 +1114,7 @@ fn parse_class_of_return_type() {
 
 #[test]
 fn parse_class_of_type_name() {
-    // BT-2034: type_name() for ClassOf returns "<Name> class"
+    // type_name() for ClassOf returns "<Name> class"
     let ann = TypeAnnotation::ClassOf {
         class_name: crate::ast::Identifier::new("Actor", crate::source_analysis::Span::new(0, 5)),
         span: crate::source_analysis::Span::new(0, 11),
@@ -1124,7 +1124,7 @@ fn parse_class_of_type_name() {
 
 #[test]
 fn parse_trailing_class_on_next_line_is_separate_method() {
-    // BT-2034: `-> Foo\nclass bar => ...` must not consume `class` into the
+    // `-> Foo\nclass bar => ...` must not consume `class` into the
     // return type as a metatype — it starts a class-method definition on the
     // next line.
     let module = parse_ok(
@@ -1147,7 +1147,7 @@ fn parse_trailing_class_on_next_line_is_separate_method() {
 
 #[test]
 fn parse_trailing_self_class_on_next_line_is_separate_method() {
-    // BT-2034: the same-line `class` guard must also apply to `Self` so that
+    // The same-line `class` guard must also apply to `Self` so that
     // `-> Self\nclass bar => ...` parses as `Self` followed by a class-method
     // definition on the next line (not `Self class`).
     let module = parse_ok(
@@ -1167,7 +1167,7 @@ fn parse_trailing_self_class_on_next_line_is_separate_method() {
 
 #[test]
 fn parse_binary_method_with_class_metatype_param() {
-    // BT-2034: `+ other :: Actor class => ...` must be recognized as a
+    // `+ other :: Actor class => ...` must be recognized as a
     // binary method definition — the `::` lookahead needs to skip the
     // `class` metatype suffix for method detection to succeed.
     let module = parse_ok(
@@ -1188,7 +1188,7 @@ fn parse_binary_method_with_class_metatype_param() {
 }
 
 // ==========================================================================
-// Singleton type annotations (`#foo`) — subtypes of `Symbol` (ADR 0068, BT-2627)
+// Singleton type annotations (`#foo`) — subtypes of `Symbol` (ADR 0068)
 // ==========================================================================
 
 /// Helper: assert a `TypeAnnotation` is the singleton `#name`.
@@ -1308,7 +1308,7 @@ fn parse_singleton_inside_generic_param() {
 
 #[test]
 fn parse_singleton_does_not_consume_class_suffix() {
-    // BT-2627 review: `#foo` is a single token with no metatype surface, so the
+    // `#foo` is a single token with no metatype surface, so the
     // signature lookahead must not consume a trailing `class` (which would
     // diverge from `parse_single_type_annotation` and orphan the `class`). A
     // valid singleton union still parses cleanly...
@@ -1337,12 +1337,12 @@ fn parse_singleton_does_not_consume_class_suffix() {
 }
 
 // ========================================================================
-// Class metatype inside generic type arguments (BT-2630)
+// Class metatype inside generic type arguments
 // ========================================================================
 
 #[test]
 fn parse_class_metatype_inside_generic_type() {
-    // BT-2630: `List(Actor class)` must parse as a Generic whose argument is ClassOf(Actor)
+    // `List(Actor class)` must parse as a Generic whose argument is ClassOf(Actor)
     let module = parse_ok(
         "Object subclass: Foo
   m: x :: List(Actor class) => x",
@@ -1368,7 +1368,7 @@ fn parse_class_metatype_inside_generic_type() {
 
 #[test]
 fn parse_class_metatype_inside_nested_generic() {
-    // BT-2630: `Map(String, Actor class)` must parse with ClassOf(Actor) as second param
+    // `Map(String, Actor class)` must parse with ClassOf(Actor) as second param
     let module = parse_ok(
         "Object subclass: Foo
   m: x :: Map(String, Actor class) => x",
@@ -1399,7 +1399,7 @@ fn parse_class_metatype_inside_nested_generic() {
 
 #[test]
 fn parse_class_metatype_generic_in_return_type() {
-    // BT-2630: `-> List(Actor class)` return type must be recognized
+    // `-> List(Actor class)` return type must be recognized
     let module = parse_ok(
         "Object subclass: Foo
   getActors -> List(Actor class) => nil",
@@ -1423,7 +1423,7 @@ fn parse_class_metatype_generic_in_return_type() {
 
 #[test]
 fn parse_class_metatype_in_generic_union_arg() {
-    // BT-2630: `List(Actor class | Nil)` — metatype as the *first* union member
+    // `List(Actor class | Nil)` — metatype as the *first* union member
     // inside a generic type arg. Exercises the first-param path in
     // `skip_paren_type_params` (the `skip_type_name_with_metatype` call at the
     // "First type param" block). The trailing `Nil` is a plain identifier.
@@ -1461,7 +1461,7 @@ fn parse_class_metatype_in_generic_union_arg() {
 
 #[test]
 fn parse_class_metatype_as_later_union_member_in_generic_arg() {
-    // BT-2630: `List(Foo | Actor class)` — metatype as a *later* union member
+    // `List(Foo | Actor class)` — metatype as a *later* union member
     // inside a generic type arg. This is the path the pipe-union loop in
     // `skip_paren_type_params` must handle: the lookahead has to consume the
     // trailing `class` on `Actor` in lock-step with `parse_single_type_annotation`.
@@ -1498,7 +1498,7 @@ fn parse_class_metatype_as_later_union_member_in_generic_arg() {
 }
 
 // ==========================================================================
-// Difference type annotations (`\`) — ADR 0102 §1/§3, BT-2742
+// Difference type annotations (`\`) — ADR 0102 §1/§3
 // ==========================================================================
 
 #[test]
@@ -1612,9 +1612,9 @@ fn parse_double_backslash_in_type_position_is_typo_error() {
 #[test]
 fn value_position_backslash_is_unchanged() {
     // The `\` difference operator is special-cased *only* in type-annotation
-    // position (BT-2742). In a value expression `\` remains an ordinary binary
-    // selector with no binding power, so `x \ x` parses exactly as it did
-    // before this change — an "expected expression" error, never a silent
+    // position. In a value expression `\` remains an ordinary binary
+    // selector with no binding power, so `x \ x` parses as
+    // an "expected expression" error, never a silent
     // type-difference. The method header `combine: x =>` is still detected,
     // proving the type-chain lookahead did not leak into value position.
     let diagnostics = parse_err(
@@ -1631,7 +1631,7 @@ fn value_position_backslash_is_unchanged() {
 
 // ==========================================================================
 // Intersection type annotations (`&`) — ADR 0068 §Protocol Composition,
-// ADR 0102 §1/§3, BT-2743
+// ADR 0102 §1/§3
 // ==========================================================================
 
 #[test]
@@ -1759,9 +1759,9 @@ fn parse_mixed_difference_and_intersection_without_parens_is_error() {
 #[test]
 fn value_position_ampersand_is_unchanged() {
     // The `&` intersection operator is special-cased *only* in type-annotation
-    // position (BT-2743), mirroring `\` (BT-2742). In a value expression `&`
-    // has no binding power (like `\`), so `x & x` parses exactly as it did
-    // before this change — an "expected expression" error, never a silent
+    // position, mirroring `\`. In a value expression `&`
+    // has no binding power (like `\`), so `x & x` parses as
+    // an "expected expression" error, never a silent
     // type-intersection. The method header `combine: x =>` is still detected,
     // proving the type-chain lookahead did not leak into value position.
     let diagnostics = parse_err(
@@ -1777,7 +1777,7 @@ fn value_position_ampersand_is_unchanged() {
 }
 
 // ==========================================================================
-// Grouping parentheses in type-annotation position — BT-2760, ADR 0102 §3
+// Grouping parentheses in type-annotation position — ADR 0102 §3
 // ==========================================================================
 
 /// Parses `ty` as the return type of a method and returns the annotation.
@@ -1831,7 +1831,7 @@ fn parse_grouped_type_span_covers_parens() {
 
 #[test]
 fn parse_grouped_intersection_then_difference() {
-    // `(A & B) \ #c` — the previously unwritable mixed form (BT-2760):
+    // `(A & B) \ #c` — the mixed form:
     // Difference { base: Intersection(A, B), excluded: #c }.
     let ret_ty = parse_return_type("(A & B) \\ #c");
     let TypeAnnotation::Difference { base, excluded, .. } = &ret_ty else {
@@ -2073,7 +2073,7 @@ fn grouped_type_name_prints_required_parens_only() {
 #[test]
 fn value_expression_parens_unchanged_by_type_grouping() {
     // Guard: `(...)` in a value expression still parses as a parenthesized
-    // expression — the type-position grouping (BT-2760) must not leak.
+    // expression — the type-position grouping must not leak.
     let module = parse_ok(
         "Object subclass: Foo
   combine: x => (x + 1) * 2",

@@ -158,7 +158,7 @@ fn idempotent_class_definition() {
     assert_idempotent("Actor subclass: Counter\n  state: value = 0\n\n  getValue => self.value\n");
 }
 
-// --- Blank line round-trip (BT-987) ---
+// --- Blank line round-trip ---
 
 #[test]
 fn idempotent_method_body_blank_lines() {
