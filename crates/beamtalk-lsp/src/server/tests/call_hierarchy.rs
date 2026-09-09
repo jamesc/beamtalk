@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2243: callHierarchy helper tests -- `CallTarget` round-tripping through item data and outgoing-calls extraction from a method body.
+//! callHierarchy helper tests -- `CallTarget` round-tripping through item data and outgoing-calls extraction from a method body.
 
 use super::*;
 
-// --- BT-2243: callHierarchy helpers ---
+// --- callHierarchy helpers ---
 
 /// `target_to_lsp_item` round-trips through `SerializedCallTarget::from_item`
 /// so the prepare → outgoing flow preserves enough context to walk the

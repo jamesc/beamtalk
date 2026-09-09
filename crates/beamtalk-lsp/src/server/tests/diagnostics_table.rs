@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2800: LSP application of beamtalk.toml's [diagnostics] table, including the absent-manifest no-op and multi-root collision (later root wins) cases.
+//! LSP application of beamtalk.toml's [diagnostics] table, including the absent-manifest no-op and multi-root collision (later root wins) cases.
 
 use super::*;
 
-// ---- BT-2800: LSP applies beamtalk.toml [diagnostics] table ----
+// ---- LSP applies beamtalk.toml [diagnostics] table ----
 
 #[tokio::test]
 async fn load_diagnostics_table_promotes_dnu_hint_to_error() {
@@ -86,7 +86,7 @@ async fn load_diagnostics_table_absent_manifest_is_noop() {
 
 #[tokio::test]
 async fn load_diagnostics_table_multi_root_collision_later_root_wins() {
-    // BT-2800 review follow-up: when two workspace roots set the same
+    // When two workspace roots set the same
     // [diagnostics] category to different severities, the collision is
     // now logged (see load_diagnostics_table's per-key merge loop), but
     // the resulting behavior is unchanged — the later root's value wins

@@ -138,7 +138,7 @@ fn resolve_path_for_uri_file_uri_still_works() {
     assert_eq!(result, Some(Utf8PathBuf::from("C:/project/main.bt")));
 }
 
-// ── position_to_offset tests (BT-1067) ─────────────────────────────
+// ── position_to_offset tests ─────────────────────────────
 
 #[test]
 fn position_to_offset_first_line() {

@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2244: workspace/document symbol unification. Covers the pure conversion helpers (`runtime_class_to_document_symbol`, `runtime_class_to_workspace_symbol`, `zero_width_range_for_line`), reload-induced-diagnostic conversion (ADR 0105 Phase 1, BT-2779), and the AST-fallback behaviour of the `document_symbol` / `folding_range` / symbol handlers -- the runtime dispatch itself is exercised end-to-end by the surface-drift and Erlang `EUnit` tests.
+//! Workspace/document symbol unification. Covers the pure conversion helpers (`runtime_class_to_document_symbol`, `runtime_class_to_workspace_symbol`, `zero_width_range_for_line`), reload-induced-diagnostic conversion (ADR 0105 Phase 1), and the AST-fallback behaviour of the `document_symbol` / `folding_range` / symbol handlers -- the runtime dispatch itself is exercised end-to-end by the surface-drift and Erlang `EUnit` tests.
 
 use super::*;
 
 // -----------------------------------------------------------------
-// BT-2244: workspace/document symbol unification.
+// Workspace/document symbol unification.
 //
 // The runtime path (`nav-symbols` over WebSocket) needs a live
 // workspace, which the LSP test harness doesn't spin up. These
@@ -40,7 +40,7 @@ fn zero_width_range_for_line_converts_one_based_runtime_lines() {
 }
 
 // -----------------------------------------------------------------
-// ADR 0105 Phase 1 (BT-2779): reload-induced diagnostics
+// ADR 0105 Phase 1: reload-induced diagnostics
 // -----------------------------------------------------------------
 
 fn sample_reload_finding() -> crate::runtime::ReloadFinding {
@@ -118,7 +118,7 @@ fn reload_finding_to_lsp_diagnostics_carries_category_as_code() {
 
 #[test]
 fn group_findings_by_origin_splits_same_owner_different_changed_class() {
-    // BT-2801: `seed_reload_diagnostics` must seed independently-clearing
+    // `seed_reload_diagnostics` must seed independently-clearing
     // entries — two findings attributed to the same owner but from
     // *different* reloaded classes are two distinct origins, not one
     // merged bucket, exactly mirroring `reload_check_listener`'s
@@ -265,7 +265,7 @@ fn runtime_class_to_document_symbol_emits_class_with_methods() {
     assert_eq!(increment.kind, SymbolKind::METHOD);
     assert_eq!(increment.range.start, Position::new(6, 0));
     let with_initial = children.iter().find(|c| c.name == "withInitial:").unwrap();
-    // BT-3442: class-side methods now share the `to_lsp_symbol` path's
+    // Class-side methods share the `to_lsp_symbol` path's
     // SymbolKind::FUNCTION + "class method" detail convention, so this
     // path can no longer silently diverge from the AST-fallback one.
     assert_eq!(with_initial.kind, SymbolKind::FUNCTION);
@@ -316,7 +316,7 @@ fn runtime_class_to_workspace_symbol_applies_query_filter() {
 
 #[test]
 fn runtime_class_to_workspace_symbol_surfaces_source_less_classes() {
-    // The headline win of BT-2244: classes with no backing source
+    // The headline win: classes with no backing source
     // file (REPL-loaded, ClassBuilder) still appear in
     // `workspace/symbol`, anchored to the workspace-root URI with a
     // `(no source file)` detail string.
@@ -408,7 +408,7 @@ fn runtime_class_to_workspace_symbol_drops_source_less_without_root() {
 
 #[tokio::test]
 async fn document_symbol_uses_ast_for_untitled_uri() {
-    // BT-2244 review fix: `document_symbol` must bypass the runtime
+    // `document_symbol` must bypass the runtime
     // (`delegate_nav_symbols`) path whenever the URI is not a clean
     // `file://` document.  An `untitled:` buffer has no `source_file`
     // in the live class registry, so a `scope = "user"` runtime
@@ -463,7 +463,7 @@ async fn document_symbol_uses_ast_for_untitled_uri() {
 async fn document_symbol_falls_back_to_ast_when_flag_off() {
     // With `delegateToRuntime` false (the default), `document_symbol`
     // returns the AST walker's outline byte-for-byte — same shape
-    // the pre-BT-2244 implementation produced. This pins the
+    // as when there is no runtime delegation at all. This pins the
     // "no behaviour change when off" contract.
     let (service, _socket) = tower_lsp::LspService::new(Backend::new);
     let backend: &Backend = service.inner();
@@ -517,7 +517,7 @@ Object subclass: Counter
     };
     let response = backend.folding_range(params).await.expect("rpc ok");
     let ranges = response.expect("Some(ranges)");
-    // BT-3260: divider-category ranges (Alpha, Beta), plus the
+    // Divider-category ranges (Alpha, Beta), plus the
     // class-body range — `foo`/`bar`/`baz` are all single-line, so none
     // contributes a method range of its own.
     assert_eq!(ranges.len(), 3, "got {ranges:?}");
@@ -537,7 +537,7 @@ Object subclass: Counter
 
 #[tokio::test]
 async fn folding_range_still_covers_a_class_without_dividers() {
-    // BT-3260: registering `folding_range_provider` at all opts every
+    // Registering `folding_range_provider` at all opts every
     // `.bt` file out of VS Code's built-in indentation-based folding
     // once *any* provider is registered — so a divider-less class must
     // still get a class-body range here, or its fold arrows regress to
@@ -595,7 +595,8 @@ async fn folding_range_is_none_for_a_trivial_single_line_file() {
 
 #[tokio::test]
 async fn workspace_symbol_falls_back_to_ast_when_flag_off() {
-    // Cold-file path matches the BT-2081 behaviour exactly — one
+    // Cold-file path matches `workspace/symbol`'s established behaviour
+    // exactly — one
     // SymbolInformation per top-level class whose name matches the
     // (case-insensitive substring) query, drawn from the indexed
     // user files.
