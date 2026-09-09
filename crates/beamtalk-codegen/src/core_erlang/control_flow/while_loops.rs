@@ -268,11 +268,22 @@ impl CoreErlangGenerator {
         // arm's reference to it; `class_var_seed_version` names the identity
         // the loop body's own first class-var `Bind` sources from, needed
         // below to rebase it onto the `produces` seed
-        // (`Self::rebase_class_var_seed`'s own doc comment has the full
+        // (`Self::rebase_loop_seed`'s own doc comment has the full
         // "why").
         let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
         let class_var_seed_version = self.class_var_version();
-        let cv_param_doc = super::class_var_arg_doc(class_var_param.as_ref());
+        let cv_param_doc = super::extra_threaded_arg_doc(class_var_param.as_ref());
+
+        // BT-3484: the value-type `Self` mirror of the three lines above —
+        // same capture-before-body-lowering discipline (`self_version`, like
+        // `class_var_version`, is inherited rather than reset across
+        // `with_branch_context`), same "extra explicit trailing fun
+        // parameter, never folded into `StateAcc`'s own map" shape. Mutually
+        // exclusive with `class_var_param` by construction, so the loop's
+        // result tuple grows at most one extra slot.
+        let self_param = plan.threads_value_self.then(|| self.current_self_var());
+        let self_seed_version = self.self_version();
+        let self_param_doc = super::extra_threaded_arg_doc(self_param.as_ref());
 
         // BT-598: At the start of each loop iteration, read threaded locals from StateAcc.
         // Use push_scope so bindings don't leak to caller after the letrec.
@@ -390,14 +401,27 @@ impl CoreErlangGenerator {
         } else {
             "<'false'> when 'true' -> "
         };
-        let exit_arm = docvec![exit_arm_atom, "{'nil', StateAcc", cv_param_doc, "} end ",];
+        let exit_arm = docvec![
+            exit_arm_atom,
+            "{'nil', StateAcc",
+            cv_param_doc,
+            self_param_doc,
+            "} end ",
+        ];
 
         let mut produces = vec![VersionedVar::new(VersionPrefix::State, 0, frame)];
         if let Some(cv_name) = &class_var_param {
             let real_seed =
                 VersionedVar::new(VersionPrefix::ClassVars, class_var_seed_version, frame);
             let gensym_seed = VersionedVar::new(VersionPrefix::Gensym(cv_name.clone()), 0, frame);
-            Self::rebase_class_var_seed(&mut body_stmts, &real_seed, &gensym_seed);
+            Self::rebase_loop_seed(&mut body_stmts, &real_seed, &gensym_seed);
+            produces.push(gensym_seed);
+        }
+        // BT-3484: identical treatment for the value-type `Self` slot.
+        if let Some(self_name) = &self_param {
+            let real_seed = VersionedVar::new(VersionPrefix::SelfVt, self_seed_version, frame);
+            let gensym_seed = VersionedVar::new(VersionPrefix::Gensym(self_name.clone()), 0, frame);
+            Self::rebase_loop_seed(&mut body_stmts, &real_seed, &gensym_seed);
             produces.push(gensym_seed);
         }
 

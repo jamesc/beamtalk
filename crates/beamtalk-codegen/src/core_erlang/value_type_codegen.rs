@@ -30,6 +30,28 @@ use beamtalk_core::ast::{
     Module, TypeAnnotation, WellKnownSelector,
 };
 
+/// BT-3484: which extra trailing slot (if any) a value-type/class-method
+/// Letrec loop's `{'nil', StateAcc, …}` result tuple carries at position 3.
+///
+/// The two are mutually exclusive by construction — `ClassVars` threading
+/// requires `in_class_method()`, value-type `Self` threading excludes it (see
+/// [`CoreErlangGenerator::loop_body_threads_value_self`]) — which is exactly
+/// why this is one enum rather than two independent booleans threaded through
+/// every extraction call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum VtLoopExtraSlot {
+    /// `{'nil', StateAcc}` — no extra slot (also every `Foldl*`-shaped
+    /// construct, whose accumulator has no such slot at all).
+    None,
+    /// BT-3168: `{'nil', StateAcc, ClassVars}` — a class-method loop that
+    /// threads a class-var mutation through its own recursive tail call.
+    ClassVars,
+    /// BT-3484: `{'nil', StateAcc, Self{N}}` — a value-type instance-method
+    /// loop that threads a `self.field := ...` mutation through its own
+    /// recursive tail call.
+    ValueSelf,
+}
+
 /// Classification of how a value-type method body expression should be handled
 /// for Self-threading.  Produced by [`CoreErlangGenerator::classify_vt_body_expr`]
 /// and consumed by the unified body loop in [`CoreErlangGenerator::generate_value_type_method`].
@@ -53,6 +75,14 @@ enum VtBodyExprKind {
     FoldlListOpWithLocalThreading,
     /// Non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` with local mutations (BT-1392).
     ConditionalWithLocalThreading,
+    /// BT-3484: non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` whose branch
+    /// writes a value-type `self.field := ...` but mutates NO outer local —
+    /// so [`ConditionalWithLocalThreading`](Self::ConditionalWithLocalThreading)
+    /// does not catch it, yet it still needs the same inline-`case` treatment
+    /// (the generic Tier 1 closure path rejects a field write outright). See
+    /// [`CoreErlangGenerator::is_conditional_with_vt_self_field_threading`]
+    /// for why this is a separate kind rather than a widening of that one.
+    ConditionalWithSelfFieldThreading,
     /// Non-last block value with captured mutations (BT-1213).
     BlockWithCapturedMutations(Vec<String>),
     /// Non-last `whileTrue:` / `whileFalse:` with local mutations (BT-1609).
@@ -81,6 +111,33 @@ struct VtBranchPieces {
     /// `Some(version)` if a class-method self-send in this arm's body advanced the
     /// class-var version past the baseline it started from.
     cv_mutated_version: Option<usize>,
+    /// BT-3484: `Some(version)` if a value-type `self.field := ...` write in
+    /// this arm's body advanced the `SelfVt` version past the baseline it
+    /// started from — the `Self` mirror of `cv_mutated_version`, and the
+    /// input to the trailing `Self{N}` tuple slot both arms must agree on.
+    self_mutated_version: Option<usize>,
+}
+
+/// BT-3159/BT-3484: the `ClassVars`/`SelfVt` version numbers live immediately
+/// BEFORE a value-type conditional's `case` — captured once, then handed to
+/// every arm so both are true siblings starting from the same baseline, and
+/// to the post-`case` rebind so the merged version is the single successor of
+/// the pre-`case` one rather than of whichever arm generated last.
+#[derive(Debug, Clone, Copy)]
+struct VtCondBaseline {
+    class_vars: usize,
+    self_vt: usize,
+}
+
+/// BT-3159/BT-3484: which trailing slots a value-type conditional's
+/// branch-merge tuple carries. Each is set when EITHER arm mutated that
+/// storage — both arms must then carry the slot, since the `element/N`
+/// extraction after the `case` is fixed at compile time and runs whichever
+/// arm actually executed.
+#[derive(Debug, Clone, Copy)]
+struct VtCondSlots {
+    class_vars: bool,
+    self_vt: bool,
 }
 
 /// BT-2998: the class-side selectors that actually produce an instance of
@@ -869,6 +926,9 @@ impl CoreErlangGenerator {
         if self.is_conditional_with_vt_local_threading(expr) {
             return VtBodyExprKind::ConditionalWithLocalThreading;
         }
+        if self.is_conditional_with_vt_self_field_threading(expr) {
+            return VtBodyExprKind::ConditionalWithSelfFieldThreading;
+        }
         if self.is_exception_construct_with_vt_local_threading(expr) {
             return VtBodyExprKind::ExceptionConstructWithLocalThreading;
         }
@@ -961,7 +1021,7 @@ impl CoreErlangGenerator {
         expr: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
-        let threads_class_vars = self.vt_construct_threads_class_vars(expr);
+        let extra_slot = self.vt_construct_extra_slot(expr);
         let span = expr.span();
         let tuple_var = self.fresh_temp_var("ThreadedResult");
         let result_var = self.fresh_temp_var("ThreadedValue");
@@ -977,10 +1037,23 @@ impl CoreErlangGenerator {
             leaf::var(tuple_var.clone()),
             ") in\n",
         ]);
-        if threads_class_vars {
-            let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
-            let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
-            body_parts.push(docvec!["    ", rebind_doc, "\n"]);
+        match extra_slot {
+            VtLoopExtraSlot::None => {}
+            VtLoopExtraSlot::ClassVars => {
+                let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
+                let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
+                body_parts.push(docvec!["    ", rebind_doc, "\n"]);
+            }
+            // BT-3484: the value-type `Self` mirror — without this a
+            // `self.field :=`-mutating loop in last/return position would
+            // compile and run, but the method's own returned `Self` (and the
+            // `{Result, Self{N}}` NLR tuple) would carry the pre-loop
+            // snapshot instead of the loop's.
+            VtLoopExtraSlot::ValueSelf => {
+                let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
+                let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
+                body_parts.push(docvec!["    ", rebind_doc, "\n"]);
+            }
         }
         Ok(result_var)
     }
@@ -1212,6 +1285,23 @@ impl CoreErlangGenerator {
                 // / foldl-list-op last branches — it dispatches the conditional through the same
                 // unified `emit_threaded_last` emitter, so the dedicated `emit_vt_conditional_last`
                 // wrapper is redundant.
+                if is_last {
+                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                } else {
+                    let doc = self.generate_vt_conditional_open(expr)?;
+                    body_parts.push(doc);
+                }
+            }
+            VtBodyExprKind::ConditionalWithSelfFieldThreading => {
+                // BT-3484: non-last, this is exactly the shape
+                // `generate_vt_conditional_open`'s new `Self` slot handles.
+                // In LAST position it deliberately falls through to the
+                // ordinary last-expression path, which reproduces the
+                // pre-BT-3484 `FieldAssignmentInUnsupportedBlock` diagnostic
+                // — see
+                // `is_conditional_with_vt_self_field_threading`'s doc comment
+                // for why a clean compile error is the right answer there
+                // rather than a half-threaded one.
                 if is_last {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
@@ -1671,9 +1761,12 @@ impl CoreErlangGenerator {
                     } else {
                         None
                     };
+                    // BT-3484: see the analogous comment in
+                    // `is_counted_loop_with_vt_local_threading`.
                     return !self
                         .compute_threaded_locals_for_loop(body, condition)
-                        .is_empty();
+                        .is_empty()
+                        || self.loop_body_threads_value_self(body);
                 }
             }
         }
@@ -1698,14 +1791,14 @@ impl CoreErlangGenerator {
         // returns) — this predicate itself doesn't need that, but keeping it
         // adjacent to the other pre-loop reads (`get_while_threaded_locals`)
         // matches the loop codegen's own read order.
-        let threads_class_vars = self.vt_construct_threads_class_vars(expr);
+        let extra_slot = self.vt_construct_extra_slot(expr);
         // Generate the while loop expression (returns {'nil', StateAcc} tuple)
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = self.get_while_threaded_locals(expr);
         Ok(self.emit_vt_loop_open_extraction(
             loop_doc,
             &threaded_locals,
-            threads_class_vars,
+            extra_slot,
             expr.span(),
             "WhileResult",
             "WhileState",
@@ -1720,28 +1813,31 @@ impl CoreErlangGenerator {
     /// 2. Extracts the `StateAcc` from element 2
     /// 3. Extracts each threaded local from the `StateAcc` via `maps:get`, rebinding the
     ///    variable names in scope so subsequent code sees the updated values
-    /// 4. BT-3168 (ADR 0111 Addendum 9, Question 3): when `threads_class_vars`,
-    ///    ALSO extracts `ClassVars` from element 3 and rebinds it via
-    ///    [`CoreErlangGenerator::rebind_class_vars_from_doc`] — the same
-    ///    extra trailing tuple slot `while_loops.rs`/`counted_loops.rs`
-    ///    append to the `{'nil', StateAcc, ClassVars}` result. `false` for
-    ///    every `do:`/`collect:`/`select:`/`inject:into:` caller
+    /// 4. BT-3168 (ADR 0111 Addendum 9, Question 3) / BT-3484: when
+    ///    `extra_slot` is not [`VtLoopExtraSlot::None`], ALSO extracts the
+    ///    loop's trailing element 3 and rebinds it — `ClassVars` via
+    ///    [`CoreErlangGenerator::rebind_class_vars_from_doc`], the value-type
+    ///    `Self` via [`CoreErlangGenerator::rebind_value_self_from_doc`] —
+    ///    matching the extra trailing tuple slot `while_loops.rs`/
+    ///    `counted_loops.rs` append to the `{'nil', StateAcc, …}` result.
+    ///    Always [`VtLoopExtraSlot::None`] for every
+    ///    `do:`/`collect:`/`select:`/`inject:into:` caller
     ///    (`generate_vt_foldl_list_op_open`/`generate_value_type_do_open`) —
     ///    those Foldl-shaped constructs' accumulator has no matching slot
     ///    yet (BT-3169).
     ///
-    /// When there are no threaded locals AND no `ClassVars` slot, falls back
+    /// When there are no threaded locals AND no extra slot, falls back
     /// to sequencing the loop as a side effect (`let _seqN = <loop> in`).
     fn emit_vt_loop_open_extraction(
         &mut self,
         loop_doc: Document<'static>,
         threaded_locals: &[String],
-        threads_class_vars: bool,
+        extra_slot: VtLoopExtraSlot,
         span: beamtalk_core::source_analysis::Span,
         result_var_prefix: &str,
         state_var_prefix: &str,
     ) -> Document<'static> {
-        if threaded_locals.is_empty() && !threads_class_vars {
+        if threaded_locals.is_empty() && matches!(extra_slot, VtLoopExtraSlot::None) {
             // Fallback: just sequence the expression
             let tmp = self.fresh_temp_var("seq");
             return docvec!["    let ", leaf::var(tmp), " = ", loop_doc, " in\n"];
@@ -1789,10 +1885,21 @@ impl CoreErlangGenerator {
             }
         }
 
-        if threads_class_vars {
-            let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")",];
-            let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
-            parts.push(docvec!["    ", rebind_doc, "\n"]);
+        match extra_slot {
+            VtLoopExtraSlot::None => {}
+            VtLoopExtraSlot::ClassVars => {
+                let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")",];
+                let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
+                parts.push(docvec!["    ", rebind_doc, "\n"]);
+            }
+            // BT-3484: same slot, same position — the loop's own trailing
+            // `Self` becomes the method's new live `Self{N}` for every
+            // statement after the loop.
+            VtLoopExtraSlot::ValueSelf => {
+                let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")",];
+                let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
+                parts.push(docvec!["    ", rebind_doc, "\n"]);
+            }
         }
 
         Document::Vec(parts)
@@ -1841,15 +1948,14 @@ impl CoreErlangGenerator {
         value: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
-        // BT-3168 (ADR 0111 Addendum 9, Question 3): whether `value` is a
-        // Letrec-shaped construct (while/counted loop) that threads
-        // `ClassVars` through its own recursive tail call as an explicit
-        // 3rd tuple element — see the analogous comment on
-        // `emit_vt_threaded_tuple_unwrap_to_var`. Always `false` for a
-        // `Foldl*` construct (`vt_construct_threads_class_vars`'s own
-        // doc comment) — that shape is handled by the BT-3169 refresh
-        // below instead.
-        let threads_class_vars = self.vt_construct_threads_class_vars(value);
+        // BT-3168 (ADR 0111 Addendum 9, Question 3) / BT-3484: which extra
+        // trailing slot `value` carries as an explicit 3rd tuple element,
+        // when it is a Letrec-shaped construct (while/counted loop) —
+        // see the analogous comment on `emit_vt_threaded_tuple_unwrap_to_var`.
+        // Always `None` for a `Foldl*` construct
+        // (`vt_construct_extra_slot`'s own doc comment) — the class-var half
+        // of that shape is handled by the BT-3169 refresh below instead.
+        let extra_slot = self.vt_construct_extra_slot(value);
         let span = value.span();
         // BT-3169: captured before generating `value` so a class-method
         // self-send inside a `Foldl*` construct (its own accumulator
@@ -1876,11 +1982,11 @@ impl CoreErlangGenerator {
         // here on. Refresh via the ADR 0110 shadow write so later code (a
         // class-var read, or another self-send) references a name that's
         // actually visible — see `refresh_class_var_after_opaque_scope`'s
-        // own doc comment. Skipped when `threads_class_vars` (the Letrec
-        // shape) already handles this precisely via the 3rd tuple element
+        // own doc comment. Skipped when the Letrec shape already threads
+        // `ClassVars` precisely via the 3rd tuple element
         // below — doing both would rebind `ClassVars` twice, shadowing the
         // Letrec extraction with a redundant (if equivalent) shadow read.
-        if !threads_class_vars {
+        if !matches!(extra_slot, VtLoopExtraSlot::ClassVars) {
             if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
                 body_parts.push(refresh);
             }
@@ -1930,12 +2036,21 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-3168: extract ClassVars from element 3 and rebind it, same as
-        // the non-last-statement / last-position consumers.
-        if threads_class_vars {
-            let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
-            let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
-            body_parts.push(docvec!["    ", rebind_doc, "\n"]);
+        // BT-3168/BT-3484: extract the loop's own trailing slot from element
+        // 3 and rebind it, same as the non-last-statement / last-position
+        // consumers.
+        match extra_slot {
+            VtLoopExtraSlot::None => {}
+            VtLoopExtraSlot::ClassVars => {
+                let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
+                let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
+                body_parts.push(docvec!["    ", rebind_doc, "\n"]);
+            }
+            VtLoopExtraSlot::ValueSelf => {
+                let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
+                let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
+                body_parts.push(docvec!["    ", rebind_doc, "\n"]);
+            }
         }
 
         Ok(core_var)
@@ -1958,35 +2073,52 @@ impl CoreErlangGenerator {
         let Some(body) = Self::counted_loop_body_block(expr) else {
             return false;
         };
+        // BT-3484: a loop whose ONLY mutation is `self.field := ...` still
+        // returns a threaded tuple (`{'nil', StateAcc, Self{N}}`) that must
+        // be unpacked here — before this issue it had no threaded locals, so
+        // this predicate said `false` and the loop's result was sequenced
+        // away, discarding the mutation.
         !self.compute_threaded_locals_for_loop(body, None).is_empty()
+            || self.loop_body_threads_value_self(body)
     }
 
-    /// BT-3168 (ADR 0111 Addendum 9, Questions 3/4): whether the loop
-    /// construct `expr` threads a `ClassVars` mutation through its own
-    /// recursive tail call — true only for the Letrec-shaped constructs this
-    /// issue implements (`whileTrue:`/`whileFalse:`,
-    /// `to:do:`/`to:by:do:`/`timesRepeat:`). `do:`/`collect:`/`select:`/
-    /// `inject:into:` (Foldl-shaped) are BT-3169's territory and never match
-    /// here even when class-var-mutating — their accumulator has no
-    /// matching tuple slot for this yet (Question 6). Shares
-    /// [`CoreErlangGenerator::loop_body_threads_class_vars`] with
-    /// `ThreadingPlan::new_impl` (`control_flow/mod.rs`) so the routing
+    /// BT-3168 (ADR 0111 Addendum 9, Questions 3/4) / BT-3484: which extra
+    /// trailing slot the loop construct `expr`'s result tuple carries —
+    /// non-`None` only for the Letrec-shaped constructs (`whileTrue:`/
+    /// `whileFalse:`, `to:do:`/`to:by:do:`/`timesRepeat:`).
+    /// `do:`/`collect:`/`select:`/`inject:into:` (Foldl-shaped) never match
+    /// here even when class-var-mutating — their accumulator has no matching
+    /// tuple slot (Question 6) — and a value-type `self.field :=` inside one
+    /// is likewise out of scope (BT-3484 covers the Letrec shape only).
+    /// Shares [`CoreErlangGenerator::loop_body_threads_class_vars`] and
+    /// [`CoreErlangGenerator::loop_body_threads_value_self`] with
+    /// `ThreadingPlan::new_impl` (`control_flow/plan.rs`) so the routing
     /// decision here and the tuple-shape decision the loop's own codegen
     /// makes can never independently drift out of sync.
-    fn vt_construct_threads_class_vars(&self, expr: &Expression) -> bool {
+    fn vt_construct_extra_slot(&self, expr: &Expression) -> VtLoopExtraSlot {
         let expr = expr.unwrap_parens();
-        if self.is_while_with_vt_local_threading(expr) {
-            if let Expression::MessageSend { arguments, .. } = expr {
-                if let Some(Expression::Block(body)) = arguments.first() {
-                    return self.loop_body_threads_class_vars(body);
-                }
+        let body = if self.is_while_with_vt_local_threading(expr) {
+            match expr {
+                Expression::MessageSend { arguments, .. } => match arguments.first() {
+                    Some(Expression::Block(body)) => Some(body),
+                    _ => None,
+                },
+                _ => None,
             }
-            false
         } else if self.is_counted_loop_with_vt_local_threading(expr) {
             Self::counted_loop_body_block(expr)
-                .is_some_and(|b| self.loop_body_threads_class_vars(b))
         } else {
-            false
+            None
+        };
+        let Some(body) = body else {
+            return VtLoopExtraSlot::None;
+        };
+        if self.loop_body_threads_class_vars(body) {
+            VtLoopExtraSlot::ClassVars
+        } else if self.loop_body_threads_value_self(body) {
+            VtLoopExtraSlot::ValueSelf
+        } else {
+            VtLoopExtraSlot::None
         }
     }
 
@@ -2024,7 +2156,7 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> Result<Document<'static>> {
         // BT-3168: see the analogous comment in `generate_vt_while_open`.
-        let threads_class_vars = self.vt_construct_threads_class_vars(expr);
+        let extra_slot = self.vt_construct_extra_slot(expr);
         // Generate the counted loop expression (returns {'nil', StateAcc} tuple).
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = Self::counted_loop_body_block(expr)
@@ -2033,7 +2165,7 @@ impl CoreErlangGenerator {
         Ok(self.emit_vt_loop_open_extraction(
             loop_doc,
             &threaded_locals,
-            threads_class_vars,
+            extra_slot,
             expr.span(),
             "CountedLoopResult",
             "CountedLoopState",
@@ -2116,8 +2248,9 @@ impl CoreErlangGenerator {
             &threaded_locals,
             // BT-3168: Foldl-shaped constructs never thread `ClassVars`
             // through this tuple slot — that's BT-3169's territory
-            // (Question 6's `{ClassVars, StateAcc}` accumulator shape).
-            false,
+            // (Question 6's `{ClassVars, StateAcc}` accumulator shape) —
+            // and, per BT-3484, no value-type `Self` slot either.
+            VtLoopExtraSlot::None,
             expr.span(),
             "FoldlListOpResult",
             "FoldlListOpState",
@@ -2362,6 +2495,82 @@ impl CoreErlangGenerator {
         false
     }
 
+    /// BT-3484: `true` if `expr` is a value-type instance-method
+    /// `self.field := ...` write — the shape that threads `Self{N}`
+    /// (`FieldWriteSite::ValueType`).
+    ///
+    /// Deliberately excludes class methods: inside one, `self.x :=` is a
+    /// CLASS-var write (`FieldWriteSite::ClassVar`) with its own, entirely
+    /// separate ADR 0110 threading, so it must never be routed through this
+    /// issue's `Self` slot.
+    fn is_vt_self_field_assignment(&self, expr: &Expression) -> bool {
+        !self.in_class_method()
+            && matches!(self.context, CodeGenContext::ValueType)
+            && Self::is_field_assignment(expr)
+    }
+
+    /// BT-3484: `true` if `expr` is an `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
+    /// whose branch block(s) contain a value-type `self.field := ...` write.
+    ///
+    /// Deliberately SEPARATE from
+    /// [`Self::is_conditional_with_vt_local_threading`] rather than folded
+    /// into it: that predicate also routes the LAST-position
+    /// (`emit_vt_conditional_case_to_var`) and assignment-RHS
+    /// (`emit_vt_conditional_assign_rhs`) paths, neither of which threads
+    /// `Self` — a field write reaching either would be silently dropped
+    /// (last position) or emit an `erlc`-rejected reference to a branch-scoped
+    /// `Self{N}` (assign RHS), both strictly worse than the clean
+    /// `FieldAssignmentInUnsupportedBlock` diagnostic those shapes produce
+    /// today (confirmed empirically while validating this issue). BT-3484 is
+    /// scoped to the NON-LAST statement position — the shape its repros
+    /// cover, and the only one `generate_vt_conditional_open` (the sole
+    /// consumer of this predicate, via
+    /// `VtBodyExprKind::ConditionalWithSelfFieldThreading`) handles.
+    ///
+    /// Only reports conditionals with NO outer-local mutation of their own:
+    /// a mixed one (locals AND a field write) is already
+    /// [`Self::is_conditional_with_vt_local_threading`], classified ahead of
+    /// this in [`Self::classify_vt_body_expr`], and routed to the same
+    /// `generate_vt_conditional_open` for the non-last case.
+    fn is_conditional_with_vt_self_field_threading(&self, expr: &Expression) -> bool {
+        if self.in_class_method() || !matches!(self.context, CodeGenContext::ValueType) {
+            return false;
+        }
+        let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        else {
+            return false;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        if !matches!(sel.as_str(), "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:") {
+            return false;
+        }
+        arguments.iter().any(|arg| match arg {
+            Expression::Block(block) => self.block_writes_vt_self_field(block),
+            _ => false,
+        })
+    }
+
+    /// BT-3484: `true` if any TOP-LEVEL statement of `block` is a value-type
+    /// `self.field := ...` write.
+    ///
+    /// Top-level-only for the same reason
+    /// [`CoreErlangGenerator::loop_body_threads_value_self`] is (and the same
+    /// reason `find_class_var_mutating_stmt` is): only a bare statement
+    /// lowers through [`Self::build_vt_conditional_branch_pieces_inner`]'s
+    /// own open-chain field-write arm, so only a bare statement produces a
+    /// `Self{N}` binding this arm's return tuple can actually name. A write
+    /// buried in a sub-expression keeps its own nested-`let` scoping,
+    /// untouched by this issue.
+    fn block_writes_vt_self_field(&self, block: &beamtalk_core::ast::Block) -> bool {
+        super::util::collect_body_exprs(&block.body)
+            .into_iter()
+            .any(|e| self.is_vt_self_field_assignment(e))
+    }
+
     /// BT-1392: Returns the list of local variables written in `block` that are already
     /// bound in the enclosing scope. This is scope-aware — it checks `lookup_var` to
     /// distinguish "reassigning outer x" from "defining new local y".
@@ -2543,13 +2752,13 @@ impl CoreErlangGenerator {
                 // BT-2342: a non-last loop / foldl list-op that mutates captured locals returns
                 // a `{value, StateAcc}` tuple. Extract and rebind the threaded locals so later
                 // statements in this branch see the updates (the value itself is discarded).
-                let threads_class_vars = self.vt_construct_threads_class_vars(body_expr);
+                let extra_slot = self.vt_construct_extra_slot(body_expr);
                 let loop_doc = self.expression_doc(body_expr)?;
                 let threaded_locals = self.vt_construct_threaded_locals(body_expr);
                 let doc = self.emit_vt_loop_open_extraction(
                     loop_doc,
                     &threaded_locals,
-                    threads_class_vars,
+                    extra_slot,
                     body_expr.span(),
                     "BranchThreadedResult",
                     "BranchThreadedState",
@@ -2601,7 +2810,16 @@ impl CoreErlangGenerator {
                 }
             }
         }
-        if all_mutations.is_empty() {
+        // BT-3484: a branch whose only mutation is `self.field := ...` has
+        // no outer-scope LOCAL mutation, but still needs this inline-`case`
+        // treatment — without it the block falls through to the generic Tier
+        // 1 closure path, which rejects a field write outright
+        // (`FieldAssignmentInUnsupportedBlock`).
+        let threads_self = arguments.iter().any(|arg| match arg {
+            Expression::Block(block) => self.block_writes_vt_self_field(block),
+            _ => false,
+        });
+        if all_mutations.is_empty() && !threads_self {
             return Ok(Document::Nil);
         }
 
@@ -2621,58 +2839,35 @@ impl CoreErlangGenerator {
         // `with_branch_context`'s restore-only-no-reset discipline) and so a
         // class-method self-send inside an arm (`x := self bump`) can be detected by
         // comparing the version before/after that arm's own generation.
-        let cv_before = self.class_var_version();
-
-        // Generate the true and false branch pieces based on the selector.
-        let (true_pieces, false_pieces) = match selector_name.as_str() {
-            "ifTrue:" => {
-                let Expression::Block(block) = &arguments[0] else {
-                    return Ok(Document::Nil);
-                };
-                let tb =
-                    self.build_vt_conditional_branch_pieces(block, &all_mutations, cv_before)?;
-                let fb = Self::build_vt_conditional_passthrough_pieces(self, &all_mutations);
-                (tb, fb)
-            }
-            "ifFalse:" => {
-                let Expression::Block(block) = &arguments[0] else {
-                    return Ok(Document::Nil);
-                };
-                let passthrough =
-                    Self::build_vt_conditional_passthrough_pieces(self, &all_mutations);
-                let fb =
-                    self.build_vt_conditional_branch_pieces(block, &all_mutations, cv_before)?;
-                (passthrough, fb)
-            }
-            "ifTrue:ifFalse:" => {
-                let Expression::Block(true_block) = &arguments[0] else {
-                    return Ok(Document::Nil);
-                };
-                let Expression::Block(false_block) = &arguments[1] else {
-                    return Ok(Document::Nil);
-                };
-                let tb =
-                    self.build_vt_conditional_branch_pieces(true_block, &all_mutations, cv_before)?;
-                let fb = self.build_vt_conditional_branch_pieces(
-                    false_block,
-                    &all_mutations,
-                    cv_before,
-                )?;
-                (tb, fb)
-            }
-            _ => return Ok(Document::Vec(docs)),
+        // BT-3484: `self_vt` is the `SelfVt` mirror of the same capture.
+        let baseline = VtCondBaseline {
+            class_vars: self.class_var_version(),
+            self_vt: self.self_version(),
         };
 
-        // BT-3159: a class var is threaded through the case's return tuple iff either
-        // arm mutated one — both arms must agree on the return shape since the
-        // `element/N` extraction after the case is fixed at compile time and runs
-        // regardless of which arm actually executed.
-        let any_cv_mutated =
-            true_pieces.cv_mutated_version.is_some() || false_pieces.cv_mutated_version.is_some();
-        let true_branch =
-            Self::finish_vt_conditional_branch(true_pieces, any_cv_mutated, cv_before);
-        let false_branch =
-            Self::finish_vt_conditional_branch(false_pieces, any_cv_mutated, cv_before);
+        let Some((true_pieces, false_pieces)) = self.build_vt_conditional_arm_pieces(
+            &selector_name,
+            arguments,
+            &all_mutations,
+            baseline,
+        )?
+        else {
+            return Ok(Document::Vec(docs));
+        };
+
+        // BT-3159/BT-3484: a class var (resp. `Self`) is threaded through the
+        // case's return tuple iff either arm mutated one — both arms must
+        // agree on the return shape since the `element/N` extraction after the
+        // case is fixed at compile time and runs regardless of which arm
+        // actually executed.
+        let slots = VtCondSlots {
+            class_vars: true_pieces.cv_mutated_version.is_some()
+                || false_pieces.cv_mutated_version.is_some(),
+            self_vt: true_pieces.self_mutated_version.is_some()
+                || false_pieces.self_mutated_version.is_some(),
+        };
+        let true_branch = Self::finish_vt_conditional_branch(true_pieces, slots, baseline);
+        let false_branch = Self::finish_vt_conditional_branch(false_pieces, slots, baseline);
 
         // Generate the case expression and rebind variables after it.
         let result_var = self.fresh_temp_var("CondResult");
@@ -2692,11 +2887,59 @@ impl CoreErlangGenerator {
             &mut docs,
             &all_mutations,
             &result_var,
-            any_cv_mutated,
-            cv_before,
+            slots,
+            baseline,
         );
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Builds the `(true_arm, false_arm)` [`VtBranchPieces`] pair for one of
+    /// the three supported conditional selectors — the taken arm(s) from
+    /// [`Self::build_vt_conditional_branch_pieces`], the absent arm (for the
+    /// one-block forms) from
+    /// [`Self::build_vt_conditional_passthrough_pieces`].
+    ///
+    /// `Ok(None)` for an unsupported selector, or for a supported one whose
+    /// argument in a block position is not actually a block — both cases the
+    /// caller answers by returning what it has built so far, exactly as the
+    /// inline `match` this was extracted from did.
+    fn build_vt_conditional_arm_pieces(
+        &mut self,
+        selector_name: &str,
+        arguments: &[Expression],
+        all_mutations: &[String],
+        baseline: VtCondBaseline,
+    ) -> Result<Option<(VtBranchPieces, VtBranchPieces)>> {
+        let pair = match (selector_name, arguments) {
+            ("ifTrue:", [Expression::Block(block), ..]) => {
+                let tb = self.build_vt_conditional_branch_pieces(block, all_mutations, baseline)?;
+                let fb = Self::build_vt_conditional_passthrough_pieces(self, all_mutations);
+                (tb, fb)
+            }
+            ("ifFalse:", [Expression::Block(block), ..]) => {
+                let passthrough =
+                    Self::build_vt_conditional_passthrough_pieces(self, all_mutations);
+                let fb = self.build_vt_conditional_branch_pieces(block, all_mutations, baseline)?;
+                (passthrough, fb)
+            }
+            (
+                "ifTrue:ifFalse:",
+                [
+                    Expression::Block(true_block),
+                    Expression::Block(false_block),
+                    ..,
+                ],
+            ) => {
+                let tb =
+                    self.build_vt_conditional_branch_pieces(true_block, all_mutations, baseline)?;
+                let fb =
+                    self.build_vt_conditional_branch_pieces(false_block, all_mutations, baseline)?;
+                (tb, fb)
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(pair))
     }
 
     /// BT-3177: whether `expr` is an `on:do:`/`ensure:` whose try/handler/
@@ -2976,13 +3219,13 @@ impl CoreErlangGenerator {
                     // BT-2359: a non-last threaded loop/foldl that mutates a captured local
                     // returns {value, StateAcc}; extract and rebind the threaded locals so a
                     // later expression in this branch sees the update (value discarded).
-                    let threads_class_vars = self.vt_construct_threads_class_vars(body_expr);
+                    let extra_slot = self.vt_construct_extra_slot(body_expr);
                     let loop_doc = self.expression_doc(body_expr)?;
                     let threaded_locals = self.vt_construct_threaded_locals(body_expr);
                     parts.push(self.emit_vt_loop_open_extraction(
                         loop_doc,
                         &threaded_locals,
-                        threads_class_vars,
+                        extra_slot,
                         body_expr.span(),
                         "BranchThreadedResult",
                         "BranchThreadedState",
@@ -3093,12 +3336,27 @@ impl CoreErlangGenerator {
         &mut self,
         block: &beamtalk_core::ast::Block,
         all_mutations: &[String],
-        cv_before: usize,
+        baseline: VtCondBaseline,
     ) -> Result<VtBranchPieces> {
+        let VtCondBaseline {
+            class_vars: cv_before,
+            self_vt: self_before,
+        } = baseline;
         self.push_scope();
         self.set_class_var_version(cv_before);
-        let result = self.build_vt_conditional_branch_pieces_inner(block, all_mutations, cv_before);
+        // BT-3484: `self_version` gets the identical save/reset/restore
+        // discipline as `class_var_version` here, and for the identical
+        // reason — the two arms are true SIBLINGS: each must start from the
+        // same baseline `Self{N}` (so both arms' `maps:put` chains source
+        // from the value live before the `case`), and neither may leak its
+        // own in-branch `Self{N+1}` binding — scoped inside that arm's own
+        // case clause — out to the code that follows the conditional. The
+        // post-`case` rebind in `rebind_vt_conditional_mutations` is what
+        // legitimately advances the outer version, exactly once.
+        self.set_self_version(self_before);
+        let result = self.build_vt_conditional_branch_pieces_inner(block, all_mutations, baseline);
         self.set_class_var_version(cv_before);
+        self.set_self_version(self_before);
         self.pop_scope();
         result
     }
@@ -3112,13 +3370,29 @@ impl CoreErlangGenerator {
         &mut self,
         block: &beamtalk_core::ast::Block,
         all_mutations: &[String],
-        cv_before: usize,
+        baseline: VtCondBaseline,
     ) -> Result<VtBranchPieces> {
+        let VtCondBaseline {
+            class_vars: cv_before,
+            self_vt: self_before,
+        } = baseline;
         let body = super::util::collect_body_exprs(&block.body);
 
         let mut preamble: Vec<Document<'static>> = Vec::new();
         for body_expr in &body {
-            if Self::is_local_var_assignment(body_expr) {
+            if self.is_vt_self_field_assignment(body_expr) {
+                // BT-3484: a value-type `self.field := ...` write. Emitted as
+                // an OPEN let-chain (`let _Val = … in let Self{N} =
+                // maps:put(…) in `) spliced straight into this arm's
+                // preamble, NOT as the `let _seqN = <closed expr> in ` the
+                // generic arm below would produce: the closed shape scopes
+                // the new `Self{N}` binding inside its own `let`'s RHS, so
+                // neither a later statement in this same branch nor the
+                // arm's own return tuple can see it — the compile-time
+                // `unbound variable 'Self1'` half of BT-3484.
+                let (doc, _val_var) = self.generate_field_assignment_open(body_expr)?;
+                preamble.push(doc);
+            } else if Self::is_local_var_assignment(body_expr) {
                 if let Expression::Assignment { target, value, .. } = body_expr {
                     if let Expression::Identifier(id) = target.as_ref() {
                         let core_var = self
@@ -3170,10 +3444,13 @@ impl CoreErlangGenerator {
         let local_values = Self::resolve_mutation_value_docs(self, all_mutations);
         let cv_after = self.class_var_version();
         let cv_mutated_version = (cv_after != cv_before).then_some(cv_after);
+        let self_after = self.self_version();
+        let self_mutated_version = (self_after != self_before).then_some(self_after);
         Ok(VtBranchPieces {
             preamble,
             local_values,
             cv_mutated_version,
+            self_mutated_version,
         })
     }
 
@@ -3188,6 +3465,7 @@ impl CoreErlangGenerator {
             preamble: Vec::new(),
             local_values: Self::resolve_mutation_value_docs(cg, all_mutations),
             cv_mutated_version: None,
+            self_mutated_version: None,
         }
     }
 
@@ -3205,21 +3483,30 @@ impl CoreErlangGenerator {
             .collect()
     }
 
-    /// BT-3159: Combines an arm's preamble with its finalized return value, appending a
-    /// trailing `ClassVars` slot (this arm's own resulting version if it mutated one,
-    /// else the unchanged baseline) when `any_cv_mutated` — i.e. when *either* sibling
-    /// arm threads a class var, both arms must agree on the tuple shape so the
+    /// BT-3159/BT-3484: Combines an arm's preamble with its finalized return value,
+    /// appending a trailing `ClassVars` slot when `any_cv_mutated` and/or a trailing
+    /// `Self{N}` slot when `any_self_mutated` (each carrying this arm's own resulting
+    /// version if it mutated that storage, else the unchanged baseline) — i.e. when
+    /// *either* sibling arm threads one, both arms must agree on the tuple shape so the
     /// `element/N` extraction after the case is valid regardless of which arm ran.
     ///
-    /// When `any_cv_mutated` is `false`, this renders byte-identically to the
+    /// Slot order is fixed: locals, then `ClassVars`, then `Self` — matching
+    /// [`Self::rebind_vt_conditional_mutations`]'s extraction order. In practice at most
+    /// one of the two trailing slots is ever present (a class method's `self.x :=` is a
+    /// class-var write, a value-type instance method's is a `Self` write), but the order
+    /// is defined rather than assumed.
+    ///
+    /// When both flags are `false`, this renders byte-identically to the
     /// pre-BT-3159 shape (bare value for one mutation, `{v1, v2, ...}` tuple otherwise).
     fn finish_vt_conditional_branch(
         pieces: VtBranchPieces,
-        any_cv_mutated: bool,
-        cv_before: usize,
+        slots: VtCondSlots,
+        baseline: VtCondBaseline,
     ) -> Document<'static> {
+        let (any_cv_mutated, any_self_mutated) = (slots.class_vars, slots.self_vt);
+        let (cv_before, self_before) = (baseline.class_vars, baseline.self_vt);
         let n_locals = pieces.local_values.len();
-        let return_doc = if !any_cv_mutated && n_locals == 1 {
+        let return_doc = if !any_cv_mutated && !any_self_mutated && n_locals == 1 {
             pieces
                 .local_values
                 .into_iter()
@@ -3227,22 +3514,41 @@ impl CoreErlangGenerator {
                 .unwrap_or(Document::Nil)
         } else {
             let mut tuple_parts: Vec<Document<'static>> = vec![Document::Str("{")];
+            let mut filled = 0usize;
             for (i, doc) in pieces.local_values.into_iter().enumerate() {
                 if i > 0 {
                     tuple_parts.push(Document::Str(", "));
                 }
                 tuple_parts.push(doc);
+                filled += 1;
             }
             if any_cv_mutated {
                 // This arm's own resulting ClassVars: its mutated version if it
                 // advanced the counter, else the baseline (unchanged) version
                 // inherited from before the conditional.
                 let cv_version = pieces.cv_mutated_version.unwrap_or(cv_before);
-                tuple_parts.push(Document::Str(", "));
+                if filled > 0 {
+                    tuple_parts.push(Document::Str(", "));
+                }
                 tuple_parts.push(leaf::var(super::util::versioned_var(
                     "ClassVars",
                     cv_version,
                 )));
+                filled += 1;
+            }
+            if any_self_mutated {
+                // BT-3484: this arm's own resulting `Self` — its mutated
+                // version if the arm performed a `self.field := ...` write,
+                // else the baseline (unchanged) version live before the
+                // `case`. Both arms carry the slot whenever EITHER does, for
+                // the same reason `any_cv_mutated` forces it: the `element/N`
+                // extraction after the `case` is fixed at compile time and
+                // runs whichever arm actually executed.
+                let self_version = pieces.self_mutated_version.unwrap_or(self_before);
+                if filled > 0 {
+                    tuple_parts.push(Document::Str(", "));
+                }
+                tuple_parts.push(leaf::var(super::util::versioned_var("Self", self_version)));
             }
             tuple_parts.push(Document::Str("}"));
             Document::Vec(tuple_parts)
@@ -3262,10 +3568,12 @@ impl CoreErlangGenerator {
         docs: &mut Vec<Document<'static>>,
         all_mutations: &[String],
         result_var: &str,
-        any_cv_mutated: bool,
-        cv_before: usize,
+        slots: VtCondSlots,
+        baseline: VtCondBaseline,
     ) {
-        if !any_cv_mutated && all_mutations.len() == 1 {
+        let (any_cv_mutated, any_self_mutated) = (slots.class_vars, slots.self_vt);
+        let (cv_before, self_before) = (baseline.class_vars, baseline.self_vt);
+        if !any_cv_mutated && !any_self_mutated && all_mutations.len() == 1 {
             // Single variable, no class-var threading: case returns the value directly.
             let var = &all_mutations[0];
             let core_var = Self::to_core_erlang_var(var);
@@ -3294,15 +3602,35 @@ impl CoreErlangGenerator {
                 ") in ",
             ]);
         }
+        let mut next_slot = all_mutations.len() + 1;
         if any_cv_mutated {
             self.set_class_var_version(cv_before);
             let new_cv = self.next_class_var();
-            let idx = all_mutations.len() + 1;
             docs.push(docvec![
                 "let ",
                 leaf::var(new_cv),
                 " = call 'erlang':'element'(",
-                leaf::int_lit(i64::try_from(idx).unwrap_or(i64::MAX)),
+                leaf::int_lit(i64::try_from(next_slot).unwrap_or(i64::MAX)),
+                ", ",
+                leaf::var(result_var.to_string()),
+                ") in ",
+            ]);
+            next_slot += 1;
+        }
+        if any_self_mutated {
+            // BT-3484: the merged `Self` becomes the method's new LIVE
+            // `Self{N}` for every statement after the conditional — the
+            // direct counterpart of Actor's `let State1 = element(2, _CF10)
+            // in`. `set_self_version(self_before)` first so the minted name
+            // is the single successor of the pre-`case` version, never of
+            // whichever arm happened to be generated last.
+            self.set_self_version(self_before);
+            let new_self = self.next_self_var();
+            docs.push(docvec![
+                "let ",
+                leaf::var(new_self),
+                " = call 'erlang':'element'(",
+                leaf::int_lit(i64::try_from(next_slot).unwrap_or(i64::MAX)),
                 ", ",
                 leaf::var(result_var.to_string()),
                 ") in ",

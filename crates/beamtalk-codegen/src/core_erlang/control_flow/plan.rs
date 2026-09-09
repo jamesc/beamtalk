@@ -180,6 +180,32 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     /// via its own recursive-call fun parameter instead, never consulting
     /// this field.
     pub initial_class_var: String,
+    /// BT-3484: `true` when this **Letrec** loop body threads a value-type
+    /// `Self` mutation (`self.field := ...` in
+    /// [`CodeGenContext::ValueType`], outside a class method) through the
+    /// loop's own recursive tail call — the `SelfVt` mirror of
+    /// `threads_class_vars`' Letrec shape, and threaded exactly the same
+    /// way: one extra, explicit trailing `letrec` fun parameter plus a
+    /// matching trailing slot on the loop's `{'nil', StateAcc, …}` result
+    /// tuple, never folded into `StateAcc`'s own map (`Self` is the
+    /// value-type instance map itself; folding the loop's `__local__` keys
+    /// into it would pollute the returned value object).
+    ///
+    /// Never `true` for a `Foldl*`-constructed plan (`allow_direct_params:
+    /// false`) — a fold's accumulator has no matching slot, exactly as
+    /// `threads_class_vars`' own Letrec/`Foldl*` split documents — and never
+    /// simultaneously with `threads_class_vars` (see
+    /// [`CoreErlangGenerator::loop_body_threads_value_self`]'s doc comment
+    /// for why the two gates are mutually exclusive), so the single extra
+    /// trailing tuple slot is unambiguous.
+    ///
+    /// Like `threads_class_vars`' Letrec shape, a body that sets this always
+    /// has `use_direct_params`/`use_tuple_acc`/`use_hybrid_params` all
+    /// `false` (a field write makes `BlockFacts::has_state_effects()` true,
+    /// and both `Hybrid` and `TupleAcc` exclude `ValueType` context
+    /// outright), so only the `StateAcc` base-path loop generators ever
+    /// consult it.
+    pub threads_value_self: bool,
 }
 
 /// Pre-computed body-effect predicates for threading strategy selection.
@@ -530,6 +556,13 @@ impl ThreadingPlan {
         };
         let initial_class_var = generator.current_class_var();
 
+        // BT-3484: the `SelfVt` mirror of `threads_class_vars`' Letrec
+        // branch above — Letrec-shaped plans only (`allow_direct_params`),
+        // for the same reason: a `Foldl*` accumulator has no trailing `Self`
+        // slot to carry the mutation out through.
+        let threads_value_self =
+            allow_direct_params && generator.loop_body_threads_value_self(body);
+
         Self {
             threaded_locals,
             initial_state_var,
@@ -544,6 +577,7 @@ impl ThreadingPlan {
             mutated_fields,
             threads_class_vars,
             initial_class_var,
+            threads_value_self,
         }
     }
 
@@ -742,11 +776,25 @@ impl ThreadingPlan {
     ///
     /// In direct-params mode (BT-1275) this is a no-op — returns `(Nil, initial_state_var)` since
     /// variables are passed as separate fun arguments instead.
+    ///
+    /// BT-3484: `threaded_locals.is_empty()` normally also short-circuits to
+    /// `initial_state_var` (nothing to pack) — but that name is the ambient
+    /// actor `State`, which does not exist in a value-type method. Before
+    /// this issue that only ever mattered for a loop no value-type method
+    /// could reach; a `to:do:` whose body's ONLY mutation is
+    /// `self.field := ...` reaches it now (`threads_value_self`), and
+    /// emitted `apply 'loop'/2 (Start, State)` — an `erlc`
+    /// "unbound variable 'State'" compile crash. Such a loop packs from a
+    /// fresh `maps:new()` too, exactly like the has-locals value-type case
+    /// immediately below.
     pub fn generate_pack_prefix(
         &self,
         generator: &mut CoreErlangGenerator,
     ) -> (Document<'static>, String) {
-        if self.threaded_locals.is_empty() || self.use_direct_params || self.use_hybrid_params {
+        if self.use_direct_params || self.use_hybrid_params {
+            return (Document::Nil, self.initial_state_var.clone());
+        }
+        if self.threaded_locals.is_empty() && !self.threads_value_self {
             return (Document::Nil, self.initial_state_var.clone());
         }
         let mut pack_docs: Vec<Document<'static>> = Vec::new();

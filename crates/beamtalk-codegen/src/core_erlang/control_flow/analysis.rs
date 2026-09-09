@@ -110,6 +110,106 @@ impl CoreErlangGenerator {
         self.find_class_var_mutating_stmt(body).is_some()
     }
 
+    /// BT-3484: whether a Letrec loop body threads a value-type `Self`
+    /// mutation (`self.field := ...` in [`CodeGenContext::ValueType`])
+    /// through the loop's own recursive tail call — the `SelfVt` mirror of
+    /// [`Self::loop_body_threads_class_vars`], deliberately built the same
+    /// (narrow, top-level-statement-only) way and for the same reason: an
+    /// extra `letrec` fun parameter can only carry a rebind that the loop
+    /// body's own STATEMENT sequence actually produces, never one scoped
+    /// inside some larger sub-expression's own nested `let` (see
+    /// [`Self::find_class_var_mutating_stmt`]'s doc comment for the
+    /// empirically-confirmed unbound-variable regression that narrowing
+    /// prevents).
+    ///
+    /// Mutually exclusive with [`Self::loop_body_threads_class_vars`] by
+    /// construction — that one requires `in_class_method()`, this one
+    /// excludes it (inside a class method `self.x :=` is a CLASS-var write,
+    /// [`FieldWriteSite::ClassVar`](super::FieldWriteSite::ClassVar), which
+    /// already has its own threading) — so the two never both claim the
+    /// loop's single extra trailing tuple slot.
+    ///
+    /// Shared by [`ThreadingPlan::new_impl`] (which turns it into
+    /// `ThreadingPlan::threads_value_self`) and the value-type loop-open
+    /// consumers in `value_type_codegen.rs`, so the routing decision and the
+    /// tuple-shape decision can never independently drift out of sync
+    /// (CLAUDE.md's no-duplicate-implementations rule) — exactly the
+    /// arrangement `loop_body_threads_class_vars` already has.
+    ///
+    /// **Accepted scope limit, inherited from that same narrowing:** a field
+    /// write buried inside a NESTED construct in the loop body — most
+    /// notably `1 to: n do: [:i | flag ifTrue: [self.total := ...]]` — is not
+    /// a top-level statement, so this returns `false` and the loop threads no
+    /// `Self`; the conditional's own `Self{N}` rebind stays scoped to its own
+    /// nested `let` and the mutation is silently lost. That is exactly the
+    /// class-var precedent's own accepted, separately-pinned behavior for the
+    /// identical shape (`class_var_sub_expr_test.bt`'s
+    /// `testTickInLoopConditionalCompilesAndRuns`, BT-2308 — see
+    /// [`Self::nested_loop_lost_class_var_mutation`]'s doc comment on why
+    /// widening the predicate instead produced real unbound-variable
+    /// regressions), and is deliberately out of BT-3484's scope.
+    pub(in crate::core_erlang) fn loop_body_threads_value_self(
+        &self,
+        body: &beamtalk_core::ast::Block,
+    ) -> bool {
+        self.find_value_self_mutating_stmt(body).is_some()
+    }
+
+    /// Shared predicate behind [`Self::loop_body_threads_value_self`] and
+    /// [`Self::nested_loop_lost_value_self_mutation`] (BT-3484) — returns
+    /// the first top-level statement of `body` that is a value-type
+    /// `self.field := ...` write, or `None` if there isn't one. The `SelfVt`
+    /// mirror of [`Self::find_class_var_mutating_stmt`]; see
+    /// [`Self::loop_body_threads_value_self`] for why it is deliberately
+    /// top-level-only.
+    fn find_value_self_mutating_stmt<'a>(
+        &self,
+        body: &'a beamtalk_core::ast::Block,
+    ) -> Option<&'a Expression> {
+        if self.in_class_method() || !matches!(self.context, CodeGenContext::ValueType) {
+            return None;
+        }
+        let filtered_body = super::super::util::collect_body_exprs(&body.body);
+        filtered_body
+            .into_iter()
+            .find(|expr| Self::is_field_assignment(expr))
+    }
+
+    /// BT-3484: the `SelfVt` mirror of
+    /// [`Self::nested_loop_lost_class_var_mutation`] — if `expr` is itself a
+    /// nested Letrec-shaped loop whose own body would thread a value-type
+    /// `Self` mutation through its own recursive tail call, returns a short
+    /// description of that mutation for
+    /// [`CodeGenError::ValueSelfMutationLostAcrossNestedLoop`](super::super::CodeGenError::ValueSelfMutationLostAcrossNestedLoop)'s
+    /// message.
+    ///
+    /// Same deliberate scope limit, for the same reason: nothing unpacks a
+    /// nested loop's own trailing `Self` tuple slot back into the enclosing
+    /// loop body's statement sequence, so the inner loop's mutation would be
+    /// silently discarded (exactly the BT-3484 bug class this issue fixes at
+    /// one level). Rejecting it cleanly is consistent with the class-var
+    /// precedent; making arbitrary nesting work is explicitly out of scope.
+    ///
+    /// Only the `Letrec` shape is checked: a `Foldl*` (`do:`/`collect:`/…)
+    /// body's value-type field write has no `Self` threading of its own to
+    /// lose here — `generate_field_assignment_open` never threads one
+    /// through a fold accumulator — so it is handled (and rejected, where
+    /// unsupported) by the pre-existing paths, unchanged by this issue.
+    pub(super) fn nested_loop_lost_value_self_mutation(&self, expr: &Expression) -> Option<String> {
+        let (body, shape) = Self::nested_loop_or_fold_body(expr)?;
+        if !matches!(shape, NestedLoopShape::Letrec) {
+            return None;
+        }
+        let mutating_stmt = self.find_value_self_mutating_stmt(body)?;
+        let Expression::Assignment { target, .. } = mutating_stmt else {
+            return None;
+        };
+        let Expression::FieldAccess { field, .. } = target.as_ref() else {
+            return None;
+        };
+        Some(format!("field 'self.{}'", field.name))
+    }
+
     /// Shared predicate behind [`Self::loop_body_threads_class_vars`] and
     /// [`Self::nested_loop_lost_class_var_mutation`] (BT-3172) — returns the
     /// first top-level statement of `body` that is a bare class-var

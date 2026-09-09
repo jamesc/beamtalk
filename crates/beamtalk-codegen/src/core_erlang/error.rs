@@ -188,6 +188,39 @@ pub enum CodeGenError {
         location: String,
     },
 
+    /// BT-3484: the value-type (`Self`-threading) mirror of
+    /// [`Self::ClassVarMutationLostAcrossNestedLoop`]. A `Letrec`-shaped
+    /// loop nested inside another one, where the inner loop's own body
+    /// threads a `self.field := ...` value-type mutation through its own
+    /// recursive tail call, but the outer loop's own top-level statements
+    /// don't independently trigger `Self` threading. Nothing unpacks a
+    /// nested loop's trailing `Self` tuple slot back into the outer loop, so
+    /// the mutation would be silently discarded once the inner loop exits.
+    #[error(
+        "Cannot mutate {mutation} inside a loop nested inside another loop, at {location}.\n\n\
+             The inner loop's own mutation would be threaded correctly on its own, but the outer \
+             loop (whileTrue:/whileFalse:/timesRepeat:/to:do:/to:by:do:) has no field mutation of \
+             its own to carry it back out — so it is silently discarded once the inner loop \
+             finishes.\n\n\
+             Fix: Accumulate into a local variable across both loops, then mutate the field once \
+             after the outer loop finishes:\n\
+             \x20 // Instead of:\n\
+             \x20 1 to: n do: [:i |\n\
+             \x20   1 to: n do: [:j | self.total := self.total + 1]].\n\
+             \x20 \n\
+             \x20 // Write:\n\
+             \x20 delta := 0.\n\
+             \x20 1 to: n do: [:i |\n\
+             \x20   1 to: n do: [:j | delta := delta + 1]].\n\
+             \x20 self.total := self.total + delta."
+    )]
+    ValueSelfMutationLostAcrossNestedLoop {
+        /// Description of the inner loop's mutation (e.g. "field 'self.total'").
+        mutation: String,
+        /// Source location.
+        location: String,
+    },
+
     /// Field assignment in a block that can't thread state back — whether the block is
     /// assigned to a variable, passed as an argument, or returned.
     #[error(

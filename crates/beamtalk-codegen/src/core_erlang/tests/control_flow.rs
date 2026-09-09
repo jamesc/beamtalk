@@ -2663,3 +2663,278 @@ fn test_local_var_assignment_with_tier2_block_value_call_inside_conditional_bran
          Got:\n{code}"
     );
 }
+
+// ─── BT-3484: value-type `Self` threading through loops and conditionals ────
+//
+// `CodeGenContext::ValueType` reaches `self.field := value` only via the
+// documented, permanent `TestCase` exemption (BT-1533; see
+// `check_value_slot_assignment` in `beamtalk-core`'s `class_validators.rs`) —
+// a genuine `Value subclass:` rejects the write outright (ADR 0042). So every
+// fixture below is a `TestCase subclass:`, matching the only shape a user can
+// actually write. The runtime ground truths for these exact shapes are pinned
+// in `stdlib/test/value_type_mutation_matrix_test.bt`'s BT-3176 axis-4 cells.
+
+#[test]
+fn test_value_type_field_write_in_to_do_threads_self_through_tail_call() {
+    // Before BT-3484 the loop's `letrec 'loop'/2 = fun (_loopidx, StateAcc)`
+    // carried only the outer-locals map: the body's own
+    // `let Self1 = maps:put('total', _Val, Self) in` was correct but never
+    // reached the recursive `apply`, so every iteration discarded it and the
+    // method's trailing `self.total` read the ORIGINAL `Self` parameter.
+    // Compiled fine; returned 0 instead of 15.
+    let src = concat!(
+        "TestCase subclass: VtLoopSelfThread\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    seen := 0\n",
+        "    1 to: 5 do: [:i |\n",
+        "      self.total := self.total + i\n",
+        "      seen := seen + 1\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtloopselfthread").with_workspace_mode(true),
+    )
+    .expect("value-type field write inside to:do: must compile");
+
+    assert!(
+        code.contains("fun (_loopidx3, StateAcc, Self)"),
+        "the loop's letrec fun must take `Self` as an extra trailing parameter. Got:\n{code}"
+    );
+    assert!(
+        code.contains("apply 'loop'/3 (call 'erlang':'+'(_loopidx3, 1), StateAcc1, Self1)"),
+        "the recursive tail call must carry the body's own mutated Self1 forward. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'nil', StateAcc, Self}"),
+        "the exit arm must return the fun's own incoming Self in the trailing slot. Got:\n{code}"
+    );
+    assert!(
+        code.contains("let Self1 = call 'erlang':'element'(3,"),
+        "the post-loop rebind must extract the threaded Self from tuple slot 3. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'get'('total', Self1)"),
+        "the method's trailing field read must see the post-loop Self1, not the \
+         original Self parameter. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@vtloopselfthread", &code);
+}
+
+#[test]
+fn test_value_type_field_only_loop_packs_from_fresh_map_not_state() {
+    // BT-3484, second manifestation: a loop whose ONLY mutation is the field
+    // write has no threaded locals at all, so `generate_pack_prefix`
+    // short-circuited to the ambient `initial_state_var` — the actor `State`,
+    // which does not exist in a value-type method. `erlc` rejected the result
+    // with "unbound variable 'State'".
+    let src = concat!(
+        "TestCase subclass: VtLoopSelfOnly\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    1 to: 5 do: [:i | self.total := self.total + i]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtloopselfonly").with_workspace_mode(true),
+    )
+    .expect("a field-write-only value-type loop must compile");
+
+    assert!(
+        code.contains("call 'maps':'new'()"),
+        "a value-type loop must pack its accumulator from a fresh map. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("(_temp1, State)"),
+        "the initial apply must never pass the (nonexistent) actor State. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@vtloopselfonly", &code);
+}
+
+#[test]
+fn test_value_type_field_write_in_if_true_merges_self_out_of_branch() {
+    // Before BT-3484 the true arm bound `Self1` inside its own nested `let`
+    // while the code AFTER the `case` referenced it unconditionally — `erlc`
+    // rejected the whole module with "unbound variable 'Self1'". The fix
+    // gives the branch-merge tuple a trailing `Self` slot both arms carry.
+    let src = concat!(
+        "TestCase subclass: VtCondSelfThread\n",
+        "  field: total = 0\n\n",
+        "  computeTotal: flag =>\n",
+        "    seen := 0\n",
+        "    flag ifTrue: [\n",
+        "      self.total := self.total + 7\n",
+        "      seen := seen + 1\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtcondselfthread").with_workspace_mode(true),
+    )
+    .expect("value-type field write inside ifTrue: must compile");
+
+    assert!(
+        code.contains("{Seen, Self1}"),
+        "the taken arm must return its own mutated Self in the merge tuple. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{Seen, Self}"),
+        "the untaken arm must pass the pre-case Self through the same slot. Got:\n{code}"
+    );
+    assert!(
+        code.contains("let Self1 = call 'erlang':'element'(2,"),
+        "the post-case rebind must extract the merged Self. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'get'('total', Self1)"),
+        "the trailing field read must see the merged Self1. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@vtcondselfthread", &code);
+}
+
+#[test]
+fn test_value_type_field_write_in_if_true_if_false_merges_both_arms() {
+    let src = concat!(
+        "TestCase subclass: VtCondBothSelfThread\n",
+        "  field: total = 0\n\n",
+        "  computeTotal: flag =>\n",
+        "    flag\n",
+        "      ifTrue: [self.total := self.total + 7]\n",
+        "      ifFalse: [self.total := self.total + 100]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtcondbothselfthread").with_workspace_mode(true),
+    )
+    .expect("value-type field writes in both conditional arms must compile");
+
+    // No outer-local mutation at all here: the merge tuple's only slot is
+    // `Self`, so each arm returns a 1-tuple and the rebind reads element 1.
+    assert!(
+        code.contains("let Self1 = call 'erlang':'element'(1,"),
+        "with no threaded locals the merged Self is the tuple's only slot. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'get'('total', Self1)"),
+        "the trailing field read must see the merged Self1. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@vtcondbothselfthread", &code);
+}
+
+#[test]
+fn test_value_type_field_write_in_nested_loop_is_compile_error() {
+    // BT-3484's accepted scope limit, mirroring BT-3172's identical one for
+    // class vars (`ClassVarMutationLostAcrossNestedLoop`): the inner loop
+    // threads its own `Self` correctly, but nothing unpacks a nested loop's
+    // trailing `Self` slot back into the OUTER loop's statement sequence, so
+    // the mutation would be silently discarded. Rejected cleanly instead.
+    let src = concat!(
+        "TestCase subclass: VtNestedLoopSelf\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      1 to: 3 do: [:j | self.total := self.total + j]\n",
+        "      seen := seen + 1\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtnestedloopself").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ValueSelfMutationLostAcrossNestedLoop { mutation, .. }) => {
+            assert_eq!(mutation, "field 'self.total'");
+        }
+        other => panic!(
+            "Expected ValueSelfMutationLostAcrossNestedLoop for a value-type field write \
+             inside a loop nested inside another loop. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_value_type_field_write_in_last_position_conditional_still_rejected() {
+    // BT-3484's deliberate boundary: the LAST-position conditional path
+    // (`emit_vt_conditional_case_to_var`) and the assignment-RHS path
+    // (`emit_vt_conditional_assign_rhs`) thread outer LOCALS only, never
+    // `Self` — routing a field write into either would silently drop it
+    // (last position) or emit an `erlc`-rejected reference to a branch-scoped
+    // `Self{N}` (assign RHS). Both are strictly worse than the clean
+    // pre-BT-3484 diagnostic, so
+    // `is_conditional_with_vt_self_field_threading` (and hence
+    // `VtBodyExprKind::ConditionalWithSelfFieldThreading`) is scoped to the
+    // non-last statement position only, and these shapes keep erroring.
+    let src = concat!(
+        "TestCase subclass: VtCondSelfLast\n",
+        "  field: total = 0\n\n",
+        "  computeTotal: flag =>\n",
+        "    flag ifTrue: [self.total := self.total + 7]\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtcondselflast").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "a value-type field write in a LAST-position conditional stays a clean compile \
+         error, not a silent drop. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_value_type_field_write_in_conditional_nested_in_loop_compiles() {
+    // BT-3484's other accepted scope limit, inherited verbatim from the
+    // class-var precedent (`class_var_sub_expr_test.bt`'s
+    // `testTickInLoopConditionalCompilesAndRuns`, BT-2308): the field write
+    // is not a TOP-LEVEL statement of the loop body, so
+    // `loop_body_threads_value_self` reports `false` and the loop threads no
+    // `Self` — the conditional's own rebind stays scoped to its nested `let`
+    // and the mutation is lost. Pinned here as compiling cleanly (no erlc
+    // crash, no verifier violation), matching that precedent exactly, rather
+    // than silently regressing into one.
+    let src = concat!(
+        "TestCase subclass: VtCondInLoopSelf\n",
+        "  field: total = 0\n\n",
+        "  computeTotal: flag =>\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      flag ifTrue: [self.total := self.total + i]\n",
+        "      seen := seen + 1\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtcondinloopself").with_workspace_mode(true),
+    )
+    .expect("a field write nested inside a conditional inside a loop must still compile");
+    assert!(
+        !code.contains("apply 'loop'/3"),
+        "the loop must NOT grow a Self parameter for a non-top-level write. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@vtcondinloopself", &code);
+}
