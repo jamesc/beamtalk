@@ -243,8 +243,8 @@ impl ProtocolClient {
     ///
     /// Transcript push messages are printed inline to stdout with a `│ `
     /// gutter prefix at the start of each line so they are visually distinct
-    /// from eval results. `reload_check`/`completed` pushes (ADR 0105 Phase
-    /// 1) render the reload-induced re-check notice the same way
+    /// from eval results. `reload_check`/`completed` pushes (ADR 0105
+    /// Phase 1) render the reload-induced re-check notice the same way
     /// the ADR's demo shows it — asynchronous, interleaved with whatever the
     /// REPL is doing, since the re-check that produced it runs on the
     /// install path of a *different* session's save as easily as this one's.

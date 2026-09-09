@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Static site generation for the Beamtalk package registry index (BT-2990).
+//! Static site generation for the Beamtalk package registry index.
 //!
 //! **DDD Context:** CLI / Documentation
 //!
 //! A read-only rendering layer over the registry index format introduced by
-//! BT-2978 (`crate::commands::deps::registry`) — no server involved, the same
+//! (`crate::commands::deps::registry`) — no server involved, the same
 //! way the index itself is nothing more than a git repository. Mirrors the
 //! existing `beamtalk doc --site` generator
 //! (`crate::commands::doc::{renderer,layout,assets,site}`): hand-rolled

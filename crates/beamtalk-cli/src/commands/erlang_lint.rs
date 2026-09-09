@@ -9,7 +9,7 @@
 //!
 //! 1. Missing `-moduledoc` attribute (EEP-59)
 //! 2. Missing `-doc` attribute on exported functions (EEP-59)
-//! 3. Hardcoded `'bt@...'` module references (BT-1730)
+//! 3. Hardcoded `'bt@...'` module references
 
 use camino::{Utf8Path, Utf8PathBuf};
 
@@ -550,7 +550,7 @@ mod tests {
     #[test]
     fn keyword_call_in_body_not_mistaken_for_definition() {
         // A keyword-form function call inside a body must not be flagged
-        // as an undocumented definition. This is the core BT-2053 scenario.
+        // as an undocumented definition.
         let source = "\
 -module(t).
 -moduledoc \"\".

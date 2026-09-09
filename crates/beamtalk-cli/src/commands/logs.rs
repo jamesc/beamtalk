@@ -441,7 +441,7 @@ mod tests {
 
     // Documents the invariant that `real_home_guard`/`WorkspaceFixture` tests
     // in this module never run concurrently with a `BeamtalkHomeOverride`
-    // test (BT-3370's guard pattern), mirroring `attach.rs`'s own test module.
+    // test (the guard pattern), mirroring `attach.rs`'s own test module.
     #[test]
     fn real_home_guard_is_available_for_direct_use() {
         let _guard = real_home_guard();

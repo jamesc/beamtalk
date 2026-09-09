@@ -36,7 +36,7 @@ pub fn run(
         miette::bail!("no .bt source files found in '{path}'");
     }
 
-    // BT-2867: Populate the FFI type registry the same way `beamtalk lint` does,
+    // Populate the FFI type registry the same way `beamtalk lint` does,
     // so calls to specced Erlang functions (and expressions consuming their
     // results) are reported as typed rather than misreported as `Dynamic`.
     // Falls back to the runtime/stdlib ebin scan (mirroring `extract_type_specs`'s
@@ -255,7 +255,7 @@ fn collect_coverage_files(source_path: &Utf8Path, path: &str) -> Result<Vec<Utf8
 
     let all_files = collect_source_files_from_dir(search_dir)?;
 
-    // Exclude common non-project directories. `stubs/` (ADR 0075, BT-1847)
+    // Exclude common non-project directories. `stubs/` (ADR 0075)
     // is type-only and never compiled — a `declare native:` block there
     // would otherwise be swept in and rejected as a hard error.
     let excluded_prefixes: Vec<Utf8PathBuf> = [

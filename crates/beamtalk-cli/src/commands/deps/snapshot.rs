@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Dependency-graph snapshot for structural freshness detection (BT-3009).
+//! Dependency-graph snapshot for structural freshness detection.
 //!
 //! **DDD Context:** Build System
 //!
 //! The freshness heuristics in [`super::deps_are_fresh`] are all *value*
-//! comparisons: mtimes, ebin presence, provenance stamps, and (BT-2994) each
+//! comparisons: mtimes, ebin presence, provenance stamps, and each
 //! git/registry dep's locked version or reference. None of them notice a
 //! **structural** change to the dependency graph — one where a dependency's
 //! declared *source type* changes while its name stays put.

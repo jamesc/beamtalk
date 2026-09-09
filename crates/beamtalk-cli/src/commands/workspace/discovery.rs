@@ -193,7 +193,7 @@ mod tests {
         // whether a `.beamtalk` marker is global config or a real project
         // marker — a concurrent `BeamtalkHomeOverride` would make it treat
         // the real `~/.beamtalk` as a project marker instead of skipping it,
-        // exactly the false positive this test guards against (BT-3370).
+        // exactly the false positive this test guards against.
         let _guard = crate::commands::test_support::real_home_guard();
         let home = dirs::home_dir().expect("home dir");
         let global = home.join(".beamtalk");

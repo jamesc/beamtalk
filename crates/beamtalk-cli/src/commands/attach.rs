@@ -250,8 +250,7 @@ mod tests {
 
     // Ensure `real_home_guard` stays referenced: `WorkspaceFixture` already
     // holds it internally, but importing it here documents the invariant
-    // for readers scanning this module's test imports (BT-3370's guard
-    // pattern).
+    // for readers scanning this module's test imports.
     #[test]
     fn real_home_guard_is_available_for_direct_use() {
         let _guard = real_home_guard();

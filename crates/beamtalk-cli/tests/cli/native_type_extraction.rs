@@ -1,16 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Regression test for BT-2861: the spec-extraction worker's `-pa` list must
+//! Regression test: the spec-extraction worker's `-pa` list must
 //! include the current project's own native ebin directory.
 //!
 //! A package's native Erlang code can be split across sibling modules (ADR
 //! 0072 "package-bundled native code") where one module's `-spec` references
 //! another module's exported `-type t()` (tagged with `'$beamtalk_class'`,
-//! ADR 0075). Before the fix, `spawn_build_worker_for_specs` only added the
-//! Beamtalk runtime's own ebin directories to the extraction worker's code
-//! path, so `code:which/1` could not find the sibling module and the
-//! reference collapsed to `Dynamic` — degrading `{ok, T} | {error, E}` to a
+//! ADR 0075). Without the project's own ebin directory on the extraction
+//! worker's code path, `code:which/1` cannot find the sibling module and the
+//! reference collapses to `Dynamic` — degrading `{ok, T} | {error, E}` to a
 //! bare `Result` instead of the parameterized `Result(T, E)`.
 
 use crate::cli_common;
