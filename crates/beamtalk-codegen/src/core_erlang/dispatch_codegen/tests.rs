@@ -14,6 +14,30 @@ fn s() -> Span {
     Span::new(0, 0)
 }
 
+/// BT-3474: `character_typed` must precede `protoobject`/`object` in
+/// `HANDLERS` — those two unconditionally claim `class`/`respondsTo:`/
+/// `perform:` family selectors for *any* receiver (keyed on runtime
+/// `class_of/1`), so a Character-typed receiver's `class`/`respondsTo:`/
+/// `perform:` send would be wrongly resolved by them before
+/// `try_handle_character_typed_message` ever got a chance to override it.
+/// `try_handle_character_typed_message` itself skips this entry by *name*
+/// when re-running the rest of the chain (not by slicing past a hardcoded
+/// index), so this ordering is the one remaining position-sensitive part —
+/// a reorder that violates it fails loudly here instead of miscompiling
+/// Character-typed sends silently.
+#[test]
+fn character_typed_handler_precedes_protoobject_and_object() {
+    let index_of = |name: &str| {
+        super::HANDLERS
+            .iter()
+            .position(|(n, _)| *n == name)
+            .unwrap_or_else(|| panic!("no HANDLERS entry named {name:?}"))
+    };
+    let character_typed = index_of("character_typed");
+    assert!(character_typed < index_of("protoobject"));
+    assert!(character_typed < index_of("object"));
+}
+
 /// The classifier must stay in sync with the actual reachable auto-exports
 /// on generated class modules. `class_name/0` is reachable via plain
 /// self-send and must short-circuit to a direct call; `superclass` moved to
