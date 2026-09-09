@@ -27,10 +27,10 @@ use ecow::EcoString;
 /// as legal Core Erlang atoms and are dropped from xref / dispatch tables.
 pub(in crate::core_erlang) const MAX_ATOM_BYTES: usize = 255;
 
-/// BT-3217 (ADR 0115 Phase 2): the xref `recv_type` write-path vocabulary a
+/// ADR 0115 Phase 2: the xref `recv_type` write-path vocabulary a
 /// message send's receiver `InferredType` projects onto — see
 /// [`project_recv_type`] and `build_method_xref_entry`'s doc for the full
-/// rule, and this PR's description for the `Meta{C}` decision.
+/// rule.
 enum RecvType {
     /// A concrete class-or-protocol name — `Known` resolving to exactly one
     /// name whose provenance the read path can trust (`Declared`,
@@ -42,14 +42,14 @@ enum RecvType {
     /// `beamtalk_class_registry:class_object_tag/1` rather than falling into
     /// the "otherwise unresolved" bucket by omission (spike §1e).
     ClassObject(EcoString),
-    /// BT-3215: a `Union{members}` receiver where *every* member itself
+    /// A `Union{members}` receiver where *every* member itself
     /// resolves to a single name or class-object tag (never `Dynamic`) —
     /// the already-rendered atoms, sorted and deduplicated. The read path's
     /// `is_relevant/3` treats this with OR-semantics: relevant iff *any*
     /// member is relevant, since the receiver could be any one of them at
     /// runtime.
     Union(Vec<EcoString>),
-    /// BT-3215: same resolution rule as [`RecvType::Union`], for
+    /// Same resolution rule as [`RecvType::Union`], for
     /// `Intersection{members}`. The read path uses AND-semantics: relevant
     /// only if *every* member is relevant, since the receiver must
     /// simultaneously satisfy all of them.
@@ -65,7 +65,7 @@ enum RecvType {
     Dynamic,
 }
 
-/// BT-3217 (ADR 0115 Phase 2) write-path projection rule (spike §1e/§4):
+/// ADR 0115 Phase 2 write-path projection rule (spike §1e/§4):
 /// projects one message send's receiver `InferredType` — looked up from the
 /// type checker's `TypeMap` by the receiver's span — onto [`RecvType`].
 fn project_recv_type(ty: &InferredType) -> RecvType {
@@ -85,7 +85,7 @@ fn project_recv_type(ty: &InferredType) -> RecvType {
             | TypeProvenance::Substituted(_) => RecvType::Name(class_name.clone()),
         },
         InferredType::Meta { class_name, .. } => RecvType::ClassObject(class_name.clone()),
-        // BT-3215: project each member the same way a single-name receiver
+        // Project each member the same way a single-name receiver
         // would be projected; if every member resolves cleanly, key on the
         // member list instead of coarsening the whole composed type away.
         InferredType::Union { members, .. } => project_composed(members, RecvType::Union),
@@ -98,7 +98,7 @@ fn project_recv_type(ty: &InferredType) -> RecvType {
     }
 }
 
-/// BT-3215: shared `Union`/`Intersection` projection — resolves each member
+/// Shared `Union`/`Intersection` projection — resolves each member
 /// to the same single atom [`recv_type_atom`] would render for it as a
 /// standalone receiver, via [`project_recv_type`] recursively. A nested
 /// composed type or anything else that isn't a clean single name (`Dynamic`,
@@ -134,7 +134,7 @@ fn project_composed(members: &[InferredType], make: fn(Vec<EcoString>) -> RecvTy
 /// Renders a [`RecvType`] as the Core Erlang literal baked into a
 /// `method_xref` send entry's `recv_type` field: a bare atom for
 /// `Name`/`ClassObject`/`Dynamic`, or a `{'union' | 'intersection',
-/// [Atom, ...]}` tuple for a composed type (BT-3215). Falls back to
+/// [Atom, ...]}` tuple for a composed type. Falls back to
 /// `'dynamic'` for a name that would exceed the `MAX_ATOM_BYTES` cap —
 /// `project_composed` already
 /// enforces this per member, so `Union`/`Intersection` never reach here with
@@ -154,7 +154,7 @@ fn recv_type_atom(recv_type: &RecvType) -> Document<'static> {
 }
 
 /// Renders a `[Atom, ...]` Core Erlang list of already-resolved member
-/// names for a `Union`/`Intersection` `recv_type` (BT-3215) — the shared
+/// names for a `Union`/`Intersection` `recv_type` — the shared
 /// bracket/comma-join helper the two `recv_type_atom` composed-type arms
 /// use, mirroring `meta_type_repr_list_doc`'s bracket/join pattern.
 fn recv_type_name_list_doc(names: &[EcoString]) -> Document<'static> {
@@ -163,7 +163,7 @@ fn recv_type_name_list_doc(names: &[EcoString]) -> Document<'static> {
 }
 
 impl CoreErlangGenerator {
-    /// ADR 0087 Phase 2 (BT-2298): Builds the `method_xref` list document baked
+    /// ADR 0087 Phase 2: Builds the `method_xref` list document baked
     /// into `register_class/0`'s `ClassInfo` (via `BuilderState.methodXref`).
     ///
     /// One entry per primary method (instance- and class-side). Each entry
@@ -176,7 +176,7 @@ impl CoreErlangGenerator {
     /// ([`beamtalk_core::method_source_walker::find_all_sends_in_source`] and
     /// [`beamtalk_core::method_source_walker::find_all_references_in_source`]).
     /// Those operate on a plain `unparse_method(method)` of the method — *not*
-    /// [`Self::extract_method_source`], which (BT-3249) strips any
+    /// [`Self::extract_method_source`], which strips any
     /// writeback-inferred `-> Type` annotation for the human-facing browsable
     /// source. xref/`referencesTo:` deliberately keeps such annotations (an
     /// inferred return type is still a real type reference), so this walk's
@@ -189,7 +189,7 @@ impl CoreErlangGenerator {
     /// Hand-written rows carry `source_status => indexed` and *omit* the
     /// optional `synthetic_origin` key (never emitted as a `null` sentinel).
     ///
-    /// ADR 0087 Phase 6 (BT-2304): compiler-generated auto-accessors for
+    /// ADR 0087 Phase 6: compiler-generated auto-accessors for
     /// `Value subclass:` classes (the `field/1` getters and `withField:/2`
     /// setters emitted by `value_type_codegen.rs`) have no user source text but
     /// are fully known to the compiler. They ride this same write path: their
@@ -210,21 +210,20 @@ impl CoreErlangGenerator {
         for method in class_methods {
             entries.push(self.build_method_xref_entry(method, true));
         }
-        // ADR 0087 Phase 6 (BT-2304): synthetic auto-accessor rows.
+        // ADR 0087 Phase 6: synthetic auto-accessor rows.
         entries.extend(self.build_synthetic_accessor_xref_entries(class));
-        // BT-3073: actor class-side `new`/`new:`/`spawn`/`spawnWith:` no longer
-        // get synthetic per-subclass rows here — BT-3071/BT-3072 lifted their
+        // Actor class-side `new`/`new:`/`spawn`/`spawnWith:` no longer
+        // get synthetic per-subclass rows here — a later change lifted their
         // bodies into real, source-backed class methods on `Actor` itself
         // (`stdlib/src/actor.bt`), so a subclass genuinely *inherits* them
         // rather than *defining* them. `Actor`'s own compilation indexes them
         // through the normal `build_method_xref_entry` path above (real
         // `MethodDefinition`s, `source_status => indexed`); subclasses simply
-        // have no row for them, which is the honest Smalltalk answer — see
-        // BT-2614 (introduced the now-removed rows) and BT-3073 (retired them).
+        // have no row for them, which is the honest Smalltalk answer.
         docvec!["[", join(entries, &Document::Str(", ")), "]"]
     }
 
-    /// BT-3439: Builds the `state_var_xref` list document baked into
+    /// Builds the `state_var_xref` list document baked into
     /// `register_class/0`'s `ClassInfo` (via `BuilderState.stateVarXref`),
     /// analogous to [`Self::build_method_xref_list`] but for instance-variable
     /// (`state:`/`field:`) declarations rather than methods.
@@ -234,7 +233,7 @@ impl CoreErlangGenerator {
     /// [`Self::span_to_line`]) — `beamtalk_xref:register_state_vars/2` uses
     /// this so the VS Code Workspace Explorer sidebar's field goto
     /// (`beamtalk.navigateToStateVar`) can jump to the real declaration
-    /// instead of guessing via source-text regex (BT-3439).
+    /// instead of guessing via source-text regex.
     ///
     /// A slot whose span cannot be resolved to a line (should not happen for
     /// real source, only a defensive fallback) is skipped rather than
@@ -282,7 +281,7 @@ impl CoreErlangGenerator {
         // that fails `core_scan` at BEAM-compile time.
 
         // Unlike `extract_method_source` (used for the *browsable* `methodSource`/
-        // `classMethodSource` maps, BT-3249), this xref walk deliberately keeps any
+        // `classMethodSource` maps), this xref walk deliberately keeps any
         // writeback-inferred `-> Type` annotation: `find_all_references_in_source`
         // explicitly walks `method.return_type` to record type references for
         // `referencesTo:`/xref queries, and an inferred-but-unannotated return type
@@ -300,7 +299,7 @@ impl CoreErlangGenerator {
 
         let sends = find_all_sends_in_source(&source);
 
-        // BT-3217 (ADR 0115 Phase 2): a second, span-carrying walk over the
+        // ADR 0115 Phase 2: a second, span-carrying walk over the
         // *original* `method` (file-absolute spans, unlike `sends` above,
         // which comes from a re-unparsed/re-parsed synthetic copy — see the
         // ADR 0115 Phase 1 spike, docs/internal/adr-0115-phase1-spike-findings.md
@@ -400,7 +399,7 @@ impl CoreErlangGenerator {
     /// Multi-line block comments are tracked across lines so a continuation line
     /// (e.g. `   still inside the comment */`) is not mistaken for the signature.
     /// In practice the unparser emits `///`/`//` doc and line comments rather than
-    /// `/* */` blocks before a signature, so this is defensive (per BT-2298 review).
+    /// `/* */` blocks before a signature, so this is defensive.
     fn method_def_line(source: &str) -> u32 {
         let mut in_block_comment = false;
         for (idx, raw) in source.lines().enumerate() {

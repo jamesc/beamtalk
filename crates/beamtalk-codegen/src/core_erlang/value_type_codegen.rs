@@ -16,6 +16,7 @@ use std::fmt::Write as FmtWrite;
 use super::control_flow::{BodyKind, ThreadingPlan};
 use super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::intrinsics::validate_block_arity_exact;
+use super::method_frame::{MethodBoundary, MethodFrame};
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::value_accessors::{
@@ -1346,35 +1347,23 @@ impl CoreErlangGenerator {
         let mangled = method.selector.name().to_string();
         let arity = method.parameters.len() + 1; // +1 for Self
 
-        // BT-833: Reset Self-threading version so each method starts with Self (version 0).
-        self.reset_self_version();
-
         // Bind parameters via fresh_var (not to_core_var) so names go through
-        // the counter and can't collide with sequencing temp vars — BT-369
-        self.push_scope();
-        // BT-295: Track method params for @primitive codegen
-        self.current_method_params.clear();
-        // BT-2709: Reset arithmetic fast-path parameter-type tracking.
-        self.clear_method_param_types();
-        // BT-1435: Track current method selector for Logger intrinsic metadata.
-        self.current_method_selector = Some(method.selector.name().to_string());
+        // the counter and can't collide with sequencing temp vars.
+        let (mut frame, user_params) = MethodFrame::enter(
+            self,
+            method.selector.name().as_str(),
+            &method.parameters,
+            MethodBoundary::ValueType,
+        );
         let mut params = vec!["Self".to_string()];
-        for param in &method.parameters {
-            let var_name = self.fresh_var(&param.name.name);
-            self.current_method_params.push(var_name.clone());
-            // BT-2709: Record declared type for the arithmetic fast path.
-            self.record_method_param_type(&param.name.name, param.type_annotation.as_ref());
-            params.push(var_name);
-        }
+        params.extend(user_params);
 
-        // ADR 0101 / BT-2720: On a `native:` Object, a `self delegate` body
-        // lowers through the unified FFI boundary (`beamtalk_erlang_proxy:
+        // ADR 0101: On a `native:` Object, a `self delegate` body lowers
+        // through the unified FFI boundary (`beamtalk_erlang_proxy:
         // native_call/4`) carrying `{Class, Sel}` — instance methods prepend
         // `Self` to the arg list (`params` already starts with Self).
         if let Some(backing) = class_def.backing_module.as_ref() {
             if method.is_self_delegate() {
-                self.pop_scope();
-                self.current_method_selector = None;
                 let body = Self::native_delegate_body_doc(
                     backing.name.as_str(),
                     class_def.name.name.as_str(),
@@ -1383,33 +1372,35 @@ impl CoreErlangGenerator {
                 );
                 let params_doc = join(params.into_iter().map(leaf::var), &Document::Str(", "));
                 let mut fun_doc = docvec!["fun (", params_doc, ") ->\n    ", body, "\n"];
-                if let Some(line_num) = self.span_to_line(method.span) {
-                    fun_doc = self.annotate_with_line(fun_doc, line_num);
+                if let Some(line_num) = frame.span_to_line(method.span) {
+                    fun_doc = frame.annotate_with_line(fun_doc, line_num);
                 }
+                // `frame` drops here (pops the scope, restores the selector)
+                // on this early return, same as the fall-through path below.
                 return Ok(docvec![leaf::fname(mangled, arity), " = ", fun_doc, "\n"]);
             }
         }
 
-        // BT-754: Detect whether any block argument in this method body contains ^.
+        // Detect whether any block argument in this method body contains ^.
         // If so, set up a non-local return token so ^ inside blocks can throw to escape
         // the closure and return from the enclosing method.
-        let needs_nlr = self
+        let needs_nlr = frame
             .semantic_facts
             .has_block_nlr_or_walk(&method.span, &method.body);
 
         let nlr_token_var = if needs_nlr {
-            let token_var = self.fresh_temp_var("NlrToken");
-            self.set_current_nlr_token(Some(token_var.clone()));
+            let token_var = frame.fresh_temp_var("NlrToken");
+            frame.set_current_nlr_token(Some(token_var.clone()));
             Some(token_var)
         } else {
             None
         };
 
-        // Generate method body expressions.
-        // BT-833: Value types now support Self-threading for field assignments.
-        // Each `:=` produces a new Self{N} snapshot via maps:put (see generate_field_assignment).
-        // Field reads use current_self_var() to reference the latest snapshot.
-        // Filter out @expect directives — they are compile-time only and generate no code.
+        // Generate method body expressions. Value types support Self-threading
+        // for field assignments: each `:=` produces a new Self{N} snapshot via
+        // maps:put (see generate_field_assignment); field reads use
+        // current_self_var() to reference the latest snapshot. Filter out
+        // @expect directives — they are compile-time only and generate no code.
         let body = super::util::collect_body_exprs(&method.body);
 
         let has_nlr = nlr_token_var.is_some();
@@ -1417,17 +1408,21 @@ impl CoreErlangGenerator {
         // If filtering leaves no executable expressions, emit a safe fallback to
         // avoid generating an empty Core Erlang function body which would be
         // syntactically invalid (e.g., `fun (...) ->\n\n`).
-        // BT-1482: Capture result so we can clean up scope/NLR unconditionally,
-        // then propagate error afterwards.
+        // Capture the result so cleanup runs unconditionally before the `?`
+        // below propagates an error, same as on the success path.
         let body_result = if body.is_empty() {
-            Ok(self.generate_vt_empty_body(has_nlr))
+            Ok(frame.generate_vt_empty_body(has_nlr))
         } else {
-            self.generate_vt_body_exprs(&body, has_nlr)
+            frame.generate_vt_body_exprs(&body, has_nlr)
         };
 
-        self.pop_scope();
-        self.current_method_selector = None;
-        self.set_current_nlr_token(None);
+        frame.set_current_nlr_token(None);
+        // `frame` has a `Drop` impl, so it borrows `self` until this explicit
+        // drop (or the end of the function) rather than its last use under
+        // NLL — drop it now so `self` is free again below, and so the scope
+        // pop and selector restore run before `?` propagates an error, not
+        // only at the end of the function.
+        drop(frame);
 
         let body_parts = body_result?;
 

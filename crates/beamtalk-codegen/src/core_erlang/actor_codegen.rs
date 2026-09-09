@@ -12,6 +12,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
+use super::method_frame::{MethodBoundary, MethodFrame};
 use super::selector_mangler::{safe_class_method_fn_name, sealed_fn_name};
 use super::spec_codegen;
 use super::util::ClassIdentity;
@@ -511,72 +512,58 @@ impl CoreErlangGenerator {
                 continue;
             }
 
-            // Reset state version for this method
             let arity = method.selector.arity() + 2; // + Self + State
-            self.reset_state_version();
-            self.push_scope();
-            self.current_method_params.clear();
-            // BT-2709: Reset arithmetic fast-path parameter-type tracking.
-            self.clear_method_param_types();
 
             // Generate parameter list and populate current_method_params
-            // (needed for @primitive codegen which reads current_method_params)
-            let mut params = Vec::new();
-            for param in &method.parameters {
-                let var_name = self.fresh_var(&param.name.name);
-                self.current_method_params.push(var_name.clone());
-                // BT-2709: Record declared type for the arithmetic fast path.
-                self.record_method_param_type(&param.name.name, param.type_annotation.as_ref());
-                params.push(var_name);
-            }
+            // (needed for @primitive codegen which reads current_method_params).
+            let (mut frame, params) = MethodFrame::enter(
+                self,
+                selector_name.as_str(),
+                &method.parameters,
+                MethodBoundary::Actor,
+            );
 
             // Parameters, then Self, then State
-            let mut all_params: Vec<String> = params.clone();
+            let mut all_params: Vec<String> = params;
             all_params.push("Self".to_string());
             all_params.push("State".to_string());
 
-            // BT-761: Detect NLR in sealed method body
-            let needs_nlr = self
+            // Detect NLR in sealed method body
+            let needs_nlr = frame
                 .semantic_facts
                 .has_block_nlr_or_walk(&method.span, &method.body);
 
             let nlr_token_var = if needs_nlr {
-                let token_var = self.fresh_temp_var("NlrToken");
-                self.set_current_nlr_token(Some(token_var.clone()));
+                let token_var = frame.fresh_temp_var("NlrToken");
+                frame.set_current_nlr_token(Some(token_var.clone()));
                 Some(token_var)
             } else {
                 None
             };
 
-            // Lower the method body (reuse existing codegen). BT-1482: Capture
-            // result so we can clean up NLR token and scope unconditionally,
-            // then propagate error afterwards.
-            let lowered = self.lower_method_definition_body_with_reply(method);
+            // Lower the method body (reuse existing codegen). Capture the
+            // result so `frame`'s `Drop` (pop scope, restore the selector)
+            // and the NLR token cleanup run before the `?` below propagates
+            // an error, same as on the success path.
+            let lowered = frame.lower_method_definition_body_with_reply(method);
 
-            self.set_current_nlr_token(None);
+            frame.set_current_nlr_token(None);
 
-            // If codegen failed, pop scope before propagating the error.
-            let stmts = match lowered {
-                Ok(stmts) => stmts,
-                Err(e) => {
-                    self.pop_scope();
-                    return Err(e);
-                }
-            };
+            let stmts = lowered?;
 
-            // BT-3171 (ADR 0111 Addendum 4/6): prepend a real `NlrCatch` stmt
+            // (ADR 0111 Addendum 4/6): prepend a real `NlrCatch` stmt
             // and verify+render once, instead of rendering the body then
-            // wrapping the `Document`. BT-761/BT-764: Sealed methods are
-            // standalone functions (not inside case arms), so the try/catch
-            // can be placed directly at function level (no letrec needed).
+            // wrapping the `Document`. Sealed methods are standalone
+            // functions (not inside case arms), so the try/catch can be
+            // placed directly at function level (no letrec needed).
             let span = method
                 .body
                 .first()
                 .map_or_else(|| method.span, |s| s.expression.span());
             let method_body_doc =
-                self.prepend_nlr_catch_and_render(stmts, nlr_token_var.as_deref(), span, false);
+                frame.prepend_nlr_catch_and_render(stmts, nlr_token_var.as_deref(), span, false);
 
-            // BT-940: Annotate the `fun` expression (not just the body) with source line.
+            // Annotate the `fun` expression (not just the body) with source line.
             // Annotating the body would create invalid `( ( e -| [...] ) -| [...] )` when the
             // body is itself a single annotated MessageSend expression.
             let params_doc = join(
@@ -590,8 +577,8 @@ impl CoreErlangGenerator {
                 "\n",
                 nest(INDENT, docvec![line(), method_body_doc,]),
             ];
-            let fun_doc = if let Some(line_num) = self.span_to_line(method.span) {
-                self.annotate_with_line(fun_doc, line_num)
+            let fun_doc = if let Some(line_num) = frame.span_to_line(method.span) {
+                frame.annotate_with_line(fun_doc, line_num)
             } else {
                 fun_doc
             };
@@ -606,7 +593,7 @@ impl CoreErlangGenerator {
             ];
             docs.push(method_entry);
 
-            self.pop_scope();
+            // `frame` drops here, popping the scope and restoring the selector.
         }
 
         Ok(Document::Vec(docs))

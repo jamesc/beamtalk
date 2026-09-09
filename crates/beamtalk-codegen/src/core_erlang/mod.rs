@@ -129,6 +129,7 @@ mod expressions;
 mod gen_server;
 pub(in crate::core_erlang) mod generator;
 mod intrinsics;
+mod method_frame;
 mod nlr;
 mod operators;
 mod options;

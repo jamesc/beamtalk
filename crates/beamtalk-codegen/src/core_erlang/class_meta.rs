@@ -65,9 +65,9 @@ pub(super) enum MetaTypeRepr {
         base: String,
         parameters: Vec<MetaTypeRepr>,
     },
-    /// A union type (BT-3076) — rendered as `{'union', [Member1, Member2, ...]}`.
+    /// A union type — rendered as `{'union', [Member1, Member2, ...]}`.
     Union(Vec<MetaTypeRepr>),
-    /// A singleton/literal type (BT-3076), e.g. `#north` — rendered as
+    /// A singleton/literal type, e.g. `#north` — rendered as
     /// `{'singleton', 'north'}` (the name, without the leading `#`).
     Singleton(String),
 }
@@ -78,7 +78,7 @@ pub(super) enum MetaTypeRepr {
 pub(super) type MethodInfoEntry = (String, usize, MetaTypeRepr, Vec<MetaTypeRepr>, bool, bool);
 
 impl CoreErlangGenerator {
-    /// Generates the `__beamtalk_meta/0` function (BT-942).
+    /// Generates the `__beamtalk_meta/0` function.
     ///
     /// Embeds static reflection metadata directly in the compiled BEAM module.
     /// This enables zero-process reflection queries for structural data:
@@ -192,7 +192,7 @@ impl CoreErlangGenerator {
 
         let fields_doc = Self::meta_atom_list(&fields);
 
-        // BT-2238: Build class-side field list from `classState:` declarations so
+        // Build class-side field list from `classState:` declarations so
         // class-side slots are reflectable (`Behaviour>>classVarNames` /
         // `allClassVarNames`). The instance `fields` key above carries instance
         // state only.
@@ -221,7 +221,7 @@ impl CoreErlangGenerator {
         // field_types: map of field name → declared type atom or 'none'
         let field_types_doc = Self::meta_field_types_map(&class.state);
 
-        // BT-1976: field_has_default — map of field name → 'true' | 'false'.
+        // field_has_default — map of field name → 'true' | 'false'.
         // Cross-file consumers use this to identify typed-no-default fields
         // without the AST (post-initialize validation in gen_server codegen).
         let field_has_default_doc = Self::meta_field_has_default_map(&class.state);
@@ -369,7 +369,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-1976: Builds a field-has-default map for `__beamtalk_meta/0`.
+    /// Builds a field-has-default map for `__beamtalk_meta/0`.
     ///
     /// Example: `[StateDecl{name: "count", default: Some(0)}]` → `~{'count' => 'true'}~`
     /// Empty slice → `~{}~`
@@ -439,7 +439,7 @@ impl CoreErlangGenerator {
             .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| Self::meta_method_entry(m, type_params))
             .collect();
-        // BT-1005: Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
+        // Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
         // but included in BuilderState.meta so init/1 can register their return types.
         if include_standalone {
             for standalone in module.method_definitions.iter().filter(|m| {
@@ -485,7 +485,7 @@ impl CoreErlangGenerator {
             .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| Self::meta_method_entry(m, type_params))
             .collect();
-        // BT-1005: Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
+        // Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
         // but included in BuilderState.meta so init/1 can register their return types.
         if include_standalone {
             for standalone in module.method_definitions.iter().filter(|m| {
@@ -499,7 +499,7 @@ impl CoreErlangGenerator {
         if let Some(auto) = auto {
             if let Some(kw_sel) = &auto.keyword_constructor {
                 let arity = class.state.len();
-                // BT-1408: Hash long keyword constructor selectors to stay within
+                // Hash long keyword constructor selectors to stay within
                 // Erlang's 255-char atom limit. The meta selector must match what
                 // class_send emits so runtime dispatch finds the method.
                 let safe_sel =
@@ -514,7 +514,7 @@ impl CoreErlangGenerator {
                 ));
             }
         }
-        // BT-1218: Register the synthesized supervisionSpec so class dispatch finds it locally
+        // Register the synthesized supervisionSpec so class dispatch finds it locally
         // rather than walking the chain to Actor's version (which always returns #temporary).
         if synthesize_supervision_spec {
             entries.push((
@@ -534,7 +534,7 @@ impl CoreErlangGenerator {
     /// ADR 0068: When `class_type_params` is non-empty, type annotations that reference
     /// a class-level type parameter emit `MetaTypeRepr::TypeParam` instead of a flat atom.
     ///
-    /// BT-3367: the serialized `is_sealed` bit is `m.is_sealed` alone — the same
+    /// The serialized `is_sealed` bit is `m.is_sealed` alone — the same
     /// per-method flag `ClassInfo::from_class_definition` (`semantic_analysis/
     /// class_hierarchy/class_info.rs`) records for a fresh-AST compile, with no OR
     /// against the class-level `sealed` flag. `is_sealed` here means two different
@@ -555,7 +555,7 @@ impl CoreErlangGenerator {
     /// (`generate_direct_class_method_call`, `dispatch_codegen.rs`), and the method's
     /// own `self`/class-name construction dereferences that `nil` as a tuple —
     /// `erlang:element(2, 'nil')` — raising exactly the reported `badarg` ("invalid
-    /// argument"). See BT-3367.
+    /// argument").
     fn meta_method_entry(
         m: &MethodDefinition,
         class_type_params: &[TypeParamDecl],
@@ -584,7 +584,7 @@ impl CoreErlangGenerator {
 
     /// Converts a `TypeAnnotation` into a `MetaTypeRepr`.
     ///
-    /// Thin wrapper (BT-3076) around [`Self::declared_type_to_meta_repr`] —
+    /// Thin wrapper around [`Self::declared_type_to_meta_repr`] —
     /// converts to the span-free [`DeclaredType`] first and delegates, so the
     /// AST and the structured `MethodInfo`/generator paths share one
     /// conversion. See that function's doc for the per-variant rules.
@@ -595,7 +595,7 @@ impl CoreErlangGenerator {
         Self::declared_type_to_meta_repr(&DeclaredType::from(ta), class_type_params)
     }
 
-    /// Converts a [`DeclaredType`] into a `MetaTypeRepr` (BT-3076).
+    /// Converts a [`DeclaredType`] into a `MetaTypeRepr`.
     ///
     /// ADR 0068: If a bare `Simple` name matches one of the class-level type
     /// parameters, it becomes a `TypeParam { name, index }`. A single
@@ -603,10 +603,9 @@ impl CoreErlangGenerator {
     /// method-local `TypeParam` (index `-1`). `Generic` types with
     /// parameters become `Generic { base, parameters }`, recursively.
     ///
-    /// BT-3076: `Union` and `Singleton` now convert structurally too
+    /// `Union` and `Singleton` convert structurally
     /// (`MetaTypeRepr::Union` / `MetaTypeRepr::Singleton`), rather than
-    /// degrading to a flat atom of the rendered string — the wire-format
-    /// extension this stage adds. `FalseOr`, `Difference`, `Intersection`,
+    /// degrading to a flat atom of the rendered string. `FalseOr`, `Difference`, `Intersection`,
     /// `SelfType`, `SelfClass`, and `ClassOf` are rare in method signatures
     /// and still fall back to a flat `Atom` of the rendered string (old
     /// readers of a new artifact degrade gracefully; the format is internal
@@ -672,8 +671,8 @@ impl CoreErlangGenerator {
     /// - `TypeParam { name: "T", index: 0 }` → `{'type_param', 'T', 0}`
     /// - `Generic { base: "Result", params: [TypeParam T, Atom E] }` →
     ///   `{'generic', 'Result', [{'type_param', 'T', 0}, 'E']}`
-    /// - `Union([Atom A, Atom B])` → `{'union', ['A', 'B']}` (BT-3076)
-    /// - `Singleton("north")` → `{'singleton', 'north'}` (BT-3076)
+    /// - `Union([Atom A, Atom B])` → `{'union', ['A', 'B']}`
+    /// - `Singleton("north")` → `{'singleton', 'north'}`
     pub(super) fn meta_type_repr_doc(repr: &MetaTypeRepr) -> Document<'static> {
         match repr {
             MetaTypeRepr::None => Document::Str("'none'"),
@@ -704,7 +703,7 @@ impl CoreErlangGenerator {
     }
 
     /// Renders a `[MetaTypeRepr, ...]` Core Erlang list — the shared
-    /// bracket/comma-join helper `Generic` and `Union` (BT-3076) both use.
+    /// bracket/comma-join helper `Generic` and `Union` both use.
     fn meta_type_repr_list_doc(items: &[MetaTypeRepr]) -> Document<'static> {
         let mut parts: Vec<Document<'static>> = Vec::new();
         parts.push(Document::Str("["));

@@ -29,7 +29,7 @@ use beamtalk_core::ast::{
 use beamtalk_core::unparse::unparse_method_display_signature;
 
 impl CoreErlangGenerator {
-    /// BT-877: Detect the `new => self error: "..."` pattern that indicates a class
+    /// Detect the `new => self error: "..."` pattern that indicates a class
     /// is not constructible via `new`. Returns `true` if any method named `new` (unary)
     /// has a single-expression body that is `self error: <StringLiteral>`.
     fn has_raising_new(class: &ClassDefinition) -> bool {
@@ -41,7 +41,7 @@ impl CoreErlangGenerator {
             .any(|m| Self::is_self_error_body(&m.body))
     }
 
-    /// BT-2998: whether the class declares a unary `new` of its own, on either
+    /// Whether the class declares a unary `new` of its own, on either
     /// side, and so keeps control of `new/0` (`Random`, `Queue`, `Announcer`).
     ///
     /// Mirrors the `has_explicit_new` / `has_explicit_class_new` test in
@@ -68,7 +68,7 @@ impl CoreErlangGenerator {
         if body.len() != 1 {
             return false;
         }
-        // BT-2073: classify `error:` via the well-known enum so a future rename
+        // Classify `error:` via the well-known enum so a future rename
         // forces this site to update too.
         matches!(
             &body[0].expression,
@@ -85,7 +85,7 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the `register_class/0` on-load function using the `ClassBuilder`
-    /// protocol (ADR 0038 Phase 3 / BT-837).
+    /// protocol (ADR 0038 Phase 3).
     ///
     /// This function is called automatically via `-on_load` when the module loads.
     /// Instead of calling `beamtalk_object_class:start/2` directly, it builds a
@@ -95,7 +95,7 @@ impl CoreErlangGenerator {
     ///
     /// If `beamtalk_class_builder:register/1` raises, the exception is re-raised
     /// via `primop 'raw_raise'` so the BEAM `-on_load` mechanism reports a visible
-    /// load failure rather than silently succeeding with an unregistered class (BT-998).
+    /// load failure rather than silently succeeding with an unregistered class.
     ///
     /// # Generated Code
     ///
@@ -131,9 +131,9 @@ impl CoreErlangGenerator {
         module: &Module,
         synthesize_supervision_spec: bool,
     ) -> Result<Document<'static>> {
-        // BT-1610: Skip only if there are no class definitions AND no protocols
+        // Skip only if there are no class definitions AND no protocols
         // AND no foreign extension methods. Protocol-only files still need
-        // register_class/0 for protocol registration; BT-2250: pure-extension
+        // register_class/0 for protocol registration; pure-extension
         // files (only `Target >> sel` with no host class) need it to register
         // their foreign extensions at load.
         if module.classes.is_empty()
@@ -143,7 +143,7 @@ impl CoreErlangGenerator {
             return Ok(Document::Nil);
         }
 
-        // BT-1610 / BT-2250: Class-less module — generate register_class/0 with
+        // Class-less module — generate register_class/0 with
         // only protocol registration and/or foreign extension registration
         // calls, no class builder chain.
         if module.classes.is_empty() {
@@ -186,19 +186,19 @@ impl CoreErlangGenerator {
                 .filter(|m| m.kind == MethodKind::Primary)
                 .collect();
 
-            // BT-101: Method source
+            // Method source
             let method_source_doc = Self::build_selector_map(&instance_methods, |m| {
                 let source_str = self.extract_method_source(class.name.name.as_str(), false, m);
                 leaf::binary_lit(&source_str)
             });
 
-            // BT-988: Method display signatures for :help command
+            // Method display signatures for :help command
             let method_sigs_doc = Self::build_selector_map(&instance_methods, |m| {
                 let sig_str = unparse_method_display_signature(m);
                 leaf::binary_lit(&sig_str)
             });
 
-            // BT-990: Class-side method display signatures for :help command
+            // Class-side method display signatures for :help command
             let class_methods_primary: Vec<_> = class
                 .class_methods
                 .iter()
@@ -209,7 +209,7 @@ impl CoreErlangGenerator {
                 leaf::binary_lit(&sig_str)
             });
 
-            // BT-2195: Class-side method source — mirrors method_source for the
+            // Class-side method source — mirrors method_source for the
             // instance side. Required by SystemNavigation `sendersOf:` /
             // `referencesTo:` / `methodsMatching:` to scan class-side bodies.
             let class_method_source_doc = Self::build_selector_map(&class_methods_primary, |m| {
@@ -217,44 +217,44 @@ impl CoreErlangGenerator {
                 leaf::binary_lit(&source_str)
             });
 
-            // ADR 0087 Phase 2 (BT-2298): Per-method cross-reference index baked
+            // ADR 0087 Phase 2: Per-method cross-reference index baked
             // into register_class/0. Forwarded to beamtalk_xref synchronously at
             // class-load time by beamtalk_object_class:init/1.
             let method_xref_doc =
                 self.build_method_xref_list(class, &instance_methods, &class_methods_primary);
 
-            // BT-3439: Per-instance-variable declaration-line index, the
+            // Per-instance-variable declaration-line index, the
             // state-var analogue of `method_xref_doc` above.
             let state_var_xref_doc = self.build_state_var_xref_list(class);
 
-            // BT-412: Class variable initial values
+            // Class variable initial values
             let class_vars_doc = self.build_class_var_map(&class.class_variables)?;
 
-            // BT-771: Class-level doc comment
+            // Class-level doc comment
             let class_doc_value: Document<'static> = if let Some(ref doc) = class.doc_comment {
                 leaf::binary_lit(doc)
             } else {
                 Document::Str("'none'")
             };
 
-            // BT-771: Method-level doc comments
+            // Method-level doc comments
             let method_docs_doc = Self::build_selector_map_filtered(&instance_methods, |m| {
                 m.doc_comment.as_ref().map(|doc| leaf::binary_lit(doc))
             });
 
-            // BT-1634: Class method doc comments
+            // Class method doc comments
             let class_method_docs_doc =
                 Self::build_selector_map_filtered(&class_methods_primary, |m| {
                     m.doc_comment.as_ref().map(|doc| leaf::binary_lit(doc))
                 });
 
-            // BT-2734: Value-type auto-accessors (slot getters, `with*:` copy-
+            // Value-type auto-accessors (slot getters, `with*:` copy-
             // setters, keyword constructor) are emitted by value_type_codegen with
             // no AST `MethodDefinition`, so the selector maps above have no entry
             // for them and their runtime `__doc__` / `__signature__` would be nil.
             // Inject compiler-derived doc + signature entries so every reflective
             // surface (System Browser read-only pane, `Beamtalk help:`, MCP docs)
-            // shows them uniformly — reusing the BT-2714 resolver, no new read path.
+            // shows them uniformly — reusing the existing resolver, no new read path.
             // A no-op for non-`Value` classes and value classes with no auto-
             // accessors (returns empty entry lists).
             let synth = Self::build_synthetic_value_accessor_metadata(class);
@@ -281,14 +281,14 @@ impl CoreErlangGenerator {
                 synth.class_docs,
             );
 
-            // BT-877: Detect non-constructible classes at compile time.
+            // Detect non-constructible classes at compile time.
             // Emit `isConstructible = false` for: abstract classes, actors, and
             // classes with `new => self error: "..."`. For all others, omit the key
             // so the runtime can fall back to lazy computation — this is needed
             // because primitive classes (String, Integer, etc.) have raising new/0
             // in Erlang, not in Beamtalk AST.
             //
-            // BT-2998: a `native:` class with no declared fields and no `new` of
+            // A `native:` class with no declared fields and no `new` of
             // its own now compiles a raising `new/0` too (see
             // `has_opaque_native_representation`). The runtime would reach the
             // same answer lazily by calling that `new/0` and catching, but
@@ -333,12 +333,12 @@ impl CoreErlangGenerator {
             class_docs.push(class_doc);
         }
 
-        // BT-738 / BT-749: Build a short-circuit chain so that the first
+        // Build a short-circuit chain so that the first
         // {error, ...} from register/1 propagates out of on_load, regardless
         // of which class position caused it.
         let class_chain = Self::build_short_circuit_chain(&class_docs);
 
-        // BT-2250: Register foreign cross-class extension methods at load.
+        // Register foreign cross-class extension methods at load.
         // The `let _ExtN = ... in` fragments are prepended to the class
         // registration chain so extensions register before the chain's trailing
         // class-registration result is produced (extension registration always
@@ -442,7 +442,7 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
-    /// BT-2734: Appends pre-built `'selector' => value` entries to an existing
+    /// Appends pre-built `'selector' => value` entries to an existing
     /// selector-map body document, inserting `, ` separators so the combined
     /// interior remains a valid comma-separated `~{ ... }~` map body.
     ///
@@ -505,7 +505,7 @@ impl CoreErlangGenerator {
     /// * `class_name`, `superclass_name`, `module_name` — string identifiers for the class.
     /// * `method_source_doc` … `meta_doc` — pre-built map / value documents for each field.
     /// * `is_non_constructible` — emits `'isConstructible' => 'false'` when true.
-    /// * `stdlib_mode` — emits `'stdlibMode' => 'true'` for stdlib compilations (BT-791).
+    /// * `stdlib_mode` — emits `'stdlibMode' => 'true'` for stdlib compilations.
     #[allow(clippy::too_many_arguments)]
     fn build_builder_state_doc(
         idx: usize,
@@ -561,13 +561,13 @@ impl CoreErlangGenerator {
                     class_method_sigs_doc,
                     "}~,",
                     line(),
-                    // ADR 0087 Phase 2 (BT-2298): per-method xref index. A list of
+                    // ADR 0087 Phase 2: per-method xref index. A list of
                     // maps, not a `~{ }~` map, so it is wrapped only by build_method_xref_list.
                     "'methodXref' => ",
                     method_xref_doc,
                     ",",
                     line(),
-                    // BT-3439: per-instance-variable declaration-line index,
+                    // Per-instance-variable declaration-line index,
                     // the state-var analogue of 'methodXref' above. A list of
                     // maps (like methodXref), not a `~{ }~` map.
                     "'stateVarXref' => ",
@@ -603,7 +603,7 @@ impl CoreErlangGenerator {
                     } else {
                         Document::Nil
                     },
-                    // BT-791: Emit stdlibMode flag for stdlib compilations so the
+                    // Emit stdlibMode flag for stdlib compilations so the
                     // runtime can bypass the sealed-superclass check in register/1.
                     // Character (extends sealed Integer) needs this to load correctly.
                     if stdlib_mode {
@@ -645,7 +645,7 @@ impl CoreErlangGenerator {
     ///
     /// For N classes, generates a nested let/case expression so that the first
     /// `{error, ...}` from `register/1` propagates out of `on_load` without
-    /// processing remaining classes (BT-738 / BT-749).
+    /// processing remaining classes.
     ///
     /// ```text
     ///   let _BuilderState0 = ... in let _Reg0 = case ... end
@@ -663,14 +663,14 @@ impl CoreErlangGenerator {
     /// the protocol's name, required methods, type parameters, extending clause,
     /// and the defining BEAM module.
     ///
-    /// BT-2615: the `module` key records the module the protocol was defined in
+    /// The `module` key records the module the protocol was defined in
     /// (e.g. `bt@stdlib@printable`) so the runtime — and the System Browser —
     /// can resolve a protocol class object's origin/source badge. The protocol
     /// class object itself is dispatched by the shared `beamtalk_protocol_object`
     /// module, which carries no package or source, so without this the browser
     /// cannot tell a stdlib protocol from a project one.
     ///
-    /// BT-2957: each method requirement map also carries `param_types` (a list,
+    /// Each method requirement map also carries `param_types` (a list,
     /// one entry per parameter) and `return_type`, using the same Core Erlang
     /// abstract type representation `-spec`s use elsewhere
     /// (`spec_codegen::type_annotation_to_spec`) — including `user_type`
