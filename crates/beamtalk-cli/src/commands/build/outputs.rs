@@ -10,6 +10,7 @@ use std::fs;
 use tracing::info;
 
 use crate::beam_compiler::ClassHierarchyContext;
+use crate::commands::util::to_forward_slash;
 use crate::commands::{app_file, manifest};
 
 /// Collected build outputs needed for OTP application packaging.
@@ -441,24 +442,10 @@ pub(crate) fn build_alias_metadata(source_files: &[Utf8PathBuf]) -> Vec<app_file
                     &alias_def.annotation,
                 ),
                 doc: alias_def.doc_comment.clone(),
-                source_file: to_forward_slash(file),
+                source_file: to_forward_slash(file.as_str()),
                 internal: alias_def.is_internal,
             });
         }
     }
     result
-}
-
-/// Render a `Utf8Path` as forward-slash-separated text regardless of host OS.
-///
-/// `Utf8PathBuf`'s `Display`/`ToString` preserve native separators (backslash
-/// on Windows), which is wrong for values embedded in generated, checked-in
-/// artifacts like `beamtalk_stdlib.app.src` — those must be byte-identical
-/// regardless of the developer's OS (BT-3067). `Utf8Path` guarantees valid
-/// UTF-8, so a plain byte-level replace is safe here: backslash can't appear
-/// as a legitimate path separator component on any of our supported
-/// platforms. Same fix pattern as `make_git_index` in
-/// `deps/registry.rs`'s tests.
-pub(crate) fn to_forward_slash(path: &Utf8Path) -> String {
-    path.as_str().replace('\\', "/")
 }

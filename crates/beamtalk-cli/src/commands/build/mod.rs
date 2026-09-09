@@ -82,8 +82,6 @@ pub(crate) use native::{
     validate_native_class_references,
 };
 #[cfg(test)]
-pub(crate) use outputs::to_forward_slash;
-#[cfg(test)]
 pub(crate) use sources::find_source_files;
 
 /// Results from the two compilation passes (class index + source compilation).
