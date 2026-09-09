@@ -28,34 +28,33 @@ use super::inline_definitions::{
 /// `Err(response_term)` containing a formatted `diagnostic_error_response`
 /// that the caller should return directly. `analysis` is the full
 /// [`AnalysisResult`](beamtalk_core::semantic_analysis::AnalysisResult) this
-/// function's own semantic-analysis pass produced (BT-3123) — callers that go
+/// function's own semantic-analysis pass produced — callers that go
 /// on to run codegen for the same module thread it into
 /// `CodegenOptions::with_analysis` instead of letting codegen re-derive the
 /// class hierarchy, semantic facts, and inferred method return types from
 /// scratch. `analysis.referenced_aliases` is the alias-dependency set
-/// (ADR 0108 hot-reload re-check trigger, BT-2899) callers used to receive
+/// (the ADR 0108 hot-reload re-check trigger) callers receive
 /// as this tuple's third element directly.
 ///
-/// `pre_loaded_aliases` (ADR 0108 Phase 8, BT-2902) carries type aliases
+/// `pre_loaded_aliases` (ADR 0108 Phase 8) carries type aliases
 /// declared in earlier turns of the same REPL session, re-parsed standalone
 /// by [`extract_known_type_aliases`] — see that function's doc for why
 /// aliases need their own re-parse path rather than `pre_class_hierarchy`'s
 /// recover-from-live-BEAM-state mechanism.
 ///
-/// `pre_loaded_protocols` (BT-3473, BT-3477) carries the live image's ambient
+/// `pre_loaded_protocols` carries the live image's ambient
 /// protocol cache — see [`extract_protocol_registry`]'s doc. Without it, a
 /// cross-file protocol-typed receiver in a live `compile_expression` (the
-/// REPL's `eval`) hits the same nominal-mismatch/Dnu false positive BT-3473
+/// REPL's `eval`) hits the same nominal-mismatch/Dnu false positive already
 /// fixed for `diagnostics/3`.
 ///
-/// BT-2952: uses `compute_diagnostics_and_analysis` (the same analysis as
+/// Uses `compute_diagnostics_and_analysis` (the same analysis as
 /// `compute_diagnostics_with_known_vars_classes_and_aliases`, additionally
 /// returning the full `AnalysisResult`) so the REPL-inline
 /// `compile_expression` path computes the same alias-dependency set
-/// `handle_compile`'s file-compile path already did — previously this
-/// function discarded it, so `handle_inline_class_definition` never got a
-/// real set to thread through and `handle_inline_protocol_definition` was
-/// called with a hardcoded `&[]` (BT-2917's known limitation).
+/// `handle_compile`'s file-compile path already does, giving
+/// `handle_inline_class_definition` and `handle_inline_protocol_definition`
+/// a real set to thread through rather than a hardcoded `&[]`.
 pub(crate) fn parse_and_check_expression(
     source: &str,
     known_vars: &[String],
@@ -142,14 +141,14 @@ pub(crate) fn handle_compile_expression(request: &Map) -> Term {
         Err(resp) => return resp,
     };
 
-    // BT-1670: Extract optional module_name override for inline class definitions
+    // Extract optional module_name override for inline class definitions
     // so they produce the same module name as file-based compilation in package mode.
     let module_name_override = map_get(request, "module_name").and_then(term_to_string);
 
-    // BT-571: If the parsed module contains class definitions, use compile path
+    // If the parsed module contains class definitions, use compile path
     if !module.classes.is_empty() {
         let referenced_aliases = analysis.referenced_aliases.clone();
-        // BT-3123: `handle_inline_class_definition` merges any standalone
+        // `handle_inline_class_definition` merges any standalone
         // `module.method_definitions` into their target class *after* this
         // point — a method the type checker saw as a standalone extension
         // during `analysis` above. `infer_method_return_types`/writeback key
@@ -177,7 +176,7 @@ pub(crate) fn handle_compile_expression(request: &Map) -> Term {
         );
     }
 
-    // BT-571: If the parsed module contains standalone method definitions, return method info
+    // If the parsed module contains standalone method definitions, return method info
     if !module.method_definitions.is_empty() {
         if module.method_definitions.len() > 1 {
             return error_response(&[
@@ -192,8 +191,8 @@ pub(crate) fn handle_compile_expression(request: &Map) -> Term {
         // `method_source` must be the METHOD's source (`sel => body`), not the
         // full `Class >> sel => body` input — it is recorded verbatim in the
         // ChangeLog and written back on flush. Echoing the input would splice a
-        // stray `Class >>` extension into the class body on flush (BT-2553
-        // follow-up). `unparse_method` re-emits the parsed method, comments and
+        // stray `Class >>` extension into the class body on flush.
+        // `unparse_method` re-emits the parsed method, comments and
         // all, so the recorded source round-trips cleanly.
         let method_source = beamtalk_core::unparse::unparse_method(&method_def.method);
         let (return_type, param_types) = method_signature_terms(&method_def.method);
@@ -208,15 +207,12 @@ pub(crate) fn handle_compile_expression(request: &Map) -> Term {
         );
     }
 
-    // BT-1612: If the parsed module contains protocol definitions, compile and return them
+    // If the parsed module contains protocol definitions, compile and return them
     if !module.protocols.is_empty() {
-        // BT-2952: `parse_and_check_expression` now computes
+        // `parse_and_check_expression` computes
         // `referenced_aliases` for this REPL-expression path too (mirroring
-        // `handle_compile`'s file-compile path below), closing the gap
-        // `handle_inline_protocol_definition`'s doc comment used to describe
-        // (BT-2917 shipped the protocol-side wiring but left this call site
-        // passing a hardcoded `&[]`, since the Rust side didn't compute a
-        // real set yet).
+        // `handle_compile`'s file-compile path below), so this call site
+        // passes a real set rather than a hardcoded `&[]`.
         let referenced_aliases = analysis.referenced_aliases.clone();
         return handle_inline_protocol_definition(
             &module,
@@ -233,7 +229,7 @@ pub(crate) fn handle_compile_expression(request: &Map) -> Term {
         );
     }
 
-    // ADR 0108 Phase 8 (BT-2902): If the parsed module contains a `type
+    // ADR 0108 Phase 8: If the parsed module contains a `type
     // Name = ...` declaration, return alias metadata for the REPL session
     // to register — no Core Erlang / bytecode step, since aliases erase
     // entirely at resolution time (ADR 0108 Semantics) and have no runtime
@@ -246,7 +242,7 @@ pub(crate) fn handle_compile_expression(request: &Map) -> Term {
         return error_response(&["No expressions to compile".to_string()]);
     }
 
-    // BT-780: Generate Core Erlang for all expressions (multi-statement support)
+    // Generate Core Erlang for all expressions (multi-statement support)
     let expressions: Vec<_> = module
         .expressions
         .iter()
@@ -262,7 +258,7 @@ pub(crate) fn handle_compile_expression(request: &Map) -> Term {
     }
 }
 
-/// Handle a `compile_expression_trace` request (BT-1238).
+/// Handle a `compile_expression_trace` request.
 ///
 /// Same parsing/validation as `compile_expression` but generates a trace module
 /// whose `eval/1` returns `{[{<<"src0">>, V0}, ...], FinalState}` instead of
@@ -290,7 +286,7 @@ pub(crate) fn handle_compile_expression_trace(request: &Map) -> Term {
 
     // Trace mode never defines classes/protocols/aliases (rejected below), so
     // neither the `referenced_aliases` nor the rest of the `AnalysisResult`
-    // this also now computes (BT-2952 / BT-3123) has a consumer here —
+    // this also computes has a consumer here —
     // trace-mode expressions never reach a `generate_module` call that could
     // use it, and can't reference an alias in a position that needs xref
     // registration either.
@@ -317,7 +313,7 @@ pub(crate) fn handle_compile_expression_trace(request: &Map) -> Term {
         ]);
     }
 
-    // BT-1612: Protocol definitions are not supported in trace mode.
+    // Protocol definitions are not supported in trace mode.
     if !module.protocols.is_empty() {
         return error_response(&["trace mode does not support protocol definitions; \
              use eval without trace to define protocols"

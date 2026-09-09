@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `reindent_method_source` (BT-2584), `compile_expression_trace`, `resolve_completion_type` edge cases, class-hierarchy builtin skipping, `derive_class_module_name` overrides, inline/protocol-only class-definition module naming, and standalone method-definition signature reporting.
+//! `reindent_method_source`, `compile_expression_trace`, `resolve_completion_type` edge cases, class-hierarchy builtin skipping, `derive_class_module_name` overrides, inline/protocol-only class-definition module naming, and standalone method-definition signature reporting.
 
 use super::*;
 
-// --- reindent_method_source tests (BT-2584) ---
+// --- reindent_method_source tests ---
 
 #[test]
 fn reindent_method_source_shifts_canonical_to_base() {
@@ -60,7 +60,7 @@ fn reindent_method_source_missing_base_indent_defaults_empty() {
     );
 }
 
-/// BT-1238: `compile_expression_trace` produces Core Erlang with trace list return.
+/// `compile_expression_trace` produces Core Erlang with trace list return.
 #[test]
 fn compile_expression_trace_single_expression() {
     use eetf::List;
@@ -95,7 +95,7 @@ fn compile_expression_trace_single_expression() {
     );
 }
 
-/// BT-1238: `compile_expression_trace` rejects class definitions.
+/// `compile_expression_trace` rejects class definitions.
 #[test]
 fn compile_expression_trace_rejects_class_definition() {
     use eetf::List;
@@ -169,35 +169,35 @@ fn parse_class_hierarchy_skips_builtins() {
     );
 }
 
-/// BT-1670: `derive_class_module_name` uses override when provided.
+/// `derive_class_module_name` uses override when provided.
 #[test]
 fn derive_class_module_name_with_override() {
     let result = derive_class_module_name("Counter", Some("bt@my_app@counter"), false);
     assert_eq!(result, "bt@my_app@counter");
 }
 
-/// BT-1670: `derive_class_module_name` falls back to `bt@{snake}` without override.
+/// `derive_class_module_name` falls back to `bt@{snake}` without override.
 #[test]
 fn derive_class_module_name_no_override() {
     let result = derive_class_module_name("MyCounter", None, false);
     assert_eq!(result, "bt@my_counter");
 }
 
-/// BT-1670: `derive_class_module_name` uses stdlib prefix in stdlib mode.
+/// `derive_class_module_name` uses stdlib prefix in stdlib mode.
 #[test]
 fn derive_class_module_name_stdlib_mode() {
     let result = derive_class_module_name("Integer", None, true);
     assert_eq!(result, "bt@stdlib@integer");
 }
 
-/// BT-1670: `derive_class_module_name` override takes precedence over stdlib mode.
+/// `derive_class_module_name` override takes precedence over stdlib mode.
 #[test]
 fn derive_class_module_name_override_over_stdlib() {
     let result = derive_class_module_name("Integer", Some("bt@custom@integer"), true);
     assert_eq!(result, "bt@custom@integer");
 }
 
-/// BT-1670: Inline class definition uses `module_name` override when provided,
+/// Inline class definition uses `module_name` override when provided,
 /// ensuring package-mode REPL class definitions get the same module name as
 /// file-based compilation.
 #[test]
@@ -250,7 +250,7 @@ fn compile_protocol_only_file() {
         "Protocol-only file should compile successfully"
     );
 
-    // BT-1950: Protocol-only files now return a protocol_definition response
+    // Protocol-only files return a protocol_definition response
     let kind = map_get(m, "kind").and_then(term_to_atom);
     assert_eq!(
         kind.as_deref(),
@@ -296,7 +296,7 @@ fn compile_protocol_only_file_with_override() {
     let status = map_get(m, "status").and_then(term_to_atom);
     assert_eq!(status.as_deref(), Some("ok"));
 
-    // BT-1950: Protocol-only files return protocol_definition kind
+    // Protocol-only files return protocol_definition kind
     let kind = map_get(m, "kind").and_then(term_to_atom);
     assert_eq!(kind.as_deref(), Some("protocol_definition"));
 
@@ -304,7 +304,7 @@ fn compile_protocol_only_file_with_override() {
     assert_eq!(module_name.as_deref(), Some("bt@exdura@awaitable"));
 }
 
-/// BT-1670: Inline class definition without override uses default `bt@` prefix.
+/// Inline class definition without override uses default `bt@` prefix.
 #[test]
 fn inline_class_definition_without_module_name_override() {
     let request = Map::from([
@@ -330,7 +330,7 @@ fn inline_class_definition_without_module_name_override() {
     assert_eq!(module_name.as_deref(), Some("bt@my_thing"));
 }
 
-/// ADR 0105 Phase 1 (BT-2777): the standalone `Class >> sel` method-definition
+/// ADR 0105 Phase 1: the standalone `Class >> sel` method-definition
 /// response (the REPL `>>` live-patch path) must carry the declared signature
 /// alongside the existing `method_source`, so the workspace can capture it into
 /// the signature-generation store before the patch installs.

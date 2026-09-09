@@ -166,7 +166,7 @@ proptest! {
 
     /// Property 3: Diagnostic entries are structured maps with a non-empty message.
     ///
-    /// BT-1235: Every diagnostic in an error response must be a Map with a
+    /// Every diagnostic in an error response must be a Map with a
     /// non-empty `message` binary field (and optionally `line` and `hint`).
     #[test]
     fn diagnostics_are_nonempty_strings(input in "\\PC{0,500}") {

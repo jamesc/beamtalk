@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `categorize_methods` request handler (BT-3239, extended by BT-3238).
+//! `categorize_methods` request handler.
 
 use beamtalk_etf::{atom, binary_from_str as binary, map_get, term_to_string};
 use eetf::{List, Map, Term};
@@ -32,14 +32,14 @@ pub(crate) fn categorized_method_term(
 /// [`MethodCategory`](beamtalk_core::source_analysis::MethodCategory).
 ///
 /// `name`/`divider_span` are always present (using the atom `undefined` as
-/// the "absent" sentinel, never an omitted key) — BT-3238's write-path
+/// the "absent" sentinel, never an omitted key) — the write-path
 /// caller (the Cockpit's `save-section` op) needs `divider_span` to locate
 /// an existing divider's byte span for a rename, and a consistent key set
 /// makes both consumers' Erlang-side pattern matching uniform. `undefined`
 /// as a value is indistinguishable from an omitted key to `maps:get/3`'s
-/// default-value form (BT-3239's original read-only consumer,
+/// default-value form (the original read-only consumer,
 /// `beamtalk_interface.erl`, already reads `name` that way), so this is a
-/// superset of BT-3239's original "omit, never null" shape, not a breaking
+/// superset of the original "omit, never null" shape, not a breaking
 /// change to it.
 pub(crate) fn category_term(category: &beamtalk_core::source_analysis::MethodCategory) -> Term {
     let methods: Vec<Term> = category
@@ -65,18 +65,18 @@ pub(crate) fn category_term(category: &beamtalk_core::source_analysis::MethodCat
     ]))
 }
 
-/// Handle a `categorize_methods` request (BT-3239, extended by BT-3238).
+/// Handle a `categorize_methods` request.
 ///
 /// Groups a class's methods by its `// === Name ===` section dividers —
 /// `beamtalk_core::source_analysis::categorize_methods_in_source` is the
-/// single, canonical recognizer (BT-2601) already used by the LSP's
+/// single, canonical recognizer already used by the LSP's
 /// `documentSymbol` outline; this command is the bridge that lets Erlang
 /// surfaces (which have no Rust parser of their own) reach the same
 /// function instead of reimplementing its recognition grammar — see that
-/// module's doc for why a second implementation is exactly what BT-3239 was
-/// written to avoid. BT-3238 (the Cockpit's grouped method view + section
-/// authoring) is the second consumer and the reason each category also
-/// carries `divider_span` and each method a `span` (BT-3239's original
+/// module's doc for why a second implementation must be avoided.
+/// The Cockpit's grouped method view + section
+/// authoring is the second consumer and the reason each category also
+/// carries `divider_span` and each method a `span` (the original
 /// REPL/MCP consumer only needed `name`/`selector`/`side`; the Cockpit's
 /// `save-section` write path needs the divider's own byte span to splice a
 /// rename).
@@ -92,7 +92,7 @@ pub(crate) fn category_term(category: &beamtalk_core::source_analysis::MethodCat
 /// => #{start, end}}`, all in source order. A class with no dividers comes
 /// back as a single category with `name => undefined` — callers gate on this
 /// (`has_dividers`, mirroring `document_symbols_provider.rs`) to fall back to
-/// their pre-BT-2601 flat rendering. Failure (class not found, or the class
+/// their flat rendering. Failure (class not found, or the class
 /// name is ambiguous — more than one class definition with that name in
 /// `source`) comes back as `#{status => error, reason => class_not_found |
 /// ambiguous, message => <<...>>}`.

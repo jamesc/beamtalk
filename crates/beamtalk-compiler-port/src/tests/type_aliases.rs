@@ -5,7 +5,7 @@
 
 use super::*;
 
-/// ADR 0108 hot-reload re-check trigger (BT-2899): `diagnostics` now
+/// ADR 0108 hot-reload re-check trigger: `diagnostics`
 /// threads `known_type_aliases` through (mirroring `compile_expression`)
 /// and reports the resolved compile's `referenced_aliases` — the
 /// alias-name → dependent-class index's raw material. Both the alias
@@ -118,10 +118,10 @@ fn diagnostics_without_class_hierarchy_is_unaffected() {
     );
 }
 
-/// BT-2839 (ADR 0100 Rule 3 surface-parity gap): a project root with a
+/// ADR 0100 Rule 3 surface parity: a project root with a
 /// `dnu = "error"` `[diagnostics]` table parses into a table that
 /// escalates `Dnu`, mirroring what `beamtalk build` and the LSP
-/// (BT-2800) already do for the same `beamtalk.toml`.
+/// already do for the same `beamtalk.toml`.
 #[test]
 fn load_diagnostics_overrides_from_parses_project_manifest() {
     use beamtalk_core::compilation::DiagnosticSeverityOverride;
@@ -219,7 +219,7 @@ fn compile_accepts_class_hierarchy_key() {
     );
 }
 
-/// ADR 0108 hot-reload re-check trigger (BT-2899): `compile` now threads
+/// ADR 0108 hot-reload re-check trigger: `compile` threads
 /// `known_type_aliases` through too (previously only
 /// `compile_expression` did), so a class-defining compile reports which
 /// alias names its own annotations referenced — the raw material for
@@ -268,13 +268,13 @@ fn compile_with_known_type_aliases_reports_referenced_aliases() {
     );
 }
 
-/// BT-2917 (BT-2899 follow-up): the sibling of
+/// The sibling of
 /// `compile_with_known_type_aliases_reports_referenced_aliases` for a
-/// protocol-only `compile` — before this fix, `protocol_definition`'s
-/// response had no `referenced_aliases` field at all, so
-/// `beamtalk_repl_compiler.erl`'s protocol arm had nothing to register
-/// into `beamtalk_alias_xref`, even though the exact same annotation on
-/// a class method's signature (the test above) already worked.
+/// protocol-only `compile`: `protocol_definition`'s response must carry a
+/// `referenced_aliases` field so `beamtalk_repl_compiler.erl`'s protocol
+/// arm has something to register into `beamtalk_alias_xref`, matching
+/// the exact same annotation on a class method's signature (the test
+/// above).
 #[test]
 fn compile_protocol_with_known_type_aliases_reports_referenced_aliases() {
     let request = Map::from([
@@ -321,13 +321,12 @@ fn compile_protocol_with_known_type_aliases_reports_referenced_aliases() {
     );
 }
 
-/// BT-2952: the REPL-inline sibling of
+/// The REPL-inline sibling of
 /// `compile_with_known_type_aliases_reports_referenced_aliases` for a
 /// class defined via `compile_expression` (as opposed to `:load`d from
-/// a file via `compile`) — before this fix, `parse_and_check_expression`
-/// called `compute_diagnostics_with_known_vars_classes_and_aliases`,
-/// which discards `AnalysisResult::referenced_aliases` entirely, so
-/// `class_definition_ok_response` had no field to carry it in at all.
+/// a file via `compile`): `parse_and_check_expression` must use an
+/// analysis path that keeps `AnalysisResult::referenced_aliases`, so
+/// `class_definition_ok_response` has a field to carry it in.
 #[test]
 fn compile_expression_class_with_known_type_aliases_reports_referenced_aliases() {
     let request = Map::from([
@@ -378,12 +377,12 @@ fn compile_expression_class_with_known_type_aliases_reports_referenced_aliases()
     );
 }
 
-/// BT-2952: the REPL-inline sibling of
+/// The REPL-inline sibling of
 /// `compile_protocol_with_known_type_aliases_reports_referenced_aliases`
-/// for a protocol defined via `compile_expression` — before this fix,
-/// `handle_compile_expression`'s protocol branch called
-/// `handle_inline_protocol_definition` with a hardcoded `&[]` since
-/// `parse_and_check_expression` never computed a real set for this path.
+/// for a protocol defined via `compile_expression`:
+/// `handle_compile_expression`'s protocol branch must call
+/// `handle_inline_protocol_definition` with a real, computed
+/// `referenced_aliases` set rather than a hardcoded `&[]`.
 #[test]
 fn compile_expression_protocol_with_known_type_aliases_reports_referenced_aliases() {
     let request = Map::from([
@@ -431,17 +430,17 @@ fn compile_expression_protocol_with_known_type_aliases_reports_referenced_aliase
     );
 }
 
-/// BT-2941: `handle_inline_protocol_definition` (the protocol-only branch
-/// of `handle_compile`) previously never threaded `pre_loaded_aliases`
-/// into `CodegenOptions`, so `self.alias_registry` at codegen time was
-/// always the empty module-local registry — a protocol source file never
+/// `handle_inline_protocol_definition` (the protocol-only branch
+/// of `handle_compile`) must thread `pre_loaded_aliases`
+/// into `CodegenOptions`, or `self.alias_registry` at codegen time stays
+/// the empty module-local registry — a protocol source file never
 /// declares its own `type Name = ...` (that's a separate top-level
 /// declaration), so every alias a protocol method signature could
 /// reference is necessarily cross-module/pre-loaded.
 ///
-/// BT-2957: protocol methods have no standalone function to attach a real
+/// Protocol methods have no standalone function to attach a real
 /// `-spec` to, so `generate_protocol_registrations`
-/// (`gen_server/methods.rs`) now embeds the same `user_type`/abstract-type
+/// (`gen_server/methods.rs`) embeds the same `user_type`/abstract-type
 /// representation `-spec`s use directly in each `register_protocol`
 /// method-requirement map's `param_types`/`return_type` entries, and
 /// `actor_codegen.rs::generate_module` marks the alias as referenced
@@ -492,11 +491,11 @@ fn compile_protocol_cross_module_alias_reference_emits_user_type() {
     );
 }
 
-/// BT-2941 sibling of `compile_protocol_cross_module_alias_reference_emits_user_type`
+/// Sibling of `compile_protocol_cross_module_alias_reference_emits_user_type`
 /// for the OTHER `handle_inline_protocol_definition` caller: the REPL-inline
 /// `compile_expression` path (`handle_compile_expression`'s protocol branch).
-/// Both call sites needed the same `.with_pre_loaded_aliases(...)` wiring.
-/// See the BT-2957 update note on the sibling test above — the same
+/// Both call sites need the same `.with_pre_loaded_aliases(...)` wiring.
+/// See the note on the sibling test above — the same
 /// reasoning applies here.
 #[test]
 fn compile_expression_protocol_cross_module_alias_reference_emits_user_type() {
@@ -542,16 +541,16 @@ fn compile_expression_protocol_cross_module_alias_reference_emits_user_type() {
     );
 }
 
-/// The concrete BT-2912 repro, exercised through the compiler port
+/// A namespace-collision repro, exercised through the compiler port
 /// exactly as a live REPL turn would present it: turn 1 declares `type
 /// Point = Integer` (carried forward via `known_type_aliases`, mirroring
 /// how the workspace re-seeds it every turn — ADR 0108 Phase 8); turn 2
-/// sends `Object subclass: Point`. Before BT-2899, `compile` never
-/// threaded `known_type_aliases` at all, so
+/// sends `Object subclass: Point`. `compile` must thread
+/// `known_type_aliases` through, so
 /// `AliasRegistry::add_pre_loaded`'s existing collision check
-/// (`alias_registry.rs`) never had a chance to see the class — the class
-/// compiled clean, silently shadowing the alias in every subsequent `::`
-/// annotation. It must now fail with the namespace-collision diagnostic.
+/// (`alias_registry.rs`) gets a chance to see the class instead of
+/// compiling clean and silently shadowing the alias in every subsequent
+/// `::` annotation — it must fail with the namespace-collision diagnostic.
 #[test]
 fn compile_class_over_earlier_turn_alias_is_flagged() {
     let request = Map::from([

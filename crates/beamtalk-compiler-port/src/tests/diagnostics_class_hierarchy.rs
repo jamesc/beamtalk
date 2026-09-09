@@ -54,7 +54,7 @@ fn compile_expression_accepts_class_hierarchy_key() {
     );
 }
 
-/// ADR 0105 Phase 1 (BT-2778): `diagnostics` accepts `class_hierarchy`
+/// ADR 0105 Phase 1: `diagnostics` accepts `class_hierarchy`
 /// (like `compile_expression`/`compile_method` already did) and returns
 /// severity- and category-tagged diagnostics, so a re-check can tell a
 /// removed-selector `Dnu` from a `Type` mismatch without location alone.
@@ -102,7 +102,7 @@ fn diagnostics_accepts_class_hierarchy_and_reports_category() {
         "expected at least one diagnostic for the now-stale `+ 1`: {response:?}"
     );
     // Every diagnostic carries a `category` key (an atom `undefined` or a
-    // binary label) — BT-2778's re-check orchestration filters on it.
+    // binary label) — the re-check orchestration filters on it.
     for diag in &diagnostics.elements {
         let Term::Map(dm) = diag else {
             panic!("Expected diagnostic map, got {diag:?}");
@@ -114,12 +114,12 @@ fn diagnostics_accepts_class_hierarchy_and_reports_category() {
     }
 }
 
-/// BT-3473: without `protocol_registry`, a runtime-seeded protocol
+/// Without `protocol_registry`, a runtime-seeded protocol
 /// reaches `analyse_full` only as a zero-method `class_hierarchy` entry
 /// (`beamtalk_protocol_registry:create_protocol_class/2`'s actual wire
 /// shape has no `superclass`/`method_info` — see
 /// `parse_protocol_info_from_meta_term`'s doc), which defeats the
-/// BT-2088/BT-3472 nominal-mismatch escape hatch and makes every
+/// nominal-mismatch escape hatch and makes every
 /// selector on a protocol-typed receiver look unresolved. This proves
 /// the pre-fix shape actually reproduces both false positives — the
 /// `TimeoutToken`/`NullTimer` scenario from the issue.
@@ -165,9 +165,9 @@ fn diagnostics_class_hierarchy_alone_reproduces_false_protocol_mismatch() {
     );
 }
 
-/// BT-3473: the companion fix to the test above — supplying
+/// The companion fix to the test above — supplying
 /// `protocol_registry` alongside `class_hierarchy` lets the existing
-/// BT-2088/BT-3472 filter in `analyse_full` recognise `TimeoutToken` as
+/// filter in `analyse_full` recognise `TimeoutToken` as
 /// a protocol (not a plain class) the same way it already does for the
 /// LSP's `ProjectIndex` path, so `NullTimer`'s structural conformance is
 /// correctly recognised and neither false positive fires.
@@ -237,7 +237,7 @@ fn diagnostics_protocol_registry_suppresses_false_protocol_mismatch() {
 }
 
 /// Extract every diagnostic's `message` string from a `handle_diagnostics`
-/// response, for the two BT-3473 tests above.
+/// response, for the two tests above.
 fn diagnostic_messages(response: &Term) -> Vec<String> {
     let Term::Map(m) = response else {
         panic!("Expected map response: {response:?}");
@@ -259,7 +259,7 @@ fn diagnostic_messages(response: &Term) -> Vec<String> {
         .collect()
 }
 
-/// BT-3477: builds the `class_hierarchy` entry for `NullTimer` used by
+/// Builds the `class_hierarchy` entry for `NullTimer` used by
 /// the `compile`/`compile_method` protocol-registry tests below —
 /// `NullTimer` stands in for the cross-file class the issue describes
 /// (the ambient cache's actual wire shape for a real compiled class,
@@ -267,7 +267,7 @@ fn diagnostic_messages(response: &Term) -> Vec<String> {
 /// something to structurally match `TimeoutToken`'s required selectors
 /// against without inlining `NullTimer`'s definition into the source
 /// under compile — `compile`/`compile_method` (unlike `diagnostics`)
-/// runs codegen, which enforces BT-1666's one-class-per-file rule.
+/// runs codegen, which enforces the one-class-per-file rule.
 fn null_timer_class_info_term() -> Term {
     let no_arg_boolean_method = |return_type: &str| {
         Term::from(Map::from([
@@ -299,11 +299,11 @@ fn null_timer_class_info_term() -> Term {
     ]))
 }
 
-/// BT-3477: the `TimeoutToken` `class_hierarchy` entry (mirrors the
+/// The `TimeoutToken` `class_hierarchy` entry (mirrors the
 /// `diagnostics_*_protocol_mismatch` tests' `class_hierarchy_term` above
 /// — the runtime-seeded checker sees a protocol as a zero-method class
 /// entry regardless of request kind) and its `protocol_registry` entry
-/// (BT-3473's real wire shape: selector/arity-only required methods).
+/// (the real wire shape: selector/arity-only required methods).
 fn timeout_token_terms() -> (Term, Term) {
     let class_entry = Term::from(Map::from([
         (atom("is_sealed"), atom("true")),
@@ -329,7 +329,7 @@ fn timeout_token_terms() -> (Term, Term) {
     (class_entry, protocol_entry)
 }
 
-/// BT-3477: extract every string in a `compile`/`compile_method` `ok`
+/// Extract every string in a `compile`/`compile_method` `ok`
 /// response's `warnings` field (plain binaries, unlike `diagnostics`'s
 /// `diagnostic_messages` maps above) for the protocol-registry tests
 /// below.
@@ -347,8 +347,8 @@ fn compile_warning_messages(response: &Term) -> Vec<String> {
         .collect()
 }
 
-/// BT-3477: without `protocol_registry`, `compile` (not just
-/// `diagnostics/3`, which BT-3473 already covers) hits the identical
+/// Without `protocol_registry`, `compile` (not just
+/// `diagnostics/3`, which is already covered above) hits the identical
 /// false type-mismatch/Dnu for a cross-file protocol-typed receiver —
 /// `NullTimer` is only known via the ambient `class_hierarchy` here
 /// (simulating a class compiled in an earlier REPL turn/another file),
@@ -398,10 +398,10 @@ fn compile_class_hierarchy_alone_reproduces_false_protocol_mismatch() {
     );
 }
 
-/// BT-3477: the companion fix to the test above — supplying
+/// The companion fix to the test above — supplying
 /// `protocol_registry` alongside `class_hierarchy` to `compile` (mirrors
 /// `diagnostics_protocol_registry_suppresses_false_protocol_mismatch`)
-/// lets the same BT-2088/BT-3472 filter recognise `TimeoutToken` as a
+/// lets the same filter recognise `TimeoutToken` as a
 /// protocol, so neither false positive fires.
 #[test]
 fn compile_protocol_registry_suppresses_false_protocol_mismatch() {
@@ -453,7 +453,7 @@ fn compile_protocol_registry_suppresses_false_protocol_mismatch() {
     );
 }
 
-/// BT-3477: the `compile_method` sibling of
+/// The `compile_method` sibling of
 /// `compile_protocol_registry_suppresses_false_protocol_mismatch` — the
 /// live-image write surface (IDE save / `compile:source:` / REPL `>>`)
 /// hits the same false positive when patching a method onto an
