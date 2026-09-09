@@ -340,8 +340,8 @@ fn sym_pair(key: &str, value: Pattern) -> MapPatternPair {
     }
 }
 
-// generate_destructure_bindings_from_var: exercises the previously-uncovered
-// function body (lines 51-59 in destructure.rs).
+// generate_destructure_bindings_from_var: exercises the delegating path through
+// generate_pattern_extractions_from_var with a pre-evaluated RHS variable.
 #[test]
 fn destructure_bindings_from_var_tuple_emits_element_extractions() {
     let mut generator = CoreErlangGenerator::new("test");
@@ -390,7 +390,7 @@ fn destructure_bindings_map_pattern_emits_map_get() {
     );
 }
 
-// Array Pattern::Literal: exercises the guard-check block (lines 175-201).
+// Array Pattern::Literal: exercises the guard-check block in the Array branch.
 #[test]
 fn destructure_array_literal_element_emits_guard_check() {
     let mut generator = CoreErlangGenerator::new("test");
@@ -432,7 +432,7 @@ fn destructure_array_wildcard_element_produces_no_bindings() {
     assert!(bound.is_empty(), "wildcard should produce no bound pairs");
 }
 
-// Tuple Pattern::Literal: exercises the guard-check block (lines ~271-303).
+// Tuple Pattern::Literal: exercises the guard-check block in the Tuple branch.
 #[test]
 fn destructure_tuple_literal_element_emits_guard_check() {
     let mut generator = CoreErlangGenerator::new("test");
@@ -477,7 +477,7 @@ fn destructure_map_wildcard_value_produces_no_binding() {
     assert!(bound.is_empty(), "map wildcard should have no bound pairs");
 }
 
-// Array nested pattern: exercises the error path at line ~206.
+// Array nested pattern: exercises the error arm for unsupported nested patterns in the Array branch.
 #[test]
 fn destructure_array_nested_pattern_returns_error() {
     let mut generator = CoreErlangGenerator::new("test");
@@ -487,7 +487,7 @@ fn destructure_array_nested_pattern_returns_error() {
     assert!(result.is_err(), "nested array pattern should be an error");
 }
 
-// Tuple nested pattern: exercises the error path at line ~306.
+// Tuple nested pattern: exercises the error arm for unsupported nested patterns in the Tuple branch.
 #[test]
 fn destructure_tuple_nested_pattern_returns_error() {
     let mut generator = CoreErlangGenerator::new("test");
@@ -497,7 +497,7 @@ fn destructure_tuple_nested_pattern_returns_error() {
     assert!(result.is_err(), "nested tuple pattern should be an error");
 }
 
-// Map nested pattern value: exercises the error path at line ~334.
+// Map nested pattern value: exercises the error arm for unsupported nested patterns in the Map branch.
 #[test]
 fn destructure_map_nested_pattern_returns_error() {
     let mut generator = CoreErlangGenerator::new("test");
@@ -510,7 +510,7 @@ fn destructure_map_nested_pattern_returns_error() {
     );
 }
 
-// Unsupported outer pattern kind: exercises the error at lines 343-347.
+// Unsupported outer pattern kind: exercises the catch-all error arm in generate_pattern_extractions_from_var.
 #[test]
 fn destructure_unsupported_outer_pattern_returns_error() {
     let mut generator = CoreErlangGenerator::new("test");
