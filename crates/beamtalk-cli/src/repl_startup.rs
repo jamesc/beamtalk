@@ -23,6 +23,7 @@ use std::path::Path;
 #[cfg(all(test, windows))]
 use std::path::PathBuf;
 
+use crate::path_util::to_forward_slash;
 use beamtalk_codegen::core_erlang::escape_atom_chars;
 
 pub use beamtalk_core::ffi_type_specs::{
@@ -207,16 +208,7 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
     let mut args = Vec::with_capacity(dirs.len() * 2);
     for dir in dirs {
         args.push(OsString::from("-pa"));
-        #[cfg(windows)]
-        {
-            // Convert Windows backslashes to forward slashes for Erlang
-            let path_str = dir.to_string_lossy().replace('\\', "/");
-            args.push(OsString::from(path_str));
-        }
-        #[cfg(not(windows))]
-        {
-            args.push(dir.as_os_str().to_os_string());
-        }
+        args.push(OsString::from(to_forward_slash(&dir.to_string_lossy())));
     }
     args
 }

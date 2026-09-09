@@ -5,6 +5,23 @@
 
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 
+/// Render a path string as forward-slash-separated text regardless of host OS.
+///
+/// `Utf8PathBuf`'s `Display`/`ToString` preserves native separators (backslash
+/// on Windows), which is wrong for values embedded in generated or protocol
+/// strings that must be byte-identical regardless of the developer's OS (BT-3067).
+/// Backslash cannot appear as a legitimate path separator on Unix, so a plain
+/// byte-level replace is safe on all supported platforms.
+///
+/// Pass `.as_str()` for a [`camino::Utf8Path`], `.to_string_lossy().as_ref()`
+/// for a [`std::path::Path`], or `&s` for a `String` or `&str` directly.
+///
+/// This is the single shared leaf for path-separator normalisation inside
+/// `beamtalk-cli`; do not inline `.replace('\\', "/")` at call sites.
+pub fn to_forward_slash(s: &str) -> String {
+    s.replace('\\', "/")
+}
+
 /// Normalize a path by resolving `.` and `..` components without filesystem access.
 ///
 /// Unlike `std::fs::canonicalize`, this does not require the path to exist and

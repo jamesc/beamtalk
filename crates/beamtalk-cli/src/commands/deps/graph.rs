@@ -605,6 +605,7 @@ fn topological_sort(graph: &BTreeMap<String, DepNode>, root_name: &str) -> Resul
 mod tests {
     use super::super::test_support::*;
     use super::*;
+    use crate::commands::util::to_forward_slash;
     use std::fs;
     use std::process::Command;
     use tempfile::TempDir;
@@ -694,7 +695,7 @@ mod tests {
         fs::create_dir_all(&b_dir).unwrap();
 
         // B depends on A
-        let a_path_str = a_dir.to_str().unwrap().replace('\\', "/");
+        let a_path_str = to_forward_slash(a_dir.to_str().unwrap());
         write_manifest(
             &b_dir,
             "pkg_b",
@@ -706,7 +707,7 @@ pkg_a = {{ path = "{a_path_str}" }}"#
         );
 
         // A depends on B
-        let b_path_str = b_dir.to_str().unwrap().replace('\\', "/");
+        let b_path_str = to_forward_slash(b_dir.to_str().unwrap());
         write_manifest(
             &a_dir,
             "pkg_a",
@@ -761,7 +762,7 @@ pkg_a = {{ path = "{a_path_str}" }}"#
         // Create pkg_a depending on shared v1
         let a_dir = temp.path().join("pkg_a");
         fs::create_dir_all(&a_dir).unwrap();
-        let shared_v1_str = shared_v1_dir.to_str().unwrap().replace('\\', "/");
+        let shared_v1_str = to_forward_slash(shared_v1_dir.to_str().unwrap());
         write_manifest(
             &a_dir,
             "pkg_a",
@@ -775,7 +776,7 @@ shared = {{ path = "{shared_v1_str}" }}"#
         // Create pkg_b depending on shared v2
         let b_dir = temp.path().join("pkg_b");
         fs::create_dir_all(&b_dir).unwrap();
-        let shared_v2_str = shared_v2_dir.to_str().unwrap().replace('\\', "/");
+        let shared_v2_str = to_forward_slash(shared_v2_dir.to_str().unwrap());
         write_manifest(
             &b_dir,
             "pkg_b",
@@ -789,8 +790,8 @@ shared = {{ path = "{shared_v2_str}" }}"#
         // Root depends on both A and B (which need different versions of shared)
         let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
-        let a_str = a_dir.to_str().unwrap().replace('\\', "/");
-        let b_str = b_dir.to_str().unwrap().replace('\\', "/");
+        let a_str = to_forward_slash(a_dir.to_str().unwrap());
+        let b_str = to_forward_slash(b_dir.to_str().unwrap());
         write_manifest(
             &root,
             "my_app",
@@ -831,7 +832,7 @@ pkg_b = {{ path = "{b_str}" }}"#
         // Create pkg_a depending on shared
         let a_dir = temp.path().join("pkg_a");
         fs::create_dir_all(&a_dir).unwrap();
-        let shared_str = shared_dir.to_str().unwrap().replace('\\', "/");
+        let shared_str = to_forward_slash(shared_dir.to_str().unwrap());
         write_manifest(
             &a_dir,
             "pkg_a",
@@ -858,8 +859,8 @@ shared = {{ path = "{shared_str}" }}"#
         // Root depends on both A and B
         let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
-        let a_str = a_dir.to_str().unwrap().replace('\\', "/");
-        let b_str = b_dir.to_str().unwrap().replace('\\', "/");
+        let a_str = to_forward_slash(a_dir.to_str().unwrap());
+        let b_str = to_forward_slash(b_dir.to_str().unwrap());
         write_manifest(
             &root,
             "my_app",
@@ -939,7 +940,7 @@ pkg_b = {{ path = "{b_str}" }}"#
         let root = temp.path().join("my_app");
         fs::create_dir_all(&root).unwrap();
 
-        let root_str = root.to_str().unwrap().replace('\\', "/");
+        let root_str = to_forward_slash(root.to_str().unwrap());
         write_manifest(
             &root,
             "my_app",
@@ -973,7 +974,7 @@ my_app = {{ path = "{root_str}" }}"#
 
         let c_dir = temp.path().join("pkg_c");
         fs::create_dir_all(&c_dir).unwrap();
-        let d_str = d_dir.to_str().unwrap().replace('\\', "/");
+        let d_str = to_forward_slash(d_dir.to_str().unwrap());
         write_manifest(
             &c_dir,
             "pkg_c",
@@ -986,7 +987,7 @@ pkg_d = {{ path = "{d_str}" }}"#
 
         let b_dir = temp.path().join("pkg_b");
         fs::create_dir_all(&b_dir).unwrap();
-        let c_str = c_dir.to_str().unwrap().replace('\\', "/");
+        let c_str = to_forward_slash(c_dir.to_str().unwrap());
         write_manifest(
             &b_dir,
             "pkg_b",
@@ -999,7 +1000,7 @@ pkg_c = {{ path = "{c_str}" }}"#
 
         let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
-        let b_str = b_dir.to_str().unwrap().replace('\\', "/");
+        let b_str = to_forward_slash(b_dir.to_str().unwrap());
         write_manifest(
             &root,
             "my_app",
@@ -1039,7 +1040,7 @@ pkg_b = {{ path = "{b_str}" }}"#
 
         let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
-        let dep_str = dep_dir.to_str().unwrap().replace('\\', "/");
+        let dep_str = to_forward_slash(dep_dir.to_str().unwrap());
         write_manifest(
             &root,
             "my_app",
@@ -1079,7 +1080,7 @@ dep_pkg = {{ path = "{dep_str}" }}"#
         run_git_cmd(path, &["tag", "-m", "v1.0.0", "v1.0.0"]);
 
         let sha = get_git_sha(path);
-        let mut path_str = path.display().to_string().replace('\\', "/");
+        let mut path_str = to_forward_slash(&path.display().to_string());
         if !path_str.starts_with('/') {
             path_str.insert(0, '/');
         }
@@ -1114,7 +1115,7 @@ dep_pkg = {{ path = "{dep_str}" }}"#
         run_git_cmd(path, &["tag", "-m", "v1.0.0", "v1.0.0"]);
 
         let sha = get_git_sha(path);
-        let mut path_str = path.display().to_string().replace('\\', "/");
+        let mut path_str = to_forward_slash(&path.display().to_string());
         if !path_str.starts_with('/') {
             path_str.insert(0, '/');
         }
@@ -1222,7 +1223,7 @@ leaf_dep = {{ git = "{leaf_url}", tag = "v1.0.0" }}"#
         // Create the root project that depends on the middle path dep
         let root = workspace.path().join("root");
         fs::create_dir_all(&root).unwrap();
-        let middle_str = middle_dir.to_str().unwrap().replace('\\', "/");
+        let middle_str = to_forward_slash(middle_dir.to_str().unwrap());
         write_manifest(
             &root,
             "my_app",
@@ -1425,7 +1426,7 @@ middle = {{ path = "{middle_str}" }}"#
         run_git_cmd(path, &["commit", "-m", "v2"]);
         run_git_cmd(path, &["tag", "-m", "v2.0.0", "v2.0.0"]);
 
-        let mut path_str = path.display().to_string().replace('\\', "/");
+        let mut path_str = to_forward_slash(&path.display().to_string());
         if !path_str.starts_with('/') {
             path_str.insert(0, '/');
         }

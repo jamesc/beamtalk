@@ -1564,7 +1564,7 @@ fn build_load_command(pipeline: &TestPipeline) -> Result<String> {
     fs::write(&list_path, contents)
         .into_diagnostic()
         .wrap_err("Failed to write BUnit module load list")?;
-    let list_path_str = list_path.as_str().replace('\\', "/");
+    let list_path_str = util::to_forward_slash(list_path.as_str());
 
     Ok(format!(
         "{{ok, LoadModules}} = file:consult(\"{list_path_str}\"), \
@@ -1582,29 +1582,14 @@ fn build_beam_test_command(
     eval_cmd: &str,
 ) -> std::process::Command {
     let mut cmd = std::process::Command::new("erl");
-    #[cfg(windows)]
-    {
-        let build_dir_path = pipeline.build_dir.as_str().replace('\\', "/");
-        cmd.arg("-noshell").arg("-pa").arg(build_dir_path);
-    }
-    #[cfg(not(windows))]
-    {
-        cmd.arg("-noshell")
-            .arg("-pa")
-            .arg(pipeline.build_dir.as_str());
-    }
+    cmd.arg("-noshell")
+        .arg("-pa")
+        .arg(util::to_forward_slash(pipeline.build_dir.as_str()));
 
     // Add all package ebin directories to code path
     for ebin_dir in &pipeline.package_ebin_dirs {
-        #[cfg(windows)]
-        {
-            let ebin_dir_path = ebin_dir.as_str().replace('\\', "/");
-            cmd.arg("-pa").arg(ebin_dir_path);
-        }
-        #[cfg(not(windows))]
-        {
-            cmd.arg("-pa").arg(ebin_dir.as_str());
-        }
+        cmd.arg("-pa")
+            .arg(util::to_forward_slash(ebin_dir.as_str()));
     }
 
     for arg in pa_args {

@@ -725,6 +725,7 @@ fn update_single_registry_dep(
 mod tests {
     use super::*;
     use crate::commands::deps::lockfile::LOCKFILE_NAME;
+    use crate::commands::util::to_forward_slash;
     use clap::Parser;
     use std::process::Command;
     use tempfile::TempDir;
@@ -770,7 +771,7 @@ mod tests {
         // file:// URLs need forward slashes. On Windows, paths don't start with
         // `/`, so we prepend one to get `file:///C:/...`. On Unix, `display()`
         // already starts with `/`, giving `file:///tmp/...` (BT-1737).
-        let mut path_str = path.display().to_string().replace('\\', "/");
+        let mut path_str = to_forward_slash(&path.display().to_string());
         if !path_str.starts_with('/') {
             path_str.insert(0, '/');
         }
