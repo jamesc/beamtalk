@@ -28,7 +28,7 @@ TestCase subclass: ActorInitializeTest
     c := Counter spawn
     self assert: c getValue equals: 0
     self assert: c increment equals: 1
-    c stop  // => _
+    self assert: c stop equals: #ok
 
   // === Initialize failure ===
   testInitializeFailureRaisesError =>
