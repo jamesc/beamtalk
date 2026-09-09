@@ -29,9 +29,8 @@
 //! with [`crate::error::BrokerError::MissingNodeName`] instead, matching
 //! `bin/server`'s Unix fail-fast behavior (ADR 0097 Broker §1b) rather than
 //! silently connecting to a guessed name that only *usually* matches the
-//! CLI's own naming convention (BT-3060 adversarial-review follow-up: a
-//! listing can afford to guess and let epmd sort out liveness, but an actual
-//! connection attempt should not).
+//! CLI's own naming convention: a listing can afford to guess and let epmd
+//! sort out liveness, but an actual connection attempt should not.
 //!
 //! **DDD Context:** Desktop Shell
 
@@ -104,7 +103,7 @@ fn parse_metadata(dir_name: &str, content: &str) -> Result<WorkspaceSummary> {
 /// `metadata.json`, without the epmd liveness check [`discover_workspaces`]
 /// does for the whole picker list.
 ///
-/// The Windows spawn path (BT-2988) needs this standalone: there is no
+/// The Windows spawn path needs this standalone: there is no
 /// `bin/server` shell script on Windows to do the equivalent `sed`
 /// extraction (ADR 0097 Implementation §5b), so the broker resolves
 /// `BT_WORKSPACE_NODE` itself before invoking `bin\bt_attach.bat` directly.
@@ -116,7 +115,7 @@ fn parse_metadata(dir_name: &str, content: &str) -> Result<WorkspaceSummary> {
 /// this module's doc comment). A workspace that has never been started has
 /// no real node to dist-connect to yet, and the two naming conventions (this
 /// crate's guess vs. the CLI's actual scheme) are independently maintained —
-/// a coincidental match today is not a guarantee (BT-3060).
+/// a coincidental match today is not a guarantee.
 ///
 /// A present-but-blank `node_name` (`""`, or whitespace-only) is treated the
 /// same as a missing field, matching both `bin/server`'s own `[ -z "${node}"
@@ -193,7 +192,7 @@ pub fn discover_workspaces() -> Result<Vec<WorkspaceSummary>> {
 /// (case-insensitive), not `id` — `id` is an opaque SHA256 hash of the path
 /// (`beamtalk_workspace::generate_workspace_id`), so sorting by it scatters
 /// workspaces from the same project directory randomly through the list
-/// instead of grouping them (BT-3230). A missing `project_path` (a
+/// instead of grouping them. A missing `project_path` (a
 /// hand-edited/corrupted `metadata.json`) sorts after every path-having
 /// workspace; `id` is the tiebreaker for two workspaces with the same or
 /// absent path.
@@ -280,7 +279,7 @@ mod tests {
         assert!(parse_metadata("abc123", "not json").is_err());
     }
 
-    /// `read_node_name` is what the Windows spawn path (BT-2988) uses in
+    /// `read_node_name` is what the Windows spawn path uses in
     /// place of `bin/server`'s shell-level extraction — a real, on-disk
     /// workspace directory (same pattern the rest of this crate's tests use;
     /// there's no HOME-override hook in `beamtalk_workspace`).
@@ -301,7 +300,7 @@ mod tests {
         assert_eq!(result, "bt_attach_x_123@localhost");
     }
 
-    /// BT-3060: `read_node_name` (the Windows spawn path's lookup) must
+    /// `read_node_name` (the Windows spawn path's lookup) must
     /// hard-fail here, matching `bin/server`'s Unix behavior — unlike
     /// `parse_metadata`'s picker-listing fallback (tested above), a real
     /// spawn attempt must not silently guess at a node name.
@@ -323,8 +322,7 @@ mod tests {
 
     /// A present-but-blank `node_name` must fail exactly like an absent one
     /// — matching `bin/server`'s `[ -z "${node}" ]` check and this crate's
-    /// own `read_cookie_file` empty-is-missing convention (BT-3060 review
-    /// follow-up).
+    /// own `read_cookie_file` empty-is-missing convention.
     #[test]
     fn read_node_name_errors_when_metadata_has_a_blank_node_name() {
         let id = format!("read_node_name_blank_field_{}", std::process::id());

@@ -1,55 +1,63 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Escaping helpers for Core Erlang atom and string leaves (BT-875, BT-3089).
+//! Escaping helpers for Core Erlang atom and string leaves.
 //!
 //! **DDD Context:** Compilation — Code Generation (shared leaf, ADR 0117 step 4)
 
 /// Escapes a string for use inside a Core Erlang double-quoted string literal.
 ///
 /// Replaces `\` with `\\` and `"` with `\"` so the result is safe to embed
-/// between `"..."` in generated `.core` source.
+/// between `"..."` in generated `.core` source. Lighter than
+/// [`escape_erlang_string`]: Core Erlang string literals have no `\n`/`\r`/
+/// `\t`/`\0` escapes of their own to preserve.
 #[must_use]
 pub fn escape_core_erlang_string(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-/// Escapes special characters in an atom name for Core Erlang.
-///
-/// This is the single canonical funnel for atom escaping (BT-875, BT-3089):
-/// every atom emitted through [`leaf::atom`](crate::leaf::atom)
-/// passes through here, and other atom-formatting call sites (e.g.
-/// `beamtalk-cli`'s generated-EUnit-source atom formatter) should reuse this
-/// function rather than hand-rolling their own escape table.
-///
-/// Escapes:
-/// - `\` → `\\`, `'` → `\'` — required to keep the surrounding `'...'`
-///   delimiters and any embedded backslash unambiguous.
-/// - `\n`, `\r`, `\t`, `\0` — **necessary, not just cosmetic** (BT-3089):
-///   Beamtalk quoted-symbol literals (`#'foo bar'`) have no backslash-escape
-///   syntax of their own — the lexer (`lex_symbol_or_hash`) accepts *any*
-///   literal character up to the closing `'`, including a raw newline typed
-///   directly in the source. A `Literal::Symbol` carrying one of these
-///   characters reaches `leaf::atom` unchanged; without escaping them here,
-///   the generated `.core` source would contain a literal control character
-///   embedded inside a quoted atom, breaking the "one term per line"
-///   assumption the rest of the pipeline (and any downstream tooling) relies
-///   on. Mirrors [`escape_core_erlang_string`]'s equivalent table.
-#[must_use]
-pub fn escape_atom_chars(name: &str) -> String {
-    let mut result = String::with_capacity(name.len());
-    for c in name.chars() {
+/// Escapes backslash, control characters, and the given quote character,
+/// shared by [`escape_atom_chars`] and [`escape_erlang_string`].
+fn escape_with_quote(s: &str, quote: char) -> String {
+    let mut result = String::with_capacity(s.len());
+    for c in s.chars() {
         match c {
-            '\'' => result.push_str("\\'"),
             '\\' => result.push_str("\\\\"),
             '\n' => result.push_str("\\n"),
             '\r' => result.push_str("\\r"),
             '\t' => result.push_str("\\t"),
             '\0' => result.push_str("\\0"),
+            c if c == quote => {
+                result.push('\\');
+                result.push(quote);
+            }
             _ => result.push(c),
         }
     }
     result
+}
+
+/// Escapes special characters in an atom name for Core Erlang.
+///
+/// This is the single canonical funnel for atom escaping: every atom emitted
+/// through [`leaf::atom`](crate::leaf::atom) passes through here, and other
+/// atom-formatting call sites (e.g. `beamtalk-cli`'s generated-EUnit-source
+/// atom formatter) should reuse this function rather than hand-rolling their
+/// own escape table.
+///
+/// Escapes `\`, `'`, `\n`, `\r`, `\t`, `\0`. The control characters are
+/// necessary, not just cosmetic: Beamtalk quoted-symbol literals
+/// (`#'foo bar'`) have no backslash-escape syntax of their own — the lexer
+/// (`lex_symbol_or_hash`) accepts *any* literal character up to the closing
+/// `'`, including a raw newline typed directly in the source. A
+/// `Literal::Symbol` carrying one of these characters reaches `leaf::atom`
+/// unchanged; without escaping them here, the generated `.core` source would
+/// contain a literal control character embedded inside a quoted atom,
+/// breaking the "one term per line" assumption the rest of the pipeline (and
+/// any downstream tooling) relies on.
+#[must_use]
+pub fn escape_atom_chars(name: &str) -> String {
+    escape_with_quote(name, '\'')
 }
 
 /// Escapes special characters for embedding in an Erlang string literal.
@@ -57,24 +65,9 @@ pub fn escape_atom_chars(name: &str) -> String {
 /// Handles `\`, `"`, `\n`, `\r`, `\t`, and `\0` so the result is safe to
 /// embed between `"..."` in generated Erlang source (e.g. `-eval` arguments,
 /// path strings passed to `erlc`, `.app` descriptions).
-///
-/// This is distinct from [`escape_core_erlang_string`], which is a lighter
-/// variant for Core Erlang `.core` output.
 #[must_use]
 pub fn escape_erlang_string(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\\' => result.push_str("\\\\"),
-            '"' => result.push_str("\\\""),
-            '\n' => result.push_str("\\n"),
-            '\r' => result.push_str("\\r"),
-            '\t' => result.push_str("\\t"),
-            '\0' => result.push_str("\\0"),
-            _ => result.push(c),
-        }
-    }
-    result
+    escape_with_quote(s, '"')
 }
 
 #[cfg(test)]
@@ -96,10 +89,10 @@ mod tests {
         assert_eq!(escape_atom_chars("back\\slash"), "back\\\\slash");
     }
 
-    /// BT-3089: a quoted symbol literal (`#'foo\nbar'`, real newline typed
-    /// in source — Beamtalk quoted symbols have no backslash-escape syntax
-    /// of their own) must not reach the generated `.core` source as a raw
-    /// embedded control character.
+    /// A quoted symbol literal (`#'foo\nbar'`, real newline typed in source
+    /// — Beamtalk quoted symbols have no backslash-escape syntax of their
+    /// own) must not reach the generated `.core` source as a raw embedded
+    /// control character.
     #[test]
     fn test_escape_atom_chars_control_characters() {
         assert_eq!(escape_atom_chars("foo\nbar"), "foo\\nbar");

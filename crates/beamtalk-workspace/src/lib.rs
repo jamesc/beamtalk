@@ -199,7 +199,7 @@ pub fn workspace_dir(workspace_id: &str) -> Result<PathBuf> {
 
 /// Read the port (and optional nonce) from the port file written by `beamtalk_repl_server`.
 ///
-/// Port file format (BT-611): `PORT\nNONCE` (two lines).
+/// Port file format: `PORT\nNONCE` (two lines).
 /// Returns `Ok(None)` if the file does not exist.
 ///
 /// # Errors

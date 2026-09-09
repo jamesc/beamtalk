@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Live-runtime validation of the desktop broker's spawn/readiness
-//! assumptions against a real `dist-liveview` release (BT-3004).
+//! assumptions against a real `dist-liveview` release.
 //!
-//! BT-2985 built [`beamtalk_desktop_broker`] entirely against the ADR
-//! 0097 / spike contract, with no built `dist-liveview` release available in
-//! that development sandbox — `sname::predict_node_name`'s pid assumption,
+//! [`beamtalk_desktop_broker`] is built entirely against the ADR
+//! 0097 / spike contract; without a built `dist-liveview` release available
+//! in every development sandbox, `sname::predict_node_name`'s pid assumption,
 //! `readiness::ProbeTimeouts::default_local`'s timeout budget, and
 //! `spawn::DEFAULT_BIND_FAILURE_GRACE`'s bind-failure heuristic were all
 //! reasoned from the ADR/OTP defaults rather than measured. This suite
@@ -39,16 +39,16 @@
 //! reintroduce the exact TOCTOU port race [`beamtalk_desktop_broker::port`]'s
 //! module doc describes and its retry logic is meant to absorb.
 //!
-//! ## BT-2989: full attach/detach lifecycle + dead-workspace negative path
+//! ## Full attach/detach lifecycle + dead-workspace negative path
 //!
-//! Two further tests below round out this file into the Rust half of BT-2989's
+//! Two further tests below round out this file into the Rust half of the
 //! E2E validation (ADR 0097 Phase 5) — the acceptance criteria's "attach →
 //! confirm reachable → detach → confirm the front process exits" and "attach
 //! with a dead workspace surfaces the failure taxonomy rather than hanging or
 //! crashing" clauses, exercised against the exact production call shape
 //! `desktop/src-tauri/src/commands.rs`'s `attach`/`detach` commands use
 //! (`spawn_front_with_port_retry` → `wait_ready` → kill+wait). The browser/UI
-//! half of BT-2989 (an eval actually round-tripping through the LiveView page
+//! half (an eval actually round-tripping through the LiveView page
 //! a workspace window loads, and the picker showing that failure) lives in
 //! `desktop/e2e/` — see that directory's README for why it is a separate,
 //! Node/Playwright-based script rather than more Rust here: driving the
@@ -135,9 +135,10 @@ fn workspace_id() -> String {
     require_env("BT_DESKTOP_BROKER_LIVE_WORKSPACE")
 }
 
-/// BT-2989: a workspace whose directory + cookie exist on disk but whose BEAM
-/// node has been stopped — see the module doc's "BT-2989" section for how to
-/// create one. Only read by the dead-workspace negative-path test below.
+/// A workspace whose directory + cookie exist on disk but whose BEAM
+/// node has been stopped — see the module doc's "Full attach/detach
+/// lifecycle" section for how to create one. Only read by the
+/// dead-workspace negative-path test below.
 fn dead_workspace_id() -> String {
     require_env("BT_DESKTOP_BROKER_LIVE_DEAD_WORKSPACE")
 }
@@ -155,12 +156,12 @@ fn drive_to_terminal(port: u16, timeouts: ProbeTimeouts) -> ReadinessState {
     )
 }
 
-/// BT-3004 acceptance criterion 1: spawn a real front against a real
-/// workspace and confirm `sname::predict_node_name` (via
-/// `predict_short_name`, epmd's own vocabulary) matches what epmd actually
-/// reports once the front distributes.
+/// Spawn a real front against a real workspace and confirm
+/// `sname::predict_node_name` (via `predict_short_name`, epmd's own
+/// vocabulary) matches what epmd actually reports once the front
+/// distributes.
 ///
-/// Unix-only (BT-3045): `predict_node_name`'s pid prediction is *only*
+/// Unix-only: `predict_node_name`'s pid prediction is *only*
 /// verified correct on Unix (see `sname`'s module doc comment — Windows'
 /// `Child::id()` reports `cmd.exe`'s pid, never `erl.exe`'s, since
 /// `bin\bt_attach.bat` can only run via that console-subsystem wrapper). This
@@ -197,7 +198,7 @@ fn predict_node_name_matches_a_live_epmd_registration() {
     );
 }
 
-/// BT-3045: the Windows-correct replacement for the pid-based prediction
+/// The Windows-correct replacement for the pid-based prediction
 /// above — spawn a real front, drive it to `Ready` (forcing
 /// `ensure_distributed/0` to actually run), then confirm
 /// `sname::resolve_registered_node_name` finds it via a real epmd query.
@@ -234,7 +235,7 @@ fn resolve_registered_node_name_matches_a_live_epmd_registration() {
     );
 }
 
-/// BT-3004 acceptance criterion 2: deliberately trigger a bad-cookie attach
+/// Deliberately trigger a bad-cookie attach
 /// and confirm `/readiness`'s default timeout budget comfortably covers the
 /// real response latency (whatever it turns out to be — this asserts the
 /// *outcome*, not a specific millisecond figure, so it stays meaningful if a
@@ -274,7 +275,7 @@ fn bad_cookie_readiness_resolves_within_the_default_budget() {
         ReadinessState::Failed(readiness::FailureReason::BadCookie),
         "expected a definitive BadCookie failure, got {state:?} after {elapsed:?}"
     );
-    // Regression guard, not a tight bound: measured BT-3004 runs resolved in
+    // Regression guard, not a tight bound: measured live runs resolved in
     // well under 100ms on loopback (see readiness.rs's ProbeTimeouts doc
     // comment) — several seconds of margin is intentional headroom, not the
     // expected figure.
@@ -287,7 +288,7 @@ fn bad_cookie_readiness_resolves_within_the_default_budget() {
     );
 }
 
-/// BT-3004 acceptance criterion 3: race two spawns on the same port and
+/// Race two spawns on the same port and
 /// measure how long the losing front takes to actually exit, to calibrate
 /// `spawn::DEFAULT_BIND_FAILURE_GRACE`. A grace window shorter than this
 /// measured exit latency would misclassify a real port conflict as
@@ -341,11 +342,11 @@ fn a_real_port_conflict_exits_within_the_calibrated_grace_period() {
         "a real :eaddrinuse crash took {elapsed:?} to surface, which exceeds \
          spawn::DEFAULT_BIND_FAILURE_GRACE ({DEFAULT_BIND_FAILURE_GRACE:?}) — the grace \
          period would misclassify this conflict as SpawnAttempt::Bound and needs \
-         recalibrating (see that constant's doc comment for the BT-3004 methodology)"
+         recalibrating (see that constant's doc comment for the measurement methodology)"
     );
 }
 
-/// BT-2989 acceptance criterion 1 (the positive-path half): the full
+/// The positive-path half: the full
 /// attach/detach lifecycle `desktop/src-tauri/src/commands.rs`'s `attach` and
 /// `detach` commands drive — spawn a real front against a real running
 /// workspace, confirm it reaches [`ReadinessState::Ready`], then kill it
@@ -412,7 +413,7 @@ fn detach_kills_the_front_and_it_exits_cleanly() {
     }
 }
 
-/// BT-2989 acceptance criterion 2: attaching to a **dead** workspace (one
+/// Attaching to a **dead** workspace (one
 /// whose `metadata.json`/`cookie` are still on disk — `spawn_front` only
 /// checks the former exists, per its doc comment — but whose BEAM node is no
 /// longer running) must surface the `/readiness` failure taxonomy

@@ -43,7 +43,7 @@ impl RequestBuilder {
     }
 
     /// Build a `run-entry` request — dispatch a class entry method with argv
-    /// in a connected session (BT-2691, ADR 0099 §3).
+    /// in a connected session (ADR 0099 §3).
     ///
     /// `selector` keeps its trailing `:` for the arity-1 keyword (`main:`) form;
     /// `args` is the program arguments delivered to the entry as a `List(String)`.
@@ -60,7 +60,7 @@ impl RequestBuilder {
         })
     }
 
-    /// Build an `eval` request with optional trace mode (BT-1238).
+    /// Build an `eval` request with optional trace mode.
     #[must_use]
     pub fn eval_with_trace(code: &str, trace: bool) -> serde_json::Value {
         let mut req = Self::eval(code);
@@ -139,7 +139,7 @@ impl RequestBuilder {
         })
     }
 
-    /// Build a `show-codegen` request for a loaded class (BT-1236).
+    /// Build a `show-codegen` request for a loaded class.
     #[must_use]
     pub fn show_codegen_class(class: &str, selector: Option<&str>) -> serde_json::Value {
         let mut req = serde_json::json!({
@@ -192,7 +192,7 @@ impl RequestBuilder {
 
     // --- Session operations ---
     //
-    // BT-2369 (ADR 0081 Phase 6): the `clear` and `bindings` ops were removed.
+    // ADR 0081 Phase 6: the `clear` and `bindings` ops were removed.
     // Session state is read and reset via the `Session` API
     // (`Session current bindings keys`, `Session current clear`) over `eval`.
 
@@ -309,7 +309,7 @@ impl RequestBuilder {
 
     // --- Documentation operations ---
 
-    /// Build an `erlang-help` request (BT-1852).
+    /// Build an `erlang-help` request.
     #[must_use]
     pub fn erlang_help(module: &str, function: Option<&str>) -> serde_json::Value {
         let mut req = serde_json::json!({
@@ -347,7 +347,7 @@ impl RequestBuilder {
         })
     }
 
-    /// Build a `list-classes` request (BT-1404).
+    /// Build a `list-classes` request.
     #[must_use]
     pub fn list_classes(filter: Option<&str>) -> serde_json::Value {
         let mut req = serde_json::json!({
@@ -361,7 +361,7 @@ impl RequestBuilder {
     }
 
     /// Build a `nav-query` request — structured navigation query that
-    /// returns `beamtalk_xref` site records to the LSP / MCP (BT-2239).
+    /// returns `beamtalk_xref` site records to the LSP / MCP.
     ///
     /// `kind` is one of `"senders"`, `"implementors"`, `"references"`.
     /// For `senders` / `implementors`, pass a Beamtalk selector as the
@@ -386,7 +386,7 @@ impl RequestBuilder {
     }
 
     /// Build a `nav-symbols` request — bulk class+method symbol enumeration
-    /// from the live class registry (BT-2244).
+    /// from the live class registry.
     ///
     /// Unlike `nav-query` (which is locked to selector-shaped navigation:
     /// senders / implementors / references), `nav-symbols` returns the full
@@ -414,7 +414,7 @@ impl RequestBuilder {
         req
     }
 
-    /// Build a `reload-findings` request (BT-2801, ADR 0105 surface-parity
+    /// Build a `reload-findings` request (ADR 0105 surface-parity
     /// gap): a snapshot read of every currently-live reload-induced finding
     /// (`beamtalk_workspace_findings_store:all/0`), the request/response
     /// counterpart to the `reload_check`/`completed` push frame — for
@@ -526,7 +526,7 @@ impl RequestBuilder {
         req
     }
 
-    // --- Stdin (BT-698) ---
+    // --- Stdin ---
 
     /// Build a `stdin` request to provide input to a running eval.
     #[must_use]

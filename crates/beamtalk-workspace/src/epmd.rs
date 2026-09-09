@@ -10,9 +10,8 @@
 //! deregistration polling) and `beamtalk-desktop-broker` (ADR 0097 discovery
 //! liveness — a *dist ping* is not available to a non-BEAM broker, so a raw
 //! epmd `NAMES` query is the liveness check, per the ADR's discovery
-//! contract). Originally lived only in `beamtalk-cli`; moved here (BT-2985)
-//! so the broker doesn't need to link the CLI's internals to get the same
-//! protocol implementation.
+//! contract). Lives here, not in `beamtalk-cli`, so the broker doesn't need
+//! to link the CLI's internals to get the same protocol implementation.
 //!
 //! **DDD Context:** CLI / Language Service
 

@@ -7,7 +7,7 @@
 //! `connect/0` from outside the VM, so readiness is checked in two stages:
 //!
 //! 1. Poll the HTTP port until Phoenix answers at all (`wait_http_up`).
-//! 2. `GET /readiness` (BT-2983), which forces `connect/0` plus one cheap RPC
+//! 2. `GET /readiness`, which forces `connect/0` plus one cheap RPC
 //!    and returns `200` with a version report only when the workspace is
 //!    truly reachable, or `503` with a `reason` distinguishing `epmd_absent`
 //!    / `bad_cookie` / `dead_workspace` (`BtAttach.Workspace.readiness/0`'s
@@ -33,8 +33,8 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-/// The workspace's version report (mirrors Erlang `beamtalk_version:get/0`,
-/// BT-2991) — carried in a successful `/readiness` response so the front can
+/// The workspace's version report (mirrors Erlang `beamtalk_version:get/0`)
+/// — carried in a successful `/readiness` response so the front can
 /// warn/refuse on a runtime/protocol mismatch (ADR 0097 Consequences,
 /// "version skew").
 ///
@@ -303,7 +303,7 @@ struct ErrBody {
 /// `connect/0` blocks for Erlang's connection-setup timeout (`net_kernel`'s
 /// `net_setuptime`, 7s by default) before the front can even answer `503`.
 ///
-/// **Measured against a real `dist-liveview` release (BT-3004), that
+/// **Measured against a real `dist-liveview` release, that
 /// assumption does not hold on loopback** — the only topology this broker
 /// ever spawns into (ADR 0091 "Local-only posture"). Racing a bad cookie and
 /// a dead-workspace target against a real front, both `503`s came back in
@@ -342,7 +342,7 @@ impl ProbeTimeouts {
     /// 2s for the HTTP-up check (a healthy, already-spawned local Phoenix
     /// answers near-instantly); 10s for `/readiness` — a generous ceiling,
     /// not a measured requirement: a real bad-cookie or dead-workspace `503`
-    /// on loopback arrives in milliseconds (measured, BT-3004; see the
+    /// on loopback arrives in milliseconds (measured; see the
     /// [`ProbeTimeouts`] doc comment), so this budget has ample headroom
     /// rather than being tuned tight against `net_setuptime`.
     #[must_use]

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Desktop picker shell-agnostic logic (ADR 0097, BT-2986).
+//! Desktop picker shell-agnostic logic (ADR 0097).
 //!
 //! [`beamtalk_desktop_broker`] implements process supervision (discovery,
 //! spawn, readiness, monitoring, reaping) with no GUI dependency. This crate
@@ -9,7 +9,7 @@
 //! itself still GUI-toolkit-agnostic (pure data + pure functions, no window
 //! system, no I/O beyond what it delegates to the broker) but that the
 //! broker deliberately left out of its own scope (`beamtalk-desktop-broker`'s
-//! module docs: "does not build or wire a picker UI \[BT-2986\]").
+//! module docs list "build or wire a picker UI" as out of scope).
 //!
 //! Kept separate from the actual GUI shell (a Tauri application — see
 //! `desktop/` at the repo root, **not** a Cargo workspace member; it depends
@@ -32,8 +32,8 @@
 
 /// Attach-twice / focus-existing decision and window-per-workspace label
 /// bookkeeping (ADR 0097 "Single-instance policy and attach-twice
-/// semantics", settled by the BT-2984 spike: attaching twice focuses the
-/// existing front rather than spawning a second one).
+/// semantics": attaching twice focuses the existing front rather than
+/// spawning a second one).
 pub mod attach;
 /// First-run empty-state classification (ADR 0097 Broker §5 / User Impact:
 /// "First run with no workspaces is a real state").

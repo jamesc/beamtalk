@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! REPL code generation boundary (BT-1462).
+//! REPL code generation boundary.
 //!
 //! **DDD Context:** REPL
 //!
@@ -17,14 +17,10 @@
 //!
 //! [`CoreErlangGenerator`]: beamtalk_codegen::core_erlang::CoreErlangGenerator
 //!
-//! BT-3340 (ADR 0117 Decision step 2): extracted from `beamtalk-core::repl`
-//! into its own crate — `repl` depended only on `codegen`/`ast`/
-//! `source_analysis` in production. Its one back-edge, `codegen`'s own test
-//! files calling `repl::codegen` to validate REPL-specific codegen paths,
-//! was test-only and has since been closed too: BT-3344 (ADR 0117 Decision
-//! step 4) moved those test cases into this crate's own `tests/`, so
-//! `beamtalk-core` no longer depends on `beamtalk-repl` at all, dev or
-//! otherwise.
+//! A standalone crate (ADR 0117 Decision step 2) depending only on
+//! `codegen`/`ast`/`source_analysis` in production. Its test cases live in
+//! this crate's own `tests/` (ADR 0117 Decision step 4), so `beamtalk-core`
+//! has no dependency — dev or otherwise — on `beamtalk-repl`.
 //! Reaching into [`CoreErlangGenerator`]'s previously crate-private state
 //! (scope stack, state-threading counters, REPL/workspace-mode flags) is
 //! exactly what a REPL-specific codegen boundary is expected to need, so

@@ -14,7 +14,7 @@
     clippy::too_many_lines
 )]
 
-//! Cross-surface parity test harness for Beamtalk (BT-2077).
+//! Cross-surface parity test harness for Beamtalk.
 //!
 //! **DDD Context:** Cross-cutting — Quality / Tooling
 //!

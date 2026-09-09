@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Lint: warn when a synchronous `self` send appears inside a `Timer every:do:`
-//! or `Timer after:do:` block (BT-1458).
+//! or `Timer after:do:` block.
 //!
 //! **DDD Context:** Compilation
 //!

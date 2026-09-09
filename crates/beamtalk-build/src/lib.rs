@@ -7,7 +7,7 @@
 //! and git state, then exposes the `BEAMTALK_VERSION` compile-time env var.
 //! Also provides `emit_spec_mapping_stamp`, which hashes
 //! `beamtalk_spec_reader.erl` and exposes the result as
-//! `BEAMTALK_SPEC_MAPPING_STAMP` (BT-2852).
+//! `BEAMTALK_SPEC_MAPPING_STAMP`.
 //!
 //! # Usage
 //!
@@ -105,8 +105,7 @@ fn git_short_sha() -> Option<String> {
 }
 
 /// Hash `runtime/apps/beamtalk_compiler/src/beamtalk_spec_reader.erl` and
-/// expose the result as the `BEAMTALK_SPEC_MAPPING_STAMP` compile-time env var
-/// (BT-2852).
+/// expose the result as the `BEAMTALK_SPEC_MAPPING_STAMP` compile-time env var.
 ///
 /// The FFI type-spec cache (`_build/type_cache/`, and the shared
 /// OTP-version-keyed tier) keys cached specs by module name, `.beam` mtime,

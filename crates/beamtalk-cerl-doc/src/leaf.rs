@@ -5,10 +5,10 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Historically the open `Document::String(arbitrary_string)` leaf was the
-//! BT-875 recurrence vector: any author could stuff an unquoted atom, a
-//! misformatted variable name, or a hand-rendered `format!()` fragment into a
-//! leaf and the compiler accepted it. This module replaces that open leaf with
+//! Historically the open `Document::String(arbitrary_string)` leaf let any
+//! author stuff an unquoted atom, a misformatted variable name, or a
+//! hand-rendered `format!()` fragment into a leaf and the compiler accepted
+//! it. This module replaces that open leaf with
 //! a small set of *typed* leaf constructors — "what kind of leaf is this?" —
 //! that do the Core Erlang punctuation and escaping for you.
 //!
@@ -41,9 +41,8 @@ use crate::escape::{escape_atom_chars, escape_core_erlang_string};
 ///
 /// The atom name is escaped via
 /// [`escape_atom_chars`]
-/// (apostrophes and backslashes), then wrapped in single quotes. The
-/// atom-quote punctuation is the entire BT-875 recurrence vector this helper
-/// closes.
+/// (apostrophes and backslashes), then wrapped in single quotes — the
+/// atom-quote punctuation that a hand-rolled leaf could otherwise get wrong.
 ///
 /// Replaces hand-rolled `docvec!["'", Document::String(name), "'"]` call sites
 /// — symbol literals, class/selector atoms, `maps:put` keys, logger metadata
@@ -226,7 +225,7 @@ impl<'a> BtSpan<'a> {
 
 /// `( Expr -| [Line, {'file', Filename}] )` — attach a `.bt` source position to
 /// a Core Erlang node so it survives `core_scan`/`core_parse` into the BEAM
-/// `Line` chunk and runtime stack traces (BT-3119 spike, BT-3127).
+/// `Line` chunk and runtime stack traces.
 ///
 /// The annotation list shape is load-bearing: it must be a bare integer line
 /// number *first*, followed by a `{'file', Filename}` tuple — this is the
@@ -371,7 +370,7 @@ mod tests {
 
     #[test]
     fn annotated_renders_bare_line_then_file_tuple() {
-        // BT-3119 spike: the shape MUST be [Line, {'file', Filename}] — a bare
+        // The shape MUST be [Line, {'file', Filename}] — a bare
         // integer first, then the file tuple. The [{'file',...},{'line',...}]
         // shape (atom-tagged tuples for both) also parses as Core Erlang but is
         // silently ignored by sys_core_fold:get_line/1 and

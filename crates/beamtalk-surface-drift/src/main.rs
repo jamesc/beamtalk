@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Surface parity drift checker (BT-2082).
+//! Surface parity drift checker.
 //!
 //! Compares the inventory of REPL ops (Erlang), MCP tools (`#[tool(...)]`
 //! attributes), REPL meta-commands (`:cmd` literals in the CLI dispatcher),
@@ -35,7 +35,7 @@ const PARITY_DOC: &str = "docs/development/surface-parity.md";
 const REPL_OPS_DIR: &str = "runtime/apps/beamtalk_workspace/src";
 const MCP_SERVER: &str = "crates/beamtalk-mcp/src/server/tools/";
 const REPL_DISPATCH: &str = "crates/beamtalk-cli/src/commands/repl/mod.rs";
-/// BT-3083: the single source of the REPL meta-command vocabulary — every
+/// The single source of the REPL meta-command vocabulary — every
 /// `":cmd"` name/alias tab-completion offers lives in this table
 /// (`commands::REPL_COMMAND_TABLE`), and `REPL_DISPATCH`'s `classify_command`
 /// resolves against it by referencing each table constant (`commands::EXIT`,
@@ -207,14 +207,14 @@ impl ParityDoc {
                 if let CellState::Bound(ref name) = bindings.lsp {
                     self.lsp_caps.insert(name.clone());
                 }
-                // ADR 0082 Phase 3 (BT-2289): an `executeCommand:` LSP cell may
+                // ADR 0082 Phase 3: an `executeCommand:` LSP cell may
                 // list more than one command name (e.g. the `flush` row enumerates
                 // `beamtalk.flush` / `beamtalk.flush.class` / `beamtalk.flush.file`
                 // / `beamtalk.flush.kind`). Harvest every backtick-delimited code
                 // span that starts with `executeCommand:` so the matching against
                 // the code-side `BEAMTALK_LSP_COMMANDS` array is exhaustive.
                 //
-                // BT-2241 / BT-2243: a single LSP cell may also list multiple
+                // A single LSP cell may also list multiple
                 // `textDocument/*`, `workspace/*`, or `callHierarchy/*`
                 // capabilities separated by ` / ` (e.g. the `nav-query` row
                 // enumerates `textDocument/references`,
@@ -238,9 +238,8 @@ impl ParityDoc {
                     {
                         // Store the canonicalised value so set comparisons
                         // against code-derived capabilities don't mismatch
-                        // on stray leading whitespace (BT-2241 review).
-                        // BT-2242 added `typeHierarchy/*` and the prior
-                        // BT-2243 work added `callHierarchy/*` — both follow
+                        // on stray leading whitespace. `typeHierarchy/*` and
+                        // `callHierarchy/*` both follow
                         // the same enumerate-per-row convention as
                         // `textDocument/*`.
                         self.lsp_caps.insert(trimmed.to_string());
@@ -435,11 +434,11 @@ struct CodeInventory {
     /// MCP tool function names from `#[tool(...)]` attributes.
     mcp_tools: BTreeSet<String>,
     /// REPL meta-command name/alias literals from `commands::REPL_COMMAND_TABLE`
-    /// — the tab-completion vocabulary (BT-3083).
+    /// — the tab-completion vocabulary.
     repl_meta: BTreeSet<String>,
     /// `ReplCommandSpec` constant identifiers declared in `REPL_COMMANDS_TABLE`
     /// (e.g. `EXIT`, `HELP`) — used with `repl_command_dispatch_refs` to check
-    /// the completion table against the dispatcher (BT-3083).
+    /// the completion table against the dispatcher.
     repl_command_consts: BTreeSet<String>,
     /// `commands::IDENT` identifiers referenced anywhere in `REPL_DISPATCH`
     /// (`classify_command`'s recognition step).
@@ -553,7 +552,8 @@ impl CodeInventory {
     /// `ReplCommandSpec` constants `classify_command` actually consults.
     /// Paired with `repl_command_consts` (from `REPL_COMMANDS_TABLE`) in
     /// `check_drift` to catch a completion-table entry with no dispatch
-    /// reference (BT-3083's `:actors`/`:kill`/`:inspect`/`:sessions` bug).
+    /// reference (the shape of a real past regression: a `:actors`/`:kill`/
+    /// `:inspect`/`:sessions` completion offered with no dispatch arm).
     /// Excludes every `#[cfg(test)] mod { .. }` block — otherwise a stray
     /// `commands::IDENT` reference in one of `mod.rs`'s test modules (e.g. a
     /// test helper building an expression from a table constant) can mask a
@@ -602,7 +602,7 @@ impl CodeInventory {
 /// only collect `<<"name">>` keys when the map-literal nesting depth is
 /// exactly 1 (the outer ops map). Inner keys like `<<"params">>` are at
 /// depth ≥ 2 and skipped. This is a heuristic but stable across the
-/// codebase (BT-2082 risk note in the issue).
+/// codebase.
 fn extract_repl_ops_from_erlang(text: &str, out: &mut BTreeSet<String>) {
     let mut in_target_fn = false;
     let mut map_depth: i32 = 0;
@@ -785,8 +785,7 @@ fn production_portion(text: &str) -> &str {
 }
 
 /// CLI scanner — match `":<word>"` literals in `REPL_COMMANDS_TABLE`'s
-/// production portion (`commands.rs`, BT-3083). Unlike the old scan of
-/// `handle_repl_command`'s brace-balanced body, this is a whole-file scan up
+/// production portion (`commands.rs`). This is a whole-file scan up
 /// to the test module: the file is a small, declarative `ReplCommandSpec`
 /// table with no unrelated `"<colon-word>"` string literals there (its
 /// `help:` doc strings never *start* with `:`, so they don't false-match
@@ -932,7 +931,7 @@ fn extract_lsp_caps(text: &str, out: &mut BTreeSet<String>) {
             out.insert("textDocument/didSave".into());
         }
     }
-    // ADR 0082 Phase 3 (BT-2289): `execute_command_provider` is enabled in
+    // ADR 0082 Phase 3: `execute_command_provider` is enabled in
     // the capabilities literal, but the individual command identifiers live
     // outside it in the `BEAMTALK_LSP_COMMANDS` array. Surface the array's
     // contents as `executeCommand: <command>` entries so the doc's per-row
@@ -943,7 +942,7 @@ fn extract_lsp_caps(text: &str, out: &mut BTreeSet<String>) {
             out.insert(format!("executeCommand: {cmd}"));
         }
     }
-    // BT-2242: type-hierarchy support is advertised via the typed
+    // Type-hierarchy support is advertised via the typed
     // `experimental` JSON value because lsp-types 0.94.1 does not yet
     // expose a `type_hierarchy_provider` field on `ServerCapabilities`.
     // Detect the well-known `"typeHierarchyProvider": true` shape inside
@@ -1046,14 +1045,14 @@ fn capability_to_doc_names(field: &str) -> Vec<String> {
         "references_provider" => vec!["textDocument/references".into()],
         "implementation_provider" => vec!["textDocument/implementation".into()],
         "document_symbol_provider" => vec!["textDocument/documentSymbol".into()],
-        // BT-3237: AST-only, no REPL-op binding — documented as an
+        // AST-only, no REPL-op binding — documented as an
         // `LSP-Only Capabilities` row instead of an `Operations` table cell.
         "folding_range_provider" => vec!["textDocument/foldingRange".into()],
         "workspace_symbol_provider" => vec!["workspace/symbol".into()],
         "document_formatting_provider" => vec!["textDocument/formatting".into()],
         "document_range_formatting_provider" => vec!["textDocument/rangeFormatting".into()],
         "code_action_provider" => vec!["textDocument/codeAction".into()],
-        // BT-2243: per the LSP spec, the three call-hierarchy RPCs are
+        // Per the LSP spec, the three call-hierarchy RPCs are
         // `textDocument/prepareCallHierarchy` (the prepare step lives
         // under `textDocument/` because it takes a text-document
         // position) plus `callHierarchy/{incomingCalls,outgoingCalls}`
@@ -1136,7 +1135,7 @@ fn check_drift(doc: &ParityDoc, code: &CodeInventory, errors: &mut Vec<String>) 
         }
     }
 
-    // 4b) BT-3083: every ReplCommandSpec table constant (the completion
+    // 4b) Every ReplCommandSpec table constant (the completion
     // vocabulary) must be referenced by classify_command in REPL_DISPATCH —
     // catches a tab-completable command with no dispatch path, the exact bug
     // that let `:actors`/`:kill`/`:inspect`/`:sessions` complete with no
@@ -1167,7 +1166,7 @@ mod tests {
     use super::*;
 
     // -----------------------------------------------------------------------
-    // BT-3083: REPL command table <-> dispatch cross-check scanners.
+    // REPL command table <-> dispatch cross-check scanners.
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1494,7 +1493,7 @@ describe_ops() ->
         assert!(doc.lsp_caps.contains("textDocument/hover"));
     }
 
-    // ADR 0082 Phase 3 (BT-2289): LSP `executeCommand` registration
+    // ADR 0082 Phase 3: LSP `executeCommand` registration
     // discovery + multi-binding cell harvesting.
 
     #[test]
@@ -1583,7 +1582,7 @@ fn _stub() -> () {
 
     #[test]
     fn extract_lsp_caps_emits_three_call_hierarchy_names_for_one_provider() {
-        // BT-2243: `call_hierarchy_provider` covers prepareCallHierarchy +
+        // `call_hierarchy_provider` covers prepareCallHierarchy +
         // incomingCalls + outgoingCalls. The drift checker must emit all
         // three doc-side names so the parity row's enumerated set verifies.
         let src = r"
@@ -1607,7 +1606,7 @@ fn _stub() -> () {
 
     #[test]
     fn parity_doc_harvests_multiple_lsp_caps_from_one_cell() {
-        // BT-2243: an LSP cell may list several capabilities (e.g. nav-query
+        // An LSP cell may list several capabilities (e.g. nav-query
         // wires textDocument/references and callHierarchy/*). `parse_cell`
         // captures only the first; the loop in `ingest_row` harvests the
         // rest. Verify the rest reach the inventory.

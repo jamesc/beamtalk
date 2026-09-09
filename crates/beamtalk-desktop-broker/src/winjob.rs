@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Windows Job Object wrapper (BT-2988, adversarial-review follow-up).
+//! Windows Job Object wrapper.
 //!
 //! **Why this exists at all:** `crate::spawn`'s Windows launch path invokes
 //! `bin\bt_attach.bat` — a `.bat`, which `CreateProcessW` cannot execute
@@ -10,8 +10,8 @@
 //! `cmd.exe /c` instead of failing. That means the process
 //! [`std::process::Child`] actually tracks is **`cmd.exe`**, not the BEAM VM
 //! `bin\bt_attach.bat` eventually execs into — so `Child::id()` is the wrong
-//! PID for [`crate::sname::predict_node_name`] (fixed on Windows, BT-3045, by
-//! not using that prediction there at all — see `sname`'s module doc for the
+//! PID for [`crate::sname::predict_node_name`] (Windows never uses that
+//! prediction, by design — see `sname`'s module doc for the
 //! epmd-query replacement), and plain `Child::kill()` only terminates
 //! `cmd.exe`, orphaning `erl.exe` underneath it (with a live workspace cookie
 //! and a bound port) every time a front is detached.

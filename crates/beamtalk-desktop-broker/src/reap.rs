@@ -19,31 +19,29 @@
 //! front's process start time at spawn time (the same technique
 //! `beamtalk-cli`'s `NodeInfo.start_time` already uses for its own PID-reuse
 //! detection) and refusing to signal a PID whose *current* start time
-//! doesn't match what was recorded. [`read_start_time`] was inert on Windows
-//! until BT-3046 (`None` unconditionally, which `classify_record` treats as
-//! "unknown, trust liveness" — every sweep matched, closing nothing); it now
-//! reads a real value there via `GetProcessTimes`.
+//! doesn't match what was recorded. [`read_start_time`] reads a real value
+//! on Windows via `GetProcessTimes`; treat any future platform arm that
+//! instead returns `None` unconditionally as "unknown, trust liveness" —
+//! every sweep would match, closing nothing.
 //!
-//! **A narrower race survived BT-3046's fix too, closed here (BT-3056):**
-//! `sweep` calls [`is_process_alive`] and [`read_start_time`] as two separate
-//! syscalls — if the process exits in that exact window, `read_start_time`
-//! returns `None` even though a `start_time` *was* recorded for it
-//! (`record.start_time: Some(_)`). Treating that as "unknown, trust
-//! liveness" (the pre-BT-3056 fallback) would classify it as
+//! **A narrower race: `sweep` calls [`is_process_alive`] and
+//! [`read_start_time`] as two separate syscalls** — if the process exits in
+//! that exact window, `read_start_time` returns `None` even though a
+//! `start_time` *was* recorded for it (`record.start_time: Some(_)`).
+//! Treating that as "unknown, trust liveness" would classify it as
 //! [`Disposition::Reap`], and if a third, unrelated process grabs the
-//! recycled PID before `terminate_process` runs, it gets killed. The fix
-//! doesn't need a platform `cfg` to tell "genuinely can't read start time"
-//! apart from "raced a process exit": a record only ever has `start_time:
-//! Some(_)` if *this* platform's own [`read_start_time`] produced a real
-//! value when the record was saved, so a `Some(_)`-recorded, `None`-observed
-//! pairing can only mean the observation itself failed this one time — it
-//! is never a platform-incapability signal, which is `start_time: None`
-//! instead (see [`start_time_matches`]'s doc comment for the exact
-//! contract). `classify_record` now maps that specific pairing to
+//! recycled PID before `terminate_process` runs, it gets killed. Telling
+//! "genuinely can't read start time" apart from "raced a process exit" needs
+//! no platform `cfg`: a record only ever has `start_time: Some(_)` if *this*
+//! platform's own [`read_start_time`] produced a real value when the record
+//! was saved, so a `Some(_)`-recorded, `None`-observed pairing can only mean
+//! the observation itself failed this one time — it is never a
+//! platform-incapability signal, which is `start_time: None` instead (see
+//! [`start_time_matches`]'s doc comment for the exact contract).
+//! `classify_record` maps that specific pairing to
 //! [`Disposition::SkipPidReused`] rather than [`Disposition::Reap`].
 //!
-//! **Trade-off, deliberate and worth stating plainly** (BT-3056
-//! adversarial-review follow-up): [`sweep`] clears a record's on-disk file
+//! **Trade-off, deliberate and worth stating plainly:** [`sweep`] clears a record's on-disk file
 //! for *every* disposition, including `SkipPidReused` — so this fix's
 //! failure mode is "silently stop tracking a front this sweep couldn't
 //! prove was safe to kill," not just "skip killing it this one time." A
@@ -66,7 +64,7 @@
 //! that succeeds for *some* still-alive, still-visible processes but not
 //! others would quietly widen this gap without any test here catching it.
 //!
-//! **What "the recorded PID" means on Windows** (BT-2988): the caller
+//! **What "the recorded PID" means on Windows:** the caller
 //! persists `Child::id()` after `spawn_front`, which per [`crate::winjob`]'s
 //! doc comment is `cmd.exe`'s PID, not `erl.exe`'s (`.bat` launches can only
 //! run via a console-subsystem wrapper). A `Reap` here terminates that
@@ -96,7 +94,7 @@ use crate::error::Result;
 /// Serializes every read-modify-write or delete of a [`FrontRecord`] file
 /// ([`save_record`], [`update_record_node_name`], [`remove_record`]) so two
 /// of those operations racing the same `(workspace_id, port)` key can never
-/// interleave (BT-3062). Without this, `update_record_node_name`'s
+/// interleave. Without this, `update_record_node_name`'s
 /// read-check-write had a window in which a concurrent `remove_record` (a
 /// racing `detach`/`quit`/failed-attach cleanup, per `kill_and_untrack`)
 /// could delete the file between the read and the write — the write would
@@ -182,7 +180,7 @@ pub fn save_record(dir: &Path, record: &FrontRecord) -> Result<()> {
     Ok(())
 }
 
-/// Correct a front record's `node_name` after the fact (BT-3045) — used on
+/// Correct a front record's `node_name` after the fact — used on
 /// the Windows attach path, where [`save_record`]'s initial write (via
 /// `desktop/src-tauri/src/commands.rs`'s `persist_front_record`) cannot yet
 /// know the front's real epmd registration name (`sname::predict_node_name`'s
@@ -208,7 +206,7 @@ pub fn save_record(dir: &Path, record: &FrontRecord) -> Result<()> {
 /// newer front in between: this must never stamp a stale epmd-resolved name
 /// onto a record that isn't the one this call was resolving it for.
 ///
-/// **The resurrection window itself (BT-3062)** — the compare-and-swap above
+/// **The resurrection window itself** — the compare-and-swap above
 /// only ever protected against a *different* front's record being mutated;
 /// it did nothing about the file being deleted by a racing `remove_record`
 /// strictly between this function's read and its write, which would recreate
@@ -255,7 +253,7 @@ pub fn update_record_node_name(
 /// Remove a front record — called on clean detach, so a graceful stop
 /// doesn't leave a stale record for the next sweep to trip over. Also
 /// removes that front's per-front `RELEASE_TMP` directory on Windows
-/// (BT-3046 adversarial-review follow-up): that directory holds the boot's
+/// that directory holds the boot's
 /// resolved `sys.config`, embedding `SECRET_KEY_BASE` and the workspace
 /// cookie, which are meant to be ephemeral per-boot secrets — left behind,
 /// they'd accumulate one live-secret directory per spawn/retry, forever.
@@ -263,7 +261,7 @@ pub fn update_record_node_name(
 /// sites in `desktop/src-tauri/src/commands.rs`) goes through here, so this
 /// one hook covers all of them.
 ///
-/// The `RELEASE_TMP` removal runs on a detached background thread (BT-3059)
+/// The `RELEASE_TMP` removal runs on a detached background thread
 /// rather than inline: `remove_release_tmp_dir_with_retry` can legitimately
 /// retry for up to ~1s absorbing `JobHandle`'s asynchronous kill-on-close,
 /// but this function sits on latency-sensitive *synchronous* callers — the
@@ -278,7 +276,7 @@ pub fn update_record_node_name(
 /// synchronously — see [`load_all_records`]) is unaffected and still
 /// happens inline.
 ///
-/// The record-file delete below still takes [`locked_record_ops`] (BT-3062);
+/// The record-file delete below still takes [`locked_record_ops`];
 /// the backgrounded `RELEASE_TMP` removal deliberately does not, matching
 /// its previous inline reasoning — it doesn't touch the record file itself,
 /// so there's no reason to hold up an unrelated [`update_record_node_name`]
@@ -317,7 +315,7 @@ pub fn remove_record(dir: &Path, workspace_id: &str, port: u16) -> Result<()> {
 }
 
 /// Registry of [`remove_record`]'s in-flight background `RELEASE_TMP`
-/// cleanup threads (BT-3059), so [`wait_for_release_tmp_cleanup`] can find
+/// cleanup threads, so [`wait_for_release_tmp_cleanup`] can find
 /// and join them. Windows-only, since the cleanup itself only exists there —
 /// see [`remove_record`]'s doc comment.
 ///
@@ -340,7 +338,7 @@ fn pending_release_tmp_cleanups() -> &'static Mutex<Vec<std::thread::JoinHandle<
 const RELEASE_TMP_CLEANUP_WAIT: Duration = Duration::from_millis(1500);
 
 /// Best-effort wait for [`remove_record`]'s backgrounded `RELEASE_TMP`
-/// cleanup threads (BT-3059) to finish, up to [`RELEASE_TMP_CLEANUP_WAIT`]
+/// cleanup threads to finish, up to [`RELEASE_TMP_CLEANUP_WAIT`]
 /// **total** — not per-thread, since every registered thread already runs
 /// concurrently, so this bounds the slowest one, not their sum.
 ///
@@ -353,7 +351,7 @@ const RELEASE_TMP_CLEANUP_WAIT: Duration = Duration::from_millis(1500);
 /// the OS process itself almost immediately, abandoning any cleanup thread
 /// still mid-retry rather than letting it run to completion. Since that
 /// retry exists to remove a `SECRET_KEY_BASE`/workspace-cookie-bearing
-/// directory (BT-3046), silently abandoning it on every ordinary quit that
+/// directory, silently abandoning it on every ordinary quit that
 /// raced `erl.exe`'s asynchronous kill-on-close — precisely the case the
 /// retry was added for — would defeat the whole point of retrying. Calling
 /// this after `detach_all`'s loop and before the process actually exits
@@ -401,10 +399,10 @@ const RELEASE_TMP_REMOVE_ATTEMPTS: u32 = 10;
 const RELEASE_TMP_REMOVE_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// Best-effort removal of a front's `RELEASE_TMP` directory, retrying briefly
-/// on failure (BT-3046 adversarial-review follow-up, second pass).
+/// on failure.
 ///
 /// The caller (`remove_record`) spawns this on a detached background thread
-/// (BT-3059) immediately after the front's `SpawnedFront` is dropped, which
+/// immediately after the front's `SpawnedFront` is dropped, which
 /// closes its `JobHandle` (`crate::winjob`) —
 /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` then kills `erl.exe` (the process
 /// actually holding files open under `RELEASE_TMP`; `Child::kill()`/`.wait()`
@@ -506,7 +504,7 @@ pub enum Disposition {
 /// outright.
 ///
 /// A recorded start time with no matching *observed* value (`record.start_time:
-/// Some(_)`, `actual_start_time: None`) is treated differently (BT-3056),
+/// Some(_)`, `actual_start_time: None`) is treated differently,
 /// **not** as "unknown, trust liveness": see [`start_time_matches`]'s doc
 /// comment for why that pairing unambiguously means the observation raced a
 /// process exit, not a platform limitation, and lands in
@@ -535,7 +533,7 @@ pub fn classify_record(
 ///   treated as a match, the same best-effort stance `beamtalk-cli`'s own
 ///   `NodeInfo.start_time` handling takes when start time isn't available.
 /// - `(Some(_), None)` — a start time *was* recorded, but this observation
-///   came back empty (BT-3056). Unlike the case above, this is **not**
+///   came back empty. Unlike the case above, this is **not**
 ///   ambiguous: `expected` can only be `Some(_)` if this exact platform's
 ///   [`read_start_time`] already produced a real value once, for this same
 ///   PID, when the record was saved — so a platform that genuinely can't
@@ -613,8 +611,8 @@ pub fn sweep(dir: &Path) -> Result<SweepReport> {
             }
         }
         // `remove_record` below backgrounds its Windows RELEASE_TMP retry
-        // removal onto its own thread (BT-3059) rather than retrying inline,
-        // so it no longer delays this loop — but the retrying itself (BT-3046
+        // removal onto its own thread rather than retrying inline,
+        // so it no longer delays this loop — but the retrying itself
         // adversarial-review follow-up) still matters: it absorbs
         // `TerminateProcess`'s documented asynchronicity, since a `Reap`
         // disposition's target may not have fully exited (and released files
@@ -664,7 +662,7 @@ fn terminate_process(pid: u32, expected_start_time: Option<u64>) {
         // TerminateProcess, no graceful-signal equivalent to wait out first),
         // so the PID-reuse window this re-check closes is inherently much
         // smaller than the Unix arm's `TERMINATE_GRACE` — but now that
-        // `read_start_time` is real on Windows too (BT-3046), re-verifying
+        // `read_start_time` is real on Windows too, re-verifying
         // costs nothing and closes it anyway rather than merely accepting it
         // as "small enough", matching the Unix arm's own belt-and-suspenders
         // stance.
@@ -755,10 +753,11 @@ pub fn read_start_time(pid: u32) -> Option<u64> {
     starttime_str.parse::<u64>().ok()
 }
 
-/// Read process creation time via `GetProcessTimes` (BT-3046). Mirrors the
-/// Linux `/proc` read above: without this, `classify_record`'s "unknown
-/// start time falls back to trusting liveness" stance (see its doc comment)
-/// meant the PID-reuse guard was **inert** on Windows — a stale on-disk
+/// Read process creation time via `GetProcessTimes`, giving Windows the same
+/// contract as the Linux `/proc` read above: without a real value here,
+/// `classify_record`'s "unknown start time falls back to trusting liveness"
+/// stance (see its doc comment) leaves the PID-reuse guard **inert** on
+/// Windows — a stale on-disk
 /// [`FrontRecord`] always classified as [`Disposition::Reap`], so a recycled
 /// PID (Windows reuses them more aggressively than Linux) would get an
 /// unconditional `TerminateProcess` against whatever unrelated process now
@@ -830,7 +829,7 @@ mod tests {
     use super::*;
     // `TERMINATE_GRACE` (crate-level import above) only exists on
     // `cfg(unix)`; this module's own `#[cfg(windows)]` tests below need
-    // `Duration` too (BT-3046).
+    // `Duration` too.
     #[cfg(windows)]
     use std::time::Duration;
 
@@ -874,7 +873,7 @@ mod tests {
         assert_eq!(disposition, Disposition::Reap);
     }
 
-    /// BT-3056: this used to fall back to trusting liveness (`Reap`), the
+    /// This used to fall back to trusting liveness (`Reap`), the
     /// same as `alive_with_no_recorded_start_time_falls_back_to_reap` above —
     /// but the two cases aren't actually equivalent. Here a start time *was*
     /// recorded (`Some(100)`), so this platform's `read_start_time`
@@ -929,7 +928,7 @@ mod tests {
         remove_record(tmp.path(), "nonexistent", 1).unwrap();
     }
 
-    // ── update_record_node_name (BT-3045) ───────────────────────────────
+    // ── update_record_node_name ─────────────────────────────────────────
 
     #[test]
     fn update_record_node_name_corrects_the_persisted_value() {
@@ -1006,7 +1005,7 @@ mod tests {
         );
     }
 
-    /// Regression test (BT-3062): `update_record_node_name`'s read-check-write
+    /// Regression test: `update_record_node_name`'s read-check-write
     /// and `remove_record`'s delete must never interleave, closing the
     /// resurrection window described in `update_record_node_name`'s doc
     /// comment (a racing `remove_record` landing strictly between the read
@@ -1069,7 +1068,7 @@ mod tests {
     #[test]
     fn remove_record_also_removes_the_release_tmp_directory() {
         let tmp = tempfile::TempDir::new().unwrap();
-        // A workspace_id/port exclusive to this test (BT-3059), deliberately
+        // A workspace_id/port exclusive to this test, deliberately
         // *not* `record()`'s shared "abc123"/4567 pair every other test in
         // this module uses. That sharing is harmless for the FrontRecord
         // JSON file (isolated per test via its own `tmp` TempDir), but
@@ -1092,7 +1091,7 @@ mod tests {
         remove_record(tmp.path(), &rec.workspace_id, rec.port).unwrap();
 
         // The RELEASE_TMP removal now runs on a detached background thread
-        // (BT-3059) rather than blocking `remove_record`, so its return no
+        // rather than blocking `remove_record`, so its return no
         // longer proves the directory is gone — bounded-poll instead of
         // asserting synchronously. The retry loop itself caps at ~1s
         // (`RELEASE_TMP_REMOVE_ATTEMPTS` * `RELEASE_TMP_REMOVE_RETRY_DELAY`);
@@ -1109,7 +1108,7 @@ mod tests {
     }
 
     /// Regression test for the exit-path gap [`wait_for_release_tmp_cleanup`]
-    /// fixes (BT-3059, adversarial-review follow-up): without it,
+    /// fixes: without it,
     /// `remove_record`'s backgrounded `RELEASE_TMP` cleanup thread is purely
     /// best-effort with no way for a caller to know it finished — exactly
     /// the situation `desktop/src-tauri`'s `quit` command is in right before
@@ -1201,7 +1200,7 @@ mod tests {
     }
 
     // Linux/Windows-only: `read_start_time` only returns a real value on
-    // those two platforms (see its doc comments; BT-3046 added the Windows
+    // those two platforms (see its doc comments; the Windows
     // `GetProcessTimes` arm) — `classify_record`'s fallback for a platform
     // where the *observed* start time is unavailable is `Reap` (best effort,
     // matching `beamtalk-cli`'s own stance), which on a CI runner without a
@@ -1297,7 +1296,7 @@ mod tests {
     }
 
     // Windows counterparts of the two Linux `terminate_process` tests above
-    // (BT-3046) — exercise the real `GetProcessTimes`/`TerminateProcess`
+    // Exercise the real `GetProcessTimes`/`TerminateProcess`
     // path rather than only `start_time_matches`'s pure logic. `ping` (not
     // `sleep`, which doesn't exist on Windows) gives a real, long-running
     // `.exe` to target — no `cmd.exe` wrapper involved, since `ping.exe` is
@@ -1356,7 +1355,7 @@ mod tests {
         let _ = child.wait();
     }
 
-    // ── read_start_time: sanity checks (BT-3046) ────────────────────────
+    // ── read_start_time: sanity checks ──────────────────────────────────
 
     #[cfg(windows)]
     #[test]
@@ -1377,7 +1376,7 @@ mod tests {
         let _ = child.wait();
     }
 
-    /// Regression test for a mis-ordered `GetProcessTimes` out-param (BT-3046
+    /// Regression test for a mis-ordered `GetProcessTimes` out-param
     /// adversarial-review follow-up): the call takes four `*mut FILETIME`
     /// slots (creation, exit, kernel, user) and it's easy to read the wrong
     /// one back. `read_start_time_returns_some_for_a_live_process` above only

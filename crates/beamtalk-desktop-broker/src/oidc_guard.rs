@@ -18,7 +18,7 @@
 //! any `BT_OIDC_*` env var is non-empty, or `ide.toml` has a non-empty
 //! `[oidc]` table.
 //!
-//! ## Parser divergence safety argument (BT-3005)
+//! ## Parser divergence safety argument
 //!
 //! This module parses `ide.toml` with the full `toml` crate (TOML v1.0.0);
 //! the front parses the same file with `BtAttach.Toml`
@@ -69,9 +69,9 @@
 //! Regression tests below (`dotted_key_oidc_is_detected_even_though_bt_attach_toml_misses_it`,
 //! `quoted_table_header_oidc_is_detected_even_though_bt_attach_toml_misses_it`,
 //! `redefined_oidc_header_is_unparsable_here_and_still_fails_closed`) lock in
-//! the divergence examples above: this resolves BT-3005 option (a) — the
-//! grammars diverge only in the safe direction, so no behavior change is
-//! required, just this documented argument and tests.
+//! the divergence examples above: the grammars diverge only in the safe
+//! direction, so no behavior change is required, just this documented
+//! argument and tests.
 //!
 //! **DDD Context:** Desktop Shell
 
@@ -141,7 +141,7 @@ pub fn oidc_requested_by_env() -> Option<OidcSource> {
 ///
 /// Uses the full `toml` crate, not the front's restricted `BtAttach.Toml`
 /// reader — see this module's doc comment ("Parser divergence safety
-/// argument (BT-3005)") for why that divergence only ever makes this check
+/// argument") for why that divergence only ever makes this check
 /// *more* conservative than the front's, never less.
 #[must_use]
 pub fn oidc_requested_by_file(ide_toml_path: &Path) -> Option<OidcSource> {
@@ -287,7 +287,7 @@ mod tests {
         unsafe { std::env::remove_var("BT_IDE_CONFIG") };
     }
 
-    // BT-3005: `BtAttach.Toml` (the front's hand-rolled reader) does not
+    // `BtAttach.Toml` (the front's hand-rolled reader) does not
     // expand dotted-key pairs — it would store this under the literal key
     // `"oidc.issuer"`, so `BtAttach.IdeConfig.requested?/1` would see no
     // `"oidc"` entry and treat OIDC as unrequested. The full `toml` crate
@@ -313,7 +313,7 @@ mod tests {
         );
     }
 
-    // BT-3005: `BtAttach.Toml` treats a quoted table-header key (`["oidc"]`)
+    // `BtAttach.Toml` treats a quoted table-header key (`["oidc"]`)
     // as a literal table name including the quote characters, so it never
     // matches the bare key `"oidc"` and `requested?/1` sees the front as
     // unrequested. The `toml` crate normalizes quoted and bare table-header
@@ -333,7 +333,7 @@ mod tests {
         );
     }
 
-    // BT-3005: `BtAttach.Toml`'s permissive line-based reader silently merges
+    // `BtAttach.Toml`'s permissive line-based reader silently merges
     // a redefined `[oidc]` header (no duplicate-table check), while standard
     // TOML disallows redefining a table and the `toml` crate rejects this as
     // invalid. The rejection routes through the unparsable-file fallback,

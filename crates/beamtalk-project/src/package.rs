@@ -11,8 +11,7 @@
 //!
 //! Both the CLI (`beamtalk lint` / `beamtalk fmt`) and the MCP server
 //! (`run_lint_structured`, `compute_diagnostic_summary`) use these helpers so
-//! lint diagnostics stay consistent between the two entry points
-//! (BT-2052, BT-2060).
+//! lint diagnostics stay consistent between the two entry points.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -34,7 +33,7 @@ fn try_canonicalize(path: &Path) -> PathBuf {
 ///
 /// `start` is canonicalized before the ancestor walk so that single-component
 /// relative paths (e.g. `test/` invoked from the package root) still reach the
-/// real package root instead of running out of parents (BT-2027).
+/// real package root instead of running out of parents.
 ///
 /// Returns `None` if no `beamtalk.toml` is found in any ancestor directory.
 #[must_use]
@@ -62,7 +61,7 @@ pub fn find_package_root(start: &Path) -> Option<PathBuf> {
 }
 
 /// Returns `true` if `file` lives under `root`'s `stubs/` directory (ADR
-/// 0075, BT-1846/BT-1847) — `declare native:` is only legal there, see
+/// 0075) — `declare native:` is only legal there, see
 /// `beamtalk_core::semantic_analysis::validators::check_native_declaration_location`'s
 /// doc.
 ///
@@ -73,7 +72,7 @@ pub fn find_package_root(start: &Path) -> Option<PathBuf> {
 /// particular `root` need not have been canonicalized by the caller first,
 /// even though [`find_package_root`] already returns a canonical path.
 ///
-/// BT-3398: shared by the MCP server's `run_module_analysis` (which derives
+/// Shared by the MCP server's `run_module_analysis` (which derives
 /// `root` from [`find_package_root`] once per call, since it has no
 /// long-lived workspace-root registry) so it doesn't reimplement this
 /// root-containment check independently of
@@ -231,7 +230,7 @@ mod tests {
         assert_eq!(found.as_deref(), Some(expected.as_path()));
     }
 
-    /// BT-3398: mirrors
+    /// Mirrors
     /// `beamtalk_language_service::project_index::tests::is_stub_file_true_for_file_under_a_root_stubs_dir`
     /// — the MCP server's single-root derivation should agree with the LSP's
     /// multi-root registry check on the same fixture shape.

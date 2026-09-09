@@ -48,12 +48,12 @@ pub struct ReplResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<Vec<String>>,
 
-    /// POSIX exit status from a connected-session `Program exit:` (BT-2688,
-    /// ADR 0099 §3). Present only on the `done` reply that ended the session.
-    /// This is the wire contract a connecting client *will* adopt as its own
-    /// process exit code once connected-mode `beamtalk run` dispatch lands
-    /// (BT-2691); no consumer reads it yet, so it does not affect any CLI exit
-    /// code today. `None` for every other response.
+    /// POSIX exit status from a connected-session `Program exit:` (ADR 0099
+    /// §3). Present only on the `done` reply that ended the session.
+    /// This is the wire contract a connecting client will adopt as its own
+    /// process exit code once connected-mode `beamtalk run` dispatch lands;
+    /// no consumer reads it yet, so it does not affect any CLI exit code
+    /// today. `None` for every other response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<u8>,
 
@@ -62,7 +62,7 @@ pub struct ReplResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<serde_json::Value>,
 
-    /// Captured stdout from evaluation (BT-355).
+    /// Captured stdout from evaluation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
 
@@ -84,7 +84,7 @@ pub struct ReplResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classes: Option<Vec<String>>,
 
-    /// Class info list with metadata (list-classes op, BT-1404).
+    /// Class info list with metadata (list-classes op).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class_list: Option<Vec<ClassInfo>>,
 
@@ -118,34 +118,34 @@ pub struct ReplResponse {
     pub state: Option<serde_json::Value>,
 
     // --- Diagnostics ---
-    /// Compilation warnings (BT-407).
+    /// Compilation warnings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warnings: Option<Vec<String>>,
 
-    /// Line number (1-based) of a compile error in the submitted snippet (BT-1235).
+    /// Line number (1-based) of a compile error in the submitted snippet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<u32>,
 
-    /// Hint text for a compile error, where available (BT-1235).
+    /// Hint text for a compile error, where available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 
     // --- Documentation ---
-    /// Documentation text (docs op, BT-500).
+    /// Documentation text (docs op).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
 
     // --- Codegen ---
-    /// Generated Core Erlang source (show-codegen op, BT-724).
+    /// Generated Core Erlang source (show-codegen op).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub core_erlang: Option<String>,
 
     // --- Reload ---
-    /// Number of actors affected by reload (BT-266).
+    /// Number of actors affected by reload.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub affected_actors: Option<u32>,
 
-    /// Number of actors that failed code migration (BT-266).
+    /// Number of actors that failed code migration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migration_failures: Option<u32>,
 
@@ -159,7 +159,7 @@ pub struct ReplResponse {
     )]
     pub errors: Vec<serde_json::Value>,
 
-    /// Incremental load summary (load-project op, BT-1685).
+    /// Incremental load summary (load-project op).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
 
@@ -169,7 +169,7 @@ pub struct ReplResponse {
     pub results: Option<serde_json::Value>,
 
     // --- Tracing (ADR 0069) ---
-    /// Per-statement trace steps (eval with trace=true, BT-1238).
+    /// Per-statement trace steps (eval with trace=true).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steps: Option<Vec<serde_json::Value>>,
 
@@ -247,7 +247,7 @@ pub struct ActorInfo {
     pub spawned_at: i64,
 }
 
-/// Class information from the list-classes op (BT-1404).
+/// Class information from the list-classes op.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ClassInfo {
     /// Class name (e.g., `"String"`).
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn deserialize_script_exit_response() {
-        // BT-2688: connected-session `Program exit: 5` — a `done` reply (not an
+        // A connected-session `Program exit: 5` — a `done` reply (not an
         // error) carrying the POSIX exit status the CLI adopts.
         let json = r#"{"id":"msg-008","value":null,"status":["done"],"exit_code":5}"#;
         let resp: ReplResponse = serde_json::from_str(json).unwrap();

@@ -43,7 +43,7 @@ pub(crate) struct ValueLikeObjectPass;
 
 impl LintPass for ValueLikeObjectPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        // BT-3098: see `hierarchy_for_lint` doc comment for why this is needed
+        // See `hierarchy_for_lint` doc comment for why this is needed
         // instead of `class.class_kind`.
         let hierarchy = hierarchy_for_lint(module);
 
@@ -59,7 +59,7 @@ fn check_class(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // Only check Object subclasses with state fields. Resolves the full
-    // ancestor chain (BT-3098) rather than only the direct superclass.
+    // ancestor chain rather than only the direct superclass.
     if hierarchy.resolve_class_kind(&class.name.name) != ClassKind::Object || class.state.is_empty()
     {
         return;
@@ -119,7 +119,7 @@ fn is_with_setter(method: &MethodDefinition, field_names: &HashSet<&str>) -> boo
     // `withName:`, not `withdraw:`) — the shared recognition counterpart to
     // `synthetic_selectors::with_star_selector`'s generation, also used by
     // `beamtalk-core`'s `check_testcase_setup_drops_field_assignments` lint
-    // (BT-3395) to spot `self withField: value` sends.
+    // to spot `self withField: value` sends.
     let selector_name = method.selector.name();
     if !beamtalk_core::synthetic_selectors::is_with_star_selector(&selector_name) {
         return false;
@@ -242,7 +242,7 @@ mod tests {
 
     /// Indirect Value subclass (two hops: `Value <- BasePoint <- Point`) —
     /// already a value type via its ancestor chain, so it should not be
-    /// flagged as "looks like it should be a Value subclass" (BT-3098).
+    /// flagged as "looks like it should be a Value subclass".
     ///
     /// `Point`'s direct superclass is `BasePoint`, not `Value` literally, so
     /// `class.class_kind` (the pre-writeback `ClassKind::from_superclass_name`
@@ -261,7 +261,7 @@ mod tests {
     }
 
     /// Indirect Actor subclass (two hops: `Actor <- BaseActor <- Counter`) —
-    /// actors are never flagged regardless of state/getter shape (BT-3098).
+    /// actors are never flagged regardless of state/getter shape.
     ///
     /// `Counter`'s direct superclass is `BaseActor`, not `Actor` literally,
     /// so `class.class_kind` (the pre-writeback placeholder) would be

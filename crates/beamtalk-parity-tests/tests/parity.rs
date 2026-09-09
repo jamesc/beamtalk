@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Cross-surface parity integration test (BT-2077).
+//! Cross-surface parity integration test.
 //!
 //! Runs every `tests/parity/cases/*.parity.bt` case through the surfaces
 //! declared in its header and asserts that the normalized outputs agree.
@@ -43,11 +43,10 @@ async fn parity_suite() {
     let staged_test_runner = stage_test_runner_project();
     let staged_mixed = stage_mixed_project();
 
-    // BT-2089: pre-load every test-fixture project on the REPL and MCP
+    // Pre-load every test-fixture project on the REPL and MCP
     // workspaces so all `Op::Test` cases see every class regardless of
-    // load order. Workspace loads now accumulate across projects, so this
-    // is a one-time setup rather than the per-class workaround that BT-2080
-    // used to need.
+    // load order. Workspace loads accumulate across projects, so this
+    // is a one-time setup rather than a per-class reload.
     if let Some(p) = staged_project.as_deref() {
         let path = p.to_string_lossy();
         repl_driver
@@ -219,22 +218,22 @@ async fn drive(
         (Surface::Cli, Op::Lint) => cli_driver::lint(Path::new(input)),
 
         (Surface::Repl, Op::Test) => {
-            // BT-2089: workspace project loads now accumulate, so we no
-            // longer need the per-class pre-load workaround. Both
-            // `simple_project` and `test_runner_project` are loaded once
-            // at the start of `parity_suite`; this branch just runs the
-            // test against the already-loaded workspace.
+            // Workspace project loads accumulate, so no per-class pre-load
+            // is needed here. Both `simple_project` and
+            // `test_runner_project` are loaded once at the start of
+            // `parity_suite`; this branch just runs the test against the
+            // already-loaded workspace.
             repl.test_class(input).await
         }
         (Surface::Mcp, Op::Test) => {
-            // BT-2089: see Repl branch above.
+            // See Repl branch above.
             mcp.test_class(input).await
         }
         (Surface::Cli, Op::Test) => {
             // CLI has no class registry, so map the input class name to its
             // staged test file. Falls back to the default `simple_project`
             // dir when the input isn't a known test-runner class — that
-            // preserves the BT-2077 behaviour for `CounterTest`.
+            // preserves the original behaviour for `CounterTest`.
             let path = cli_test_path_for_class(input);
             cli_driver::test_project(&path)
         }
@@ -274,7 +273,7 @@ fn stage_simple_project() -> Option<PathBuf> {
     Some(dst)
 }
 
-/// Stage `tests/parity/fixtures/test_runner_project/` (BT-2080).
+/// Stage `tests/parity/fixtures/test_runner_project/`.
 ///
 /// Counterpart to [`stage_simple_project`] for the test-runner parity suite.
 /// Each fixture project lives in a stable temp directory so the harness can
@@ -291,12 +290,12 @@ fn stage_test_runner_project() -> Option<PathBuf> {
 }
 
 /// Stage `tests/parity/projects/mixed/` to a stable temp directory so the
-/// BT-2079 load-project parity case can drive `:sync` / `load_project` /
+/// load-project parity case can drive `:sync` / `load_project` /
 /// `beamtalk build` against the same on-disk tree across surfaces.
 ///
 /// The fixture lives under `tests/parity/projects/` (sibling of `fixtures/`)
-/// to keep the larger BT-2079 project tree separate from the small
-/// per-case fixtures used by the original BT-2077 cases.
+/// to keep the larger load-project project tree separate from the small
+/// per-case fixtures used by the original parity cases.
 fn stage_mixed_project() -> Option<PathBuf> {
     let src = parity_root().join("projects/mixed");
     if !src.exists() {
@@ -311,9 +310,8 @@ fn stage_mixed_project() -> Option<PathBuf> {
 /// Class-name → test-runner-project test file mapping.
 ///
 /// Used by [`cli_test_path_for_class`] to map a class name to the
-/// staged test file. (BT-2089: REPL/MCP no longer need a class→project
-/// lookup because both fixture projects are pre-loaded at the start of
-/// the parity suite.)
+/// staged test file. REPL/MCP need no class→project lookup because both
+/// fixture projects are pre-loaded at the start of the parity suite.
 const TEST_RUNNER_CLASSES: &[(&str, &str)] = &[
     ("PassingRunnerTest", "passing_runner_test.bt"),
     ("AssertFailRunnerTest", "assert_fail_runner_test.bt"),
@@ -326,9 +324,9 @@ const TEST_RUNNER_CLASSES: &[(&str, &str)] = &[
 /// Map a `TestCase` class name to the staged test file that defines it.
 ///
 /// CLI `beamtalk test` operates on a path, not a class name; this lookup
-/// gives the test-runner parity case (BT-2080) per-class CLI scoping that
+/// gives the test-runner parity case per-class CLI scoping that
 /// matches the REPL/MCP `:test ClassName` semantics. Unknown class names
-/// fall back to the BT-2077 `simple_project` directory so `CounterTest`
+/// fall back to the `simple_project` directory so `CounterTest`
 /// keeps working unchanged.
 fn cli_test_path_for_class(class: &str) -> PathBuf {
     let runner_root = std::env::temp_dir().join("beamtalk-parity-test-runner");

@@ -4,18 +4,12 @@
 //! REPL-boundary Core Erlang codegen tests, exercised through
 //! `beamtalk-repl::codegen`'s public functions.
 //!
-//! BT-3344 (ADR 0117 Decision step 4): moved here from
-//! `beamtalk-core`'s own `tests/` tree, where these tests originally lived
-//! as the last surviving edge from `codegen`'s test tree into `repl` (test-
-//! only; see BT-3340, ADR 0117 Decision step 2, for the production-code
-//! split). Before that, they were unit tests inside
-//! `codegen::core_erlang::tests::{gen_server,dispatch,expressions}` and
-//! `source_analysis::parser::tests::literal_tests` (white-box tests of
-//! `CoreErlangGenerator` internals via `use super::*`), but every one of
-//! them actually only exercises `beamtalk-repl`'s public REPL-codegen entry
-//! points against public `beamtalk-core` AST types -- none of them touch
-//! `CoreErlangGenerator` or other codegen internals directly. They belong
-//! here, in `beamtalk-repl`'s own test suite, exercising its own public API.
+//! Lives here rather than in `beamtalk-core` (ADR 0117 Decision step 4):
+//! every one of these tests exercises `beamtalk-repl`'s public
+//! REPL-codegen entry points against public `beamtalk-core` AST types --
+//! none of them touch `CoreErlangGenerator` or other codegen internals
+//! directly. They belong here, in `beamtalk-repl`'s own test suite,
+//! exercising its own public API.
 //!
 //! Kept as a Cargo integration test (linking `beamtalk-repl` and
 //! `beamtalk-core` as ordinary external dependencies) rather than folded
@@ -57,7 +51,7 @@ fn parse_ok(source: &str) -> Module {
 
 #[test]
 fn test_generate_repl_module_aliases_state_to_bindings() {
-    // BT-57: REPL modules must alias State to Bindings for identifier lookups
+    // REPL modules must alias State to Bindings for identifier lookups
     let expression = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
     let code = generate_repl_expression(&expression, "repl_test").expect("codegen should work");
 
@@ -67,7 +61,7 @@ fn test_generate_repl_module_aliases_state_to_bindings() {
         "REPL module should alias State to Bindings. Got:\n{code}"
     );
 
-    // BT-2365 (ADR 0081 Phase 1): a free REPL identifier now resolves via a
+    // ADR 0081 Phase 1: a free REPL identifier now resolves via a
     // locals maps:find against State with a runtime resolve_name fallthrough,
     // instead of a bare maps:get (which would throw {badkey,_} once workspace
     // globals are no longer eagerly injected into State).
@@ -125,7 +119,7 @@ fn test_generate_repl_module_block_value_call() {
 
 #[test]
 fn test_generate_repl_module_returns_tuple_with_state() {
-    // BT-153: REPL eval/1 should return {Result, UpdatedBindings}
+    // REPL eval/1 should return {Result, UpdatedBindings}
     let expression = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
     let code =
         generate_repl_expression(&expression, "repl_tuple_test").expect("codegen should work");
@@ -148,7 +142,7 @@ fn test_generate_repl_module_returns_tuple_with_state() {
 
 #[test]
 fn test_generate_repl_module_with_times_repeat_mutation() {
-    // BT-153: REPL with mutation should return updated state
+    // REPL with mutation should return updated state
     // Expression: 5 timesRepeat: [count := count + 1]
 
     // Build the block: [count := count + 1]
@@ -192,14 +186,14 @@ fn test_generate_repl_module_with_times_repeat_mutation() {
     eprintln!("Generated code for 5 timesRepeat: [count := count + 1]:");
     eprintln!("{code}");
 
-    // BT-483: For mutation-threaded loops, return {Result, State} tuple.
+    // For mutation-threaded loops, return {Result, State} tuple.
     // REPL extracts via element/2: let _LoopResult = element(1, Result) ...
     assert!(
         code.contains("'element'(1, Result)") && code.contains("'element'(2, Result)"),
         "Should extract Result tuple elements via element/2 for mutation loop. Got:\n{code}"
     );
 
-    // BT-483: Loop termination should return {nil, StateAcc}
+    // Loop termination should return {nil, StateAcc}
     assert!(
         code.contains("{'nil', StateAcc}"),
         "Loop should return {{'nil', StateAcc}} on termination. Got:\n{code}"
@@ -222,7 +216,7 @@ fn test_generate_repl_module_with_times_repeat_mutation() {
 fn test_generate_repl_module_with_to_do_mutation() {
     use beamtalk_core::ast::BlockParameter;
 
-    // BT-153: REPL with to:do: mutation should return updated state
+    // REPL with to:do: mutation should return updated state
     // Expression: 1 to: 5 do: [:n | total := total + n]
 
     // Build the block: [:n | total := total + n]
@@ -275,7 +269,7 @@ fn test_generate_repl_module_with_to_do_mutation() {
     eprintln!("Generated code for 1 to: 5 do: [:n | total := total + n]:");
     eprintln!("{code}");
 
-    // BT-483: For mutation-threaded loops, return {Result, State} tuple.
+    // For mutation-threaded loops, return {Result, State} tuple.
     assert!(
         code.contains("'element'(1, Result)") && code.contains("'element'(2, Result)"),
         "Should extract Result tuple elements via element/2 for mutation loop. Got:\n{code}"
@@ -296,7 +290,7 @@ fn test_generate_repl_module_with_to_do_mutation() {
 
 #[test]
 fn test_generate_repl_module_with_while_true_mutation() {
-    // BT-181: REPL with whileTrue: mutation should read condition from StateAcc
+    // REPL with whileTrue: mutation should read condition from StateAcc
     // Expression: [x < 5] whileTrue: [x := x + 1]
 
     // Build the condition: [x < 5]
@@ -354,12 +348,12 @@ fn test_generate_repl_module_with_while_true_mutation() {
     eprintln!("Generated code for [x < 5] whileTrue: [x := x + 1]:");
     eprintln!("{code}");
 
-    // BT-181: Condition lambda should take StateAcc parameter
+    // Condition lambda should take StateAcc parameter
     assert!(
         code.contains("fun (StateAcc) ->"),
         "Condition lambda should accept StateAcc parameter. Got:\n{code}"
     );
-    // BT-181 + BT-2365: Condition should read x from StateAcc, not outer scope.
+    // Condition should read x from StateAcc, not outer scope.
     // Lazy resolution (ADR 0081 Phase 1) now applies inside loop bodies too, so
     // the read is a `maps:find` against StateAcc with a `resolve_name`
     // fallthrough rather than a bare `maps:get` (which would `badkey` on a miss).
@@ -371,7 +365,7 @@ fn test_generate_repl_module_with_while_true_mutation() {
         code.contains("call 'beamtalk_workspace':'resolve_name'(StateAcc, 'x')"),
         "Condition should fall through to resolve_name on a StateAcc miss. Got:\n{code}"
     );
-    // BT-181: Condition should be applied with StateAcc argument
+    // Condition should be applied with StateAcc argument
     assert!(
         code.contains("apply") && code.contains("(StateAcc)"),
         "Condition should be applied with StateAcc argument. Got:\n{code}"
@@ -382,7 +376,7 @@ fn test_generate_repl_module_with_while_true_mutation() {
 
 #[test]
 fn test_repl_multi_stmt_times_repeat_intermediate() {
-    // BT-790: `x := 1. 5 timesRepeat: [x := x + 1]. x` should return 6.
+    // `x := 1. 5 timesRepeat: [x := x + 1]. x` should return 6.
     // The loop is in intermediate (non-last) position — its StateAcc must be threaded
     // to the final `x` lookup, not discarded.
     let src = "x := 1. 5 timesRepeat: [x := x + 1]. x";
@@ -431,7 +425,7 @@ fn test_repl_multi_stmt_times_repeat_intermediate() {
 
 #[test]
 fn test_repl_multi_stmt_while_true_intermediate() {
-    // BT-790: `x := 0. [x < 3] whileTrue: [x := x + 1]. x` — whileTrue: in intermediate
+    // `x := 0. [x < 3] whileTrue: [x := x + 1]. x` — whileTrue: in intermediate
     // position must thread its StateAcc so the final `x` lookup sees the updated value.
     let src = "x := 0. [x < 3] whileTrue: [x := x + 1]. x";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -472,7 +466,7 @@ fn test_repl_multi_stmt_while_true_intermediate() {
 
 #[test]
 fn test_repl_multi_stmt_assignment_then_loop_then_plain() {
-    // BT-790: Regression — multiple intermediate expressions including assignment + loop.
+    // Regression — multiple intermediate expressions including assignment + loop.
     // `count := 0. 3 timesRepeat: [count := count + 1]. count` generates state chain:
     //   State → State1 (from assignment) → State2 (from loop StateAcc) → {Result, State2}
     let src = "count := 0. 3 timesRepeat: [count := count + 1]. count";
@@ -520,7 +514,7 @@ fn test_repl_multi_stmt_assignment_then_loop_then_plain() {
 
 #[test]
 fn test_generate_repl_module_with_arithmetic() {
-    // BT-57: Verify complex expressions with variable references work
+    // Verify complex expressions with variable references work
     // Expression: x + 1
     let x_ref = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
     let one = Expression::Literal(Literal::Integer(1), Span::new(4, 5));
@@ -540,7 +534,7 @@ fn test_generate_repl_module_with_arithmetic() {
         "REPL module should alias State to Bindings. Got:\n{code}"
     );
 
-    // Check that x lookup works through State. BT-2365 (ADR 0081 Phase 1): a free
+    // Check that x lookup works through State. ADR 0081 Phase 1: a free
     // REPL identifier resolves via a locals maps:find with a resolve_name
     // fallthrough rather than a bare maps:get.
     assert!(
@@ -563,7 +557,7 @@ fn test_generate_repl_module_with_arithmetic() {
 
 #[test]
 fn test_generate_repl_multi_stmt_times_repeat_then_read() {
-    // BT-790: x := 1. 5 timesRepeat: [x := x + 1]. x
+    // x := 1. 5 timesRepeat: [x := x + 1]. x
     // The loop in intermediate position must thread its updated state to the final `x` read.
 
     let span = Span::new(0, 1);
@@ -621,13 +615,13 @@ fn test_generate_repl_multi_stmt_times_repeat_then_read() {
     eprintln!("Generated code for x := 1. 5 timesRepeat: [x := x + 1]. x:");
     eprintln!("{code}");
 
-    // BT-790: The loop in intermediate position must have its StateAcc extracted
+    // The loop in intermediate position must have its StateAcc extracted
     assert!(
         code.contains("call 'erlang':'element'(2,"),
         "Should extract StateAcc from loop result in intermediate position. Got:\n{code}"
     );
 
-    // BT-790: The final x read must use a state that was updated by the loop
+    // The final x read must use a state that was updated by the loop
     // (not the original State or State1 from the x := 1 assignment)
     assert!(
         code.contains("let Result ="),
@@ -649,7 +643,7 @@ fn test_generate_repl_multi_stmt_times_repeat_then_read() {
 
 #[test]
 fn test_generate_repl_multi_stmt_while_true_then_read() {
-    // BT-790: x := 0. [x < 5] whileTrue: [x := x + 1]. x
+    // x := 0. [x < 5] whileTrue: [x := x + 1]. x
     // whileTrue: in intermediate position must thread state to the final x read.
 
     let span = Span::new(0, 1);
@@ -720,7 +714,7 @@ fn test_generate_repl_multi_stmt_while_true_then_read() {
     eprintln!("Generated code for x := 0. [x < 5] whileTrue: [x := x + 1]. x:");
     eprintln!("{code}");
 
-    // BT-790: The loop in intermediate position must have its StateAcc extracted
+    // The loop in intermediate position must have its StateAcc extracted
     assert!(
         code.contains("call 'erlang':'element'(2,"),
         "Should extract StateAcc from whileTrue: loop result in intermediate position. Got:\n{code}"
@@ -743,7 +737,7 @@ fn test_generate_repl_multi_stmt_while_true_then_read() {
 
 #[test]
 fn test_generate_repl_multi_stmt_loop_does_not_corrupt_final_expr() {
-    // BT-790: repl_loop_mutated must be reset before the final expression.
+    // repl_loop_mutated must be reset before the final expression.
     // x := 1. 5 timesRepeat: [x := x + 1]. 42
     // The final expression `42` is not a loop, so it must NOT use element/2 unwrapping.
 
@@ -802,7 +796,7 @@ fn test_generate_repl_multi_stmt_loop_does_not_corrupt_final_expr() {
     eprintln!("Generated code for x := 1. 5 timesRepeat: [x := x + 1]. 42:");
     eprintln!("{code}");
 
-    // BT-790: Final expression is a literal — must NOT apply element/2 unwrapping on Result
+    // Final expression is a literal — must NOT apply element/2 unwrapping on Result
     // The return tuple must be {Result, StateN} where Result = 42 (not extracted from a tuple)
     assert!(
         !code.contains("'element'(1, Result)"),
@@ -824,7 +818,7 @@ fn test_generate_repl_multi_stmt_loop_does_not_corrupt_final_expr() {
 
 #[test]
 fn test_repl_loop_mutations_accumulate_plain_key() {
-    // BT-800: In REPL mode, loop writes must use plain key so reads accumulate.
+    // In REPL mode, loop writes must use plain key so reads accumulate.
     // Expression: 5 timesRepeat: [x := x + 1]
     // Write path must use 'x' not '__local__x' so that each iteration reads the
     // value written by the previous iteration from StateAcc.
@@ -868,7 +862,7 @@ fn test_repl_loop_mutations_accumulate_plain_key() {
     eprintln!("BT-800: Generated code for 5 timesRepeat: [x := x + 1]:");
     eprintln!("{code}");
 
-    // BT-800: REPL mode must use plain key 'x' (not '__local__x') so reads match writes.
+    // REPL mode must use plain key 'x' (not '__local__x') so reads match writes.
     assert!(
         code.contains("maps':'put'('x'"),
         "BT-800: REPL write must use plain key 'x', not '__local__x'. Got:\n{code}"
@@ -878,7 +872,7 @@ fn test_repl_loop_mutations_accumulate_plain_key() {
         "BT-800: REPL mode must never use __local__ prefix for x. Got:\n{code}"
     );
 
-    // BT-800 + BT-2365: Reads inside loop body must use StateAcc (not State) so
+    // Reads inside loop body must use StateAcc (not State) so
     // they get the accumulated value from the previous iteration. Lazy
     // resolution (ADR 0081 Phase 1) now applies inside loop bodies too, so the
     // read is a `maps:find` against StateAcc with a `resolve_name` fallthrough
@@ -892,7 +886,7 @@ fn test_repl_loop_mutations_accumulate_plain_key() {
         "BT-800: Read inside loop must fall through to resolve_name on a StateAcc miss. Got:\n{code}"
     );
 
-    // BT-800: Loop must thread state correctly (arity-2 letrec, returns {nil, StateAcc}).
+    // Loop must thread state correctly (arity-2 letrec, returns {nil, StateAcc}).
     assert!(
         code.contains("letrec 'repeat'/2"),
         "BT-800: Must use arity-2 repeat for state threading. Got:\n{code}"
@@ -907,7 +901,7 @@ fn test_repl_loop_mutations_accumulate_plain_key() {
 
 #[test]
 fn test_repl_multi_stmt_loop_accumulates_from_zero() {
-    // BT-800: x := 0. 5 timesRepeat: [x := x + 1]. x
+    // x := 0. 5 timesRepeat: [x := x + 1]. x
     // Acceptance criteria: starting from zero, result must be 5.
     // Validates that the multi-statement path threads state correctly through the loop.
 
@@ -966,26 +960,26 @@ fn test_repl_multi_stmt_loop_accumulates_from_zero() {
     eprintln!("BT-800: Generated code for x := 0. 5 timesRepeat: [x := x + 1]. x:");
     eprintln!("{code}");
 
-    // BT-800: Loop write must use plain key (no __local__ prefix in REPL mode)
+    // Loop write must use plain key (no __local__ prefix in REPL mode)
     assert!(
         !code.contains("__local__"),
         "BT-800: REPL mode must never use __local__ prefix. Got:\n{code}"
     );
 
-    // BT-800: The loop must be applied with the state containing x=0
+    // The loop must be applied with the state containing x=0
     assert!(
         code.contains("apply 'repeat'/2 (1, State1)"),
         "BT-800: Loop must start with State1 (after x := 0 binding). Got:\n{code}"
     );
 
-    // BT-800: The intermediate loop result must be unpacked to thread state forward
+    // The intermediate loop result must be unpacked to thread state forward
     assert!(
         code.contains("call 'erlang':'element'(2,"),
         "BT-800: Must extract updated StateAcc from loop result. Got:\n{code}"
     );
 
-    // BT-800: Final read of x must use the state produced by the loop (State2+).
-    // BT-2365 (ADR 0081 Phase 1): the post-loop free-identifier read resolves via
+    // Final read of x must use the state produced by the loop (State2+).
+    // ADR 0081 Phase 1: the post-loop free-identifier read resolves via
     // a locals maps:find (with a resolve_name fallthrough) against State2.
     assert!(
         code.contains("maps':'find'('x', State2)"),
@@ -1001,8 +995,8 @@ fn test_repl_multi_stmt_loop_accumulates_from_zero() {
 
 #[test]
 fn test_class_method_call_generation() {
-    // BT-215: Test that ClassReference message sends generate appropriate code
-    // BT-490 / ADR 0019: All classes (including Transcript, Beamtalk, Workspace)
+    // Test that ClassReference message sends generate appropriate code
+    // ADR 0019: All classes (including Transcript, Beamtalk, Workspace)
     //         use standard class dispatch via class_send
     use beamtalk_core::ast::{Expression, Identifier, MessageSelector};
     use beamtalk_core::source_analysis::Span;
@@ -1048,7 +1042,7 @@ fn test_class_method_call_generation() {
     let code2 = generate_repl_expression(&expr2, "repl_eval2")
         .expect("codegen should succeed for non-binding class");
 
-    // BT-411/ADR 0019: In REPL, all class references check bindings then class_send
+    // ADR 0019: In REPL, all class references check bindings then class_send
     assert!(
         code2.contains("maps':'find") && code2.contains("class_send"),
         "Non-binding class should check bindings then class_send. Got:\n{code2}"
@@ -1086,7 +1080,7 @@ fn test_class_method_call_generation() {
 
 #[test]
 fn test_generate_repl_list_reject() {
-    // BT-408: reject: must generate valid Core Erlang with properly bound wrapper fun
+    // reject: must generate valid Core Erlang with properly bound wrapper fun
     // The wrapper fun must be bound via `let` — not inlined in the call args,
     // because Core Erlang lambdas don't use `end` and can't be inlined in calls.
     let src = "#(1, 2, 3, 4, 5) reject: [:x | x > 2]";
@@ -1117,7 +1111,7 @@ fn test_generate_repl_list_reject() {
 #[test]
 #[allow(clippy::too_many_lines)]
 fn test_repl_destructure_mutation_threaded_rhs_unwraps_element() {
-    // BT-1283: When the RHS of a REPL destructuring assignment is a mutation-threaded
+    // When the RHS of a REPL destructuring assignment is a mutation-threaded
     // expression (a loop containing a REPL variable mutation), the generated code must
     // unwrap the {Result, StateAcc} tuple with element/2 before extracting pattern
     // variables. Without the unwrap, pattern extraction would operate on the
@@ -1292,7 +1286,7 @@ fn test_cascade_repl_expression() {
         "Should have module header. Got:\n{code}"
     );
 
-    // Should bind the underlying receiver once. BT-2365 (ADR 0081 Phase 1): a
+    // Should bind the underlying receiver once. ADR 0081 Phase 1: a
     // free REPL identifier now resolves via a locals maps:find with a runtime
     // resolve_name fallthrough rather than a bare maps:get.
     assert!(
@@ -1319,7 +1313,7 @@ fn test_cascade_repl_expression() {
 
 #[test]
 fn test_standalone_class_reference_uses_dynamic_module_name() {
-    // BT-215: Test that standalone ClassReference uses module_name/1 dynamically
+    // Test that standalone ClassReference uses module_name/1 dynamically
     // Review comment: Should match generate_beamtalk_class_named pattern (lines 915-922)
     use beamtalk_core::ast::{Expression, Identifier, Module};
     use beamtalk_core::source_analysis::Span;
@@ -1346,7 +1340,7 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
     let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
         .expect("codegen should succeed");
 
-    // BT-2365 (ADR 0081 Phase 1): an unqualified REPL class reference checks the
+    // ADR 0081 Phase 1: an unqualified REPL class reference checks the
     // session locals map first (so a local shadows the class), then delegates to
     // the shared runtime resolver. The class object construction and dynamic
     // module_name lookup now live in beamtalk_workspace:resolve_class_reference/2.
@@ -1374,7 +1368,7 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
 
 #[test]
 fn test_standalone_class_reference_validates_undefined_classes() {
-    // BT-215, BT-597: Test that standalone ClassReference raises class_not_found error for undefined classes
+    // Test that standalone ClassReference raises class_not_found error for undefined classes
     use beamtalk_core::ast::{Expression, Identifier, Module};
     use beamtalk_core::source_analysis::Span;
 
@@ -1400,7 +1394,7 @@ fn test_standalone_class_reference_validates_undefined_classes() {
     let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
         .expect("codegen should succeed");
 
-    // BT-2365 (ADR 0081 Phase 1): undefined-class validation now happens in the
+    // ADR 0081 Phase 1: undefined-class validation now happens in the
     // runtime resolver (beamtalk_workspace:resolve_class_reference/2), which
     // raises the same class_not_found error. The REPL codegen emits a locals
     // check then delegates to that resolver.

@@ -1,13 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Desktop attach connection-broker core (ADR 0097, BT-2985).
+//! Desktop attach connection-broker core (ADR 0097).
 //!
 //! Implements the desktop shell's connection-broker responsibilities per
-//! ADR 0097 ("Desktop Attach Client — One Front Node per Workspace") and the
-//! BT-2984 spike verdict: discovery of live workspaces, per-instance spawn
-//! with the loopback/no-OIDC/entropy-seeded-sname posture, two-stage
-//! readiness probing, post-attach monitoring, and orphan reaping.
+//! ADR 0097 ("Desktop Attach Client — One Front Node per Workspace"):
+//! discovery of live workspaces, per-instance spawn with the
+//! loopback/no-OIDC/entropy-seeded-sname posture, two-stage readiness
+//! probing, post-attach monitoring, and orphan reaping.
 //!
 //! ```text
 //! discover_workspaces() ─┐
@@ -36,18 +36,14 @@
 //!
 //! This is the broker **core** — a plain Rust library with no GUI
 //! dependency. It does not:
-//! - build or wire a picker UI ([BT-2986])
-//! - bundle or wire an actual Tauri shell / packaging lane ([BT-2987]/[BT-2988])
+//! - build or wire a picker UI
+//! - bundle or wire an actual Tauri shell / packaging lane
 //! - bundle or supervise the Rust `beamtalk` toolchain (it *invokes* the
 //!   user's already-installed CLI for workspace create/stop — [`cli_ops`] —
 //!   never links or ships it, per ADR constraint 1)
 //!
 //! A future shell crate depends on this one for the process-supervision
 //! logic and adds the window/event-loop/UI layer on top.
-//!
-//! [BT-2986]: https://linear.app/beamtalk/issue/BT-2986
-//! [BT-2987]: https://linear.app/beamtalk/issue/BT-2987
-//! [BT-2988]: https://linear.app/beamtalk/issue/BT-2988
 //!
 //! **DDD Context:** Desktop Shell
 
@@ -72,7 +68,7 @@ pub mod sname;
 /// Spawn a per-workspace front with the required env/posture.
 pub mod spawn;
 /// Windows Job Object wrapper tying a spawned front's process tree to this
-/// handle's lifetime (BT-2988) — see the module doc comment for why
+/// handle's lifetime — see the module doc comment for why
 /// `Child::kill()` alone is not enough on Windows.
 #[cfg(windows)]
 pub mod winjob;
