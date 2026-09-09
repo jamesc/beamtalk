@@ -7718,12 +7718,12 @@ fn bt3416_self_dispatch_in_later_interpolation_segment_now_threads_after_earlier
 fn bt3414_self_send_in_and_receiver_inside_while_true_condition_now_compiles_and_threads_state() {
     // `[i := i + 1. (self bumpCount) > 0 and: [i < 3]] whileTrue: [nil]` —
     // a self-send as the RECEIVER of an inline-threaded `and:`, itself the
-    // whileTrue: CONDITION block's last expression. Before ADR 0118 phase 3
-    //, `generate_while_true`'s mode selection only inspected the
-    // BODY's own mutations (trivially none — `[nil]`), so this fell to the
-    // simple (non-threading) codegen path, which compiled the condition as
-    // a genuine stateful Tier-2 closure and panicked the verifier
-    // (`UnboundVersion`). Now: `generate_while_true` also checks the
+    // whileTrue: CONDITION block's last expression. ADR 0118 phase 3:
+    // `generate_while_true`'s mode selection must not only inspect the
+    // BODY's own mutations (trivially none — `[nil]`) — falling to the
+    // simple (non-threading) codegen path would compile the condition as
+    // a genuine stateful Tier-2 closure and panic the verifier
+    // (`UnboundVersion`). `generate_while_true` also checks the
     // condition (`condition_has_state_effects`), routing this into the
     // mutation-threading path, and every iteration's `bumpCount` dispatch
     // correctly advances the actor's `count` field.
