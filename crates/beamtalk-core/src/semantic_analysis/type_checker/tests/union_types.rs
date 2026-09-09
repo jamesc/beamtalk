@@ -395,6 +395,59 @@ fn union_receiver_single_culprit_dnu_keeps_union_context_and_did_you_mean() {
     );
 }
 
+/// A single-culprit union DNU whose selector has no similar selector on the
+/// culprit's class (`find_similar_selector` returns `None`) must still fall
+/// back to the generic `respondsTo:`/`@expect` hint — the same hint the
+/// multi-culprit branch a few lines below always attaches. Without the
+/// fallback, reusing `emit_unknown_selector_warning` for the single-culprit
+/// case means a "no suggestion" result leaves the diagnostic with no hint at
+/// all, an inconsistency with every other DNU shape (multi-culprit union, or
+/// single-culprit with a nearby selector).
+#[test]
+fn union_receiver_single_culprit_dnu_falls_back_to_generic_hint_with_no_suggestion() {
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("zzzzNoSuchSelectorAtAllzzzz".into()),
+            vec![],
+        ))],
+        span(),
+    );
+
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local(
+        "x",
+        InferredType::simple_union(&["String", "UndefinedObject"]),
+    );
+
+    checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+
+    let dnu: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert_eq!(
+        dnu.len(),
+        1,
+        "expected exactly one DNU diagnostic, got: {:?}",
+        checker.diagnostics()
+    );
+    assert_eq!(
+        dnu[0].hint.as_deref(),
+        Some("Use `respondsTo:` to check before sending, or `@expect type` to suppress"),
+        "a single-culprit union DNU with no similar selector must still \
+         carry the generic hint, matching the multi-culprit branch: {dnu:?}"
+    );
+}
+
 /// BT-1572: No warning when all union members understand the selector.
 #[test]
 fn union_receiver_no_warning_when_all_understand() {

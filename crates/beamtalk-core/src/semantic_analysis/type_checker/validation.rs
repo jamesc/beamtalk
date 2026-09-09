@@ -236,6 +236,7 @@ impl TypeChecker {
                     true,
                     Severity::Hint,
                     None,
+                    None,
                 );
             }
         }
@@ -587,6 +588,7 @@ impl TypeChecker {
                             false,
                             Severity::Hint,
                             None,
+                            None,
                         );
                     }
                 }
@@ -615,6 +617,7 @@ impl TypeChecker {
                 hierarchy,
                 false,
                 Severity::Hint,
+                None,
                 None,
             );
         }
@@ -3154,7 +3157,15 @@ impl TypeChecker {
     /// uses it for `" (in union A | B)"` so a union's single-culprit DNU
     /// keeps the same receiver context every other union DNU carries; every
     /// other caller passes `None`.
-    #[allow(clippy::too_many_arguments)] // display/lookup name split (BT-2679) + severity/context (BT-3469)
+    ///
+    /// `fallback_hint`, when `Some`, is attached verbatim whenever
+    /// [`Self::find_similar_selector`] finds no "did you mean" suggestion —
+    /// this keeps every DNU shape carrying actionable advice: the union
+    /// multi-culprit branch a few lines below always attaches the generic
+    /// `respondsTo:`/`@expect` hint, and a single-culprit union DNU should
+    /// too when it has no nearby selector to suggest. Bare-receiver callers
+    /// pass `None` here, keeping their existing no-fallback behavior.
+    #[allow(clippy::too_many_arguments)] // display/lookup name split (BT-2679) + severity/context (BT-3469) + fallback hint
     pub(super) fn emit_unknown_selector_warning(
         &mut self,
         display_name: &EcoString,
@@ -3165,6 +3176,7 @@ impl TypeChecker {
         is_class_side: bool,
         severity: Severity,
         context_suffix: Option<&str>,
+        fallback_hint: Option<&str>,
     ) {
         let side = if is_class_side { " class" } else { "" };
         let suffix = context_suffix.unwrap_or("");
@@ -3177,11 +3189,14 @@ impl TypeChecker {
         }
         .with_category(DiagnosticCategory::Dnu);
 
-        // Try to suggest similar selectors
+        // Try to suggest similar selectors; fall back to the caller-supplied
+        // generic hint, if any, when no suggestion was found.
         if let Some(suggestion) =
             Self::find_similar_selector(class_name, selector, hierarchy, is_class_side)
         {
             diag = diag.with_hint(format!("Did you mean '{suggestion}'?"));
+        } else if let Some(hint) = fallback_hint {
+            diag = diag.with_hint(hint);
         }
 
         self.diagnostics.push(diag);
