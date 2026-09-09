@@ -371,6 +371,53 @@ impl CoreErlangGenerator {
         super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
     }
 
+    /// BT-3484: the value-type `Self` mirror of
+    /// [`Self::rebind_class_vars_from_doc`] — rebinds `Self{N}` from an
+    /// already-produced value `Document` (a Letrec loop construct's own
+    /// returned trailing tuple slot, carrying the `self.field := ...`
+    /// mutations threaded through its recursive tail call). This is what
+    /// makes the loop's final `Self` the method's new LIVE `Self` for every
+    /// statement that follows — the direct counterpart of Actor's `let
+    /// State1 = element(2, _CF10) in`.
+    ///
+    /// Simpler than the class-var sibling: `SelfVt` carries none of ADR
+    /// 0110's shadow-write obligation, so this verifies through the same
+    /// plain [`Self::check_simple_field_bind_invariant`] every other
+    /// `Self{N}`/`State{N}` version step already uses.
+    pub(super) fn rebind_value_self_from_doc(
+        &mut self,
+        value_doc: Document<'static>,
+        span: beamtalk_core::source_analysis::Span,
+    ) -> Document<'static> {
+        let source_version = self.self_version();
+        self.next_self_var();
+        let target_version = self.self_version();
+        self.check_simple_field_bind_invariant(
+            super::threaded_ir::VersionPrefix::SelfVt,
+            source_version,
+            target_version,
+            "value-type Self rebind from a loop construct's threaded result",
+            span,
+        );
+        let bind = ThreadedStmt::Bind {
+            target: super::threaded_ir::VersionedVar::new(
+                super::threaded_ir::VersionPrefix::SelfVt,
+                target_version,
+                FrameId::ROOT,
+            ),
+            source: super::threaded_ir::VersionedVar::new(
+                super::threaded_ir::VersionPrefix::SelfVt,
+                source_version,
+                FrameId::ROOT,
+            ),
+            op: super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(value_doc)),
+            shadow_write: false,
+            span,
+        };
+        let mut ctx = super::threaded_ir::RenderCtx::new(self);
+        super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
+    }
+
     /// Generates code for a message send.
     ///
     /// This is the **main entry point** for message compilation. It dispatches

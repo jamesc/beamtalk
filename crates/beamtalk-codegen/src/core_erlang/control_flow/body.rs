@@ -211,8 +211,9 @@ impl CoreErlangGenerator {
         result
     }
 
-    /// ADR 0111 Addendum 15: rebases the loop body's own class-var `Bind`
-    /// chain onto its `produces` seed identity.
+    /// ADR 0111 Addendum 15: rebases the loop body's own class-var (or, per
+    /// BT-3484, value-type `Self`) `Bind` chain onto its `produces` seed
+    /// identity.
     ///
     /// `render_loop_skeleton`'s `outer_args`/`param_list` always render
     /// `produces`' entries at version `0` (the "loop's own frame-entry
@@ -239,7 +240,13 @@ impl CoreErlangGenerator {
     /// from `from` (the loop threads no class-var mutation, or `stmts`
     /// doesn't contain one at the top level — a nested construct's own
     /// `Bind`s belong to a different `FrameId` and are never touched here).
-    pub(super) fn rebase_class_var_seed(
+    ///
+    /// BT-3484: `VersionPrefix::SelfVt` has the identical version-driven
+    /// (`Self`, `Self1`, …), never context-toggled rendering, so a
+    /// value-type `Self`-threading loop seeds and rebases through this same
+    /// function rather than a second copy of it — the reason it is named for
+    /// the mechanism (a loop's `produces` seed) rather than for `ClassVars`.
+    pub(super) fn rebase_loop_seed(
         stmts: &mut [ThreadedStmt],
         from: &VersionedVar,
         to: &VersionedVar,
@@ -290,6 +297,24 @@ impl CoreErlangGenerator {
                     |line| format!("line {line}"),
                 );
                 return Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop {
+                    mutation,
+                    location,
+                });
+            }
+
+            // BT-3484: the value-type `Self` mirror of the check just above,
+            // with the same deliberate scope limit — nothing unpacks a
+            // nested Letrec loop's own trailing `Self` tuple slot back into
+            // THIS body's statement sequence, so the inner mutation would be
+            // silently discarded once the inner loop exits (the exact
+            // BT-3484 bug class this issue fixes at one level). See
+            // `nested_loop_lost_value_self_mutation`'s doc comment.
+            if let Some(mutation) = self.nested_loop_lost_value_self_mutation(expr) {
+                let location = self.span_to_line(expr.span()).map_or_else(
+                    || format!("offset {}", expr.span().start()),
+                    |line| format!("line {line}"),
+                );
+                return Err(CodeGenError::ValueSelfMutationLostAcrossNestedLoop {
                     mutation,
                     location,
                 });
@@ -626,6 +651,24 @@ impl CoreErlangGenerator {
                     |line| format!("line {line}"),
                 );
                 return Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop {
+                    mutation,
+                    location,
+                });
+            }
+
+            // BT-3484: the value-type `Self` mirror of the check just above,
+            // with the same deliberate scope limit — nothing unpacks a
+            // nested Letrec loop's own trailing `Self` tuple slot back into
+            // THIS body's statement sequence, so the inner mutation would be
+            // silently discarded once the inner loop exits (the exact
+            // BT-3484 bug class this issue fixes at one level). See
+            // `nested_loop_lost_value_self_mutation`'s doc comment.
+            if let Some(mutation) = self.nested_loop_lost_value_self_mutation(expr) {
+                let location = self.span_to_line(expr.span()).map_or_else(
+                    || format!("offset {}", expr.span().start()),
+                    |line| format!("line {line}"),
+                );
+                return Err(CodeGenError::ValueSelfMutationLostAcrossNestedLoop {
                     mutation,
                     location,
                 });

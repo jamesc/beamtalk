@@ -54,7 +54,7 @@ mod while_loops;
 // the others have no caller outside this subtree, so a plain (module-private,
 // visible-to-descendants) `use` is enough.
 use super::threaded_ir::StateAccFallbackReason;
-use counted_loops::class_var_arg_doc;
+use counted_loops::extra_threaded_arg_doc;
 use plan::ListOpKind;
 // ADR 0111 Addendum 15 (Foldl migration): `BodyKind` is also consumed by
 // `value_type_codegen.rs`'s `generate_value_type_do_open`, which now calls

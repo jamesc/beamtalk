@@ -68,8 +68,15 @@ pub(super) struct CountedLoopFrame {
     /// when the body threads a `ClassVars` mutation through the loop's own
     /// recursive tail call. `None` when it doesn't. Used, verbatim, as both
     /// the letrec fun's extra trailing formal parameter and the initial
-    /// `apply`'s trailing argument — see [`class_var_arg_doc`].
+    /// `apply`'s trailing argument — see [`extra_threaded_arg_doc`].
     pub class_var_param: Option<String>,
+    /// BT-3484: the pre-loop value-type `Self` name (`current_self_var()`,
+    /// captured before body generation runs), when the body threads a
+    /// `self.field := ...` value-type mutation through the loop's own
+    /// recursive tail call. `None` when it doesn't. The `SelfVt` mirror of
+    /// `class_var_param`, used identically (fun formal parameter + exit-arm
+    /// reference) and never set at the same time as it.
+    pub self_param: Option<String>,
 }
 
 impl CountedLoopFrame {
@@ -83,14 +90,21 @@ impl CountedLoopFrame {
     }
 }
 
-/// BT-3168 (ADR 0111 Addendum 9, Question 3): renders `", <name>"` for a
-/// threaded `ClassVars` fun-argument slot, or nothing when the loop doesn't
-/// thread class vars. Shared by `while_loops.rs`'s and `counted_loops.rs`'s
-/// (via `generate_counted_stateful_loop`) Letrec base-path `ClassVars`
-/// plumbing — the letrec fun signature, both `apply` call sites, and the
-/// exit arm all need the identical "extra trailing arg, or nothing" shape,
-/// so it is written once rather than copy-evolved per call site.
-pub(super) fn class_var_arg_doc(name: Option<&String>) -> Document<'static> {
+/// BT-3168 (ADR 0111 Addendum 9, Question 3) / BT-3484: renders
+/// `", <name>"` for a threaded extra fun-argument slot — the `ClassVars`
+/// one (class-method loops) or the value-type `Self` one — or nothing when
+/// the loop threads neither. Shared by `while_loops.rs`'s and
+/// `counted_loops.rs`'s (via `generate_counted_stateful_loop`) Letrec
+/// base-path plumbing: the letrec fun signature, both `apply` call sites,
+/// and the exit arm all need the identical "extra trailing arg, or nothing"
+/// shape, so it is written once rather than copy-evolved per call site.
+///
+/// At most ONE of the two slots is ever present on a given loop —
+/// `ThreadingPlan::threads_class_vars` and `threads_value_self` are mutually
+/// exclusive by construction (see
+/// [`CoreErlangGenerator::loop_body_threads_value_self`]'s doc comment) — so
+/// the threaded slot is always at tuple position 3, whichever it is.
+pub(super) fn extra_threaded_arg_doc(name: Option<&String>) -> Document<'static> {
     name.map_or(Document::Nil, |v| docvec![", ", leaf::var(v.clone())])
 }
 
@@ -145,6 +159,8 @@ impl CoreErlangGenerator {
         // `class_var_version`, so this is both the letrec fun's own extra
         // trailing formal parameter and the exit arm's reference to it.
         let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
+        // BT-3484: the `SelfVt` mirror — see `CountedLoopFrame::self_param`.
+        let self_param = plan.threads_value_self.then(|| self.current_self_var());
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -168,6 +184,7 @@ impl CoreErlangGenerator {
             body_param: None,
             counter,
             class_var_param,
+            self_param,
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
@@ -195,6 +212,8 @@ impl CoreErlangGenerator {
         // BT-3168 (ADR 0111 Addendum 9, Question 3): see the analogous
         // comment in `generate_times_repeat_with_mutations`.
         let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
+        // BT-3484: the `SelfVt` mirror — see `CountedLoopFrame::self_param`.
+        let self_param = plan.threads_value_self.then(|| self.current_self_var());
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -222,6 +241,7 @@ impl CoreErlangGenerator {
             body_param,
             counter,
             class_var_param,
+            self_param,
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
@@ -251,6 +271,8 @@ impl CoreErlangGenerator {
         // BT-3168 (ADR 0111 Addendum 9, Question 3): see the analogous
         // comment in `generate_times_repeat_with_mutations`.
         let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
+        // BT-3484: the `SelfVt` mirror — see `CountedLoopFrame::self_param`.
+        let self_param = plan.threads_value_self.then(|| self.current_self_var());
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -303,6 +325,7 @@ impl CoreErlangGenerator {
             body_param,
             counter,
             class_var_param,
+            self_param,
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
@@ -337,8 +360,14 @@ impl CoreErlangGenerator {
         }
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
-        let cv_param_doc = class_var_arg_doc(frame.class_var_param.as_ref());
+        let cv_param_doc = extra_threaded_arg_doc(frame.class_var_param.as_ref());
         let class_var_seed_version = self.class_var_version();
+        // BT-3484: the value-type `Self` mirror of the two lines above —
+        // `self_version`, like `class_var_version`, is inherited (never
+        // reset) across `with_branch_context`, so this names the identity
+        // the loop body's own first `SelfVt` `Bind` will source from.
+        let self_param_doc = extra_threaded_arg_doc(frame.self_param.as_ref());
+        let self_seed_version = self.self_version();
 
         self.push_scope();
 
@@ -373,12 +402,13 @@ impl CoreErlangGenerator {
         let exit_arm = docvec![
             "<'false'> when 'true' -> {'nil', StateAcc",
             cv_param_doc,
+            self_param_doc,
             "} end "
         ];
 
         let mut produces = vec![VersionedVar::new(VersionPrefix::State, 0, ir_frame)];
         if let Some(cv_name) = &frame.class_var_param {
-            // ADR 0111 Addendum 15: see `Self::rebase_class_var_seed`'s doc
+            // ADR 0111 Addendum 15: see `Self::rebase_loop_seed`'s doc
             // comment for why this loop's own `ClassVars` `produces` entry
             // must be `Gensym`-seeded, not the method's live (possibly
             // nonzero) `ClassVars` version.
@@ -386,7 +416,17 @@ impl CoreErlangGenerator {
                 VersionedVar::new(VersionPrefix::ClassVars, class_var_seed_version, ir_frame);
             let gensym_seed =
                 VersionedVar::new(VersionPrefix::Gensym(cv_name.clone()), 0, ir_frame);
-            Self::rebase_class_var_seed(&mut body_stmts, &real_seed, &gensym_seed);
+            Self::rebase_loop_seed(&mut body_stmts, &real_seed, &gensym_seed);
+            produces.push(gensym_seed);
+        }
+        // BT-3484: identical treatment for the value-type `Self` slot —
+        // mutually exclusive with the `ClassVars` one above, so at most one
+        // of these two `produces` entries ever exists.
+        if let Some(self_name) = &frame.self_param {
+            let real_seed = VersionedVar::new(VersionPrefix::SelfVt, self_seed_version, ir_frame);
+            let gensym_seed =
+                VersionedVar::new(VersionPrefix::Gensym(self_name.clone()), 0, ir_frame);
+            Self::rebase_loop_seed(&mut body_stmts, &real_seed, &gensym_seed);
             produces.push(gensym_seed);
         }
         // See `ConditionalLoop::outer_args`'s doc comment: the value

@@ -301,6 +301,7 @@ Value subclass: MutationCorpusValue
 // crates/beamtalk-core/src/semantic_analysis/validators/class_validators.rs),
 // not a codegen gap to work around here. BT-3483 investigated adding this
 // axis via the one legal route to value-type-context self.field :=
-// (the BT-1533 TestCase exemption) and found it currently broken —
-// see value_type_mutation_matrix_test.bt's `fragStateFieldToDoNonLastReadWrite`
-// and BT-3484.
+// (the BT-1533 TestCase exemption) and found it broken; BT-3484 fixed it —
+// so the axis IS covered, by the `fragStateField*` helpers and cells living
+// directly on value_type_mutation_matrix_test.bt (which is itself a
+// TestCase, hence exempt), not by a fragment here.

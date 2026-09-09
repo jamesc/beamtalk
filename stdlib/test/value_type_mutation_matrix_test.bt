@@ -91,16 +91,19 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // analogue the way `mutation_corpus_actor.bt` does. The ONLY route by which
   // `self.field := value` compiles under `CodeGenContext::ValueType` today is
   // the BT-1533 TestCase exemption (TestCase is itself a Value subclass, but
-  // exempted from the immutability check) — hence `fragStateFieldToDoNonLastReadWrite`
+  // exempted from the immutability check) — hence the axis-4 `frag*` methods
   // below, living directly on this TestCase, rather than in the fixture file.
   // Exercising that path end-to-end (BT-3483's whole point) found BT-3484:
-  // the loop shape silently drops the field mutation (compiles, but returns
-  // the ORIGINAL unmodified `self`), and the conditional shape (`ifTrue:`)
-  // fails to compile at all (`unbound variable 'SelfN'` from erlc) — see that
-  // fragment's own doc comment for why no `fragStateFieldIfTrue...` fixture
-  // exists here. This switch gates the one cell that DOES compile, until
-  // BT-3484 lands.
-  bt3484ValueTypeFieldWriteThreadingPending => true
+  // the loop shape silently dropped the field mutation (compiled, but
+  // returned the ORIGINAL unmodified `self`), and the conditional shape
+  // (`ifTrue:`) failed to compile at all (`unbound variable 'SelfN'` from
+  // erlc). BT-3484 has landed — a value-type `Self` mutation now threads
+  // through a loop's own recursive tail call (an extra trailing `letrec` fun
+  // parameter + result-tuple slot, mirroring BT-3168's `ClassVars`
+  // threading) and through a conditional's branch-merge tuple (mirroring
+  // BT-3159's `ClassVars` slot) — so both cells run their ground-truth
+  // asserts. Kept as a switch for documentation/bisection.
+  bt3484ValueTypeFieldWriteThreadingPending => false
 
   // ── TestCase-context fragments (the test class is itself a value-type) ──────
   // `frag` prefix keeps BUnit from treating them as test methods.
@@ -159,24 +162,33 @@ TestCase subclass: ValueTypeMutationMatrixTest
     1 to: 3 do: [:i | 1 to: 3 do: [:j | sum := sum + j]]
     sum
 
-  // BT-3176 axis 4 (BT-3483): the TestCase-context analogue of
-  // mutation_corpus_actor.bt's stateFieldToDoNonLastReadWrite — mutating this
-  // TestCase's own `total` field (via the BT-1533 value-type exemption)
-  // instead of an outer local. See bt3484ValueTypeFieldWriteThreadingPending
-  // above: this compiles but currently returns the ORIGINAL (unthreaded)
-  // `self`, so its assertion is skipped until BT-3484 lands.
+  // BT-3176 axis 4 (BT-3483/BT-3484): the TestCase-context analogues of
+  // mutation_corpus_actor.bt's stateFieldToDoNonLastReadWrite /
+  // stateFieldIfTrueNonLastReadWrite: — mutating this TestCase's own `total`
+  // field (via the BT-1533 value-type exemption) instead of an outer local.
+  // Both are byte-for-byte the same fragment bodies as the Actor originals,
+  // so the absolute oracle compares like with like across contexts.
   //
-  // There is NO `fragStateFieldIfTrueNonLastReadWrite:` analogue here (the
-  // conditional shape of the same bug): unlike the loop shape, that one
-  // doesn't just compute a wrong value — it fails erlc outright with
-  // `unbound variable 'SelfN'`, which would break compilation of this whole
-  // file. It's tracked directly in BT-3484's own repro instead of as a fixture.
+  // Before BT-3484 only the loop fragment could live here at all: the
+  // conditional shape didn't merely compute a wrong value, it failed erlc
+  // outright with `unbound variable 'SelfN'`, which would have broken
+  // compilation of this whole file. BT-3484 fixed both, so the conditional
+  // fragment now lives here alongside the loop one.
   fragStateFieldToDoNonLastReadWrite =>
     seen := 0
     1
       to: 5
       do: [:i |
         self.total := self.total + i
+        seen := seen + 1
+      ]
+    self.total
+
+  fragStateFieldIfTrueNonLastReadWrite: flag =>
+    seen := 0
+    flag
+      ifTrue: [
+        self.total := self.total + 7
         seen := seen + 1
       ]
     self.total
@@ -632,11 +644,12 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testStateFieldToDoNonLastReadWriteActor =>
     self assert: self actorCorpus stateFieldToDoNonLastReadWrite equals: 15
 
-  // BT-3483/BT-3484: the TestCase-context (value-type) analogue. Currently
-  // broken — the loop's own carried-accumulator plumbing never threads the
+  // BT-3483/BT-3484: the TestCase-context (value-type) analogue. Before
+  // BT-3484 the loop's own carried-accumulator plumbing never threaded the
   // value-type `Self` binding a field write produces, so this silently
-  // returns the field's ORIGINAL value (0) instead of 15. Skipped until
-  // BT-3484 lands; see fragStateFieldToDoNonLastReadWrite's doc comment above.
+  // returned the field's ORIGINAL value (0) instead of 15. Now the loop
+  // carries `Self` through its own recursive tail call, matching the Actor
+  // cell directly above.
   testStateFieldToDoNonLastReadWriteTestCase =>
     self bt3484ValueTypeFieldWriteThreadingPending
       ifTrue: [
@@ -652,6 +665,28 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testStateFieldIfTrueNonLastReadWriteFalseActor =>
     self assert: (self actorCorpus stateFieldIfTrueNonLastReadWrite: false) equals: 0
+
+  // BT-3484: the TestCase-context (value-type) analogue of the two Actor
+  // cells directly above. Before BT-3484 this shape could not be checked in
+  // at all — the branch's `Self1` binding was scoped inside the `case` arm's
+  // own inner `let`, so the post-conditional read of it was an erlc
+  // `unbound variable 'Self1'` compile failure for the whole file. The
+  // conditional's branch-merge tuple now carries `Self` out of the taken
+  // arm (and the untaken arm passes the pre-`case` `Self` through), so both
+  // ground truths match the Actor cells: 7 when taken, 0 when not.
+  testStateFieldIfTrueNonLastReadWriteTrueTestCase =>
+    self bt3484ValueTypeFieldWriteThreadingPending
+      ifTrue: [
+        ^self skip: "BT-3484: value-type self.field := inside ifTrue: fails to compile"
+      ]
+    self assert: (self fragStateFieldIfTrueNonLastReadWrite: true) equals: 7
+
+  testStateFieldIfTrueNonLastReadWriteFalseTestCase =>
+    self bt3484ValueTypeFieldWriteThreadingPending
+      ifTrue: [
+        ^self skip: "BT-3484: value-type self.field := inside ifTrue: fails to compile"
+      ]
+    self assert: (self fragStateFieldIfTrueNonLastReadWrite: false) equals: 0
 
   testClassVarIfTrueNonLastReadWriteTrueClassMethod =>
     self assert: (MutationCorpusClassMethod classVarIfTrueNonLastReadWrite: true) equals: 7
