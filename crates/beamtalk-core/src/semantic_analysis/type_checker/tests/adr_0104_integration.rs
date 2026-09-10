@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0104 (Typed Actor Protocols) end-to-end integration tests (BT-2752).
+//! ADR 0104 (Typed Actor Protocols) end-to-end integration tests.
 //!
 //! Unlike the per-feature unit tests (`cast_and_sync_send`, `spawn_with_keys`,
 //! `with_timeout_transparency`), which build the AST by hand and call
@@ -244,7 +244,7 @@ Counter spawnWith: #{#count => 0}
     );
 }
 
-/// BT-3469: `self spawnWith:` inside a class method (not a class-reference
+/// `self spawnWith:` inside a class method (not a class-reference
 /// receiver) also gets literal-map key checking. The class-reference and
 /// `Meta`-typed-receiver branches of `infer_message_send_with_receiver_ty`
 /// already ran this check; the self-in-class-method branch was the one

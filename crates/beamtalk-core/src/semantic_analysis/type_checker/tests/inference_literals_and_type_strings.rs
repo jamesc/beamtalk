@@ -7,7 +7,7 @@
 use super::super::*;
 use super::common::*;
 
-// ---- BT-2254: literal-index tuple `at:` ----
+// ---- literal-index tuple `at:` ----
 
 fn tuple_args(names: &[&str]) -> Vec<InferredType> {
     names.iter().map(|n| InferredType::known(*n)).collect()
@@ -322,7 +322,7 @@ fn resolve_type_string_three_way_union() {
     }
 }
 
-/// BT-2928: a cross-file alias name (as stored raw in a `ClassInfo`/
+/// a cross-file alias name (as stored raw in a `ClassInfo`/
 /// `MethodInfo` string, e.g. a `MethodInfo::return_type` extracted from
 /// another file's `-> RestartStrategy` annotation) expands to its
 /// declared union through the alias registry, instead of staying an
@@ -380,7 +380,7 @@ fn resolve_type_string_expands_alias_from_registry() {
     }
 
     // Without the registry, the same raw string stays an opaque nominal
-    // class — the pre-BT-2928 behaviour this test guards against
+    // class — the behaviour this test guards against
     // regressing back to.
     let unresolved = type_resolver::resolve_declared_type(
         &DeclaredType::parse("RestartStrategy"),
@@ -392,12 +392,12 @@ fn resolve_type_string_expands_alias_from_registry() {
     assert_eq!(unresolved, InferredType::known("RestartStrategy"));
 }
 
-/// BT-2936: a `self.field` narrowing lookup (e.g. the `self.field isNil
+/// a `self.field` narrowing lookup (e.g. the `self.field isNil
 /// ifFalse: [...]` shape [`Self::resolve_narrowing_variable_type`]
 /// serves) on an alias-typed field expands the alias through the
 /// threaded `alias_registry`, instead of leaving it an opaque nominal
-/// class — the deferred half of BT-2928's `resolve_type_name_string`
-/// fix for the narrowing call chain specifically.
+/// class — the deferred half of `resolve_type_name_string`'s
+/// alias-aware fix for the narrowing call chain specifically.
 #[test]
 fn resolve_narrowing_variable_type_expands_alias_for_self_field() {
     use crate::semantic_analysis::alias_registry::AliasRegistry;
@@ -431,7 +431,7 @@ fn resolve_narrowing_variable_type_expands_alias_for_self_field() {
     }
 
     // Without the registry, the field's raw type name stays opaque — the
-    // pre-BT-2936 fallback this test guards against regressing back to.
+    // fallback this test guards against regressing back to.
     let unresolved = TypeChecker::resolve_narrowing_variable_type(&var_key, &env, &hierarchy, None);
     assert_eq!(unresolved, InferredType::known("RestartStrategy"));
 }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
+import { type StdlibDocumentOpener, resolveClassDocument } from "./documentResolution";
 import { GenerationTracker } from "./generationTracker";
 import {
   type DeclarationRef,
@@ -201,6 +202,16 @@ export class WorkspaceTreeDataProvider
     this._onDidChangeTreeData.event;
 
   private client: WorkspaceClient | null = null;
+  /**
+   * Opens a stdlib class's source via the LSP's `beamtalk-stdlib://` virtual
+   * URI scheme (`openStdlibDocumentForClass` in extension.ts), injected at
+   * activation since it needs the `LanguageClient`, not the workspace
+   * protocol `client` above. Without this, every hover/doc-comment lookup
+   * for a class whose `source_file` the runtime never tracks (all
+   * compiled-in stdlib classes) has nothing to read and falls straight to
+   * the hardcoded fallback tooltip — see `_resolveClassDocument`.
+   */
+  private stdlibDocumentOpener: StdlibDocumentOpener | null = null;
   private connectionState: ConnectionState = "disconnected";
   private bindings: BindingsMap = {};
   private actors: ActorInfo[] = [];
@@ -258,6 +269,16 @@ export class WorkspaceTreeDataProvider
   /** The active session ID, or null if no session is running. */
   get currentSessionId(): string | null {
     return this.sessionId;
+  }
+
+  /**
+   * Inject the stdlib virtual-URI document opener (see `stdlibDocumentOpener`
+   * above). Pass null to clear. Independent of `setClient`/the workspace
+   * protocol connection — it only needs the LSP `LanguageClient`, which
+   * extension.ts wires up once at activation.
+   */
+  setStdlibDocumentOpener(opener: StdlibDocumentOpener | null): void {
+    this.stdlibDocumentOpener = opener;
   }
 
   /**
@@ -584,7 +605,7 @@ export class WorkspaceTreeDataProvider
   ): Promise<vscode.TreeItem | undefined> {
     if (element.kind === "class-item") {
       item.tooltip =
-        (await this._lspHoverTooltip(element.info.source_file, element.info.name, "class")) ??
+        (await this._lspHoverTooltip(element.info, element.info.name, "class")) ??
         this._classTooltipFallback(element.info);
       return item;
     }
@@ -608,7 +629,7 @@ export class WorkspaceTreeDataProvider
       }
       item.tooltip = this._appendDefiningClass(
         (await this._lspHoverTooltip(
-          element.classInfo.source_file,
+          element.classInfo,
           element.method.selector,
           element.method.side === "class" ? "class-method" : "method",
           { side: element.method.side, declaredLine: element.method.line }
@@ -626,16 +647,36 @@ export class WorkspaceTreeDataProvider
     return undefined;
   }
 
+  /**
+   * Open the document a class's source lives in, for hover/doc-comment
+   * lookups. Delegates the actual "real `source_file`, else the
+   * `beamtalk-stdlib://` virtual URI fallback" rule to `resolveClassDocument`
+   * (the same one `beamtalk.openClassSource`/`navigateToMethod`/
+   * `navigateToStateVar` use for navigation, in documentResolution.ts) and
+   * collapses its result to a plain document-or-undefined — every hover path
+   * below (`_lspHoverTooltip`, `_methodDocCommentTooltip`, `_stateVarTooltip`)
+   * only needs "did this open," not why it didn't. So a stdlib-defined class
+   * or a method/state var inherited from one gets the same doc-comment
+   * treatment as a local one — previously they fell straight to the
+   * hardcoded fallback tooltip.
+   */
+  private async _resolveClassDocument(
+    classInfo: ClassInfo
+  ): Promise<vscode.TextDocument | undefined> {
+    const result = await resolveClassDocument(classInfo, this.stdlibDocumentOpener);
+    return result.kind === "opened" ? result.document : undefined;
+  }
+
   private async _lspHoverTooltip(
-    sourceFile: string | undefined,
+    classInfo: ClassInfo,
     symbol: string,
     kind: "class" | "method" | "class-method",
     decl?: { side?: "instance" | "class"; declaredLine?: number }
   ): Promise<vscode.MarkdownString | undefined> {
-    if (!sourceFile || sourceFile === "unknown") return undefined;
     try {
-      const uri = vscode.Uri.file(sourceFile);
-      const doc = await vscode.workspace.openTextDocument(uri);
+      const doc = await this._resolveClassDocument(classInfo);
+      if (!doc) return undefined;
+      const uri = doc.uri;
 
       // Fast path: locate the declaration the same way `navigateToMethod` /
       // `navigateToStateVar` already do (BT-3439's real-line-first, then
@@ -772,10 +813,9 @@ export class WorkspaceTreeDataProvider
   private async _methodDocCommentTooltip(
     element: MethodItemNode
   ): Promise<vscode.MarkdownString | undefined> {
-    const sourceFile = element.classInfo.source_file;
-    if (!sourceFile || sourceFile === "unknown") return undefined;
     try {
-      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
+      const doc = await this._resolveClassDocument(element.classInfo);
+      if (!doc) return undefined;
       const comment = extractMethodDocComment(
         doc.getText(),
         element.method.selector,
@@ -796,10 +836,9 @@ export class WorkspaceTreeDataProvider
   private async _stateVarTooltip(element: StateVarItemNode): Promise<vscode.MarkdownString> {
     const { classInfo, stateVar } = element;
     const fallback = new vscode.MarkdownString(`**${stateVar.name}**\n\n_state variable_`);
-    if (!classInfo.source_file || classInfo.source_file === "unknown") return fallback;
     try {
-      const uri = vscode.Uri.file(classInfo.source_file);
-      const doc = await vscode.workspace.openTextDocument(uri);
+      const doc = await this._resolveClassDocument(classInfo);
+      if (!doc) return fallback;
       const text = doc.getText();
       const info = extractStateVarInfo(text, stateVar.name);
       const docComment = extractStateVarDocComment(text, stateVar.name);
@@ -943,10 +982,25 @@ export class WorkspaceTreeDataProvider
     return item;
   }
 
+  /**
+   * Whether `beamtalk.openClassSource`/`navigateToMethod`/`navigateToStateVar`
+   * can find something to open for this class. The runtime never reports a
+   * real `source_file` for compiled-in stdlib classes, but those commands
+   * fall back to the LSP's `beamtalk-stdlib://` virtual URI scheme
+   * (`openStdlibDocumentForClass` in extension.ts) whenever `source_origin`
+   * is `"stdlib"` — so a plain `source_file` check alone under-reports
+   * navigability and leaves stdlib rows (direct or inherited) inert.
+   */
+  private _hasNavigableSource(info: ClassInfo): boolean {
+    return (
+      (!!info.source_file && info.source_file !== "unknown") || info.source_origin === "stdlib"
+    );
+  }
+
   private _classItem(node: ClassItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.info.name, vscode.TreeItemCollapsibleState.Collapsed);
     item.iconPath = new vscode.ThemeIcon("symbol-class");
-    const hasSource = !!node.info.source_file && node.info.source_file !== "unknown";
+    const hasSource = this._hasNavigableSource(node.info);
     item.contextValue = hasSource ? "class-item" : "class-item-no-source";
     if (node.info.actor_count !== undefined && node.info.actor_count > 0) {
       item.description = `${node.info.actor_count} instance${node.info.actor_count !== 1 ? "s" : ""}`;
@@ -1051,7 +1105,7 @@ export class WorkspaceTreeDataProvider
       return item;
     }
     item.iconPath = new vscode.ThemeIcon("symbol-method");
-    const hasSource = !!node.classInfo.source_file && node.classInfo.source_file !== "unknown";
+    const hasSource = this._hasNavigableSource(node.classInfo);
     item.contextValue = hasSource ? "method-item" : "method-item-no-source";
     if (node.definingClass) {
       item.description = node.definingClass;
@@ -1080,7 +1134,7 @@ export class WorkspaceTreeDataProvider
   private _stateVarItem(node: StateVarItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.stateVar.name, vscode.TreeItemCollapsibleState.None);
     item.iconPath = new vscode.ThemeIcon("symbol-field");
-    const hasSource = !!node.classInfo.source_file && node.classInfo.source_file !== "unknown";
+    const hasSource = this._hasNavigableSource(node.classInfo);
     item.contextValue = hasSource ? "state-item" : "state-item-no-source";
     if (hasSource) {
       item.command = {

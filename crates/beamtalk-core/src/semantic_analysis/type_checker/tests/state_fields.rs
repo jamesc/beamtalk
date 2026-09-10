@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! State field assignment and typed state declarations (BT-672, BT-1831, BT-1913).
+//! State field assignment and typed state declarations.
 
 use super::common::*;
 
-// --- State field assignment type checking tests (BT-672) ---
+// --- State field assignment type checking tests ---
 
 #[test]
 fn test_empty_body_with_return_type_no_crash() {
@@ -283,7 +283,7 @@ fn test_state_default_value_match_no_warn() {
     );
 }
 
-// --- BT-2848: Union-typed state defaults ---
+// --- Union-typed state defaults ---
 
 #[test]
 fn test_state_default_union_incompatible_member_warns() {
@@ -367,8 +367,8 @@ fn test_state_default_union_all_compatible_no_warn() {
 fn test_state_default_dynamic_no_warn() {
     // state: count: Integer = unknownVar → unknownVar is unbound, so the
     // default's inferred type is Dynamic. Dynamic defaults must remain
-    // unchecked (BT-2848 AC (c)) — same behaviour as before the Union arm
-    // was added.
+    // unchecked — the Union-typed default check must not affect the
+    // Dynamic-default path.
     let state = vec![StateDeclaration::with_type_and_default(
         ident("count"),
         TypeAnnotation::simple("Integer", span()),
@@ -444,11 +444,11 @@ fn test_union_type_annotation_no_false_positive() {
     );
 }
 
-// --- Typed state field declarations (BT-1831, BT-1947) ---
+// --- Typed state field declarations ---
 
 #[test]
 fn test_typed_state_no_default_no_warn() {
-    // BT-1947: Mixed-default class: name :: String (no default) + count :: Integer = 0 (has default)
+    // Mixed-default class: name :: String (no default) + count :: Integer = 0 (has default)
     // Type annotation replaces the need for a default — no uninitialized warning.
     let state = vec![
         StateDeclaration::with_type(
@@ -587,7 +587,7 @@ fn test_untyped_state_no_default_no_warn() {
     );
 }
 
-// --- BT-1913: Missing state field annotations in typed classes ---
+// --- Missing state field annotations in typed classes ---
 
 #[test]
 fn test_typed_class_warns_on_missing_state_annotation() {
@@ -707,7 +707,7 @@ fn test_inherited_typed_class_warns_on_missing_state_annotation() {
 
 #[test]
 fn test_expect_type_suppresses_typed_state_warning() {
-    // BT-1913: @expect type on a state field should suppress the warning
+    // @expect type on a state field should suppress the warning
     let mut state_decl = StateDeclaration::new(ident("count"), span());
     state_decl.expect = Some((vec![ExpectCategory::Type], None, span()));
 

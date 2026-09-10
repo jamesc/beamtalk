@@ -1,9 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2856 / ADR 0107 Phase A: `nil`/`Type`-pattern exhaustiveness.
+//! ADR 0107 Phase A: `nil`/`Type`-pattern exhaustiveness.
 //!
-//! Extends BT-2745's advisory `Warning` / BT-2763's asserted `Error`
+//! Extends the advisory `Warning` / asserted `Error`
 //! `matchExhaustive:` machinery to reach closed `Known | Nil` unions and
 //! small closed unions of concrete leaf classes, covered by `nil` and
 //! `binding :: ClassName` arms — reusing the exact severity split verbatim
@@ -287,8 +287,8 @@ fn ordinary_class_union_with_symbol_arms_is_unaffected() {
 /// A non-leaf class in a `Type` arm (has subclasses) must not be treated as
 /// closed — `matchExhaustive:` falls back to "cannot verify" rather than
 /// asserting a false exhaustiveness proof. Mirrors
-/// `match_validators`'s own "has subclasses" compile-error restriction
-/// (BT-2854): the two mechanisms must never disagree about which classes
+/// `match_validators`'s own "has subclasses" compile-error restriction:
+/// the two mechanisms must never disagree about which classes
 /// are closed.
 #[test]
 fn non_leaf_class_type_arm_is_not_closed() {
@@ -320,10 +320,10 @@ fn non_leaf_class_type_arm_is_not_closed() {
     );
 }
 
-// ── Regression: existing BT-2745/BT-1299/ADR-0106 behaviour is untouched ─
+// ── Regression: existing advisory/sealed-constructor/ADR-0106 behaviour is untouched ─
 
 /// A closed `#symbol` singleton union with symbol arms behaves exactly as
-/// before (BT-2745) — this new mechanism is additive, not a replacement.
+/// before — this new mechanism is additive, not a replacement.
 #[test]
 fn symbol_singleton_union_behaviour_is_unaffected() {
     let ty = InferredType::simple_union(&["#north", "#south"]);

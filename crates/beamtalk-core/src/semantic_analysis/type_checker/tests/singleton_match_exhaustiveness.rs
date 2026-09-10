@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2745 / ADR 0102 §4: advisory `match:` exhaustiveness for singleton-union
+//! ADR 0102 §4: advisory `match:` exhaustiveness for singleton-union
 //! scrutinees.
 //!
 //! Covers the residual computation (`difference(scrutinee, covered)`), the
@@ -9,11 +9,12 @@
 //! `Dynamic`, bare/open `Symbol`, `Negation`, and a union with any
 //! non-singleton member), and the severity (`Warning`, never `Error`).
 //!
-//! Also pins that BT-1299's pattern-based sealed-constructor exhaustiveness
-//! error (`validators::match_validators::check_match_exhaustiveness`) is
-//! untouched by this change — it lives in a separate module and is not
-//! exercised by this file at all, so its own test suite
-//! (`validators::match_validators::tests`) remains the regression pin.
+//! Also pins that the pattern-based sealed-constructor exhaustiveness
+//! error (`validators::match_validators::check_match_exhaustiveness`) is a
+//! separate check this advisory check does not call, modify, or gate — it
+//! lives in a separate module and is not exercised by this file at all, so
+//! its own test suite (`validators::match_validators::tests`) remains the
+//! regression pin.
 
 use super::super::*;
 use super::common::*;
@@ -33,7 +34,7 @@ fn sym_arm(name: &str, body: Expression) -> MatchArm {
 }
 
 /// A guarded `#name when: [guard] -> body` match arm — does NOT count as
-/// coverage (mirrors BT-1299's guarded-arm rule).
+/// coverage (mirrors the pattern-based check's guarded-arm rule).
 fn guarded_sym_arm(name: &str, guard: Expression, body: Expression) -> MatchArm {
     MatchArm::with_guard(
         Pattern::Literal(Literal::Symbol(name.into()), span()),
@@ -294,7 +295,7 @@ fn union_with_non_singleton_member_is_silent() {
 }
 
 /// A union of ordinary classes (no singletons at all) is not a singleton
-/// union — silent (this check never touches BT-1299's territory).
+/// union — silent (this check never touches the pattern-based check's territory).
 #[test]
 fn union_of_ordinary_classes_is_silent() {
     let warnings = exhaustiveness_warnings(
@@ -307,11 +308,11 @@ fn union_of_ordinary_classes_is_silent() {
     );
 }
 
-// ── BT-1299 regression: pattern-based sealed-constructor check untouched ──
+// ── Regression: pattern-based sealed-constructor check untouched ──
 
-/// BT-1299's pattern-based check is a completely separate validator
+/// The pattern-based check is a completely separate validator
 /// (`validators::match_validators::check_match_exhaustiveness`) that this
-/// change does not call, modify, or gate. This test pins that the new
+/// advisory check does not call, modify, or gate. This test pins that the
 /// type-based check does not fire for (and does not interfere with) a
 /// `Result`-constructor-pattern match, which has no singleton-union
 /// scrutinee type at all.

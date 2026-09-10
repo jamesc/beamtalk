@@ -3,7 +3,7 @@
 
 //! Binary-operator sends now get argument-type coverage even when the
 //! argument's inferred type is a `Union` (or otherwise doesn't match the
-//! `Known`/`Known` pattern `check_binary_operand_types` expects) (BT-2843).
+//! `Known`/`Known` pattern `check_binary_operand_types` expects).
 //!
 //! Root cause: `infer_message_send_with_receiver_ty` unconditionally skipped
 //! `check_argument_types` for `MessageSelector::Binary` sends, on the
@@ -84,7 +84,7 @@ typed Value subclass: Thing
 
 /// AC (a): a `Union` argument where *no* member is compatible with the
 /// declared parameter type still produces a Type diagnostic on a binary
-/// send — mirrors the existing keyword-send coverage (BT-1832) but exercised
+/// send — mirrors the existing keyword-send coverage but exercised
 /// through the binary-selector inference path this issue fixes.
 #[test]
 fn bt2843_binary_send_union_all_members_incompatible_warns() {
@@ -215,7 +215,7 @@ fn bt2843_binary_send_uncovered_operator_integer_power_known_mismatch_warns() {
 
 /// AC (d): keyword sends are unaffected by this change — the same `Union`
 /// argument shape (`String | Nil` field into a `String`-only parameter),
-/// but via a keyword selector, still gets the pre-existing BT-1832
+/// but via a keyword selector, still gets the pre-existing
 /// `check_argument_types` coverage (this path never touched
 /// `check_binary_operand_types` and isn't gated on `binary_operand_check_ran`
 /// at all — the binary-selector fix only added a fallback for `Binary`

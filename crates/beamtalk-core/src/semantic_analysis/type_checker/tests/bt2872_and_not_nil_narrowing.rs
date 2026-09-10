@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `X notNil and: [...]` narrows `X` to non-Nil inside the block argument,
-//! including nested block-argument positions of binary sends (BT-2872).
+//! including nested block-argument positions of binary sends.
 //!
 //! Root cause: there was no narrowing rule at all for `and:` — only
 //! `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` pushed a refinement layer before
 //! type-checking a block argument. `local notNil and: [local > 0 and: [5 >=
 //! local]]` therefore type-checked `local` as `Integer | Nil` throughout the
-//! block. That went unnoticed while binary-send arguments skipped union
-//! checking entirely; BT-2843 made binary-send argument checking
+//! block. This would go unnoticed if binary-send arguments skipped union
+//! checking entirely; binary-send argument checking must be
 //! union-aware (matching pre-existing keyword-send behavior), which
 //! surfaced the gap as a false-positive "Argument 1 of '>=' on Integer
 //! expects Number, got Integer | Nil" diagnostic for `5 >= local` — the
@@ -57,7 +57,7 @@ typed Object subclass: Checker
 }
 
 /// A `self.field notNil and: [...]` receiver narrows the field the same way
-/// as a local (BT-2048-style synthetic key path).
+/// as a local (via the synthetic key path).
 #[test]
 fn bt2872_not_nil_and_narrows_self_field() {
     let source = r"

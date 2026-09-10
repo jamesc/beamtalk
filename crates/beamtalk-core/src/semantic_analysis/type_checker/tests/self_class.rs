@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Metaclass-aware type inference — Slice 1 (ADR 0083 / BT-2255).
+//! Metaclass-aware type inference — Slice 1 (ADR 0083).
 //!
 //! Covers `InferredType::Meta` representation, `Self class` / `X class`
 //! resolution, type-driven class-side routing, `new`/`basicNew` on a metatype,
@@ -517,7 +517,7 @@ Nav new
 
 #[test]
 fn new_on_actor_subclass_no_longer_dnu() {
-    // BT-3071: actor.bt now declares real `class sealed new` / `new:`
+    // actor.bt now declares real `class sealed new` / `new:`
     // methods (lifted from the codegen-injected error stubs), so `new`
     // resolves like any other inherited class method — no DNU from the
     // TypeChecker here, and this is correct: the send is not "unknown", it
@@ -530,7 +530,7 @@ fn new_on_actor_subclass_no_longer_dnu() {
     //
     // The user-facing "use spawn, not new" protection is unaffected — it
     // lives in the separate, hierarchy-resolution-independent
-    // `check_actor_new_usage` validator (BT-563/BT-1524), still a hard
+    // `check_actor_new_usage` validator, still a hard
     // compile error; see `test_actor_new_error_in_standalone_method` in
     // `semantic_analysis::tests` and `error_actor_subclass_new` in
     // `queries::diagnostic_provider::tests`.
@@ -550,8 +550,8 @@ Worker new
 }
 
 // ---------------------------------------------------------------------------
-// NEGATIVE / safety: `X class | Nil` state field (the SupervisionSpec shape,
-// BT-2034) must not produce false DNU when its class-side selectors are sent.
+// NEGATIVE / safety: `X class | Nil` state field (the SupervisionSpec shape)
+// must not produce false DNU when its class-side selectors are sent.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -616,8 +616,8 @@ fn metatype_renders_as_source_spelling_in_diagnostics() {
 
 // ---------------------------------------------------------------------------
 // Regression: code-review findings on the metaclass-aware inference PR
-// (BT-2255 / ADR 0083). See `source_analysis::is_equality_operator`
-// (BT-3462), inference.rs `class_object_tower_return`, `InferredType::meta`,
+// (ADR 0083). See `source_analysis::is_equality_operator`,
+// inference.rs `class_object_tower_return`, `InferredType::meta`,
 // and the union-send path.
 // ---------------------------------------------------------------------------
 
@@ -782,7 +782,7 @@ typed Object subclass: Beta
 }
 
 // ---------------------------------------------------------------------------
-// BT-2260: a *bare class literal* `Foo` infers `Meta{Foo}` so an unannotated
+// a *bare class literal* `Foo` infers `Meta{Foo}` so an unannotated
 // class value routes class-side wherever it flows — through a variable, a
 // collection, or as a class/behaviour argument — not just when used
 // syntactically as a direct receiver (`Foo new`).
@@ -985,7 +985,7 @@ fn class_eq_literal_narrowing_not_regressed() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-2256 (ADR 0083 Slice 2): class-side `Self`-return precision for *concrete*
+// ADR 0083 Slice 2: class-side `Self`-return precision for *concrete*
 // class-literal / concrete-metatype receivers. A class-side constructor sent to
 // a concrete class literal infers *that* class's instance type (`Set withAll: →
 // Set`, `List withAll: → List`, `Array withAll: → Array`), composing the element
@@ -1086,7 +1086,7 @@ fn concrete_withall_composes_known_element_type() {
     // AC: composes with ADR 0068 element-type inference — `Set withAll:
     // aList(Integer)` infers `Set(Integer)` where the element type is statically
     // known. The element flows from the `List(E)`-shaped parameter, recovered by
-    // class-side nested unification (BT-2256).
+    // class-side nested unification.
     let hierarchy = ClassHierarchy::with_builtins();
     for cls in ["Set", "List", "Array"] {
         let send = kw1_send(class_ref(cls), "withAll:", var("items"));

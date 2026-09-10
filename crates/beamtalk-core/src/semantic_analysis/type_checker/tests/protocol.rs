@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Behaviour protocol / class hierarchy fallback (BT-777).
+//! Behaviour protocol / class hierarchy fallback.
 
 use super::common::*;
 
-// --- Behaviour protocol / Class hierarchy fallback tests (BT-777) ---
+// --- Behaviour protocol / Class hierarchy fallback tests ---
 
 #[test]
 fn test_behaviour_protocol_superclass_no_warning() {
@@ -219,7 +219,7 @@ fn test_non_self_field_assignment_produces_warning_not_error() {
     );
 }
 
-// --- BT-2135: is_protocol_type returns true even when protocol classes are registered ---
+// --- is_protocol_type returns true even when protocol classes are registered ---
 
 /// After `register_protocol_classes` adds synthetic class entries for protocols,
 /// `is_protocol_type` must still recognise them as protocols (not real classes).
@@ -255,7 +255,8 @@ fn test_is_protocol_type_with_registered_protocol_classes() {
     let diags = registry.register_module(&proto_module, &hierarchy);
     assert!(diags.is_empty());
 
-    // Register protocol classes (this is what BT-1933 added — previously broke is_protocol_type)
+    // Register protocol classes — is_protocol_type must recognise a registered
+    // protocol class as a protocol, not a real class.
     hierarchy.register_protocol_classes(&proto_module);
 
     // After registering protocol classes, hierarchy.has_class("Printable") is true
@@ -291,8 +292,8 @@ fn test_is_protocol_type_real_class_not_protocol() {
     );
 }
 
-/// Builds a fixture for class-side (Meta receiver) conformance checking
-/// (BT-2761): registers the `Printable` (`asString`) and `Serializable`
+/// Builds a fixture for class-side (Meta receiver) conformance checking:
+/// registers the `Printable` (`asString`) and `Serializable`
 /// (`serialize`) protocols, plus a `JsonEncoder` class whose **class-side** method
 /// `generate:` declares its parameter as `param_type`. Returns
 /// `(hierarchy, registry)`.
@@ -351,7 +352,7 @@ fn setup_json_class_side_fixture(
     let diags = registry.register_module(&proto_module, &hierarchy);
     assert!(diags.is_empty());
 
-    // Register protocol classes (this triggers the pre-fix BT-2135 bug)
+    // Register protocol classes.
     hierarchy.register_protocol_classes(&proto_module);
 
     // Add a class "JsonEncoder" with a class method "generate:" whose param is
@@ -432,25 +433,25 @@ fn make_json_generate_module(arg_name: &str, arg_type: &str, receiver_span: Span
 /// Printable should NOT produce a conformance diagnostic, because Dictionary
 /// conforms to the Printable protocol.
 ///
-/// De-vacuated for BT-2761: before Meta-typed receivers were handled by
-/// `check_protocol_conformance_in_expr`, this test passed vacuously (the
-/// `JsonEncoder` class-reference receiver inferred as `InferredType::Meta`, which
-/// the conformance walk silently skipped). It now *asserts* that the checker
-/// resolved the receiver as `Meta{JsonEncoder}` and that the class-side method is
-/// resolvable — so the "no warning" outcome is a real conformance pass, not
-/// an unreached check. The companion negative test
+/// `check_protocol_conformance_in_expr` handles Meta-typed receivers, so a
+/// `JsonEncoder` class-reference receiver must infer as `InferredType::Meta`
+/// and go through the conformance walk rather than being silently skipped.
+/// This test *asserts* that the checker resolved the receiver as
+/// `Meta{JsonEncoder}` and that the class-side method is resolvable — so the
+/// "no warning" outcome is a real conformance pass, not an unreached check.
+/// The companion negative test
 /// (`test_meta_receiver_class_method_protocol_param_non_conforming_warns`)
 /// proves the same path fires a warning when the argument does not conform.
 ///
-/// BT-2784: also asserts there is no *nominal* "expects Printable, got
-/// Dictionary" mismatch. Before the fix, `check_argument_types`'s nominal
-/// class-hierarchy walk (`is_type_compatible`) had no protocol awareness: once
-/// `register_protocol_classes` (BT-1933) added `Printable` as a synthetic
-/// class entry, the "unknown type → compatible" escape hatch it relied on no
-/// longer applied, and Dictionary's ordinary superclass chain doesn't contain
-/// `Printable` — so a spurious nominal-mismatch diagnostic fired *alongside*
-/// the (correct) silent structural pass below. This is the false positive
-/// from PR #2862's "Pre-existing note".
+/// Also asserts there is no *nominal* "expects Printable, got
+/// Dictionary" mismatch: `check_argument_types`'s nominal class-hierarchy
+/// walk (`is_type_compatible`) must defer to the structural conformance
+/// check for protocol-typed params — once `register_protocol_classes` adds
+/// `Printable` as a synthetic class entry, the "unknown type → compatible"
+/// escape hatch no longer applies, and Dictionary's ordinary superclass
+/// chain doesn't contain `Printable`, so the nominal walk must skip
+/// protocol-typed params rather than firing a spurious mismatch alongside
+/// the (correct) silent structural pass below.
 #[test]
 fn test_protocol_typed_param_no_false_positive_with_protocol_classes() {
     let (hierarchy, registry) = setup_json_class_side_fixture("Printable");
@@ -462,7 +463,7 @@ fn test_protocol_typed_param_no_false_positive_with_protocol_classes() {
     let mut checker = TypeChecker::new();
     checker.check_module_with_protocols(&module, &hierarchy, &registry);
 
-    // BT-2761: prove the Meta path was actually exercised — the receiver must
+    // Prove the Meta path was actually exercised — the receiver must
     // have been resolved to the metatype `Meta{JsonEncoder}` (not skipped), and the
     // class-side target method must be resolvable from it.
     let receiver_ty = checker.type_map().get(receiver_span).expect(
@@ -494,7 +495,7 @@ fn test_protocol_typed_param_no_false_positive_with_protocol_classes() {
             .collect::<Vec<_>>()
     );
 
-    // BT-2784: there should also be NO nominal "expects ..., got ..." mismatch
+    // There should also be NO nominal "expects ..., got ..." mismatch
     // — `check_argument_types`'s nominal walk must defer to the structural
     // conformance check above for protocol-typed class-side params.
     let nominal_warnings: Vec<_> = checker
@@ -512,8 +513,8 @@ fn test_protocol_typed_param_no_false_positive_with_protocol_classes() {
     );
 }
 
-/// Negative counterpart proving the Meta-receiver path genuinely fires
-/// (BT-2761): `JsonEncoder generate:` (class-side) declares `:: Serializable`;
+/// Negative counterpart proving the Meta-receiver path genuinely fires:
+/// `JsonEncoder generate:` (class-side) declares `:: Serializable`;
 /// passing an Integer (no `serialize`) must warn.
 #[test]
 fn test_meta_receiver_class_method_protocol_param_non_conforming_warns() {
@@ -556,7 +557,7 @@ fn test_meta_receiver_class_method_protocol_param_non_conforming_warns() {
         conformance_warnings[0].message
     );
 
-    // BT-2784: exactly one diagnostic total should mention Serializable — the
+    // Exactly one diagnostic total should mention Serializable — the
     // structural "does not conform" warning above. A duplicate nominal
     // "expects Serializable, got Integer" mismatch must NOT also fire.
     let serializable_mentions: Vec<_> = checker
@@ -575,12 +576,12 @@ fn test_meta_receiver_class_method_protocol_param_non_conforming_warns() {
     );
 }
 
-/// BT-2784: skipping the nominal walk for protocol-typed class-side params
+/// Skipping the nominal walk for protocol-typed class-side params
 /// must NOT swallow ordinary nominal mismatches on *non-protocol* class-side
 /// params. `JsonEncoder generate:` here declares its param as the real class
 /// `Integer` (not a protocol) — passing a `String` must still produce the
-/// nominal "expects Integer, got String" warning, proving the BT-2784 fix
-/// (`hierarchy.is_protocol_class(..)` guard) is scoped to protocol-typed
+/// nominal "expects Integer, got String" warning, proving the
+/// `hierarchy.is_protocol_class(..)` guard is scoped to protocol-typed
 /// params only.
 #[test]
 fn test_class_side_non_protocol_param_nominal_mismatch_still_warns() {
@@ -700,7 +701,7 @@ fn test_protocol_typed_param_non_conforming_still_warns() {
 }
 
 // --- `&` intersection parameter types require conformance to BOTH protocol
-// parts (ADR 0068 §Protocol Composition, ADR 0102 §1/§3, BT-2743) ---
+// parts (ADR 0068 §Protocol Composition, ADR 0102 §1/§3) ---
 
 /// Builds a `Zzyzx >> process:` **instance** method whose parameter is
 /// annotated `Printable & Serializable` (as `type_name()` would render the
@@ -710,9 +711,10 @@ fn test_protocol_typed_param_non_conforming_still_warns() {
 ///
 /// Also installs single-protocol instance methods `store:` (`:: Serializable`)
 /// and `describe:` (`:: Describable`, requiring `printString`) plus the
-/// `Describable` protocol, used by the BT-2761 class-object-argument tests. (Class-side receivers are exercised separately via
-/// `setup_json_class_side_fixture` — since BT-2761 the conformance walk
-/// resolves `Meta` receivers through `find_class_method` too.)
+/// `Describable` protocol, used by the class-object-argument tests below.
+/// (Class-side receivers are exercised separately via
+/// `setup_json_class_side_fixture` — the conformance walk resolves `Meta`
+/// receivers through `find_class_method` too.)
 #[allow(clippy::too_many_lines)] // declarative protocol/class fixture data
 fn setup_intersection_param_fixture() -> (
     ClassHierarchy,
@@ -761,7 +763,7 @@ fn setup_intersection_param_fixture() -> (
             },
             // `printString` is provided by the metaclass tower (Object), so
             // class objects satisfy Describable with an empty class side
-            // (BT-2761 tower test).
+            // (tower test).
             ProtocolDefinition {
                 name: Identifier::new("Describable", span()),
                 type_params: vec![],
@@ -814,7 +816,7 @@ fn setup_intersection_param_fixture() -> (
                 spawns_block: false,
                 return_type: Some(DeclaredType::parse("String")),
                 // A real `:: Printable & Serializable` parameter annotation
-                // builds a structural `DeclaredType::Intersection` (BT-3076)
+                // builds a structural `DeclaredType::Intersection`
                 // now, not this opaque `Simple`. Kept as a `Simple` here
                 // deliberately: this test exercises the protocol checker's
                 // *string-level* intersection-splitting path
@@ -870,7 +872,7 @@ fn test_intersection_param_missing_one_protocol_warns() {
     // Serializable) is expected.
     let (hierarchy, registry) = setup_intersection_param_fixture();
 
-    // BT-2743 regression note: every synthetic node built by the `common`
+    // Distinct-span regression note: every synthetic node built by the `common`
     // helpers (`var`, `msg_send`, …) shares the single fixed `span()`
     // (`Span::new(0, 1)`), and `check_protocol_conformance_in_expr` looks up
     // the receiver/argument types by span in the checker's `TypeMap`. With a
@@ -984,7 +986,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
     };
     hierarchy.add_from_beam_meta(vec![report_info]);
 
-    // See the BT-2743 regression note in `test_intersection_param_missing_one_protocol_warns`
+    // See the distinct-span regression note in `test_intersection_param_missing_one_protocol_warns`
     // — the receiver and argument need distinct spans so their `TypeMap`
     // entries don't collide.
     let zzyzx_ident = Identifier::new("zzyzx", Span::new(10, 14));
@@ -1025,7 +1027,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
     );
 }
 
-// --- BT-2761: class-object (Meta-typed) ARGUMENTS against protocol-typed
+// --- class-object (Meta-typed) ARGUMENTS against protocol-typed
 // parameters — `Meta{C}` satisfies `:: P` iff C's class side conforms to P ---
 
 /// Adds a `Widget` class to the hierarchy whose class side has the given
@@ -1080,7 +1082,7 @@ fn add_widget_class(hierarchy: &mut ClassHierarchy, class_side_selectors: &[&str
 /// a class-object argument (inferred `Meta{Widget}`) passed to a
 /// protocol-typed parameter of the `Zzyzx` fixture. Receiver and argument
 /// get distinct spans so their `TypeMap` entries don't collide (see the
-/// BT-2743 regression note above).
+/// distinct-span regression note above).
 fn make_widget_arg_module(selector: &str) -> Module {
     let zzyzx_ident = Identifier::new("zzyzx", Span::new(10, 14));
     let widget_span = Span::new(20, 26);
@@ -1111,13 +1113,13 @@ fn make_widget_arg_module(selector: &str) -> Module {
 /// Positive: `Widget` has a class-side `serialize`, so the class object
 /// `Widget` conforms to `Serializable` — no warning for `zzyzx store: Widget`.
 ///
-/// BT-2784: also asserts no nominal "expects Serializable, got Widget class"
-/// mismatch — the same nominal-walk false positive that affected the
-/// `Dictionary`/`Printable` class-side-param case also applies to
+/// Also asserts no nominal "expects Serializable, got Widget class"
+/// mismatch: the nominal-walk skip for protocol-typed params that covers the
+/// `Dictionary`/`Printable` class-side-param case must also apply to
 /// `Meta`-typed (class-object) arguments, since `check_argument_types`'s
-/// `InferredType::Meta` arm shares the same protocol-unaware nominal
-/// comparison. The BT-2784 fix's `continue` guard runs before the
-/// `match arg_ty` split, so it covers this arm too.
+/// `InferredType::Meta` arm shares the same nominal comparison — the
+/// protocol-typed-param `continue` guard runs before the `match arg_ty`
+/// split, so it covers this arm too.
 #[test]
 fn test_class_object_arg_conforms_via_class_side_method() {
     let (mut hierarchy, registry) = setup_intersection_param_fixture();
@@ -1227,7 +1229,7 @@ fn test_class_object_arg_conforms_via_metaclass_tower() {
     );
 }
 
-/// Intersection param + class-object argument (BT-2743 × BT-2761): the class
+/// Intersection param + class-object argument: the class
 /// object `Widget` conforms to `Printable & Serializable` when its class side
 /// has both `asString` and `serialize` (neither is tower-provided).
 #[test]
@@ -1318,7 +1320,7 @@ fn test_split_intersection_type_string() {
     );
 }
 
-/// BT-2794 (pre-WS3 dependency guard): with dependencies declared and
+/// Pre-WS3 dependency guard: with dependencies declared and
 /// project-complete knowledge, the receiver-knowledge classifier keeps every
 /// receiver `Open`, which also suppresses protocol-conformance warnings —
 /// a dependency could extend the class with the missing required method, so

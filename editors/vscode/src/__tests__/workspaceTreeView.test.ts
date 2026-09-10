@@ -768,6 +768,51 @@ describe("WorkspaceTreeDataProvider — inherited methods (BT-3478)", () => {
     client.dispose();
   });
 
+  it("wires up Go to Definition for a stdlib method with no source_file, direct or inherited", async () => {
+    // The runtime never reports a real `source_file` for compiled-in stdlib
+    // classes, but `beamtalk.navigateToMethod` falls back to the LSP's
+    // `beamtalk-stdlib://` virtual URI scheme whenever `source_origin` is
+    // "stdlib" — so a row for a stdlib method must stay clickable even
+    // without a `source_file`, both for a method declared directly on the
+    // browsed class and for one inherited from a stdlib superclass.
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Array", source_file: null, actor_count: 0, source_origin: "stdlib" },
+      { name: "Object", source_file: null, actor_count: 0, source_origin: "stdlib" },
+    ]);
+    const [classItem] = await provider.getChildren({ kind: "classes-section" });
+    const fetch = provider.getChildren(classItem);
+    respondToOp(ws, "methods", {
+      methods: [{ name: "size", selector: "size", side: "instance" }],
+      state_vars: [],
+    });
+    const children = await fetch;
+
+    const methodGroup = children.find(
+      (c) => c.kind === "method-group" && c.side === "instance"
+    ) as MethodGroupNode;
+    const [directItem] = methodGroup.methods;
+    const directTreeItem = provider.getTreeItem(directItem);
+    expect(directTreeItem.contextValue).toBe("method-item");
+    expect(directTreeItem.command).toEqual(
+      expect.objectContaining({ command: "beamtalk.navigateToMethod" })
+    );
+
+    const instanceFetch = provider.getChildren(inheritedGroup(children, "instance"));
+    respondToOp(ws, "inherited-methods", {
+      methods: [{ name: "==", selector: "==", side: "instance", defining_class: "Object" }],
+    });
+    const [inheritedItem] = (await instanceFetch) as MethodItemNode[];
+    const inheritedTreeItem = provider.getTreeItem(inheritedItem);
+    expect(inheritedTreeItem.contextValue).toBe("method-item");
+    expect(inheritedTreeItem.command).toEqual(
+      expect.objectContaining({ command: "beamtalk.navigateToMethod" })
+    );
+
+    client.dispose();
+  });
+
   it("discards an inherited-methods fetch that resolves after a classes/loaded push invalidated it", async () => {
     const { client, ws } = makeConnectedClient();
     provider.setClient(client);

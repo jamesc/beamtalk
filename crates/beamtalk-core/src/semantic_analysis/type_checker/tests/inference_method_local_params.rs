@@ -411,7 +411,7 @@ fn infer_method_local_params_inject_into_block() {
     assert_eq!(result.get("R"), Some(&InferredType::known("Integer")));
 }
 
-/// BT-2039: When the same method-local type parameter is unified across
+/// When the same method-local type parameter is unified across
 /// multiple argument positions and one resolves to `Known` while another
 /// resolves to `Dynamic`, the Known binding must win. Otherwise
 /// `Block(R) Block(R) -> R` on `ifTrue:ifFalse:` collapses to `Dynamic`
@@ -469,7 +469,7 @@ fn bt_2039_method_local_known_beats_dynamic_across_args() {
 
 #[test]
 fn infer_method_local_params_skips_non_type_param_in_parametric() {
-    // BT-1895: Param type is Result(Enumerable, E) where Enumerable is a protocol name,
+    // Param type is Result(Enumerable, E) where Enumerable is a protocol name,
     // not a type parameter. It should NOT be substituted even though it's not in the hierarchy.
     let method = method_info("check:", vec![Some("Result(Enumerable, E)")], Some("E"));
     let arg = InferredType::Known {
@@ -587,8 +587,8 @@ fn substitute_return_type_nested_result() {
 
 #[test]
 fn substitute_return_type_union_with_type_param() {
-    // BT-1836: "E | Nil" with E=Integer should produce a Union of Integer
-    // and nil. BT-3075: `Nil` now normalises to the canonical
+    // "E | Nil" with E=Integer should produce a Union of Integer
+    // and nil. `Nil` normalises to the canonical
     // `UndefinedObject` on this path too (like every other resolver), so
     // `isNil`/`ifNil:` narrowing recognises the member.
     let mut subst = HashMap::new();
@@ -613,7 +613,7 @@ fn substitute_return_type_union_with_type_param() {
 #[test]
 fn substitute_return_type_union_no_params() {
     // "Behaviour | Nil" with no substitutions should pass through as Union
-    // (with `Nil` normalised to `UndefinedObject`, BT-3075).
+    // (with `Nil` normalised to `UndefinedObject`).
     let result = type_resolver::resolve_declared_type(
         &DeclaredType::parse("Behaviour | Nil"),
         &type_resolver::SubstitutionMap::new(),

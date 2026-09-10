@@ -3921,3 +3921,207 @@ fn test_value_type_parenthesized_field_write_in_match_arm_is_compile_error() {
         ),
     }
 }
+
+#[test]
+fn test_value_type_ensure_in_last_position_unwraps_tuple_to_self() {
+    // BT-3492: before this fix, a value-type `on:do:`/`ensure:` in the
+    // method's LAST-statement position leaked its raw
+    // `{Result, StateAcc, Self}` tuple as the method's own return value —
+    // `computeTotal`'s own last statement was this `ensure:` send, so the
+    // whole method returned the tuple instead of `nil`. Now it routes
+    // through the shared `lower_threaded_last` transform (same as loops
+    // and conditionals), unwrapping element 1 as the logical value and
+    // rebinding `Self` from element 3.
+    let src = concat!(
+        "TestCase subclass: VtLastPositionEnsure\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    [\n",
+        "      self.total := self.total + 1\n",
+        "      nil\n",
+        "    ] ensure: [nil]\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtlastpositionensure").with_workspace_mode(true),
+    )
+    .expect("a value-type ensure: in last position must compile");
+    // The method body's OWN trailing expression — not the exception
+    // construct's internal try/catch tuple bookkeeping, which legitimately
+    // builds `{Result, StateAcc, Self}` tuples throughout — must be the
+    // unwrapped logical value, not a raw tuple.
+    let compute_total = code
+        .split("'computeTotal'/1 = fun (Self) ->")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("generated code must contain computeTotal's body");
+    let trailing_line = compute_total
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .expect("computeTotal must have a non-empty body")
+        .trim();
+    assert!(
+        !trailing_line.starts_with('{'),
+        "computeTotal's own return value must be the unwrapped logical result, not the \
+         raw exception-construct tuple. Trailing line was: {trailing_line:?}. Full \
+         function:\n{compute_total}"
+    );
+}
+
+#[test]
+fn test_value_type_ensure_as_assignment_rhs_unwraps_tuple_and_rebinds_self() {
+    // BT-3492: before this fix, `r := [...] ensure: [...]` bound `r` to the
+    // raw `{Result, StateAcc, Self}` tuple and never rebound the method's
+    // live `Self`, so a later `self.total` read the PRE-try snapshot and the
+    // mutation was silently dropped. Now `emit_threaded_assign_rhs` extracts
+    // element 1 to the target and rebinds `Self` from element 3 (mirroring
+    // `generate_vt_exception_construct_open`'s non-last extraction).
+    let src = concat!(
+        "TestCase subclass: VtAssignRhsEnsure\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    r := [\n",
+        "      self.total := self.total + 1\n",
+        "      nil\n",
+        "    ] ensure: [nil]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtassignrhsensure").with_workspace_mode(true),
+    )
+    .expect("a value-type ensure: as an assignment RHS must compile");
+    assert!(
+        !code.contains("let R = let StateAcc"),
+        "the assignment target must not be bound to the raw exception-construct tuple. \
+         Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_type_field_write_in_ensure_nested_in_ensure_is_compile_error() {
+    // BT-3492: `block_writes_vt_self_field` is deliberately top-level-body-only
+    // (same reason as `loop_body_threads_value_self`), so a field write nested
+    // inside an INNER `ensure:`'s block is invisible to the OUTER `ensure:`'s
+    // own threading decision. Before this fix that mutation was silently
+    // dropped (the outer construct's tuple carried no trailing `Self` slot at
+    // all). Now `generate_exception_body_with_threading_inner` rejects it
+    // with the same `FieldAssignmentInUnsupportedBlock` diagnostic the
+    // identical loop-nesting shape already gets (BT-3488).
+    let field = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtEnsureInEnsureSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    [\n",
+            "      [\n",
+            "        self.total := self.total + 1\n",
+            "        nil\n",
+            "      ] ensure: [nil]\n",
+            "      nil\n",
+            "    ] ensure: [nil]\n",
+            "    self.total\n",
+        ),
+        "bt@vtensureinensureself",
+    );
+    assert_eq!(field, "total");
+}
+
+#[test]
+fn test_value_type_parenthesized_ensure_as_assignment_rhs_unwraps_tuple() {
+    // BT-3492: a parenthesized `ensure:`/`on:do:` assignment RHS
+    // (`r := (... ensure: [...])`) must not dodge `emit_threaded_assign_rhs`'s
+    // detection — mirrors BT-3489's identical paren-stripping fix for
+    // match-arm field writes. `is_exception_construct_with_vt_local_threading`
+    // / `is_exception_construct_with_vt_self_field_threading` are checked
+    // against `value.unwrap_parens()`, so the parenthesized wrapper must not
+    // hide the construct and fall back to the generic (tuple-leaking) path.
+    let src = concat!(
+        "TestCase subclass: VtParenAssignRhsEnsure\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    r := ([\n",
+        "      self.total := self.total + 1\n",
+        "      nil\n",
+        "    ] ensure: [nil])\n",
+        "    self.total + r\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtparenassignrhsensure").with_workspace_mode(true),
+    )
+    .expect("a parenthesized value-type ensure: as an assignment RHS must compile");
+    assert!(
+        !code.contains("let R = let StateAcc"),
+        "the assignment target must not be bound to the raw exception-construct tuple \
+         even when parenthesized. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_class_method_ensure_last_position_and_assign_rhs_thread_local() {
+    // BT-3492: `lower_threaded_last` / `emit_threaded_assign_rhs` are shared
+    // by the value-type instance-method boundary AND the class-method
+    // boundary (`try_generate_class_method_threaded_last` /
+    // `generate_class_method_local_var_binding`, gen_server/methods.rs) —
+    // `is_exception_construct_with_vt_local_threading` gates on
+    // `in_class_method() || ValueType`. So this fix also closes the
+    // identical gap for a class-method `on:do:`/`ensure:` that mutates a
+    // captured OUTER LOCAL (not a class var) in last-statement / assign-RHS
+    // position — previously the raw `{Result, StateAcc}` tuple leaked the
+    // same way. Two class methods exercise both positions on one class so a
+    // single compile proves both.
+    let src = concat!(
+        "Object subclass: ClassMethodEnsureProbe\n\n",
+        "  class computeLast =>\n",
+        "    sum := 0\n",
+        "    [\n",
+        "      sum := sum + 1\n",
+        "      nil\n",
+        "    ] ensure: [nil]\n",
+        "    sum\n\n",
+        "  class computeAssignRhs =>\n",
+        "    sum := 0\n",
+        "    r := [\n",
+        "      sum := sum + 1\n",
+        "      nil\n",
+        "    ] ensure: [nil]\n",
+        "    sum\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@classmethodensureprobe").with_workspace_mode(true),
+    )
+    .expect("a class-method ensure: in last / assign-RHS position must compile");
+    assert!(
+        !code.contains("let R = let StateAcc"),
+        "computeAssignRhs's target must not bind to the raw exception-construct tuple. \
+         Got:\n{code}"
+    );
+    let compute_last = code
+        .split("'class_computeLast'/2 = fun (ClassSelf, ClassVars) ->")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("generated code must contain class_computeLast's body");
+    let trailing_line = compute_last
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .expect("class_computeLast must have a non-empty body")
+        .trim();
+    assert!(
+        !trailing_line.starts_with('{'),
+        "class_computeLast's own return value must be the unwrapped logical result, not \
+         the raw exception-construct tuple. Trailing line was: {trailing_line:?}. Full \
+         function:\n{compute_last}"
+    );
+}

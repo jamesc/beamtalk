@@ -86,7 +86,7 @@ fn infer_expr_unknown_var_is_dynamic() {
 
 #[test]
 fn infer_expr_class_reference() {
-    // BT-2260: a bare class literal `Integer` is the class *object*, whose
+    // a bare class literal `Integer` is the class *object*, whose
     // type is the metatype `Meta{Integer}` — not an instance of `Integer`.
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
@@ -136,7 +136,7 @@ fn infer_expr_map_literal() {
         span: span(),
     };
     let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    // BT-2620: empty map literal carries no key/value info → Dictionary(Dynamic, Dynamic).
+    // empty map literal carries no key/value info → Dictionary(Dynamic, Dynamic).
     assert_eq!(
         ty,
         InferredType::known_with_args(
@@ -159,7 +159,7 @@ fn infer_expr_array_literal() {
         span: span(),
     };
     let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    // BT-2620: homogeneous Integer elements → Array(Integer).
+    // homogeneous Integer elements → Array(Integer).
     assert_eq!(
         ty,
         InferredType::known_with_args("Array", vec![InferredType::known("Integer")])
@@ -177,7 +177,7 @@ fn infer_expr_list_literal() {
         span: span(),
     };
     let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    // BT-2620: homogeneous Integer elements → List(Integer).
+    // homogeneous Integer elements → List(Integer).
     assert_eq!(
         ty,
         InferredType::known_with_args("List", vec![InferredType::known("Integer")])
@@ -186,7 +186,7 @@ fn infer_expr_list_literal() {
 
 #[test]
 fn infer_expr_array_literal_heterogeneous_joins_to_union() {
-    // BT-2620: mixed element types join into a union element type.
+    // mixed element types join into a union element type.
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
@@ -206,7 +206,7 @@ fn infer_expr_array_literal_heterogeneous_joins_to_union() {
 
 #[test]
 fn infer_expr_array_literal_empty_is_dynamic_element() {
-    // BT-2620: an empty literal carries no element info → Array(Dynamic).
+    // an empty literal carries no element info → Array(Dynamic).
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
@@ -223,7 +223,7 @@ fn infer_expr_array_literal_empty_is_dynamic_element() {
 
 #[test]
 fn infer_expr_list_literal_folds_typed_tail_element() {
-    // BT-2620: a `List(Integer)` tail contributes its `Integer` element to
+    // a `List(Integer)` tail contributes its `Integer` element to
     // the join, so `[1 | someIntList]` stays `List(Integer)`.
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
@@ -246,7 +246,7 @@ fn infer_expr_list_literal_folds_typed_tail_element() {
 
 #[test]
 fn infer_expr_list_literal_array_tail_widens_to_dynamic() {
-    // BT-2620: an Array is not a valid BEAM cons tail (it would form an
+    // an Array is not a valid BEAM cons tail (it would form an
     // improper list), so it contributes no element type — folding a
     // `Dynamic` into the join collapses the element to `Dynamic`, giving
     // `List(Dynamic)` rather than a false `List(Integer)`.
@@ -267,7 +267,7 @@ fn infer_expr_list_literal_array_tail_widens_to_dynamic() {
         ty,
         InferredType::known_with_args("List", vec![InferredType::Dynamic(DynamicReason::Unknown)])
     );
-    // BT-2623: the silent widening is now also surfaced as a diagnostic so
+    // the silent widening is now also surfaced as a diagnostic so
     // the user sees the likely improper-list bug.
     assert_eq!(
         checker.diagnostics().len(),
@@ -289,7 +289,7 @@ fn infer_expr_list_literal_array_tail_widens_to_dynamic() {
 
 #[test]
 fn infer_expr_list_literal_list_tail_no_diagnostic() {
-    // BT-2623: a proper `List(T)` cons tail is valid — no diagnostic.
+    // a proper `List(T)` cons tail is valid — no diagnostic.
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
@@ -312,7 +312,7 @@ fn infer_expr_list_literal_list_tail_no_diagnostic() {
 
 #[test]
 fn infer_expr_list_literal_dynamic_tail_no_diagnostic() {
-    // BT-2623: a `Dynamic` tail (e.g. unannotated param) is too uncertain to
+    // a `Dynamic` tail (e.g. unannotated param) is too uncertain to
     // flag — staying silent avoids false-positive noise.
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
@@ -333,7 +333,7 @@ fn infer_expr_list_literal_dynamic_tail_no_diagnostic() {
 
 #[test]
 fn infer_expr_list_literal_non_collection_tail_warns() {
-    // BT-2623: any known non-List tail (e.g. an Integer) would form an
+    // any known non-List tail (e.g. an Integer) would form an
     // improper list, so it is flagged too — not just Array.
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
@@ -427,7 +427,7 @@ fn infer_expr_match_is_dynamic() {
     assert_eq!(ty, InferredType::Dynamic(DynamicReason::Unknown));
 }
 
-// ---- BT-2854 / ADR 0107 Phase A: `Pattern::Nil` narrowing ----
+// ---- ADR 0107 Phase A: `Pattern::Nil` narrowing ----
 
 /// A `nil` arm's body sees the scrutinee narrowed to `UndefinedObject`,
 /// mirroring `x isNil ifTrue:` (reuses the same true-branch type as
@@ -528,7 +528,7 @@ fn infer_expr_match_guarded_nil_arm_does_not_narrow_subsequent_arms() {
     );
 }
 
-// ---- BT-2855 / ADR 0107 Phase A: `Pattern::Type` narrowing ----
+// ---- ADR 0107 Phase A: `Pattern::Type` narrowing ----
 
 /// A `binding :: ClassName` arm's body sees `binding` statically
 /// narrowed to `ClassName`, mirroring `isKindOf:`'s true-branch

@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Typed class enforcement and @expect suppression (BT-587).
+//! Typed class enforcement and @expect suppression.
 
 use super::common::*;
 
-// ---- Typed class tests (BT-587) ----
+// ---- Typed class tests ----
 
 #[test]
 fn test_typed_class_warns_on_missing_param_annotation() {
@@ -112,11 +112,11 @@ fn test_typed_class_no_warning_when_fully_annotated() {
     );
 }
 
-// ── BT-1856: @expect suppression on declarations ───────────────────────────
+// ── @expect suppression on declarations ───────────────────────────
 
 #[test]
 fn test_expect_type_suppresses_typed_method_warnings() {
-    // BT-1883: typed class with untyped method that has @expect type —
+    // typed class with untyped method that has @expect type —
     // type checker emits the diagnostic, apply_expect_directives suppresses it,
     // and no stale @expect warning is produced.
     let mut method = MethodDefinition::new(
@@ -149,7 +149,7 @@ fn test_expect_type_suppresses_typed_method_warnings() {
 
 #[test]
 fn test_expect_all_suppresses_typed_method_warnings() {
-    // BT-1883: @expect all should also suppress typed class warnings
+    // @expect all should also suppress typed class warnings
     // without producing a stale @expect warning.
     let mut method = MethodDefinition::new(
         MessageSelector::Unary("first".into()),
@@ -181,7 +181,7 @@ fn test_expect_all_suppresses_typed_method_warnings() {
 
 #[test]
 fn test_typed_no_default_state_no_warning() {
-    // BT-1947: A type annotation replaces the need for a default value.
+    // A type annotation replaces the need for a default value.
     // `state: count :: Integer` (no default) should produce no warnings.
     let typed_no_default = StateDeclaration::with_type(
         ident("count"),

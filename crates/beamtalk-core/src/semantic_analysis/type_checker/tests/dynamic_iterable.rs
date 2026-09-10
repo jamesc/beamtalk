@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Dynamic-iterable block-param inference in typed classes (BT-2042).
+//! Dynamic-iterable block-param inference in typed classes.
 
 use super::common::*;
 
-// BT-2042: Block param inferred Dynamic in `typed` class when iterable's
+// Block param inferred Dynamic in `typed` class when iterable's
 // element type is Dynamic.
 //
 // When a block argument is passed to a method on a Dynamic receiver (e.g.,
@@ -19,7 +19,7 @@ use super::common::*;
 // The fix propagates `Dynamic(DynamicReceiver)` into block params in the
 // fallback path (non-Known receiver / unresolved selector), matching how the
 // send's result itself is classified. `DynamicReceiver` is filtered from the
-// BT-1914 warning, so usages of the block param no longer double-warn.
+// Dynamic-in-typed-class warning, so usages of the block param no longer double-warn.
 // =========================================================================
 
 /// Repro from the issue: iterating the result of `Dictionary at:ifAbsent:`

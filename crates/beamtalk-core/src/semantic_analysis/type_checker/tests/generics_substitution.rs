@@ -1,14 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Generic substitution and constructor type inference (BT-1570, BT-1571).
+//! Generic substitution and constructor type inference.
 
 use super::super::*;
 use super::common::*;
 
-// ---- BT-1570: Generic substitution tests ----
+// ---- Generic substitution tests ----
 
-/// BT-1570: Substitution map built from `GenResult(Integer, IOError)`.
+/// Substitution map built from `GenResult(Integer, IOError)`.
 /// `unwrap` returns `T` → `Integer`.
 #[test]
 fn generic_substitution_unwrap_returns_concrete_type() {
@@ -43,7 +43,7 @@ fn generic_substitution_unwrap_returns_concrete_type() {
     );
 }
 
-/// BT-1570: `error` returns `E` → `IOError`.
+/// `error` returns `E` → `IOError`.
 #[test]
 fn generic_substitution_error_returns_concrete_type() {
     let mut hierarchy = ClassHierarchy::with_builtins();
@@ -77,7 +77,7 @@ fn generic_substitution_error_returns_concrete_type() {
     );
 }
 
-/// BT-1570: Non-generic return type (`isOk` -> `Boolean`) is unaffected.
+/// Non-generic return type (`isOk` -> `Boolean`) is unaffected.
 #[test]
 fn generic_substitution_non_generic_return_unchanged() {
     let mut hierarchy = ClassHierarchy::with_builtins();
@@ -111,7 +111,7 @@ fn generic_substitution_non_generic_return_unchanged() {
     );
 }
 
-/// BT-1570: No `type_args` on receiver falls back to unsubstituted return.
+/// No `type_args` on receiver falls back to unsubstituted return.
 #[test]
 fn generic_no_type_args_returns_unsubstituted() {
     let mut hierarchy = ClassHierarchy::with_builtins();
@@ -138,7 +138,7 @@ fn generic_no_type_args_returns_unsubstituted() {
     );
 }
 
-/// BT-1570: `set_param_types` handles generic annotations.
+/// `set_param_types` handles generic annotations.
 #[test]
 fn set_param_types_resolves_generic_annotation() {
     // Parameter annotated as :: Result(Integer, Error) should be Known("Result")
@@ -185,7 +185,7 @@ fn set_param_types_resolves_generic_annotation() {
     }
 }
 
-/// BT-1570: Generic return type check extracts base type for compatibility.
+/// Generic return type check extracts base type for compatibility.
 #[test]
 fn check_return_type_handles_generic_declared_type() {
     let mut hierarchy = ClassHierarchy::with_builtins();
@@ -230,7 +230,7 @@ fn check_return_type_handles_generic_declared_type() {
     );
 }
 
-/// BT-1570: `is_assignable_to` handles generic declared types structurally.
+/// `is_assignable_to` handles generic declared types structurally.
 #[test]
 fn is_assignable_to_generic_declared_type() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -256,9 +256,9 @@ fn is_assignable_to_generic_declared_type() {
     );
 }
 
-// ---- BT-1571: Constructor type inference tests ----
+// ---- Constructor type inference tests ----
 
-/// BT-1571: `GenResult ok: 42` infers T = Integer → GenResult(Integer, Dynamic).
+/// `GenResult ok: 42` infers T = Integer → GenResult(Integer, Dynamic).
 #[test]
 fn constructor_inference_ok_infers_t_from_integer() {
     let mut hierarchy = ClassHierarchy::with_builtins();
@@ -306,7 +306,7 @@ fn constructor_inference_ok_infers_t_from_integer() {
     }
 }
 
-/// BT-1571: `GenResult error: #not_found` infers E = Symbol → GenResult(Dynamic, Symbol).
+/// `GenResult error: #not_found` infers E = Symbol → GenResult(Dynamic, Symbol).
 #[test]
 fn constructor_inference_error_infers_e_from_symbol() {
     let mut hierarchy = ClassHierarchy::with_builtins();
@@ -353,7 +353,7 @@ fn constructor_inference_error_infers_e_from_symbol() {
     }
 }
 
-/// BT-1571: Constructor inference on non-generic class returns plain Known.
+/// Constructor inference on non-generic class returns plain Known.
 #[test]
 fn constructor_inference_non_generic_class_no_type_args() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -381,7 +381,7 @@ fn constructor_inference_non_generic_class_no_type_args() {
     }
 }
 
-/// BT-1571: Inferred type from constructor flows into subsequent instance sends.
+/// Inferred type from constructor flows into subsequent instance sends.
 /// `(GenResult ok: 42) unwrap` should return Integer via substitution.
 #[test]
 fn constructor_inference_flows_to_instance_sends() {
@@ -419,7 +419,7 @@ fn constructor_inference_flows_to_instance_sends() {
     );
 }
 
-/// BT-1571: Constructor inference for error: flows into error accessor.
+/// Constructor inference for error: flows into error accessor.
 /// `(GenResult error: #not_found) error` should return Symbol.
 #[test]
 fn constructor_inference_error_flows_to_error_accessor() {

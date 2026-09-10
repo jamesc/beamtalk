@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Local variable type annotations and method-call union returns (BT-2012, BT-2017).
+//! Local variable type annotations and method-call union returns.
 
 use super::common::*;
 
-// --- Local variable type annotation tests (BT-2012) ---
+// --- Local variable type annotation tests ---
 
 #[test]
 fn annotated_assignment_uses_declared_type() {
@@ -27,7 +27,7 @@ fn annotated_assignment_uses_declared_type() {
 
 #[test]
 fn annotated_assignment_with_chained_alias_records_transitive_referenced_aliases() {
-    // ADR 0108 hot-reload re-check trigger (BT-2899): the exact
+    // ADR 0108 hot-reload re-check trigger: the exact
     // `heading :: Direction := ...` shape from the ADR's REPL example.
     // `type Direction = Compass` where `type Compass = #n | #s` — resolving
     // this site must record dependency edges for *both* alias names, not
@@ -240,9 +240,9 @@ fn annotated_assignment_compatible_type_no_warning() {
     );
 }
 
-// ── BT-2016: isNil narrowing propagation into keyword args / typed assignment ──
+// ── isNil narrowing propagation into keyword args / typed assignment ──
 
-/// BT-2016: After `ms isNil ifTrue: [^nil]`, the narrowed type of `ms`
+/// After `ms isNil ifTrue: [^nil]`, the narrowed type of `ms`
 /// should be `Integer` (not `Integer | Nil`), so passing it to a class-side
 /// keyword method that expects `Integer` must not produce a type mismatch.
 #[test]
@@ -275,7 +275,7 @@ Object subclass: Caller
     );
 }
 
-/// BT-2016: After `ms isNil ifTrue: [^nil]`, assigning the narrowed value
+/// After `ms isNil ifTrue: [^nil]`, assigning the narrowed value
 /// to a typed local `local :: Integer := ms` must not produce a type mismatch.
 #[test]
 fn narrowing_isnil_propagates_to_typed_assignment_rhs_e2e() {
@@ -302,7 +302,7 @@ Object subclass: Caller
     );
 }
 
-/// BT-2016: After `ms isNil ifTrue: [^nil]`, passing the narrowed value to
+/// After `ms isNil ifTrue: [^nil]`, passing the narrowed value to
 /// an instance-side keyword method that expects `Integer` must not warn.
 #[test]
 fn narrowing_isnil_propagates_to_instance_send_arg_e2e() {
@@ -335,7 +335,7 @@ Object subclass: Caller
     );
 }
 
-/// BT-2016: `non_nil_type` must strip `Known("Nil")` from unions, not just
+/// `non_nil_type` must strip `Known("Nil")` from unions, not just
 /// `Known("UndefinedObject")`. This ensures the defense-in-depth layer works
 /// even if a `"Nil"` member slips past `resolve_type_keyword`.
 #[test]
@@ -350,7 +350,7 @@ fn non_nil_type_strips_capital_nil_from_union() {
     );
 }
 
-/// BT-2016: `non_nil_type` must strip both `Known("UndefinedObject")` and
+/// `non_nil_type` must strip both `Known("UndefinedObject")` and
 /// `Known("Nil")` when both appear in the same union.
 #[test]
 fn non_nil_type_strips_both_nil_variants() {
@@ -370,9 +370,9 @@ fn non_nil_type_strips_both_nil_variants() {
     );
 }
 
-// ---- BT-2017: Method-call-bound locals must resolve union return types ----
+// ---- Method-call-bound locals must resolve union return types ----
 
-/// BT-2017: When a method returns `Integer | Nil`, the return type must be
+/// When a method returns `Integer | Nil`, the return type must be
 /// resolved as a proper `Union([Integer, UndefinedObject])`, not as a flat
 /// `Known("Integer | Nil")`. Without this fix, locals bound from such method
 /// calls get a malformed type that causes false binary-operand warnings
@@ -464,7 +464,7 @@ fn method_call_union_return_no_false_binary_warning() {
     );
 }
 
-/// BT-2017: Verify that `resolve_type_name_string` correctly splits
+/// Verify that `resolve_type_name_string` correctly splits
 /// "Integer | Nil" into a proper Union type (not Known("Integer | Nil")).
 #[test]
 fn resolve_type_string_splits_union() {
@@ -495,7 +495,7 @@ fn resolve_type_string_splits_union() {
     }
 }
 
-/// BT-2017: Parameter-bound locals (case a) should continue to work
+/// Parameter-bound locals (case a) should continue to work
 /// without binary operand warnings — regression guard.
 #[test]
 fn param_passthrough_local_no_false_binary_warning() {

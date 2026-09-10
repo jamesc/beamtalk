@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2749: Pin sync-send actor typing and the cast (`!`) → `Nil` retype
+//! Pin sync-send actor typing and the cast (`!`) → `Nil` retype
 //! (ADR 0104 Phase 1).
 //!
 //! Two behaviours are pinned here:
@@ -150,7 +150,7 @@ fn sync_send_inferred_return_infers_method_type() {
     );
 }
 
-/// BT-2749: a bare cast statement `counter increment!` evaluates to `Nil`
+/// a bare cast statement `counter increment!` evaluates to `Nil`
 /// (`UndefinedObject`) — the fire-and-forget async send has no synchronous
 /// reply. Previously this typed as `Dynamic`.
 #[test]

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0108 / BT-2897: display-name provenance for diagnostics.
+//! ADR 0108: display-name provenance for diagnostics.
 //!
 //! Hover coverage lives in `queries::hover_provider`'s own test module
 //! (`compute_hover` is the hover entry point, not part of this crate's
@@ -11,8 +11,8 @@
 //! machinery), and the core `TypeProvenance::Aliased` display mechanics that
 //! back both surfaces.
 //!
-//! BT-2953 also covers the *structural correctness* of the three `EcoString`-
-//! based compatibility checks BT-2911 deliberately left untouched
+//! This also covers the *structural correctness* of the three `EcoString`-
+//! based compatibility checks that display-only provenance deliberately left untouched
 //! (`check_field_assignment`, `check_spawn_with_value`,
 //! `check_argument_types`) — see the tests below asserting a valid alias
 //! member is no longer flagged, and an invalid one still is.
@@ -66,11 +66,11 @@ Object subclass: Supervisor
 #[test]
 fn singleton_comparison_against_spelled_out_union_has_no_did_you_mean_without_alias() {
     // Sibling to the alias case above with the union spelled out directly —
-    // pins that plain structural unions behave exactly as they did before
-    // BT-2897 (no alias name, and still no false "did you mean" for an
-    // unrelated typo — `#premanent` is edit-distance 2 from `#permanent`
-    // either way, so this test's real point is the *absence* of the alias
-    // parenthetical, not the suggestion itself).
+    // pins that plain structural unions produce no alias name, and still no
+    // false "did you mean" for an unrelated typo — `#premanent` is
+    // edit-distance 2 from `#permanent` either way, so this test's real
+    // point is the *absence* of the alias parenthetical, not the suggestion
+    // itself.
     let source = r"
 Object subclass: Supervisor
   restart: policy :: #temporary | #transient | #permanent =>
@@ -160,7 +160,7 @@ Object subclass: Supervisor
         "negated case must never suggest, got: {message}"
     );
 }
-// ── BT-2911: EcoString-based diagnostic paths never touched by BT-2897 ─────
+// ── EcoString-based diagnostic paths never touched by display-only provenance ─────
 
 #[test]
 fn field_assignment_mismatch_on_alias_typed_state_field_names_the_alias() {
@@ -170,7 +170,7 @@ fn field_assignment_mismatch_on_alias_typed_state_field_names_the_alias() {
     // `InferredType` does. Assigning an incompatible `Integer` to a
     // `RestartStrategy`-typed `state:` field must still name the alias in
     // the "Type mismatch: field ... declared as ..." message, matching what
-    // an alias-typed parameter mismatch already renders (BT-2897).
+    // an alias-typed parameter mismatch already renders.
     let source = r"
 type RestartStrategy = #temporary | #transient | #permanent
 
@@ -198,8 +198,8 @@ Actor subclass: Supervisor
 #[test]
 fn field_assignment_mismatch_on_plain_typed_state_field_is_unaffected() {
     // Sibling to the alias case above with a plain (non-alias) declared
-    // field type — pins that the BT-2911 fix is a no-op when there is no
-    // alias registry entry to resolve, matching pre-BT-2911 behaviour.
+    // field type — pins that alias-aware resolution is a no-op when there is no
+    // alias registry entry to resolve.
     let source = r#"
 Actor subclass: Supervisor
   state: count :: Integer = 0
@@ -224,7 +224,7 @@ Actor subclass: Supervisor
 fn argument_mismatch_on_alias_typed_parameter_names_the_alias() {
     // `check_argument_types` reads `expected_ty` as a bare `EcoString` from
     // `MethodInfo::param_types` — the same pre-ADR-0108 storage
-    // `check_field_assignment` sits on. Before BT-2953, this path could not
+    // `check_field_assignment` sits on. Without structural resolution, this path could not
     // be exercised through the *full* compile pipeline: an alias name is
     // never registered as a class in `ClassHierarchy`
     // (`hierarchy.has_class("RestartStrategy")` is always `false`), and
@@ -233,7 +233,7 @@ fn argument_mismatch_on_alias_typed_parameter_names_the_alias() {
     // `!hierarchy.has_class(actual_base) || !hierarchy.has_class(expected_base)`
     // check) absorbed *every* argument against a bare alias-typed parameter
     // as compatible, so the mismatch branch this test targets never ran
-    // end-to-end. BT-2953 closed that gap by resolving `expected_ty` to its
+    // end-to-end. Resolving `expected_ty` to its
     // structural expansion (`resolve_alias_structural`) before it ever
     // reaches `is_type_compatible`, so the scenario is now also reachable
     // through the full pipeline — see
@@ -324,20 +324,20 @@ Object subclass: Widget
 
 #[test]
 fn field_assignment_of_a_valid_alias_member_is_not_flagged() {
-    // BT-2953 positive case: `check_field_assignment` used to call
+    // Positive case: `check_field_assignment` must not call
     // `is_assignable_to` (validation.rs) with the *bare* alias name
     // (`"RestartStrategy"`, never expanded — `ClassHierarchy` predates ADR
     // 0108 and has no `AliasRegistry` access). `is_assignable_to` has no
     // "unknown declared class" escape hatch, so a bare alias name that never
-    // matched any registered class fell through to a superclass-chain walk
-    // that always returned `false` — reporting EVERY value as incompatible
+    // matched any registered class would fall through to a superclass-chain walk
+    // that always returns `false` — reporting EVERY value as incompatible
     // with an alias-typed field, including values that ARE valid members of
-    // the alias (like `#transient` here). BT-2953 fixed this by resolving
+    // the alias (like `#transient` here). Resolving
     // the declared field type to its structural expansion
-    // (`resolve_alias_structural`) before it reaches `is_assignable_to`, so
-    // a valid member no longer produces a false "Type mismatch" warning.
+    // (`resolve_alias_structural`) before it reaches `is_assignable_to` means
+    // a valid member does not produce a false "Type mismatch" warning.
     //
-    // Surfaced under BT-2939 too — `just build-stdlib` hit this exact false
+    // `just build-stdlib` hit this exact false
     // positive on `TimeoutProxy>>setTimeoutMs:`'s `self.timeoutMs := ms`
     // once `Timeout`/`RestartStrategy` became real cross-file aliases.
     let source = r"
@@ -362,7 +362,7 @@ Actor subclass: Supervisor
 
 #[test]
 fn spawn_with_value_of_a_valid_alias_member_is_not_flagged() {
-    // BT-2953 positive case, sibling to the field-assignment case above:
+    // Positive case, sibling to the field-assignment case above:
     // `check_spawn_with_value` resolves the declared slot's alias type to
     // its structural expansion before `is_assignable_to`, so a `spawnWith:`
     // value that IS a member of the alias's union is not flagged.
@@ -387,7 +387,7 @@ Supervisor spawnWith: #{#policy => #transient}
 
 #[test]
 fn argument_of_a_valid_alias_member_type_is_not_flagged() {
-    // BT-2953 positive case: an alias-typed parameter accepts a valid
+    // Positive case: an alias-typed parameter accepts a valid
     // member of its union without a false "expects ... got ..." diagnostic,
     // now that `check_argument_types` resolves `expected_ty` through the
     // alias registry before `is_type_compatible`.
@@ -412,9 +412,9 @@ Widget new restart: #temporary
 
 #[test]
 fn argument_of_an_invalid_alias_member_type_is_flagged() {
-    // BT-2953 negative case, now reachable through the full pipeline.
-    // Before the fix, `is_type_compatible`'s "unknown declared class"
-    // escape hatch absorbed every argument against a bare alias-typed
+    // Negative case, reachable through the full pipeline.
+    // Without structural resolution, `is_type_compatible`'s "unknown declared class"
+    // escape hatch would absorb every argument against a bare alias-typed
     // parameter as compatible, so this scenario could only be reached via
     // the synthetic direct-call setup in
     // `argument_mismatch_on_alias_typed_parameter_names_the_alias` above.
@@ -445,16 +445,16 @@ Widget new restart: 42
 
 #[test]
 fn argument_that_is_itself_an_alias_typed_return_value_is_not_flagged() {
-    // BT-2939: complementary to BT-2953's `expected_structural` fix above,
+    // Complementary to the `expected_structural` resolution above,
     // which only resolves the *declared/expected* side. Here the *actual*
     // side comes from `Provider policy`'s return type — a raw
     // `MethodInfo::return_type` string (`"RestartStrategy"`) resolved at
     // the send site. Historically that path (the substitution resolver) had
     // no `AliasRegistry` access, so `policy` was inferred as a bare
     // `Known { class_name: "RestartStrategy", .. }` and the argument check
-    // had to accept an unexpanded alias name; since BT-3075 the unified
-    // resolver (`resolve_declared_type`, folded in from BT-3075's
-    // `resolve_type_string` and BT-3080's FFI path alike) expands the alias
+    // had to accept an unexpanded alias name; the unified
+    // resolver (`resolve_declared_type`, folded in from the deleted
+    // `resolve_type_string` and the FFI path alike) expands the alias
     // at the send site, so `policy` carries the structural union directly.
     // Either shape must stay green.
     // Reproduces the exact stdlib shape that surfaced this
@@ -491,9 +491,8 @@ Object subclass: Runner
 fn spawn_with_value_mismatch_on_alias_typed_slot_names_the_alias() {
     // `check_spawn_with_value` (validation.rs) sits on the same
     // pre-ADR-0108 `state_field_type` `EcoString` boundary as
-    // `check_field_assignment` — found during BT-2911's own adversarial
-    // review as a fourth EcoString-based display path the issue's three
-    // named call sites didn't enumerate. `C spawnWith: #{ slot: value }`
+    // `check_field_assignment` — a fourth EcoString-based display path
+    // beyond the three main call sites. `C spawnWith: #{ slot: value }`
     // must name the alias in its "type mismatch for state key ..." message
     // too.
     let source = r"
@@ -521,15 +520,15 @@ Supervisor spawnWith: #{#policy => 42}
 
 #[test]
 fn instance_arg_rejected_for_class_typed_alias_parameter() {
-    // Claude review on PR #3082 (BT-2953): `check_argument_types`'s
+    // `check_argument_types`'s
     // `class_shortcut_applies` guard (validation.rs, `expected_ty.as_str()
-    // == "Class"`) gated the BT-1877 shortcut on the *bare* declared type,
-    // not `expected_structural`. For `type ClassAlias = Class`,
+    // == "Class"`) must gate on `expected_structural`,
+    // not the bare `expected_ty`. For `type ClassAlias = Class`,
     // `expected_ty` is `"ClassAlias"` (never `"Class"`) while
-    // `expected_structural` resolves to `"Class"` — so the guard never
-    // fired, `is_type_compatible`'s own `expected == "Class"` shortcut
-    // absorbed *any* known class instance unconditionally, and a plain
-    // `TestCase` instance (not a class literal) wrongly satisfied a `::
+    // `expected_structural` resolves to `"Class"` — gating on `expected_ty`
+    // would leave the guard never firing, so `is_type_compatible`'s own `expected == "Class"` shortcut
+    // would absorb *any* known class instance unconditionally, and a plain
+    // `TestCase` instance (not a class literal) would wrongly satisfy a `::
     // ClassAlias` parameter. Sibling to `unions_checking`'s
     // `instance_identifier_still_rejected_for_class_param`, through the
     // alias.
@@ -638,13 +637,13 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
 
 #[test]
 fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
-    // BT-2939 hot-reload coverage gap: `argument_that_is_itself_an_alias_typed_return_value_is_not_flagged`
+    // `argument_that_is_itself_an_alias_typed_return_value_is_not_flagged`
     // above only asserts the diagnostic side (no false "expects ... got ..."
-    // warning). It doesn't confirm the actual fix's point — that resolving
-    // the *actual* side's bare alias name now folds it into
-    // `self.referenced_aliases` (ADR 0108 hot-reload re-check trigger,
-    // BT-2899) via `resolve_type_annotation_with_alias_deps`, the same way
-    // the `expected_structural`/BT-2953 side already does.
+    // warning). It doesn't confirm the other half of the contract — that resolving
+    // the *actual* side's bare alias name also folds it into
+    // `self.referenced_aliases` (ADR 0108 hot-reload re-check trigger)
+    // via `resolve_type_annotation_with_alias_deps`, the same way
+    // the `expected_structural` side already does.
     //
     // Declares the parameter with the union *spelled out* (not through the
     // alias) so the only path that can record `RestartStrategy` as a

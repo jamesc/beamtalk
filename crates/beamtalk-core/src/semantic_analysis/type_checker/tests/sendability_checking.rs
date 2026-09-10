@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Sendability tier checks (ADR 0103, Phase 0 — BT-2753).
+//! Sendability tier checks (ADR 0103, Phase 0).
 //!
 //! Covers the builtin tier table applied to actor message arguments: a
 //! process-bound handle (`Port`) passed in an actor message warns with zero
@@ -197,7 +197,7 @@ fn spawn_with_sendable_value_silent() {
     );
 }
 
-// --- @expect sendability suppression (BT-2774) ---
+// --- @expect sendability suppression ---
 
 /// Parse `src`, build its hierarchy, run the full diagnostic pipeline
 /// (type check + `@expect` suppression via `apply_expect_directives`).

@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Super type inference and binary operand validation (BT-596).
+//! Super type inference and binary operand validation.
 
 use super::super::*;
 use super::common::*;
 
-// --- Super type inference tests (BT-596) ---
+// --- Super type inference tests ---
 
 #[test]
 fn test_super_infers_parent_class_type() {
@@ -206,7 +206,7 @@ fn test_super_unknown_selector_warns() {
     );
 }
 
-// --- Binary operand type validation tests (BT-596) ---
+// --- Binary operand type validation tests ---
 
 #[test]
 fn test_integer_plus_string_warns() {

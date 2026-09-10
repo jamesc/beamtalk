@@ -1,9 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2871: a binary selector used as a cascade *continuation* message now
+//! A binary selector used as a cascade *continuation* message
 //! gets the same argument-type coverage as any other cascade continuation
-//! message, mirroring BT-2843's non-cascade fix for `infer_message_send_
+//! message, mirroring the non-cascade coverage for `infer_message_send_
 //! with_receiver_ty`.
 //!
 //! Root cause: the cascade-message loop in `Expression::Cascade`'s handling
@@ -14,12 +14,12 @@
 //! `infer_message_send_with_receiver_ty`, which runs for the *first* message
 //! of a send/cascade — never for cascade continuations. So a binary
 //! continuation message's argument went completely unchecked, with no
-//! fallback at all (worse than the pre-BT-2843 bug, which at least covered
-//! Known/Known shapes on the first send).
+//! fallback at all — the binary continuation coverage this module adds must
+//! at least match the Known/Known coverage the first-send path already has.
 //!
 //! Fix: the cascade loop now always falls back to the generic
 //! `check_argument_types` for binary continuation messages too — the
-//! "simpler" option from BT-2871's AC. `check_binary_operand_types`'s only
+//! simpler option. `check_binary_operand_types`'s only
 //! value-add over `check_argument_types` is more specific wording for
 //! arithmetic/comparison/concat, not broader coverage, so there is no
 //! more-specific check to defer to for a continuation message anyway.
@@ -66,8 +66,8 @@ typed Value subclass: Thing
 }
 
 /// AC: a binary cascade continuation with a `Union` argument containing no
-/// compatible member also produces a diagnostic — mirrors BT-2843's AC (b)
-/// for the cascade-continuation path.
+/// compatible member also produces a diagnostic — mirrors the
+/// no-compatible-member coverage for the cascade-continuation path.
 #[test]
 fn bt2871_cascade_binary_continuation_union_arg_mismatch_warns() {
     let source = "\
@@ -125,7 +125,7 @@ typed Value subclass: Thing
 /// `infer_message_send_with_receiver_ty`, not the continuation loop this
 /// issue changes — `Thing` isn't a numeric type, so
 /// `check_binary_operand_types` has no bespoke logic for it (`handled ==
-/// false`) and the existing BT-2843 fallback fires exactly once. The
+/// false`) and the generic `check_argument_types` fallback fires exactly once. The
 /// continuation loop must not re-check that same first message.
 #[test]
 fn bt2871_cascade_first_message_binary_mismatch_no_duplicate() {
