@@ -1149,103 +1149,85 @@ perform_recursive_dispatch_test() ->
 %%% BT-427: Object method delegation tests
 %%% Actors inherit Object base methods via hierarchy walk
 
-object_printstring_test() ->
-    %% Test printString on actor (inherited from Object via hierarchy walk)
-    application:ensure_all_started(beamtalk_runtime),
-    {ok, Counter} = test_counter:start_link(42),
+%% Tests that only need the actor's initial value (0) share one process.
+object_delegation_zero_state_test_() ->
+    {setup,
+        fun() ->
+            application:ensure_all_started(beamtalk_runtime),
+            {ok, Counter} = test_counter:start_link(0),
+            Counter
+        end,
+        fun(Counter) -> gen_server:stop(Counter) end, fun(Counter) ->
+            [
+                {"isNil returns false for a live actor", fun() ->
+                    ?assertEqual(false, gen_server:call(Counter, {isNil, []}))
+                end},
+                {"notNil returns true for a live actor", fun() ->
+                    ?assertEqual(true, gen_server:call(Counter, {notNil, []}))
+                end},
+                {"hash returns an integer", fun() ->
+                    Result = gen_server:call(Counter, {hash, []}),
+                    ?assert(is_integer(Result))
+                end},
+                {"yourself returns the actor object", fun() ->
+                    Result = gen_server:call(Counter, {yourself, []}),
+                    ?assertMatch({beamtalk_object, 'Counter', counter, _}, Result)
+                end},
+                {"class returns the class atom", fun() ->
+                    Result = gen_server:call(Counter, {class, []}),
+                    ?assertEqual('Counter', Result)
+                end},
+                {"respondsTo: reports inherited Object methods and actor built-ins", fun() ->
+                    %% Inherited methods from Object should be reported
+                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', ['printString']})),
+                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [inspect]})),
+                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [isNil]})),
+                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [hash]})),
+                    %% Actor-specific built-in should also be reported
+                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [isAlive]})),
+                    %% BT-1442: pid, monitor, onExit: should be reported
+                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [pid]})),
+                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [monitor]})),
+                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', ['onExit:']}))
+                end}
+            ]
+        end}.
 
-    Result = gen_server:call(Counter, {'printString', []}),
-    ?assert(is_binary(Result)),
-
-    gen_server:stop(Counter).
-
-object_inspect_test() ->
-    %% ADR 0095 Phase 3 (BT-2504): inspect on an actor (inherited from Object via
-    %% the hierarchy walk) now returns an Inspector cursor, not a binary string.
-    %% A live Beamtalk actor classifies as kind = actor.
-    %%
-    %% Crucially the snapshot must be *available* and seeded from the actor's own
-    %% live state: `inspect` dispatches inside the actor's handle_call, so a
-    %% sys:get_state(self()) would deadlock — the cursor is seeded from the
-    %% in-hand State (beamtalk_inspector:on/2) instead. `available => true` and a
-    %% captured `value` slot prove no self-deadlock occurred.
-    application:ensure_all_started(beamtalk_runtime),
-    {ok, Counter} = test_counter:start_link(42),
-
-    Result = gen_server:call(Counter, {inspect, []}),
-    ?assertMatch(#{'$beamtalk_class' := 'Inspector', kind := actor, available := true}, Result),
-    %% The cursor's subject is the seeded state snapshot, carrying the value slot.
-    ?assertMatch(#{value := 42}, maps:get(subject, Result)),
-
-    gen_server:stop(Counter).
-
-object_isNil_test() ->
-    %% Test isNil on actor (inherited from Object)
-    application:ensure_all_started(beamtalk_runtime),
-    {ok, Counter} = test_counter:start_link(0),
-
-    ?assertEqual(false, gen_server:call(Counter, {isNil, []})),
-
-    gen_server:stop(Counter).
-
-object_notNil_test() ->
-    %% Test notNil on actor (inherited from Object)
-    application:ensure_all_started(beamtalk_runtime),
-    {ok, Counter} = test_counter:start_link(0),
-
-    ?assertEqual(true, gen_server:call(Counter, {notNil, []})),
-
-    gen_server:stop(Counter).
-
-object_hash_test() ->
-    %% Test hash on actor (inherited from Object)
-    application:ensure_all_started(beamtalk_runtime),
-    {ok, Counter} = test_counter:start_link(0),
-
-    Result = gen_server:call(Counter, {hash, []}),
-    ?assert(is_integer(Result)),
-
-    gen_server:stop(Counter).
-
-object_yourself_test() ->
-    %% Test yourself on actor (inherited from Object, returns Self)
-    application:ensure_all_started(beamtalk_runtime),
-    {ok, Counter} = test_counter:start_link(0),
-
-    Result = gen_server:call(Counter, {yourself, []}),
-    ?assertMatch({beamtalk_object, 'Counter', counter, _}, Result),
-
-    gen_server:stop(Counter).
-
-object_class_test() ->
-    %% Test class on actor (inherited from Object)
-    application:ensure_all_started(beamtalk_runtime),
-    {ok, Counter} = test_counter:start_link(0),
-
-    Result = gen_server:call(Counter, {class, []}),
-    ?assertEqual('Counter', Result),
-
-    gen_server:stop(Counter).
-
-respondsTo_inherited_methods_test() ->
-    %% Test respondsTo: reports inherited Object methods
-    application:ensure_all_started(beamtalk_runtime),
-    {ok, Counter} = test_counter:start_link(0),
-
-    %% Inherited methods from Object should be reported
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', ['printString']})),
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [inspect]})),
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [isNil]})),
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [hash]})),
-
-    %% Actor-specific built-in should also be reported
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [isAlive]})),
-    %% BT-1442: pid, monitor, onExit: should be reported
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [pid]})),
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [monitor]})),
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', ['onExit:']})),
-
-    gen_server:stop(Counter).
+%% Tests that inspect actor state seeded from value=42 use a separate process.
+object_delegation_nonzero_state_test_() ->
+    {setup,
+        fun() ->
+            application:ensure_all_started(beamtalk_runtime),
+            {ok, Counter} = test_counter:start_link(42),
+            Counter
+        end,
+        fun(Counter) -> gen_server:stop(Counter) end, fun(Counter) ->
+            [
+                {"printString returns a binary", fun() ->
+                    Result = gen_server:call(Counter, {'printString', []}),
+                    ?assert(is_binary(Result))
+                end},
+                {"inspect returns an Inspector cursor seeded from actor state",
+                    %% ADR 0095 Phase 3 (BT-2504): inspect on an actor (inherited from Object
+                    %% via the hierarchy walk) now returns an Inspector cursor, not a binary
+                    %% string. A live Beamtalk actor classifies as kind = actor.
+                    %%
+                    %% Crucially the snapshot must be *available* and seeded from the actor's
+                    %% own live state: `inspect` dispatches inside the actor's handle_call, so
+                    %% a sys:get_state(self()) would deadlock — the cursor is seeded from the
+                    %% in-hand State (beamtalk_inspector:on/2) instead. `available => true` and
+                    %% a captured `value` slot prove no self-deadlock occurred.
+                    fun() ->
+                        Result = gen_server:call(Counter, {inspect, []}),
+                        ?assertMatch(
+                            #{'$beamtalk_class' := 'Inspector', kind := actor, available := true},
+                            Result
+                        ),
+                        %% The cursor's subject is the seeded state snapshot, carrying the value slot.
+                        ?assertMatch(#{value := 42}, maps:get(subject, Result))
+                    end}
+            ]
+        end}.
 
 %%% Actor lifecycle tests (BT-170)
 
