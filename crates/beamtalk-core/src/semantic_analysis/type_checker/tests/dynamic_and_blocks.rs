@@ -1,15 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Dynamic inference warnings in typed classes and block-param type propagation (BT-1914).
+//! Dynamic inference warnings in typed classes and block-param type propagation.
 
 use super::common::*;
 
-// ---- BT-1914: Dynamic inference warnings in typed classes ----
+// ---- Dynamic inference warnings in typed classes ----
 
 #[test]
 fn test_dynamic_inference_warning_in_typed_class() {
-    // BT-1914: unannotated parameter in typed class should produce a warning
+    // unannotated parameter in typed class should produce a warning
     // when referenced in the method body.
     let class_def = ClassDefinition::with_modifiers(
         ident("StrictCounter"),
@@ -63,7 +63,7 @@ fn test_dynamic_inference_warning_in_typed_class() {
 
 #[test]
 fn test_no_dynamic_inference_warning_in_untyped_class() {
-    // BT-1914: non-typed class should NOT warn about Dynamic inference
+    // non-typed class should NOT warn about Dynamic inference
     let class_def = ClassDefinition::with_modifiers(
         ident("SimpleCounter"),
         Some(ident("Object")),
@@ -94,7 +94,7 @@ fn test_no_dynamic_inference_warning_in_untyped_class() {
 
 #[test]
 fn test_no_dynamic_inference_warning_for_known_types() {
-    // BT-1914: expressions with known types in typed class should NOT warn
+    // expressions with known types in typed class should NOT warn
     let class_def = ClassDefinition::with_modifiers(
         ident("StrictCounter"),
         Some(ident("Object")),
@@ -128,7 +128,7 @@ fn test_no_dynamic_inference_warning_for_known_types() {
 
 #[test]
 fn test_expect_type_suppresses_dynamic_inference_warning() {
-    // BT-1914: @expect type should suppress Dynamic inference warnings.
+    // @expect type should suppress Dynamic inference warnings.
     // Uses parse_source for real spans so apply_expect_directives can match.
     let source =
         "typed Object subclass: Processor\n  process: handler =>\n    @expect type\n    handler";
@@ -156,7 +156,7 @@ fn test_expect_type_suppresses_dynamic_inference_warning() {
 
 #[test]
 fn test_expect_type_stale_when_no_dynamic_warning() {
-    // BT-1914: @expect type on a fully-typed expression in a typed class
+    // @expect type on a fully-typed expression in a typed class
     // should produce a stale @expect warning.
     let source = "typed Object subclass: Processor\n  getValue =>\n    @expect type\n    42";
     let module = parse_source(source);
@@ -383,7 +383,7 @@ fn block_params_more_than_signature_extra_stays_dynamic() {
     );
 }
 
-// ── BT-2158 ───────────────────────────────────────────────────────────────────
+// ── Class-side block-param propagation ──────────────────────────────────────
 //
 // Block-param type propagation for user-defined classes. Fixtures are kept
 // minimal (no `new` calls, return types match) so the assertions can demand
@@ -394,7 +394,7 @@ fn block_params_more_than_signature_extra_stays_dynamic() {
 fn block_params_typed_from_user_defined_instance_method_signature_bt2158() {
     // Instance-method baseline: `router build: [:r | ...]` infers `r` from
     // build:'s `Block(HTTPRouteBuilder, Object)`. This case already worked
-    // before BT-2158 — kept as a regression guard. Also exercises a nested
+    // — kept as a regression guard. Also exercises a nested
     // block (`handler: [:req | ...]`) whose param comes from the inner
     // signature.
     let source = "\
@@ -418,9 +418,10 @@ typed Object subclass: App\n\
 
 #[test]
 fn block_params_typed_for_class_method_bt2158() {
-    // Class-method propagation — the actual BT-2158 fix. `HTTPRouter build:`
-    // is a class-side send; before the fix `find_method` was used and missed
-    // the class-side declaration, leaving `r` as Dynamic.
+    // Class-method propagation. `HTTPRouter build:`
+    // is a class-side send, so block-param resolution must use
+    // `find_class_method`, not `find_method` — the latter would miss the
+    // class-side declaration and leave `r` as Dynamic.
     let source = "\
 typed Object subclass: HTTPRouteBuilder\n\
   get: path :: String -> HTTPRouteBuilder => self\n\
@@ -539,7 +540,7 @@ fn block_params_typed_in_cascade_sends() {
     );
 }
 
-// ── BT-1945: Never bottom type ──────────────────────────────────────────────
+// ── Never bottom type ──────────────────────────────────────────────
 
 #[test]
 fn never_union_identity() {

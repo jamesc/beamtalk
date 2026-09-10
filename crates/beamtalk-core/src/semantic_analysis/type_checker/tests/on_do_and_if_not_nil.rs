@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! on:do: block-param inference and ifNotNil: narrowing (BT-2045, BT-2046).
+//! on:do: block-param inference and ifNotNil: narrowing.
 
 use super::common::*;
 
-// --- BT-2045: on:do: block parameter inference ---
+// --- on:do: block parameter inference ---
 
 /// `on: Exception do: [:e | e message]` should infer `e :: Exception`,
 /// so `e message` resolves to `String` with no Dynamic or DNU warnings.
@@ -138,11 +138,11 @@ typed Object subclass: Repro
     );
 }
 
-// --- BT-2046: ifNotNil: block parameter narrowing ---
+// --- ifNotNil: block parameter narrowing ---
 //
 // When the receiver of `ifNotNil: [:x | ...]` is typed `T | Nil`, the block
 // parameter `:x` should be typed `T` inside the block (non-nil branch). Dual
-// of the receiver-side `isNil ifFalse:` narrowing shipped in BT-2048.
+// of the receiver-side `isNil ifFalse:` narrowing.
 
 /// Minimal repro from the issue: `self.snapshot` typed `ReplaySnapshot | Nil`,
 /// block param `snap` should be `ReplaySnapshot`, so `snap workflowId` resolves.
@@ -447,7 +447,7 @@ typed Object subclass: Repro
     );
 }
 
-/// BT-2826 review follow-up: parameterizing `on:do:`'s handler as
+/// parameterizing `on:do:`'s handler as
 /// `Block(Object, Object)` must not reject the common zero-arg handler
 /// idiom (`on: Error do: [0]`, ignoring the exception) in a `typed` class —
 /// block-param arity checking is flexible (a handler may ignore params it

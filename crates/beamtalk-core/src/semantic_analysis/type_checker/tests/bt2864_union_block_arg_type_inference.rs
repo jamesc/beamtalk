@@ -1,17 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Block-literal callback params now infer their arg type when the declared
-//! param type is a Union containing a `Block(...)` arm (BT-2864).
+//! Block-literal callback params infer their arg type when the declared
+//! param type is a Union containing a `Block(...)` arm.
 //!
-//! Before this fix (BT-2864), propagating an expected type into a
-//! block-literal argument only recognised a bare `Block(...)` param type. A
-//! param typed as a Union whose arms include a `Block(...)` (e.g.
-//! `Block(HTTPRequest, HTTPResponse) | HTTPHandler | HTTPRouter`, matching
-//! `HTTPServer>>start:handler:` from the issue) fell back to typing every
-//! block param as `Dynamic`, requiring a manual `@expect type` annotation to
-//! narrow it, even though exactly one union arm was an unambiguous
-//! `Block(...)` signature.
+//! Propagating an expected type into a
+//! block-literal argument must recognise not just a bare `Block(...)` param
+//! type but also a param typed as a Union whose arms include a `Block(...)`
+//! (e.g. `Block(HTTPRequest, HTTPResponse) | HTTPHandler | HTTPRouter`,
+//! matching `HTTPServer>>start:handler:`) — even though a naive
+//! implementation could fall back to typing every block param as `Dynamic`,
+//! requiring a manual `@expect type` annotation to narrow it, when exactly
+//! one union arm is an unambiguous `Block(...)` signature.
 
 use super::common::*;
 
@@ -21,7 +21,7 @@ use super::common::*;
 /// Diagnostics alone can't reliably distinguish "block param resolved to
 /// the expected class" from "block param stayed Dynamic": a Dynamic
 /// receiver never fires DNU (Dynamic suppresses that check entirely), and
-/// this codebase's BT-1914 "Dynamic in typed class" warning only fires for
+/// this codebase's "Dynamic in typed class" warning only fires for
 /// specific expression shapes — not for a Dynamic value used as a
 /// message-send receiver nested inside a block body. Reading the checker's
 /// own `TypeMap` for the block's span is the direct, shape-independent way
@@ -114,7 +114,7 @@ typed Object subclass: App\n\
 }
 
 /// Regression guard: a bare (non-Union) `Block(...)` param still works
-/// unchanged (the pre-existing BT-2158 behaviour `find_block_arm` must
+/// unchanged (the pre-existing behaviour `find_block_arm` must
 /// preserve).
 #[test]
 fn bare_block_param_still_inferred_no_union() {

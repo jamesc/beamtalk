@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Control-flow narrowing tests (ADR 0068 Phase 1g) and respondsTo: narrowing (BT-1582, BT-1833).
+//! Control-flow narrowing tests (ADR 0068 Phase 1g) and respondsTo: narrowing.
 
 use super::super::narrowing::ClassTestKind;
 use super::super::*;
@@ -204,7 +204,7 @@ fn test_narrowing_is_kind_of_in_true_block() {
     );
 }
 
-/// ADR 0102 §2 group 2 / BT-2741: `x :: Number; x isKindOf: Integer` narrows
+/// ADR 0102 §2 group 2: `x :: Number; x isKindOf: Integer` narrows
 /// the true branch precisely to `Integer` — not `Number` — via
 /// `intersect(Number, Integer, Some(hierarchy)) = Integer` (subclass wins).
 /// `isEven` is an Integer-only selector (not on `Number`), so it resolving
@@ -252,7 +252,7 @@ fn bt2741_is_kind_of_subclass_narrows_true_branch_to_subclass() {
     );
 }
 
-/// ADR 0102 §2 group 2 / BT-2741: `x class =:= Bar` against a hierarchy-unrelated
+/// ADR 0102 §2 group 2: `x class =:= Bar` against a hierarchy-unrelated
 /// sealed class types the (unreachable) true branch `Never` and fires the
 /// impossible-class-comparison hint, mirroring
 /// `check_impossible_singleton_comparison`'s "can never be true" wording.
@@ -291,7 +291,7 @@ fn bt2741_class_eq_unrelated_class_true_branch_never_emits_hint() {
     );
 }
 
-/// ADR 0102 §2 group 2 / BT-2741 (provenance gate): a *declared* annotation is
+/// ADR 0102 §2 group 2 (provenance gate): a *declared* annotation is
 /// an unverified promise under gradual typing, and `isKindOf:` is precisely how
 /// code verifies it at runtime — modelled on stdlib `SystemNavigation
 /// referencesTo:`, where `aClass :: Behaviour` is defensively guarded by
@@ -374,7 +374,7 @@ fn bt2741_declared_annotation_receiver_no_hint_true_branch_still_never() {
     );
 }
 
-/// ADR 0102 §2 group 2 / BT-2741 (Never-receiver send policy): a message send
+/// ADR 0102 §2 group 2 (Never-receiver send policy): a message send
 /// on a `Never`-typed receiver — the unreachable true branch of an impossible
 /// class test — must NOT itself emit a diagnostic. The impossible-comparison
 /// hint at the guard already flags the branch; a per-send diagnostic inside
@@ -411,9 +411,9 @@ fn bt2741_send_on_never_receiver_is_silent() {
     );
 }
 
-/// ADR 0102 §2 group 2 / §5, BT-2744: `x :: Number; x isKindOf: Integer`
+/// ADR 0102 §2 group 2 / §5: `x :: Number; x isKindOf: Integer`
 /// narrows the false branch to the nominal complement `Number \ Integer` —
-/// closing the group-2 gap BT-2741 deliberately left open.
+/// closing the group-2 gap that isKindOf:'s true-branch narrowing deliberately leaves open.
 #[test]
 fn bt2744_is_kind_of_subclass_narrows_false_branch_to_nominal_negation() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -434,7 +434,7 @@ fn bt2744_is_kind_of_subclass_narrows_false_branch_to_nominal_negation() {
     );
 }
 
-/// ADR 0102 §5, BT-2744: an exact class match (`class_eq`/`isKindOf:` against
+/// ADR 0102 §5: an exact class match (`class_eq`/`isKindOf:` against
 /// the receiver's own current type) narrows the false branch to `Never` —
 /// every instance of the current type is also an instance of itself.
 #[test]
@@ -450,7 +450,7 @@ fn bt2744_is_kind_of_exact_match_narrows_false_branch_to_never() {
     assert_eq!(refined.false_type, Some(InferredType::Never));
 }
 
-/// ADR 0102 §5, BT-2744 (correctness fix found in adversarial review): `x
+/// ADR 0102 §5 (correctness fix found in adversarial review): `x
 /// class =:= C`'s false branch must stay unnarrowed (`None`), unlike
 /// `isKindOf:`'s. `Negation{base, excluded}` always excludes `excluded`'s
 /// *entire* subtree (§5 Q1), which matches `isKindOf:`'s negation ("not C
@@ -486,7 +486,7 @@ fn bt2744_class_eq_false_branch_stays_unnarrowed() {
     }
 }
 
-/// ADR 0102 §5, BT-2744 (end-to-end regression for the adversarial-review
+/// ADR 0102 §5 (end-to-end regression for the adversarial-review
 /// finding): inside the false branch of `x class =:= Integer`, a *nested*
 /// `x isKindOf: Integer` test must NOT be flagged as statically impossible —
 /// `x` could still be a `Character` (a sealed `Integer` subclass), which has
@@ -541,7 +541,7 @@ fn bt2744_class_eq_false_branch_does_not_poison_nested_is_kind_of() {
     );
 }
 
-/// ADR 0102 §5, BT-2744: a hierarchy-unrelated class test leaves the false
+/// ADR 0102 §5: a hierarchy-unrelated class test leaves the false
 /// branch unchanged — nothing is provably removable (mirrors `difference`'s
 /// disjoint-classes no-op).
 #[test]
@@ -557,7 +557,7 @@ fn bt2744_is_kind_of_unrelated_class_false_branch_unchanged() {
     assert_eq!(refined.false_type, Some(InferredType::known("Integer")));
 }
 
-/// ADR 0102 §5, BT-2744 (Q3 — method lookup / conformance on nominal
+/// ADR 0102 §5 (Q3 — method lookup / conformance on nominal
 /// `Negation`): inside the `ifFalse:` branch of `x isKindOf: Integer`, `x`
 /// narrows to `Number \ Integer`. Sending `isZero` (declared on `Number`)
 /// must resolve without a DNU warning — method lookup on a nominal
@@ -607,7 +607,7 @@ fn bt2744_negation_receiver_resolves_method_through_base() {
     );
 }
 
-/// ADR 0102 §5, BT-2744 (Q3, conformance parity — the negative case): a
+/// ADR 0102 §5 (Q3, conformance parity — the negative case): a
 /// `Negation{base, excluded}` receiver's protocol is exactly `base`'s, never
 /// wider. `isEven` is declared on `Integer` only (not `Number`), so sending
 /// it inside the `Number \ Integer` false branch must still DNU — proving
@@ -658,11 +658,11 @@ fn bt2744_negation_receiver_dnu_for_selector_only_on_excluded_class() {
     );
 }
 
-/// ADR 0102 §5, BT-2744 (Q4 — ADR 0100 interaction, open-world/hot-reload
+/// ADR 0102 §5 (Q4 — ADR 0100 interaction, open-world/hot-reload
 /// safety): the open-world receiver-knowledge classification for a
 /// `Negation{base, excluded}` receiver is inherited directly from
 /// classifying `base` — no separate rule. `Erlang` has an instance-side
-/// `doesNotUnderstand:` override (accepts any message, BT-1763); that safety
+/// `doesNotUnderstand:` override (accepts any message); that safety
 /// net must carry over to a `Negation` derived from it exactly as it would
 /// for a bare `Erlang`-typed receiver — proving the inheritance is real, not
 /// just documented. (Built by hand rather than via `isKindOf:` narrowing,
@@ -784,7 +784,7 @@ fn test_narrowing_union_with_nil_check() {
     //
     // This validates the `non_nil_type` subtraction logic directly. (Declared
     // union annotations *do* resolve to `InferredType::Union` via
-    // `type_resolver` — see BT-2016 — so the union-narrowing path is also
+    // `type_resolver` — so the union-narrowing path is also
     // exercised end-to-end by the `ifNil:`/`ifTrue:ifFalse:` tests elsewhere.)
     let union = InferredType::simple_union(&["String", "UndefinedObject"]);
     let narrowed = TypeChecker::non_nil_type(&union);
@@ -930,7 +930,7 @@ fn test_detect_narrowing_no_match() {
     );
 }
 
-// ---- Singleton (in)equality narrowing (BT-2617) ----
+// ---- Singleton (in)equality narrowing ----
 
 #[test]
 fn test_detect_narrowing_singleton_eq() {
@@ -1124,7 +1124,7 @@ fn test_refine_singleton_symbol_left_inequality_swaps_branches() {
     assert_eq!(refined.false_type, Some(InferredType::known("#infinity")));
 }
 
-/// BT-2740 / ADR 0102 §2 (pinned corner 1): an impossible singleton test
+/// ADR 0102 §2 (pinned corner 1): an impossible singleton test
 /// (`x :: Integer; x =:= #foo`) now narrows the *true* branch to `Never` via
 /// `intersect(Integer, #foo) = Never`. Previously `union_without` returned the
 /// singleton (`#foo`) unconditionally for the true branch even though it is
@@ -1148,7 +1148,7 @@ fn test_refine_singleton_eq_impossible_true_branch_is_never() {
     assert_eq!(refined.false_type, Some(InferredType::known("Integer")));
 }
 
-/// BT-2740 / ADR 0102 §2 (new capability): the false branch of `x =:= #foo` on a
+/// ADR 0102 §2 (new capability): the false branch of `x =:= #foo` on a
 /// bare `Symbol` receiver narrows to the negation `Symbol \ #foo` (every symbol
 /// except `#foo`) and renders as `Symbol \ #foo` in hover.
 #[test]
@@ -1174,7 +1174,7 @@ fn test_refine_singleton_eq_symbol_false_branch_is_negation() {
     assert_eq!(false_ty.display_for_diagnostic().unwrap(), "Symbol \\ #foo");
 }
 
-/// BT-2624 (item 1) / BT-2631: testing a variable against a singleton it can
+/// Testing a variable against a singleton it can
 /// never hold (`#west` is not a member of `#north | #south`) is statically false
 /// — emit exactly one "can never be true" hint even when the comparison guards
 /// an `ifTrue:` (the guard receiver and the narrowing must not double-fire).
@@ -1210,7 +1210,7 @@ fn bt2624_singleton_eq_impossible_member_emits_hint() {
     );
 }
 
-/// BT-2624 (item 1): the negated form against an impossible member is always
+/// The negated form against an impossible member is always
 /// true — emit the complementary "always true" hint (here in a guard position).
 #[test]
 fn bt2624_singleton_inequality_impossible_member_always_true() {
@@ -1238,7 +1238,7 @@ fn bt2624_singleton_inequality_impossible_member_always_true() {
     );
 }
 
-/// BT-2624 (item 1): a singleton that IS a member must not be flagged, and a
+/// A singleton that IS a member must not be flagged, and a
 /// `Symbol`-typed variable admits any singleton — no hint.
 #[test]
 fn bt2624_singleton_eq_possible_member_no_hint() {
@@ -1281,7 +1281,7 @@ fn bt2624_singleton_eq_possible_member_no_hint() {
     );
 }
 
-/// BT-2631: the impossible-comparison hint must also fire for a *standalone*
+/// the impossible-comparison hint must also fire for a *standalone*
 /// singleton equality send (`unionVar =:= #west`), not only inside an
 /// `ifTrue:`/`ifFalse:` guard. The send still infers `Boolean`; the hint is the
 /// only added signal.
@@ -1321,7 +1321,7 @@ fn bt2631_standalone_singleton_eq_impossible_member_emits_hint() {
     );
 }
 
-/// BT-2631: the negated standalone send (`unionVar =/= #west`) is always true.
+/// the negated standalone send (`unionVar =/= #west`) is always true.
 #[test]
 fn bt2631_standalone_singleton_inequality_impossible_member_always_true() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1344,7 +1344,7 @@ fn bt2631_standalone_singleton_inequality_impossible_member_always_true() {
     );
 }
 
-/// BT-2631: the union operand may be on either side — `#west =:= unionVar`
+/// the union operand may be on either side — `#west =:= unionVar`
 /// (singleton on the left, union as the *argument*) is just as decidable as the
 /// receiver-side form, so the hint fires there too.
 #[test]
@@ -1373,7 +1373,7 @@ fn bt2631_standalone_singleton_eq_union_on_right_emits_hint() {
     );
 }
 
-/// BT-2631: a standalone send whose singleton IS a member, or whose union
+/// a standalone send whose singleton IS a member, or whose union
 /// admits any singleton (a `Symbol` member), must stay silent — matching the
 /// conservative guard-path behaviour.
 #[test]
@@ -1412,7 +1412,7 @@ fn bt2631_standalone_singleton_eq_admitted_no_hint() {
     );
 }
 
-/// BT-2764: a nominal *supertype* of `Symbol` other than `Object`
+/// a nominal *supertype* of `Symbol` other than `Object`
 /// (`ProtoObject` in the builtin hierarchy) admits every singleton, so a
 /// union containing it must stay silent for a non-member singleton test —
 /// the pre-ADR-0102 hierarchy walk was silent here, and the hierarchy-aware
@@ -1454,12 +1454,12 @@ fn bt2764_singleton_eq_symbol_supertype_union_member_no_hint() {
     );
 }
 
-/// BT-2764: `refine_singleton_narrowing` on a bare `ProtoObject`-typed
+/// `refine_singleton_narrowing` on a bare `ProtoObject`-typed
 /// variable — the true branch of `x =:= #foo` narrows to the singleton (via the
 /// hierarchy-aware `intersect`), not to a spurious `Never`; the false branch
 /// keeps `ProtoObject` unchanged. This is the *singleton-excluded* `Negation`
 /// flavour (`is_symbol_base` requires an exact `Symbol` base, ADR 0102 §1),
-/// distinct from the *nominal-excluded* flavour BT-2744 added — `ProtoObject`
+/// distinct from the *nominal-excluded* flavour — `ProtoObject`
 /// is not itself the base of a singleton subtraction, so nothing is
 /// removable here regardless.
 #[test]
@@ -1531,7 +1531,7 @@ fn test_narrowing_does_not_leak_outside_block() {
     );
 }
 
-// ---- BT-1582: respondsTo: narrowing tests (ADR 0068 Phase 2e) ----
+// ---- respondsTo: narrowing tests (ADR 0068 Phase 2e) ----
 
 #[test]
 fn test_detect_narrowing_responds_to_pattern() {
@@ -1790,7 +1790,7 @@ fn test_responds_to_protocol_inference() {
     );
 }
 
-// ---- BT-1833: respondsTo: narrows to protocol type ----
+// ---- respondsTo: narrows to protocol type ----
 
 /// Helper: build a protocol module with a single protocol requiring a single selector.
 fn make_protocol_module(

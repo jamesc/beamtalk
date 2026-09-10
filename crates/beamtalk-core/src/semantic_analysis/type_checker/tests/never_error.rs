@@ -1,16 +1,16 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `self error:` Never propagation in class-side and block contexts (BT-2037).
+//! `self error:` Never propagation in class-side and block contexts.
 
 use super::common::*;
 
 // =====================================================================
-// BT-2037 — `self error:` should infer as Never inside typed classes,
+// `self error:` should infer as Never inside typed classes,
 // both class-side and inside block arguments.
 // =====================================================================
 
-/// BT-2037: a class-side method that calls `self error: "..."` should
+/// a class-side method that calls `self error: "..."` should
 /// not warn about Dynamic-in-typed-class. `error:` is declared
 /// `-> Never` on `Object`; the type checker must propagate that through
 /// the Class→Behaviour→Object→ProtoObject chain when no class-side
@@ -47,7 +47,7 @@ typed Object subclass: WidgetFactory
     );
 }
 
-/// BT-2037: an instance-side method that wraps `self error: "..."` in a
+/// an instance-side method that wraps `self error: "..."` in a
 /// block argument (e.g. as a fallback for `valueOrDo:`) should not warn
 /// about Dynamic-in-typed-class. `self` inside the block is the same
 /// instance type as in the enclosing method, and `error:` is `-> Never`.

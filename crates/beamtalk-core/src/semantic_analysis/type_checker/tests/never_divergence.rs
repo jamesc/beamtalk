@@ -1,19 +1,19 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Deep-descendant Never detection for block divergence (BT-2051).
+//! Deep-descendant Never detection for block divergence.
 
 use super::common::*;
 
-// ── BT-2051: Deep-descendant `Never` detection in `block_diverges` ──
+// ── Deep-descendant `Never` detection in `block_diverges` ──
 //
-// BT-2049 only scanned top-level statement roots for `Never`. A diverging call
+// Scanning only top-level statement roots for `Never` misses a diverging call
 // buried in a method-send argument — e.g. `logger info: (self error: "…")` —
-// was missed because the *argument* is `Never` but the outer `info:` send is
-// typed by its own return type. BT-2051 walks descendants via
-// `expr_contains_never`, symmetric with `expr_contains_return` from BT-2047.
+// because the *argument* is `Never` but the outer `info:` send is
+// typed by its own return type. `expr_contains_never` walks descendants,
+// symmetric with `expr_contains_return`.
 
-/// BT-2051: A `Never` call buried inside a method-send argument should still
+/// A `Never` call buried inside a method-send argument should still
 /// mark the enclosing guard block as diverging, narrowing the nullable local
 /// on subsequent statements.
 #[test]
@@ -47,7 +47,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2051: A `Never` call buried inside a parenthesized expression should
+/// A `Never` call buried inside a parenthesized expression should
 /// also diverge.
 #[test]
 fn bt2051_never_inside_parenthesized_diverges() {
@@ -77,7 +77,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2051: A `Never` call on the RHS of an assignment statement should
+/// A `Never` call on the RHS of an assignment statement should
 /// diverge — evaluating the RHS throws before the binding is ever updated.
 #[test]
 fn bt2051_never_in_assignment_rhs_diverges() {
@@ -108,7 +108,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2051: A `Never` call used as a cascade receiver should diverge even
+/// A `Never` call used as a cascade receiver should diverge even
 /// though the cascade's own inferred type is not `Never`.
 #[test]
 fn bt2051_never_as_cascade_receiver_diverges() {
@@ -138,7 +138,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2051 soundness: a `Never`-typed expression INSIDE a nested block literal
+/// Soundness: a `Never`-typed expression INSIDE a nested block literal
 /// must NOT make the enclosing guard count as diverging. The inner block is
 /// constructed, not executed, so the outer guard can still fall through and
 /// `ms` must stay nullable at the downstream use site.
@@ -167,7 +167,7 @@ typed Object subclass: Caller
     // `Receiver process: ms` with `ms` still `Integer | Nil`, so the
     // argument-mismatch diagnostic must still fire.
     //
-    // BT-2066: user-facing messages render the source-sympathetic `Nil`
+    // user-facing messages render the source-sympathetic `Nil`
     // spelling, not the canonical `UndefinedObject` hierarchy name.
     let mismatch_warnings: Vec<_> = result
         .diagnostics
@@ -188,7 +188,7 @@ typed Object subclass: Caller
             .map(|d| &d.message)
             .collect::<Vec<_>>()
     );
-    // BT-2066: canonical `UndefinedObject` must NOT leak into user-facing
+    // canonical `UndefinedObject` must NOT leak into user-facing
     // diagnostic messages.
     for d in &mismatch_warnings {
         assert!(

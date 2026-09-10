@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Generic inheritance, type-param bounds, variance, and generic param detection (BT-1577, BT-1583, BT-1588).
+//! Generic inheritance, type-param bounds, variance, and generic param detection.
 
 use super::super::*;
 use super::common::*;
 
-// ---- BT-1577: Generic inheritance tests ----
+// ---- Generic inheritance tests ----
 
 /// Build `GenCollection(E)` with method `first` returning `E`, `size` returning `Integer`.
 /// Build `GenArray(E)` extends `GenCollection(E)` with `superclass_type_args` mapping E to E.
@@ -110,7 +110,7 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
     hierarchy.add_from_beam_meta(vec![collection_info, array_info]);
 }
 
-/// BT-1577: Inherited method `first` on `GenArray(Integer)` returns `Integer`.
+/// Inherited method `first` on `GenArray(Integer)` returns `Integer`.
 #[test]
 fn generic_inheritance_inherited_method_returns_substituted_type() {
     let mut hierarchy = ClassHierarchy::with_builtins();
@@ -141,7 +141,7 @@ fn generic_inheritance_inherited_method_returns_substituted_type() {
     );
 }
 
-/// BT-1577: Non-generic return type from inherited method is unaffected.
+/// Non-generic return type from inherited method is unaffected.
 #[test]
 fn generic_inheritance_non_generic_return_unchanged() {
     let mut hierarchy = ClassHierarchy::with_builtins();
@@ -172,7 +172,7 @@ fn generic_inheritance_non_generic_return_unchanged() {
     );
 }
 
-/// BT-1577: Concrete superclass type arg — `IntArray` extends `GenCollection(Integer)`.
+/// Concrete superclass type arg — `IntArray` extends `GenCollection(Integer)`.
 #[test]
 fn generic_inheritance_concrete_superclass_type_arg() {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, SuperclassTypeArg};
@@ -225,7 +225,7 @@ fn generic_inheritance_concrete_superclass_type_arg() {
     );
 }
 
-/// BT-1577: Self type on inherited method carries receiver's type args.
+/// Self type on inherited method carries receiver's type args.
 #[test]
 fn generic_inheritance_self_type_carries_type_args() {
     let mut hierarchy = ClassHierarchy::with_builtins();
@@ -276,7 +276,7 @@ fn generic_inheritance_self_type_carries_type_args() {
     }
 }
 
-/// BT-1577: Multi-level inheritance composes substitution correctly.
+/// Multi-level inheritance composes substitution correctly.
 /// `GenCollection(E) subclass: GenArray(E)`, `GenArray(E) subclass: SortedArray(E)`.
 #[test]
 fn generic_inheritance_multi_level_composition() {
@@ -336,7 +336,7 @@ fn generic_inheritance_multi_level_composition() {
     );
 }
 
-/// BT-1577: Method defined on own class (not inherited) still uses direct substitution.
+/// Method defined on own class (not inherited) still uses direct substitution.
 #[test]
 fn generic_inheritance_own_method_uses_direct_substitution() {
     let mut hierarchy = ClassHierarchy::with_builtins();
@@ -587,7 +587,7 @@ fn type_param_bounds_dynamic_skipped() {
     );
 }
 
-// ---- BT-1583: Generic variance tests (ADR 0068 Phase 2f) ----
+// ---- Generic variance tests (ADR 0068 Phase 2f) ----
 
 /// Build a sealed Value class `SealedBox(T)` with a Printable protocol and
 /// classes that conform to it, for variance testing.
@@ -797,7 +797,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
     (hierarchy, registry)
 }
 
-/// BT-1583: `is_covariant_class` returns true for sealed Value classes with type params.
+/// `is_covariant_class` returns true for sealed Value classes with type params.
 #[test]
 fn covariant_class_sealed_value_is_covariant() {
     let (hierarchy, _registry) = setup_variance_test_env();
@@ -807,7 +807,7 @@ fn covariant_class_sealed_value_is_covariant() {
     );
 }
 
-/// BT-1583: `is_covariant_class` returns false for Actor classes (invariant).
+/// `is_covariant_class` returns false for Actor classes (invariant).
 #[test]
 fn covariant_class_actor_is_invariant() {
     let (hierarchy, _registry) = setup_variance_test_env();
@@ -817,7 +817,7 @@ fn covariant_class_actor_is_invariant() {
     );
 }
 
-/// BT-1583: `is_covariant_class` returns false for unsealed Value classes (conservative).
+/// `is_covariant_class` returns false for unsealed Value classes (conservative).
 #[test]
 fn covariant_class_unsealed_value_is_invariant() {
     let (hierarchy, _registry) = setup_variance_test_env();
@@ -827,7 +827,7 @@ fn covariant_class_unsealed_value_is_invariant() {
     );
 }
 
-/// BT-1583: `is_covariant_class` returns false for non-generic classes.
+/// `is_covariant_class` returns false for non-generic classes.
 #[test]
 fn covariant_class_non_generic_is_false() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -837,7 +837,7 @@ fn covariant_class_non_generic_is_false() {
     );
 }
 
-/// BT-1583: Covariant assignment — `SealedBox(Integer)` assignable to `SealedBox(Printable)`.
+/// Covariant assignment — `SealedBox(Integer)` assignable to `SealedBox(Printable)`.
 ///
 /// Integer conforms to Printable (has `asString`), and `SealedBox` is a sealed Value class.
 #[test]
@@ -855,7 +855,7 @@ fn variance_covariant_sealed_value_protocol_typed() {
     );
 }
 
-/// BT-1583: Covariant — same type args are trivially compatible.
+/// Covariant — same type args are trivially compatible.
 #[test]
 fn variance_covariant_same_type_args() {
     let (hierarchy, registry) = setup_variance_test_env();
@@ -871,7 +871,7 @@ fn variance_covariant_same_type_args() {
     );
 }
 
-/// BT-1583: Covariant — non-conforming type is rejected.
+/// Covariant — non-conforming type is rejected.
 ///
 /// If `OpaqueType` does not conform to Printable, `SealedBox(OpaqueType)` should NOT
 /// be assignable to `SealedBox(Printable)`.
@@ -916,7 +916,7 @@ fn variance_covariant_non_conforming_rejected() {
     );
 }
 
-/// BT-1583: Invariant actor state — `ActorBox(Integer)` NOT assignable to `ActorBox(Printable)`.
+/// Invariant actor state — `ActorBox(Integer)` NOT assignable to `ActorBox(Printable)`.
 ///
 /// Actor classes are invariant because their state fields can be mutated.
 #[test]
@@ -935,7 +935,7 @@ fn variance_invariant_actor_state() {
     );
 }
 
-/// BT-1583: Non-generic types fall back to normal assignability.
+/// Non-generic types fall back to normal assignability.
 #[test]
 fn variance_non_generic_falls_back() {
     let (hierarchy, registry) = setup_variance_test_env();
@@ -963,7 +963,7 @@ fn variance_non_generic_falls_back() {
     );
 }
 
-/// BT-1583: Covariant with class-hierarchy subtyping (Integer → Number).
+/// Covariant with class-hierarchy subtyping (Integer → Number).
 #[test]
 fn variance_covariant_class_subtyping() {
     let (hierarchy, registry) = setup_variance_test_env();
@@ -981,7 +981,7 @@ fn variance_covariant_class_subtyping() {
     );
 }
 
-/// BT-1583: `parse_generic_type_string` correctly parses type strings.
+/// `parse_generic_type_string` correctly parses type strings.
 #[test]
 fn parse_generic_type_string_basic() {
     let (base, args) = TypeChecker::parse_generic_type_string("Array(Integer)");
@@ -997,7 +997,7 @@ fn parse_generic_type_string_basic() {
     assert!(args.is_empty());
 }
 
-// ---- BT-1588: Generic type param detection ----
+// ---- Generic type param detection ----
 
 #[test]
 fn test_is_generic_type_param() {
@@ -1150,7 +1150,7 @@ fn test_binary_operand_with_origin_note() {
     );
 }
 
-// ── ADR 0071 Phase 3 (BT-1702): E0403 — internal method visibility ──
+// ── ADR 0071 Phase 3: E0403 — internal method visibility ──
 
 /// Build a hierarchy with a class that has an internal method, in a specific package.
 fn make_hierarchy_with_internal_method() -> ClassHierarchy {

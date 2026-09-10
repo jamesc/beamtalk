@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Result isOk/isError narrowing, type-args validation, flatten/partition, coverage (BT-1859, BT-1882).
+//! Result isOk/isError narrowing, type-args validation, flatten/partition, coverage.
 
 use super::super::*;
 use super::common::*;
 
-// ---- BT-1859: Result isOk/isError narrowing tests ----
+// ---- Result isOk/isError narrowing tests ----
 
 #[test]
 fn test_detect_narrowing_is_ok_pattern() {
@@ -306,7 +306,7 @@ fn test_result_narrowing_does_not_leak() {
     );
 }
 
-// BT-1861: Warn on type args for classes with no type params
+// Warn on type args for classes with no type params
 #[test]
 fn type_args_for_non_generic_class_warns() {
     // Integer has no type params — `:: Integer(String)` should warn
@@ -542,7 +542,7 @@ fn type_args_for_block_no_false_positive() {
     );
 }
 
-/// BT-1872: When no non-nil union members understand the selector, the DNU
+/// When no non-nil union members understand the selector, the DNU
 /// diagnostic should be a warning (definite runtime failure).
 #[test]
 fn union_dnu_all_missing_emits_warning() {
@@ -591,7 +591,7 @@ fn union_dnu_all_missing_emits_warning() {
     );
 }
 
-/// BT-1872: When some but not all non-nil union members understand the
+/// When some but not all non-nil union members understand the
 /// selector, the DNU diagnostic should remain a hint.
 #[test]
 fn union_dnu_partial_missing_emits_hint() {
@@ -634,9 +634,9 @@ fn union_dnu_partial_missing_emits_hint() {
     );
 }
 
-// ---- BT-1882: flatten and partition: type annotations ----
+// ---- flatten and partition: type annotations ----
 
-/// BT-1882: List(List(Integer)) flatten returns List (not List(List(Integer))).
+/// List(List(Integer)) flatten returns List (not List(List(Integer))).
 #[test]
 fn generic_list_flatten_returns_unparameterized_list() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -674,7 +674,7 @@ fn generic_list_flatten_returns_unparameterized_list() {
     );
 }
 
-/// BT-1882: List(Integer) partition: returns Dictionary (not List(List(Integer))).
+/// List(Integer) partition: returns Dictionary (not List(List(Integer))).
 #[test]
 fn generic_list_partition_returns_dictionary() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -717,7 +717,7 @@ fn generic_list_partition_returns_dictionary() {
     );
 }
 
-// ── CoverageReport tests (BT-1915) ─────────────────────────────────
+// ── CoverageReport tests ─────────────────────────────────
 
 #[test]
 fn coverage_report_from_module_counts_typed_vs_dynamic() {

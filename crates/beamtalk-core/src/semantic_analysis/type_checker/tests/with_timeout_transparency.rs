@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2751: `withTimeout:` return-type transparency + cross-process DNU
+//! `withTimeout:` return-type transparency + cross-process DNU
 //! wording (ADR 0104 Phase 3).
 //!
 //! `db withTimeout: 30000` returns a `TimeoutProxy` at runtime, but the proxy
@@ -20,7 +20,7 @@
 //! 3. An unknown selector on a statically-known actor class gets the *same*
 //!    knowledge-graded DNU diagnostic as a local send — the process boundary
 //!    adds no new severity rule (ADR 0100). Sync actor sends already type as
-//!    method sends (BT-2749), so no code change was needed; this pins it.
+//!    method sends, so no code change is needed; this pins it.
 //! 4. A value typed literally as `TimeoutProxy` (the proxy's own type)
 //!    silences unresolved selectors, because `TimeoutProxy` overrides
 //!    `doesNotUnderstand:args:` to forward (ADR 0100).
@@ -313,7 +313,7 @@ fn dnu_diags_for(hierarchy: &ClassHierarchy, recv: &str, class_name: &str) -> Ve
 /// AC #3: an unknown selector on a statically-known actor class gets the same
 /// knowledge-graded DNU diagnostic as a local (plain-object) send. The process
 /// boundary adds no new severity rule (ADR 0100); sync actor sends already
-/// route through the shared `check_instance_selector` path (BT-2749), so the
+/// route through the shared `check_instance_selector` path, so the
 /// wording is unified with no code change — this test pins it.
 #[test]
 fn cross_process_dnu_wording_matches_local_send() {

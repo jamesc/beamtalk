@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! FFI call type inference from `NativeTypeRegistry` (ADR 0075, BT-1880).
+//! FFI call type inference from `NativeTypeRegistry` (ADR 0075).
 
 use super::super::*;
 use super::common::*;
@@ -103,7 +103,7 @@ fn test_ffi_call_returns_typed_result() {
     checker.check_module(&module, &hierarchy);
 
     // Check the type map — the outer message send should have type List.
-    // BT-2620: the `#[1, 2, 3]` argument now infers `List(Integer)`, and the
+    // the `#[1, 2, 3]` argument now infers `List(Integer)`, and the
     // unary `[T] -> [T]` FFI spec for `reverse` propagates the element type
     // through, so the call infers `List(Integer)` rather than bare `List`.
     let send_type = checker.type_map().get(span());
@@ -138,7 +138,7 @@ fn test_ffi_call_multi_arg_returns_typed_result() {
     );
 }
 
-/// BT-2254: an FFI call returning `List(Tuple(Symbol, Symbol))` propagates the
+/// an FFI call returning `List(Tuple(Symbol, Symbol))` propagates the
 /// element type into a `collect:` block param, and literal-index `at:` recovers
 /// the positional element type. This is the end-to-end path that lets the stdlib
 /// drop its FFI-driven `@expect` overrides (ADR 0075 amendment).
@@ -196,7 +196,7 @@ fn ffi_list_tuple_element_propagates_into_iteration_and_literal_at() {
     );
 }
 
-/// BT-2632: an FFI function whose `-spec` is a narrow atom-union (e.g.
+/// an FFI function whose `-spec` is a narrow atom-union (e.g.
 /// `-spec logFormat() -> text | json.`) is registered with a singleton-union
 /// return type (`#text | #json`). A getter declaring exactly that union must
 /// type-check cleanly — the inferred FFI body type matches the declared return,
@@ -337,7 +337,7 @@ fn test_ffi_variable_tracking_through_assignment() {
     checker.set_native_type_registry(lists_registry());
     checker.check_module(&module, &hierarchy);
 
-    // BT-2620: the `#[1]` argument now infers `List(Integer)`, propagated
+    // the `#[1]` argument now infers `List(Integer)`, propagated
     // through the unary `[T] -> [T]` spec, so the call infers `List(Integer)`.
     let send_type = checker.type_map().get(span());
     assert_eq!(
@@ -504,7 +504,7 @@ fn test_ffi_argument_dynamic_param_no_warning() {
 
 #[test]
 fn test_ffi_argument_string_list_union_param_no_warning() {
-    // BT-2817: Erlang os putenv: "MY_VAR" value: "my_value"
+    // Erlang os putenv: "MY_VAR" value: "my_value"
     // `os:putenv/2` params are Erlang `string()`-typed, which the FFI spec
     // reader maps to `String | List` (not `List` only) — a Beamtalk String
     // argument must type-check without a warning.
@@ -513,7 +513,7 @@ fn test_ffi_argument_string_list_union_param_no_warning() {
     // `beamtalk_spec_reader.erl` emits (`type => <<"String | List">>`), so
     // this exercises the real `map_type_name` string-parsing path rather than
     // constructing `InferredType` directly — the parsing step is itself part
-    // of the contract being regression-tested (BT-2817 code review).
+    // of the contract being regression-tested.
     let mut reg = NativeTypeRegistry::new();
     let line = "beamtalk-specs-module:os:[#{arity => 2,name => <<\"putenv\">>,\
         params => [#{name => <<\"varname\">>,type => <<\"String | List\">>},\
@@ -742,7 +742,7 @@ fn test_ffi_unnamed_arg_param_skips_keyword_mismatch() {
     );
 }
 
-// ---- BT-1880: Class protocol selectors vs FFI module lookups ----
+// ---- Class protocol selectors vs FFI module lookups ----
 
 #[test]
 fn test_erlang_class_resolves_as_class_protocol_not_ffi() {
@@ -803,7 +803,7 @@ fn test_erlang_new_resolves_as_class_protocol_not_ffi() {
 
 #[test]
 fn test_package_qualified_erlang_does_not_infer_ffi_module() {
-    // BT-3079 regression: `json@Erlang lists` names a package-scoped `Erlang`
+    // `json@Erlang lists` names a package-scoped `Erlang`
     // class, not the compiler's built-in FFI bridge — it must not be
     // inferred as `ErlangModule<lists>`.
     let module = parse_source("go => json@Erlang lists");
@@ -875,7 +875,7 @@ fn test_erlang_module_proxy_equality_uses_normal_dispatch() {
     );
 }
 
-// ---- BT-2846: Union arm for check_ffi_argument_types ----
+// ---- Union arm for check_ffi_argument_types ----
 
 /// Helper: a `FunctionSignature` for a single-param FFI function `mod:fun/1`
 /// whose declared parameter type is `param_type`.
@@ -963,7 +963,7 @@ fn ffi_union_arg_object_param_accepts_any_member() {
 
 #[test]
 fn ffi_union_arg_singleton_symbol_members_compatible_with_symbol_param() {
-    // BT-2846 regression: an FFI param declared `Symbol` (e.g. Erlang spec
+    // An FFI param declared `Symbol` (e.g. Erlang spec
     // `atom()`) must accept a call-site union of singleton symbols like
     // `#emergency | #alert | ...` (typed:: annotations on Beamtalk-side
     // wrapper methods, e.g. BeamtalkInterface>>logLevel:). Singletons are
@@ -996,16 +996,16 @@ fn ffi_union_arg_singleton_symbol_members_compatible_with_symbol_param() {
     );
 }
 
-// ---- BT-3024: the same subtyping rule for a *scalar* singleton ----
+// ---- The same subtyping rule for a *scalar* singleton ----
 
 #[test]
 fn ffi_scalar_singleton_symbol_arg_compatible_with_symbol_param() {
-    // BT-3024 regression: the singleton rule asserted by the BT-2846 test just
-    // above applies to a *lone* singleton too. A call like
+    // The singleton rule asserted by the union test just above applies to a
+    // *lone* singleton too. A call like
     // `(Erlang beamtalk_collection) raiseEmpty: #Interval selector: #first`
-    // against `-spec raiseEmpty(atom(), atom())` must not warn — before this
-    // fix the `Known` arm compared by name equality, so `#first` warned where
-    // `#first | #last` did not.
+    // against `-spec raiseEmpty(atom(), atom())` must not warn — the `Known`
+    // arm compares via `is_type_compatible`, not name equality, so `#first`
+    // must not warn where `#first | #last` doesn't either.
     let sig = single_param_sig(InferredType::known("Symbol"));
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
@@ -1026,7 +1026,7 @@ fn ffi_scalar_singleton_symbol_arg_compatible_with_symbol_param() {
 
 #[test]
 fn ffi_scalar_symbol_arg_against_singleton_param_still_warns() {
-    // BT-3024: subtyping is one-directional. `Symbol` is *not* a subtype of the
+    // subtyping is one-directional. `Symbol` is *not* a subtype of the
     // singleton `#first`, so widening the `Known` arm to `is_type_compatible`
     // must not make this direction pass too.
     let sig = single_param_sig(InferredType::known("#first"));
@@ -1050,10 +1050,10 @@ fn ffi_scalar_symbol_arg_against_singleton_param_still_warns() {
 
 #[test]
 fn ffi_scalar_subclass_arg_compatible_with_superclass_param() {
-    // BT-3024 (intentional widening): `is_type_compatible` also admits a
+    // Intentional widening: `is_type_compatible` also admits a
     // subclass where an ancestor is declared. `Integer` against a `Number`
-    // param is a genuine subtype relation, so the warning name equality used
-    // to emit here was a false positive.
+    // param is a genuine subtype relation, so name-equality comparison alone
+    // would be a false positive here.
     let sig = single_param_sig(InferredType::known("Number"));
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
@@ -1074,7 +1074,7 @@ fn ffi_scalar_subclass_arg_compatible_with_superclass_param() {
 
 #[test]
 fn ffi_scalar_unrelated_class_arg_still_warns() {
-    // BT-3024 guard: the widened check must still catch genuinely unrelated
+    // Guard: the widened check must still catch genuinely unrelated
     // classes — `Integer` where `String` is declared has no subtype relation.
     let sig = single_param_sig(InferredType::known("String"));
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1140,7 +1140,7 @@ fn ffi_known_known_call_unchanged_no_regression() {
     );
 }
 
-/// BT-2867: the free `infer_types` function (used by `type-coverage` and the
+/// the free `infer_types` function (used by `type-coverage` and the
 /// LSP query providers) must accept and thread a `NativeTypeRegistry` — not
 /// just `TypeChecker` when driven directly, which every other test in this
 /// file exercises. Before the fix, `infer_types` unconditionally built a
@@ -1194,18 +1194,18 @@ fn test_erlang_lists_still_infers_ffi() {
     );
 }
 
-/// BT-3080: an FFI function spec'd `-> integer() | nil` — the `"Integer |
+/// an FFI function spec'd `-> integer() | nil` — the `"Integer |
 /// Nil"` wire vocabulary `beamtalk_spec_reader:map_type/1` emits for a
 /// `-spec ... -> integer() | nil.` — narrows correctly under
 /// `ifNil:`/`ifNotNil:`, exactly like a source-written `Integer | Nil` field
-/// annotation (BT-2047). Registered via `parse_specs_line` with the exact
+/// annotation. Registered via `parse_specs_line` with the exact
 /// wire format (not a hand-built `InferredType`), so this exercises the real
-/// `map_type_name` parsing path. Before this fix, `map_type_name` bypassed
-/// the BT-2016 nil-keyword normalisation and left the union's second member
-/// as the foreign `Known("Nil")` pseudo-class — which narrowing (keyed on
-/// `UndefinedObject`) never matches — so the `ifNotNil:` block param would
-/// have stayed the full `Integer | Nil` union instead of narrowing to plain
-/// `Integer`.
+/// `map_type_name` parsing path — it must apply the nil-keyword
+/// normalisation and produce the real `UndefinedObject` narrowing target,
+/// not leave the union's second member as the foreign `Known("Nil")`
+/// pseudo-class (which narrowing, keyed on `UndefinedObject`, would never
+/// match) — so the `ifNotNil:` block param narrows to plain `Integer`
+/// instead of staying the full `Integer | Nil` union.
 #[test]
 fn bt3080_ffi_nil_union_narrows_under_if_nil_if_not_nil() {
     let mut reg = NativeTypeRegistry::new();
@@ -1236,7 +1236,7 @@ fn bt3080_ffi_nil_union_narrows_under_if_nil_if_not_nil() {
     );
 
     // The whole `ifNil:ifNotNil:` send's return type should be the plain
-    // `Integer` branch union (BT-2047's dedup rule) — not `Integer |
+    // `Integer` branch union (the branch-union dedup rule) — not `Integer |
     // UndefinedObject` — confirming the FFI `Nil` member was recognised and
     // excluded from the `ifNotNil:` branch's param type rather than passing
     // through as an opaque, narrowing-invisible pseudo-class.

@@ -1,14 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Generic return type validation, Never returns, and self/super threading in generics (BT-2022, BT-2033, BT-2021).
+//! Generic return type validation, Never returns, and self/super threading in generics.
 
 use super::super::*;
 use super::common::*;
 
-// ---- BT-2022: Generic return type validation checks inner type args ----
+// ---- Generic return type validation checks inner type args ----
 
-/// BT-2022 Bug A: Declared `-> Result(Integer, Error)` with body returning
+/// Declared `-> Result(Integer, Error)` with body returning
 /// `Result(String, Error)` must warn about the type arg mismatch.
 #[test]
 fn bt2022_generic_return_type_inner_arg_mismatch_warns() {
@@ -72,7 +72,7 @@ fn bt2022_generic_return_type_inner_arg_mismatch_warns() {
     );
 }
 
-/// BT-2022: When both declared and body have matching inner type args,
+/// When both declared and body have matching inner type args,
 /// no warning should be produced.
 #[test]
 fn bt2022_generic_return_type_matching_inner_args_no_warning() {
@@ -121,7 +121,7 @@ fn bt2022_generic_return_type_matching_inner_args_no_warning() {
     );
 }
 
-/// BT-2022: Body with bare `GenResult` (no `type_args`) is still compatible
+/// Body with bare `GenResult` (no `type_args`) is still compatible
 /// with declared `GenResult(Integer, Error)` — only warn when both sides
 /// have `type_args` and they mismatch.
 #[test]
@@ -167,7 +167,7 @@ fn bt2022_generic_return_type_bare_body_no_warning() {
     );
 }
 
-/// BT-2022: Dictionary(Symbol, Integer) declared, body returns
+/// Dictionary(Symbol, Integer) declared, body returns
 /// Dictionary(Symbol, String) — should warn about the value type mismatch.
 #[test]
 fn bt2022_dictionary_inner_arg_mismatch_warns() {
@@ -216,7 +216,7 @@ fn bt2022_dictionary_inner_arg_mismatch_warns() {
     );
 }
 
-/// BT-2022: Array(Integer) declared, body returns Array(String) — should warn.
+/// Array(Integer) declared, body returns Array(String) — should warn.
 #[test]
 fn bt2022_list_inner_arg_mismatch_warns() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -261,7 +261,7 @@ fn bt2022_list_inner_arg_mismatch_warns() {
     );
 }
 
-/// BT-2022 Bug B: `method_return_types` cache preserves `type_args`.
+/// `method_return_types` cache preserves `type_args`.
 /// An unannotated method whose body infers as a generic type should have
 /// the full `InferredType` (with `type_args`) stored in the cache.
 #[test]
@@ -282,7 +282,7 @@ fn bt2022_method_return_type_cache_preserves_type_args() {
         "Unannotated method `items` should have an entry in method_return_types"
     );
     let cached_ty = cached.unwrap();
-    // BT-2022: The cache must store an InferredType (not the previous EcoString)
+    // The cache must store an InferredType (not the previous EcoString)
     // so that any type_args produced by the inference path can flow to callers.
     // Verifies the structural fix; element-type inference for array literals is
     // a separate concern outside this issue's scope.
@@ -292,7 +292,7 @@ fn bt2022_method_return_type_cache_preserves_type_args() {
     assert_eq!(class_name.as_str(), "List", "expected List base class");
 }
 
-/// BT-2022: When declared inner args include a generic type parameter (T, E),
+/// When declared inner args include a generic type parameter (T, E),
 /// the comparison should skip that arg rather than warn (type params are
 /// symbolic placeholders, not concrete types).
 #[test]
@@ -343,9 +343,9 @@ fn bt2022_generic_type_param_in_declared_args_not_warned() {
     );
 }
 
-// ---- BT-2033: `-> Never` with non-divergent body must warn ----
+// ---- `-> Never` with non-divergent body must warn ----
 
-/// BT-2033: A method declared `-> Never` with a `Known` body type (e.g. `42`)
+/// A method declared `-> Never` with a `Known` body type (e.g. `42`)
 /// is not divergent — warn so the mislabelled declaration is caught.
 #[test]
 fn bt2033_never_return_with_known_body_warns() {
@@ -393,7 +393,7 @@ fn bt2033_never_return_with_known_body_warns() {
     );
 }
 
-/// BT-2033: A method declared `-> Never` whose body is truly divergent
+/// A method declared `-> Never` whose body is truly divergent
 /// (inferred as `InferredType::Never`) must not warn — the declaration is
 /// honest.
 #[test]
@@ -432,14 +432,14 @@ fn bt2033_never_return_with_never_body_no_warning() {
 }
 
 // =====================================================================
-// BT-2021 — Receiver type_args dropped for self / super in generic classes
+// Receiver type_args for self / super in generic classes
 // =====================================================================
 //
 // Sub-bug A (self): a method body inside a generic class `Box(T)` that
-// `self`-sends a `-> T` helper used to see `self` as `Known("Box", [])`,
-// dropping the symbolic type arg and resolving T to Dynamic. After
-// BT-2025's `receiver_type_for_class` migration, `self` carries
-// `[Known("T")]` placeholders so substitution can rewrite T correctly.
+// `self`-sends a `-> T` helper must see `self` as carrying the symbolic
+// `[Known("T")]` type-arg placeholder (via `receiver_type_for_class`), not
+// `Known("Box", [])` — dropping the placeholder would resolve T to Dynamic
+// instead of letting substitution rewrite T correctly.
 //
 // Sub-bug B (super): from a child generic class `Sub(R)` extending
 // `Base(E)`, `super`-sending a `-> E`-returning method has to thread the
@@ -453,10 +453,11 @@ fn bt2033_never_return_with_never_body_no_warning() {
 // support stays deferred. The regression test below pins that contract
 // down so a future change can't silently flip it.
 
-/// BT-2021 sub-bug A: inside a generic class `Box(T)`, calling a self-send
+/// Sub-bug A: inside a generic class `Box(T)`, calling a self-send
 /// that returns `T` must yield the symbolic `T` placeholder rather than
 /// `Dynamic`. We probe the cached return type of the wrapper method —
-/// without the fix, the wrapper's return type was bare `Dynamic`.
+/// a dropped type-arg placeholder would leave the wrapper's return type
+/// bare `Dynamic`.
 #[test]
 fn bt2021_self_send_in_generic_class_preserves_type_param() {
     let source = "
@@ -475,10 +476,10 @@ Object subclass: Box(T)
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
 
-    // The fix should produce no return-type-mismatch warnings — the wrapped
+    // This must produce no return-type-mismatch warnings — the wrapped
     // method's body type must be the same `T` placeholder as its declared
-    // return type. Without the fix, `self value` resolves to Dynamic and
-    // the typed-class-context would warn.
+    // return type. If `self value` resolved to Dynamic instead, the
+    // typed-class-context would warn.
     let mismatches: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -493,7 +494,7 @@ Object subclass: Box(T)
     );
 }
 
-/// BT-2021 sub-bug A direct check: probe the inferred type of `self value`
+/// Sub-bug A direct check: probe the inferred type of `self value`
 /// inside a method of `Box(T)`. Must be `Known("T", [])`, never `Dynamic`.
 #[test]
 fn bt2021_self_send_inferred_type_is_symbolic_param() {
@@ -543,7 +544,7 @@ Object subclass: Box(T)
     }
 }
 
-/// BT-2021 sub-bug A nested case: a multi-param generic class. Inside
+/// Sub-bug A nested case: a multi-param generic class. Inside
 /// `Pair(K, V)`, calling `self second` (returning `V`) must resolve to
 /// the symbolic V placeholder, not Dynamic and not the wrong slot.
 #[test]
@@ -594,7 +595,7 @@ Object subclass: Pair(K, V)
     }
 }
 
-/// BT-2021 sub-bug B: a child generic class calling `super`-send on a
+/// Sub-bug B: a child generic class calling `super`-send on a
 /// parent method that returns the parent's type param must yield the
 /// child's matching type-param placeholder (mapped via
 /// `superclass_type_args`).
@@ -650,7 +651,7 @@ Base(R) subclass: Sub(R)
     }
 }
 
-/// BT-2021 sub-bug B with a *concrete* mapping: child binds parent's type
+/// Sub-bug B with a *concrete* mapping: child binds parent's type
 /// param to a fixed type. `IntBase` extends `Base(Integer)`. Inside an
 /// `IntBase` method, `super peek` should resolve to `Integer`, not the
 /// parent's symbolic `E` placeholder.
@@ -702,7 +703,7 @@ Base(Integer) subclass: IntBase
     }
 }
 
-/// ADR 0083 (supersedes the BT-2021 sub-bug C contract pin): `self class` (as
+/// ADR 0083 (sub-bug C contract pin): `self class` (as
 /// returned by `Object>>class -> Self class`) now resolves to the *metatype* of
 /// the receiver class, not `Dynamic`. The narrowing tests `x class = Integer`
 /// still pass because binary operators on a metatype receiver are treated as

@@ -1,9 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2850: a cascade's `spawnWith: #{...}` continuation message now gets the
-//! same literal-map key checking (ADR 0104 Phase 2, BT-2750) as any other
-//! `spawnWith:` send, mirroring BT-2845's non-cascade fix for
+//! a cascade's `spawnWith: #{...}` continuation message gets the
+//! same literal-map key checking (ADR 0104 Phase 2) as any other
+//! `spawnWith:` send, mirroring the non-cascade coverage for
 //! `check_argument_types`.
 //!
 //! Root cause: `check_spawn_with_map_keys` is only called from
@@ -20,7 +20,7 @@
 //! class-side-dispatch branches — the syntactic class-reference branch
 //! (`is_class_ref`), and the branch that treats `self` inside a class method
 //! as a class-side send (the cascade loop's equivalent of the non-cascade
-//! Meta-typed-receiver branch, per BT-2845's three-way branch split).
+//! Meta-typed-receiver branch, per the three-way branch split).
 
 use super::common::*;
 

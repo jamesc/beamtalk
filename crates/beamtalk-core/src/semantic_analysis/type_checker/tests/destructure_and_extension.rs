@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Destructure-assignment binding and extension method checking (BT-1518).
+//! Destructure-assignment binding and extension method checking.
 
 use super::common::*;
 
@@ -107,7 +107,7 @@ fn test_array_destructure_binds_vars_in_env() {
 
 #[test]
 fn test_list_destructure_binds_vars_in_env() {
-    // #(first, second) := someValue  (list syntax, BT-1279)
+    // #(first, second) := someValue  (list syntax)
     // first + 1 — first is Dynamic, no warnings expected
     // Verifies list_syntax: true takes the same type-checking path as list_syntax: false.
     let method = make_method(
@@ -154,7 +154,7 @@ fn test_bind_pattern_vars_skips_wildcard() {
     );
 }
 
-// --- Extension method type checking tests (BT-1518) ---
+// --- Extension method type checking tests ---
 
 #[test]
 fn extension_method_no_dnu_warning() {
@@ -358,7 +358,7 @@ fn extension_method_argument_type_checking() {
     );
 }
 
-/// BT-1559: Cross-file Value sub-subclass `self new:` should NOT produce DNU warning.
+/// Cross-file Value sub-subclass `self new:` should NOT produce DNU warning.
 ///
 /// Simulates the build command's flow: Child is in the current file,
 /// Base is injected from another file via pre-loaded classes.

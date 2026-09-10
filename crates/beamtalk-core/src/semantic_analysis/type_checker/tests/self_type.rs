@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Self return type and Self in generic positions (BT-1041, BT-1986, BT-1995).
+//! Self return type and Self in generic positions.
 
 use super::super::*;
 use super::common::*;
 
-// ---- Self return type tests (BT-1041) ----
+// ---- Self return type tests ----
 
 #[test]
 fn test_self_return_type_parsed() {
@@ -209,14 +209,14 @@ result onlyOnC
 
 #[test]
 fn test_self_class_type_name() {
-    // BT-1952: TypeAnnotation::SelfClass::type_name() returns "Self class"
+    // TypeAnnotation::SelfClass::type_name() returns "Self class"
     let ann = TypeAnnotation::SelfClass { span: span() };
     assert_eq!(ann.type_name(), "Self class");
 }
 
 #[test]
 fn test_self_class_no_false_dnu_warnings() {
-    // BT-1952: A method returning `-> Self class` should parse correctly and
+    // A method returning `-> Self class` should parse correctly and
     // not produce false DNU warnings for class-side method sends on the result.
     let source = "
 Value subclass: Counter
@@ -266,9 +266,9 @@ Value subclass: User
 
 #[test]
 fn test_class_of_metatype_no_false_dnu_warnings() {
-    // BT-2034: A field typed `Actor class | Nil` must allow class-side messages
+    // A field typed `Actor class | Nil` must allow class-side messages
     // (e.g. `isSupervisor`, `name`) to flow through after a nil-check without
-    // false DNU warnings. Mirrors the `Self class` behaviour from BT-1952.
+    // false DNU warnings. Mirrors the `Self class` behaviour.
     let source = "
 Value subclass: Actor
   class isSupervisor -> Boolean => false
@@ -335,9 +335,9 @@ typed Value subclass: Spec
     );
 }
 
-// ---- Self in generic position tests (BT-1986, Phase 0 of ADR 0079) ----
+// ---- Self in generic position tests (Phase 0 of ADR 0079) ----
 
-/// BT-1986: Verify that `Self` substitutes correctly when it appears as a
+/// Verify that `Self` substitutes correctly when it appears as a
 /// generic type argument (e.g. `Result(Self, Error)`). This is required by
 /// ADR 0079's typed-lookup API, where `class named: name -> Result(Self, Error)`
 /// is declared once on `Actor` and subclasses like `Counter` are expected to
@@ -388,7 +388,7 @@ Value subclass: Driver
     );
 }
 
-/// BT-1986: Direct inspection of inferred type for `Self` inside `Result(...)`.
+/// Direct inspection of inferred type for `Self` inside `Result(...)`.
 /// Uses `check_module` + method-body type inference to assert the outer
 /// result type is `Result(Sub, Error)`, not `Result(Self, Error)` or
 /// `Result(Dynamic, Error)`.
@@ -483,7 +483,7 @@ Value subclass: Driver
     );
 }
 
-/// BT-1986: When called directly on the declaring class, `Self` inside a
+/// When called directly on the declaring class, `Self` inside a
 /// generic return type should resolve to that class (not `Self` as a class
 /// name, not `Dynamic`). This is the base case for ADR 0079's
 /// `Actor>>class named: -> Result(Self, Error)` — calling `Actor named: #x`
@@ -544,16 +544,16 @@ Value subclass: Driver
     }
 }
 
-// ---- Class-level type parameter in generic return type (BT-1995, Phase 0b of ADR 0080) ----
+// ---- Class-level type parameter in generic return type (Phase 0b of ADR 0080) ----
 
-/// BT-1995: Verify that a class-level type parameter `C` substitutes correctly
+/// Verify that a class-level type parameter `C` substitutes correctly
 /// inside a generic return type (e.g. `Result(C, Error)`) on a subclass that
 /// binds `C` to a concrete type via `superclass_type_args`.
 ///
 /// This is ADR 0080's Phase 0b probe: `DynamicSupervisor(C)` declares
 /// `startChild -> Result(C, Error)`, and a subclass `WorkerPool` extending
 /// `DynamicSupervisor(Counter)` must see `pool startChild` narrow to
-/// `Result(Counter, Error)`. BT-1992 threaded the receiver's type arguments
+/// `Result(Counter, Error)`. The receiver's type arguments thread
 /// through `Self` substitution; this test probes the analogous path for a
 /// class-level parameter (`C`), which flows through
 /// `build_inherited_substitution_map` rather than via `Self`.
@@ -640,7 +640,7 @@ Value subclass: Driver
     }
 }
 
-// ── infer_method_return_types / take_method_return_types tests (BT-1042) ─────
+// ── infer_method_return_types / take_method_return_types tests ─────
 
 fn method_unannotated(selector: &str, body: Vec<Expression>) -> MethodDefinition {
     MethodDefinition {
@@ -809,7 +809,7 @@ fn take_method_return_types_leaves_empty_map() {
     );
 }
 
-// ── infer_types_and_returns combined entry point (BT-1047) ──────────
+// ── infer_types_and_returns combined entry point ──────────
 
 #[test]
 fn infer_types_and_returns_produces_both_outputs() {

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2949: `List(E)`/`Dictionary(K, V)` element-type checking on
+//! `List(E)`/`Dictionary(K, V)` element-type checking on
 //! construction/mutation sends (`at:put:`, `++`, ...).
 //!
 //! Before this fix, `check_argument_types` never substituted a class-level
@@ -93,7 +93,7 @@ fn dictionary_at_put_compatible_value_no_warning() {
 fn dictionary_at_put_with_no_receiver_type_args_stays_conservative() {
     // A bare (unparameterized) `Dictionary` receiver — e.g. one that erased
     // its type args, or one the checker never inferred args for — must keep
-    // today's pre-BT-2949 conservative behavior: no type args to substitute
+    // today's conservative behavior: no type args to substitute
     // with means no basis for a diagnostic, exactly like every other
     // "unknown declared type" case in this checker.
     let hierarchy = ClassHierarchy::with_builtins();
@@ -136,7 +136,7 @@ fn ets_at_put_incompatible_value_warns() {
     assert_one_expects_diagnostic(checker.diagnostics(), "Integer", "String");
 }
 
-/// BT-2949 investigation: a `Dictionary` literal's key(s) infer as narrow
+/// A `Dictionary` literal's key(s) infer as narrow
 /// *singleton* types (`#{#a => 1}` gives `Dictionary(#a, Integer)`, not
 /// `Dictionary(Symbol, Integer)`). Substituting that narrow singleton
 /// invariantly would make `at:ifAbsent:` with any differently-keyed lookup
@@ -170,7 +170,7 @@ fn dictionary_at_ifabsent_different_singleton_key_no_warning() {
     assert_no_expects_diagnostic(checker.diagnostics());
 }
 
-/// BT-2949 investigation: same false positive, but through
+/// Same false positive, but through
 /// `check_variance_in_expr` (`merge:`'s param is the nested
 /// `Dictionary(K, V)`) — `d1 merge: d2` where `d1`/`d2` were built from
 /// literals with different keys must not warn.
@@ -296,10 +296,10 @@ Object subclass: Probe
     assert_one_expects_diagnostic(&diags, "Integer", "String");
 }
 
-/// BT-2949's motivating repro used `Dictionary(Symbol, JsonValue)`, an
+/// The motivating repro used `Dictionary(Symbol, JsonValue)`, an
 /// alias-typed element. Mirrors `type_alias_display_provenance.rs`'s own
 /// alias setup to confirm the substituted element type still flows through
-/// the existing (BT-2953) alias-expansion machinery unchanged — the
+/// the existing alias-expansion machinery unchanged — the
 /// substitution produces a plain `Known("RestartStrategy")`, exactly what a
 /// *directly* alias-typed parameter would already look like, so the
 /// existing "resolve to structural expansion" step downstream applies with
@@ -425,13 +425,13 @@ Object subclass: Probe
     );
 }
 
-/// BT-2949 investigation: `is_type_compatible`'s singleton branch must treat
+/// `is_type_compatible`'s singleton branch must treat
 /// an unresolved `Dynamic` actual as compatible with any expected singleton,
 /// same as every other branch in this function already does via the
 /// "unknown class -> conservatively compatible" fallback (`Dynamic` is never
-/// a registered hierarchy class). Before this fix, `actual == expected ||
-/// is_generic_type_param(actual)` had no such case, so `Dynamic` compared
-/// against a singleton like `#x` wrongly failed.
+/// a registered hierarchy class) — `actual == expected ||
+/// is_generic_type_param(actual)` alone is not enough, since `Dynamic`
+/// compared against a singleton like `#x` would otherwise wrongly fail.
 #[test]
 fn is_type_compatible_treats_dynamic_actual_as_compatible_with_singleton() {
     let hierarchy = ClassHierarchy::with_builtins();

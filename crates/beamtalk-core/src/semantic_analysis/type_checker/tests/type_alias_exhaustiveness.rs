@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0108 / BT-2895: exhaustiveness regression — an alias-annotated
+//! ADR 0108: exhaustiveness regression — an alias-annotated
 //! `match:`/`matchExhaustive:` scrutinee must behave *identically* to the
 //! spelled-out union, because the exhaustiveness checker itself is
 //! unchanged (`check_singleton_match_exhaustiveness` / `matchExhaustive:`
@@ -32,7 +32,7 @@ fn analyse_diagnostics(source: &str) -> Vec<crate::source_analysis::Diagnostic> 
     result.diagnostics
 }
 
-// ── Advisory `match:` over an alias-typed local (BT-2745 sibling) ───────
+// ── Advisory `match:` over an alias-typed local ───────
 
 #[test]
 fn alias_typed_local_advisory_match_warns_on_missing_member() {
@@ -84,7 +84,7 @@ heading match: [
     );
 }
 
-// ── Asserted `matchExhaustive:` over an alias-typed local (BT-2763 sibling) ──
+// ── Asserted `matchExhaustive:` over an alias-typed local ──
 
 #[test]
 fn alias_typed_local_matchexhaustive_errors_naming_missing_member() {

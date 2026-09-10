@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Union arg/field/protocol/bounds checking and builtin param unions (BT-1834, BT-1835, BT-1877).
+//! Union arg/field/protocol/bounds checking and builtin param unions.
 
 use super::super::*;
 use super::common::*;
@@ -252,7 +252,7 @@ fn union_arg_dynamic_still_skips() {
     );
 }
 
-// ── BT-2038: Class literal compatibility with Behaviour/Class/Object parameters ──
+// ── Class literal compatibility with Behaviour/Class/Object parameters ──
 //
 // A class reference like `TestCase` is a first-class class value whose runtime
 // type is `TestCase class` (a `Metaclass`, which inherits from `Class` →
@@ -329,7 +329,7 @@ fn test_hierarchy_with_class_literal_arg(
 
 #[test]
 fn class_literal_arg_accepted_for_behaviour_param() {
-    // BT-2038: Passing a class literal (TestCase) to a param expecting Behaviour
+    // Passing a class literal (TestCase) to a param expecting Behaviour
     // should not warn — class objects flow through Metaclass → Class → Behaviour.
     let hierarchy = test_hierarchy_with_class_literal_arg("Behaviour");
     let mut checker = TypeChecker::new();
@@ -458,12 +458,12 @@ fn class_literal_arg_rejected_for_unrelated_param() {
 
 #[test]
 fn instance_identifier_still_rejected_for_class_param() {
-    // Regression guard (CodeRabbit on PR #2071): the BT-1877 `expected == "Class"`
-    // shortcut in `is_type_compatible` previously accepted any known class name
-    // unconditionally. With BT-2038's metaclass-tower check handling class
-    // literals, that shortcut must stay scoped to class-literal arguments —
-    // a plain identifier typed as `TestCase` is an instance, not a class,
-    // and should not satisfy a `:: Class` parameter.
+    // Regression guard: the `expected == "Class"` shortcut in
+    // `is_type_compatible` must stay scoped to class-literal arguments, not
+    // accept any known class name unconditionally — the metaclass-tower
+    // check handles class literals separately, so a plain identifier typed
+    // as `TestCase` is an instance, not a class, and should not satisfy a
+    // `:: Class` parameter.
     let hierarchy = test_hierarchy_with_class_literal_arg("Class");
     let mut checker = TypeChecker::new();
     let ident_arg = var("aTestCase");
@@ -1073,9 +1073,9 @@ fn union_type_param_bounds_mixed_conformance_hints() {
     );
 }
 
-// ---- BT-1834: Generic return type resolution ----
+// ---- Generic return type resolution ----
 
-/// BT-1834: List(E) first returns E, resolved to concrete type via substitution.
+/// List(E) first returns E, resolved to concrete type via substitution.
 #[test]
 fn generic_list_first_returns_element_type() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1105,7 +1105,7 @@ fn generic_list_first_returns_element_type() {
     );
 }
 
-/// BT-1834: List(E) last returns E.
+/// List(E) last returns E.
 #[test]
 fn generic_list_last_returns_element_type() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1134,7 +1134,7 @@ fn generic_list_last_returns_element_type() {
     );
 }
 
-/// BT-1834: List(E) at: returns E.
+/// List(E) at: returns E.
 #[test]
 fn generic_list_at_returns_element_type() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1167,7 +1167,7 @@ fn generic_list_at_returns_element_type() {
     );
 }
 
-/// BT-1834: Array(E) at: returns E (existing functionality, regression check).
+/// Array(E) at: returns E (existing functionality, regression check).
 #[test]
 fn generic_array_at_returns_element_type() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1200,7 +1200,7 @@ fn generic_array_at_returns_element_type() {
     );
 }
 
-/// BT-1834: Dictionary(K, V) at: returns V.
+/// Dictionary(K, V) at: returns V.
 #[test]
 fn generic_dictionary_at_returns_value_type() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1236,7 +1236,7 @@ fn generic_dictionary_at_returns_value_type() {
     );
 }
 
-/// BT-1834: Nested generics — Dictionary(String, Array(Integer)) at: returns Array(Integer).
+/// Nested generics — Dictionary(String, Array(Integer)) at: returns Array(Integer).
 #[test]
 fn generic_nested_dictionary_at_returns_nested_type() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1288,7 +1288,7 @@ fn generic_nested_dictionary_at_returns_nested_type() {
     }
 }
 
-/// BT-1834: Block value returns the last type arg.
+/// Block value returns the last type arg.
 #[test]
 fn generic_block_value_returns_last_type_arg() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1318,7 +1318,7 @@ fn generic_block_value_returns_last_type_arg() {
     );
 }
 
-/// BT-1834: Block(A, R) value: returns R (last type arg).
+/// Block(A, R) value: returns R (last type arg).
 #[test]
 fn generic_block_value_colon_returns_last_type_arg() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1355,7 +1355,7 @@ fn generic_block_value_colon_returns_last_type_arg() {
     );
 }
 
-/// BT-1834: Unresolvable type params fall back to Dynamic (no regression).
+/// Unresolvable type params fall back to Dynamic (no regression).
 #[test]
 fn generic_unresolved_type_param_falls_back_to_dynamic() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1377,7 +1377,7 @@ fn generic_unresolved_type_param_falls_back_to_dynamic() {
     );
 }
 
-/// BT-1834: Plain param type inference — inject:into: resolves A from initial arg.
+/// Plain param type inference — inject:into: resolves A from initial arg.
 #[test]
 fn generic_inject_into_resolves_accumulator_type() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1428,7 +1428,7 @@ fn generic_inject_into_resolves_accumulator_type() {
     );
 }
 
-/// BT-1834: List(E) detect: returns E.
+/// List(E) detect: returns E.
 #[test]
 fn generic_list_detect_returns_element_type() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1471,7 +1471,7 @@ fn generic_list_detect_returns_element_type() {
     );
 }
 
-/// BT-1834: Behaviour superclass returns Behaviour | Nil.
+/// Behaviour superclass returns Behaviour | Nil.
 #[test]
 fn behaviour_superclass_returns_union_type() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1484,7 +1484,7 @@ fn behaviour_superclass_returns_union_type() {
     );
 }
 
-// --- BT-1835: Union syntax in builtin param_types ---
+// --- Union syntax in builtin param_types ---
 
 #[test]
 fn union_param_type_integer_compatible() {
@@ -1651,12 +1651,12 @@ fn non_union_param_type_unchanged() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-1877: Nil resolved to UndefinedObject in union param validation
+// Nil resolved to UndefinedObject in union param validation
 // ---------------------------------------------------------------------------
 
 #[test]
 fn union_param_type_nil_does_not_disable_validation() {
-    // BT-1877: `String | Nil` param with Integer arg should warn.
+    // `String | Nil` param with Integer arg should warn.
     // Before fix, `Nil` was not in the hierarchy so the conservative fallback
     // made it compatible with anything, silently disabling validation.
     let hierarchy = hierarchy_with_extension(
@@ -1722,7 +1722,7 @@ fn union_param_type_nil_compatible_with_object_union() {
     );
 }
 
-// --- BT-2623: parameterized union members keep their type args ---
+// --- Parameterized union members keep their type args ---
 
 /// `Array(Integer)` is assignable to declared `Array(Integer)`.
 #[test]
@@ -1735,7 +1735,7 @@ fn is_assignable_to_same_type_args_ok() {
     ));
 }
 
-/// BT-2623: `Array(String)` must NOT be assignable to declared `Array(Integer)` —
+/// `Array(String)` must NOT be assignable to declared `Array(Integer)` —
 /// before the fix the type args were dropped and both reduced to bare `Array`.
 #[test]
 fn is_assignable_to_mismatched_type_args_rejected() {
@@ -1750,7 +1750,7 @@ fn is_assignable_to_mismatched_type_args_rejected() {
     );
 }
 
-/// BT-2623: same precision for `is_type_compatible` (the argument-check path).
+/// same precision for `is_type_compatible` (the argument-check path).
 #[test]
 fn is_type_compatible_mismatched_type_args_rejected() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -1769,7 +1769,7 @@ fn is_type_compatible_mismatched_type_args_rejected() {
     );
 }
 
-/// BT-2623: a `classify_union_members`-driven check now distinguishes
+/// a `classify_union_members`-driven check now distinguishes
 /// `Array(Integer) | Array(String)` checked against a declared `Array(Integer)`.
 /// The `Array(String)` member is incompatible, so a diagnostic must fire (and it
 /// must name the offending parameterized member, not bare `Array`).
@@ -1845,7 +1845,7 @@ fn union_arg_parameterized_member_mismatch_warns() {
     );
 }
 
-/// BT-2623: a parameterized union whose members are all compatible stays
+/// a parameterized union whose members are all compatible stays
 /// silent. `Array(Integer) | Array(Float)` against declared `Array(Number)` —
 /// Integer and Float are both subclasses of Number, so each member's type arg
 /// is compatible.
@@ -1912,7 +1912,7 @@ fn union_arg_parameterized_members_all_match_no_warning() {
 
 #[test]
 fn process_navigation_from_rejects_non_supervisor_or_pid() {
-    // ADR 0092 (BT-2429): `ProcessNavigation from:` is typed `Supervisor | Pid`,
+    // ADR 0092: `ProcessNavigation from:` is typed `Supervisor | Pid`,
     // so passing an Integer must be rejected statically — the common bug never
     // reaches the runtime `type_error` fallback.
     let hierarchy = ClassHierarchy::with_builtins();

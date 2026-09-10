@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `self delegate` expressions infer the enclosing method's declared return
-//! type instead of `Dynamic` (BT-2862).
+//! type instead of `Dynamic`.
 //!
 //! `delegate` (ADR 0056 / ADR 0101) is a sentinel with no per-selector return
 //! type of its own — `Actor>>delegate` has no return-type annotation at all,

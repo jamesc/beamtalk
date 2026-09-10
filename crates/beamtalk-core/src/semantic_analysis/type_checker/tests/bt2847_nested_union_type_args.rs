@@ -1,19 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `type_args_compatible` no longer treats a nested `Union` type-arg as
-//! automatically compatible (BT-2847).
+//! `type_args_compatible` must not treat a nested `Union` type-arg as
+//! automatically compatible.
 //!
-//! Before this fix, any non-`Known` shape (`Dynamic`, `Union`, `Never`)
-//! nested inside a generic's type arguments short-circuited to `true` on the
-//! assumption a "broader checker" handled it elsewhere. That premise didn't
-//! hold for `Union`: `check_union_body_return_type` (BT-2829) only validates
-//! a *top-level* Union body type, so a method declared `-> Array(String)`
-//! whose body infers `Array(String | Nil)` passed silently.
+//! A non-`Known` shape (`Dynamic`, `Union`, `Never`) nested inside a
+//! generic's type arguments cannot simply short-circuit to `true` on the
+//! assumption a "broader checker" handles it elsewhere — that premise
+//! doesn't hold for `Union`: `check_union_body_return_type` only validates a
+//! *top-level* Union body type, so a method declared `-> Array(String)`
+//! whose body infers `Array(String | Nil)` would otherwise pass silently.
 //!
-//! Per the spec decision (issue comment): only the `Union` half changes —
-//! a nested `Union` type-arg now recurses with the same
-//! `classify_union_members`-style check used at the top level (BT-1832).
+//! Only the `Union` half changes: a nested `Union` type-arg recurses with
+//! the same `classify_union_members`-style check used at the top level.
 //! Nested `Dynamic`/`Never` stay permissive, unchanged.
 
 use super::common::*;
@@ -67,7 +66,7 @@ fn type_mismatch_diagnostics(checker: &TypeChecker) -> Vec<&Diagnostic> {
 /// now produces a diagnostic — `Nil` isn't assignable to the expected
 /// `String` element type. This is the exact repro from the issue (nested
 /// `List(String)` vs. `List(String | Nil)`, using `Array` to match the other
-/// BT-2022-family tests in this suite).
+/// generic-return-type-family tests in this suite).
 #[test]
 fn bt2847_nested_union_incompatible_member_warns() {
     let hierarchy = typed_class_hierarchy("Probe");
@@ -146,7 +145,7 @@ fn bt2847_nested_dynamic_stays_permissive() {
 
 /// Conservative skip: a nested `Union` type-arg with a non-`Known` member
 /// (nested `Dynamic`) can't be reliably compared, so the whole union is
-/// skipped — mirrors `classify_union_members`'s (BT-1832) conservative
+/// skipped — mirrors `classify_union_members`'s conservative
 /// fallback at the top level.
 #[test]
 fn bt2847_nested_union_with_dynamic_member_skips() {

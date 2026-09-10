@@ -1,17 +1,16 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3408: `Dictionary(K, V)>>at:ifAbsent:` must widen its result type
+//! `Dictionary(K, V)>>at:ifAbsent:` must widen its result type
 //! through the absent-block's own return type (`V | T`) rather than
 //! requiring the block to return exactly `V`.
 //!
-//! Before this fix, `at:ifAbsent:` declared its absent-block parameter as
-//! `Block(V)` and its own return type as bare `V` — so `dict at: k ifAbsent:
-//! [nil]` failed to type-check whenever `V` didn't already include `Nil`,
-//! forcing the `includesKey:`-then-`at:` double-lookup workaround (BT-3408)
-//! described in the issue. The fix widens the block parameter to a fresh
-//! method-local type param `Block(T)` and the return type to `V | T`,
-//! mirroring `Behaviour>>removeSelector:ifAbsent:`'s established shape.
+//! `at:ifAbsent:` declares its absent-block parameter as a fresh
+//! method-local type param `Block(T)` and its own return type as `V | T`,
+//! mirroring `Behaviour>>removeSelector:ifAbsent:`'s established shape — a
+//! bare `V` return type would fail to type-check `dict at: k ifAbsent:
+//! [nil]` whenever `V` doesn't already include `Nil`, forcing the
+//! `includesKey:`-then-`at:` double-lookup workaround (BT-3408).
 //!
 //! These are full-pipeline tests (`check_module_with_protocols`, not a
 //! direct `check_argument_types` unit call) because the bug's fix lives

@@ -236,7 +236,7 @@ fn intersect_distinct_singletons_are_disjoint() {
     );
 }
 
-/// BT-2764: with a hierarchy, a nominal *supertype* of `Symbol` other than
+/// with a hierarchy, a nominal *supertype* of `Symbol` other than
 /// `Object` (in the builtin hierarchy: `ProtoObject`) also admits singletons —
 /// `ProtoObject ∩ #foo = #foo` in both orders, matching the pre-ADR-0102
 /// hierarchy walk. Without this, the nominal arm would answer `Never`
@@ -256,7 +256,7 @@ fn intersect_symbol_supertype_with_singleton_keeps_singleton() {
     );
 }
 
-/// BT-2764: without a hierarchy there is no way to know `ProtoObject` sits
+/// without a hierarchy there is no way to know `ProtoObject` sits
 /// above `Symbol`, so the pre-existing conservative fallback (`Never`) is
 /// pinned — only bare `Symbol` (and top `Object`) admit singletons
 /// hierarchy-free.
@@ -269,7 +269,7 @@ fn intersect_symbol_supertype_with_singleton_without_hierarchy_is_never() {
     );
 }
 
-/// BT-2764: the hierarchy-aware singleton arm must not leak to classes that
+/// the hierarchy-aware singleton arm must not leak to classes that
 /// are *not* supertypes of `Symbol` — `Integer ∩ #foo` stays `Never` with the
 /// hierarchy threaded.
 #[test]
@@ -499,7 +499,7 @@ fn difference_rhs_union_folds_left() {
     assert_eq!(direct, folded);
 }
 
-// ── difference: nominal-class base case (ADR 0102 §5, BT-2744) ─────────
+// ── difference: nominal-class base case (ADR 0102 §5) ─────────
 
 #[test]
 fn difference_nominal_subclass_makes_negation() {
@@ -739,7 +739,7 @@ fn negation_is_not_known() {
     assert!(negation(singleton("#a")).as_known().is_none());
 }
 
-// ── Intersection (ADR 0102 §1/§3, BT-2743) ──────────────────────────────
+// ── Intersection (ADR 0102 §1/§3) ──────────────────────────────
 
 /// Builds a minimal `ProtocolRegistry` containing empty (no required method)
 /// protocols under the given names — enough for `has_protocol` checks.
@@ -823,7 +823,7 @@ fn intersect_class_and_protocol_without_registry_falls_back_to_never() {
 
 #[test]
 fn intersect_class_and_class_still_reduces_with_hierarchy_even_with_registry() {
-    // GAP 1 must not regress (BT-2743 task instruction): class ∩ class still
+    // GAP 1 must not regress: class ∩ class still
     // reduces via the nominal hierarchy — `Number ∩ Integer = Integer` — even
     // when a (empty, unrelated) protocol registry is also supplied.
     let registry = protocol_registry_with(&["Comparable"]);
@@ -988,7 +988,7 @@ fn intersection_provenance_accessor() {
 #[test]
 fn union_of_treats_intersection_as_opaque_member() {
     // `union_of` dedups an `Intersection` by structural equality but applies
-    // no absorption law to it (unlike `Negation`) — ADR 0102 §1, BT-2743.
+    // no absorption law to it (unlike `Negation`) — ADR 0102 §1.
     let registry = protocol_registry_with(&["Printable", "Comparable"]);
     let inter = InferredType::intersect(
         &InferredType::known("Printable"),
@@ -1009,7 +1009,7 @@ fn union_of_treats_intersection_as_opaque_member() {
 
 #[test]
 fn union_of_singleton_with_bare_symbol_collapses_to_symbol() {
-    // BT-2741 (Windows CI): bare-singleton-under-bare-`Symbol` subsumption
+    // Bare-singleton-under-bare-`Symbol` subsumption
     // must apply in `union_of` regardless of whether a `Negation` is present —
     // `#a | Symbol = Symbol` always (a singleton is a subtype of `Symbol`;
     // the collapsed form admits exactly the same values). Previously this
@@ -1035,7 +1035,7 @@ fn union_of_singleton_with_bare_symbol_collapses_to_symbol() {
 
 #[test]
 fn intersect_commutes_on_windows_ci_counterexample() {
-    // BT-2741: deterministic pin of the Windows CI proptest counterexample
+    // deterministic pin of the Windows CI proptest counterexample
     // (seed cc cb64d47a…). Before the `union_of` subsumption fix:
     //   intersect(#a | Symbol, (Symbol \ #a) | Object) = #a | Symbol
     //   intersect((Symbol \ #a) | Object, #a | Symbol) = Symbol

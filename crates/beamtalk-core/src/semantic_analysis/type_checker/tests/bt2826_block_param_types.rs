@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `String>>collect:` and `Actor>>onExit:` declare parameterized `Block(...)`
-//! callback types instead of bare `Block` (BT-2826).
+//! callback types instead of bare `Block`.
 //!
-//! Before this fix, both methods declared their callback as bare `Block`
-//! (no type params). In a `typed` class, that left the block's parameter
-//! `Dynamic(UnannotatedParam)`, forcing callers to add `@expect type` plus a
-//! rebind to recover a concrete param type. With `Block(String, String)` on
-//! `String>>collect:` and `Block(Object, Object)` on `Actor>>onExit:`, the
-//! block parameter should now resolve to a concrete (non-Dynamic) type with
-//! no `@expect` workaround needed (BT-2826).
+//! A bare `Block` (no type params) callback would leave the block's
+//! parameter `Dynamic(UnannotatedParam)` in a `typed` class, forcing callers
+//! to add `@expect type` plus a rebind to recover a concrete param type.
+//! With `Block(String, String)` on `String>>collect:` and
+//! `Block(Object, Object)` on `Actor>>onExit:`, the block parameter
+//! resolves to a concrete (non-Dynamic) type with no `@expect` workaround
+//! needed (BT-2826).
 
 use super::common::*;
 
