@@ -48,7 +48,7 @@ use crate::commands::manifest;
 /// - `beamtalk.toml` was modified after the lockfile
 /// - The transitive dependency graph changed shape since the last successful
 ///   resolve — e.g. an intermediate manifest swapped a dependency between a
-///   git and a path source (BT-3009)
+///   git and a path source
 /// - Any dependency's `_build/deps/{name}/ebin/` directory is missing or empty
 ///
 /// Always returns `ResolvedDependency` structs with class module indexes
@@ -75,7 +75,7 @@ pub fn ensure_deps_resolved(
         info!("Dependencies need resolution, resolving...");
         let resolved = graph::resolve_dependency_graph(project_root, options)?;
         // Record the graph we just resolved as the baseline the next build's
-        // structural freshness check compares against (BT-3009). Discovery is
+        // structural freshness check compares against. Discovery is
         // re-run *after* resolution so every git/registry checkout and every
         // transitive manifest is on disk and the recorded graph is complete.
         record_dep_graph_snapshot(project_root, &parsed);
@@ -168,7 +168,7 @@ struct DiscoveredDep {
     /// Carried so freshness checks (`deps_are_fresh`'s `has_locked_deps` and
     /// `locked_deps_match`) can compare the *declared* spec against the
     /// lockfile for every dependency in the transitive graph, not just the
-    /// root manifest's `[dependencies]` (BT-2994) — a monorepo's root
+    /// root manifest's `[dependencies]` — a monorepo's root
     /// commonly declares only a path dependency, with the git/registry dep
     /// whose version actually matters appearing several levels down.
     source: beamtalk_core::compilation::DependencySource,
@@ -183,7 +183,7 @@ struct DiscoveredDep {
 /// Used by both `deps_are_fresh` and `collect_fresh_deps` to handle the full
 /// transitive graph rather than just direct deps.
 ///
-/// Note (BT-2836): `dependency_classes.rs`'s offline MCP
+/// Note: `dependency_classes.rs`'s offline MCP
 /// `lint`/`diagnostic_summary` dependency-class resolution needs the same
 /// transitive-walk reachability but cannot call this function directly — it
 /// lives in the library crate (`lib.rs`) while this module is compiled only
@@ -327,18 +327,18 @@ fn collect_fresh_deps(
 /// matches what the lockfile actually pinned.
 ///
 /// For a registry dep this means the locked version *and* registry
-/// (`BEAMTALK_REGISTRY`, or a `[registry] url` edit — BT-2993) still match
+/// (`BEAMTALK_REGISTRY`, or a `[registry] url` edit) still match
 /// the manifest's request. For a plain git dep it means the locked URL and
 /// reference (tag/branch/rev) still match.
 ///
 /// A version or tag bump must force re-resolution even when it's declared by
 /// an *intermediate* path dependency's own manifest several levels below the
-/// root (BT-2994) — e.g. the root declares only `utils = { path = "../utils" }`
+/// root — e.g. the root declares only `utils = { path = "../utils" }`
 /// and `utils/beamtalk.toml` bumps `yaml` from `"0.2.1"` to `"0.3.0"`. Mtime
 /// comparisons can miss this (edits landing within the same timestamp
 /// granularity, or an intermediate dep's own ebin mtime happening to still
 /// look current), so this is a deterministic field comparison against the
-/// lockfile instead — the same technique BT-2993 used for registry switches,
+/// lockfile instead — the same technique used for registry switches,
 /// generalized to the whole transitive graph and to plain git deps too.
 fn locked_deps_match(
     project_root: &Utf8Path,
@@ -437,7 +437,7 @@ fn locked_deps_match(
 ///    what its declaring manifest (root or transitive) currently requests
 /// 4. The transitive graph's shape (names, declaring chains, declared
 ///    sources) still matches the snapshot recorded by the last successful
-///    resolve — see [`snapshot`] (BT-3009)
+///    resolve — see [`snapshot`]
 fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) -> bool {
     use beamtalk_core::compilation::DependencySource;
 
@@ -446,7 +446,7 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
     // every git/registry dep in the graph, not just the root manifest's
     // `[dependencies]` — a monorepo's root commonly declares only a path
     // dependency, with the git/registry dep whose version actually matters
-    // declared several levels down (BT-2994). If discovery itself fails
+    // declared several levels down. If discovery itself fails
     // (e.g. non-UTF-8 path), treat as stale.
     let all_deps = match discover_all_dep_roots(project_root, manifest) {
         Ok(deps) => deps,
@@ -456,7 +456,7 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
         }
     };
 
-    // Structural check (BT-3009): compare the graph's *shape* — every dep's
+    // Structural check: compare the graph's *shape* — every dep's
     // name, declaring chain, and declared source — against what the last
     // successful resolve recorded. This is the only check that notices a
     // dependency's source type swapping (a git dep becoming a path dep of the
@@ -574,7 +574,7 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
 }
 
 /// Record the just-resolved dependency graph so the next build's structural
-/// freshness check has a baseline to compare against (BT-3009).
+/// freshness check has a baseline to compare against.
 ///
 /// Best-effort by design: discovery or writing failing here must not fail a
 /// build that has already resolved and compiled successfully. A missing
@@ -700,7 +700,7 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    /// `deps_are_fresh` with the BT-3009 dependency-graph snapshot pre-seeded
+    /// `deps_are_fresh` with the dependency-graph snapshot pre-seeded
     /// from the graph currently on disk — i.e. as if the last successful
     /// resolve had produced exactly this graph.
     ///
@@ -1402,7 +1402,7 @@ mod tests {
         );
     }
 
-    // --- Registry dependency freshness (BT-2978) ---
+    // --- Registry dependency freshness ---
 
     /// Lay out a project with one compiled registry dep locked at
     /// `locked_version`, whose manifest asks for `manifest_version`.
@@ -1437,7 +1437,7 @@ mod tests {
         // `[registry] url`, so the currently configured registry is always
         // `registry::DEFAULT_REGISTRY_URL` — record that as the lock entry's
         // registry so these tests exercise the version comparison alone,
-        // not BT-2993's registry comparison (covered separately below).
+        // not the registry comparison (covered separately below).
         std::thread::sleep(std::time::Duration::from_millis(50));
         fs::write(
             temp.path().join("beamtalk.lock"),
@@ -1525,7 +1525,7 @@ mod tests {
     /// the resolved (and therefore checkout-specific) absolute path instead
     /// of the raw configured value would make a project using a vendored,
     /// relatively-pathed registry spuriously stale every time it's built
-    /// from a different absolute path — e.g. a dev machine vs. CI (BT-2993).
+    /// from a different absolute path — e.g. a dev machine vs. CI.
     #[test]
     fn test_registry_dep_fresh_with_relative_local_registry_path() {
         let temp = TempDir::new().unwrap();
@@ -1579,7 +1579,7 @@ mod tests {
 
     /// A lock entry pinned by a different registry than the one currently
     /// configured must not be trusted, even when its recorded version still
-    /// matches the manifest (BT-2993).
+    /// matches the manifest.
     #[test]
     fn test_registry_dep_stale_when_registry_differs() {
         let temp = TempDir::new().unwrap();
@@ -1625,7 +1625,7 @@ mod tests {
         assert!(deps[0].is_direct);
     }
 
-    // --- Transitive freshness checks (BT-2994) ---
+    // --- Transitive freshness checks ---
     //
     // `has_locked_deps` and the version/reference-vs-lockfile comparison must
     // account for git/registry deps declared by a *transitive* dependency,
@@ -1734,7 +1734,7 @@ mod tests {
     #[test]
     fn test_transitive_registry_dep_stale_when_manifest_version_bumped() {
         // utils/beamtalk.toml asks for 0.3.0 but the lockfile pins 0.2.1 —
-        // this is the exact scenario from BT-2994: the root declares no
+        // this is the exact monorepo scenario above: the root declares no
         // registry dependency of its own at all.
         let temp = TempDir::new().unwrap();
         let root = setup_transitive_registry_project(&temp, "0.3.0", "0.2.1");
@@ -1841,8 +1841,8 @@ mod tests {
     #[test]
     fn test_transitive_git_dep_stale_when_tag_bumped() {
         // middle/beamtalk.toml asks for tag v2.0 but the lockfile pins v1.0 —
-        // the git-dep analogue of BT-2994: the root declares no git
-        // dependency of its own at all.
+        // the git-dep analogue of the monorepo scenario above: the root
+        // declares no git dependency of its own at all.
         let temp = TempDir::new().unwrap();
         let root = setup_transitive_git_project(&temp, "v2.0", "v1.0");
         let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
@@ -1853,7 +1853,7 @@ mod tests {
         );
     }
 
-    // --- Structural freshness checks (BT-3009) ---
+    // --- Structural freshness checks ---
     //
     // Every check above compares a *value* — an mtime, a locked version, a
     // provenance stamp. None of them notices a dependency's declared *source

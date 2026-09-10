@@ -55,7 +55,7 @@ fn detect_tailscale_ip() -> Result<Ipv4Addr> {
 }
 
 /// `detect_tailscale_ip`'s output-parsing logic, with the actual `tailscale`
-/// subprocess spawn injected as a closure (BT-3373) — a real `Command::output()`
+/// subprocess spawn injected as a closure — a real `Command::output()`
 /// call has no injection seam of its own, so a fake `run` lets tests exercise
 /// every parse/validation branch (spawn failure, non-zero exit, empty/malformed
 /// stdout) without a real `tailscale` binary on the test machine.
@@ -102,7 +102,7 @@ mod tests {
     use super::*;
 
     /// Builds a real `std::process::ExitStatus` for a given exit code without
-    /// spawning a subprocess (BT-3373) — `ExitStatus` has no public
+    /// spawning a subprocess — `ExitStatus` has no public
     /// cross-platform constructor, so tests go through each platform's
     /// `from_raw` extension trait instead. Unix encodes the exit code in the
     /// high byte of the raw wait-status word; Windows' raw value is the exit

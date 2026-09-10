@@ -35,8 +35,8 @@ pub(crate) fn build_class_terms(classes: &[(String, String)]) -> Vec<Term> {
         .collect()
 }
 
-/// Build ETF terms for the `referenced_aliases` response field (ADR 0108
-/// hot-reload re-check trigger, BT-2899) — every alias name this compile's
+/// Build ETF terms for the `referenced_aliases` response field (the ADR 0108
+/// hot-reload re-check trigger) — every alias name this compile's
 /// annotations transitively depended on
 /// (`AnalysisResult::referenced_aliases`, already sorted/deduplicated
 /// there), as a plain list of binaries. The Erlang side
@@ -59,9 +59,9 @@ pub(crate) fn ok_response(core_erlang: &str, warnings: &[String]) -> Term {
 }
 
 /// Build a response map for a successful inline class definition in REPL.
-/// BT-885: `trailing_core_erlang` is Some when trailing expressions follow the class body.
-/// `referenced_aliases` (ADR 0108 hot-reload re-check trigger, BT-2899 /
-/// BT-2952 follow-up) mirrors `compile_ok_response`'s field of the same
+/// `trailing_core_erlang` is Some when trailing expressions follow the class body.
+/// `referenced_aliases` (the ADR 0108 hot-reload re-check trigger)
+/// mirrors `compile_ok_response`'s field of the same
 /// name — every alias name this class's own method-signature annotations
 /// transitively depended on, so the Erlang side can register the same
 /// `beamtalk_alias_xref` dependency edges a file-defining compile gets.
@@ -98,7 +98,7 @@ pub(crate) fn class_definition_ok_response(
 }
 
 /// Compute the declared signature (return type + parameter types) of a method
-/// definition for the ADR 0105 Phase 1 signature-generation store (BT-2777).
+/// definition for the ADR 0105 Phase 1 signature-generation store.
 ///
 /// Uses `TypeAnnotation::type_name()` — the same canonical string rendering
 /// the class hierarchy already uses for declared state/method types — so the
@@ -165,7 +165,7 @@ pub(crate) fn method_definition_ok_response(
             },
         ),
         (atom("method_source"), binary(method_source)),
-        // ADR 0105 Phase 1 (BT-2777): the compiled method's declared signature,
+        // ADR 0105 Phase 1: the compiled method's declared signature,
         // carried so the workspace can capture it into the signature-generation
         // store before the patch installs (the pre-patch signature is otherwise
         // unrecoverable — see beamtalk_object_class.erl's put_method/4 clearing).
@@ -178,10 +178,10 @@ pub(crate) fn method_definition_ok_response(
     ]))
 }
 
-/// Build a response map for a successful protocol definition in REPL (BT-1612).
+/// Build a response map for a successful protocol definition in REPL.
 ///
-/// `referenced_aliases` (ADR 0108 hot-reload re-check trigger, BT-2899 /
-/// BT-2917 follow-up) mirrors `compile_ok_response`'s field of the same
+/// `referenced_aliases` (the ADR 0108 hot-reload re-check trigger)
+/// mirrors `compile_ok_response`'s field of the same
 /// name — every alias name this protocol's own method-signature annotations
 /// transitively depended on, so the Erlang side can register the same
 /// `beamtalk_alias_xref` dependency edges a class-defining compile gets.
@@ -211,7 +211,7 @@ pub(crate) fn protocol_definition_ok_response(
 }
 
 /// Build a response map for a successful `type Name = ...` declaration in
-/// the REPL (ADR 0108 Phase 8, BT-2902).
+/// the REPL (ADR 0108 Phase 8).
 ///
 /// No `core_erlang`/bytecode: an alias erases entirely at annotation
 /// resolution and has no runtime representation to compile (ADR 0108
@@ -307,7 +307,7 @@ pub(crate) fn compile_method_ok_response(
         ),
         (atom("method_source"), binary(method_source)),
         (atom("merged_class_source"), binary(merged_class_source)),
-        // ADR 0105 Phase 1 (BT-2777): see method_definition_ok_response's doc
+        // ADR 0105 Phase 1: see method_definition_ok_response's doc
         // comment for why this is carried (signature-generation store capture).
         (atom("return_type"), binary(return_type)),
         (atom("param_types"), build_param_type_terms(param_types)),
@@ -463,7 +463,7 @@ pub(crate) fn diagnostic_error_response(
 /// patched method, matching the snippet the user is editing rather than the line in
 /// the whole class. A diagnostic whose span lands outside the patched method (a
 /// rarer class-context error) keeps its merged-source line, which is accurate and
-/// in-range (BT-2563 #2).
+/// in-range.
 pub(crate) fn compile_method_diagnostic_response(
     diagnostics: &[&beamtalk_core::source_analysis::Diagnostic],
     merged_class_source: &str,

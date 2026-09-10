@@ -6,7 +6,7 @@
 use super::*;
 
 // ========================================================================
-// BT-571: Standalone Method Definition Tests
+// Standalone Method Definition Tests
 // ========================================================================
 
 #[test]
@@ -81,7 +81,7 @@ fn multiple_standalone_method_definitions() {
 
 #[test]
 fn standalone_method_definition_keyword_typed_param() {
-    // Regression: BT-1151 — is_keyword_method_selector_at must handle typed params
+    // Regression: is_keyword_method_selector_at must handle typed params
     // just like is_keyword_method_at; without the shared helper this was missed.
     let module = parse_ok("Counter >> setValue: v :: Integer => self.value := v");
     assert_eq!(module.method_definitions.len(), 1);
@@ -109,7 +109,7 @@ fn standalone_method_definition_keyword_union_typed_param_lookahead() {
     );
 }
 
-// --- BT-1519: Extension type annotation syntax (:: -> ReturnType) ---
+// --- Extension type annotation syntax (:: -> ReturnType) ---
 
 #[test]
 fn standalone_method_unary_return_type_arrow() {
@@ -394,7 +394,7 @@ fn parse_non_typed_class_defaults_false() {
 }
 
 // ========================================================================
-// BT-919: Cast (!) statement terminator tests
+// Cast (!) statement terminator tests
 // ========================================================================
 
 #[test]
@@ -545,7 +545,7 @@ fn parse_cascade_with_bang_is_error() {
 }
 
 // =========================================================================
-// BT-948: Unnecessary period separator warnings
+// Unnecessary period separator warnings
 // =========================================================================
 
 /// Helper to extract only lint diagnostics from a parse.
@@ -638,7 +638,7 @@ fn module_level_period_does_not_lint() {
 }
 
 // ========================================================================
-// Comment attachment tests (BT-975)
+// Comment attachment tests
 // ========================================================================
 
 #[test]
@@ -741,7 +741,7 @@ fn state_declaration_line_comment_attached() {
 }
 
 // ========================================================================
-// ExpressionStatement comment attachment tests (BT-976)
+// ExpressionStatement comment attachment tests
 // ========================================================================
 
 #[test]
@@ -1011,7 +1011,7 @@ fn parse_method_preserves_leading_section_banner() {
 
 // `parse_method_unparse_drops_banner_keeps_doc` and
 // `parse_method_roundtrip_is_idempotent` moved to `crate::unparse`'s own test
-// tree (BT-3346, ADR 0117 Phase 4) — both round-trip through `unparse_method`,
+// tree (ADR 0117 Phase 4) — both round-trip through `unparse_method`,
 // which `source_analysis`'s test tree no longer references.
 
 #[test]
@@ -1040,12 +1040,12 @@ fn parse_method_rejects_trailing_tokens() {
 }
 
 // ========================================================================
-// BT-2829: declaration-level `@expect` after a preceding method
+// Declaration-level `@expect` after a preceding method
 // ========================================================================
 
 #[test]
 fn declaration_level_expect_after_prior_method_attaches_to_next_method() {
-    // Regression test for a parser bug found while implementing BT-2829:
+    // Regression:
     // `parse_method_body`'s statement loop didn't stop at a leading `@expect`
     // (col <= 2, the same boundary a fresh method/state declaration sits at),
     // so it swallowed the directive as a trailing statement of the *preceding*
@@ -1116,7 +1116,7 @@ fn standalone_method_statement_level_expect_inside_body_still_works() {
 
 #[test]
 fn synthetic_wrap_shape_body_level_expect_is_not_declaration_level() {
-    // Regression test for BT-3223: `method_source_walker::find_all_sends_in_source`
+    // Regression: `method_source_walker::find_all_sends_in_source`
     // (and `find_all_references_in_source`) reparse a method's bare,
     // unparsed source through a synthetic wrapper —
     // `Object subclass: __SyntheticAllSendsScope\n<method text>` — where the
@@ -1228,18 +1228,18 @@ fn declaration_level_expect_does_not_strand_preceding_plain_comment() {
 
 #[test]
 fn declaration_level_expect_preserves_leading_blank_line_with_own_comment() {
-    // BT-2944 regression test for `PendingDeclarationExpect::apply_to`.
+    // Regression test for `PendingDeclarationExpect::apply_to`.
     // When the destination declaration has its *own* leading comment
     // sandwiched between `@expect` and itself, `comments.is_empty()` is
     // `false`, so `apply_to` keeps the destination's own `CommentAttachment`
-    // instead of replacing it wholesale with the `@expect` token's. Before
-    // the BT-2944 fix, that meant the blank line preceding `@expect` (i.e.
+    // instead of replacing it wholesale with the `@expect` token's. Without
+    // this, the blank line preceding `@expect` (i.e.
     // separating the whole `@expect`-annotated method from the previous
-    // one) was silently discarded along with the rest of `self.comments`.
+    // one) would be silently discarded along with the rest of `self.comments`.
     //
     // No unparser reads `leading_blank_line` on a class-member
     // `CommentAttachment` yet (only top-level class/protocol/type-alias
-    // declarations — see BT-2944), so this asserts directly on the parsed
+    // declarations), so this asserts directly on the parsed
     // AST rather than through a format round-trip.
     let module = parse_ok(
         "typed Object subclass: Foo\n\

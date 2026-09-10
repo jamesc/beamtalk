@@ -133,7 +133,7 @@ mod tests {
         assert!(!is_with_star_selector("withCounter"));
     }
 
-    /// BT-3090: `with_star_selector` has a hand-rolled Erlang mirror,
+    /// `with_star_selector` has a hand-rolled Erlang mirror,
     /// `beamtalk_recheck:with_star_selector/1`
     /// (`runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl`), needed
     /// because the workspace app cannot depend on this Rust crate. A shared

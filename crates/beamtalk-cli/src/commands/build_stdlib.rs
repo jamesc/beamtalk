@@ -93,7 +93,7 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     // Compiler options: stdlib mode enabled
     let options = stdlib_compiler_options(warnings_as_errors);
 
-    // BT-295 / ADR 0007 Phase 3: Build primitive binding table from ALL stdlib sources.
+    // ADR 0007 Phase 3: Build primitive binding table from ALL stdlib sources.
     // This is used during compilation so that @primitive expressions in method bodies
     // can reference the runtime dispatch modules.
     info!("Building primitive binding table from stdlib sources");
@@ -109,9 +109,9 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     // get proper type inference instead of Dynamic (ADR 0075).
     let native_type_registry = extract_stdlib_type_specs();
 
-    // BT-2935: live same-run alias pre-pass — see its doc for why.
+    // Live same-run alias pre-pass — see its doc for why.
     let alias_sources = collect_stdlib_alias_sources(&source_files)?;
-    // BT-3034: live same-run protocol pre-pass, mirroring the alias pre-pass
+    // Live same-run protocol pre-pass, mirroring the alias pre-pass
     // immediately above — see `collect_stdlib_protocol_infos`'s doc for why.
     let protocol_infos = collect_stdlib_protocol_infos(&source_files);
     let compile_ctx = CompileContext {
@@ -141,7 +141,7 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         .compile_batch(&core_files)
         .wrap_err("Failed to compile stdlib Core Erlang to BEAM")?;
 
-    // BT-2938: `{type_aliases, [...]}` `.app`/`.app.src` env metadata — the
+    // `{type_aliases, [...]}` `.app`/`.app.src` env metadata — the
     // same `build_alias_metadata` extraction the ordinary `beamtalk build`
     // pipeline already uses (`build.rs`'s `ClassIndexResult::all_alias_infos`
     // call site), independently re-parsing `source_files` for doc
@@ -176,7 +176,7 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         &alias_source_texts_sorted_by_name(alias_sources),
     )?;
 
-    // BT-3085: Generate the Erlang-side twin of the same builtin-class list,
+    // Generate the Erlang-side twin of the same builtin-class list,
     // replacing the hand-typed `beamtalk_class_metadata:all_builtins/0` table.
     generate_erlang_builtins_hrl(&class_metadata)?;
 
@@ -228,15 +228,15 @@ fn compile_all_stdlib_files(
         // Extract class metadata (class_name, superclass) before compilation
         let meta = extract_class_metadata(source_file, &module_name)?;
 
-        // BT-3435 (ADR 0119 step 2): validate the file-stem-derived
+        // ADR 0119 step 2: validate the file-stem-derived
         // `module_name` (computed above by `module_name_from_path`, from the
         // file's path alone) against the closed-form name a real parse of
         // the class would produce. The stdlib arm never becomes a free
         // lookup — the Erlang runtime derives `bt@stdlib@{snake}` closed-form
         // with no registry to consult (ADR 0119 Context) — so this doesn't
-        // change what module a stdlib class compiles to; it catches the
-        // BT-3432 bug shape (a `.bt` file renamed without renaming, or vice
-        // versa, the class it declares) at `build-stdlib` time instead of
+        // change what module a stdlib class compiles to; it catches a
+        // mismatched-rename bug shape (a `.bt` file renamed without renaming,
+        // or vice versa, the class it declares) at `build-stdlib` time instead of
         // silently trusting the file stem.
         beamtalk_core::semantic_analysis::validate_stdlib_module_name(
             &meta.class_name,
@@ -294,7 +294,7 @@ fn clean_ebin_dir(ebin_dir: &Utf8Path) -> Result<()> {
 /// pointing nowhere useful); callers should treat that as "force rebuild to
 /// be safe", same as any other missing-input case in this file.
 ///
-/// Split out from `is_stdlib_up_to_date` itself (BT-3357) so the directory
+/// Split out from `is_stdlib_up_to_date` itself so the directory
 /// *list* is an injectable parameter there: this function's real-filesystem
 /// discovery (`beamtalk_cli::repl_startup::find_runtime_dir_with_layout`) has
 /// no test seam of its own, but `is_stdlib_up_to_date` no longer needs one —
@@ -614,7 +614,7 @@ struct ClassMeta {
     /// Declared type annotations for state fields (field name → type).
     state_types: Vec<(String, DeclaredType)>,
     /// Which state fields have an explicit default value (field name → has default).
-    /// BT-1976: Carries cross-file default-value presence so downstream
+    /// Carries cross-file default-value presence so downstream
     /// consumers can identify typed-no-default fields without the AST.
     state_has_default: Vec<(String, bool)>,
     /// Instance method signatures.
@@ -840,14 +840,14 @@ fn mark_spawns_for_selectors(
 
 /// Mark Timer class methods that spawn their block argument in a separate BEAM process.
 ///
-/// BT-1312: replaces hardcoded list in `validators.rs` so the self-capture validator
+/// Replaces hardcoded list in `validators.rs` so the self-capture validator
 /// can skip false-positive warnings.
 fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
     mark_spawns_for_selectors(class_methods, &["after:do:", "every:do:"], "Timer")
 }
 
 /// Mark `Parallel` class methods that spawn their block arguments in separate
-/// BEAM processes (BT-2974).
+/// BEAM processes.
 ///
 /// Feeds the `spawns_block_selectors()` metadata a future lint uses to warn when
 /// a synchronous `self` send appears inside a spawned-block argument (deadlock
@@ -858,7 +858,7 @@ fn mark_parallel_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
 }
 
 /// Mark `Collection>>parallelCollect:` and `parallelCollect:maxConcurrency:`
-/// as spawning their block argument (BT-2974, BT-3006 follow-up) — both
+/// as spawning their block argument — both
 /// delegate to `Parallel all:` under the hood (directly, or via the internal
 /// `runChunked:maxConcurrency:` helper), same rationale as
 /// `mark_parallel_spawns`. The internal `runChunked:...` helpers are not
@@ -875,11 +875,11 @@ fn mark_parallel_collect_spawns(methods: &mut [MethodMeta]) -> Result<()> {
 }
 
 /// A single stdlib type-alias declaration collected by
-/// `collect_stdlib_alias_sources` (BT-2935), carrying both its
+/// `collect_stdlib_alias_sources`, carrying both its
 /// reconstructed `AliasInfo` (for immediately seeding *this* run's own
 /// `pre_loaded_aliases`) and its exact declaration source text (for
 /// persisting into `generated_builtins.rs`, so a consumer with no direct
-/// access to `stdlib/src/*.bt` — e.g. a REPL/workspace session, BT-2938 —
+/// access to `stdlib/src/*.bt` — e.g. a REPL/workspace session —
 /// can still reconstruct it later via
 /// `ClassHierarchy::generated_stdlib_aliases`).
 struct AliasSource {
@@ -888,7 +888,7 @@ struct AliasSource {
 }
 
 /// Scans every stdlib source file for `type Name = ...` declarations,
-/// reconstructing each into an `AliasSource` immediately (BT-2935).
+/// reconstructing each into an `AliasSource` immediately.
 ///
 /// **Why a live, same-run pre-pass — not a seed from
 /// `ClassHierarchy::generated_stdlib_aliases`'s persisted snapshot** (the
@@ -934,34 +934,35 @@ fn collect_stdlib_alias_sources(source_files: &[Utf8PathBuf]) -> Result<Vec<Alia
 }
 
 /// Scans every stdlib source file for `Protocol define: ...` declarations,
-/// extracting each into a `ProtocolInfo` immediately (BT-3034).
+/// extracting each into a `ProtocolInfo` immediately.
 ///
 /// **Why a live, same-run pre-pass — mirroring [`collect_stdlib_alias_sources`]
-/// (BT-2935) exactly:** before this fix, `build_stdlib()`'s `CompileContext`
-/// seeded `pre_loaded_aliases` from a live scan but left `pre_loaded_protocols`
-/// at its `Vec::default()`, so a stdlib file compiled with a `:: SomeProtocol`
-/// type annotation referencing a protocol declared in *another* stdlib file
-/// (e.g. `console.bt`/`json.bt`'s `:: Printable` parameters, with `Printable`
-/// declared in `printable.bt`) could never see that protocol as resolved —
-/// each file is compiled independently, with only this pre-pass's output as
-/// its window into the rest of stdlib.
+/// exactly:** `build_stdlib()`'s `CompileContext` seeds `pre_loaded_aliases`
+/// from a live scan; without an equivalent live scan for protocols,
+/// `pre_loaded_protocols` would sit at its `Vec::default()`, so a stdlib file
+/// compiled with a `:: SomeProtocol` type annotation referencing a protocol
+/// declared in *another* stdlib file (e.g. `console.bt`/`json.bt`'s
+/// `:: Printable` parameters, with `Printable` declared in `printable.bt`)
+/// could never see that protocol as resolved — each file is compiled
+/// independently, with only this pre-pass's output as its window into the
+/// rest of stdlib.
 ///
-/// That degrades *silently*, with no diagnostic at all — not even a
+/// That would degrade *silently*, with no diagnostic at all — not even a
 /// warning: `build_stdlib()` never sets `pre_loaded_classes` either, so
 /// `has_cross_file_classes` is always `false` for every stdlib compile,
 /// which gates off `check_unresolved_classes` entirely (see its call site's
 /// doc in `semantic_analysis/mod.rs` — "only check ... when cross-file
-/// metadata has been loaded"). So a missing `Printable` registration was
-/// never going to surface as an `UnresolvedClass` diagnostic in this
-/// pipeline in the first place. The actual damage is one level deeper: the
-/// type checker's `check_protocol_argument_conformance` (BT-1928,
-/// `type_checker/validation.rs`) short-circuits with
+/// metadata has been loaded"). So a missing `Printable` registration would
+/// never surface as an `UnresolvedClass` diagnostic in this
+/// pipeline in the first place. The actual damage would be one level deeper: the
+/// type checker's `check_protocol_argument_conformance`
+/// (`type_checker/validation.rs`) short-circuits with
 /// `let Some(_protocol) = protocol_registry.get(base_protocol) else { return; }`
 /// whenever the named protocol isn't registered — so with `Printable`
 /// unregistered, structural protocol-conformance checking on every
-/// `Printable`-typed argument anywhere in stdlib was silently skipped
-/// (never verifying, never warning), which is exactly the "silently
-/// degrade to unresolved" failure mode this issue describes. Nothing short
+/// `Printable`-typed argument anywhere in stdlib would be silently skipped
+/// (never verifying, never warning): a silent degrade-to-unresolved failure
+/// mode. Nothing short
 /// of an explicit `pre_loaded_protocols`/`ProtocolRegistry` inspection
 /// (see this function's regression test) makes the gap visible; no build
 /// flag, including `--warnings-as-errors`, could ever have caught it.
@@ -1003,7 +1004,7 @@ fn collect_stdlib_protocol_infos(
 
 /// The `CompilerOptions` every stdlib compile in [`build_stdlib`] runs with.
 ///
-/// BT-2964: `current_package` is `Some("stdlib")`, matching the
+/// `current_package` is `Some("stdlib")`, matching the
 /// `package: Some("stdlib")` stamp on [`stdlib_pre_loaded_aliases`]'s entries
 /// (and [`generate_class_entry`]'s `ClassInfo`s) and the LSP's
 /// `STDLIB_PACKAGE_MARKER` — without it, `None` would make
@@ -1052,7 +1053,7 @@ fn alias_source_texts_sorted_by_name(mut alias_sources: Vec<AliasSource>) -> Vec
 }
 
 /// Extracts every `type Name = ...` declaration in a `.bt` file as verbatim
-/// source text (BT-2935), one string per alias.
+/// source text, one string per alias.
 ///
 /// Slices each declaration's exact span out of the original source rather
 /// than reconstructing it from the parsed `TypeAnnotation` — see
@@ -1170,7 +1171,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         mark_timer_spawns(&mut class_methods)?;
     }
 
-    // Mark Parallel/Collection methods that spawn their block argument(s) (BT-2974)
+    // Mark Parallel/Collection methods that spawn their block argument(s)
     if class_name == "Parallel" {
         mark_parallel_spawns(&mut class_methods)?;
     }
@@ -1275,14 +1276,14 @@ fn format_sorted_atom_list(names: &[String]) -> String {
 /// Lists all modules and embeds class hierarchy metadata in the `env` section.
 /// The metadata is used by `beamtalk_stdlib` to load modules in dependency order.
 ///
-/// **`type_aliases` env key (ADR 0108 Phase 8, BT-2903/BT-2938):** mirrors
+/// **`type_aliases` env key (ADR 0108 Phase 8):** mirrors
 /// [`super::app_file::generate_app_file`] (the real `beamtalk build`
 /// pipeline), which emits `{type_aliases, [...]}` via
 /// [`super::build::build_alias_metadata`] + [`app_file::format_type_aliases_entry`].
 /// Without this key, `application:get_env(beamtalk_stdlib, type_aliases)`
 /// returns `undefined` forever, so neither `browse-type-aliases`
 /// (`beamtalk_repl_ops_browse.erl`) nor the REPL/workspace session's
-/// alias-seeding path (`beamtalk_repl_state:new/3`, BT-2938) can ever learn
+/// alias-seeding path (`beamtalk_repl_state:new/3`) can ever learn
 /// stdlib's own `type Name = ...` declarations.
 fn generate_app_file(
     ebin_dir: &Utf8Path,
@@ -1301,10 +1302,10 @@ fn generate_app_file(
     // ADR 0070 Phase 4: Generate extended class hierarchy entries for env
     let classes_list = format_stdlib_classes_list(class_metadata, ",\n                    ");
 
-    // BT-1766: Protocol-only modules need to be loaded separately during stdlib init
+    // Protocol-only modules need to be loaded separately during stdlib init
     let protocol_modules_list = format_sorted_atom_list(protocol_modules);
 
-    // BT-2938: same `{type_aliases, [...]}` entry the ordinary `beamtalk
+    // Same `{type_aliases, [...]}` entry the ordinary `beamtalk
     // build` pipeline emits (`app_file::format_type_aliases_entry`) — empty
     // string (no key at all) when stdlib declares no aliases.
     let type_aliases_entry = app_file::format_type_aliases_entry(alias_metadata);
@@ -1336,7 +1337,7 @@ fn generate_app_file(
 /// Generate/update the `.app.src` file so rebar3 picks up the classes metadata.
 ///
 /// The `.app.src` uses `{modules, []}` (rebar3 auto-fills modules) but embeds
-/// the `{classes, [...]}` and (BT-2938) `{type_aliases, [...]}` envs for the
+/// the `{classes, [...]}` and `{type_aliases, [...]}` envs for the
 /// runtime to read via `application:get_env`.
 fn generate_app_src_file(
     src_dir: &Utf8Path,
@@ -1347,10 +1348,10 @@ fn generate_app_src_file(
     // ADR 0070 Phase 4: Generate extended class hierarchy entries for env
     let classes_list = format_stdlib_classes_list(class_metadata, ",\n            ");
 
-    // BT-1766: Protocol-only modules need to be loaded separately during stdlib init
+    // Protocol-only modules need to be loaded separately during stdlib init
     let protocol_modules_list = format_sorted_atom_list(protocol_modules);
 
-    // BT-2938: see `generate_app_file`'s doc.
+    // See `generate_app_file`'s doc.
     let type_aliases_entry = app_file::format_type_aliases_entry(alias_metadata);
 
     let app_src_content = format!(
@@ -1382,7 +1383,7 @@ fn generate_app_src_file(
 const GENERATED_BUILTINS_PATH: &str =
     "crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs";
 
-/// Default path for the generated Erlang builtin-class-list header (BT-3085).
+/// Default path for the generated Erlang builtin-class-list header.
 const GENERATED_BUILTINS_HRL_PATH: &str =
     "runtime/apps/beamtalk_runtime/include/beamtalk_generated_builtins.hrl";
 
@@ -1391,7 +1392,7 @@ const GENERATED_BUILTINS_HRL_PATH: &str =
 /// when a stdlib build produces byte-identical output.
 ///
 /// Shared by `generate_builtins_rs` and `generate_erlang_builtins_hrl`, which
-/// otherwise each hand-rolled this exact read-compare-write dance (BT-3357).
+/// otherwise each hand-rolled this exact read-compare-write dance.
 /// Taking `dest` as a parameter — rather than each caller reading its own
 /// hardcoded `GENERATED_*_PATH` constant internally — is also what makes this
 /// unit-testable: real call sites still pass the hardcoded constants, but
@@ -1418,10 +1419,10 @@ fn write_generated_file_if_changed(dest: &Utf8Path, content: &str) -> Result<()>
 /// type-alias metadata.
 ///
 /// This produces a Rust source file that defines `generated_builtin_classes()`,
-/// `is_generated_builtin_class()`, and (BT-2935) `generated_stdlib_alias_sources()`,
+/// `is_generated_builtin_class()`, and `generated_stdlib_alias_sources()`,
 /// replacing the hand-written tables in `builtins.rs`.
 ///
-/// **BT-2935 design decision — how a stdlib `type Name = ...` alias is
+/// **Design decision — how a stdlib `type Name = ...` alias is
 /// persisted here:** `AliasInfo::annotation` is a full, recursive
 /// `TypeAnnotation` AST (unions, generics, `\`/`&`, nested `Box`es, `Span`s
 /// on every node) — nothing like `ClassInfo`/`MethodInfo`'s flat
@@ -1520,7 +1521,7 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) 
 
     code.push_str("    classes\n}\n");
 
-    // Generate generated_stdlib_alias_sources() (BT-2935) — see this
+    // Generate generated_stdlib_alias_sources() — see this
     // function's own doc for the source-text-persisted-and-reparsed design.
     generate_alias_sources_section(&mut code, alias_sources);
 
@@ -1529,7 +1530,7 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) 
 }
 
 /// Generate the `beamtalk_generated_builtins.hrl` Erlang header from parsed
-/// stdlib class metadata (BT-3085).
+/// stdlib class metadata.
 ///
 /// Defines `?BEAMTALK_GENERATED_BUILTIN_CLASSES`, the Erlang-side twin of
 /// `generated_builtins.rs`'s `is_generated_builtin_class` match arms — both
@@ -1645,7 +1646,7 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
         code.push_str("]),\n");
     }
 
-    // BT-1976: state_has_default — used by gen_server post-initialize
+    // state_has_default — used by gen_server post-initialize
     // validation to identify typed-no-default inherited fields without the AST.
     if meta.state_has_default.is_empty() {
         code.push_str("            state_has_default: HashMap::new(),\n");
@@ -1709,7 +1710,7 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
     code.push_str("        },\n    );\n\n");
 }
 
-/// Emit the `generated_stdlib_alias_sources()` function body (BT-2935): one
+/// Emit the `generated_stdlib_alias_sources()` function body: one
 /// `&'static str` literal per stdlib type-alias declaration, in the order
 /// given by `alias_sources`.
 ///
@@ -1780,8 +1781,8 @@ fn generate_superclass_type_args(code: &mut String, args: &[DeclaredType], type_
 
 /// Serialise a [`DeclaredType`] into a Rust source expression that
 /// reconstructs it verbatim — the structured counterpart to stringifying via
-/// `Display` and re-parsing on read. Mirrors every `DeclaredType` variant
-/// (BT-3076 stage 3b.2): `Simple`/`Singleton`/`Generic`/`Union` go through
+/// `Display` and re-parsing on read. Mirrors every `DeclaredType` variant:
+/// `Simple`/`Singleton`/`Generic`/`Union` go through
 /// the compact constructors added for this purpose
 /// ([`DeclaredType::simple`], etc.); the remaining variants (`FalseOr`,
 /// `Difference`, `Intersection`, `SelfType`, `SelfClass`, `ClassOf`) are rare
@@ -1920,7 +1921,7 @@ mod tests {
         (temp, dir)
     }
 
-    /// BT-2935: End-to-end regression fixture for stdlib's own cross-file
+    /// End-to-end regression fixture for stdlib's own cross-file
     /// type-alias resolution, proving the full round trip
     /// `build_stdlib.rs` relies on: `collect_stdlib_alias_sources` (a live,
     /// same-run pre-pass — *not* a seed from a previously-persisted
@@ -1928,7 +1929,7 @@ mod tests {
     /// → `ClassHierarchyContext::pre_loaded_aliases` → cross-file resolution
     /// during a real compile, in the very same run the alias was first
     /// declared in. Mirrors the shape of `build.rs`'s
-    /// `test_cross_file_alias_resolution_no_false_type_mismatch` (BT-2928),
+    /// `test_cross_file_alias_resolution_no_false_type_mismatch`,
     /// adapted to `build_stdlib`'s own manifest-less compile path
     /// (`compile_source_with_bindings`, no package/`build_class_module_index`).
     #[test]
@@ -1947,8 +1948,8 @@ mod tests {
 
         // File 2: consumes A's alias-typed return value as an argument to a
         // parameter typed with the spelled-out equivalent union — the exact
-        // shape of the real `RestartStrategy`/`Timeout` stdlib bug this issue
-        // fixes (BT-2923).
+        // shape of the real `RestartStrategy`/`Timeout` stdlib bug this
+        // fixture guards against.
         fs::write(
             lib_dir.join("AliasFixtureB.bt"),
             "Object subclass: AliasFixtureB\n  \
@@ -2021,9 +2022,9 @@ mod tests {
         );
 
         // Negative control: WITHOUT pre_loaded_aliases (but still with
-        // pre_loaded_classes), the same compile reproduces the pre-BT-2935
-        // false positive — proving this test actually exercises the fix
-        // rather than a scenario that never warned.
+        // pre_loaded_classes), the same compile reproduces the false
+        // positive cross-file alias resolution fixes — proving this test
+        // actually exercises the fix rather than a scenario that never warned.
         let core_file_unfixed = lib_dir.join("b_unfixed.core");
         let diagnostics_unfixed = compile_source_with_bindings(
             &file_b,
@@ -2034,7 +2035,7 @@ mod tests {
             &CompileContext {
                 hierarchy: ClassHierarchyContext {
                     pre_loaded_classes,
-                    // No pre_loaded_aliases — reproduces the pre-fix gap.
+                    // No pre_loaded_aliases — reproduces the unresolved-alias gap.
                     ..ClassHierarchyContext::default()
                 },
                 ..CompileContext::default()
@@ -2052,7 +2053,7 @@ mod tests {
         );
     }
 
-    /// BT-2964: an `internal type` stdlib alias must resolve cross-file
+    /// An `internal type` stdlib alias must resolve cross-file
     /// *within* stdlib. `stdlib_pre_loaded_aliases` stamps every entry
     /// `package: Some("stdlib")` and `build_stdlib()`'s `CompilerOptions`
     /// set `current_package: Some("stdlib")` to match —
@@ -2094,7 +2095,7 @@ mod tests {
         let pre_loaded_aliases = stdlib_pre_loaded_aliases(&alias_sources);
         assert_eq!(pre_loaded_aliases[0].package.as_deref(), Some("stdlib"));
 
-        // BT-2965: `build.rs`'s `package_identity` names the *other* stdlib
+        // `build.rs`'s `package_identity` names the *other* stdlib
         // compile path — manifest-less `beamtalk build --stdlib-mode <dir>`,
         // what `just dialyzer-specs` runs — with `STDLIB_PACKAGE_MARKER`. The
         // literal hardcoded here and that constant must stay the same string,
@@ -2179,7 +2180,7 @@ mod tests {
         );
     }
 
-    /// BT-3034: End-to-end regression fixture for stdlib's own cross-file
+    /// End-to-end regression fixture for stdlib's own cross-file
     /// protocol resolution, mirroring
     /// `test_internal_alias_resolves_cross_file_within_stdlib`/
     /// `test_cross_file_alias_resolution_seeds_pre_loaded_aliases` above but
@@ -2194,14 +2195,13 @@ mod tests {
     /// This is the exact shape of the real stdlib bug: `console.bt`/`json.bt`
     /// reference `Printable` (declared in `printable.bt`) in a `::
     /// Printable` parameter annotation — a different file entirely, compiled
-    /// independently. Before this fix, `ProtocolRegistry::has_protocol` for a
-    /// cross-file protocol name was always `false` while compiling any other
+    /// independently. Without this pre-pass, `ProtocolRegistry::has_protocol` for a
+    /// cross-file protocol name is always `false` while compiling any other
     /// stdlib file, which — per `check_protocol_argument_conformance`'s early
     /// return when `protocol_registry.get(name)` is `None` — makes structural
     /// protocol-conformance checking on `Printable`-typed arguments silently
     /// a no-op *everywhere* in stdlib, with no diagnostic at all (not even a
-    /// warning): the exact "silently degrade to unresolved" failure mode
-    /// BT-3034 describes. That's why this test asserts on
+    /// warning): a silent degrade-to-unresolved failure mode. That's why this test asserts on
     /// `protocol_registry.has_protocol` directly instead of scanning for a
     /// diagnostic message — there is no diagnostic to find; the whole point
     /// of the bug is that the check never ran.
@@ -2290,8 +2290,8 @@ mod tests {
              file B's own protocol registry"
         );
 
-        // Negative control: WITHOUT pre_loaded_protocols (the pre-BT-3034
-        // gap), the cross-file protocol never gets registered — proving the
+        // Negative control: WITHOUT pre_loaded_protocols, the cross-file
+        // protocol never gets registered — proving the
         // assertion above exercises the fix rather than a tautology.
         let result_unfixed = beamtalk_core::semantic_analysis::analyse_full(
             &module_b,
@@ -2553,7 +2553,7 @@ mod tests {
 
         let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
         assert!(content.contains("{modules, []}"));
-        // BT-2938: no type-alias metadata => no `type_aliases` env key at all
+        // No type-alias metadata => no `type_aliases` env key at all
         // (matches `format_type_aliases_entry`'s empty-input contract).
         assert!(!content.contains("type_aliases"));
     }
@@ -3051,16 +3051,16 @@ mod tests {
             .to_owned()
     }
 
-    /// BT-3033: `beamtalk_primitive:is_string_binary_shared_selector/1` hand-lists
+    /// `beamtalk_primitive:is_string_binary_shared_selector/1` hand-lists
     /// the `binary.bt` instance selectors that `string.bt` inherits unchanged
     /// (byte-level primitives, safe to dispatch without the `is_utf8/1` scan).
     /// This test recomputes that set from the real `.bt` sources — Binary's own
     /// instance selectors minus whatever String redefines — and fails if it
     /// drifts from the hardcoded Erlang list, so a future edit to either file
     /// that changes the override relationship is caught here instead of
-    /// silently reintroducing BT-2999-style misdispatch.
+    /// silently reintroducing a binary/string dispatch mismatch.
     ///
-    /// BT-3049: this only sees overrides made by editing `binary.bt`/`string.bt`
+    /// This only sees overrides made by editing `binary.bt`/`string.bt`
     /// directly — it has no visibility into selectors added via the `extend`
     /// mechanism (ADR 0066), which lives in separate extension sources, not the
     /// class bodies this test parses. That's a known, currently-low-risk gap
@@ -3119,7 +3119,7 @@ mod tests {
         );
     }
 
-    // --- BT-3351: is_stdlib_up_to_date / oldest_mtime_in_dir ---
+    // --- is_stdlib_up_to_date / oldest_mtime_in_dir ---
     //
     // `is_stdlib_up_to_date` also checks the real compiler binary
     // (`std::env::current_exe`), which isn't injectable, so the
@@ -3127,10 +3127,10 @@ mod tests {
     // beam/source mtime far enough in the past that any real compiler binary
     // is newer.
     //
-    // BT-3357: the runtime-`.beam`-newer check used to call
+    // The runtime-`.beam`-newer check takes the runtime ebin directory list
+    // as a parameter, rather than calling
     // `beamtalk_cli::repl_startup::find_runtime_dir_with_layout()` directly,
-    // with no seam to point it at a synthetic directory. `is_stdlib_up_to_date`
-    // now takes the runtime ebin directory list as a parameter (real
+    // so tests have a seam to point it at a synthetic directory (real
     // discovery lives in `discover_runtime_ebin_dirs`, called only from the
     // real `build_stdlib()` call site) — see the `runtime_ebin` tests below
     // for both the "newer" (rebuild) and "older" (no rebuild) branches, plus
@@ -3338,13 +3338,13 @@ mod tests {
         assert_eq!(oldest_mtime_in_dir(&dir, "beam"), Some(old_time));
     }
 
-    // --- BT-3357: write_generated_file_if_changed ---
+    // --- write_generated_file_if_changed ---
     //
     // `generate_builtins_rs`/`generate_erlang_builtins_hrl` themselves still
     // write to the real hardcoded `GENERATED_BUILTINS_PATH`/
     // `GENERATED_BUILTINS_HRL_PATH` constants and aren't unit-tested directly
-    // (per CLAUDE.md's "Generated files" rule, and see BT-3357's cluster-2
-    // follow-up for the rest of their orchestration). This shared helper is
+    // (per CLAUDE.md's "Generated files" rule; their orchestration is covered
+    // separately). This shared helper is
     // where the "only write if changed" and write-error branches actually
     // live, and it takes `dest` as a parameter, so tests exercise it against
     // a temp file instead.
@@ -3404,7 +3404,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // --- BT-3351: mark_spawns_for_selectors and its Timer/Parallel/Collection callers ---
+    // --- mark_spawns_for_selectors and its Timer/Parallel/Collection callers ---
 
     fn method_meta(selector: &str) -> MethodMeta {
         MethodMeta {
@@ -3490,7 +3490,7 @@ mod tests {
         assert!(mark_parallel_collect_spawns(&mut methods).is_err());
     }
 
-    // --- BT-3351: extract_class_metadata error paths and Timer/Parallel/Collection triggers ---
+    // --- extract_class_metadata error paths and Timer/Parallel/Collection triggers ---
 
     #[test]
     fn test_extract_class_metadata_no_class_definition_errors() {
@@ -3595,7 +3595,7 @@ mod tests {
         assert!(meta.methods.iter().all(|m| m.spawns_block));
     }
 
-    // --- BT-3351: synthesize_value_auto_methods (via extract_class_metadata) ---
+    // --- synthesize_value_auto_methods (via extract_class_metadata) ---
 
     #[test]
     fn test_extract_class_metadata_value_class_generates_all_auto_methods() {
@@ -3674,7 +3674,7 @@ mod tests {
         assert!(meta.methods.iter().any(|m| m.selector == "y"));
     }
 
-    // --- BT-3351: is_protocol_only_file ---
+    // --- is_protocol_only_file ---
 
     #[test]
     fn test_is_protocol_only_file_true_for_protocol_only_source() {
@@ -3710,7 +3710,7 @@ mod tests {
         assert!(is_protocol_only_file(&missing).is_err());
     }
 
-    // --- BT-3351: collect_stdlib_protocol_infos non-fatal read errors ---
+    // --- collect_stdlib_protocol_infos non-fatal read errors ---
 
     #[test]
     fn test_collect_stdlib_protocol_infos_skips_unreadable_file() {
@@ -3724,7 +3724,7 @@ mod tests {
         assert_eq!(infos[0].name.as_str(), "Printable");
     }
 
-    // --- BT-3351: alias_source_texts_sorted_by_name ---
+    // --- alias_source_texts_sorted_by_name ---
 
     #[test]
     fn test_alias_source_texts_sorted_by_name_sorts_by_alias_name_not_raw_text() {
@@ -3747,7 +3747,7 @@ mod tests {
         assert_eq!(sorted_texts[1], "internal type Zebra = Integer");
     }
 
-    // --- BT-3351: generate_class_entry multi-item fields (separator branches) ---
+    // --- generate_class_entry multi-item fields (separator branches) ---
 
     #[test]
     fn test_generate_class_entry_multi_item_fields_use_separators() {
@@ -3788,7 +3788,7 @@ mod tests {
         ));
     }
 
-    // --- BT-3351: declared_type_to_rust_expr — every DeclaredType variant ---
+    // --- declared_type_to_rust_expr — every DeclaredType variant ---
 
     #[test]
     fn test_declared_type_to_rust_expr_covers_every_variant() {
@@ -3844,7 +3844,7 @@ mod tests {
         );
     }
 
-    // --- BT-3351: generate_method_list doc-string escaping ---
+    // --- generate_method_list doc-string escaping ---
 
     #[test]
     fn test_generate_method_list_escapes_doc_special_characters() {

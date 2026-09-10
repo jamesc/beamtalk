@@ -62,7 +62,7 @@ fn test_clean_stale_artifacts_preserves_non_bt_files() {
     assert!(build_dir.join("beamtalk_myapp_app.erl").exists());
 }
 
-// ── BT-1682 / BT-3120: Change detection tests ────────────────────
+// ── Change detection tests ────────────────────
 
 /// Helper: seed the beam-hash sidecar as if `file` was last successfully
 /// compiled at its *current* on-disk content — i.e. record today's hash
@@ -146,8 +146,8 @@ fn test_detect_changes_up_to_date() {
     let source_file = src_dir.join("counter.bt");
     write_test_file(&source_file, "counter := [0].");
     write_test_file(&build_dir.join("bt@counter.beam"), "BEAM");
-    // Record the current content hash as "what produced this .beam"
-    // (BT-3120) — without this the sidecar has no prior hash to compare
+    // Record the current content hash as "what produced this .beam" —
+    // without this the sidecar has no prior hash to compare
     // against, and the file must be recompiled once regardless of mtime.
     seed_beam_hash(&build_dir, &source_file);
 
@@ -191,7 +191,7 @@ fn test_detect_changes_source_modified() {
     assert!(result.unchanged_files.is_empty());
 }
 
-/// BT-3120: a source rewritten with identical content but a backdated (or
+/// A source rewritten with identical content but a backdated (or
 /// preserved) mtime must still be treated as up-to-date — the hash, not
 /// the mtime, is authoritative.
 #[test]
@@ -224,7 +224,7 @@ fn test_detect_changes_touch_without_change_not_recompiled() {
     assert_eq!(result.unchanged_files.len(), 1);
 }
 
-/// BT-3120: `known_hashes` (Pass 1's already-computed content hashes) must
+/// `known_hashes` (Pass 1's already-computed content hashes) must
 /// actually be consulted instead of always re-hashing from disk — proven
 /// here by seeding a deliberately wrong hash for the file and observing
 /// `detect_changes` trust it (report the file changed) even though its
@@ -270,7 +270,7 @@ fn test_detect_changes_trusts_known_hashes_over_rereading() {
     assert!(result.unchanged_files.is_empty());
 }
 
-/// BT-3120 acceptance criterion: `git checkout` restoring older content
+/// Acceptance criterion: `git checkout` restoring older content
 /// under a newer mtime must still be recompiled — mtime ordering must
 /// not be trusted.
 #[test]

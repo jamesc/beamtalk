@@ -75,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Log to stderr (stdout is the MCP stdio transport).
     // Use a reloadable filter so the MCP debug signal file can upgrade
-    // the level at runtime (BT-1441).
+    // the level at runtime.
     let default_directive = directive_for_verbosity(args.verbose);
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_directive));
@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (port, cookie, workspace_id) = resolve_port_and_cookie(&args).await?;
     tracing::info!(port, workspace_id = ?workspace_id, "Connecting to beamtalk REPL");
 
-    // Keep a copy of the workspace ID for the debug signal watcher (BT-1441).
+    // Keep a copy of the workspace ID for the debug signal watcher.
     let workspace_id_for_signal = workspace_id.clone();
 
     // Connect to REPL
@@ -113,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("Connected to REPL, starting MCP server on stdio");
 
-    // Spawn background task to watch for MCP debug signal file (BT-1441).
+    // Spawn background task to watch for MCP debug signal file.
     // The signal file is written by `Beamtalk enableDebug: #mcp` on the
     // Erlang side and tells us to switch to debug-level tracing.
     if let Some(ref ws_id) = workspace_id_for_signal {
@@ -134,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Resolve the REPL port, cookie, and workspace ID from CLI args or workspace discovery.
 ///
 /// The workspace ID is returned so the MCP client can re-read the port file
-/// on reconnect when the workspace restarts on a different port (BT-1416).
+/// on reconnect when the workspace restarts on a different port.
 async fn resolve_port_and_cookie(
     args: &Args,
 ) -> Result<(u16, String, Option<String>), Box<dyn std::error::Error>> {
@@ -192,7 +192,7 @@ async fn resolve_port_and_cookie(
 /// process exits once the workspace node is up. The node continues running
 /// detached. The assigned port is read by **streaming** `beamtalk repl` stdout
 /// line-by-line until the port line appears, rather than waiting for the pipe to
-/// reach EOF. This is essential on Windows (BT-2568): the detached BEAM
+/// reach EOF. This is essential on Windows: the detached BEAM
 /// grandchild node inherits `beamtalk repl`'s stdout pipe handle (Rust spawns
 /// children with `bInheritHandles = TRUE` and Windows has no `CLOEXEC`), so the
 /// write end stays open after `beamtalk repl` itself exits. An EOF-based read
@@ -209,8 +209,8 @@ async fn start_workspace(
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(14400); // 4 hours
 
-    // Cap the wait for `beamtalk repl` to report its port. A stuck boot now fails
-    // with a clear error instead of hanging the MCP server indefinitely (BT-2568).
+    // Cap the wait for `beamtalk repl` to report its port. A stuck boot fails
+    // with a clear error instead of hanging the MCP server indefinitely.
     let boot_timeout_secs: u64 = std::env::var("BEAMTALK_WORKSPACE_BOOT_TIMEOUT_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -307,7 +307,7 @@ async fn start_workspace(
 /// Streams the launcher's stdout line-by-line, accumulating it, and returns as
 /// soon as `parse_repl_port` matches a line — without waiting for EOF. This
 /// avoids the Windows hang where the detached BEAM grandchild keeps the stdout
-/// pipe's write end open (BT-2568). The whole read is bounded by `timeout`; on
+/// pipe's write end open. The whole read is bounded by `timeout`; on
 /// expiry, or if stdout closes before a port is seen, a clear error is returned.
 ///
 /// Output-ordering invariant: `beamtalk repl` MUST print the `Workspace: <id>`
@@ -536,7 +536,7 @@ mod tests {
     async fn read_port_from_boot_returns_on_port_line() {
         // The port line need not be the last line — the function must stop as
         // soon as it appears rather than reading on to EOF (depending on EOF is
-        // the Windows hang, BT-2568). The genuine never-EOF case is covered by
+        // the Windows hang). The genuine never-EOF case is covered by
         // read_port_from_boot_errors_on_timeout.
         let out = b"Welcome to beamtalk REPL\n\
                     Connected to REPL backend on port 9876.\n\
@@ -582,7 +582,7 @@ mod tests {
     async fn read_port_from_boot_errors_on_timeout() {
         // A stream that never closes and never emits a port line should time out
         // and return the "boot stalled" error — not hang forever. This is the
-        // Windows hazard (BT-2568): the detached BEAM grandchild holds the stdout
+        // Windows hazard: the detached BEAM grandchild holds the stdout
         // pipe open so EOF never arrives, so the deadline must bound the wait.
         use tokio::io::AsyncWriteExt;
         let (reader, mut writer) = tokio::io::duplex(256);
@@ -639,8 +639,8 @@ mod tests {
 
     /// With `--port`, the cookie comes only from the ambient `BEAMTALK_COOKIE`
     /// env var — never mutated here, since `set_var` is process-global and
-    /// unsound under a multi-threaded test runner (same approach BT-3325 took
-    /// for beamtalk-lsp's equivalent env-dependent test). The test instead
+    /// unsound under a multi-threaded test runner (same approach
+    /// `beamtalk-lsp`'s equivalent env-dependent test takes). The test instead
     /// reads whatever is ambiently set and asserts the branch that implies.
     #[tokio::test]
     async fn resolve_port_and_cookie_with_explicit_port_reflects_ambient_cookie() {

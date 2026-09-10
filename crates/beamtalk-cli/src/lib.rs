@@ -9,14 +9,14 @@
 //! - [`manifest`] — `beamtalk.toml` parsing and validation
 //! - [`build_layout`] — centralised `_build/` path construction
 //! - [`dependency_classes`] — best-effort, offline dependency class
-//!   resolution shared with `beamtalk-mcp` (BT-2823)
+//!   resolution shared with `beamtalk-mcp`
 //! - [`native_type_specs`] — Erlang FFI type-spec extraction shared with
-//!   `beamtalk-mcp` (BT-2858)
+//!   `beamtalk-mcp`
 //! - [`path_util`] — shared `normalize_path` utility (filesystem-free `.`/`..` resolution)
 //! - [`pid_liveness`] — cross-platform "is this PID alive?" check, shared
-//!   with `tests/cli_common` (BT-3077)
+//!   with `tests/cli_common`
 //! - [`repl_meta_exprs`] — REPL meta-command → Beamtalk-expression builders,
-//!   shared with `tests/repl_protocol.rs` (BT-3189)
+//!   shared with `tests/repl_protocol.rs`
 
 pub mod build_layout;
 pub mod dependency_classes;

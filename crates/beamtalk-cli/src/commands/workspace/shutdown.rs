@@ -28,7 +28,7 @@ const EXIT_PROBE_CONNECT_TIMEOUT_MS: u64 = 500;
 /// How long to wait for port release after a forced kill, in seconds.
 const FORCE_KILL_WAIT_TIMEOUT_SECS: u64 = 5;
 
-/// Send a WebSocket shutdown message to a workspace (BT-611, ADR 0020).
+/// Send a WebSocket shutdown message to a workspace (ADR 0020).
 ///
 /// Connects to the workspace's WebSocket endpoint, authenticates with the
 /// cookie, sends a `{"op":"shutdown","cookie":"..."}` message, and waits for
@@ -279,11 +279,11 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
     }
 }
 
-/// Tests for the actual stop-a-running-node logic (BT-3333): the TCP
+/// Tests for the actual stop-a-running-node logic: the TCP
 /// shutdown request/ack, the exit-wait probe, the force-kill fallback, and
-/// `stop_workspace`'s orchestration across all of the above. BT-3326 only
-/// covered the "workspace doesn't exist" error path via a CLI subprocess
-/// test (`cli_workspace.rs`) — none of the branches below had any coverage.
+/// `stop_workspace`'s orchestration across all of the above. The existing
+/// CLI-subprocess test (`cli_workspace.rs`) only covers the "workspace
+/// doesn't exist" error path — none of the branches below had any coverage.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,9 +300,9 @@ mod tests {
     /// the BEAM node actually exiting after `init:stop()`.
     ///
     /// This is another hand-rolled instance of the same ADR 0020 handshake
-    /// double as `test_support::spawn_auth_ok_server` (BT-3326/BT-3349) and
-    /// the `tokio`-async doubles in `beamtalk-lsp`/`beamtalk-mcp` — BT-3331
-    /// tracks consolidating all of these; not folded into `spawn_auth_ok_server`
+    /// double as `test_support::spawn_auth_ok_server` and
+    /// the `tokio`-async doubles in `beamtalk-lsp`/`beamtalk-mcp` — consolidating
+    /// all of these is tracked separately; not folded into `spawn_auth_ok_server`
     /// itself since none of the existing doubles model "one request then the
     /// port closes".
     fn spawn_shutdown_server(error: Option<&'static str>) -> u16 {

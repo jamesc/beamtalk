@@ -93,7 +93,7 @@ fn discover_package_corpora() -> (
     (example_corpora, class_corpora)
 }
 
-/// BT-3239: locate `class`'s on-disk `.bt` source via a `nav-symbols` round
+/// Locate `class`'s on-disk `.bt` source via a `nav-symbols` round
 /// trip, then compute its divider-grouped method categories locally.
 ///
 /// The `nav-symbols` op is the same one the LSP's `documentSymbol`
@@ -101,7 +101,7 @@ fn discover_package_corpora() -> (
 /// — reused here purely to resolve `class` -> source file path; the
 /// categorization itself runs in-process against `beamtalk-core`'s
 /// `source_analysis::categorize_methods_in_source`, the same function the
-/// static AST-walker `documentSymbol` path calls (BT-2601) — no
+/// static AST-walker `documentSymbol` path calls — no
 /// reimplementation, no second port round trip. Returns `None` (never an
 /// error) whenever nothing is computable: the class isn't in the live
 /// registry, it has no source file, the file can't be read, or the class
@@ -242,7 +242,7 @@ impl BeamtalkMcp {
         let mut call_result = CallToolResult::default();
         call_result.content = vec![ContentBlock::text(text)];
 
-        // BT-3239: for a whole-class lookup (no per-selector filter), also
+        // For a whole-class lookup (no per-selector filter), also
         // attach structured, divider-grouped method-category data —
         // "structured data, not just REPL text formatting" per the surface-
         // parity contract, since `docs`'s text content above is the exact
@@ -270,7 +270,7 @@ impl BeamtalkMcp {
         tracing::debug!(tool = "search_examples", limit = ?params.limit, "tool invoked");
         let start = std::time::Instant::now();
 
-        // BT-1722: Aggregate package corpora with the bundled corpus.
+        // Aggregate package corpora with the bundled corpus.
         let (pkg_corpora, _) = discover_package_corpora();
         let merged;
         let corpus_ref = if pkg_corpora.is_empty() {
@@ -344,7 +344,7 @@ impl BeamtalkMcp {
         tracing::debug!(tool = "search_classes", limit = ?params.limit, "tool invoked");
         let start = std::time::Instant::now();
 
-        // BT-1722: Aggregate package class corpora with the bundled corpus.
+        // Aggregate package class corpora with the bundled corpus.
         let (_, pkg_class_corpora) = discover_package_corpora();
         let merged;
         let corpus_ref = if pkg_class_corpora.is_empty() {
@@ -440,7 +440,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
-    /// List all available Beamtalk classes with one-line descriptions (BT-1404).
+    /// List all available Beamtalk classes with one-line descriptions.
     #[tool(
         description = "List all available Beamtalk classes with one-line descriptions. Optionally filter by superclass (e.g. 'Value', 'Actor') or scope ('stdlib' for built-in classes, 'user' for user-defined)."
     )]

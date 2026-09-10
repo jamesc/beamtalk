@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Subprocess tests for `beamtalk run` (BT-2084).
+//! Subprocess tests for `beamtalk run`.
 //!
 //! Covers the script-mode entry-point invocation. Connected mode
 //! (`run ... --connect`) and service mode (`run .`) both need a live BEAM
 //! workspace, so each is covered by an `#[ignore]`d end-to-end test below
-//! that boots a real one (BT-2890, BT-2963, BT-2889).
+//! that boots a real one.
 
 use crate::cli_common;
 
@@ -33,7 +33,7 @@ fn run_script_mode_invokes_class_method() {
         .args(["run", "Smoke", "run"])
         .assert()
         .success()
-        // BT-2702: status/progress lines go to stderr, keeping stdout clean for
+        // Status/progress lines go to stderr, keeping stdout clean for
         // the program's own output (the entry's return value is discarded here).
         .stdout(contains("Running Smoke>>run").not())
         .stdout(contains("Building...").not())
@@ -43,17 +43,16 @@ fn run_script_mode_invokes_class_method() {
 
 #[test]
 fn run_script_mode_dispatches_subdirectory_class_by_name() {
-    // BT-3437 (ADR 0119 Phase 3): package-compiler/e2e regression test for
-    // the `user_package_prefix` subdirectory-dispatch bug this epic fixes.
+    // ADR 0119 Phase 3: package-compiler/e2e regression test for the
+    // subdirectory-dispatch bug this guards against.
     //
-    // Before BT-3436, a reference from a root-level class to a class
-    // declared in a package subdirectory (`src/scheme/SchemeEnv.bt`) could
-    // compile to the wrong module name: `user_package_prefix` reverse-parsed
-    // an already-computed module name to guess a package prefix and, by its
-    // own doc comment, discarded subdirectory segments doing so (its
-    // `bt@sicp@scheme@eval` -> `bt@sicp@` example). The generated call would
-    // then target a nonexistent module and fail at runtime with `undef`.
-    // `compiled_module_name` now resolves such references through the
+    // A reference from a root-level class to a class declared in a
+    // package subdirectory (`src/scheme/SchemeEnv.bt`) must not compile to
+    // the wrong module name: reverse-parsing an already-computed module
+    // name to guess a package prefix would discard subdirectory segments
+    // (e.g. its `bt@sicp@scheme@eval` -> `bt@sicp@` example), making the
+    // generated call target a nonexistent module and fail at runtime with
+    // `undef`. `compiled_module_name` resolves such references through the
     // shared `ClassModuleRegistry`, built from the real, parsed file paths
     // (Pass 1) — no guessing, no dropped subdirectory segment.
     let project = cli_common::fixture_project();
@@ -127,7 +126,7 @@ fn run_dot_without_application_section_errors() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-2890 / BT-2963: connected mode (`--connect`) stream split — the program's
+// Connected mode (`--connect`) stream split — the program's
 // output on stdout, status lines on stderr
 // ---------------------------------------------------------------------------
 
@@ -150,18 +149,19 @@ impl Drop for WorkspaceStopGuard {
 #[test]
 #[ignore = "requires beamtalk binary and erlang runtime (boots a live workspace, slow)"]
 fn run_connected_status_lines_go_to_stderr_not_stdout() {
-    // BT-2890 (BT-2702 follow-up): `run_connected`'s two status lines —
+    // `run_connected`'s two status lines —
     // "Connecting to workspace ..." and "Running ... (connected)..." — must
     // land on stderr, keeping stdout clean for the program's own output.
     // `cli_run.rs`'s script-mode test covers the `run_script` path; this
     // covers the `--connect` path against a real shared workspace.
     //
-    // BT-2963: the other half of that split — the entry's own `Console` output
-    // must actually *reach* stdout. It used to vanish: the entry runs in its
-    // class's gen_server, which kept the node's group leader, so the writes
-    // never reached the dispatching session's IO capture. `Helper shout` guards
-    // the nested hop as well, since a class method calling another class method
-    // has to re-propagate the sink to keep streaming.
+    // The other half of that split — the entry's own `Console` output
+    // must actually *reach* stdout: the entry runs in its class's
+    // gen_server, which keeps the node's group leader, so without routing
+    // the writes would never reach the dispatching session's IO capture.
+    // `Helper shout` guards the nested hop as well, since a class method
+    // calling another class method has to re-propagate the sink to keep
+    // streaming.
     let project = cli_common::fixture_project();
     std::fs::write(
         project.path().join("src/Helper.bt"),
@@ -214,7 +214,7 @@ fn run_connected_status_lines_go_to_stderr_not_stdout() {
         .stderr(contains("Connecting to workspace"))
         .stderr(contains("Running Smoke>>run (connected)"))
         // ... and stdout carries the program's own output, in order, from both
-        // the entry and the class method it calls (BT-2963).
+        // the entry and the class method it calls.
         .stdout(contains("connected-output-42"))
         .stdout(contains("connected-nested-99"))
         .stdout(predicate::function(|out: &str| {
@@ -232,14 +232,14 @@ fn run_connected_status_lines_go_to_stderr_not_stdout() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-2889: service mode (`run .`) stream split — the third run mode joins
+// Service mode (`run .`) stream split — the third run mode joins
 // script and connected mode in keeping status lines off stdout
 // ---------------------------------------------------------------------------
 
 #[test]
 #[ignore = "requires beamtalk binary and erlang runtime (boots a live workspace, slow)"]
 fn run_service_mode_status_lines_go_to_stderr_not_stdout() {
-    // BT-2889 (BT-2702 follow-up): `run_package_as_otp_application`'s status
+    // `run_package_as_otp_application`'s status
     // banner — "Building..." and the "Started <pkg> v<ver> / Supervisor /
     // REPL port" block — must land on stderr, matching the script-mode split
     // asserted by `run_script_mode_invokes_class_method` above. Service mode

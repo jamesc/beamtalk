@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Subprocess tests for `beamtalk workspace logs` (BT-3326).
+//! Subprocess tests for `beamtalk workspace logs`.
 //!
 //! `logs` is a pure file-reading command, but reading the actual log file
 //! of a running workspace needs a live node. These tests cover the

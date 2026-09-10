@@ -5,22 +5,21 @@
 //!
 //! **DDD Context:** Semantic Analysis
 //!
-//! ADR 0119 (BT-3435, Phase 1 of 3): today this question is independently
+//! ADR 0119: this question would otherwise be independently
 //! re-derived — or guessed — in at least seven places across
 //! `beamtalk-cli`/`beamtalk-codegen`/`beamtalk-repl`/`beamtalk-compiler-port`,
-//! each added ad hoc as a new codegen need arose. That duplication already
-//! shipped three real bugs (BT-3081, BT-3431, BT-3432). This module is the
+//! each added ad hoc as a new codegen need arises. That duplication is a
+//! real bug risk. This module is the
 //! one authority those call sites converge on, extending ADR 0089's
 //! typed-leaf discipline to this leaf kind: [`ModuleName`] wraps a resolved
 //! module name instead of every caller carrying its own ad hoc `String`.
 //!
 //! **Phase 1 scope (this module):** the data structure and its construction
-//! primitives only — nothing in the compiler consumed this registry when it
-//! was added. **Phase 2 (BT-3436)** wired the actual consumers up to it:
+//! primitives. **Phase 2** wires the actual consumers up to it:
 //! `beamtalk-codegen`'s `compiled_module_name`/`compiled_module_name_qualified`
 //! query it (falling back to the best-effort convention only on a genuine
-//! miss), `module_matches_class` was deleted in favor of a direct
-//! `CoreErlangGenerator::current_class` identity check (ADR 0040: no
+//! miss), a direct `CoreErlangGenerator::current_class` identity check
+//! replaces `module_matches_class` (ADR 0040: no
 //! module-name comparison needed), and `beamtalk-compiler-port`'s
 //! `derive_class_module_name` mints names via [`ClassModuleRegistry::assign`]
 //! instead of a closed-form `format!`. `beamtalk-repl` and the REPL/compiler-
@@ -57,7 +56,7 @@ pub enum ModuleName {
     /// underscore namespace reserved for native runtime code), e.g.
     /// `"beamtalk_future"` for a builtin with no `stdlib/src/*.bt` source.
     ///
-    /// BT-3435 (ADR 0119 Phase 1): the variant exists so `ModuleName` can
+    /// ADR 0119 Phase 1: the variant exists so `ModuleName` can
     /// represent this case, but nothing seeds or resolves one yet — no
     /// current call site actually resolves such a class's module at all (see
     /// `compute_direct_call_eligible`'s gate 3 in `beamtalk-codegen`), so
@@ -159,8 +158,8 @@ pub enum ClassModuleRegistryError {
     },
     /// A stdlib class's path-derived module name (from its file stem)
     /// disagrees with the closed-form name computed from its real, parsed
-    /// class name — the exact BT-3432 bug shape (a file renamed without
-    /// renaming, or vice versa, the class it declares).
+    /// class name — the shape of a bug where a file is renamed without
+    /// renaming, or vice versa, the class it declares.
     #[error(
         "stdlib class '{class_name}' is declared in a file whose derived module name \
          ('{path_derived}') disagrees with the closed-form name computed from the class's own \
@@ -221,7 +220,7 @@ pub fn relative_module_segments(
 
 /// Validates a stdlib class's path-derived module name against the
 /// closed-form name computed from its real, parsed class name (ADR 0119
-/// step 2 / BT-3432).
+/// step 2).
 ///
 /// The stdlib arm never becomes a free lookup — the Erlang runtime derives
 /// `bt@stdlib@{snake}` closed-form with no registry to consult (ADR 0119
@@ -256,7 +255,7 @@ pub fn validate_stdlib_module_name(
 /// is class X in" and "what class does module Y back" — are O(1) lookups
 /// rather than a re-derivation.
 ///
-/// # Invariant: always fresh, never cached (BT-3443, ADR 0119 Open Questions)
+/// # Invariant: always fresh, never cached (ADR 0119 Open Questions)
 ///
 /// This type has no built-in invalidation — no version counter, no
 /// generation stamp, nothing that would notice a class was renamed out from
@@ -275,11 +274,11 @@ pub fn validate_stdlib_module_name(
 /// of a `ClassModuleRegistry` instance (or its backing maps) — e.g. an
 /// "avoid rebuilding this every request" perf optimization — MUST also hook
 /// ADR 0114's rename/move mutations to rebuild or invalidate that cache.
-/// Skipping that would silently reintroduce the BT-3081/BT-3431/BT-3432
-/// stale-name bug shape this registry exists to prevent. See this issue
-/// (BT-3443) and ADR 0119's Open Questions for the full discussion; no such
-/// caching exists yet, so no invalidation hook exists yet either (CLAUDE.md:
-/// don't add handling for scenarios that can't currently happen).
+/// Skipping that would silently reintroduce the stale-name bug shape this
+/// registry exists to prevent. See ADR 0119's Open Questions for the full
+/// discussion; no such caching exists yet, so no invalidation hook exists
+/// yet either (CLAUDE.md: don't add handling for scenarios that can't
+/// currently happen).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClassModuleRegistry {
     class_to_module: HashMap<(PackageId, String), ModuleName>,
@@ -310,7 +309,7 @@ impl ClassModuleRegistry {
     /// wrong class while [`Self::module_for_class`] still answers correctly
     /// for both. Not asserted here: nothing in Phase 1 constructs such a
     /// collision, and enforcing it is a caller-level concern once a real
-    /// build path calls this at scale (BT-3436).
+    /// build path calls this at scale.
     pub fn insert(&mut self, pkg: PackageId, class_name: impl Into<String>, module: ModuleName) {
         let class_name = class_name.into();
         self.module_to_class
@@ -598,7 +597,7 @@ mod tests {
 
     #[test]
     fn native_module_name_is_a_distinct_registry_entry() {
-        // BT-3435 (ADR 0119 Phase 1): `Native` exists so `ModuleName` can
+        // ADR 0119 Phase 1: `Native` exists so `ModuleName` can
         // represent a hand-written-Erlang-backed class, but nothing seeds or
         // resolves one yet (see the type's doc). This only exercises the
         // variant's equality/hash/round-trip behavior through the registry
@@ -623,16 +622,16 @@ mod tests {
 
     #[test]
     fn bt_3081_regression_class_for_module_preserves_acronym_case() {
-        // BT-3081 (Erlang runtime side, Done): `beamtalk_stack_frame`'s
-        // `module_to_class`/`snake_to_class` inverse rebuilt a class name
-        // from its snake_case module suffix by naive title-casing —
+        // The Erlang runtime side's `beamtalk_stack_frame` had a
+        // `module_to_class`/`snake_to_class` inverse that rebuilt a class
+        // name from its snake_case module suffix by naive title-casing —
         // provably lossy for acronym-cased names: "BEAMError" ->
         // "beam_error" -> 'Beamerror' (wrong). Fixed there by routing
         // through the live class registry instead of re-deriving.
         //
         // `ClassModuleRegistry` is this ADR's Rust-side analogue of that
-        // same "one class-name<->module-name authority" question, and BT-3437
-        // asks for this exact scenario reproduced against it:
+        // same "one class-name<->module-name authority" question, and this
+        // test reproduces the exact scenario against it:
         // `class_for_module` must return the real class name recorded at
         // `assign`/`insert` time, never a re-derivation from the module
         // string, so the same lossy-inverse bug shape cannot recur here.
@@ -641,7 +640,7 @@ mod tests {
         // the fold that makes "BEAMError" and "Beamerror" both compile to
         // "beamerror" and makes the *inverse* direction lossy if it tries to
         // re-derive a class name from that snake_case string instead of
-        // consulting a real authority (BT-3081's bug).
+        // consulting a real authority.
         let mut registry = ClassModuleRegistry::new();
         let module = registry.assign(&PackageId::Stdlib, "BEAMError", &ModuleNamingScheme::Stdlib);
         assert_eq!(
@@ -663,7 +662,7 @@ mod tests {
 
     #[test]
     fn bt_3437_future_native_backing_module_resolves_to_real_module_not_a_guessed_bt_module() {
-        // ADR 0119 Decision / BT-3435: `Future` is a runtime-only builtin
+        // ADR 0119 Decision: `Future` is a runtime-only builtin
         // backed by hand-written `beamtalk_future.erl` (ADR 0056), with no
         // `stdlib/src/Future.bt` source file. Nothing seeds it into the
         // registry today — no live call site actually resolves `Future`'s
@@ -730,7 +729,7 @@ mod tests {
 
     #[test]
     fn bt_3443_new_instances_share_no_hidden_state_across_construction() {
-        // BT-3443 (ADR 0119 Open Questions): pins the "always fresh, never
+        // ADR 0119 Open Questions: pins the "always fresh, never
         // cached" invariant documented on `ClassModuleRegistry` itself —
         // `ClassModuleRegistry::new()` must produce a genuinely independent
         // instance every time, with no hidden shared/static state (a
@@ -797,16 +796,13 @@ mod tests {
 
     #[test]
     fn validate_stdlib_module_name_rejects_disagreeing_name() {
-        // The BT-3432 bug shape: `TestCase.bt` renamed to `test_case.bt`
+        // The bug shape this guards against: `TestCase.bt` renamed to `test_case.bt`
         // (path-derived: bt@stdlib@test_case) while the class stays `TestCase`
         // — the two must always agree, so a real mismatch is a hard error.
         //
-        // BT-3437 (this exact scenario against the unified registry): this
-        // is the literal historical rename that broke `TestCase` resolution
-        // via the old file-stem-scanning `STDLIB_CLASS_NAMES` (deleted in
-        // BT-3435). `build_stdlib.rs::compile_all_stdlib_files` calls this
+        // `build_stdlib.rs::compile_all_stdlib_files` calls this
         // same validator on every real stdlib source file at
-        // `beamtalk build-stdlib` time, so this bug shape is now caught at
+        // `beamtalk build-stdlib` time, so this bug shape is caught at
         // build time, not silently mis-resolved at codegen time.
         let err = validate_stdlib_module_name(
             "TestCase",

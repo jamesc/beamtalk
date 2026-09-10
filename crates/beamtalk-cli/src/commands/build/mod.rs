@@ -5,7 +5,7 @@
 //!
 //! This module is the `build` command's entry point ([`build`]) and pass
 //! orchestration ([`execute_build_passes`]). The individual build stages live
-//! in sibling modules, split by concern (BT-3455):
+//! in sibling modules, split by concern:
 //!
 //! - [`changes`] — per-file change detection and stale-artifact cleanup
 //! - [`environment`] — build-environment setup and dependency resolution
@@ -41,7 +41,7 @@ mod stubs;
 
 // Re-exports so `crate::commands::build::X` paths used by `build_stdlib.rs`,
 // `test.rs`, `lint.rs`, `fmt.rs`, `type_coverage.rs`, `beam_compiler.rs`, and
-// `deps/path.rs` keep working unchanged (BT-3455).
+// `deps/path.rs` keep working unchanged.
 pub(crate) use changes::{clean_stale_artifacts, detect_changes};
 pub(crate) use class_index::{
     CachedAst, build_class_index, build_class_module_index, collect_all_class_infos,
@@ -67,8 +67,8 @@ pub(crate) use stubs::{
 };
 
 // Re-exported only for `build::tests` (which relies on `super::*` to see
-// every build-stage helper as if this were still one flat file, per
-// BT-3451's split test tree). None of these has a production caller outside
+// every build-stage helper as if this were still one flat file). None of
+// these has a production caller outside
 // its own defining submodule, so re-exporting them unconditionally would be
 // an unused-import warning under `-D warnings` in a non-test build.
 #[cfg(test)]
@@ -95,7 +95,7 @@ struct BuildPassesResult {
     hierarchy: ClassHierarchyContext,
     /// Native compilation result, if native Erlang sources were compiled.
     native_result: Option<Rebar3Result>,
-    /// BT-2014: Diagnostic summary aggregated from all compiled files.
+    /// Diagnostic summary aggregated from all compiled files.
     diagnostic_summary: beamtalk_core::source_analysis::DiagnosticSummary,
 }
 
@@ -105,14 +105,14 @@ struct BuildPassesResult {
 ///
 /// When `force` is false, per-file change detection compares each `.bt`
 /// source's content hash against the hash recorded for its `.beam` output
-/// (BT-3120) and only recompiles changed files.
+/// and only recompiles changed files.
 #[instrument(skip_all, fields(path = %path))]
 pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) -> Result<()> {
     info!("Starting build");
 
     let env = setup_build_environment(path)?;
 
-    // BT-2796: A package directory build walks every project source file
+    // A package directory build walks every project source file
     // (Pass 1) before any per-file analysis runs (Pass 2), so the injected
     // cross-file knowledge is project-complete. Declare that to the
     // receiver-knowledge classifier (ADR 0100 Rule 2 sequencing guard).
@@ -123,14 +123,14 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     if Utf8Path::new(path).is_dir() && env.full_manifest.is_some() {
         options.knowledge_scope = beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
     }
-    // BT-2794 (pre-WS3 guard): dependency extension contributions are not
+    // Pre-WS3 guard: dependency extension contributions are not
     // loaded until WS3 (ADR 0070 amendment), so declaring dependencies means
     // no receiver's method surface is provably complete.
     options.has_package_dependencies = env
         .full_manifest
         .as_ref()
         .is_some_and(|m| !m.dependencies.is_empty());
-    // BT-2920: Set the current package so E0401/E0402 visibility checks
+    // Set the current package so E0401/E0402 visibility checks
     // (`check_class_visibility`/`check_alias_leaked_visibility`) actually run
     // — they're gated on `current_package: Some(_)` and silently emit zero
     // diagnostics otherwise. `None` for single-file/manifest-less builds,
@@ -142,7 +142,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
     let passes = execute_build_passes(&env, options, &dep_ctx, force)?;
 
-    // BT-2014: Print diagnostic summary at end of successful build.
+    // Print diagnostic summary at end of successful build.
     // Suppressed when --no-warnings is set (suppress_warnings), matching
     // the behaviour of individual warning suppression during compilation.
     if !options.suppress_warnings && !passes.diagnostic_summary.is_empty() {
@@ -182,7 +182,7 @@ fn execute_build_passes(
         env.pkg_manifest().is_some(),
         options.stdlib_mode,
     );
-    // ADR 0075 full resolution chain (BT-1847, BT-3394): each stub tier
+    // ADR 0075 full resolution chain: each stub tier
     // overrides auto-extract at the function/arity level, applied
     // lowest-precedence first so project-local always wins —
     // extracted -> distribution -> package-bundled -> project-local. Every
@@ -220,9 +220,9 @@ fn execute_build_passes(
 
     let file_module_pairs = compute_file_module_pairs(env)?;
 
-    // BT-1682: Per-file change detection — only recompile files whose source
+    // Per-file change detection — only recompile files whose source
     // is newer than the corresponding .beam output. Pass 1's already-computed
-    // content hashes (`index.source_hashes`, BT-3120) let this skip re-hashing
+    // content hashes (`index.source_hashes`) let this skip re-hashing
     // any file Pass 1 already hashed this build.
     let changes = detect_changes(
         &env.source_files,
@@ -248,8 +248,8 @@ fn execute_build_passes(
         .collect();
 
     // Pass 2: compile each file with the full class → module index.
-    // BT-1544: Reuse cached ASTs from Pass 1 to avoid re-reading and re-parsing.
-    // BT-1682: Only compile files that have changed since last build.
+    // Reuse cached ASTs from Pass 1 to avoid re-reading and re-parsing.
+    // Only compile files that have changed since last build.
     let mut cached_asts = index.cached_asts;
     let mut core_files = Vec::new();
     let mut module_names = Vec::new();
@@ -257,7 +257,7 @@ fn execute_build_passes(
         .full_manifest
         .as_ref()
         .is_some_and(|m| m.package.strict_deps);
-    // ADR 0100 Rule 3 (BT-2793): the package's `[diagnostics]` severity-override
+    // ADR 0100 Rule 3: the package's `[diagnostics]` severity-override
     // table, empty when there's no manifest or no `[diagnostics]` section.
     let diagnostics_overrides = env
         .full_manifest
@@ -284,11 +284,11 @@ fn execute_build_passes(
         native_type_registry,
         diagnostics_overrides,
     };
-    // BT-2014: Collect diagnostics from all compiled files for the summary.
-    // BT-1847: seed with stubs/ diagnostics (skipped signatures, version drift).
+    // Collect diagnostics from all compiled files for the summary.
+    // Seed with stubs/ diagnostics (skipped signatures, version drift).
     let mut all_build_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = stub_diagnostics;
 
-    // BT-3410: an unchanged file's diagnostics from its last actual compile,
+    // An unchanged file's diagnostics from its last actual compile,
     // so they can be replayed (shown and counted) instead of silently
     // vanishing the moment the file stops being recompiled. Rebuilt from
     // scratch below (rather than mutated in place) so a file removed from
@@ -300,11 +300,11 @@ fn execute_build_passes(
         String,
         Vec<beamtalk_core::source_analysis::Diagnostic>,
     > = HashMap::with_capacity(file_module_pairs.len());
-    // BT-3410: every changed file (always known) plus every unchanged file
+    // Every changed file (always known) plus every unchanged file
     // whose diagnostics were actually found in the cache and replayed, or
     // recompiled below because they weren't.
     let mut files_with_known_diagnostics = 0usize;
-    // BT-3410: unchanged files recompiled this build solely because the
+    // Unchanged files recompiled this build solely because the
     // diagnostics sidecar had no entry for them (a fresh sidecar right after
     // upgrading to this feature, corruption, or a cache-version bump) — their
     // .beam is already current, only their diagnostics were unknown. Counted
@@ -348,7 +348,7 @@ fn execute_build_passes(
             continue;
         }
 
-        // BT-3410: unchanged, but no diagnostics cache entry — recompile now
+        // Unchanged, but no diagnostics cache entry — recompile now
         // so the gap closes within this one build instead of leaving the
         // file silently unreported until its content next changes or
         // `--force` is used. `compile_file` transparently falls back to
@@ -373,7 +373,7 @@ fn execute_build_passes(
         file_module_pairs.len(),
     )?;
 
-    // BT-3410: persist diagnostics before the beam-hash sidecar. If the
+    // Persist diagnostics before the beam-hash sidecar. If the
     // process dies between these two writes, the hash cache must be the one
     // left stale — an unchanged-looking file whose diagnostics entry is
     // missing/superseded falls through to "unknown" and gets skipped safely,
@@ -382,7 +382,7 @@ fn execute_build_passes(
     // held the superseded file's diagnostics, which would then get replayed
     // as if it were current.
     crate::commands::build_cache::save_diagnostics_cache(&env.build_dir, &new_diagnostics_cache);
-    // BT-3120: only persist the beam-hash sidecar once compilation has
+    // Only persist the beam-hash sidecar once compilation has
     // actually succeeded (the `?` above already returned on failure) — the
     // saved hashes assert "this content produced the `.beam` now on disk".
     crate::commands::build_cache::save_beam_hash_cache(&env.build_dir, &changes.source_hashes);
@@ -435,7 +435,7 @@ fn post_process_package_artifacts(
         return Ok(());
     };
 
-    // BT-1682: For stale artifact cleanup, we need ALL expected .beam files
+    // For stale artifact cleanup, we need ALL expected .beam files
     // (both newly compiled and unchanged), not just the ones from this build.
     let all_expected_beams: Vec<Utf8PathBuf> = passes
         .file_module_pairs

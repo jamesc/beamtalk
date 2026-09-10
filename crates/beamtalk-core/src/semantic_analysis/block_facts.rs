@@ -22,20 +22,20 @@ pub struct BlockMutationAnalysis {
     pub local_reads: HashSet<String>,
     /// Local variables that are written to in the block.
     pub local_writes: HashSet<String>,
-    /// BT-665: Variables read before being locally defined (captured from outer scope).
+    /// Variables read before being locally defined (captured from outer scope).
     pub captured_reads: HashSet<String>,
     /// Fields (self.field) that are read in the block.
     pub field_reads: HashSet<String>,
     /// Fields (self.field) that are written to in the block.
     pub field_writes: HashSet<String>,
-    /// BT-245: Whether the block contains self-sends (which may mutate actor state).
+    /// Whether the block contains self-sends (which may mutate actor state).
     pub has_self_sends: bool,
-    /// BT-3151: Selectors sent to `self` anywhere in the block, including inside
+    /// Selectors sent to `self` anywhere in the block, including inside
     /// nested blocks (e.g. a `do:`/`collect:` argument) — unlike `has_self_sends`,
     /// tracked by name so a caller can distinguish a self-send to a provably
     /// non-mutating class method from one that is (or might be) mutating.
     pub self_send_selectors: HashSet<String>,
-    /// BT-2807: Whether the block contains a `self.field value(:...)` send — invoking
+    /// Whether the block contains a `self.field value(:...)` send — invoking
     /// a block stored in a field. The stored block's body isn't visible here (it may
     /// be assigned anywhere), so this is conservative: any such call is treated as a
     /// potential mutation source, since the field may hold a Tier 2 (state-mutating)
@@ -54,7 +54,7 @@ impl BlockMutationAnalysis {
         !self.local_writes.is_empty() || !self.field_writes.is_empty()
     }
 
-    /// BT-245/BT-2807: Returns true if the block has any state-affecting operations.
+    /// Returns true if the block has any state-affecting operations.
     /// This includes field writes, self-sends, and `self.field value(:...)` calls
     /// (which may all mutate actor state).
     pub fn has_state_effects(&self) -> bool {
@@ -80,7 +80,7 @@ pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
     analyze_statements(&block.body, &mut ctx)
 }
 
-/// BT-3151: Analyzes a method body (top-level statements, not wrapped in a
+/// Analyzes a method body (top-level statements, not wrapped in a
 /// `Block`) the same way [`analyze_block`] analyzes a block body — used by
 /// the class-var-mutating-selector purity check (`compute_class_var_mutating_selectors`)
 /// to inspect each class method's own body directly, since `MethodDefinition`
@@ -96,7 +96,7 @@ pub fn analyze_method_body(
     analyze_statements(body, &mut ctx)
 }
 
-/// BT-3151: Computes the set of this class's own class-method selectors that
+/// Computes the set of this class's own class-method selectors that
 /// are *known or suspected* to mutate a class variable — directly (`self.cv
 /// := ...` for `cv` in `class_var_names`) or transitively (a self-send,
 /// anywhere in the method body including inside nested blocks, to another
@@ -105,7 +105,7 @@ pub fn analyze_method_body(
 /// A self-send to a selector NOT defined in this class's own `class_methods`
 /// (inherited from a superclass, or otherwise unresolvable at this class's
 /// compile time) is conservatively treated as mutating too — the same "can't
-/// know statically, so assume the worst" call BT-3150 makes for self-sends in
+/// know statically, so assume the worst" call codegen makes for self-sends in
 /// threaded loop bodies. This keeps the analysis sound without needing
 /// cross-class information codegen doesn't have at this point: a self-send is
 /// only ever excluded from the mutating set when its target is a *locally
@@ -115,9 +115,9 @@ pub fn analyze_method_body(
 /// see `stdlib/test/fixtures/class_method_block.bt`'s `self double:`-style
 /// helpers) keep compiling in a bare, unthreaded block passed to
 /// `select:`/`collect:`/`do:`/etc., while rejecting one whose target may
-/// mutate class state, where BT-3150's `Letrec`-only guard doesn't reach.
+/// mutate class state, where codegen's `Letrec`-only guard doesn't reach.
 ///
-/// BT-3430 (ADR 0118 §Decision 5 follow-up — design decision): investigated
+/// ADR 0118 §Decision 5 follow-up — design decision: investigated
 /// replacing this whole-class, syntax-only pre-flight fixed point with
 /// `beamtalk-codegen`'s `ThreadedValue::close(ctx, CloseContext::Opaque)` /
 /// `VerifyError::StateEffectEscapesExpression` — a post-hoc check of one
@@ -127,7 +127,7 @@ pub fn analyze_method_body(
 /// `beamtalk-codegen` (Code Generation) —
 /// `docs/development/architecture-principles.md` §1 — so it cannot name
 /// `ThreadedValue`/`close()`/`VerifyError` at all, the same constraint
-/// BT-3423's `StateEffects` fact hit for its own, differently-shaped
+/// the `StateEffects` fact hits for its own, differently-shaped
 /// "genuinely different questions" split. This function must also run
 /// BEFORE any codegen of any of the class's methods (it needs the whole
 /// class's own call graph to compute a fixed point), where `close()`'s input
@@ -248,7 +248,7 @@ fn analyze_expression(
             // Read of a variable - track ALL reads, not just known locals
             // This is important for detecting outer scope variables that need threading
             analysis.local_reads.insert(id.name.to_string());
-            // BT-665: Track reads of variables not yet locally defined (captured from outer scope)
+            // Track reads of variables not yet locally defined (captured from outer scope)
             if !ctx.local_bindings.contains(id.name.as_str()) {
                 analysis.captured_reads.insert(id.name.to_string());
             }
@@ -300,21 +300,21 @@ fn analyze_expression(
             arguments,
             ..
         } => {
-            // BT-245: Detect self-sends (may mutate actor state)
+            // Detect self-sends (may mutate actor state)
             if is_self_reference(receiver) {
                 analysis.has_self_sends = true;
-                // BT-3151: record the selector too (see `self_send_selectors` doc).
+                // Record the selector too (see `self_send_selectors` doc).
                 analysis
                     .self_send_selectors
                     .insert(selector.name().to_string());
             }
-            // BT-2807: Detect `self.field value(:...)` — invoking a block stored in a
+            // Detect `self.field value(:...)` — invoking a block stored in a
             // field. The field may hold a Tier 2 (state-mutating) block, so this is
             // conservatively treated as a potential mutation source.
             if is_self_field_value_send(receiver, selector) {
                 analysis.has_field_value_call = true;
             }
-            // BT-3173: on:do:/ensure: run their receiver (the try/protected
+            // on:do:/ensure: run their receiver (the try/protected
             // block) inline too, in the same activation — so it needs the same
             // local_writes propagation as an inline-conditional block argument
             // (see below), not the isolated-closure treatment the generic
@@ -329,7 +329,7 @@ fn analyze_expression(
             } else {
                 analyze_expression(receiver, analysis, ctx);
             }
-            // BT-1053/BT-3173: ifTrue:/ifFalse:/ifTrue:ifFalse:/ifNotNil:/on:do:/
+            // ifTrue:/ifFalse:/ifTrue:ifFalse:/ifNotNil:/on:do:/
             // ensure: blocks are compiled inline (not as closures), so their
             // local_writes and some captured_reads affect the enclosing scope.
             // Propagate them to allow the outer loop analysis to detect that a
@@ -367,17 +367,17 @@ fn analyze_expression(
                 .extend(nested_analysis.field_reads.iter().cloned());
             // Don't merge local_writes - nested block local mutations are isolated
             // DO merge field_writes - field mutations (self.x := ...) modify shared
-            // actor state and must be visible to outer loops for state threading (BT-478)
+            // actor state and must be visible to outer loops for state threading
             analysis
                 .field_writes
                 .extend(nested_analysis.field_writes.iter().cloned());
-            // BT-2807: propagate `self.field value(:...)` calls the same way as
+            // Propagate `self.field value(:...)` calls the same way as
             // field_writes — a nested block invoking a stored (possibly Tier 2) block
             // is itself a potential mutation source visible to the outer analysis.
             if nested_analysis.has_field_value_call {
                 analysis.has_field_value_call = true;
             }
-            // BT-3151: propagate self-sends the same way — a self-send inside a
+            // Propagate self-sends the same way — a self-send inside a
             // block passed to select:/collect:/do:/etc. (this is exactly that
             // shape: a `Block` argument that isn't an inline-conditional
             // selector, handled above) is itself a potential mutation source,
@@ -404,7 +404,7 @@ fn analyze_expression(
             // `parse_cascade`), so `receiver` here IS that MessageSend, and the
             // `MessageSend` arm's own `is_self_field_value_send` check covers it.
             //
-            // Code review follow-up (BT-2807): the SECOND and later cascaded
+            // The SECOND and later cascaded
             // messages are sent to that same underlying receiver too — cascade
             // semantics evaluate the receiver once and send every message to it —
             // but `messages` here only stores their selector/arguments, not a
@@ -425,7 +425,7 @@ fn analyze_expression(
                 if is_self_field_value_send(cascade_receiver, &msg.selector) {
                     analysis.has_field_value_call = true;
                 }
-                // BT-3151 review follow-up: a cascade's 2nd+ message is sent to
+                // A cascade's 2nd+ message is sent to
                 // the same shared receiver as the first (see the comment above),
                 // so a self-send there needs the same `self_send_selectors`
                 // recording the `MessageSend` arm does for the first message —
@@ -579,12 +579,12 @@ fn is_self_reference(expr: &Expression) -> bool {
     matches!(expr, Expression::Identifier(id) if id.name == "self")
 }
 
-/// BT-2807: Returns true if `receiver`/`selector` form a `self.field value(:...)`
+/// Returns true if `receiver`/`selector` form a `self.field value(:...)`
 /// send — a `value`/`value:`/`value:value:`/`value:value:value:` message sent
 /// directly to a field access on `self`. Used to detect a stored (possibly Tier 2)
 /// block being invoked, which `analyze_block` otherwise has no visibility into.
 ///
-/// BT-2803 (adversarial review): also recognizes `valueWithArguments:` —
+/// Also recognizes `valueWithArguments:` —
 /// without this, a `self.field valueWithArguments: #(...)` send nested inside
 /// another block (e.g. a `do:` body) wouldn't mark the enclosing block as
 /// needing state threading, silently discarding the mutated state the Tier 2
@@ -607,7 +607,7 @@ fn is_self_field_value_send(receiver: &Expression, selector: &MessageSelector) -
     ) || selector.name() == "valueWithArguments:")
 }
 
-/// BT-3173: Returns true if `selector_name` is `on:do:` or `ensure:` — exception
+/// Returns true if `selector_name` is `on:do:` or `ensure:` — exception
 /// selectors whose *receiver* (the try/protected block) runs inline in the
 /// enclosing activation, not as an isolated closure. Delegates to the shared
 /// classifier in [`crate::state_threading_selectors`] so this stays in sync
@@ -621,14 +621,14 @@ fn is_exception_selector_name(selector_name: &str) -> bool {
 /// compiled inline rather than as isolated closures, so mutations inside them
 /// affect the enclosing scope: `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`
 /// (via [`crate::state_threading_selectors::is_conditional_selector`]), plus
-/// `on:do:`/`ensure:` (BT-3173: their non-receiver block arguments — e.g.
+/// `on:do:`/`ensure:` (their non-receiver block arguments — e.g.
 /// `on:do:`'s handler — are inline for the same reason as the receiver).
 fn is_inline_propagating_selector(selector_name: &str) -> bool {
     crate::state_threading_selectors::is_conditional_selector(selector_name)
         || is_exception_selector_name(selector_name)
 }
 
-/// BT-1053/BT-3173: Propagates a nested inline-compiled block's mutation
+/// Propagates a nested inline-compiled block's mutation
 /// analysis into the enclosing block's `analysis` — used for the block
 /// receiver/arguments of `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`/
 /// `on:do:`/`ensure:`, none of which introduce a separate closure activation
@@ -643,7 +643,7 @@ fn propagate_inline_block_writes(
     analysis
         .local_reads
         .extend(nested.local_reads.iter().cloned());
-    // BT-3173 review follow-up: exclude this block's own parameters (e.g.
+    // Exclude this block's own parameters (e.g.
     // on:do:'s exception var, ifNotNil:'s bound value) before merging
     // local_writes into the enclosing analysis — a write to the block's own
     // param (`on: Error do: [:e | e := 1]`) is confined to that param's own
@@ -861,7 +861,7 @@ mod tests {
 
     #[test]
     fn test_analyze_self_field_value_call() {
-        // BT-2807: [self.onTick value: x] — invoking a block stored in a field must
+        // [self.onTick value: x] — invoking a block stored in a field must
         // be flagged as a potential mutation source, even with no literal field write.
         let block = Block::new(
             vec![],
@@ -912,7 +912,7 @@ mod tests {
 
     #[test]
     fn test_analyze_self_field_value_call_as_non_first_cascade_message() {
-        // Code review follow-up (BT-2807): [self.onTick displayString; value: x] —
+        // [self.onTick displayString; value: x] —
         // the parser folds the cascade's FIRST message ("displayString") into
         // Cascade.receiver as a whole MessageSend, so the true underlying
         // receiver ("self.onTick") is one level deeper than Cascade.receiver
@@ -955,7 +955,7 @@ mod tests {
 
     #[test]
     fn test_nested_block_propagates_field_writes() {
-        // BT-478: [:i | [:j | self.value := self.value + 1]]
+        // [:i | [:j | self.value := self.value + 1]]
         // Field writes in nested blocks must propagate to outer analysis
         let inner_block = Expression::Block(Block::new(
             vec![BlockParameter::new("j", Span::new(1, 2))],
@@ -992,7 +992,7 @@ mod tests {
         );
 
         let analysis = analyze_block(&outer_block);
-        // Field writes from nested blocks MUST propagate (BT-478)
+        // Field writes from nested blocks MUST propagate
         assert!(
             analysis.field_writes.contains("value"),
             "field_writes should propagate from nested blocks"
@@ -1006,7 +1006,7 @@ mod tests {
 
     #[test]
     fn test_ensure_receiver_propagates_local_writes() {
-        // BT-3173: [t := t + 1] ensure: [nil] — ensure:'s receiver (the
+        // [t := t + 1] ensure: [nil] — ensure:'s receiver (the
         // protected block) runs inline in the enclosing activation, so its
         // write to `t` must be visible at this block's own top-level
         // analysis (previously only ifTrue:/ifFalse:/ifTrue:ifFalse:
@@ -1056,7 +1056,7 @@ mod tests {
 
     #[test]
     fn test_on_do_receiver_propagates_local_writes() {
-        // BT-3173: [t := t + 1] on: Error do: [:e | nil] — on:do:'s receiver
+        // [t := t + 1] on: Error do: [:e | nil] — on:do:'s receiver
         // (the try body) runs inline, same as ensure:'s.
         let try_block = Expression::Block(Block::new(
             vec![],
@@ -1114,7 +1114,7 @@ mod tests {
 
     #[test]
     fn test_on_do_handler_param_write_does_not_leak_as_outer_local_write() {
-        // BT-3173 review follow-up: [nil] on: Error do: [:e | e := 1] — the
+        // [nil] on: Error do: [:e | e := 1] — the
         // handler writes its OWN exception param `e`. That write is confined
         // to the handler's own shadowed binding, not a genuine outer-scope
         // mutation, so it must NOT propagate into the enclosing block's
@@ -1161,8 +1161,8 @@ mod tests {
 
     #[test]
     fn test_if_not_nil_propagates_local_writes() {
-        // BT-3173: x ifNotNil: [:v | t := v] — ifNotNil: was previously
-        // excluded from is_inline_conditional_selector even for this
+        // x ifNotNil: [:v | t := v] — ifNotNil: must be
+        // included in is_inline_conditional_selector even for this
         // single-level (non-nested) case.
         let handler_block = Expression::Block(Block::new(
             vec![BlockParameter::new("v", Span::new(15, 16))],
@@ -1233,7 +1233,7 @@ mod tests {
 
     #[test]
     fn test_captured_reads_for_outer_variable_mutation() {
-        // BT-665: [count := count + 1] — `count` is read before being locally defined
+        // [count := count + 1] — `count` is read before being locally defined
         let block = Block::new(
             vec![],
             vec![bare(Expression::Assignment {
@@ -1263,7 +1263,7 @@ mod tests {
 
     #[test]
     fn test_no_captured_reads_for_new_local_definition() {
-        // BT-665: [:x | temp := x * 2. temp + 1] — `temp` is defined then read (not captured)
+        // [:x | temp := x * 2. temp + 1] — `temp` is defined then read (not captured)
         let block = Block::new(
             vec![BlockParameter::new("x", Span::new(1, 2))],
             vec![
@@ -1306,7 +1306,7 @@ mod tests {
 
     #[test]
     fn test_destructure_assignment_binds_variables() {
-        // BT-1263: [{a, b} := expr. a + b] — a and b must be local bindings after destructure
+        // [{a, b} := expr. a + b] — a and b must be local bindings after destructure
         use crate::ast::Pattern;
 
         let tuple_pattern = Pattern::Tuple {
@@ -1360,7 +1360,7 @@ mod tests {
 
     #[test]
     fn test_array_destructure_binds_variables() {
-        // BT-1263: [#[first, second] := arr. first] — first and second are local after destructure
+        // [#[first, second] := arr. first] — first and second are local after destructure
         use crate::ast::Pattern;
 
         let array_pattern = Pattern::Array {
@@ -1402,7 +1402,7 @@ mod tests {
 
     #[test]
     fn test_binary_destructure_size_expr_recorded_as_read() {
-        // BT-1263: [<<payload:len/binary>> := bin] where `len` is a variable —
+        // [<<payload:len/binary>> := bin] where `len` is a variable —
         // the size expression `len` must appear in local_reads/captured_reads.
         use crate::ast::{BinarySegment, Pattern};
 
@@ -1449,7 +1449,7 @@ mod tests {
 
     #[test]
     fn test_binary_forward_ref_size_is_captured_read() {
-        // BT-1269 regression: <<payload:len/binary, len:8>> — the size expression
+        // <<payload:len/binary, len:8>> — the size expression
         // `len` in segment 1 must still be a captured read even though `len` is
         // bound by segment 2 of the same binary pattern.
         use crate::ast::{BinarySegment, Pattern};
@@ -1517,7 +1517,7 @@ mod tests {
 
     #[test]
     fn test_block_param_read_is_not_captured() {
-        // BT-665: [:x | x + 1] — `x` is a block param, not a captured read
+        // [:x | x + 1] — `x` is a block param, not a captured read
         let block = Block::new(
             vec![BlockParameter::new("x", Span::new(1, 2))],
             vec![bare(Expression::MessageSend {

@@ -62,24 +62,24 @@ pub(crate) fn term_to_atom_list(term: &Term) -> Vec<ecow::EcoString> {
     }
 }
 
-/// BT-3076: Deserialize a single `method_info`/`class_method_info`
+/// Deserialize a single `method_info`/`class_method_info`
 /// `return_type`/`param_types` entry — the `MetaTypeRepr` wire shape codegen
 /// emits (`crate::codegen::core_erlang::gen_server::methods::MetaTypeRepr`'s
 /// `meta_type_repr_doc`, beamtalk-core) — into a structured
 /// [`DeclaredType`](beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType).
 ///
 /// This is THE single place strings become types crossing the ETF boundary:
-/// before BT-3076, `term_to_atom` only matched a bare `Term::Atom`, so every
-/// tagged tuple (`{type_param, ...}`, `{generic, ...}`, and now `{union,
-/// ...}` / `{singleton, ...}`) silently degraded to `None` — a generic
-/// return type crossing the compiler port lost its structure entirely (the
-/// bug this stage fixes; see `test_generic_return_type_survives_etf_meta`).
+/// `term_to_atom` alone only matches a bare `Term::Atom`, so every
+/// tagged tuple (`{type_param, ...}`, `{generic, ...}`, `{union, ...}`,
+/// `{singleton, ...}`) needs this parser, or it silently degrades to `None`
+/// — a generic return type crossing the compiler port would lose its
+/// structure entirely (see `test_generic_return_type_survives_etf_meta`).
 ///
 /// Wire shapes:
 /// - `'none'` → `None` (the `Option` wrapper, not `DeclaredType::None` — no
 ///   such variant exists).
 /// - A bare atom (e.g. `'Integer'`) → [`DeclaredType::parse`] — handles
-///   legacy artifacts (pre-BT-3076 compiled modules only ever emitted flat
+///   legacy artifacts (older compiled modules only ever emitted flat
 ///   atoms) and the old return-type writeback union strings the same way
 ///   `resolve_type_string` used to. `parse` also recognises the flat
 ///   self-type renderings codegen still emits for method signatures
@@ -94,10 +94,8 @@ pub(crate) fn term_to_atom_list(term: &Term) -> Vec<ecow::EcoString> {
 ///   Simple` naming a generic param does everywhere else in the checker.
 /// - `{'generic', Base, [Params]}` → `DeclaredType::Generic { base, parameters }`,
 ///   recursively.
-/// - `{'union', [Members]}` → `DeclaredType::Union(members)`, recursively
-///   (BT-3076 wire extension).
-/// - `{'singleton', Name}` → `DeclaredType::Singleton(Name)` (BT-3076 wire
-///   extension).
+/// - `{'union', [Members]}` → `DeclaredType::Union(members)`, recursively.
+/// - `{'singleton', Name}` → `DeclaredType::Singleton(Name)`.
 /// - Anything else (malformed/unknown tag) → `None`, matching this parser's
 ///   existing graceful-degradation convention.
 pub(crate) fn term_to_declared_type(
@@ -166,7 +164,7 @@ pub(crate) fn term_to_declared_type_list(
     }
 }
 
-/// BT-3076: Deserialize an atom→`DeclaredType` map (for `field_types` /
+/// Deserialize an atom→`DeclaredType` map (for `field_types` /
 /// `ClassInfo::state_types`).
 ///
 /// `field_types` is still emitted by codegen as flat atoms (`'Integer'`, or
@@ -176,7 +174,7 @@ pub(crate) fn term_to_declared_type_list(
 /// [`DeclaredType::parse`] rather than the full [`term_to_declared_type`].
 /// The `'none'` sentinel is intentionally *not* filtered out here — it
 /// round-trips as `DeclaredType::Simple("none")`, preserving this map's
-/// pre-BT-3076 behaviour verbatim (the old atom→atom reader never
+/// this map's original behaviour verbatim (the old atom→atom reader never
 /// special-cased it either) rather than fixing that latent quirk as a
 /// drive-by change.
 pub(crate) fn term_to_declared_type_atom_map(
@@ -204,7 +202,7 @@ pub(crate) fn term_to_declared_type_atom_map(
     }
 }
 
-/// BT-1976: Extract an atom→bool map (for `field_has_default`).
+/// Extract an atom→bool map (for `field_has_default`).
 pub(crate) fn term_to_atom_bool_map(
     term: &Term,
 ) -> std::collections::HashMap<ecow::EcoString, bool> {
@@ -315,7 +313,7 @@ pub(crate) fn parse_class_info_from_meta_term(
     let state_types = map_get(m, "field_types")
         .map(term_to_declared_type_atom_map)
         .unwrap_or_default();
-    // BT-1976: Read field_has_default map emitted by codegen. Missing key
+    // Read field_has_default map emitted by codegen. Missing key
     // (older BEAM artifacts) → empty map; AST-less cross-file validation
     // degrades gracefully (fields without entries are treated as "unknown",
     // which means the post-init check skips them as before).
@@ -354,7 +352,7 @@ pub(crate) fn parse_class_info_from_meta_term(
             .and_then(term_to_atom)
             .map(ecow::EcoString::from),
         // BEAM metadata comes from successfully-compiled modules, whose
-        // surfaces are complete by construction (BT-2796).
+        // surfaces are complete by construction.
         surface_incomplete: false,
         is_typed,
         state,
@@ -392,7 +390,7 @@ pub(crate) fn parse_class_hierarchy_from_term(
 /// Parse a `required_methods`/`required_class_methods` ETF list
 /// (`beamtalk_protocol_registry:register_protocol/1`'s wire shape —
 /// `[#{selector => atom(), arity => integer()}, ...]`) into
-/// `ProtocolMethodRequirement`s (BT-3473).
+/// `ProtocolMethodRequirement`s.
 ///
 /// Selector/arity only: the live image's ambient protocol cache never carries
 /// the original `::`-annotated parameter/return type text (that lives only in
@@ -425,7 +423,7 @@ pub(crate) fn parse_protocol_method_requirements(
         .collect()
 }
 
-/// Deserialize a single ambient protocol-registry entry (BT-3473) —
+/// Deserialize a single ambient protocol-registry entry —
 /// `beamtalk_protocol_registry:register_protocol/1`'s `Info` map, threaded
 /// through `beamtalk_compiler_server`'s `protocols` cache the same way
 /// `class_hierarchy` threads `register_class/2`'s — into a `ProtocolInfo`.
@@ -443,7 +441,7 @@ pub(crate) fn parse_protocol_info_from_meta_term(
     let type_params = map_get(m, "type_params")
         .map(term_to_atom_list)
         .unwrap_or_default();
-    // No wire representation for bounds on this channel (BT-3473 scope is
+    // No wire representation for bounds on this channel (the scope here is
     // suppressing false positives via name/selector recognition, not full
     // generic-bounds re-derivation) — unbounded for every type param.
     let type_param_bounds = vec![None; type_params.len()];
@@ -475,7 +473,7 @@ pub(crate) fn parse_protocol_info_from_meta_term(
 
 /// Parse a `protocol_registry` ETF term (`#{atom() => meta_map()}`,
 /// `beamtalk_compiler_server`'s ambient `protocols` cache) into
-/// `Vec<ProtocolInfo>` (BT-3473). Degrades gracefully on malformed entries
+/// `Vec<ProtocolInfo>`. Degrades gracefully on malformed entries
 /// (silently skipped), mirroring `parse_class_hierarchy_from_term`.
 pub(crate) fn parse_protocol_registry_from_term(
     term: &Term,
@@ -490,8 +488,8 @@ pub(crate) fn parse_protocol_registry_from_term(
         .collect()
 }
 
-/// Extract an optional `protocol_registry` field, returning `Vec<ProtocolInfo>`
-/// (BT-3473). Mirrors `extract_class_hierarchy`.
+/// Extract an optional `protocol_registry` field, returning `Vec<ProtocolInfo>`.
+/// Mirrors `extract_class_hierarchy`.
 pub(crate) fn extract_protocol_registry(
     request: &Map,
 ) -> Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo> {
@@ -510,7 +508,7 @@ pub(crate) fn extract_protocol_registry(
 /// side (it only distinguishes `Primary` from future AOP advice kinds), so a
 /// standalone-parsed body lands in the right side purely by list choice, and the
 /// `kind` match is a within-list replace-or-add discriminator — not a side check.
-/// (BT-2563 #3: there is therefore no class-side "kind trap" / duplicate-push.)
+/// There is therefore no class-side "kind trap" / duplicate-push.
 pub(crate) fn merge_method(
     methods: &mut Vec<beamtalk_core::ast::MethodDefinition>,
     method: beamtalk_core::ast::MethodDefinition,
@@ -555,7 +553,7 @@ pub(crate) fn extract_class_hierarchy(
 }
 
 /// Extract an optional `known_type_aliases` field: a list of standalone
-/// `type Name = <expansion>` source strings (ADR 0108 Phase 8, BT-2902),
+/// `type Name = <expansion>` source strings (ADR 0108 Phase 8),
 /// re-parsing each into an `AliasInfo`.
 ///
 /// Aliases erase to nothing at runtime, so — unlike `class_hierarchy`, which

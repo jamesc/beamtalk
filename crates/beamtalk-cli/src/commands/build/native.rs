@@ -30,7 +30,7 @@ pub(crate) fn compile_native_sources(
 ) -> Result<Option<Rebar3Result>> {
     let pkg_manifest = env.pkg_manifest();
 
-    // BT-1730: Generate beamtalk_classes.hrl before native Erlang compilation.
+    // Generate beamtalk_classes.hrl before native Erlang compilation.
     // This header provides ?BT_CLASS_MODULE macros so native .erl files can
     // reference Beamtalk class modules without hardcoding bt@<pkg>@<class> atoms.
     if pkg_manifest.is_some() {
@@ -86,7 +86,7 @@ pub(crate) fn compile_native_sources(
         None
     };
 
-    // BT-1730: Validate native .erl files for hardcoded bt@<pkg>@ module references.
+    // Validate native .erl files for hardcoded bt@<pkg>@ module references.
     // Warns at compile time so moving a class between packages doesn't cause
     // silent runtime failures.
     if let Some(pkg) = pkg_manifest {
@@ -96,7 +96,7 @@ pub(crate) fn compile_native_sources(
     Ok(native_result)
 }
 
-// ── BT-1730: Class module header generation ─────────────────────────────────
+// ── Class module header generation ──────────────────────────────────────────
 
 /// Generate a `beamtalk_classes.hrl` header file with Erlang preprocessor
 /// macros that map Beamtalk class names to their compiled BEAM module atoms.
@@ -623,7 +623,7 @@ pub(crate) fn compile_native_erlang_with_deps(
         .docs()
         .erl_libs(&build_layout.rebar_lib_dir())
         .runtime_include()
-        // BT-1730: generated include dir for beamtalk_classes.hrl
+        // Generated include dir for beamtalk_classes.hrl
         .include_dir(build_layout.native_include_dir());
 
     for inc in &include_dirs {
@@ -640,7 +640,7 @@ pub(crate) fn compile_native_erlang_with_deps(
 
     invocation.run("Native Erlang compilation")?;
 
-    // BT-1732: User-visible output confirming native Erlang compilation.
+    // User-visible output confirming native Erlang compilation.
     let count = erl_files.len();
     let plural = if count == 1 { "" } else { "s" };
     eprintln!("Compiled {count} native Erlang file{plural}");

@@ -39,8 +39,8 @@ fn format_source_is_idempotent() {
     assert_eq!(pass1, pass2, "format_source must be idempotent");
 }
 
-// --- `matchExhaustive:` unparse round-trip (BT-2763 / ADR 0106; moved
-// from `source_analysis::parser::expressions`, BT-3346 / ADR 0117 Phase 4) ---
+// --- `matchExhaustive:` unparse round-trip (ADR 0106; moved
+// from `source_analysis::parser::expressions`, ADR 0117 Phase 4) ---
 
 #[test]
 fn match_exhaustive_unparse_round_trips_keyword() {
@@ -70,7 +70,7 @@ fn plain_match_unparse_does_not_gain_exhaustive_keyword() {
     );
 }
 
-// --- Difference type annotation unparsing (BT-2742) ---
+// --- Difference type annotation unparsing ---
 
 #[test]
 fn difference_type_annotation_unparses() {
@@ -98,7 +98,7 @@ fn difference_return_type_round_trips_through_format_source() {
 }
 
 // --- Intersection type annotation unparsing (ADR 0068 §Protocol
-// Composition, ADR 0102 §1/§3, BT-2743) ---
+// Composition, ADR 0102 §1/§3) ---
 
 #[test]
 fn intersection_type_annotation_unparses() {
@@ -126,7 +126,7 @@ fn intersection_return_type_round_trips_through_format_source() {
     );
 }
 
-// --- Grouping parentheses in type annotations (BT-2760) ---
+// --- Grouping parentheses in type annotations ---
 
 #[test]
 fn grouped_difference_operands_unparse_with_parens() {
@@ -190,7 +190,7 @@ fn right_nested_difference_unparses_with_parens() {
 
 #[test]
 fn grouped_mixed_types_round_trip_through_format_source() {
-    // Parse → unparse preserves the parenthesised mixed forms (BT-2760),
+    // Parse → unparse preserves the parenthesised mixed forms,
     // and the formatter is idempotent on them.
     for (source, expected) in [
         (

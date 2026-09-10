@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `beamtalk warm-otp-cache` — warm the shared, OTP-version-keyed type-spec
-//! cache without a Beamtalk project (BT-2471).
+//! cache without a Beamtalk project.
 //!
 //! `beamtalk build`/`beamtalk lint` already populate the shared cache
-//! introduced by BT-2470 (`<cache>/beamtalk/otp-specs/<otp>-<erts>/`) as a
+//! (`<cache>/beamtalk/otp-specs/<otp>-<erts>/`) as a
 //! side effect of extracting FFI type specs for a real project. This command
 //! exists for callers that want to pay that cost *before* any project build
 //! runs — e.g. `.claude/hooks/worktree-init.sh` (the `SessionStart` hook),
@@ -27,7 +27,7 @@
 //! Idempotent and cheap when already warm: [`extract_type_specs`] checks the
 //! shared tier first and spawns no `beamtalk_build_worker` BEAM node at all
 //! when every OTP module is already cached under the current OTP/ERTS
-//! version key (BT-2470's cache-hit fast path) — the only work is discovering
+//! version key (the cache-hit fast path) — the only work is discovering
 //! the current OTP version and the on-disk `.beam` listing.
 //!
 //! Non-fatal by design: if the Beamtalk runtime isn't compiled yet, or `erl`

@@ -180,7 +180,7 @@ fn pretty_json(value: &serde_json::Value) -> String {
 /// Check a REPL response for errors and return early with a formatted error result.
 ///
 /// The `$fallback` string is used when the response has no error message.
-/// Uses the shared `format_diagnostic` helper (BT-2086) so MCP error rendering
+/// Uses the shared `format_diagnostic` helper so MCP error rendering
 /// stays in lockstep with CLI output.
 macro_rules! check_response {
     ($response:expr, $fallback:expr) => {

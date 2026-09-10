@@ -598,7 +598,7 @@ pub fn write_core_erlang(
 /// Writes a parsed Beamtalk module as Core Erlang to the specified path, with source text.
 ///
 /// When source text is provided, method source is captured in class registration
-/// metadata for `CompiledMethod` introspection (BT-101).
+/// metadata for `CompiledMethod` introspection.
 ///
 /// # Errors
 ///
@@ -651,11 +651,11 @@ pub struct ClassHierarchyContext {
     /// Full `ProtocolInfo` entries from other source files in the compilation
     /// unit (e.g. `BUnit` fixtures). Seeded into the protocol registry during
     /// semantic analysis so the unresolved-class validator and type checker
-    /// recognise protocol names defined outside the current module (BT-2006).
+    /// recognise protocol names defined outside the current module.
     pub pre_loaded_protocols:
         Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     /// Type alias declarations (`type Name = ...`) from other source files in
-    /// the same package (BT-2928, ADR 0108). Seeded into the `AliasRegistry`
+    /// the same package (ADR 0108). Seeded into the `AliasRegistry`
     /// during semantic analysis so a cross-file alias reference resolves
     /// through `resolve_type_annotation` instead of staying an opaque,
     /// unresolved name. Structurally a `ctx.hierarchy.*` field like
@@ -666,7 +666,7 @@ pub struct ClassHierarchyContext {
     /// `analyse_full`'s merge order lets the module's own declaration take
     /// precedence over its duplicate pre-loaded entry.
     pub pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
-    /// Project-wide standalone extension definitions from Pass 1 (BT-2795).
+    /// Project-wide standalone extension definitions from Pass 1.
     /// Registered into each file's class hierarchy during Pass 2 so
     /// same-project cross-file extensions resolve instead of producing
     /// false `Dnu` hints (ADR 0066 / ADR 0100 Rule 2 WS1).
@@ -700,7 +700,7 @@ pub struct CompileContext<'a> {
     /// no manifest or no `[diagnostics]` section — absence preserves today's
     /// Rule 1 completeness-ladder defaults.
     ///
-    /// BT-3410: an unchanged file's diagnostics, replayed from `build.rs`'s
+    /// An unchanged file's diagnostics, replayed from `build.rs`'s
     /// diagnostics sidecar instead of recompiled, keep whatever
     /// `diagnostics_overrides` (and `suppress_warnings`/`warnings_as_errors`)
     /// were in effect the last time that file was *actually* compiled.
@@ -714,7 +714,7 @@ pub struct CompileContext<'a> {
 
 /// Writes Core Erlang code with primitive bindings.
 ///
-/// BT-295 / ADR 0007 Phase 3: Same as [`write_core_erlang`] but accepts
+/// ADR 0007 Phase 3: Same as [`write_core_erlang`] but accepts
 /// a binding table for pragma-driven dispatch.
 ///
 /// # Errors
@@ -748,7 +748,7 @@ pub fn write_core_erlang_with_bindings(
         .with_class_superclass_index(hierarchy.class_superclass_index.clone())
         .with_source_path_opt(source_path)
         .with_class_hierarchy(hierarchy.pre_loaded_classes.clone())
-        // BT-2932: thread cross-module type aliases through to codegen so
+        // Thread cross-module type aliases through to codegen so
         // an alias-typed annotation referencing a `type Name = ...` from
         // another module in the same compilation unit resolves to a
         // `user_type` reference in generated `-spec`/`-type` attributes
@@ -761,7 +761,7 @@ pub fn write_core_erlang_with_bindings(
             env!("BEAMTALK_VERSION"),
             crate::commands::build_stamp::current_otp_version(),
         );
-    // BT-3123: thread the driver's already-computed semantic analysis (class
+    // Thread the driver's already-computed semantic analysis (class
     // hierarchy, semantic facts, inferred method return types) into codegen
     // when the caller ran `analyse_full` itself (via
     // `compute_project_diagnostics_with_analysis`) — avoids codegen re-deriving
@@ -814,7 +814,7 @@ pub fn compile_source(
 
 /// Compiles a Beamtalk source file to Core Erlang with primitive bindings.
 ///
-/// BT-295 / ADR 0007 Phase 3: Same as [`compile_source`] but accepts a
+/// ADR 0007 Phase 3: Same as [`compile_source`] but accepts a
 /// [`PrimitiveBindingTable`] for pragma-driven dispatch.
 ///
 /// # Errors
@@ -834,7 +834,7 @@ pub(crate) fn compile_source_with_bindings(
 ) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
     debug!("Compiling module '{}' with bindings", module_name);
 
-    // BT-1544: Reuse pre-parsed source + AST from Pass 1 when available,
+    // Reuse pre-parsed source + AST from Pass 1 when available,
     // otherwise read and parse from disk (single-file mode, REPL, etc.).
     let (source, mut module, mut diagnostics) = if let Some(cached) = cached_ast {
         debug!("Using cached AST from Pass 1 for '{}'", source_path);
@@ -859,7 +859,7 @@ pub(crate) fn compile_source_with_bindings(
         );
     diagnostics.extend(primitive_diags);
 
-    // BT-2009: Unified post-analysis diagnostic pipeline.
+    // Unified post-analysis diagnostic pipeline.
     // Semantic analysis + all post-analysis passes + @expect suppression are now
     // handled by a single function shared between CLI and LSP.
     let cross_file_classes =
@@ -872,7 +872,7 @@ pub(crate) fn compile_source_with_bindings(
             options: options.clone(),
             cross_file_classes: cross_file_classes.clone(),
             pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
-            // BT-2928: cross-file/package type aliases from Pass 1 — see
+            // Cross-file/package type aliases from Pass 1 — see
             // `ClassHierarchyContext::pre_loaded_aliases`'s doc. `analyse_full`
             // filters out any name the current module redeclares itself, so no
             // "current file's own aliases" pre-filter is needed here (mirrors
@@ -882,25 +882,25 @@ pub(crate) fn compile_source_with_bindings(
             native_type_registry: ctx.native_type_registry.clone(),
             dep_registry: ctx.dep_registry,
             strict_deps: ctx.strict_deps,
-            // ADR 0100 Rule 3 (BT-2793) / BT-2800: `compute_project_diagnostics`
+            // ADR 0100 Rule 3: `compute_project_diagnostics`
             // applies this table itself (after `@expect` suppression, before
             // returning) — the single shared pipeline both the CLI and the LSP
             // call, so severity can never drift between the two surfaces.
             diagnostics_overrides: ctx.diagnostics_overrides.clone(),
-            // BT-1846/BT-1847: this compile pipeline never reaches a `stubs/`
+            // This compile pipeline never reaches a `stubs/`
             // file — `find_source_files`/`collect_lint_files` exclude
             // `stubs/` from the walk that feeds it, and `declare native:`
             // stub declarations are parsed separately by
             // `load_project_stub_registry`, never through here.
             is_stub_file: false,
-            // BT-3431: file basename (without extension), so the shared
+            // File basename (without extension), so the shared
             // pipeline can validate it agrees with the class declared here —
             // see `ProjectDiagnosticContext::source_file_stem`'s doc.
             source_file_stem: source_path
                 .file_stem()
                 .map(std::string::ToString::to_string),
         };
-    // BT-3123: capture the `AnalysisResult` this pipeline's `analyse_full`
+    // Capture the `AnalysisResult` this pipeline's `analyse_full`
     // call already produced, so it can be handed to codegen below instead of
     // codegen re-deriving the class hierarchy, semantic facts, and inferred
     // method return types from scratch (a second full type-checking pass).
@@ -914,13 +914,13 @@ pub(crate) fn compile_source_with_bindings(
     diagnostics = new_diagnostics;
 
     // Check for errors (and optionally treat warnings/hints as errors).
-    // Deprecation-category warnings (BT-1529) and structural validation warnings
-    // (BT-1726: UnresolvedClass, UnresolvedFfi, ArityMismatch) are excluded from
+    // Deprecation-category warnings and structural validation warnings
+    // (UnresolvedClass, UnresolvedFfi, ArityMismatch) are excluded from
     // warnings-as-errors because they can produce false positives when compiling
     // single files that reference classes, FFI modules, or arities defined in
     // other compilation units.
     //
-    // ADR 0100 Rule 3 (BT-2793): that exclusion is itself the Rule 1 default
+    // ADR 0100 Rule 3: that exclusion is itself the Rule 1 default
     // for those categories — an explicit `[diagnostics]` table entry for one
     // of them is a deliberate, package-level opt back in to promotion, so it
     // wins over the exclusion (per the "explicit table value wins over the
@@ -966,14 +966,14 @@ pub(crate) fn compile_source_with_bindings(
 
     debug!("Parsed successfully: {}", source_path);
 
-    // Save diagnostics for the caller to build a summary (BT-2014).
+    // Save diagnostics for the caller to build a summary.
     // `diagnostics` is no longer needed after this point — the printing loop above
     // borrowed them by reference and the error check already bailed if needed.
     let returned_diags = diagnostics;
 
-    // Generate Core Erlang (with source text for CompiledMethod introspection BT-101, and bindings BT-295)
-    // BT-374: Pass workspace_mode for workspace binding dispatch
-    // BT-845: Use an absolute path so reload works regardless of the
+    // Generate Core Erlang (with source text for CompiledMethod introspection, and bindings)
+    // Pass workspace_mode for workspace binding dispatch
+    // Use an absolute path so reload works regardless of the
     // working directory at reload time. Always pass the source path so that
     // line annotations and the 'file' attribute populate BEAM stacktraces
     // (even for stdlib). The `beamtalk_source` attribute is suppressed for
@@ -985,7 +985,7 @@ pub(crate) fn compile_source_with_bindings(
     let embed_source_path = Some(embed_source_path.as_str());
     // Build a codegen-specific hierarchy with cross-file classes (filtered to
     // exclude the current file's classes, which are added by codegen itself).
-    // BT-2932: `pre_loaded_aliases` is *not* filtered the way `cross_file_classes`
+    // `pre_loaded_aliases` is *not* filtered the way `cross_file_classes`
     // is — it already includes the current file's own aliases (see
     // `ClassHierarchyContext::pre_loaded_aliases`'s doc), and codegen's merge
     // (`AliasRegistry::from_module_declarations_with_pre_loaded`) lets the
@@ -999,7 +999,7 @@ pub(crate) fn compile_source_with_bindings(
         pre_loaded_aliases: ctx.hierarchy.pre_loaded_aliases.clone(),
         ..ClassHierarchyContext::default()
     };
-    // BT-3125: prepare the AST (inferred return types, supervisor_kind,
+    // Prepare the AST (inferred return types, supervisor_kind,
     // class_kind) at the driver boundary, using the same `AnalysisResult`
     // handed off to codegen below via `Some(analysis_result)` — nothing
     // mutates `module` between `compute_project_diagnostics_with_analysis`
@@ -1021,7 +1021,7 @@ pub(crate) fn compile_source_with_bindings(
         &codegen_hierarchy,
         Some((&source, embed_source_path)),
         ctx.native_type_registry.clone(),
-        // BT-3123: hand off the `AnalysisResult` this function's own
+        // Hand off the `AnalysisResult` this function's own
         // `compute_project_diagnostics_with_analysis` call above already
         // computed — `cross_file_classes` (this analysis's
         // `AnalysisContext::pre_loaded_classes`) is exactly `codegen_hierarchy`'s
@@ -1036,10 +1036,10 @@ pub(crate) fn compile_source_with_bindings(
     Ok(returned_diags)
 }
 
-// BT-2858: OTP/dependency Erlang type-spec extraction moved to the
-// `beamtalk_cli` lib crate so `beamtalk-mcp` can share it — mirrors the
-// `dependency_classes`/`build_layout`/`manifest` moves done for BT-2823/
-// BT-2836. Re-exported here so existing `beam_compiler::X` references
+// OTP/dependency Erlang type-spec extraction lives in the
+// `beamtalk_cli` lib crate so `beamtalk-mcp` can share it — mirrors
+// where `dependency_classes`/`build_layout`/`manifest` also live.
+// Re-exported here so existing `beam_compiler::X` references
 // throughout this crate keep working unchanged.
 pub use beamtalk_cli::native_type_specs::{
     OtpDiscovery, current_spec_mapping_stamp, discover_dependency_beam_files,
@@ -1249,7 +1249,7 @@ end
         result.expect("compile_batch should succeed when escript is available");
     }
 
-    /// BT-3115: a deliberately-malformed Core Erlang module — `foo/1`
+    /// A deliberately-malformed Core Erlang module — `foo/1`
     /// references `State`, which is never a parameter or let-bound — must
     /// fail with a readable `core_lint` message naming the unbound
     /// variable, actually reaching this process's stderr (and therefore
@@ -1400,7 +1400,7 @@ end
     }
 
     /// Source that triggers an actor-new Error (using `new` on an Actor subclass).
-    /// BT-1524: Promoted from warning to error.
+    /// Promoted from warning to error.
     const ACTOR_NEW_SOURCE: &str =
         "Actor subclass: TestActorWarnings\n  doNothing => nil\n\nTestActorWarnings new";
 
@@ -1415,7 +1415,7 @@ end
         let options = beamtalk_core::CompilerOptions::default();
         let result = compile_source(&source_file, "actor_new", &core_file, &options);
 
-        // BT-1524: actor new is now an error, not a warning — always fails
+        // Actor new is now an error, not a warning — always fails
         assert!(
             result.is_err(),
             "Should fail to compile: actor new is a compile-time error: {result:?}"
@@ -1445,7 +1445,7 @@ end
         );
     }
 
-    // ---- BT-2793: ADR 0100 Rule 3 `[diagnostics]` table tests ----
+    // ---- ADR 0100 Rule 3 `[diagnostics]` table tests ----
 
     /// Source with a DNU hint on a known, closed receiver (`String` has no
     /// `frobnicate`) — mirrors the fixture `lint.rs` uses for the same hint.
@@ -1648,7 +1648,7 @@ end
 
     #[test]
     fn test_diagnostics_table_severity_floor_protects_hard_errors() {
-        // BT-2793 adversarial-review finding: `ActorNew` (BT-1524 — `Actor
+        // `ActorNew` (`Actor
         // subclass new` must always fail the build) is emitted at
         // Severity::Error unconditionally, not via the Rule 1 completeness
         // ladder. A table entry like `actor-new = "warn"` must NOT silently
@@ -1789,7 +1789,7 @@ end
 
     #[test]
     fn test_diagnostics_table_hint_override_also_lifts_gradual_migration_exclusion() {
-        // BT-2793 adversarial-review finding: the exclusion-lift keys off
+        // The exclusion-lift keys off
         // table *presence* for the category, not the chosen severity value —
         // per ADR 0100 Rule 3's literal precedence note ("the explicit table
         // value wins over the exclusion"), so `unresolved-class = "hint"`
@@ -1871,7 +1871,7 @@ end
         );
     }
 
-    /// BT-1535: Keyword/class-kind mismatches are now hard compile errors
+    /// Keyword/class-kind mismatches are now hard compile errors
     /// (promoted from deprecation warnings in Phase 4 of ADR 0067).
     #[test]
     fn test_keyword_class_kind_mismatch_is_compile_error() {

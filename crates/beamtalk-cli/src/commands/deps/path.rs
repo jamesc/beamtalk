@@ -41,14 +41,14 @@ pub struct ResolvedDependency {
     /// class references (superclass chains, method signatures, etc.).
     /// Empty when metadata is unavailable (e.g., compiled-only dependencies).
     pub class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    /// Full protocol metadata from the dependency's source files (BT-2910).
+    /// Full protocol metadata from the dependency's source files.
     ///
     /// Lets a consumer's `extending:`/conformance checks resolve protocol
     /// names exported by this dependency. Protocols have no `internal`
     /// modifier at the AST level, so every declared protocol is exported —
     /// unlike `alias_infos`, there is no seeding-boundary filter to apply.
     pub protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
-    /// Full type-alias metadata from the dependency's source files (BT-2910),
+    /// Full type-alias metadata from the dependency's source files,
     /// each stamped with `.package = Some(name)`.
     ///
     /// Lets a consumer's `:: Alias` annotations resolve type aliases exported
@@ -378,8 +378,8 @@ fn compile_dependency_with_context(
 
     info!(dep = %dep_name, ebin = %ebin_path, "Compiling path dependency");
 
-    // Find source files in the dependency. `stubs/` is excluded (ADR 0075,
-    // BT-1847) — it's type-only and never compiled.
+    // Find source files in the dependency. `stubs/` is excluded (ADR 0075)
+    // — it's type-only and never compiled.
     let src_dir = dep_root.join("src");
     let source_files = crate::commands::build::collect_project_source_files(dep_root)?;
 
@@ -427,11 +427,11 @@ fn compile_dependency_with_context(
         }
     }
 
-    // BT-2928: Same-package cross-file type-alias resolution within the
+    // Same-package cross-file type-alias resolution within the
     // dependency's own multi-file compilation — mirrors `all_class_infos`
     // immediately above. Exporting these aliases to *consumers* of this
-    // dependency (cross-package alias resolution) is deferred — see the
-    // BT-2928 follow-up filed for this module.
+    // dependency (cross-package alias resolution) is deferred as a
+    // follow-up for this module.
     let all_alias_infos =
         crate::commands::build::collect_project_alias_infos(&source_files, dep_name);
 
@@ -443,7 +443,7 @@ fn compile_dependency_with_context(
             pre_loaded_classes: all_class_infos.clone(),
             pre_loaded_protocols: Vec::new(),
             pre_loaded_aliases: all_alias_infos,
-            // BT-2795: The dep's own project-wide extensions — its files see
+            // The dep's own project-wide extensions — its files see
             // each other's extensions during its own compilation. (Exporting
             // them to consumers is WS3 / the ADR 0070 amendment.)
             extension_index: extension_index.clone(),
@@ -451,7 +451,7 @@ fn compile_dependency_with_context(
         dep_registry: None, // No collision detection within dependency compilation
         strict_deps: false, // Dependencies use their own strict-deps setting, not root's
         native_type_registry: None, // Dependencies don't need FFI type checking
-        // ADR 0100 Rule 3 (BT-2793): neither the root package's nor the
+        // ADR 0100 Rule 3: neither the root package's nor the
         // dependency's own `[diagnostics]` table is applied here — this path
         // doesn't load either manifest's `[diagnostics]` section, so
         // dependency compilation always sees an empty table (today's Rule 1
@@ -573,7 +573,7 @@ fn generate_dependency_app_file(
         own_class_module_index,
         dep_name,
     );
-    // ADR 0108 Phase 8 (BT-2903): a path dependency is itself a fully-built
+    // ADR 0108 Phase 8: a path dependency is itself a fully-built
     // Beamtalk package, so its own `internal type` declarations must round-
     // trip into its `.app` file the same way the root package's do — the
     // seeding-boundary exclusion of a dependency's internal aliases happens
@@ -604,7 +604,7 @@ fn generate_dependency_app_file(
         &alias_metadata,
     )?;
 
-    // BT-1722: Generate per-package corpus files for MCP discovery.
+    // Generate per-package corpus files for MCP discovery.
     // Place corpus alongside the dep's ebin dir (in _build/deps/{name}/).
     let corpus_dir = ebin_path.parent().unwrap_or(ebin_path);
     crate::commands::build::generate_package_corpus(
@@ -620,7 +620,7 @@ fn generate_dependency_app_file(
 /// Build a class module index for a dependency without compiling.
 ///
 /// Scans the dependency's source files and extracts class-to-module mappings,
-/// plus (BT-2910) protocol and type-alias metadata for cross-package
+/// plus protocol and type-alias metadata for cross-package
 /// `extending:`/`:: Alias` resolution. This is the fast path used when deps
 /// are fresh and don't need recompilation.
 ///
@@ -637,7 +637,7 @@ pub(crate) fn build_dep_class_index(
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
 )> {
-    // `stubs/` is excluded (ADR 0075, BT-1847) — it's type-only and never
+    // `stubs/` is excluded (ADR 0075) — it's type-only and never
     // compiled.
     let src_dir = dep_root.join("src");
     let source_files = crate::commands::build::collect_project_source_files(dep_root)?;
@@ -658,7 +658,7 @@ pub(crate) fn build_dep_class_index(
             dep_name,
         )?;
 
-    // BT-2910: Extract protocol/alias infos from the already-parsed modules,
+    // Extract protocol/alias infos from the already-parsed modules,
     // iterating in a stable (sorted-by-path) order for deterministic output.
     let mut sorted_files: Vec<&Utf8PathBuf> = cached_asts.keys().collect();
     sorted_files.sort();
@@ -1073,7 +1073,7 @@ dep_utils = { path = "dep_utils" }"#,
         );
     }
 
-    /// BT-2910: `build_dep_class_index` must extract a dependency's protocol
+    /// `build_dep_class_index` must extract a dependency's protocol
     /// and type-alias declarations alongside its classes, so that a
     /// consumer's cross-package `extending:`/`:: Alias` resolution can be
     /// wired from `ResolvedDependency.protocol_infos`/`alias_infos`.

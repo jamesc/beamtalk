@@ -125,8 +125,8 @@ fn extract_pattern_bindings_impl(
 
         // Type patterns bind `binding` (ADR 0107 Phase A) — registering it
         // here is what makes the name resolvable in the arm body/guard;
-        // narrowing its *type* to `class` is BT-2855's job (bindings/scope,
-        // narrowing, and codegen for `Pattern::Type` land together there).
+        // narrowing its *type* to `class` is a separate concern (bindings/scope,
+        // narrowing, and codegen for `Pattern::Type` are handled separately).
         // Without this, `path :: String -> path` would raise a spurious
         // "Undefined variable: path" error even though the pattern is
         // otherwise valid Phase A syntax.
@@ -147,13 +147,13 @@ fn extract_pattern_bindings_impl(
             }
         }
 
-        // Array patterns: duplicates are allowed — codegen emits equality checks (BT-1315)
+        // Array patterns: duplicates are allowed — codegen emits equality checks
         Pattern::Array { elements, rest, .. } => {
             for element in elements {
                 extract_pattern_bindings_impl(element, bindings, seen, diagnostics, true);
             }
             if let Some(rest_pat) = rest {
-                // TODO(BT-1315): validate rest name doesn't shadow an element binding
+                // TODO: validate rest name doesn't shadow an element binding
                 extract_pattern_bindings_impl(rest_pat, bindings, seen, diagnostics, true);
             }
         }
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_extract_pattern_bindings_duplicate_in_array_is_allowed() {
-        // BT-1315: Pattern #[x, x] should NOT error — codegen emits equality check
+        // Pattern #[x, x] should NOT error — codegen emits equality check
         let pattern = Pattern::Array {
             elements: vec![
                 Pattern::Variable(Identifier::new("x", test_span())),

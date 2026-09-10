@@ -125,7 +125,7 @@ mod tests {
 
     /// Helper to create a unique test workspace ID and clean up after. Holds
     /// the shared (real-directory) side of `test_support`'s `BEAMTALK_HOME`
-    /// guard for its whole lifetime (BT-3370), so it can never run
+    /// guard for its whole lifetime, so it can never run
     /// concurrently with a `BeamtalkHomeOverride`.
     struct TestWorkspace {
         id: String,
@@ -232,7 +232,7 @@ mod tests {
     fn test_generate_cookie_is_args_file_safe() {
         // A cookie passed via `-args_file` as `-setcookie <cookie>` must not be
         // mistaken for a VM flag, or the node boots with the wrong cookie and
-        // every WebSocket auth fails with "Invalid cookie" (BT-2532). Run enough
+        // every WebSocket auth fails with "Invalid cookie". Run enough
         // iterations to exercise the ~1.5% leading-`-` reroll path.
         for _ in 0..5_000 {
             let cookie = generate_cookie();
@@ -1200,7 +1200,7 @@ mod tests {
         })
     }
 
-    /// Regression test for BT-2057: even after the retry wrapper has exhausted
+    /// Regression test: even after the retry wrapper has exhausted
     /// all three attempts (each running `cleanup_stale_node_info` after failure),
     /// a pre-existing `startup.log` must still be present so the panic message's
     /// "Check …/startup.log" reference is not dangling.
@@ -1352,7 +1352,7 @@ mod tests {
 
         // Step 1: First call creates workspace and starts node.
         // Retry up to 3 times for transient WS health-check failures on loaded
-        // CI runners (BT-2040).
+        // CI runners.
         let (info1, started1, id1) =
             get_or_start_workspace_with_retry(&project_path, &tw.id, &paths, &config);
         let _guard1 = NodeGuard::new(&info1);
@@ -1404,7 +1404,7 @@ mod tests {
         assert_node_stopped(&info3, "node should not be running after force stop");
     }
 
-    /// Regression test for BT-970: concurrent `get_or_start_workspace` calls on the
+    /// Regression test: concurrent `get_or_start_workspace` calls on the
     /// same workspace ID must not both attempt to start a node. The workspace lock must
     /// cover the full check-is-running + start sequence so the second caller discovers
     /// the node already running after the first caller starts it.
@@ -1488,7 +1488,7 @@ mod tests {
         );
     }
 
-    /// Regression test for BT-967: stale port file from a previous aborted startup
+    /// Regression test: stale port file from a previous aborted startup
     /// causes `start_detached_node` to connect to the wrong BEAM node, producing
     /// auth failures in `wait_for_tcp_ready` for 30 seconds before timing out.
     ///
@@ -1517,7 +1517,7 @@ mod tests {
         let config = test_workspace_config();
 
         // Step 1: Start a node to get a real port, then kill it without cleanup.
-        // Retry up to 3 times for transient WS health-check failures (BT-2040).
+        // Retry up to 3 times for transient WS health-check failures.
         let first_info = start_detached_node_with_retry(&tw.id, &paths, &config);
         let stale_port = first_info.port;
         kill_node_raw(&first_info);
@@ -1542,7 +1542,7 @@ mod tests {
         // so it calls `start_detached_node` directly (not via cleanup_stale_node_info).
         // The stale port file must be deleted before discovery, otherwise the loop
         // reads stale_port immediately and wait_for_tcp_ready times out.
-        // Retry up to 3 times for transient WS health-check failures (BT-2040).
+        // Retry up to 3 times for transient WS health-check failures.
         let (new_info, started, _) =
             get_or_start_workspace_with_retry(&project_path, &tw.id, &paths, &config);
         let _guard = NodeGuard::new(&new_info);
@@ -1558,7 +1558,7 @@ mod tests {
         );
     }
 
-    /// Regression test for BT-969: a `starting` tombstone left by a mid-startup
+    /// Regression test: a `starting` tombstone left by a mid-startup
     /// crash is detected on the next `start_detached_node` call, all stale runtime
     /// files are cleaned up, and the node starts successfully.
     ///
@@ -1582,7 +1582,7 @@ mod tests {
         let config = test_workspace_config();
 
         // Step 1: Start a node to produce real runtime files, then kill it.
-        // Retry up to 3 times for transient WS health-check failures (BT-2040).
+        // Retry up to 3 times for transient WS health-check failures.
         let first_info = start_detached_node_with_retry(&tw.id, &paths, &config);
         kill_node_raw(&first_info);
 
@@ -1600,7 +1600,7 @@ mod tests {
 
         // Step 3: Start a new node.  The tombstone must be detected, all stale
         // files cleaned, and startup must succeed.
-        // Retry up to 3 times for transient WS health-check failures (BT-2040).
+        // Retry up to 3 times for transient WS health-check failures.
         let (new_info, started, _) =
             get_or_start_workspace_with_retry(&project_path, &tw.id, &paths, &config);
         let _guard = NodeGuard::new(&new_info);

@@ -84,7 +84,7 @@ fn search_classes_tool_registered() {
     );
 }
 
-// --- list_classes param deserialization (BT-1404) ---
+// --- list_classes param deserialization ---
 
 #[test]
 fn list_classes_params_no_filter() {

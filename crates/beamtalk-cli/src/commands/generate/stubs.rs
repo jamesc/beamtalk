@@ -277,10 +277,10 @@ fn format_stub_file(module_name: &str, functions: &[FunctionSignature]) -> Strin
 /// `TypeAnnotation`) every other signature-text consumer renders from — so
 /// there's no `TypeAnnotation` to hand to
 /// `unparse::unparse_type_annotation_display` here. Each parameter's type is
-/// rendered by this module's own [`format_type`] instead, and the result is
-/// composed with the same shared
+/// rendered via [`beamtalk_core::semantic_analysis::type_checker::InferredType::display_annotation`]
+/// instead, and the result is composed with the same shared
 /// [`beamtalk_core::unparse::render_signature_text`] core every other
-/// consumer uses (BT-3097) — text-in/text-out is exactly the seam that lets
+/// consumer uses — text-in/text-out is exactly the seam that lets
 /// one composer serve both AST- and native-type-rendered signatures without
 /// an AST adapter.
 fn format_signature(sig: &FunctionSignature) -> String {
@@ -288,7 +288,7 @@ fn format_signature(sig: &FunctionSignature) -> String {
         SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
     };
 
-    let ret_type = format_type(&sig.return_type);
+    let ret_type = sig.return_type.display_annotation().to_string();
 
     if sig.params.is_empty() {
         return render_signature_text(
@@ -298,7 +298,11 @@ fn format_signature(sig: &FunctionSignature) -> String {
         );
     }
 
-    let type_texts: Vec<String> = sig.params.iter().map(|p| format_type(&p.type_)).collect();
+    let type_texts: Vec<String> = sig
+        .params
+        .iter()
+        .map(|p| p.type_.display_annotation().to_string())
+        .collect();
     let keywords: Vec<String> = sig
         .params
         .iter()
@@ -329,60 +333,6 @@ fn format_signature(sig: &FunctionSignature) -> String {
         Some(&ret_type),
         &SignatureRenderOptions::DISPLAY,
     )
-}
-
-/// Format an `InferredType` as a Beamtalk type annotation string.
-fn format_type(ty: &beamtalk_core::semantic_analysis::type_checker::InferredType) -> String {
-    use beamtalk_core::semantic_analysis::type_checker::InferredType;
-
-    match ty {
-        InferredType::Dynamic(_) => "Dynamic".to_string(),
-        InferredType::Never => "Never".to_string(),
-        InferredType::Known {
-            class_name,
-            type_args,
-            ..
-        } => {
-            if type_args.is_empty() {
-                class_name.to_string()
-            } else {
-                let args: Vec<String> = type_args.iter().map(format_type).collect();
-                format!("{}({})", class_name, args.join(", "))
-            }
-        }
-        InferredType::Union { members, .. } => {
-            let parts: Vec<String> = members.iter().map(format_type).collect();
-            parts.join(" | ")
-        }
-        // ADR 0083: render a metatype as the source annotation spelling `C class`.
-        InferredType::Meta { class_name, .. } => format!("{class_name} class"),
-        // ADR 0102: render a negation as `base \ excluded`, e.g. `Symbol \ #foo`.
-        // Parenthesise a union excluded (`Symbol \ (#a | #b)`) so `\` vs `|`
-        // precedence is unambiguous, matching `InferredType::display_with_options`.
-        InferredType::Negation { base, excluded, .. } => {
-            if matches!(excluded.as_ref(), InferredType::Union { .. }) {
-                format!("{} \\ ({})", format_type(base), format_type(excluded))
-            } else {
-                format!("{} \\ {}", format_type(base), format_type(excluded))
-            }
-        }
-        // ADR 0102/BT-2743: render an intersection as `A & B & …`. A union
-        // member is only reachable via explicit grouping; parenthesise to
-        // preserve meaning, matching `InferredType::display_with_options`.
-        InferredType::Intersection { members, .. } => {
-            let parts: Vec<String> = members
-                .iter()
-                .map(|m| {
-                    if matches!(m, InferredType::Union { .. }) {
-                        format!("({})", format_type(m))
-                    } else {
-                        format_type(m)
-                    }
-                })
-                .collect();
-            parts.join(" & ")
-        }
-    }
 }
 
 #[cfg(test)]
@@ -672,7 +622,7 @@ mod tests {
 
     /// Build a unique scratch directory under the OS temp dir, removed on
     /// drop even on panic, mirroring `escript.rs`'s own `ScratchDir` (kept
-    /// module-local rather than shared: BT-3349's no-duplication rule is
+    /// module-local rather than shared: the no-duplication rule is
     /// about *production* helpers, and both are tiny test-only RAII types
     /// over a one-line `tempfile`-free pattern already used elsewhere in
     /// this crate's tests).
@@ -698,63 +648,63 @@ mod tests {
         }
     }
 
-    // --- format_type: variants not exercised via format_signature above ---
+    // --- display_annotation: variants not exercised via format_signature above ---
 
     #[test]
-    fn format_type_never() {
-        assert_eq!(format_type(&InferredType::Never), "Never");
+    fn display_annotation_never() {
+        assert_eq!(InferredType::Never.display_annotation().as_str(), "Never");
     }
 
     #[test]
-    fn format_type_known_with_type_args() {
+    fn display_annotation_known_with_type_args() {
         let ty = InferredType::Known {
             class_name: "List".into(),
             type_args: vec![InferredType::known("Integer")],
             provenance: TypeProvenance::Extracted,
         };
-        assert_eq!(format_type(&ty), "List(Integer)");
+        assert_eq!(ty.display_annotation().as_str(), "List(Integer)");
     }
 
     #[test]
-    fn format_type_meta_renders_class_side() {
+    fn display_annotation_meta_renders_class_side() {
         let ty = InferredType::Meta {
             class_name: "Counter".into(),
             provenance: TypeProvenance::Extracted,
         };
-        assert_eq!(format_type(&ty), "Counter class");
+        assert_eq!(ty.display_annotation().as_str(), "Counter class");
     }
 
     #[test]
-    fn format_type_negation_non_union_excluded() {
+    fn display_annotation_negation_non_union_excluded() {
         let ty = InferredType::Negation {
             base: Box::new(InferredType::known("Symbol")),
             excluded: Box::new(InferredType::known("#foo")),
             provenance: TypeProvenance::Extracted,
         };
-        assert_eq!(format_type(&ty), "Symbol \\ #foo");
+        assert_eq!(ty.display_annotation().as_str(), "Symbol \\ #foo");
     }
 
     #[test]
-    fn format_type_negation_union_excluded_is_parenthesized() {
+    fn display_annotation_negation_union_excluded_is_parenthesized() {
         let ty = InferredType::Negation {
             base: Box::new(InferredType::known("Symbol")),
             excluded: Box::new(InferredType::simple_union(&["#a", "#b"])),
             provenance: TypeProvenance::Extracted,
         };
-        assert_eq!(format_type(&ty), "Symbol \\ (#a | #b)");
+        assert_eq!(ty.display_annotation().as_str(), "Symbol \\ (#a | #b)");
     }
 
     #[test]
-    fn format_type_intersection_plain_members() {
+    fn display_annotation_intersection_plain_members() {
         let ty = InferredType::Intersection {
             members: vec![InferredType::known("A"), InferredType::known("B")],
             provenance: TypeProvenance::Extracted,
         };
-        assert_eq!(format_type(&ty), "A & B");
+        assert_eq!(ty.display_annotation().as_str(), "A & B");
     }
 
     #[test]
-    fn format_type_intersection_union_member_is_parenthesized() {
+    fn display_annotation_intersection_union_member_is_parenthesized() {
         let ty = InferredType::Intersection {
             members: vec![
                 InferredType::known("A"),
@@ -762,6 +712,12 @@ mod tests {
             ],
             provenance: TypeProvenance::Extracted,
         };
-        assert_eq!(format_type(&ty), "A & (B | C)");
+        assert_eq!(ty.display_annotation().as_str(), "A & (B | C)");
+    }
+
+    #[test]
+    fn display_annotation_dynamic_omits_reason() {
+        let ty = InferredType::Dynamic(DynamicReason::UnannotatedParam);
+        assert_eq!(ty.display_annotation().as_str(), "Dynamic");
     }
 }

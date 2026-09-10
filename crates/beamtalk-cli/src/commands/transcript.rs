@@ -332,7 +332,7 @@ mod tests {
     //
     // `spawn_auth_ok_server`/`spawn_auth_error_server` are the shared
     // synchronous ADR 0020 handshake doubles in `crate::commands::test_support`
-    // (BT-3349) — see that module's doc comment.
+    // — see that module's doc comment.
 
     mod transcript_client {
         use super::super::TranscriptClient;

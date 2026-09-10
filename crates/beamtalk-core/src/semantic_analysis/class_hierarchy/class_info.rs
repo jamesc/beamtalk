@@ -119,7 +119,7 @@ pub struct ClassInfo {
     /// via [`add_from_beam_meta`], or set from the build pipeline's current
     /// package context. `None` for REPL classes and bootstrap builtins.
     pub package: Option<EcoString>,
-    /// Whether this class is a Value subclass (ADR 0042, BT-1528).
+    /// Whether this class is a Value subclass (ADR 0042).
     ///
     /// `true` for classes that directly or indirectly inherit from `Value`.
     /// Initially set from the direct superclass name, then corrected by
@@ -138,7 +138,7 @@ pub struct ClassInfo {
     /// the superclass chain. Only meaningful on `Object`-kind classes.
     pub handle_scope: Option<EcoString>,
     /// Whether this class was extracted from a file with parse errors
-    /// (BT-2796, ADR 0100 Rule 2 parse-error guard).
+    /// (ADR 0100 Rule 2 parse-error guard).
     ///
     /// Parser error recovery can silently drop method definitions, so the
     /// method surface recorded here may be incomplete. The receiver-knowledge
@@ -159,7 +159,7 @@ pub struct ClassInfo {
     /// Which state fields carry an explicit default value (field name → has default).
     /// Populated for every declared state field (both typed and untyped).
     ///
-    /// BT-1976: Needed so cross-file consumers can identify typed-no-default
+    /// Needed so cross-file consumers can identify typed-no-default
     /// fields (for post-initialize validation in `gen_server` codegen) even
     /// when the defining class's AST is not present in the current compilation.
     pub state_has_default: HashMap<EcoString, bool>,
@@ -245,7 +245,7 @@ impl ClassInfo {
             })
             .collect();
 
-        // BT-923: For `Value subclass:` classes, synthesize auto-generated slot
+        // For `Value subclass:` classes, synthesize auto-generated slot
         // methods so the type checker and cross-file consumers can resolve them.
         if class.class_kind == ClassKind::Value {
             ClassHierarchy::add_value_auto_methods(
@@ -363,10 +363,11 @@ mod tests {
         Span::new(0, 0)
     }
 
-    // Parity tests (BT-3088): the stdlib-metadata path (`format_default_value`)
-    // must render literals identically to the unparse path
-    // (`unparse_literal_display`) — they used to disagree because
-    // `format_default_value` had its own hand-rolled, Rust-flavoured escaping.
+    // Parity tests: the stdlib-metadata path (`format_default_value`) must
+    // render literals identically to the unparse path
+    // (`unparse_literal_display`) — both must escape consistently rather
+    // than `format_default_value` using its own hand-rolled, Rust-flavoured
+    // escaping.
 
     #[test]
     fn string_with_embedded_quote_matches_unparse() {

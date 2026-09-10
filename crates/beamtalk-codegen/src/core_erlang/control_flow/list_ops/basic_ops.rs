@@ -21,7 +21,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-493: Validate body block arity (must be 1-arg)
+        // Validate body block arity (must be 1-arg)
         validate_block_arity_exact(
             body,
             1,
@@ -45,11 +45,11 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        // BT-1276: Use tuple accumulator when eligible (no field/self-send mutations).
+        // Use tuple accumulator when eligible (no field/self-send mutations).
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
-        // BT-524: Add is_list guard for non-list collection types.
+        // Add is_list guard for non-list collection types.
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let safe_list_var = self.fresh_temp_var("temp");
@@ -58,7 +58,7 @@ impl CoreErlangGenerator {
         let item_var = Self::to_core_erlang_var(item_param);
 
         if plan.use_tuple_acc {
-            // BT-1276: Tuple-accumulator path — no StateAcc map allocation per iteration.
+            // Tuple-accumulator path — no StateAcc map allocation per iteration.
             // Initial fold accumulator: {Var1, ..., VarN} built from outer-scope bindings.
             let init_tuple_doc = plan.initial_vars_tuple_doc(self);
 
@@ -91,10 +91,10 @@ impl CoreErlangGenerator {
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
             let result_doc = if self.loop_mode.in_direct_params_loop {
-                // BT-1329: In direct-params loop context, skip StateAcc repack and omit
+                // In direct-params loop context, skip StateAcc repack and omit
                 // trailing 'nil'. The extracted vars are left as open let-bindings so they
                 // escape to the outer scope (the caller chains the next expression directly).
-                // BT-1448/BT-3053/ADR 0118 phase 5b (BT-3422): Signal open scope with no
+                // ADR 0118 phase 5b: Signal open scope with no
                 // single value (multiple accumulator vars may have been rebound; `do:`
                 // itself always answers `nil`) so the annotation guard in
                 // generate_expression does not wrap this open let-chain in `( ... -|
@@ -130,7 +130,7 @@ impl CoreErlangGenerator {
                     "'nil'",
                 ]
             } else {
-                // BT-1276: Re-pack updated locals into StateAcc so the outer method-body
+                // Re-pack updated locals into StateAcc so the outer method-body
                 // threading (`maps:get` in `lower_body_exprs_with_reply`) can extract them.
                 let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
                 docvec![
@@ -164,7 +164,7 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, StateAcc}
         // tuple, unwrapped by `cv_prelude` immediately below — see
         // `class_var_fun_param`'s doc comment.
@@ -190,7 +190,7 @@ impl CoreErlangGenerator {
         docs.push(body_doc);
         self.pop_scope();
 
-        // BT-598: After foldl, extract threaded locals and rebind them.
+        // After foldl, extract threaded locals and rebind them.
         let fold_result = self.fresh_temp_var("FoldResult");
         let mut post_docs: Vec<Document<'static>> = vec![plan.foldl_call_doc(
             self,
@@ -201,7 +201,7 @@ impl CoreErlangGenerator {
         )];
         post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
 
-        // BT-1053: Value types return 'nil' (no state); actors return {'nil', FinalState}.
+        // Value types return 'nil' (no state); actors return {'nil', FinalState}.
         if !plan.threaded_locals.is_empty() && matches!(plan.context, CodeGenContext::ValueType) {
             post_docs.push(Document::Str("'nil'"));
         } else {
@@ -217,7 +217,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-493: Validate body block arity (must be 1-arg)
+        // Validate body block arity (must be 1-arg)
         validate_block_arity_exact(
             body,
             1,
@@ -226,7 +226,7 @@ impl CoreErlangGenerator {
              \x20 list collect: [:item | item * 2]",
         )?;
 
-        // BT-904: Check if body has state-affecting operations (self-sends, field writes)
+        // Check if body has state-affecting operations (self-sends, field writes)
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
             return self.generate_list_collect_with_mutations(receiver, body_block);
         }
@@ -235,22 +235,22 @@ impl CoreErlangGenerator {
         self.generate_simple_list_op(receiver, body, "map")
     }
 
-    /// BT-904: Generates stateful `collect:` using `lists:foldl` with state threading.
+    /// Generates stateful `collect:` using `lists:foldl` with state threading.
     ///
     /// In map mode: accumulator is `{ResultList, StateAcc}`.
-    /// In tuple mode (BT-1276): accumulator is `{ResultList, Var1, ..., VarN}`.
+    /// In tuple mode: accumulator is `{ResultList, Var1, ..., VarN}`.
     #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang) fn generate_list_collect_with_mutations(
         &mut self,
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        // BT-1276: Use tuple accumulator when eligible.
+        // Use tuple accumulator when eligible.
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
-        // BT-1489: Save recv var for is_binary check after foldl (String-aware result).
+        // Save recv var for is_binary check after foldl (String-aware result).
         let recv_var_for_str_check = list_var.clone();
         let recv_code = self.expression_doc(receiver)?;
         let safe_list_var = self.fresh_temp_var("temp");
@@ -260,7 +260,7 @@ impl CoreErlangGenerator {
         let acc_state_var = self.fresh_temp_var("AccSt");
 
         if plan.use_tuple_acc {
-            // BT-1276: Tuple-accumulator path.
+            // Tuple-accumulator path.
             // Initial fold acc: {[], Var1, ..., VarN} (flat tuple, no StateAcc map).
             let vars_doc = plan.current_vars_doc(self); // Before push_scope.
             let init_tuple_doc = docvec!["{ [], ", vars_doc, "}"];
@@ -306,13 +306,13 @@ impl CoreErlangGenerator {
             // Extract each updated local var from tuple positions 2..N.
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
 
-            // BT-1489: String-aware result wrapping — if the original receiver
+            // String-aware result wrapping — if the original receiver
             // was a binary (String), convert the reversed list back to a binary.
             let (str_binding, str_result) =
                 self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
             if self.loop_mode.in_direct_params_loop {
-                // BT-1329: Skip StateAcc repack. Emit open let-chain so variable rebindings
+                // Skip StateAcc repack. Emit open let-chain so variable rebindings
                 // escape to the outer scope. Store the result var for the caller.
                 self.loop_mode.direct_params_list_op_result = Some(str_result);
                 docs.push(docvec![
@@ -338,7 +338,7 @@ impl CoreErlangGenerator {
                     extract_doc,
                 ]);
             } else {
-                // BT-1276: Re-pack into StateAcc for outer method-body `maps:get` extraction.
+                // Re-pack into StateAcc for outer method-body `maps:get` extraction.
                 let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
                 docs.push(docvec![
                     " in let ",
@@ -382,7 +382,7 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
         // unwrapped by `cv_prelude` immediately below — see
         // `class_var_fun_param`'s doc comment.
@@ -418,7 +418,7 @@ impl CoreErlangGenerator {
         let final_list = self.fresh_temp_var("FinalList");
         let state_out = self.fresh_temp_var("StOut");
 
-        // BT-1489: String-aware result wrapping for map-acc path.
+        // String-aware result wrapping for map-acc path.
         let (str_binding_doc, str_result) =
             self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 

@@ -28,7 +28,7 @@ use super::storage::{
     workspaces_base_dir,
 };
 
-/// Best-effort project-identity fingerprint for `project_path` (BT-3355):
+/// Best-effort project-identity fingerprint for `project_path`:
 /// the package `name` from its `beamtalk.toml`, when the path is valid UTF-8
 /// and a manifest exists and parses there. `None` on any failure — this
 /// gates an *optional* confirmation for the self-heal below, not workspace
@@ -53,7 +53,7 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
         // If metadata is valid, return it. If it is corrupted/empty (e.g. from a
         // crashed write), fall through to recreate the workspace metadata.
         if let Ok(metadata) = get_workspace_metadata(workspace_id) {
-            // Self-heal a legacy non-absolute `project_path` (BT-3354 case 2): a
+            // Self-heal a legacy non-absolute `project_path`: a
             // named workspace created before its project directory existed falls
             // back to storing the raw, relative path (`canonicalize()` fails at
             // creation time, see below) and metadata is never otherwise rewritten.
@@ -73,10 +73,10 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
             // affect message routing (that's keyed by `workspace_id`, not this
             // field).
             //
-            // BT-3355 narrows this: the heal only fires when `metadata`'s
+            // The heal only fires when `metadata`'s
             // recorded `project_fingerprint` (the `beamtalk.toml` package name
             // at the last successful record) is either absent (legacy metadata
-            // predating this field — falls back to the pre-BT-3355 unconditional
+            // predating this field — falls back to unconditional
             // trust, still logged) or matches the CURRENT caller's own directory
             // — an unrelated project reports a different name (or none) and is
             // rejected rather than silently repointing the stored path.
@@ -92,7 +92,7 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
             if !metadata.project_path.is_absolute() && !node_is_running {
                 let current_fingerprint = project_fingerprint(project_path);
                 // `None` (legacy metadata, or no manifest at the last successful
-                // record) stays fully ungated, same as pre-BT-3355: a heal that
+                // record) stays fully ungated: a heal that
                 // fires from the wrong directory here adopts that wrong
                 // project's fingerprint below, entrenching the mistake for
                 // future heal checks rather than self-correcting. Accepted as
@@ -164,8 +164,8 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
         .as_secs();
 
     // Canonicalize before storing: `metadata.json`'s `project_path` must always
-    // be an absolute, canonical path, never a bare relative string like "."
-    // (BT-3332). A relative stored path later resolves against whichever
+    // be an absolute, canonical path, never a bare relative string like ".".
+    // A relative stored path later resolves against whichever
     // process happens to read it back, not wherever the workspace was
     // actually created, letting an unrelated caller collide with it. Every
     // caller of `create_workspace_impl` derives `workspace_id` from
@@ -175,8 +175,8 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
     //
     // Falls back to the raw path rather than erroring when canonicalization
     // fails (e.g. a named workspace created against a not-yet-existing
-    // directory) — that matches this function's pre-fix behavior of never
-    // rejecting workspace creation on account of `project_path`.
+    // directory) — this function never rejects workspace creation on
+    // account of `project_path`.
     // `find_workspace_by_project_path`'s defense-in-depth check already
     // treats a non-absolute stored path as unmatchable, so a raw fallback
     // here can't reintroduce the wildcard-match bug.
@@ -188,7 +188,7 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
         workspace_id: workspace_id.to_string(),
         project_path: canonical_project_path,
         created_at: now,
-        // BT-3355: recorded now so a later self-heal (above) can confirm an
+        // Recorded now so a later self-heal (above) can confirm an
         // out-of-directory `--workspace <name>` invocation is still the same
         // project before trusting its `project_path`. `None` when the project
         // has no readable `beamtalk.toml` (or a non-UTF-8 path) — that's not
@@ -500,7 +500,7 @@ pub(super) fn find_workspace_by_project_path(project_path: &Path) -> Result<Opti
             continue;
         };
 
-        // Defense in depth (BT-3332): a stored `project_path` that isn't already
+        // Defense in depth: a stored `project_path` that isn't already
         // absolute can only come from metadata written before workspace creation
         // started canonicalizing it. Canonicalizing it *here* would resolve it
         // against this process's own cwd rather than wherever the workspace was
@@ -555,19 +555,18 @@ pub(crate) fn resolve_workspace_id_or_cwd(name_or_id: Option<&str>) -> Result<St
 mod tests {
     use super::*;
 
-    /// Regression test for BT-3332.
+    /// Regression test: without care, `beamtalk run .` could write workspace
+    /// metadata with a bare relative `project_path` of `"."` (see
+    /// `create_workspace_impl`, which canonicalizes before writing). If
+    /// `find_workspace_by_project_path` also canonicalized a stored `"."`,
+    /// `Path::canonicalize` would resolve it against *the calling process's
+    /// own cwd* — and `resolve_workspace_id_or_cwd` always queries with a
+    /// path derived from that same cwd. So a stored `"."` would act as a
+    /// wildcard: it would match whichever directory the querying process
+    /// happened to be running from, regardless of where the workspace was
+    /// actually created.
     ///
-    /// Before the fix, `beamtalk run .` wrote workspace metadata with a bare
-    /// relative `project_path` of `"."` (see `create_workspace_impl`, which now
-    /// canonicalizes before writing). `find_workspace_by_project_path` then
-    /// canonicalized that stored `"."` too, but `Path::canonicalize` resolves a
-    /// relative path against *the calling process's own cwd* — and
-    /// `resolve_workspace_id_or_cwd` always queries with a path derived from
-    /// that same cwd. So a stored `"."` acted as a wildcard: it matched
-    /// whichever directory the querying process happened to be running from,
-    /// regardless of where the workspace was actually created.
-    ///
-    /// This test reproduces the buggy metadata shape directly via
+    /// This test reproduces that buggy metadata shape directly via
     /// `save_workspace_metadata` (bypassing `create_workspace_impl`, which no
     /// longer produces it) for two separate workspaces, then confirms
     /// `find_workspace_by_project_path` — queried with this process's own cwd,
@@ -577,7 +576,7 @@ mod tests {
     /// bare cleanup call after the assertion would otherwise never run and
     /// leak `~/.beamtalk/workspaces/*` fixture directories. Also holds the
     /// shared (real-directory) side of `test_support`'s `BEAMTALK_HOME` guard
-    /// for its whole lifetime (BT-3370), since every test in this module
+    /// for its whole lifetime, since every test in this module
     /// constructs one of these as its first step.
     struct CleanupWorkspaceDirs<'a> {
         ids: &'a [String],
@@ -621,7 +620,7 @@ mod tests {
                 workspace_id: ws_id.clone(),
                 project_path: PathBuf::from(relative_path),
                 created_at: now,
-                project_fingerprint: None, // legacy metadata (BT-3355 predates this field)
+                project_fingerprint: None, // legacy metadata (predates this field)
             })
             .unwrap();
         }
@@ -639,10 +638,10 @@ mod tests {
         );
     }
 
-    /// Regression test for BT-3332 review feedback: `create_workspace_impl`'s
+    /// Regression test: `create_workspace_impl`'s
     /// fallback to the raw `project_path` when `canonicalize()` fails (e.g. a
     /// named workspace created against a directory that doesn't exist yet)
-    /// must not reintroduce the wildcard-match bug this PR fixes.
+    /// must not reintroduce the wildcard-match bug guarded against above.
     #[test]
     fn test_create_workspace_impl_falls_back_to_raw_path_when_canonicalize_fails() {
         let pid = std::process::id();
@@ -668,7 +667,7 @@ mod tests {
         // Query with the identical relative value: even a byte-for-byte match
         // must be rejected, because find_workspace_by_project_path skips any
         // non-absolute stored project_path before it ever reaches path
-        // comparison (BT-3332's defense-in-depth check).
+        // comparison (a defense-in-depth check).
         let result = find_workspace_by_project_path(&nonexistent_relative).unwrap();
         assert_ne!(
             result,
@@ -690,13 +689,14 @@ mod tests {
         }
     }
 
-    /// Regression test for BT-3354 case 2: a named workspace created before its
+    /// Regression test: a named workspace created before its
     /// project directory exists stores a relative `project_path` (see
     /// `test_create_workspace_impl_falls_back_to_raw_path_when_canonicalize_fails`
-    /// above) that, pre-fix, would never be corrected once the directory later
-    /// appeared. `create_workspace_impl`'s early-return path (the one every
-    /// subsequent by-name lookup takes) now re-attempts `canonicalize()` and
-    /// heals the stored metadata in place when it succeeds.
+    /// above). Without healing, that relative path would never be corrected
+    /// once the directory later appeared. `create_workspace_impl`'s
+    /// early-return path (the one every subsequent by-name lookup takes)
+    /// re-attempts `canonicalize()` and heals the stored metadata in place
+    /// when it succeeds.
     #[test]
     fn test_create_workspace_impl_self_heals_relative_project_path_once_directory_exists() {
         let pid = std::process::id();
@@ -732,11 +732,10 @@ mod tests {
         assert_eq!(reloaded.project_path, healed.project_path);
     }
 
-    /// Regression test for BT-3355: the self-heal above must not trust a
+    /// Regression test: the self-heal above must not trust a
     /// `--workspace <name>` invocation from an unrelated directory just
-    /// because the stored `project_path` happens to be relative. Reproduces
-    /// the "wrong directory" scenario BT-3355's own acceptance criteria name
-    /// — a mismatched `project_fingerprint` (the `beamtalk.toml` package
+    /// because the stored `project_path` happens to be relative — a
+    /// mismatched `project_fingerprint` (the `beamtalk.toml` package
     /// name) must reject the heal rather than silently repointing it.
     #[test]
     fn test_create_workspace_impl_rejects_heal_from_wrong_project_directory() {
@@ -766,7 +765,7 @@ mod tests {
         )
         .unwrap();
 
-        // Seed metadata as it would look right after BT-3354's self-heal
+        // Seed metadata as it would look right after the self-heal above
         // already recorded the real project's fingerprint, but with a
         // (still legacy-shaped) relative `project_path` — e.g. the directory
         // was moved after the fingerprint was recorded.
@@ -804,17 +803,17 @@ mod tests {
         assert_eq!(healed.project_path, real_dir.canonicalize().unwrap());
     }
 
-    /// BT-3354 case 1 ("orphaned node on upgrade") analysis: not reproducible
-    /// in the current code, and this test is the evidence backing that
-    /// decision (recorded on the issue) rather than a remediation.
+    /// Analysis of a hypothesized "orphaned node on upgrade" failure mode:
+    /// not reproducible in the current code, and this test is the evidence
+    /// backing that finding rather than a remediation.
     ///
     /// An unnamed workspace's id is always `generate_workspace_id` — a SHA256
     /// hash of the *canonicalized project directory* — computed fresh by every
     /// caller (every direct `create_workspace_impl` caller such as `run .`,
     /// and `resolve_workspace_id_or_cwd`'s fallback) directly from the
     /// directory in question. It is never read back from the possibly-stale
-    /// `metadata.project_path` field the BT-3332 fix hardened, and that was
-    /// already true before BT-3332 too. So a legacy workspace whose metadata
+    /// `metadata.project_path` field this module validates, and that has
+    /// always been true. So a legacy workspace whose metadata
     /// still carries a bare relative `project_path` keeps the *same*
     /// `workspace_id` it always had, and a later caller re-derives that
     /// identical id straight from the directory — reusing the existing
@@ -829,7 +828,7 @@ mod tests {
         let ws_id = beamtalk_workspace::generate_workspace_id(&project_dir).unwrap();
         let _cleanup = CleanupWorkspaceDirs::new(std::slice::from_ref(&ws_id));
 
-        // Seed metadata exactly as a pre-BT-3332 binary would have: correct id,
+        // Seed metadata exactly as a legacy binary would have: correct id,
         // but a bare relative `project_path`.
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -839,12 +838,12 @@ mod tests {
             workspace_id: ws_id.clone(),
             project_path: PathBuf::from("."),
             created_at: now,
-            project_fingerprint: None, // legacy metadata (BT-3355 predates this field)
+            project_fingerprint: None, // legacy metadata (predates this field)
         })
         .unwrap();
 
         // find_workspace_by_project_path correctly refuses to match via the
-        // legacy relative metadata (BT-3332 defense in depth)...
+        // legacy relative metadata (a defense-in-depth check)...
         assert_eq!(find_workspace_by_project_path(&project_dir).unwrap(), None);
 
         // ...but replaying exactly what `resolve_workspace_id_or_cwd`'s

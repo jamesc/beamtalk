@@ -5,8 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! BT-3465: split out of `expressions.rs`, no logic changes (ADR 0107
-//! Phase A / BT-2855, BT-2870, BT-2882). [`CoreErlangGenerator::generate_type_pattern`]
+//! ADR 0107 Phase A. [`CoreErlangGenerator::generate_type_pattern`]
 //! picks and applies one of eight per-class runtime-test shapes — see its
 //! own doc comment for the full strategy breakdown — dispatched from
 //! `generate_match_chain` (`patterns::match_lowering`).
@@ -24,7 +23,7 @@ use beamtalk_core::ast::{Identifier, MatchArm};
 /// subclass) falls through to
 /// [`CoreErlangGenerator::dispatch_type_pattern_strategy`]'s
 /// hierarchy-dependent default — that choice needs a `self.class_hierarchy`
-/// lookup, not just the name, so it cannot be a static table entry (BT-3474).
+/// lookup, not just the name, so it cannot be a static table entry.
 #[derive(Clone, Copy)]
 enum TypeTest {
     /// A guard-safe boolean-returning BIF (`is_binary`, `is_integer`, `is_float`,
@@ -42,7 +41,7 @@ enum TypeTest {
     UntaggedMap,
 }
 
-/// BT-3474: data table replacing `dispatch_type_pattern_strategy`'s
+/// Data table replacing `dispatch_type_pattern_strategy`'s
 /// class-name match arms for every class whose runtime-test shape depends
 /// only on the name (not on `self.class_hierarchy`, unlike the actor/
 /// supervisor/generic-tagged-class fallback — see [`TypeTest`]'s doc).
@@ -67,7 +66,7 @@ static TYPE_TESTS: &[(&str, TypeTest)] = &[
 
 impl CoreErlangGenerator {
     /// Compiles a single `Pattern::Type` match arm (`binding :: ClassName ->
-    /// body`) — ADR 0107 Phase A / BT-2855.
+    /// body`) — ADR 0107 Phase A.
     ///
     /// Dispatches to one of four runtime-test shapes based on `class`'s
     /// name, generalizing two existing codegen strategies (no new runtime
@@ -109,7 +108,7 @@ impl CoreErlangGenerator {
     ///   entry rather than falling into the tagged-class path.
     /// - **`True`/`False`/`Nil`/`UndefinedObject`**: `True`/`False` are
     ///   real (sealed, leaf) stdlib subclasses of `Boolean`, and
-    ///   `UndefinedObject` (canonical) / `Nil` (legacy alias, BT-2016) are
+    ///   `UndefinedObject` (canonical) / `Nil` (legacy alias) are
     ///   the nil class — all four are resolvable, leaf class names a type
     ///   pattern can legally name, but all four compile to a bare atom
     ///   (`'true'`/`'false'`/`'nil'`), never a map, so
@@ -123,7 +122,7 @@ impl CoreErlangGenerator {
     ///   'beamtalk_object'` idiom `fieldAt:`'s actor-vs-map dispatch already
     ///   uses (`intrinsics.rs`), extended to also compare `element(2)`
     ///   (the class name) against the pattern's `class` field.
-    /// - **`Supervisor`/`DynamicSupervisor`-hierarchy classes** (BT-2870): a
+    /// - **`Supervisor`/`DynamicSupervisor`-hierarchy classes**: a
     ///   live supervisor reference is a third runtime shape, also a 4-tuple
     ///   but tagged `'beamtalk_supervisor'` (or transiently
     ///   `'beamtalk_supervisor_new'` — rewritten to `'beamtalk_supervisor'`
@@ -194,7 +193,7 @@ impl CoreErlangGenerator {
     /// `generate_type_pattern` itself under the line-count lint; see that
     /// function's doc comment for the full strategy breakdown.
     ///
-    /// BT-3474: `class_name` is looked up in [`TYPE_TESTS`] first — a class
+    /// `class_name` is looked up in [`TYPE_TESTS`] first — a class
     /// name whose test shape depends only on the name, not on
     /// `self.class_hierarchy`, is table-driven via [`Self::render_type_test`].
     /// The fallback below (actor/supervisor/generic tagged-class) stays a
@@ -211,13 +210,13 @@ impl CoreErlangGenerator {
             return self.render_type_test(*test, match_var, bound_success, rest_doc);
         }
 
-        // BT-2855: an actor reference is a 4-tuple (`{'beamtalk_object',
+        // An actor reference is a 4-tuple (`{'beamtalk_object',
         // ClassAtom, ModuleAtom, Pid}`), not a map — the tagged-class
         // `is_map` check would never match a live actor instance, silently
         // miscompiling the single most common kind of leaf class in real
         // Beamtalk programs.
         //
-        // BT-2882: `is_actor_subclass`/`is_supervisor_subclass`/
+        // `is_actor_subclass`/`is_supervisor_subclass`/
         // `is_dynamic_supervisor_subclass` are verified to resolve correctly
         // even when `class_name`'s Actor/Supervisor ancestor is declared in a
         // different file (or several files away) — see their doc comments in
@@ -228,7 +227,7 @@ impl CoreErlangGenerator {
             .class_hierarchy
             .as_ref()
             .is_some_and(|h| h.is_actor_subclass(class_name));
-        // BT-2870: a Supervisor/DynamicSupervisor subclass reference is a
+        // A Supervisor/DynamicSupervisor subclass reference is a
         // *different* 4-tuple, tagged `'beamtalk_supervisor'` (or
         // transiently `'beamtalk_supervisor_new'`) rather than
         // `'beamtalk_object'` — same reasoning as the actor case above, just
@@ -250,7 +249,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-3474: dispatches a [`TypeTest`] to its renderer — the single
+    /// Dispatches a [`TypeTest`] to its renderer — the single
     /// match [`TYPE_TESTS`]-driven strategies share, replacing what was a
     /// 14-arm match keyed directly on class-name string literals.
     fn render_type_test(
@@ -405,7 +404,7 @@ impl CoreErlangGenerator {
 
     /// Exact literal match on a single atom (`'true'`, `'false'`, or
     /// `'nil'`) — used for the `True`/`False` `Boolean` subclasses and the
-    /// nil class (`UndefinedObject`, or its legacy alias `Nil`, BT-2016).
+    /// nil class (`UndefinedObject`, or its legacy alias `Nil`).
     /// None of these is a map, so [`Self::wrap_class_tag_test`]'s `is_map`
     /// check would never match; a bare `is_atom` guard would also be wrong
     /// (see [`Self::generate_type_pattern`]'s doc on why `Symbol`/`Boolean`
@@ -504,7 +503,7 @@ impl CoreErlangGenerator {
 
     /// Tests whether the scrutinee is a supervisor reference (a
     /// `Supervisor`/`DynamicSupervisor` subclass instance) of exactly
-    /// `class_name` (BT-2870). A live supervisor reference is always
+    /// `class_name`. A live supervisor reference is always
     /// `{'beamtalk_supervisor', ClassAtom, ModuleAtom, Pid}` by the time any
     /// caller observes it — `beamtalk_class_dispatch:class_send_dispatch/3`
     /// rewrites the transient `{'beamtalk_supervisor_new', ClassAtom,
@@ -584,8 +583,8 @@ impl CoreErlangGenerator {
     /// (`{'beamtalk_supervisor' | 'beamtalk_supervisor_new', ...}`) —
     /// without this exclusion, a live actor/supervisor reference is *also*
     /// a plain Erlang tuple structurally, so `x :: Tuple` would incorrectly
-    /// match it too. (BT-2870: `Supervisor`/`DynamicSupervisor` subclasses
-    /// are themselves valid type-pattern `class` names now, handled by
+    /// match it too. (`Supervisor`/`DynamicSupervisor` subclasses
+    /// are themselves valid type-pattern `class` names, handled by
     /// [`Self::wrap_supervisor_class_tag_test`] above — this exclusion
     /// still applies to an *unrelated* `x :: Tuple` arm that could see one
     /// of these values flow through.)

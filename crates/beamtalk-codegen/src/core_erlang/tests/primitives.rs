@@ -17,13 +17,13 @@ fn test_generate_primitive_selector_based() {
     let doc = generator
         .generate_primitive("+", true, Span::new(0, 0))
         .unwrap();
-    // BT-340: Now emits direct Erlang BIF instead of dispatch delegation
+    // Now emits direct Erlang BIF instead of dispatch delegation
     assert_eq!(doc.to_pretty_string(), "call 'erlang':'+'(Self, Other)");
 }
 
 #[test]
 fn test_generate_primitive_structural_intrinsic() {
-    // BT-2812: `blockValue`/`blockValue1`/`blockValue2`/`blockValue3` no longer
+    // `blockValue`/`blockValue1`/`blockValue2`/`blockValue3` no longer
     // hit the generic runtime-dispatch placeholder (see
     // `test_generate_primitive_block_value_structural_fallback` below) — use
     // `classOf`, a structural intrinsic still on the generic placeholder path,
@@ -43,7 +43,7 @@ fn test_generate_primitive_structural_intrinsic() {
 
 #[test]
 fn test_generate_primitive_block_value_structural_fallback() {
-    // BT-2812: `blockValue`'s fallback body (reached via `perform:`, not the
+    // `blockValue`'s fallback body (reached via `perform:`, not the
     // call-site interception) discriminates Tier 1 (plain fun) from Tier 2
     // (stateful fun expecting a StateAcc) via erlang:is_function/2, instead of
     // self-dispatching to the wrong intrinsic name.
@@ -73,7 +73,7 @@ fn test_generate_primitive_block_value_structural_fallback() {
 
 #[test]
 fn test_generate_primitive_while_true_structural_fallback() {
-    // BT-2908: `whileTrue`'s fallback body (reached via `perform:`) discriminates
+    // `whileTrue`'s fallback body (reached via `perform:`) discriminates
     // Tier 1 (both condition and body plain funs) from Tier 2 (either a
     // stateful fun expecting a StateAcc) via erlang:is_function/2, and runs a
     // real generic loop for the Tier 1 case instead of self-dispatching to the
@@ -109,7 +109,7 @@ fn test_generate_primitive_while_true_structural_fallback() {
 
 #[test]
 fn test_generate_primitive_while_false_structural_fallback_negates_condition() {
-    // BT-2908: `whileFalse` shares `whileTrue`'s fallback shape but continues
+    // `whileFalse` shares `whileTrue`'s fallback shape but continues
     // looping while the condition is 'false' instead of 'true'.
     let mut generator = CoreErlangGenerator::new("test");
     generator.set_class_identity(Some(util::ClassIdentity::new("Block")));
@@ -131,7 +131,7 @@ fn test_generate_primitive_while_false_structural_fallback_negates_condition() {
 
 #[test]
 fn test_generate_primitive_repeat_structural_fallback() {
-    // BT-2908: `repeat`'s fallback body has no argument block to discriminate,
+    // `repeat`'s fallback body has no argument block to discriminate,
     // only the receiver itself.
     let mut generator = CoreErlangGenerator::new("test");
     generator.set_class_identity(Some(util::ClassIdentity::new("Block")));
@@ -163,7 +163,7 @@ fn test_generate_primitive_repeat_structural_fallback() {
 
 #[test]
 fn test_generate_primitive_ensure_structural_fallback() {
-    // BT-2908: `ensure`'s fallback body discriminates Tier 1/Tier 2 for both
+    // `ensure`'s fallback body discriminates Tier 1/Tier 2 for both
     // the protected block (Self) and the cleanup block, running a generic
     // try/catch with cleanup-on-both-paths for the Tier 1 case.
     let mut generator = CoreErlangGenerator::new("test");
@@ -199,7 +199,7 @@ fn test_generate_primitive_ensure_structural_fallback() {
 
 #[test]
 fn test_generate_primitive_on_do_structural_fallback() {
-    // BT-2908: `onDo`'s fallback body discriminates Self's tier, then (for a
+    // `onDo`'s fallback body discriminates Self's tier, then (for a
     // Tier 1 receiver) reuses the same NLR-passthrough + matches_class try/catch
     // shape `generate_on_do` produces, discriminating the handler's tier by
     // arity (0 = pure 0-arg, 1 = pure 1-arg, else = stateful) since a

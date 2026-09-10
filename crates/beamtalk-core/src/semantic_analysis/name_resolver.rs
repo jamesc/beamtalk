@@ -33,7 +33,7 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 pub struct NameResolver {
     scope: Scope,
     diagnostics: Vec<Diagnostic>,
-    /// ADR 0084 / BT-2267: depth of nesting inside a programmatic `ClassBuilder`
+    /// ADR 0084: depth of nesting inside a programmatic `ClassBuilder`
     /// `classMethods:` block body. While > 0, `super` is permitted regardless of
     /// lexical scope depth — such a block IS a class-method body even though it
     /// appears as a cascade argument (possibly at the REPL top level).
@@ -172,13 +172,13 @@ impl NameResolver {
         // Collect unused variable warnings before exiting scope
         self.collect_unused_warnings();
 
-        // BT-954: Warn on unused method parameters — but suppress for @primitive /
+        // Warn on unused method parameters — but suppress for @primitive /
         // @intrinsic bodies. A sole `Primitive` expression means all declared
         // parameters are forwarded implicitly to the underlying Erlang function;
         // none of them appear as identifiers in the AST, so the normal
         // "never referenced" heuristic produces false positives.
         //
-        // BT-1211: Also suppress for `self delegate` bodies — parameters are
+        // Also suppress for `self delegate` bodies — parameters are
         // used by the generated dispatch function, not the Beamtalk body.
         let is_primitive_body = matches!(
             method.body.as_slice(),
@@ -272,7 +272,7 @@ impl NameResolver {
             Cascade {
                 receiver, messages, ..
             } => {
-                // ADR 0084 / BT-2267: in a `classBuilder … classMethods: #{…};
+                // ADR 0084: in a `classBuilder … classMethods: #{…};
                 // register` cascade, resolve each `classMethods:` block value as a
                 // class-method body so `super`/`self` and class-var access resolve
                 // (they would otherwise be plain blocks at the enclosing depth).
@@ -283,7 +283,7 @@ impl NameResolver {
                         "classMethods:" if is_builder => {
                             self.resolve_class_methods_argument(&msg.arguments);
                         }
-                        // BT-2269: the incremental counterpart of `classMethods:`.
+                        // The incremental counterpart of `classMethods:`.
                         // Resolve its selector argument normally and its block
                         // body argument as a class-method body.
                         "addClassMethod:body:" if is_builder => {
@@ -339,7 +339,7 @@ impl NameResolver {
             Super(span) => {
                 // super can only be used inside a method body (depth >= 2).
                 // Depth 0 = module, 1 = class, 2+ = method/block.
-                // ADR 0084 / BT-2267: a `classMethods:` block IS a class-method
+                // ADR 0084: a `classMethods:` block IS a class-method
                 // body even when it appears as a cascade argument (possibly at the
                 // REPL top level, depth < 2), so allow super there.
                 if self.scope.current_depth() < 2 && self.builder_class_method_depth == 0 {
@@ -404,7 +404,7 @@ impl NameResolver {
         self.scope.pop(); // Exit block scope
     }
 
-    /// ADR 0084 / BT-2267: Resolve the `classMethods:` argument of a `ClassBuilder`
+    /// ADR 0084: Resolve the `classMethods:` argument of a `ClassBuilder`
     /// cascade — a map literal whose values are class-method block literals — by
     /// resolving each block value as a class-method body.
     fn resolve_class_methods_argument(&mut self, args: &[Expression]) {
@@ -424,12 +424,12 @@ impl NameResolver {
         }
     }
 
-    /// BT-2269: Resolve the arguments of an incremental
+    /// Resolve the arguments of an incremental
     /// `addClassMethod: #sel body: [block]` setter — the selector symbol normally
     /// and the block body as a class-method body (so `super`/`self` and
     /// class-variable access resolve, matching `classMethods:`).
     ///
-    /// BT-2279: the block is only resolved as a class-method body when the
+    /// The block is only resolved as a class-method body when the
     /// selector is a **literal symbol** — that is exactly when codegen lowers it
     /// as a class-method fun (`generate_class_method_single_arg`, gated on
     /// `[Literal::Symbol, Block]`). For a non-literal selector, codegen falls
@@ -650,7 +650,7 @@ impl NameResolver {
         }
     }
 
-    /// BT-3386: refines the hint on an "Undefined variable" diagnostic when a
+    /// Refines the hint on an "Undefined variable" diagnostic when a
     /// bare identifier statement looks like an attempted unary-message
     /// continuation split across lines, e.g.:
     ///
@@ -661,7 +661,7 @@ impl NameResolver {
     ///
     /// The parser deliberately treats a unary selector alone on its own line
     /// as the start of a *new* statement rather than a continuation of the
-    /// receiver above (see `parse_unary_message`, BT-360): unlike a keyword
+    /// receiver above (see `parse_unary_message`): unlike a keyword
     /// part (which can never validly start a statement, making `foo\n  bar:
     /// 1` unambiguous), a bare identifier like `asList` IS a valid statement
     /// on its own — so the parser cannot safely rejoin it with the previous
@@ -775,7 +775,7 @@ mod tests {
 
     #[test]
     fn builder_class_method_block_allows_super() {
-        // BT-2267: super inside a classMethods: block of a classBuilder cascade
+        // super inside a classMethods: block of a classBuilder cascade
         // is a class-method body, so super must be allowed even at module depth.
         let resolver = run("Object classBuilder name: #BT2267T; superclass: Object; \
              classMethods: #{ #greeting => [:self | super greeting] }; register");
@@ -792,7 +792,7 @@ mod tests {
 
     #[test]
     fn incremental_add_class_method_block_allows_super() {
-        // BT-2269: the incremental `addClassMethod:body:` setter's block is a
+        // The incremental `addClassMethod:body:` setter's block is a
         // class-method body just like a `classMethods:` map value, so super is
         // allowed even at module depth.
         let resolver = run("Object classBuilder name: #BT2269T; superclass: Object; \
@@ -810,7 +810,7 @@ mod tests {
 
     #[test]
     fn incremental_add_class_method_self_param_no_shadow_warning() {
-        // BT-2269: the receiver `self` parameter of an addClassMethod:body: block
+        // The receiver `self` parameter of an addClassMethod:body: block
         // must not warn about shadowing when nested in a method body.
         let resolver = run(
             "Counter subclass: BT2269Host\n  build =>\n    Object classBuilder name: #BT2269N; \
@@ -829,7 +829,7 @@ mod tests {
 
     #[test]
     fn incremental_add_class_method_non_literal_selector_rejects_super() {
-        // BT-2279: when the addClassMethod:body: selector is NOT a literal
+        // When the addClassMethod:body: selector is NOT a literal
         // symbol, codegen lowers the block as an ordinary block (not a
         // class-method fun), so the resolver must treat it as an ordinary block
         // too — `super` is rejected, keeping resolver and codegen in agreement.
@@ -850,7 +850,7 @@ mod tests {
 
     #[test]
     fn builder_without_literal_name_does_not_permit_super() {
-        // BT-2267: the resolver must require a literal name: to match the codegen
+        // The resolver must require a literal name: to match the codegen
         // recogniser — otherwise super would be allowed here but codegen would
         // lower the block as an ordinary block (instance-super, unbound Self).
         let resolver = run("Object classBuilder superclass: Object; \
@@ -868,7 +868,7 @@ mod tests {
 
     #[test]
     fn builder_with_later_non_literal_name_does_not_permit_super() {
-        // BT-2267: a later non-literal name: is the effective setter, so the
+        // A later non-literal name: is the effective setter, so the
         // recogniser must NOT enable class-method semantics (kept in lockstep
         // with codegen, which clears the class name on a non-literal name:).
         let resolver = run("n := someName. Object classBuilder name: #X; name: n; \
@@ -886,7 +886,7 @@ mod tests {
 
     #[test]
     fn builder_class_method_block_self_param_no_shadow_warning() {
-        // BT-2267: the receiver `self` parameter of a classMethods: block must not
+        // The receiver `self` parameter of a classMethods: block must not
         // warn about shadowing when the cascade is nested in a method body.
         let resolver = run(
             "Counter subclass: BT2267Host\n  build =>\n    Object classBuilder name: #BT2267N; \
@@ -932,8 +932,8 @@ mod tests {
 
     #[test]
     fn unary_selector_on_own_line_gets_continuation_hint() {
-        // BT-3386: `asList` on its own line right after `result := "abc"` is
-        // parsed as a new bare-identifier statement (BT-360 — a bare
+        // `asList` on its own line right after `result := "abc"` is
+        // parsed as a new bare-identifier statement (a bare
         // identifier can validly start a statement, so the parser cannot
         // safely rejoin it with the receiver above). The identifier then
         // fails to resolve; the hint should explain the real newline

@@ -5,7 +5,7 @@
 //! `diagnostic_summary` MCP tools (`server::tools::diagnostics`).
 //!
 //! Runs the same two-pass parse + semantic-analysis pipeline as CLI `beamtalk
-//! lint` (BT-2052): Pass 1 parses every file in the package and extracts
+//! lint`: Pass 1 parses every file in the package and extracts
 //! class metadata so cross-file references resolve; Pass 2 analyses each
 //! target file against that cross-file context. Everything here is pure and
 //! filesystem/offline — no REPL connection required, which is what lets both
@@ -35,7 +35,7 @@ pub(crate) struct LintResult {
     pub(crate) total: usize,
 }
 
-/// BT-2152: Run the shared three-step lint analysis pipeline for a single
+/// Run the shared three-step lint analysis pipeline for a single
 /// module. Callers pre-filter `parse_diags` per their severity requirements
 /// and pass them in; this helper appends lint-pass results, runs semantic
 /// analysis with cross-file class context, filters analysis diagnostics by
@@ -44,47 +44,47 @@ pub(crate) struct LintResult {
 /// `compute_diagnostic_summary` for type inference).
 ///
 /// `has_package_dependencies` mirrors `beamtalk lint`'s
-/// `CompilerOptions::has_package_dependencies` (BT-2794/BT-2823): true when
+/// `CompilerOptions::has_package_dependencies`: true when
 /// the project's manifest declares `[dependencies]`, regardless of whether
 /// any of them could be resolved on disk.
 ///
-/// `native_type_registry` (BT-2858) mirrors `beamtalk lint`'s FFI type
-/// registry (BT-2851/BT-2134): when `Some`, `(Erlang m) f:` calls get return
+/// `native_type_registry` mirrors `beamtalk lint`'s FFI type
+/// registry: when `Some`, `(Erlang m) f:` calls get return
 /// type inference and argument-type checks from the registry instead of
 /// falling back to `Dynamic(UntypedFfi)` — the same registry `beamtalk
 /// build`/`beamtalk lint` use, so MCP `lint`/`diagnostic_summary` never
 /// diverge from them on which Erlang calls are seen as typed.
 ///
-/// `current_package` (BT-2921) mirrors `beamtalk lint`'s
+/// `current_package` mirrors `beamtalk lint`'s
 /// `CompilerOptions::current_package`: when `Some`, `check_class_visibility`/
 /// `check_alias_leaked_visibility` (E0401/E0402/E0403) actually run — they
 /// are gated on `current_package: Some(_)` and silently emit zero
 /// diagnostics otherwise.
 ///
-/// `source` (BT-3257) is the module's raw source text — mirroring
+/// `source` is the module's raw source text — mirroring
 /// `queries::diagnostic_provider::compute_project_diagnostics_with_analysis`
-/// (BT-3240) and `beamtalk lint`'s `collect_diagnostics`: needed so the
+/// and `beamtalk lint`'s `collect_diagnostics`: needed so the
 /// near-miss `// === Name ===` divider check can scan `source` directly
 /// (`beamtalk_core::near_miss_divider::check_near_miss_dividers`) instead of relying on
 /// the AST's `Comment::span`, which is actually the *following
 /// declaration's* span, not the comment's own.
 ///
-/// `is_stub_file` (BT-3398) mirrors the LSP's `ProjectIndex::is_stub_file`
-/// fix (review follow-up on #3679): this crate builds its own
+/// `is_stub_file` mirrors the LSP's `ProjectIndex::is_stub_file`
+/// treatment: this crate builds its own
 /// `AnalysisContext` directly rather than going through
-/// `beamtalk-language-service`'s shared `diagnostic_provider.rs`, so it was
-/// never touched by that fix and always analysed every file — including a
+/// `beamtalk-language-service`'s shared `diagnostic_provider.rs`, so without
+/// this parameter it would analyse every file — including a
 /// legitimate `stubs/lists.bt`'s `declare native:` blocks — as if it lived
 /// outside `stubs/`. Callers derive this from the file path being analysed
 /// (`beamtalk_project::package::is_under_stubs_dir`, called once per
 /// top-level `path` argument below rather than by this per-file helper).
 ///
-/// `file_stem` (BT-3431) is the target file's basename without extension,
+/// `file_stem` is the target file's basename without extension,
 /// passed to `check_class_file_name_agreement` so MCP `lint`/
 /// `diagnostic_summary` report the same file-name/class-name mismatch
 /// `beamtalk build`/`beamtalk lint`/the LSP do — `None` for callers with no
 /// real file backing the module skips the check.
-#[allow(clippy::too_many_arguments)] // BT-3398 added is_stub_file; each param is load-bearing context, same as `beamtalk lint`'s `collect_diagnostics`.
+#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s `collect_diagnostics`.
 pub(crate) fn run_module_analysis(
     module: &beamtalk_core::ast::Module,
     source: &str,
@@ -124,7 +124,7 @@ pub(crate) fn run_module_analysis(
             .filter(|d| d.category.is_some()),
     );
 
-    // BT-3431: Validate the file name agrees with the class it declares —
+    // Validate the file name agrees with the class it declares —
     // `analyse_full` doesn't run this check itself (see
     // `check_class_file_name_agreement`'s doc), so it must be called
     // explicitly here, mirroring `compute_project_diagnostics_with_analysis`.
@@ -138,20 +138,20 @@ pub(crate) fn run_module_analysis(
         module, &mut diags,
     );
 
-    // BT-3257: mirrors `compute_project_diagnostics_with_analysis`'s
+    // Mirrors `compute_project_diagnostics_with_analysis`'s
     // placement — appended after `apply_expect_directives` because a
     // near-miss-divider comment's span (the comment's own line) can never
     // be contained in any `@expect`-annotated declaration's target span, so
     // running it through that pass first would be a no-op at best. See that
-    // function's BT-3240 comment for the full reasoning.
+    // function's own comment for the full reasoning.
     beamtalk_core::near_miss_divider::check_near_miss_dividers(source, &mut diags);
 
     (diags, analysis_result.class_hierarchy)
 }
 
-/// BT-2858: Build the Erlang FFI native-type registry for `path`'s package,
-/// the same way `beamtalk lint` does (BT-2134/BT-2851's `extract_type_specs`,
-/// now shared via `beamtalk_cli::native_type_specs`) — rather than reading a
+/// Build the Erlang FFI native-type registry for `path`'s package,
+/// the same way `beamtalk lint` does (via the shared `extract_type_specs`,
+/// exposed as `beamtalk_cli::native_type_specs`) — rather than reading a
 /// possibly-absent/stale on-disk `_build/type_cache/` written by a *previous*
 /// `beamtalk build`. Returns `None` outside a manifest-backed package or when
 /// extraction finds no `.beam` files (e.g. runtime not yet compiled).
@@ -164,7 +164,7 @@ pub(crate) fn build_native_type_registry(
     beamtalk_cli::native_type_specs::extract_project_type_specs(&layout).map(std::sync::Arc::new)
 }
 
-/// BT-2014: Compute a diagnostic summary (counts + type coverage) for a path.
+/// Compute a diagnostic summary (counts + type coverage) for a path.
 ///
 /// Runs the same two-pass parse + semantic-analysis pipeline as `beamtalk lint`,
 /// aggregates all diagnostics via the shared `DiagnosticSummary` type, and
@@ -178,7 +178,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     let source_files = match resolve_source_files(path) {
         Ok(files) => files,
         Err(result) => {
-            // BT-2031: Surface the actual error (permission, IO, path-not-found)
+            // Surface the actual error (permission, IO, path-not-found)
             // instead of collapsing to a generic "no files found" message. Include
             // the file context from the diagnostic since the message alone may not
             // name the offending path.
@@ -200,15 +200,15 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         }
     };
 
-    // BT-2052: Determine the full extraction set (package-wide src/ + test/)
+    // Determine the full extraction set (package-wide src/ + test/)
     // so cross-file class references resolve correctly.
     let (extraction_files, target_set) = resolve_extraction_files(path, &source_files);
 
-    // BT-2921: Resolve the current package once, mirroring `beamtalk lint`,
+    // Resolve the current package once, mirroring `beamtalk lint`,
     // so E0401/E0402/E0403 visibility checks fire the same way in MCP.
     let current_package = resolve_current_package(path);
 
-    // BT-3398: Resolve the package root once so each file's `is_stub_file`
+    // Resolve the package root once so each file's `is_stub_file`
     // check below (`beamtalk_project::package::is_under_stubs_dir`) doesn't
     // re-walk ancestors per file — mirrors `current_package`/
     // `native_type_registry`'s own one-time-per-call resolution above.
@@ -225,9 +225,9 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
 
     for file in &extraction_files {
         let Ok(source) = std::fs::read_to_string(file) else {
-            // BT-2067: Track unreadable target files separately so the caller
+            // Track unreadable target files separately so the caller
             // sees a clear error instead of a deceptively-clean `files_checked=0`
-            // summary. BT-2056: Unreadable package-only files produce a softer
+            // summary. Unreadable package-only files produce a softer
             // warning since cross-file class extraction may be incomplete but
             // the targets themselves were still checked.
             let canonical = canonicalize_or_clone(file);
@@ -242,7 +242,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         let tokens = lex_with_eof(&source);
         let (module, parse_diags) = parse(tokens);
         let mut class_infos = ClassHierarchy::extract_class_infos(&module);
-        // BT-2921: Stamp the package per-file, same as build's/lint's Pass 1 —
+        // Stamp the package per-file, same as build's/lint's Pass 1 —
         // without this, a same-package class defined in a sibling file is
         // indistinguishable from a builtin/REPL class and never flagged as a
         // leak by `check_class_visibility`.
@@ -257,12 +257,12 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         }
     }
 
-    // BT-2823: Merge dependency class metadata so cross-file references to
-    // classes defined only in a git/path dependency (declared in
+    // Merge dependency class metadata so cross-file references to
+    // classes defined only in a repository/path dependency (declared in
     // beamtalk.toml) resolve the same way `beamtalk build` does.
     let has_package_dependencies = merge_dependency_class_infos(path, &mut all_class_infos);
 
-    // BT-2858: Populate the FFI type registry the same way `beamtalk lint` does.
+    // Populate the FFI type registry the same way `beamtalk lint` does.
     let native_type_registry = build_native_type_registry(path);
 
     // Pass 2: Analyse each file and collect diagnostics + coverage.
@@ -309,7 +309,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         coverage.merge(file_report);
     }
 
-    // BT-2031: Count only files that were actually read and analysed,
+    // Count only files that were actually read and analysed,
     // not all resolved files (some may have been unreadable).
     let files_checked = parsed_files.len();
     let summary = DiagnosticSummary::from_diagnostics(&all_diags, files_checked);
@@ -336,7 +336,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         0.0
     };
 
-    // BT-2056: Include unreadable package files in the output so the caller
+    // Include unreadable package files in the output so the caller
     // knows cross-file class extraction may be incomplete.
     let mut result = serde_json::json!({
         "files_checked": files_checked,
@@ -357,7 +357,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     if !unreadable_files.is_empty() {
         result["unreadable_package_files"] = serde_json::json!(unreadable_files);
     }
-    // BT-2067: Surface unreadable target files as a structured field and a
+    // Surface unreadable target files as a structured field and a
     // top-level `error` message so callers treating the response as a summary
     // do not mistake zero-checked-files for a clean result.
     if !unreadable_target_files.is_empty() {
@@ -411,7 +411,7 @@ fn lint_error(file: &str, message: String) -> LintResult {
     }
 }
 
-/// BT-2060: Package root / source-file resolution now lives in
+/// Package root / source-file resolution lives in
 /// [`beamtalk_project::package`] so CLI lint and MCP lint share one
 /// implementation.
 ///
@@ -429,7 +429,7 @@ fn resolve_extraction_files(
     beamtalk_project::package::resolve_extraction_files(std::path::Path::new(path), source_files)
 }
 
-/// BT-2921: Resolve the current package name from `path`'s `beamtalk.toml`,
+/// Resolve the current package name from `path`'s `beamtalk.toml`,
 /// mirroring `beamtalk lint`'s `find_manifest_full` resolution
 /// (`beamtalk_cli::commands::lint::run_lint`) so `CompilerOptions::current_package`
 /// gets set the same way for MCP `lint`/`diagnostic_summary` as it does for
@@ -456,7 +456,7 @@ fn resolve_current_package(path: &str) -> Option<String> {
     }
 }
 
-/// BT-2823: Merge class metadata from `path`'s package dependencies (as
+/// Merge class metadata from `path`'s package dependencies (as
 /// declared in `beamtalk.toml`) into `all_class_infos`, so `Unresolved
 /// class` diagnostics see the same class hierarchy as `beamtalk
 /// build`/`beamtalk lint` for classes defined only in a dependency.
@@ -468,7 +468,7 @@ fn resolve_current_package(path: &str) -> Option<String> {
 /// fetched by a prior `beamtalk build` are silently skipped.
 ///
 /// Returns whether the project's manifest declares any dependencies, for use
-/// as `CompilerOptions::has_package_dependencies` (BT-2794).
+/// as `CompilerOptions::has_package_dependencies`.
 fn merge_dependency_class_infos(
     path: &str,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
@@ -490,7 +490,7 @@ fn merge_dependency_class_infos(
 
 /// Run lint passes on `path` (file or directory) and return structured results.
 ///
-/// BT-2052: Uses a two-pass pipeline mirroring CLI `beamtalk lint`:
+/// Uses a two-pass pipeline mirroring CLI `beamtalk lint`:
 /// - Pass 1: Parse all files in the package and extract class metadata
 /// - Pass 2: Analyse each target file with cross-file class context
 ///
@@ -507,15 +507,15 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         Err(result) => return result,
     };
 
-    // BT-2052: Determine the full extraction set (package-wide src/ + test/)
+    // Determine the full extraction set (package-wide src/ + test/)
     // so cross-file class references resolve correctly.
     let (extraction_files, target_set) = resolve_extraction_files(path, &source_files);
 
-    // BT-2921: Resolve the current package once, mirroring `beamtalk lint`,
+    // Resolve the current package once, mirroring `beamtalk lint`,
     // so E0401/E0402/E0403 visibility checks fire the same way in MCP.
     let current_package = resolve_current_package(path);
 
-    // BT-3398: Resolve the package root once, mirroring
+    // Resolve the package root once, mirroring
     // `compute_diagnostic_summary`'s own one-time resolution above, so each
     // target file's `is_stub_file` can be derived via
     // `beamtalk_project::package::is_under_stubs_dir` without re-walking
@@ -545,7 +545,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
                     severity: "error",
                 });
             } else {
-                // BT-2056: Surface a warning when a package-extraction file
+                // Surface a warning when a package-extraction file
                 // (chosen by the resolver but not a direct lint target) cannot
                 // be read. Without this, cross-file class extraction silently
                 // drops the file, potentially re-introducing diagnostic
@@ -567,7 +567,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         let (module, parse_diags) = parse(tokens);
 
         let mut class_infos = ClassHierarchy::extract_class_infos(&module);
-        // BT-2921: Stamp the package per-file, same as build's/lint's Pass 1 —
+        // Stamp the package per-file, same as build's/lint's Pass 1 —
         // without this, a same-package class defined in a sibling file is
         // indistinguishable from a builtin/REPL class and never flagged as a
         // leak by `check_class_visibility`.
@@ -582,12 +582,12 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         }
     }
 
-    // BT-2823: Merge dependency class metadata so cross-file references to
-    // classes defined only in a git/path dependency (declared in
+    // Merge dependency class metadata so cross-file references to
+    // classes defined only in a repository/path dependency (declared in
     // beamtalk.toml) resolve the same way `beamtalk build` does.
     let has_package_dependencies = merge_dependency_class_infos(path, &mut all_class_infos);
 
-    // BT-2858: Populate the FFI type registry the same way `beamtalk lint` does.
+    // Populate the FFI type registry the same way `beamtalk lint` does.
     let native_type_registry = build_native_type_registry(path);
 
     // Pass 2: Analyse each target file with cross-file class context.
@@ -606,9 +606,9 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             })
             .collect();
 
-        // BT-1587 / BT-2052: run_module_analysis runs lint passes, semantic
+        // run_module_analysis runs lint passes, semantic
         // analysis with cross-file class context (mirroring CLI `beamtalk lint`),
-        // and applies @expect directives (BT-1476).
+        // and applies @expect directives.
         let is_stub_file = project_root
             .as_deref()
             .is_some_and(|root| beamtalk_project::package::is_under_stubs_dir(root, &file));
@@ -631,7 +631,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
                 Severity::Error => "error",
                 Severity::Warning | Severity::Lint | Severity::Hint => "warning",
             };
-            // BT-1588: Include notes in the message for origin tracing
+            // Include notes in the message for origin tracing
             let message = if diag.notes.is_empty() {
                 diag.message.to_string()
             } else {

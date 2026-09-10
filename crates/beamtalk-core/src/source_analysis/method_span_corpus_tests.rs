@@ -25,8 +25,8 @@
 //!
 //! The corpus tests that also exercise `unparse` (reshape round-trip, full
 //! save/flush pipeline round-trip, and the receiver-span/syntactic-send-walk
-//! conformance check) live in `crate::unparse`'s own test tree instead
-//! (BT-3346) — this module has no test-time dependency on `unparse`.
+//! conformance check) live in `crate::unparse`'s own test tree instead —
+//! this module has no test-time dependency on `unparse`.
 
 use std::collections::BTreeSet;
 

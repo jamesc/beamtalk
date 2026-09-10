@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Byte-span resolver for a class's header + state declarations (ADR 0082
-//! extension, BT-3248).
+//! extension).
 //!
 //! **DDD Context:** Source Analysis (Compilation context per ADR 0082).
 //!
@@ -13,7 +13,7 @@
 //!
 //! # Why this exists, and why it stops before the methods
 //!
-//! The cockpit `:def` tab's "Compile" action (BT-3248) recompiles a small,
+//! The cockpit `:def` tab's "Compile" action recompiles a small,
 //! *synthesized* skeleton of an already-loaded class:
 //! `beamtalk_repl_ops_browse:class_definition_text/7` builds it purely from
 //! runtime reflection — `{modifier keywords }{Superclass} subclass: {Name}`
@@ -26,15 +26,12 @@
 //! the span must never reach past the last state declaration.
 //!
 //! Naively using the whole `ClassDefinition::span` (header through the last
-//! *method*, which is what a first draft of this resolver did) would make a
-//! flush splice the header+state skeleton over the header+state+**all
-//! methods** region — permanently erasing every method's source from the
-//! file on disk. That bug was caught in review before it shipped (BT-3248);
-//! this module's span deliberately ends at the last `state:`/`field:`
-//! declaration (or the header line itself, when there is none) specifically
-//! so a flush can never reach a method.
+//! *method*) would make a flush splice the header+state skeleton over the
+//! header+state+**all methods** region — permanently erasing every method's
+//! source from the file on disk. This module's span deliberately ends at
+//! the last `state:`/`field:` declaration (or the header line itself, when
+//! there is none) specifically so a flush can never reach a method.
 //!
-//! A second review pass caught a follow-on version of the same class of bug:
 //! `state:`/`field:` declarations are legal Beamtalk anywhere in a class body
 //! (interleaved with, or after, methods), so "the last state declaration"
 //! must be read positionally, not by parse-list order, and is additionally
@@ -44,9 +41,9 @@
 //! test `excludes_a_method_that_precedes_a_later_state_declaration`.
 //!
 //! This span backs the CHANGES-dock diff
-//! (`beamtalk_workspace_changelog:disk_class_body/2`, read-only) and, since
-//! BT-3254 made the skeleton itself round-trip-safe (modifier keywords, the
-//! `field:`/`state:` keyword choice, and `::` type annotations all now
+//! (`beamtalk_workspace_changelog:disk_class_body/2`, read-only) and,
+//! because the skeleton itself is round-trip-safe (modifier keywords, the
+//! `field:`/`state:` keyword choice, and `::` type annotations all
 //! survive a resubmit — see `class_definition_text/7`),
 //! `beamtalk_repl_loader:add_class_def_flushability/2` also uses it to mark a
 //! `'class-def'` `ChangeEntry` `flushable: true` and to compute the actual
@@ -62,8 +59,8 @@
 //! Splicing a live-reflected skeleton (which lists every field regardless of
 //! position) into a span that excludes a trailing field would duplicate that
 //! field's declaration rather than losing it. `beamtalk_repl_loader:
-//! class_def_span_contains_all_state_fields/3` (BT-3254 review finding)
-//! guards the flush path against exactly this: it compares
+//! class_def_span_contains_all_state_fields/3` guards the flush path
+//! against exactly this: it compares
 //! the field set [`class_state_field_defaults`] reports for the whole disk
 //! file against the field set it reports for just the resolved span, and
 //! refuses to flush whenever a field lies outside the span this module
@@ -72,7 +69,7 @@
 //! # Span boundaries — also EXCLUDES the doc comment
 //!
 //! Unlike [`crate::source_analysis::method_span::resolve_method_span`], which
-//! pulls a method's leading `///` doc comment into its span (BT-2577 — the
+//! pulls a method's leading `///` doc comment into its span (the
 //! method editor round-trips the whole definition, doc comment included),
 //! this resolver's span starts at the class's own declaration line and never
 //! backs up across `///` lines. The `:def` tab's skeleton never carries the
@@ -136,7 +133,7 @@ impl std::fmt::Display for ClassSpanResolveError {
 impl std::error::Error for ClassSpanResolveError {}
 
 /// Resolve the byte span of `class`'s declaration line through its last
-/// `state:`/`field:` declaration in `source` (ADR 0082 extension, BT-3248).
+/// `state:`/`field:` declaration in `source` (ADR 0082 extension).
 ///
 /// See the module doc for why this stops before any method — it is the
 /// load-bearing property of this resolver. Parser [`Diagnostic`]s produced
@@ -154,8 +151,7 @@ pub fn resolve_class_span(
 }
 
 /// For every `state:`/`field:` declaration of `class` in `source`, its field
-/// name and whether it carries a default value (ADR 0082 extension,
-/// BT-3254).
+/// name and whether it carries a default value (ADR 0082 extension).
 ///
 /// Backs `beamtalk_repl_loader:class_def_source_is_skeleton_shaped/2`'s
 /// sibling safety check: a `'class-def'` `ChangeLog` entry's resubmitted
@@ -293,8 +289,8 @@ mod tests {
         assert!(!slice.contains("class new"));
     }
 
-    /// Regression for a Claude-review-caught blocker (BT-3248): a
-    /// `state:`/`field:` declaration that textually follows a method must
+    /// Regression: a `state:`/`field:` declaration that textually follows
+    /// a method must
     /// not pull that method into the span. `class_def.state.last()` alone
     /// (parse-order, not position-order relative to methods) would extend
     /// the span through `increment` here — see this codebase's parser tests
@@ -371,7 +367,7 @@ mod tests {
         );
     }
 
-    // --- class_state_field_defaults tests (ADR 0082 extension, BT-3254) ---
+    // --- class_state_field_defaults tests (ADR 0082 extension) ---
 
     #[test]
     fn class_state_field_defaults_reports_presence_per_field() {

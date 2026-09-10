@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Minimal WebSocket client for the Beamtalk LSP server to talk to a running
-//! workspace REPL (ADR 0082 Phase 3, BT-2289).
+//! workspace REPL (ADR 0082 Phase 3).
 //!
 //! **DDD Context:** Language Service ↔ REPL (Workspace) bridge
 //!
@@ -81,13 +81,13 @@ pub enum RuntimeError {
 #[derive(Debug, Clone)]
 pub struct FlushEvent {
     /// One entry per file touched by the flush — written (patch, `new-class`,
-    /// `remove-method`) *or*, since ADR 0113 Phase 2 (BT-3207), deleted
+    /// `remove-method`) *or*, since ADR 0113 Phase 2, deleted
     /// (`remove-class`, Tier 2 destructive flush).
     pub files: Vec<FlushedFile>,
 }
 
 /// One file touched by a flush, paired with its operation kind when the
-/// runtime reported one (ADR 0113 LSP follow-up, BT-3212).
+/// runtime reported one (ADR 0113 LSP follow-up).
 #[derive(Debug, Clone)]
 pub struct FlushedFile {
     /// Absolute or workspace-relative path as `ChangeEntry.sourceFile`
@@ -97,12 +97,12 @@ pub struct FlushedFile {
     /// The per-file operation kind from the wire's `fileKinds` companion
     /// list (`beamtalk_workspace_changelog:entry_kind/1`'s own enum value,
     /// bucketed into the shapes the LSP acts on), or `None` when the
-    /// producer predates BT-3212 and sent no `fileKinds` entry for this
+    /// producer predates this and sent no `fileKinds` entry for this
     /// path — the older, filesystem-existence-based classification in
-    /// `resolve_flushed_path` remains the fallback for that case (BT-3209
-    /// backward-compat tolerance).
+    /// `resolve_flushed_path` remains the fallback for that case
+    /// (backward-compat tolerance).
     pub kind: Option<FlushFileKind>,
-    /// ADR 0114 LSP follow-up (BT-3275): the pre-rename path, present only
+    /// ADR 0114 LSP follow-up: the pre-rename path, present only
     /// for the one `RenameClass`-kind file that IS the moved declaration
     /// (`beamtalk_workspace_flush:file_kind_map/1`'s `op = move` case,
     /// forwarded on the wire as `oldFile`). `None` for every other file,
@@ -114,7 +114,7 @@ pub struct FlushedFile {
 }
 
 /// The flush operation shapes the LSP distinguishes on the wire (ADR 0113
-/// LSP follow-up, BT-3212; ADR 0114 LSP follow-up, BT-3275) — bucketed
+/// LSP follow-up; ADR 0114 LSP follow-up) — bucketed
 /// client-side from the runtime's own `entry_kind/1` enum value rather than
 /// a value this crate invents: `'new-class'`, `'remove-class'`,
 /// `'rename-class'`, and `'rename-method'` map straight across, and every
@@ -128,17 +128,17 @@ pub enum FlushFileKind {
     NewClass,
     /// `removeFromSystem` (Tier 2 destructive flush, ADR 0113) — the flush
     /// already unlinked the file from disk. Emitted as a `DeleteFile`
-    /// resource operation (BT-3209).
+    /// resource operation.
     RemoveClass,
-    /// `renameTo:`/`moveClass:to:` (Tier 2 destructive flush, ADR 0114,
-    /// BT-3271/BT-3275) — a file touched by a class rename. Paired with
+    /// `renameTo:`/`moveClass:to:` (Tier 2 destructive flush, ADR 0114) —
+    /// a file touched by a class rename. Paired with
     /// `FlushedFile::old_path` (`Some`), emitted as a `RenameFile` resource
     /// operation plus a `TextDocumentEdit` carrying the moved file's new
     /// content; without it (`None`), an ordinary same-batch reference
     /// rewrite in a file that did not itself move — an ordinary patch.
     RenameClass,
-    /// `renameSelector:to:` (Tier 2 destructive flush, ADR 0114, BT-3273/
-    /// BT-3275) — the definition site or a confirmed sender site of a
+    /// `renameSelector:to:` (Tier 2 destructive flush, ADR 0114) —
+    /// the definition site or a confirmed sender site of a
     /// method rename (never a `candidate_sites` entry, which is never
     /// staged/written and so never appears on this wire at all). Emitted as
     /// a `TextDocumentEdit`.
@@ -165,7 +165,7 @@ impl FlushFileKind {
 
 /// A class-load or class-reload event surfaced to the LSP server so it
 /// can invalidate caches that depend on the class's method dictionary or
-/// senders (BT-2239).
+/// senders.
 ///
 /// Today the workspace emits `class_loaded` for every register / re-register
 /// — including the per-method `Behaviour >>` install path (ADR 0082 Phase 1),
@@ -178,8 +178,8 @@ pub struct ClassChangedEvent {
     pub class_name: String,
 }
 
-/// One caller call-site inside a reload-induced finding (ADR 0105 Phase 1,
-/// BT-2779) — mirrors `beamtalk_recheck:site_ref()`
+/// One caller call-site inside a reload-induced finding (ADR 0105 Phase 1)
+/// — mirrors `beamtalk_recheck:site_ref()`
 /// (`runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl`). `line` is
 /// the 1-based line xref recorded for the call site, not a byte offset —
 /// same precedent as [`beamtalk_language_service::NavSite`].
@@ -233,7 +233,7 @@ pub struct ReloadFinding {
     pub end: u32,
 }
 
-/// A `reload_check`/`completed` push event (ADR 0105 Phase 1, BT-2779): the
+/// A `reload_check`/`completed` push event (ADR 0105 Phase 1): the
 /// outcome of `beamtalk_repl_loader:maybe_trigger_recheck/4` for one live
 /// reload, surfaced to the LSP so it can publish/clear reload-induced
 /// diagnostics on the caller classes' documents.
@@ -274,7 +274,7 @@ pub struct ReloadCheckEvent {
     pub findings: Vec<ReloadFinding>,
 }
 
-/// Snapshot payload for the `reload-findings` op response (BT-2801, ADR 0105
+/// Snapshot payload for the `reload-findings` op response (ADR 0105
 /// surface-parity gap) — deserializes the op's `{"findings": [...]}` `value`
 /// payload. `ReloadFinding` is the exact per-finding shape shared with
 /// [`ReloadCheckEvent::findings`]; the Erlang side produces both from the
@@ -353,14 +353,14 @@ impl RuntimeClient {
     /// `applyEdit` task can't backpressure the listener.
     ///
     /// `class_changed_tx` receives `{classes, loaded}` push frames
-    /// translated to [`ClassChangedEvent`] (BT-2239) — used by the LSP to
+    /// translated to [`ClassChangedEvent`] — used by the LSP to
     /// invalidate runtime-attached nav caches. Pass an unbounded sender so
     /// the listener never blocks. Listeners that don't care can drop the
     /// receiver — the send will fail silently, which is fine for a
     /// best-effort signal.
     ///
     /// `reload_check_tx` receives `{reload_check, completed}` push frames
-    /// translated to [`ReloadCheckEvent`] (ADR 0105 Phase 1, BT-2779) — used
+    /// translated to [`ReloadCheckEvent`] (ADR 0105 Phase 1) — used
     /// by the LSP to publish/clear reload-induced diagnostics.
     pub async fn connect(
         project_path: &Path,
@@ -471,8 +471,7 @@ impl RuntimeClient {
         self.dispatch_request(request, &id, "eval").await
     }
 
-    /// Submit a structured `nav-query` request and decode the typed reply
-    /// (BT-2239).
+    /// Submit a structured `nav-query` request and decode the typed reply.
     ///
     /// Unlike [`Self::evaluate`], this op bypasses the Beamtalk inspect-string
     /// formatter — the runtime serialises `beamtalk_xref` site records as
@@ -506,7 +505,7 @@ impl RuntimeClient {
         Ok(payload.sites)
     }
 
-    /// Submit a `nav-symbols` request (BT-2244) and decode the typed reply.
+    /// Submit a `nav-symbols` request and decode the typed reply.
     ///
     /// The op is the bulk-outline sibling of `nav-query` — used by the LSP
     /// `textDocument/documentSymbol` and `workspace/symbol` handlers to
@@ -543,7 +542,7 @@ impl RuntimeClient {
     }
 
     /// One-shot snapshot read of every currently-live reload-induced finding
-    /// (BT-2801, ADR 0105 surface-parity gap) — the request/response
+    /// (ADR 0105 surface-parity gap) — the request/response
     /// counterpart to the `reload_check`/`completed` push frame
     /// [`ReloadCheckEvent`] arrives on. Callers use this to seed state on
     /// attach (findings that already existed in
@@ -755,11 +754,11 @@ fn handle_push_frame(
                 debug!("runtime: flush_completed with empty files list");
                 return;
             }
-            // BT-3212: per-file operation kind, keyed by path — absent (an
+            // Per-file operation kind, keyed by path — absent (an
             // older producer, or a path this list simply omits) leaves that
             // file's `kind` as `None`, so `flush_event_listener` falls back
-            // to the pre-BT-3212 existence check for it (BT-3209 backward
-            // compat). BT-3275: also carries the optional `oldFile`
+            // to the existence check for it (backward
+            // compat). Also carries the optional `oldFile`
             // companion (present only for the moved `'rename-class'` file).
             let kinds_by_path: std::collections::HashMap<&str, (FlushFileKind, Option<String>)> =
                 data.and_then(|d| d.get("fileKinds"))
@@ -796,7 +795,7 @@ fn handle_push_frame(
                 warn!(error = %e, "runtime: flush_tx receiver dropped");
             }
         }
-        // BT-2239: a class load / reload / method-install (all routed through
+        // A class load / reload / method-install (all routed through
         // `beamtalk_class_builder`) invalidates any runtime-attached nav
         // cache keyed on that class's method dictionary or senders.
         (Some("classes"), Some("loaded")) => {
@@ -813,7 +812,7 @@ fn handle_push_frame(
                 warn!(error = %e, "runtime: class_changed_tx receiver dropped");
             }
         }
-        // ADR 0105 Phase 1 (BT-2779): reload-induced re-check outcome —
+        // ADR 0105 Phase 1: reload-induced re-check outcome —
         // publish/clear diagnostics on the affected caller classes.
         (Some("reload_check"), Some("completed")) => {
             let Some(data) = value.get("data") else {
@@ -839,7 +838,7 @@ async fn perform_auth_handshake(ws: &mut WsStream, cookie: &str) -> Result<(), S
     use tokio_tungstenite::tungstenite::Message;
 
     // Read auth-required. Frame recognition goes through
-    // `beamtalk_repl_protocol::handshake` (BT-3330) rather than re-matching
+    // `beamtalk_repl_protocol::handshake` rather than re-matching
     // the JSON here — see that module's doc comment for why.
     let auth_required = read_text(ws).await?;
     let auth_required_json: serde_json::Value = serde_json::from_str(&auth_required)
@@ -1067,7 +1066,7 @@ mod tests {
         let paths: Vec<&str> = evt.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, vec!["src/counter.bt", "src/foo.bt"]);
         // No `fileKinds` companion on the wire: every file's kind is `None`
-        // (BT-3209 fallback tolerance for a pre-BT-3212 producer shape).
+        // (fallback tolerance for an older producer shape).
         assert!(evt.files.iter().all(|f| f.kind.is_none()));
     }
 
@@ -1112,7 +1111,7 @@ mod tests {
 
     #[tokio::test]
     async fn push_frame_with_rename_class_old_file_is_forwarded() {
-        // BT-3275: `oldFile` distinguishes the moved declaration file
+        // `oldFile` distinguishes the moved declaration file
         // (`RenameClass` + `old_path = Some`) from an ordinary same-batch
         // reference-rewrite file that shares the same `kind` but never
         // moved (`RenameClass` + `old_path = None`).
@@ -1185,7 +1184,7 @@ mod tests {
         );
     }
 
-    /// BT-3275 conformance: `FlushFileKind::from_wire` must bucket every
+    /// Conformance: `FlushFileKind::from_wire` must bucket every
     /// atom `beamtalk_workspace_changelog:kind()` (Erlang) admits the same
     /// way this corpus pins it. The corpus is the single source of truth
     /// both language-side implementations are pinned to; the Erlang side
@@ -1435,7 +1434,7 @@ mod tests {
     // Fidelity caveat — this is a test double, not a second implementation of
     // a shared rule: `perform_auth_handshake` above no longer re-matches the
     // handshake JSON itself, it builds/recognises every frame through
-    // `beamtalk_repl_protocol::handshake` (BT-3330), which is pinned to
+    // `beamtalk_repl_protocol::handshake`, which is pinned to
     // `beamtalk_ws_handler.erl`'s actual production frame shapes via the
     // shared `ws_auth_handshake_wire_corpus.json` fixture — read on the Rust
     // side by `handshake::tests::matches_shared_wire_corpus` and on the
@@ -1457,9 +1456,9 @@ mod tests {
     // (`just test-mcp`).
     // ------------------------------------------------------------------
 
-    // BT-3331: the loopback WS server performing this handshake (listener
+    // The loopback WS server performing this handshake (listener
     // bind, ADR 0020 frames, request/response loop keyed by a responder
-    // closure) used to be hand-rolled here; it's now shared with
+    // closure) is shared with
     // `beamtalk-mcp`'s equivalent fake REPL via
     // `beamtalk_repl_protocol::test_support` (see that module's doc comment
     // for the full extraction rationale). `Handshake`/`FakeWorkspace` alias

@@ -5,7 +5,7 @@
 
 use super::*;
 
-/// Startup preload (BT-2027) indexes every `src/`/`test/` file, so the
+/// Startup preload indexes every `src/`/`test/` file, so the
 /// `ProjectIndex` is workspace-wide rather than "currently open files".
 /// `did_close` used to evict the closed file regardless — correct back
 /// when files were only ever indexed while open, but after preload it

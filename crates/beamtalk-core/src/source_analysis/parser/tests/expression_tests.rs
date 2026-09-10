@@ -269,7 +269,7 @@ fn parse_keyword_message_dot_terminates_not_newline() {
 
 #[test]
 fn parse_keyword_message_multiline_paren_receiver_continuation() {
-    // BT-1061: `(expr)\n  ifTrue: [...]` should be a single keyword send,
+    // `(expr)\n  ifTrue: [...]` should be a single keyword send,
     // not two statements. The parenthesized receiver signals unambiguous
     // continuation.
     let module = parse_ok("(a > 0)\n  ifTrue: [a]");
@@ -290,7 +290,7 @@ fn parse_keyword_message_multiline_paren_receiver_continuation() {
 
 #[test]
 fn parse_keyword_message_multiline_paren_receiver_iftrue_iffalse() {
-    // BT-1061: parenthesized receiver + multi-keyword continuation across newlines
+    // Parenthesized receiver + multi-keyword continuation across newlines
     let module = parse_ok("(a > 0)\n  ifTrue: [a]\n  ifFalse: [0]");
     assert_eq!(module.expressions.len(), 1, "Should be one statement");
     match &module.expressions[0].expression {
@@ -310,8 +310,8 @@ fn parse_keyword_message_multiline_paren_receiver_iftrue_iffalse() {
 
 #[test]
 fn parse_keyword_message_multiline_complex_paren_receiver() {
-    // BT-1061: the motivating case from the issue — complex parenthesized
-    // boolean expression followed by ifTrue: on the next line
+    // A complex parenthesized boolean expression followed by ifTrue: on
+    // the next line
     let module =
         parse_ok("((step > 0 and: [x <= end]) or: [step < 0 and: [x >= end]])\n  ifTrue: [x]");
     assert_eq!(module.expressions.len(), 1, "Should be one statement");
@@ -329,7 +329,7 @@ fn parse_keyword_message_multiline_complex_paren_receiver() {
 
 #[test]
 fn parse_keyword_message_newline_keyword_continues_receiver() {
-    // BT-1061: a keyword on the next line is always a continuation — keywords
+    // A keyword on the next line is always a continuation — keywords
     // can never validly start a new statement on their own. `x\n  ifTrue: [x]`
     // is one statement, not two.
     let module = parse_ok("x\n  ifTrue: [x]");
@@ -665,7 +665,7 @@ fn parse_super_with_cascade() {
 }
 
 // ========================================================================
-// @primitive parsing tests (BT-290)
+// @primitive parsing tests
 // ========================================================================
 
 #[test]
@@ -754,8 +754,7 @@ fn parse_primitive_structural_intrinsic() {
 #[test]
 fn parse_primitive_bare_infers_selector() {
     // Bare @primitive (no selector string) infers the selector from the
-    // enclosing method, producing the same AST as the explicit quoted form
-    // (BT-2724).
+    // enclosing method, producing the same AST as the explicit quoted form.
     let source = "Object subclass: Foo\n  size => @primitive";
     let module = parse_ok(source);
     let method = &module.classes[0].methods[0];
@@ -853,7 +852,7 @@ fn parse_primitive_inside_block_in_method_body() {
 }
 
 // ========================================================================
-// @intrinsic parsing tests (BT-484)
+// @intrinsic parsing tests
 // ========================================================================
 
 #[test]
@@ -876,7 +875,7 @@ fn parse_intrinsic_bare_identifier() {
 
 #[test]
 fn parse_intrinsic_bare_does_not_infer() {
-    // BT-2724: bare `@intrinsic` must still error. Intrinsic names name a
+    // Bare `@intrinsic` must still error. Intrinsic names name a
     // structural intrinsic, never the method's selector, so inference (which is
     // only correct for `@primitive`) must not apply.
     let source = "Object subclass: Foo\n  size => @intrinsic";
@@ -928,7 +927,7 @@ fn parse_intrinsic_outside_method_body_error() {
     );
 }
 
-// BT-285: Consecutive binary method definitions
+// Consecutive binary method definitions
 #[test]
 fn parse_consecutive_binary_methods() {
     let source = "Object subclass: Foo\n  + other => @primitive \"+\"\n  - other => @primitive \"-\"\n  * other => @primitive \"*\"";
@@ -961,7 +960,7 @@ fn parse_binary_continuation_on_same_line() {
 #[test]
 fn parse_binary_continuation_on_new_line() {
     // Binary operator on new line that is NOT a method definition should
-    // continue the expression (regression test for BT-285)
+    // continue the expression (regression test)
     let source = "Object subclass: Foo\n  m => 1\n    + 2\n  n => 3";
     let module = parse_ok(source);
     assert_eq!(module.classes[0].methods.len(), 2);
@@ -970,7 +969,7 @@ fn parse_binary_continuation_on_new_line() {
 }
 
 // ========================================================================
-// Binary pattern tests (BT-663)
+// Binary pattern tests
 // ========================================================================
 
 #[test]
@@ -1345,7 +1344,7 @@ fn binary_segment_conflicting_signedness_specifiers_error() {
     );
 }
 
-// --- field: keyword tests (BT-1527) ---
+// --- field: keyword tests ---
 
 #[test]
 fn field_declaration_basic() {
@@ -1412,7 +1411,7 @@ fn mixed_state_and_field_declarations() {
     );
 }
 
-// --- Type-annotated local variable assignment tests (BT-2012) ---
+// --- Type-annotated local variable assignment tests ---
 
 #[test]
 fn parse_annotated_assignment_simple_type() {
@@ -1531,7 +1530,7 @@ fn parse_annotated_assignment_missing_assign_op() {
     );
 }
 
-/// Bare `=` is not a valid Beamtalk operator (BT-2762): it has no entry in
+/// Bare `=` is not a valid Beamtalk operator: it has no entry in
 /// `binary_binding_power`, so `x = y` never parses as an equality test.
 /// Assert the parser reports a clear, targeted diagnostic rather than the
 /// generic "expected expression" fallback.
@@ -1553,7 +1552,7 @@ fn bare_equals_is_not_an_operator() {
     );
 }
 
-/// BT-3462 conformance test: the parser's own precedence-10 bucket and
+/// Conformance test: the parser's own precedence-10 bucket and
 /// [`is_equality_operator`] must agree for every operator this file's own
 /// `binary_binding_power` table recognises — both known operators (whether
 /// or not they're equality operators) and one unknown string. This is what

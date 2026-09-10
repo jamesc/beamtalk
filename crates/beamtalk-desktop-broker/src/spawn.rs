@@ -1571,7 +1571,7 @@ mod tests {
         // Pay this exact file's first-exec tax here, untimed,
         // instead of racing it against the fixed 2s `wait_for_file_contents`
         // timeout below. Same root cause as the sibling
-        // `..._recovers_after_transient_conflicts` test): the *first* exec of
+        // `..._recovers_after_transient_conflicts` test: the *first* exec of
         // a brand-new script file can take 200ms+ on a loaded macOS sandbox —
         // and under full-crate parallel `cargo test` scheduler contention,
         // occasionally much more — while every *subsequent* exec of that same

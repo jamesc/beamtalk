@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `escape_string_literal`, `reindent_method_source` (BT-2584), the
-//! `unparse_method` round-trip, and `unparse_literal_display` (BT-3088)
+//! `escape_string_literal`, `reindent_method_source`, the
+//! `unparse_method` round-trip, and `unparse_literal_display`
 //!.
 
 use super::common::*;
@@ -44,7 +44,7 @@ fn escape_string_literal_mixed_backslash_quote_brace() {
     assert_eq!(escape_string_literal("\\\"\\{"), "\\\\\\\"\\\\\\{");
 }
 
-// --- reindent_method_source (BT-2584) ---
+// --- reindent_method_source ---
 
 #[test]
 fn reindent_empty_base_is_identity_for_canonical() {
@@ -71,7 +71,7 @@ fn reindent_preserves_relative_indentation() {
 
 #[test]
 fn reindent_rebreaks_line_too_wide_at_indent() {
-    // BT-2594: the core re-layout property. A single-expression body that
+    // The core re-layout property. A single-expression body that
     // fits inline at column 0 (exactly 80 cols) must break to its own line
     // once indented, because the indent steals from the width budget — a pure
     // whitespace shift could not do this.
@@ -87,7 +87,7 @@ fn reindent_rebreaks_line_too_wide_at_indent() {
 
 #[test]
 fn reindent_preserves_blank_line_between_statements() {
-    // A blank line the author left between two body statements (BT-987) is
+    // A blank line the author left between two body statements is
     // preserved by the re-layout and shifted to the new base (blank stays
     // empty — no indent, no trailing space).
     assert_eq!(
@@ -140,7 +140,7 @@ fn reindent_is_idempotent_on_canonical_disk_shape() {
 
 #[test]
 fn reindent_emits_class_prefix_for_class_side_method() {
-    // BT-2594: the `class ` modifier is recovered from the re-parsed method
+    // The `class ` modifier is recovered from the re-parsed method
     // and re-emitted, so a class-side method's stored source keeps its prefix.
     assert_eq!(
         reindent_method_source("  ", "class spawn => self new\n"),
@@ -149,7 +149,7 @@ fn reindent_emits_class_prefix_for_class_side_method() {
 }
 
 // --- unparse_method round-trip (moved from source_analysis's
-// `parser::tests::method_tests`, BT-3346 / ADR 0117 Phase 4) ---
+// `parser::tests::method_tests`, ADR 0117 Phase 4) ---
 
 /// Parses a single bare method definition (`Class >> ` header not
 /// required — the live-image "compile one method" idiom), failing loudly
@@ -170,8 +170,7 @@ fn parse_method_unparse_drops_banner_keeps_doc() {
     // must match the method's byte span — which starts at the `///` doc block and
     // excludes a leading `//` section banner (the banner is inter-method file
     // structure, not part of the method). So unparse_method drops the banner but
-    // keeps the doc comment; whole-file unparse preserves the banner in place
-    // (BT-2594; banners become first-class categories in BT-2601).
+    // keeps the doc comment; whole-file unparse preserves the banner in place.
     let src = "// --- Execution CRUD ---\n\
                \n\
                /// Store a new workflow execution.\n\
@@ -212,7 +211,7 @@ fn parse_method_roundtrip_is_idempotent() {
     assert_eq!(twice, thrice, "method source not idempotent after 3rd save");
 }
 
-// --- unparse_literal_display (BT-3088) ---
+// --- unparse_literal_display ---
 //
 // These are the single source of truth for literal-to-source rendering;
 // `format_default_value` (stdlib-metadata path) and hover's literal

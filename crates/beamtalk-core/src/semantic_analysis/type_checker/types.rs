@@ -145,21 +145,32 @@ impl TypeProvenance {
 /// Controls how [`InferredType`] renders class names when converted to a
 /// display string.
 ///
-/// See [`InferredType::display_name`] and
-/// [`InferredType::display_for_diagnostic`].
+/// See [`InferredType::display_name`], [`InferredType::display_annotation`],
+/// and [`InferredType::display_for_diagnostic`].
 #[derive(Debug, Clone, Copy)]
 struct DisplayOptions {
     /// When `true`, `Known("UndefinedObject")` renders as `"Nil"`. When
     /// `false`, the canonical `UndefinedObject` name is used.
     nil_as_source_name: bool,
+    /// When `true`, `Dynamic(reason)` renders as `"Dynamic (description)"` if
+    /// the reason has a description. When `false`, always renders as `"Dynamic"`.
+    show_dynamic_reason: bool,
 }
 
 impl DisplayOptions {
     const CANONICAL: Self = Self {
         nil_as_source_name: false,
+        show_dynamic_reason: true,
     };
     const SOURCE_FRIENDLY: Self = Self {
         nil_as_source_name: true,
+        show_dynamic_reason: true,
+    };
+    /// Produces a valid Beamtalk annotation string: no nil remapping, no
+    /// dynamic-reason parenthetical. Used by [`InferredType::display_annotation`].
+    const BARE: Self = Self {
+        nil_as_source_name: false,
+        show_dynamic_reason: false,
     };
 }
 
@@ -576,6 +587,25 @@ impl InferredType {
         self.display_with_options(DisplayOptions::CANONICAL)
     }
 
+    /// Returns the type as a valid Beamtalk annotation string — the form a
+    /// user writes in source code.
+    ///
+    /// - `Known("Integer", [])` → `"Integer"`
+    /// - `Known("UndefinedObject", [])` → `"UndefinedObject"` (no `Nil` remapping)
+    /// - `Dynamic(_)` → `"Dynamic"` (provenance description is always omitted)
+    /// - `Union([Known("A"), Known("B")])` → `"A | B"`
+    /// - `Negation { base, excluded: Union }` → `"base \\ (excluded)"`
+    /// - `Intersection { members }` → `"A & B"`
+    ///
+    /// Unlike [`display_name`](Self::display_name), the `Dynamic` variant never
+    /// includes a provenance description parenthetical. Use this wherever you
+    /// need a string that could be pasted back into a type annotation or compared
+    /// against another annotation string for assignability.
+    #[must_use]
+    pub fn display_annotation(&self) -> EcoString {
+        self.display_with_options(DisplayOptions::BARE)
+    }
+
     /// Maps a raw class-name string to its user-facing diagnostic spelling.
     ///
     /// Rewrites every occurrence of `"UndefinedObject"` → `"Nil"` as a whole
@@ -699,11 +729,12 @@ impl InferredType {
                 EcoString::from(format!("{rendered_name} class"))
             }
             Self::Dynamic(reason) => {
-                if let Some(desc) = reason.description() {
-                    EcoString::from(format!("Dynamic ({desc})"))
-                } else {
-                    EcoString::from("Dynamic")
+                if opts.show_dynamic_reason {
+                    if let Some(desc) = reason.description() {
+                        return EcoString::from(format!("Dynamic ({desc})"));
+                    }
                 }
+                EcoString::from("Dynamic")
             }
             Self::Never => EcoString::from("Never"),
             Self::Negation { base, excluded, .. } => {

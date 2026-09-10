@@ -8,10 +8,10 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! BT-3459: split out of `control_flow/mod.rs`, no logic changes. ADR 0111
+//! split out of `control_flow/mod.rs`, no logic changes. ADR 0111
 //! Addendum 15 then migrated both families onto real `ThreadedIr`: the
 //! Letrec migration deleted the `BodyKind::Letrec` arm of the original
-//! `generate_threaded_loop_body_inner` (BT-3470); the Foldl migration
+//! `generate_threaded_loop_body_inner`; the Foldl migration
 //! converted what remained (`lower_foldl_body`, this file) from a
 //! `Document`-returning per-statement dispatch into a `Vec<ThreadedStmt>`
 //! one, merged with the fold's own unpack into one verified `Threaded` node
@@ -114,9 +114,9 @@ impl CoreErlangGenerator {
                 produces: Vec::new(),
                 span,
             };
-            // ADR 0111 Addendum 4/BT-3148 technique (`backfill_opaque_version_gaps`,
-            // generalized off `FrameId::ROOT` for this non-ROOT frame by
-            // BT-3475): a self-send, Tier 2 call, or inline-conditional-with-
+            // ADR 0111 Addendum 4 technique (`backfill_opaque_version_gaps`,
+            // generalized off `FrameId::ROOT` for this non-ROOT frame):
+            // a self-send, Tier 2 call, or inline-conditional-with-
             // mutations statement bumps `next_state_var()` inside its own
             // opaque `Statement` text (no real `Bind` for that step) — a
             // following real `Bind` (e.g. a field assignment) reading that
@@ -211,9 +211,8 @@ impl CoreErlangGenerator {
         result
     }
 
-    /// ADR 0111 Addendum 15: rebases the loop body's own class-var (or, per
-    /// BT-3484, value-type `Self`) `Bind` chain onto its `produces` seed
-    /// identity.
+    /// ADR 0111 Addendum 15: rebases the loop body's own class-var (or
+    /// value-type `Self`) `Bind` chain onto its `produces` seed identity.
     ///
     /// `render_loop_skeleton`'s `outer_args`/`param_list` always render
     /// `produces`' entries at version `0` (the "loop's own frame-entry
@@ -241,7 +240,7 @@ impl CoreErlangGenerator {
     /// doesn't contain one at the top level — a nested construct's own
     /// `Bind`s belong to a different `FrameId` and are never touched here).
     ///
-    /// BT-3484: `VersionPrefix::SelfVt` has the identical version-driven
+    /// `VersionPrefix::SelfVt` has the identical version-driven
     /// (`Self`, `Self1`, …), never context-toggled rendering, so a
     /// value-type `Self`-threading loop seeds and rebases through this same
     /// function rather than a second copy of it — the reason it is named for
@@ -287,7 +286,7 @@ impl CoreErlangGenerator {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
 
-            // BT-3172: see `generate_threaded_loop_body_inner`'s identical
+            // see `generate_threaded_loop_body_inner`'s identical
             // check for the full rationale — a nested loop/fold statement
             // whose own body threads a `ClassVars` mutation must be rejected
             // here too, ahead of every dispatch branch below.
@@ -302,12 +301,11 @@ impl CoreErlangGenerator {
                 });
             }
 
-            // BT-3484: the value-type `Self` mirror of the check just above,
+            // the value-type `Self` mirror of the check just above,
             // with the same deliberate scope limit — nothing unpacks a
             // nested Letrec loop's own trailing `Self` tuple slot back into
             // THIS body's statement sequence, so the inner mutation would be
-            // silently discarded once the inner loop exits (the exact
-            // BT-3484 bug class this issue fixes at one level). See
+            // silently discarded once the inner loop exits. See
             // `nested_loop_lost_value_self_mutation`'s doc comment.
             if let Some(mutation) = self.nested_loop_lost_value_self_mutation(expr) {
                 let location = self.span_to_line(expr.span()).map_or_else(
@@ -332,9 +330,9 @@ impl CoreErlangGenerator {
             if Self::is_field_assignment(expr) {
                 self.lower_letrec_field_assignment(expr, frame, span, &mut stmts)?;
             } else if self.is_actor_self_send(expr) {
-                // BT-1343: Emit diagnostic for synchronous self-send in loop body.
+                // Emit diagnostic for synchronous self-send in loop body.
                 self.emit_self_send_in_loop_diagnostic(expr, span);
-                // ADR 0118 phase 2a (BT-3417): `threaded_expression`'s
+                // ADR 0118 phase 2a: `threaded_expression`'s
                 // self-send producer path (`generate_self_dispatch_parts`)
                 // builds the exact same `Statement`+`Bind` pair
                 // `generate_self_dispatch_open` used to hand-render — see
@@ -350,7 +348,7 @@ impl CoreErlangGenerator {
                 } else {
                     // Defensive fallback — see the deleted dispatch's
                     // identical comment in `generate_threaded_loop_body_inner`
-                    // (BT-3459 git history) for why this is not expected to be
+                    // (git history) for why this is not expected to be
                     // live in practice.
                     let selector = if let Expression::MessageSend { selector, .. } = expr {
                         selector.name().to_string()
@@ -519,7 +517,7 @@ impl CoreErlangGenerator {
         stmts.extend(prelude_stmts);
 
         if self.loop_mode.in_direct_params_loop {
-            // BT-1329: see `emit_non_assign_expr`'s identical branch — a
+            // see `emit_non_assign_expr`'s identical branch — a
             // nested list op's own open let-chain, emitted verbatim so its
             // variable rebindings escape to the outer (this loop's) scope.
             let expr_code = self.expression_doc(expr)?;
@@ -629,7 +627,7 @@ impl CoreErlangGenerator {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
 
-            // BT-3172: `expr` is a top-level statement of THIS loop/fold's
+            // `expr` is a top-level statement of THIS loop/fold's
             // own body — if it's itself a nested loop/fold whose own body
             // threads a `ClassVars` mutation, no downstream branch (this
             // function's own field-assignment/self-send/tier2/local-var/
@@ -665,12 +663,11 @@ impl CoreErlangGenerator {
                 });
             }
 
-            // BT-3484: the value-type `Self` mirror of the check just above,
+            // the value-type `Self` mirror of the check just above,
             // with the same deliberate scope limit — nothing unpacks a
             // nested Letrec loop's own trailing `Self` tuple slot back into
             // THIS body's statement sequence, so the inner mutation would be
-            // silently discarded once the inner loop exits (the exact
-            // BT-3484 bug class this issue fixes at one level). See
+            // silently discarded once the inner loop exits. See
             // `nested_loop_lost_value_self_mutation`'s doc comment.
             if let Some(mutation) = self.nested_loop_lost_value_self_mutation(expr) {
                 let location = self.span_to_line(expr.span()).map_or_else(
@@ -700,7 +697,7 @@ impl CoreErlangGenerator {
                 // documents it as byte-identical to
                 // `generate_field_assignment_open`'s hand-rolled `Document`
                 // (same helper calls, same mint order, including its own
-                // `thread_ahead` step for BT-3418). A direct class-var write
+                // `thread_ahead` step). A direct class-var write
                 // never reaches here (`reject_class_var_field_assignment`,
                 // called internally, rejects it at compile time — unchanged
                 // by this migration; only a same-class self-send can mutate
@@ -711,7 +708,7 @@ impl CoreErlangGenerator {
                 }
             } else if self.is_actor_self_send(expr) {
                 has_mutations = true;
-                // BT-1343: Emit diagnostic for synchronous self-send in loop body.
+                // Emit diagnostic for synchronous self-send in loop body.
                 self.emit_self_send_in_loop_diagnostic(expr, expr.span());
                 let (doc, dispatch_var) = self.generate_self_dispatch_open(expr)?;
                 stmts.push(ThreadedStmt::Statement(doc, span));
@@ -725,7 +722,7 @@ impl CoreErlangGenerator {
                     );
                 }
             } else if self.is_tier2_value_call(expr) {
-                // BT-2813: a bare (non-assigned) Tier 2 `value(:...)` statement
+                // a bare (non-assigned) Tier 2 `value(:...)` statement
                 // (field-stored or local-var-stored block) inside a foldl-based
                 // loop body (do:/collect:/select:/etc). Before this fix, such a
                 // statement fell through to `emit_non_assign_expr`, which treats
@@ -737,7 +734,7 @@ impl CoreErlangGenerator {
                 // handling in conditionals.rs and gen_server/methods.rs.
                 //
                 // Excluded for Letrec (whileTrue:/timesRepeat:) loop bodies:
-                // out of scope for BT-2813, whose repro and matrix coverage are
+                // this construct's repro and matrix coverage are
                 // do:/collect:/nested-do: only.
                 has_mutations = true;
                 let tuple_var = self.fresh_temp_var("T2LoopTuple");
@@ -773,7 +770,7 @@ impl CoreErlangGenerator {
                     has_plain_lets = true;
                     stmts.push(ThreadedStmt::Statement(doc, span));
                 } else if plan.use_direct_params || plan.use_tuple_acc || plan.use_hybrid_params {
-                    // BT-1275/BT-1276/BT-1326: Direct-params, tuple-acc, or
+                    // Direct-params, tuple-acc, or
                     // hybrid mode. ADR 0111 Addendum 15: reuses the SAME
                     // `Bind` producer `lower_letrec_local_var_assignment`'s
                     // own direct-params/hybrid branch calls
@@ -849,14 +846,14 @@ impl CoreErlangGenerator {
                     &self.semantic_facts,
                 )
             {
-                // BT-1053/BT-1477: Inline conditional with mutations returns {Result, NewStateAcc}.
+                // Inline conditional with mutations returns {Result, NewStateAcc}.
                 // Unpack element(2) so subsequent iterations see the updated StateAcc.
                 // This applies to ALL foldl body kinds (do:, collect:, select:, reject:,
                 // inject:into:), not just do: — otherwise mutations inside conditionals
                 // nested within collect:/select:/etc. are silently lost.
                 has_mutations = true;
                 let tuple_var = self.fresh_temp_var("CondResult");
-                // BT-3173: the vars THIS construct itself threads, read before
+                // the vars THIS construct itself threads, read before
                 // `generate_expression` below (which may push/pop scopes) so
                 // the lookup reflects this statement's own captured set.
                 let inner_threaded_vars = self.get_control_flow_threaded_vars(expr);
@@ -876,7 +873,7 @@ impl CoreErlangGenerator {
                     ],
                     span,
                 ));
-                // BT-3173: a non-last (or last) ensure:/on:do:/ifNotNil:/nested-loop
+                // a non-last (or last) ensure:/on:do:/ifNotNil:/nested-loop
                 // statement here only bumps the StateAcc *version pointer* above —
                 // it does NOT rebind the specific local vars it threads. Both
                 // StateAcc (map) mode and tuple-acc mode bind each threaded local
@@ -999,7 +996,7 @@ impl CoreErlangGenerator {
                     leaf::var(pv.clone())
                 };
                 if plan.use_tuple_acc {
-                    // BT-1276: Tuple mode — repack current var bindings into the result tuple.
+                    // Tuple mode — repack current var bindings into the result tuple.
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(ThreadedStmt::Statement(
                         docvec![
@@ -1039,7 +1036,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-1481: FoldlBoolPredicate — update boolean accumulator based on predicate result.
+        // FoldlBoolPredicate — update boolean accumulator based on predicate result.
         // Match only 'true'/'false' explicitly (consistent with FoldlFilter and lists:any/all).
         if let BodyKind::FoldlBoolPredicate { is_all } = kind {
             if let Some(pv) = &pred_var {
@@ -1111,7 +1108,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-1486: FoldlDetect — update found-item accumulator on first match.
+        // FoldlDetect — update found-item accumulator on first match.
         // Accumulator is {FoundItem, FoundFlag, StateVars...}.
         // Only update FoundItem when pred=true AND FoundFlag='false' (first match only).
         if let BodyKind::FoldlDetect { item_var } = kind {
@@ -1160,7 +1157,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-1486: FoldlCount — increment count accumulator on predicate match.
+        // FoldlCount — increment count accumulator on predicate match.
         // Accumulator is {Count, StateVars...}.
         if matches!(kind, BodyKind::FoldlCount) {
             if let Some(pv) = &pred_var {
@@ -1200,7 +1197,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-1487: FoldlTakeWhile — include item while predicate holds.
+        // FoldlTakeWhile — include item while predicate holds.
         // Once predicate returns false, StillTaking flips to false and all subsequent
         // elements are excluded. Accumulator: {ResultList, StillTaking, StateVars...}.
         if let BodyKind::FoldlTakeWhile { item_var } = kind {
@@ -1251,7 +1248,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-1487: FoldlDropWhile — drop items while predicate holds.
+        // FoldlDropWhile — drop items while predicate holds.
         // Once predicate returns false, StillDropping flips to false and all subsequent
         // elements are included. Accumulator: {ResultList, StillDropping, StateVars...}.
         if let BodyKind::FoldlDropWhile { item_var } = kind {
@@ -1306,7 +1303,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-1487: FoldlPartition — route item to one of two lists based on predicate.
+        // FoldlPartition — route item to one of two lists based on predicate.
         // Accumulator: {MatchList, NoMatchList, StateVars...}.
         if let BodyKind::FoldlPartition { item_var } = kind {
             if let Some(pv) = &pred_var {
@@ -1354,7 +1351,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-1487: FoldlGroupBy — group item by key.
+        // FoldlGroupBy — group item by key.
         // The pred_var holds the key result. Each element is added to the key's list in a map.
         // Accumulator: {Map, StateVars...}.
         if let BodyKind::FoldlGroupBy { item_var } = kind {
@@ -1431,7 +1428,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-3169 (ADR 0111 Addendum 9, Question 6): whenever this fold body
+        // ADR 0111 Addendum 9, Question 6: whenever this fold body
         // threads `ClassVars`, wrap its returned TAIL VALUE — regardless of
         // which `BodyKind` arm above produced it, and regardless of that
         // arm's own internal shape (a bare `StateAcc`, `{[Result|AccList],
@@ -1439,7 +1436,7 @@ impl CoreErlangGenerator {
         // as `{ClassVars, <original tail value>}`. This is the single choke
         // point every `Foldl*` exit arm's tail value flows through
         // (`generate_threaded_loop_body`'s only call site into this
-        // function), so it closes BT-3151's silent-loss gap uniformly
+        // function), so it closes the silent-loss gap uniformly
         // without touching any of the ~15 individual exit-arm branches
         // above: each keeps building exactly the value it always did.
         //
@@ -1463,7 +1460,7 @@ impl CoreErlangGenerator {
         // iteration (`emit_class_var_result_unwrap`, frame-scoped to this
         // loop body's `current_branch_frame()` per Question 2) is reflected.
         //
-        // BT-3169: this `{ClassVars, tail}` accumulator wrap is the `Foldl*`
+        // this `{ClassVars, tail}` accumulator wrap is the `Foldl*`
         // shape's own mechanism (Question 6) — `while_loops.rs`/
         // `counted_loops.rs`'s Letrec loops build their own, textually
         // different `{ClassVars1, <tail>}` true-arm shape via the loop's
@@ -1474,7 +1471,7 @@ impl CoreErlangGenerator {
         // this shape.
         if plan.threads_class_vars {
             let cv = self.current_class_var();
-            // BT-3169: record this closure's peak class-var version (BEFORE
+            // record this closure's peak class-var version (BEFORE
             // `with_branch_context`'s guard restores it on drop, right after
             // this function returns) so `ThreadingPlan::foldl_call_doc` can
             // fast-forward past it — see `last_foldl_class_var_peak`'s own
@@ -1622,7 +1619,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2813: emits the `is_last`-position tail for a bare Tier 2 `value(:...)`
+    /// emits the `is_last`-position tail for a bare Tier 2 `value(:...)`
     /// loop-body statement, per `BodyKind`. `tuple_var` holds the full
     /// `{Result, NewState}` tuple returned by `generate_tier2_value_call_doc`;
     /// `self.current_state_var()` already reflects `NewState` (bound by the
@@ -1712,7 +1709,7 @@ impl CoreErlangGenerator {
         span: Span,
     ) {
         if plan.use_tuple_acc {
-            // BT-1276: Tuple mode — repack current bindings as tuple accumulator.
+            // Tuple mode — repack current bindings as tuple accumulator.
             // `last_val` is the newly-bound variable name from `generate_direct_var_update_in_loop`
             // (e.g. `"Sum1"`). Used for FoldlCollect/FoldlFilter/FoldlInject where the loop
             // result value must be referenced explicitly; falls back to `"_Val"` when not set.
@@ -1860,11 +1857,11 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-3169 (ADR 0111 Addendum 9, Question 6): builds `"let <result_var> =
+    /// ADR 0111 Addendum 9, Question 6: builds `"let <result_var> =
     /// <expr's value> in "` — the exact prelude every `is_last` `Foldl*`
     /// exit arm below builds by hand.
     ///
-    /// ADR 0118 phase 5b (BT-3422): `expr`'s own top-level class-var
+    /// ADR 0118 phase 5b: `expr`'s own top-level class-var
     /// producer (a same-class self-send or a class-var assignment) is now
     /// threaded ahead of this call by the caller's own `thread_ahead`
     /// (`emit_non_assign_expr`'s first statement), which splices a real
@@ -1882,8 +1879,8 @@ impl CoreErlangGenerator {
         result_var: &str,
         _plan: &ThreadingPlan,
     ) -> Result<Document<'static>> {
-        // `expr` may dispatch a class-method self-send (locally declared or,
-        // per BT-2007, inherited) that rebinds `ClassVarsN` opaquely, closed
+        // `expr` may dispatch a class-method self-send (locally declared or
+        // inherited) that rebinds `ClassVarsN` opaquely, closed
         // by the time this call returns — `refresh_class_var_after_opaque_scope`
         // recovers the live value via the ADR 0110 shadow write (rather than
         // relying on lexical scope) so the fold's own `{ClassVars, tail}`
@@ -1922,10 +1919,10 @@ impl CoreErlangGenerator {
         plan: &ThreadingPlan,
     ) -> Result<()> {
         let span = expr.span();
-        // ADR 0118 phase 2b (BT-3418): thread every state-effecting
+        // ADR 0118 phase 2b: thread every state-effecting
         // sub-expression nested in `expr` (e.g. `1 + (self bumpCount)`)
         // ahead of `expr`'s own compile, via the sequencing rule
-        // (`Self::thread_ahead`) — the drop-in replacement for BT-3403's
+        // (`Self::thread_ahead`) — the drop-in replacement for the earlier
         // planner-based emission (now deleted). Every branch below compiles `expr` through
         // `expression_doc`/`closed_expression_doc`/
         // `bind_closed_expr_threading_class_vars`/`push_discarded_stmt` —
@@ -1951,7 +1948,7 @@ impl CoreErlangGenerator {
         }
         let has_mutations = *has_mutations;
 
-        // BT-3172: the nested-loop/fold `ClassVars`-loss check runs once, at
+        // the nested-loop/fold `ClassVars`-loss check runs once, at
         // the top of `generate_threaded_loop_body_inner`'s per-statement
         // loop — ahead of every dispatch branch, not just this function's
         // own fallback — since a nested `do:`/`collect:`/etc. statement is
@@ -1961,20 +1958,20 @@ impl CoreErlangGenerator {
         match kind {
             BodyKind::FoldlDo => {
                 if is_last {
-                    // BT-1290: When preceding let-bindings exist (has_mutations/
+                    // When preceding let-bindings exist (has_mutations/
                     // has_plain_lets), the last expression must also be bound with
                     // `let _ =` before `in StateAcc`. Without this,
                     // `let Y = ... in <expr> in StateAcc` is invalid Core Erlang
                     // (the `in StateAcc` has no corresponding `let`).
                     //
-                    // BT-2350/BT-3169: close any class self-send open scope so
+                    // close any class self-send open scope so
                     // the trailing `… in {vars}` / `… in StateAcc` does not
                     // dangle a second `in` — `bind_closed_expr_threading_class_vars`
                     // also threads a self-send's own `ClassVarsN` rebind
                     // forward past this `let _ = …` boundary when
                     // `plan.threads_class_vars` (see its own doc comment).
                     //
-                    // BT-3169 review fix: this arm must take the same
+                    // This arm must take the same
                     // unconditional-threading path as `FoldlCollect`/
                     // `FoldlInject`/the predicate arms whenever
                     // `plan.threads_class_vars` — not just when
@@ -1997,7 +1994,7 @@ impl CoreErlangGenerator {
                     }
                     if threads_here {
                         if plan.use_tuple_acc {
-                            // BT-1276: Repack threaded locals as tuple.
+                            // Repack threaded locals as tuple.
                             stmts.push(ThreadedStmt::Statement(
                                 docvec!["{", plan.current_vars_doc(self), "}"],
                                 span,
@@ -2012,7 +2009,7 @@ impl CoreErlangGenerator {
                         }
                     }
                 } else {
-                    // BT-2350: ClassVars-visible discard for non-last statements
+                    // ClassVars-visible discard for non-last statements
                     // (a class self-send leaves an open let-chain whose ClassVarsN
                     // must stay visible to following statements).
                     stmts.push(ThreadedStmt::Statement(
@@ -2024,11 +2021,11 @@ impl CoreErlangGenerator {
             BodyKind::FoldlCollect => {
                 if is_last {
                     let result_var = self.fresh_temp_var("CollectItem");
-                    // BT-3169: threads a self-send's own `ClassVarsN` rebind
+                    // threads a self-send's own `ClassVarsN` rebind
                     // forward past this `let` boundary when
                     // `plan.threads_class_vars` — see
                     // `bind_closed_expr_threading_class_vars`'s doc comment.
-                    // BT-3169: pushed as its OWN `stmts` entry, separate from
+                    // pushed as its OWN `stmts` entry, separate from
                     // the tuple-construction push below — this function's
                     // own final `{ClassVars, tail}` wrap only pops the LAST
                     // `stmts` entry, so a self-send's `ClassVarsN` rebind
@@ -2043,7 +2040,7 @@ impl CoreErlangGenerator {
                         self.bind_closed_expr_threading_class_vars(expr, &result_var, plan)?;
                     stmts.push(ThreadedStmt::Statement(bind_doc, span));
                     if plan.use_tuple_acc {
-                        // BT-1276: Tuple mode — repack current vars.
+                        // Tuple mode — repack current vars.
                         let vars_doc = plan.current_vars_doc(self);
                         stmts.push(ThreadedStmt::Statement(
                             docvec!["{[", leaf::var(result_var), " | AccList], ", vars_doc, "}",],
@@ -2067,7 +2064,7 @@ impl CoreErlangGenerator {
                         ));
                     }
                 } else {
-                    // BT-2350: a non-last statement may be a class self-send that
+                    // a non-last statement may be a class self-send that
                     // emits an open let-chain; close it (keeping ClassVarsN visible)
                     // so the surrounding sequencing does not dangle a second `in`.
                     stmts.push(ThreadedStmt::Statement(
@@ -2086,17 +2083,17 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlGroupBy { .. } => {
                 if is_last {
                     if let Some(pv) = pred_var {
-                        // BT-3169: threads a self-send's own `ClassVarsN`
+                        // threads a self-send's own `ClassVarsN`
                         // rebind forward past this `let` boundary when
                         // `plan.threads_class_vars` — see
                         // `bind_closed_expr_threading_class_vars`'s doc
                         // comment. This is the exact shape a `select:`
-                        // predicate self-send needs (BT-3151's own repro).
+                        // predicate self-send needs.
                         let doc = self.bind_closed_expr_threading_class_vars(expr, pv, plan)?;
                         stmts.push(ThreadedStmt::Statement(doc, span));
                     }
                 } else {
-                    // BT-2350: see FoldlCollect — close a non-last open scope while
+                    // see FoldlCollect — close a non-last open scope while
                     // keeping ClassVarsN visible for following statements.
                     stmts.push(ThreadedStmt::Statement(
                         docvec!["let _ = ", self.expression_doc(expr)?, " in "],
@@ -2107,7 +2104,7 @@ impl CoreErlangGenerator {
             BodyKind::FoldlInject => {
                 if is_last {
                     let acc_var = self.fresh_temp_var("AccOut");
-                    // BT-3169: pushed as its OWN `stmts` entry, separate from
+                    // pushed as its OWN `stmts` entry, separate from
                     // the tuple-construction push below — see the identical
                     // `FoldlCollect` comment above for why fusing them is
                     // wrong (confirmed empirically, `erlc` "unbound
@@ -2116,7 +2113,7 @@ impl CoreErlangGenerator {
                         self.bind_closed_expr_threading_class_vars(expr, &acc_var, plan)?;
                     stmts.push(ThreadedStmt::Statement(bind_doc, span));
                     if plan.use_tuple_acc {
-                        // BT-1276: Tuple mode — repack current vars.
+                        // Tuple mode — repack current vars.
                         let vars_doc = plan.current_vars_doc(self);
                         stmts.push(ThreadedStmt::Statement(
                             docvec!["{", leaf::var(acc_var), ", ", vars_doc, "}",],
@@ -2134,7 +2131,7 @@ impl CoreErlangGenerator {
                         ));
                     }
                 } else {
-                    // BT-2350: see FoldlCollect — close a non-last open scope while
+                    // see FoldlCollect — close a non-last open scope while
                     // keeping ClassVarsN visible for following statements.
                     stmts.push(ThreadedStmt::Statement(
                         docvec!["let _ = ", self.expression_doc(expr)?, " in "],

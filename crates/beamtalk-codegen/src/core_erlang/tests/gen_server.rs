@@ -75,7 +75,7 @@ fn test_generate_empty_module() {
     reason = "comprehensive test covering all registration metadata"
 )]
 fn test_class_registration_generation() {
-    // BT-218: Test that class definitions generate registration code
+    // Test that class definitions generate registration code
     use beamtalk_core::ast::{
         ClassDefinition, DeclaredKeyword, Identifier, MethodDefinition, MethodKind,
         StateDeclaration,
@@ -183,7 +183,7 @@ fn test_class_registration_generation() {
         "Should generate register_class function. Got:\n{code}"
     );
 
-    // BT-837: Check that it calls beamtalk_class_builder:register
+    // Check that it calls beamtalk_class_builder:register
     assert!(
         code.contains("call 'beamtalk_class_builder':'register'(_BuilderState0)"),
         "Should call beamtalk_class_builder:register. Got:\n{code}"
@@ -203,13 +203,13 @@ fn test_class_registration_generation() {
         "Should include superclassRef in builder state. Got:\n{code}"
     );
 
-    // BT-745: Check beamtalk_class module attribute for dependency sorting
+    // Check beamtalk_class module attribute for dependency sorting
     assert!(
         code.contains("'beamtalk_class' = [{'Counter', 'Actor'}]"),
         "Should include beamtalk_class attribute with class and superclass. Got:\n{code}"
     );
 
-    // BT-1078: methodSpecs, fieldSpecs, classMethods removed from BuilderState.
+    // methodSpecs, fieldSpecs, classMethods removed from BuilderState.
     // Methods and fields now live in meta map.
     assert!(
         code.contains("'meta' => ~{"),
@@ -230,7 +230,7 @@ fn test_class_registration_generation() {
         "Should include fields in meta map. Got:\n{code}"
     );
 
-    // BT-1078: modifiers removed from BuilderState; is_sealed/is_abstract now in meta map
+    // modifiers removed from BuilderState; is_sealed/is_abstract now in meta map
     assert!(
         code.contains("'is_sealed' => 'false'"),
         "Should include is_sealed in meta map. Got:\n{code}"
@@ -239,13 +239,13 @@ fn test_class_registration_generation() {
     // Check function returns ok
     assert!(code.contains("'ok'"), "Should return 'ok'. Got:\n{code}");
 
-    // BT-998: catch clause must re-raise, not silently swallow errors
+    // catch clause must re-raise, not silently swallow errors
     assert!(
         code.contains("catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)"),
         "register_class/0 catch clause must re-raise via primop 'raw_raise' (BT-998). Got:\n{code}"
     );
 
-    // BT-2029: every generated class module must export method_table/0 and
+    // every generated class module must export method_table/0 and
     // has_method/1 — these are the reflection accessors that runtime dispatch
     // (beamtalk_class_dispatch, method_table lookups, DNU chain walk) relies
     // on. The classifier at dispatch_codegen.rs:is_class_auto_export_selector
@@ -266,9 +266,9 @@ fn test_class_registration_generation() {
     );
     // superclass/0 and class_name/0 must always be in the header. class_name/0
     // is still reachable via `is_class_auto_export_selector`'s self-send
-    // classifier (BT-2007). superclass/0 is part of the same uniform
-    // auto-export set every class module emits, but BT-3057's audit found no
-    // live caller for it anywhere in the runtime: the gen_server's own
+    // classifier. superclass/0 is part of the same uniform
+    // auto-export set every class module emits, but no live caller for it
+    // exists anywhere in the runtime: the gen_server's own
     // `superclass` reply reads `#class_state.superclass` directly rather than
     // calling this export, non-self-send dispatch resolves `superclass`
     // through the Class/Behaviour chain to
@@ -285,8 +285,8 @@ fn test_class_registration_generation() {
         header_exports.contains("'class_name'/0"),
         "Generated class module must export class_name/0 in header. Got header:\n{header_exports}"
     );
-    // The old mistaken auto-export `methods/0` must NOT appear — it was
-    // removed from the classifier after BT-2007 and no codegen site emits it.
+    // The old mistaken auto-export `methods/0` must NOT appear — the
+    // classifier no longer includes it and no codegen site emits it.
     assert!(
         !header_exports.contains("'methods'/0"),
         "Generated class module must NOT export methods/0 in header — removed after BT-2007. Got header:\n{header_exports}"
@@ -295,7 +295,7 @@ fn test_class_registration_generation() {
 
 #[test]
 fn test_class_state_emits_class_fields_in_meta() {
-    // BT-2238: `classState:` declarations must be reflected into __beamtalk_meta/0
+    // `classState:` declarations must be reflected into __beamtalk_meta/0
     // as a `class_fields` key, alongside the instance-side `fields` key.
     let src = concat!(
         "Actor subclass: Counter\n",
@@ -323,7 +323,7 @@ fn test_class_state_emits_class_fields_in_meta() {
 
 #[test]
 fn test_no_class_state_emits_empty_class_fields() {
-    // BT-2238: a class with no `classState:` declarations emits an empty
+    // a class with no `classState:` declarations emits an empty
     // class_fields list so the runtime intrinsic always finds the key.
     let src = concat!("Actor subclass: Counter\n", "  state: value = 0\n");
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -339,7 +339,7 @@ fn test_no_class_state_emits_empty_class_fields() {
 
 #[test]
 fn test_no_class_registration_for_empty_module() {
-    // BT-218: Modules without class definitions should not have on_load or register_class
+    // Modules without class definitions should not have on_load or register_class
     let module = Module::new(vec![], Span::new(0, 0));
     let code = generate_module(&module, CodegenOptions::new("empty_module"))
         .expect("codegen should succeed");
@@ -356,7 +356,7 @@ fn test_no_class_registration_for_empty_module() {
         "Module without classes should not export register_class. Got:\n{code}"
     );
 
-    // BT-745: Should NOT have beamtalk_class attribute
+    // Should NOT have beamtalk_class attribute
     assert!(
         !code.contains("'beamtalk_class'"),
         "Module without classes should not have beamtalk_class attribute. Got:\n{code}"
@@ -366,7 +366,7 @@ fn test_no_class_registration_for_empty_module() {
 #[test]
 #[allow(clippy::too_many_lines)]
 fn test_multiple_classes_registration() {
-    // BT-218: Test that modules with multiple classes register all of them
+    // Test that modules with multiple classes register all of them
     use beamtalk_core::ast::{ClassDefinition, DeclaredKeyword, Identifier, StateDeclaration};
     use beamtalk_core::source_analysis::Span;
 
@@ -434,7 +434,7 @@ fn test_multiple_classes_registration() {
         "Should have on_load attribute for multiple classes. Got:\n{code}"
     );
 
-    // BT-837: Should register both classes via ClassBuilder
+    // Should register both classes via ClassBuilder
     assert!(
         code.contains("call 'beamtalk_class_builder':'register'(_BuilderState0)"),
         "Should register Counter via ClassBuilder. Got:\n{code}"
@@ -443,7 +443,7 @@ fn test_multiple_classes_registration() {
         code.contains("'className' => 'Counter'"),
         "Should include Counter metadata. Got:\n{code}"
     );
-    // BT-1078: fieldSpecs removed from BuilderState; fields now in meta map
+    // fieldSpecs removed from BuilderState; fields now in meta map
     assert!(
         code.contains("'fields' => ['value']"),
         "Should include Counter fields in meta. Got:\n{code}"
@@ -480,13 +480,13 @@ fn test_multiple_classes_registration() {
         "Should chain second registration with _Reg1. Got:\n{code}"
     );
 
-    // BT-738: Final result propagates last _Reg.
+    // Final result propagates last _Reg.
     assert!(
         code.contains("in _Reg1"),
         "Should propagate last _Reg result after all registrations. Got:\n{code}"
     );
 
-    // BT-749: Short-circuit: earlier error must propagate before executing later classes.
+    // Short-circuit: earlier error must propagate before executing later classes.
     assert!(
         code.contains("in case _Reg0 of"),
         "Should short-circuit on _Reg0 error. Got:\n{code}"
@@ -496,7 +496,7 @@ fn test_multiple_classes_registration() {
         "Should propagate _Reg0 error. Got:\n{code}"
     );
 
-    // BT-745: Check beamtalk_class attribute lists both classes
+    // Check beamtalk_class attribute lists both classes
     assert!(
         code.contains("'beamtalk_class' = [{'Counter', 'Actor'}, {'Logger', 'Actor'}]"),
         "Should include beamtalk_class attribute with both classes. Got:\n{code}"
@@ -505,7 +505,7 @@ fn test_multiple_classes_registration() {
 
 #[test]
 fn test_multi_class_early_error_short_circuits() {
-    // BT-749: When an earlier class (not the last) returns {error, ...} from
+    // When an earlier class (not the last) returns {error, ...} from
     // update_class (e.g. stdlib_shadowing), the error must propagate — the
     // subsequent class registrations must not mask it with 'ok'.
     //
@@ -566,7 +566,7 @@ fn test_multi_class_early_error_short_circuits() {
     let code = generate_module(&module, CodegenOptions::new("multi_shadow"))
         .expect("codegen should succeed");
 
-    // BT-749: First class must be wrapped in a short-circuit case check.
+    // First class must be wrapped in a short-circuit case check.
     assert!(
         code.contains("in case _Reg0 of"),
         "Should wrap _Reg0 in a short-circuit case. Got:\n{code}"
@@ -592,7 +592,7 @@ fn test_multi_class_early_error_short_circuits() {
 
 #[test]
 fn test_three_class_short_circuit_nesting() {
-    // BT-749: Verify nesting correctness for N=3 classes.
+    // Verify nesting correctness for N=3 classes.
     // Short-circuit cases are added for indices 0 and 1 (all except the last).
     // The last class (index 2) is returned directly with no extra wrapping.
     use beamtalk_core::ast::{ClassDefinition, DeclaredKeyword, Identifier, StateDeclaration};
@@ -647,7 +647,7 @@ fn test_three_class_short_circuit_nesting() {
     let code = generate_module(&module, CodegenOptions::new("three_classes"))
         .expect("codegen should succeed");
 
-    // BT-749: Classes 0 and 1 (non-last) must have short-circuit case wrappers.
+    // Classes 0 and 1 (non-last) must have short-circuit case wrappers.
     assert!(
         code.contains("in case _Reg0 of"),
         "Should short-circuit on _Reg0 error. Got:\n{code}"
@@ -1037,7 +1037,7 @@ fn test_is_actor_class_root_class_is_value_type() {
 #[test]
 fn test_actor_value_classification_consistent_regardless_of_exception_grandchild_declaration_order()
 {
-    // BT-3086: MyBaseError is a grandchild of Exception (Exception -> Error -> MyBaseError);
+    // MyBaseError is a grandchild of Exception (Exception -> Error -> MyBaseError);
     // MySpecificError extends MyBaseError. Neither analysis (`resolve_class_kind`) nor codegen
     // (`is_actor_class`) should ever classify these as actors, and the answer must not depend
     // on which order the two classes are declared in — `add_module_classes` registers every
@@ -1132,7 +1132,7 @@ fn test_generate_with_bindings_compiles_value_type() {
 
 #[test]
 fn test_class_method_rejects_field_access() {
-    // BT-426: Class methods should reject instance field access
+    // Class methods should reject instance field access
     let src = "Actor subclass: TestClass\n  state: value = 0\n\n  class broken => self.value";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -1153,7 +1153,7 @@ fn test_class_method_rejects_field_access() {
 
 #[test]
 fn test_class_method_rejects_field_assignment() {
-    // BT-426: Class methods should reject instance field mutation
+    // Class methods should reject instance field mutation
     let src = "Actor subclass: TestClass\n  state: value = 0\n\n  class broken => self.value := 42";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -1174,7 +1174,7 @@ fn test_class_method_rejects_field_assignment() {
 
 #[test]
 fn test_value_subclass_auto_getter_exported() {
-    // BT-923: `Value subclass:` auto-generates getter functions for each slot.
+    // `Value subclass:` auto-generates getter functions for each slot.
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     assert!(result.is_ok(), "Codegen should succeed for Value subclass:");
@@ -1192,7 +1192,7 @@ fn test_value_subclass_auto_getter_exported() {
 
 #[test]
 fn test_value_subclass_auto_getter_function() {
-    // BT-923: Getter body uses maps:get to read the slot from Self.
+    // Getter body uses maps:get to read the slot from Self.
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
@@ -1212,7 +1212,7 @@ fn test_value_subclass_auto_getter_function() {
 
 #[test]
 fn test_value_subclass_auto_setter_exported() {
-    // BT-923: `Value subclass:` auto-generates with*: functional setters.
+    // `Value subclass:` auto-generates with*: functional setters.
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
@@ -1228,7 +1228,7 @@ fn test_value_subclass_auto_setter_exported() {
 
 #[test]
 fn test_value_subclass_auto_setter_function() {
-    // BT-923: with*: setter body uses maps:put to return an updated map.
+    // with*: setter body uses maps:put to return an updated map.
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
@@ -1244,7 +1244,7 @@ fn test_value_subclass_auto_setter_function() {
 
 #[test]
 fn test_value_subclass_keyword_constructor_exported() {
-    // BT-923: `Value subclass:` auto-generates an all-fields keyword constructor.
+    // `Value subclass:` auto-generates an all-fields keyword constructor.
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
@@ -1257,7 +1257,7 @@ fn test_value_subclass_keyword_constructor_exported() {
 
 #[test]
 fn test_value_subclass_keyword_constructor_function() {
-    // BT-923: Keyword constructor body creates a tagged map with all slots.
+    // Keyword constructor body creates a tagged map with all slots.
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
@@ -1281,7 +1281,7 @@ fn test_value_subclass_keyword_constructor_function() {
 
 #[test]
 fn test_value_subclass_dispatch_routes_getter() {
-    // BT-923: dispatch/3 must route getter selectors to auto-generated functions.
+    // dispatch/3 must route getter selectors to auto-generated functions.
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
@@ -1293,7 +1293,7 @@ fn test_value_subclass_dispatch_routes_getter() {
 
 #[test]
 fn test_value_subclass_dispatch_routes_setter() {
-    // BT-923: dispatch/3 must route with*: selectors to auto-generated functions.
+    // dispatch/3 must route with*: selectors to auto-generated functions.
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
@@ -1305,7 +1305,7 @@ fn test_value_subclass_dispatch_routes_setter() {
 
 #[test]
 fn test_value_subclass_has_method_includes_auto_methods() {
-    // BT-923: has_method/1 must report true for auto-generated selectors.
+    // has_method/1 must report true for auto-generated selectors.
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
@@ -1319,7 +1319,7 @@ fn test_value_subclass_has_method_includes_auto_methods() {
     );
 }
 
-/// BT-2734: Extracts the body between a `<key> => ~{` marker and its closing
+/// Extracts the body between a `<key> => ~{` marker and its closing
 /// `}~`. Map entry values are Core Erlang binary literals (`#{...}#`), which
 /// never contain the `}~` map terminator, so the first `}~` after the marker is
 /// the map close.
@@ -1336,7 +1336,7 @@ fn map_body<'a>(code: &'a str, key: &str) -> &'a str {
 
 #[test]
 fn test_value_subclass_synthetic_accessor_metadata_injected() {
-    // BT-2734: auto-generated getters / setters / keyword constructor gain
+    // auto-generated getters / setters / keyword constructor gain
     // `__signature__` + `__doc__` entries in the builder-state selector maps, so
     // every reflective surface can resolve their docs uniformly.
     let module = make_value_subclass_point();
@@ -1372,7 +1372,7 @@ fn test_value_subclass_synthetic_accessor_metadata_injected() {
 
 #[test]
 fn test_value_subclass_synthetic_accessor_metadata_gated_to_value_kind() {
-    // BT-2734: only `Value subclass:` classes get synthetic accessor metadata.
+    // only `Value subclass:` classes get synthetic accessor metadata.
     // An `Object subclass:` with the same slot must not synthesize `withX:`.
     let mut module = make_value_subclass_point();
     module.classes[0].class_kind = ClassKind::Object;
@@ -1387,7 +1387,7 @@ fn test_value_subclass_synthetic_accessor_metadata_gated_to_value_kind() {
 
 #[test]
 fn test_object_subclass_no_auto_getters() {
-    // BT-923: `Object subclass:` (ClassKind::Object) must NOT generate auto-getters.
+    // `Object subclass:` (ClassKind::Object) must NOT generate auto-getters.
     let class = ClassDefinition {
         name: Identifier::new("Point", Span::new(0, 0)),
         superclass: Some(Identifier::new("Object", Span::new(0, 0))),
@@ -1446,7 +1446,7 @@ fn test_object_subclass_no_auto_getters() {
 
 #[test]
 fn test_value_subclass_user_defined_overrides_auto() {
-    // BT-923: User-defined methods suppress the corresponding auto-generated method.
+    // User-defined methods suppress the corresponding auto-generated method.
     let x_method = MethodDefinition {
         selector: MessageSelector::Unary("x".into()),
         parameters: vec![],
@@ -1518,7 +1518,7 @@ fn test_value_subclass_user_defined_overrides_auto() {
 
 #[test]
 fn test_value_subclass_no_slots_no_keyword_constructor() {
-    // BT-923: A Value subclass with no slots produces no keyword constructor.
+    // A Value subclass with no slots produces no keyword constructor.
     let class = ClassDefinition {
         name: Identifier::new("Empty", Span::new(0, 0)),
         superclass: Some(Identifier::new("Value", Span::new(0, 0))),
@@ -1567,7 +1567,7 @@ fn test_value_subclass_no_slots_no_keyword_constructor() {
 
 #[test]
 fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
-    // BT-996: `ClassName slot: value` inside a class method of the same class must
+    // `ClassName slot: value` inside a class method of the same class must
     // route to the auto-generated class-side keyword constructor, not the instance getter.
     //
     // Equivalent Beamtalk:
@@ -1676,7 +1676,7 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
 
 #[test]
 fn test_bt1005_writeback_inferred_return_type_appears_in_method_return_types() {
-    // BT-1005: A user-defined Actor class method with no explicit return-type
+    // A user-defined Actor class method with no explicit return-type
     // annotation should have its inferred return type written back into the AST
     // before codegen, so the emitted BEAM module contains it in method_return_types.
     let src = "
@@ -1692,7 +1692,7 @@ Actor subclass: Counter
 
     // The writeback pass should have populated return_type in meta.method_info
     // with 'Integer' (inferred from the state variable type).
-    // BT-1078: return types now live in meta.method_info, not methodReturnTypes.
+    // return types now live in meta.method_info, not methodReturnTypes.
     assert!(
         code.contains(
             "'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~"
@@ -1703,7 +1703,7 @@ Actor subclass: Counter
 
 #[test]
 fn test_bt3249_method_source_omits_inferred_return_type_annotation() {
-    // BT-3249: `getValue` has no explicit `-> Type` annotation in source —
+    // `getValue` has no explicit `-> Type` annotation in source —
     // return-type writeback infers `Integer` and (correctly) records it in
     // meta.method_info for chain-based REPL completion. But the *browsable*
     // `methodSource` text (what the cockpit/System Browser displays, and what
@@ -1752,7 +1752,7 @@ Actor subclass: Counter
 
 #[test]
 fn test_bt2524_generated_callbacks_notify_state_change_substrate() {
-    // BT-2524: a compiled actor's generated handle_call/handle_cast must call
+    // a compiled actor's generated handle_call/handle_cast must call
     // beamtalk_actor:notify_state_change/2 after committing new state, so a
     // *watched* actor's state writes push {object_changed,…} to the live
     // Inspector. The runtime beamtalk_actor dispatch path does this via
@@ -1769,7 +1769,7 @@ Actor subclass: Counter
         .expect("codegen should succeed")
         .code;
 
-    // BT-2717: handle_call strips codegen-internal `__local__` threading temps from
+    // handle_call strips codegen-internal `__local__` threading temps from
     // the committed state, then notifies + persists the cleaned state.
     assert!(
         code.contains("let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in"),
@@ -1796,7 +1796,7 @@ Actor subclass: Counter
 
 #[test]
 fn test_bt2717_handle_continue_strips_local_temps_from_init_state() {
-    // BT-2717: handle_continue is an outermost state-commit boundary (it persists
+    // handle_continue is an outermost state-commit boundary (it persists
     // the post-initialize state). An `initialize` that threads an outer local must
     // not leave a `__local__` temp in the actor's first committed state, so the
     // post-initialize path strips it before the {'noreply', …} reply — the same
@@ -1827,7 +1827,7 @@ Actor subclass: Counter
 
 #[test]
 fn test_bt2717_handle_info_strips_local_temps_for_server_subclass() {
-    // BT-2717: a Server subclass's handle_info is an outermost state-commit boundary
+    // a Server subclass's handle_info is an outermost state-commit boundary
     // too — a `handleInfo:` that threads an outer local through a control-flow desugar
     // must not persist `__local__` temps into the committed gen_server state.
     let src = "
@@ -1863,7 +1863,7 @@ Server subclass: TickServer
 
 #[test]
 fn test_bt1005_explicit_annotation_not_overwritten_by_writeback() {
-    // BT-1005: An explicitly annotated method must NOT be changed by the writeback pass.
+    // An explicitly annotated method must NOT be changed by the writeback pass.
     let src = "
 Actor subclass: Counter
   state: value :: Integer = 0
@@ -1882,7 +1882,7 @@ Actor subclass: Counter
         ),
         "Explicitly annotated method should appear in meta.method_info. Got:\n{code}"
     );
-    // BT-3249: a genuine user-written annotation must still round-trip
+    // a genuine user-written annotation must still round-trip
     // untouched into the browsable `methodSource` text (only inference-
     // written ones get stripped). `methodSource` bakes as a Core Erlang
     // binary literal (per-byte segments, not a plain string), so compare
@@ -1898,7 +1898,7 @@ Actor subclass: Counter
 
 #[test]
 fn test_bt1005_literal_return_type_inferred_by_writeback() {
-    // BT-1005: A method returning an integer literal should have Integer inferred
+    // A method returning an integer literal should have Integer inferred
     // and written back even when the class has no typed state.
     let src = "
 Actor subclass: Greeter
@@ -1920,7 +1920,7 @@ Actor subclass: Greeter
 
 #[test]
 fn test_bt1005_standalone_method_writeback_infers_return_type() {
-    // BT-1005: Tonel-style standalone method definitions (Counter >> getValue => ...)
+    // Tonel-style standalone method definitions (Counter >> getValue => ...)
     // must also have their return types inferred and written back.
     // This exercises the module.method_definitions loop in infer_method_return_types.
     let src = "
@@ -1945,7 +1945,7 @@ Counter >> getValue => value
 
 #[test]
 fn test_bt3367_sealed_class_does_not_mark_unsealed_class_method_as_sealed() {
-    // BT-3367: a class-level `sealed` must not leak into an individual class
+    // a class-level `sealed` must not leak into an individual class
     // method's own `is_sealed` bit in __beamtalk_meta/0 — only a method itself
     // declared `class sealed` should report `is_sealed => true`. This is the
     // producer side of the bug: the REPL recovers an already-loaded project
@@ -1974,7 +1974,7 @@ sealed Value subclass: SealedFactory
 
 #[test]
 fn test_bt1005_untyped_param_does_not_shadow_state_field_type() {
-    // BT-1005: An untyped parameter with the same name as a state field must NOT
+    // An untyped parameter with the same name as a state field must NOT
     // cause the method's return type to be inferred as the state field's type.
     // The untyped param should be Dynamic, so the method's inferred return type
     // is also Dynamic and no writeback annotation is emitted.
@@ -2040,7 +2040,7 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
     assert!(result.is_ok(), "generate_module should succeed: {result:?}");
 }
 
-/// BT-2728: Builds a `ClassInfo` for a foreign target class named `PriceBand`
+/// Builds a `ClassInfo` for a foreign target class named `PriceBand`
 /// with a single state field `lo` carrying the given declared type. Used by the
 /// extension-method field-type threading tests.
 fn price_band_class_info_with_lo_type(
@@ -2079,7 +2079,7 @@ fn price_band_class_info_with_lo_type(
 
 #[test]
 fn test_bt2728_extension_object_typed_field_dispatches() {
-    // BT-2728: An extension method comparing an object-typed `self.<field>` must
+    // An extension method comparing an object-typed `self.<field>` must
     // route through the runtime guard so it dispatches to the field type's
     // operator — same as an in-class method. The target class (`PriceBand`) is
     // foreign (declared elsewhere); its `lo :: Money` field type is resolved
@@ -2103,7 +2103,7 @@ fn test_bt2728_extension_object_typed_field_dispatches() {
 
 #[test]
 fn test_bt2728_extension_object_typed_field_arithmetic_dispatches() {
-    // BT-2728: The arithmetic guard (`is_number`) follows a parallel path to the
+    // The arithmetic guard (`is_number`) follows a parallel path to the
     // comparison guard and shares the same `set_extension_target_field_types`
     // fix. An extension method doing arithmetic on an object-typed `self.<field>`
     // must route through the `is_number` guard so `self.lo + other` dispatches to
@@ -2127,7 +2127,7 @@ fn test_bt2728_extension_object_typed_field_arithmetic_dispatches() {
 
 #[test]
 fn test_bt2728_extension_untyped_field_stays_bare() {
-    // BT-2728: An untyped `self.<field>` in an extension keeps the bare BIF (no
+    // An untyped `self.<field>` in an extension keeps the bare BIF (no
     // regression) — the guard/dispatch path is only taken for object-typed
     // fields.
     let src = "PriceBand >> below: other => self.lo < other";
@@ -2149,7 +2149,7 @@ fn test_bt2728_extension_untyped_field_stays_bare() {
 
 #[test]
 fn test_bt2728_extension_primitive_field_stays_bare() {
-    // BT-2728: A primitive-typed (`Integer`) `self.<field>` in an extension keeps
+    // A primitive-typed (`Integer`) `self.<field>` in an extension keeps
     // the bare comparison BIF — parity with in-class primitive fields.
     let src = "PriceBand >> below: other => self.lo < other";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -2170,7 +2170,7 @@ fn test_bt2728_extension_primitive_field_stays_bare() {
 
 #[test]
 fn test_value_subclass_typed_fields_emit_type_alias() {
-    // BT-1156: Value subclass with typed state: declarations emits '-type t()' attribute.
+    // Value subclass with typed state: declarations emits '-type t()' attribute.
     let class = ClassDefinition {
         name: Identifier::new("Point", Span::new(0, 0)),
         superclass: Some(Identifier::new("Value", Span::new(0, 0))),
@@ -2256,7 +2256,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
 
 #[test]
 fn test_value_subclass_untyped_fields_still_emit_type_alias() {
-    // BT-1156: Value subclass with untyped state: declarations also emits '-type t()'
+    // Value subclass with untyped state: declarations also emits '-type t()'
     // using any() for untyped fields.
     let module = make_value_subclass_point(); // x and y have no type annotations
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
@@ -2278,12 +2278,12 @@ fn test_value_subclass_untyped_fields_still_emit_type_alias() {
 
 #[test]
 fn test_actor_class_method_alias_param_emits_user_type_and_named_type() {
-    // BT-2909: wiring the compile's `AliasRegistry` into `actor_codegen.rs`'s
+    // wiring the compile's `AliasRegistry` into `actor_codegen.rs`'s
     // `generate_class_specs` call site must make an alias-typed annotation
     // emit a `user_type` reference — and the module must also declare the
     // matching named `-type` in its own attribute list (an `erlc` compile
     // error otherwise). Actor *instance* methods don't get standalone specs
-    // (BT-1944 — they're dispatch clauses inside `safe_dispatch/3`), so this
+    // (— they're dispatch clauses inside `safe_dispatch/3`), so this
     // exercises the class-side method spec path, the only spec surface a
     // full `gen_server` actor module has.
     let src = "
@@ -2317,11 +2317,11 @@ Actor subclass: Supervisor
 
 #[test]
 fn test_value_subclass_field_alias_emits_user_type_and_named_type() {
-    // BT-2909: same wiring check as the actor test above, but for
+    // same wiring check as the actor test above, but for
     // `value_type_codegen.rs`'s `generate_type_alias`/`generate_class_specs`
     // call sites — a Value subclass's `state:` field typed with an alias
     // must reference the alias's named `-type` from inside the class's own
-    // `-type t()` map alias (BT-1156), with the named `-type` declared
+    // `-type t()` map alias, with the named `-type` declared
     // alongside it in the same module.
     let src = "
 type RestartStrategy = #temporary | #transient | #permanent
@@ -2347,7 +2347,7 @@ Value subclass: Child
 
 #[test]
 fn test_value_subclass_cross_module_alias_reference_emits_user_type() {
-    // BT-2932: same wiring check as
+    // same wiring check as
     // `test_value_subclass_field_alias_emits_user_type_and_named_type`
     // above, but the alias is declared in a *different* compiled module —
     // threaded in via `CodegenOptions::with_pre_loaded_aliases`, mirroring
@@ -2392,7 +2392,7 @@ Value subclass: Child
 
 #[test]
 fn test_module_without_type_aliases_is_unaffected_by_alias_wiring() {
-    // BT-2909 acceptance criterion: confirm generated Core Erlang for
+    // Confirm generated Core Erlang for
     // message dispatch/field access is unaffected for modules with no
     // `type_aliases` — `generate_alias_type_attrs` returns an empty `Vec`
     // for an empty registry, so no `'type'` attribute for aliases (and no
@@ -2416,7 +2416,7 @@ Actor subclass: Counter
 
 #[test]
 fn test_cross_module_alias_reference_emits_user_type_via_pre_loaded_aliases() {
-    // BT-2932: an alias declared in one compiled module — simulated here by
+    // an alias declared in one compiled module — simulated here by
     // extracting `AliasInfo`s from a standalone `type X = ...` module via
     // `AliasRegistry::extract_alias_infos`, the same mechanism the CLI build
     // pipeline uses to populate `ClassHierarchyContext::pre_loaded_aliases`
@@ -2472,9 +2472,9 @@ Actor subclass: Supervisor
 
 #[test]
 fn test_cross_module_alias_reference_compiles_through_erlc() {
-    // BT-2932 (review follow-up): the sibling same-module case is guarded
+    // review follow-up: the sibling same-module case is guarded
     // through erlc by `test_alias_annotated_actor_module_compiles_through_erlc`
-    // (BT-2909) — this exercises the cross-module case (alias declared in
+    // — this exercises the cross-module case (alias declared in
     // one module, referenced via `pre_loaded_aliases` from another) the same
     // way, so a `-type`/`user_type` pairing bug here would fail to compile
     // rather than only fail a string assertion.
@@ -2508,9 +2508,9 @@ Actor subclass: Supervisor
 
 #[test]
 fn test_cross_module_alias_reference_without_pre_loaded_aliases_falls_back_to_any() {
-    // BT-2932 negative control: the same module, compiled without
-    // `with_pre_loaded_aliases`, reproduces the pre-fix gap this issue
-    // closes — since the module has no local `type_aliases` of its own,
+    // Negative control: the same module, compiled without
+    // `with_pre_loaded_aliases`, reproduces the gap that motivates
+    // cross-module alias wiring — since the module has no local `type_aliases` of its own,
     // `RestartStrategy` is an unresolved name and the annotation falls
     // through to `any()` rather than a spurious `user_type` reference.
     let src = "
@@ -2536,8 +2536,8 @@ Actor subclass: Supervisor
 
 #[test]
 fn test_unused_pre_loaded_alias_gets_no_type_declaration() {
-    // BT-2940: `generate_alias_type_attrs` used to emit a `-type` for every
-    // name in the pre-loaded `AliasRegistry` (BT-2932), regardless of
+    // `generate_alias_type_attrs` used to emit a `-type` for every
+    // name in the pre-loaded `AliasRegistry`, regardless of
     // whether this module's own specs referenced it — for a project with
     // `A` aliases and `M` modules, every module's attribute list grew by
     // `A` entries rather than just what it used. Two aliases are pre-loaded
@@ -2592,7 +2592,7 @@ Actor subclass: Supervisor
 
 #[test]
 fn test_unused_pre_loaded_alias_gets_no_type_declaration_for_value_state_field() {
-    // BT-2940 sibling of `test_unused_pre_loaded_alias_gets_no_type_declaration`
+    // Sibling of `test_unused_pre_loaded_alias_gets_no_type_declaration`
     // for `value_type_codegen.rs`'s `generate_type_alias` call site — a
     // Value subclass's `state:` field is the other (besides method specs)
     // path that can mark an alias referenced; it must be scoped just as
@@ -2646,7 +2646,7 @@ Value subclass: Child
 
 #[test]
 fn test_alias_annotated_actor_module_compiles_through_erlc() {
-    // BT-2909: the correctness trap this issue exists to close — a
+    // the correctness trap this issue exists to close — a
     // `-spec`/`-type` referencing an undeclared local type is a hard `erlc`
     // compile error, not just a Dialyzer warning. This exercises the full
     // `generate_module` pipeline end-to-end through `erlc` (mirroring
@@ -2672,7 +2672,7 @@ Actor subclass: Supervisor
 
 #[test]
 fn test_class_method_local_var_assignment_of_self_class_method() {
-    // BT-1201: class method `x := self classMethod` must NOT produce `in  in`.
+    // class method `x := self classMethod` must NOT produce `in in`.
     // Previously generated invalid Core Erlang:
     //   let X = let _CMR = call ... in let ClassVars1 = ... in let _Unwrapped = ... in  in X
     let src = "Object subclass: Broken\n  class a =>\n    x := self b.\n    x\n\n  class b => 42";
@@ -2700,7 +2700,7 @@ fn test_class_method_local_var_assignment_of_self_class_method() {
 
 #[test]
 fn test_class_method_local_var_after_class_var_mutation() {
-    // BT-1201 follow-up (reviewer feedback): a class var mutation (`self.cv := expr`) preceding
+    // A class var mutation (`self.cv := expr`) preceding
     // a local var assignment (`x := plainExpr`) must NOT incorrectly treat the local var RHS as
     // a class-var-producing expression. Any stale producer state left over from the field
     // assignment must not leak into processing the local var's RHS.
@@ -2724,19 +2724,16 @@ fn test_class_method_local_var_after_class_var_mutation() {
 
 #[test]
 fn test_class_method_self_send_in_while_loop_body_compiles_and_threads_class_vars() {
-    // BT-3150/BT-3168: a self-send to a same-class class method (`self bump`)
-    // used as a bare statement inside a `whileTrue:` loop body previously
-    // produced a `core_parse_error` — a doubled `in in` around the
-    // self-send's `class_var_result` tuple-unwrapping, from
-    // `emit_class_var_result_unwrap`'s open let-chain being re-wrapped by the
-    // loop body's naive `let _ = <expr> in` statement sequencing. Fixing only
-    // the syntax (so it compiles) was tried and rejected at the time (BT-3140/
-    // BT-3150): the mutation was silently discarded by the time the loop
-    // finished, because `ClassVarsN` was never threaded through the loop's
-    // recursive tail call the way `StateAcc` was — rejected at compile time
-    // instead. BT-3168 (ADR 0111 Addendum 9) closes that gap: `ClassVars`
-    // now threads through the loop's own recursive tail call as an extra fun
-    // parameter, so this compiles AND correctly accumulates. See
+    // a self-send to a same-class class method (`self bump`)
+    // used as a bare statement inside a `whileTrue:` loop body must compile
+    // and correctly accumulate: `ClassVars` (ADR 0111 Addendum 9) threads
+    // through the loop's own recursive tail call as an extra fun parameter,
+    // the same way `StateAcc` does, rather than a plain syntax fix around
+    // the self-send's `class_var_result` tuple-unwrapping (which would only
+    // avoid the doubled `in in` from `emit_class_var_result_unwrap`'s open
+    // let-chain being re-wrapped by the loop body's naive `let _ = <expr> in`
+    // statement sequencing, while still silently discarding the mutation by
+    // the time the loop finished). See
     // `stdlib/test/loop_class_var_mutation_test.bt`'s
     // `testSelfSendInWhileLoopAccumulates` for the
     // runtime-behavior pin (this test only pins the codegen shape).
@@ -2765,7 +2762,7 @@ fn test_class_method_self_send_in_while_loop_body_compiles_and_threads_class_var
 
 #[test]
 fn test_class_method_self_send_in_to_do_loop_body_compiles_and_threads_class_vars() {
-    // BT-3150 review nit / BT-3168: `to:do:`/`to:by:do:` compile through the
+    // `to:do:`/`to:by:do:` compile through the
     // same `generate_counted_stateful_loop`/`BodyKind::Letrec` path as
     // `timesRepeat:` (see `control_flow/mod.rs`'s `generate_counted_stateful_loop`
     // doc comment), so the `ClassVars`-threading fix must cover this
@@ -2791,7 +2788,7 @@ fn test_class_method_self_send_in_to_do_loop_body_compiles_and_threads_class_var
 
 #[test]
 fn test_class_method_self_send_as_local_var_assignment_rhs_in_while_loop_compiles() {
-    // BT-3150 review follow-up: the `ClassMethodSelfSendInThreadedLoopBody`
+    // The `ClassMethodSelfSendInThreadedLoopBody`
     // guard only fires when a class-method self-send is itself the top-level
     // statement expression (`self bump` as a bare statement) — it doesn't walk
     // into `Expression::Assignment`, so `x := self bump` inside the same
@@ -2807,8 +2804,8 @@ fn test_class_method_self_send_as_local_var_assignment_rhs_in_while_loop_compile
     // "self-send return value matters" shape that made blanket-rejecting
     // `Foldl*` bodies wrong (see `test_class_method_self_send_as_collect_transform_still_compiles`).
     // So this is fixed as a compile bug (thread the self-send's class-var
-    // mutation ahead of the assignment's own compile, mirroring BT-1397's fix
-    // for the same shape inside blocks generally), not folded into the reject
+    // mutation ahead of the assignment's own compile, mirroring the analogous
+    // fix for the same shape inside blocks generally), not folded into the reject
     // list. `self.runs` not accumulating across
     // iterations is the same pre-existing, tracked `Letrec` limitation as
     // always (this test only pins that it compiles and runs without crashing).
@@ -2832,26 +2829,24 @@ fn test_class_method_self_send_as_local_var_assignment_rhs_in_while_loop_compile
 
 #[test]
 fn test_do_assigned_to_discarded_local_in_direct_params_loop_still_emits_foldl() {
-    // BT-3150 review follow-up: `try_generate_block_local_plain_let`'s
-    // producer-aware fix (above) initially discarded `val_doc` entirely in
-    // the direct-params-loop "no single value" arm instead of emitting it
-    // first (unlike the ordinary-value arm right above it). That arm fires
-    // for a mutation-threaded `do:` nested inside a direct-params outer loop
-    // (BT-1329/
-    // BT-3053, see `test_do_nested_in_direct_params_loop` in
-    // `control_flow/list_ops/tests.rs` for the bare-statement variant this
-    // adapts) — there, `val_doc` isn't just "a value", it's the entire
+    // `try_generate_block_local_plain_let`'s producer-aware handling must
+    // not discard `val_doc` in the direct-params-loop "no single value" arm
+    // — it must emit it first, like the ordinary-value arm right above it.
+    // That arm fires for a mutation-threaded `do:` nested inside a
+    // direct-params outer loop (see `test_do_nested_in_direct_params_loop`
+    // in `control_flow/list_ops/tests.rs` for the bare-statement variant
+    // this adapts) — there, `val_doc` isn't just "a value", it's the entire
     // generated `lists:foldl` call. Assigning such a `do:`'s result to a
     // discarded local var (`_y := items do: [...]`) inside a direct-params
-    // loop silently dropped the nested loop from the generated code — no
-    // crash, just the nested `do:` (and any mutation it made, like `seen`
-    // below) never executing. A regression from the prior behavior (a loud
-    // `core_parse_error` for this same shape) to silently wrong code, so this
+    // loop must not silently drop the nested loop from the generated code —
+    // no crash, just the nested `do:` (and any mutation it made, like
+    // `seen` below) never executing, a regression from a loud
+    // `core_parse_error` for this same shape to silently wrong code. This
     // pins that the `lists:foldl` call — and the loop it drives — survives.
     //
-    // Confirmed via manual `beamtalk build` toggling of the fix (not just
-    // reasoning about it) that this exact shape reproduces the drop with the
-    // bug present and is fixed by it — several other plausible-looking
+    // Confirmed via manual `beamtalk build` toggling (not just reasoning
+    // about it) that this exact shape reproduces the drop when the handling
+    // is wrong and is fixed when correct — several other plausible-looking
     // shapes (e.g. `_y := ...` as a `timesRepeat:` body's only/last
     // statement, or as a `class` method's `timesRepeat:` rather than an
     // `Actor` method's `to:do:`) turned out NOT to reach this code path at
@@ -2878,7 +2873,7 @@ fn test_do_assigned_to_discarded_local_in_direct_params_loop_still_emits_foldl()
 
 #[test]
 fn test_class_method_self_send_alongside_local_in_times_repeat_body_compiles() {
-    // BT-3150/BT-3168: the same gap reached via `timesRepeat:` instead of
+    // the same gap reached via `timesRepeat:` instead of
     // `whileTrue:`, with a co-occurring local-variable mutation — a bare
     // self-send-only `timesRepeat:` body doesn't reach the state-threaded
     // loop codegen path at all (see
@@ -2886,7 +2881,7 @@ fn test_class_method_self_send_alongside_local_in_times_repeat_body_compiles() {
     // below), so this pins the shape that actually reaches it: a loop that
     // legitimately needs local threading (an accumulator) with a class-method
     // self-send alongside it. Now compiles and threads ClassVars correctly
-    // (BT-3168, ADR 0111 Addendum 9) instead of being rejected.
+    // (ADR 0111 Addendum 9) instead of being rejected.
     let src = "Value subclass: Driver5\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: n =>\n    total := 0\n    n timesRepeat: [\n      self bump\n      total := total + 1\n    ]\n    total";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -2908,11 +2903,11 @@ fn test_class_method_self_send_alongside_local_in_times_repeat_body_compiles() {
 
 #[test]
 fn test_non_mutating_class_method_self_send_in_loop_body_also_compiles() {
-    // BT-3150/BT-3168: every same-class class-method self-send routes
+    // every same-class class-method self-send routes
     // through the same `{class_var_result, ...}` unwrap convention
     // regardless of whether the callee actually touches class state — the
     // caller can't know that statically (the callee may be overridden, or
-    // defined later in the file). `ClassVars` threading (BT-3168) works
+    // defined later in the file). `ClassVars` threading works
     // unconditionally for the same reason: it doesn't need to know whether
     // the self-send actually mutates anything, only that the callee's return
     // convention always carries a (possibly-unchanged) `ClassVars` value.
@@ -2932,19 +2927,18 @@ fn test_non_mutating_class_method_self_send_in_loop_body_also_compiles() {
 
 #[test]
 fn test_bare_class_method_self_send_in_times_repeat_body_skips_loop_threading() {
-    // BT-3150 (contrast case): a `timesRepeat:` body with ONLY a class-method
+    // contrast case: a `timesRepeat:` body with ONLY a class-method
     // self-send and no other local-variable mutation never needs state
-    // threading (`needs_mutation_threading`, BT-1346) — it compiles as an
+    // threading (`needs_mutation_threading`) — it compiles as an
     // ordinary block passed to the runtime `timesRepeat:` helper, never
-    // reaching `generate_threaded_loop_body`/the BT-3150 gap at all. Pinned
-    // here as the boundary of this fix's scope, mirroring BT-3140's analogous
-    // bare-field-write contrast test.
+    // reaching `generate_threaded_loop_body` at all. Pinned
+    // here as the boundary of this construct's scope, mirroring the
+    // analogous bare-field-write contrast test.
     //
-    // BT-3151: that "ordinary block" path is exactly `generate_block`'s
-    // generic fallback, which is where BT-3151's own guard lives — so this
-    // bare, mutation-losing self-send is now a compile error instead of
-    // silently compiling. Updated from `result.is_ok()` (BT-3150-era) to
-    // match.
+    // That "ordinary block" path is exactly `generate_block`'s
+    // generic fallback, which is where the guard lives — so this
+    // bare, mutation-losing self-send is a compile error rather than
+    // silently compiling.
     let src = "Value subclass: Driver4\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: n =>\n    n timesRepeat: [\n      self bump\n      self bump\n    ]\n    nil";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -2968,13 +2962,13 @@ fn test_class_method_self_send_after_loop_still_compiles() {
     // BT-3150 (contrast case): the workaround recommended by
     // `ClassMethodSelfSendInThreadedLoopBody`'s error message — accumulate a
     // local count inside the loop, then make the self-send once after the
-    // loop, at the class method's own top frame (the already-proven ADR
-    // 0110/BT-412 shape) — must keep compiling.
+    // loop, at the class method's own top frame (the already-proven
+    // ADR 0110 shape) — must keep compiling.
     //
-    // BT-3151: this is deliberately a single top-frame self-send, not
+    // This is deliberately a single top-frame self-send, not
     // `count timesRepeat: [self bump]` — repeating the self-send N times
     // still requires wrapping it in a block, which is exactly the shape
-    // BT-3151's guard now (correctly) rejects. See
+    // the guard now (correctly) rejects. See
     // `test_bare_class_method_self_send_in_times_repeat_body_skips_loop_threading`
     // for that case.
     let src = "Value subclass: Driver8\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aBlock over: aList =>\n    i := 1\n    count := 0\n    [i <= aList size] whileTrue: [\n      count := count + 1\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    self bump\n    nil";
@@ -2993,27 +2987,23 @@ fn test_class_method_self_send_after_loop_still_compiles() {
 
 #[test]
 fn test_class_method_self_send_alongside_local_in_do_body_survives_via_class_vars_threading() {
-    // BT-3150 review follow-up / BT-3169: the `Letrec` (whileTrue:/timesRepeat:)
-    // guard used to leave an identical class-var-mutation-loss gap open for
-    // `Foldl*` bodies (do:/collect:/select:/inject:into:/...) — `ThreadingPlan`
-    // threaded only `threaded_locals` (user `:=` locals) through a fold's
-    // accumulator, never `ClassVars`, so a class-method self-send inside a
-    // `do:` block with a co-occurring local mutation (which is what actually
-    // routes it through `generate_threaded_loop_body_inner` in the first
-    // place) lost its class-var mutation exactly like the `whileTrue:` case
-    // — confirmed empirically (pre-fix): `runs` stayed at 0 across all 3 list
-    // elements instead of accumulating.
-    //
-    // BT-3169 closes this: the fold's accumulator becomes a `{ClassVars,
+    // A class-method self-send inside a `do:` block with a co-occurring
+    // local mutation (which is what actually routes it through
+    // `generate_threaded_loop_body_inner` in the first place) must not lose
+    // its class-var mutation the way the analogous `Letrec`
+    // (whileTrue:/timesRepeat:) shape would if `ThreadingPlan` threaded only
+    // `threaded_locals` (user `:=` locals) through a fold's accumulator and
+    // never `ClassVars`: the fold's accumulator becomes a `{ClassVars,
     // StateAcc}` 2-tuple whenever the body threads `ClassVars` (ADR 0111
-    // Addendum 9, Question 6), so the mutation now survives the loop and is
+    // Addendum 9, Question 6), so the mutation survives the loop and is
     // visible in the method's own `{'class_var_result', Result, ClassVarsN}`
-    // return. Confirmed both by direct `erl` execution against the compiled
-    // `.beam` (`runs` correctly ends at 3, not 0 — see BT-3169's own PR
-    // description) and, structurally, here: the compiled `class_countedRun:`
-    // fun's accumulator parameter and the post-`lists:foldl` extraction both
-    // reference a *versioned* `ClassVarsN` name (`N > 0`), never the bare,
-    // unmutated `ClassVars` the pre-fix compiler silently discarded into.
+    // return.
+    //
+    // Confirmed both by direct `erl` execution against the compiled
+    // `.beam` (`runs` correctly ends at 3, not 0) and, structurally, here:
+    // the compiled `class_countedRun:` fun's accumulator parameter and the
+    // post-`lists:foldl` extraction both reference a *versioned*
+    // `ClassVarsN` name (`N > 0`), never the bare, unmutated `ClassVars`.
     let src = "Value subclass: DriverDo\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aList =>\n    total := 0\n    aList do: [:x | self bump. total := total + x]\n    total";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -3028,7 +3018,7 @@ fn test_class_method_self_send_alongside_local_in_do_body_survives_via_class_var
         .expect("expected a class_countedRun:/3 function in the generated code");
     // The fold's own accumulator parameter must be a raw {ClassVars, StateAcc}
     // tuple (unwrapped via two `erlang:element/2` calls), not the bare
-    // literal `StateAcc` the pre-fix compiler emitted.
+    // literal `StateAcc`.
     assert!(
         func.contains("call 'erlang':'element'(1,") && func.contains("call 'erlang':'element'(2,"),
         "the fold fun's accumulator must be unwrapped from a {{ClassVars, StateAcc}} \
@@ -3038,7 +3028,7 @@ fn test_class_method_self_send_alongside_local_in_do_body_survives_via_class_var
     // *versioned* ClassVars name (ClassVars1, ClassVars2, ...) — proof the
     // self-send's mutation, threaded through the fold, reached the method's
     // own top-level return, not the bare (unmutated, version-0) `ClassVars`
-    // parameter the pre-fix bug silently returned instead.
+    // parameter.
     let reply_idx = func
         .rfind("{'class_var_result',")
         .expect("expected a final {'class_var_result', ...} reply");
@@ -3055,22 +3045,21 @@ fn test_class_method_self_send_alongside_local_in_do_body_survives_via_class_var
 #[test]
 fn test_class_method_self_send_as_select_predicate_alongside_local_survives_via_class_vars_threading()
  {
-    // BT-3150 review follow-up / BT-3169: an earlier version of this fix
-    // blanket-rejected a class-method self-send in ANY `BodyKind::Foldl*`
-    // body, including `select:`'s predicate position — but that broke a
-    // real, existing stdlib fixture (`test/fixtures/class_method_block.bt`)
-    // that uses pure (non-mutating) self-sends as the value feeding
+    // A class-method self-send in a `BodyKind::Foldl*` body, including
+    // `select:`'s predicate position, must not be blanket-rejected — a real,
+    // existing stdlib fixture (`test/fixtures/class_method_block.bt`) uses
+    // pure (non-mutating) self-sends as the value feeding
     // `collect:`/`sort:`/`inject:into:` (see
     // `test_class_method_self_send_as_collect_transform_still_compiles`
     // below). Unlike `Letrec`, `select:`'s predicate result is NOT discarded
     // — it structurally IS the fold's output — so rejecting every self-send
-    // there has a real false-positive cost. The `Letrec`-only compile-time
-    // guard was never widened to cover this shape.
+    // there would have a real false-positive cost. The `Letrec`-only
+    // compile-time guard is deliberately not widened to cover this shape.
     //
-    // BT-3169 instead makes this shape correct rather than rejecting it: the
+    // Instead, this shape is made correct rather than rejected: the
     // fold's accumulator threads `ClassVars` through a `{ClassVars, StateAcc}`
     // 2-tuple, so a class-var mutation performed by `check:` — hypothetically
-    // — would now survive rather than being silently lost. This fixture's
+    // — would survive rather than being silently lost. This fixture's
     // own `check:` is pure (no class var declared at all), so the test below
     // checks the *threading machinery* is in place — the fold fun's
     // accumulator unwrap and the assignment's own final ClassVars rebind —
@@ -3093,8 +3082,7 @@ fn test_class_method_self_send_as_select_predicate_alongside_local_survives_via_
         .expect("expected a class_positives:/3 function in the generated code");
     // The fold's own accumulator parameter must be a raw {ClassVars, AccSt}
     // tuple (unwrapped via two `erlang:element/2` calls before the
-    // pre-existing {AccList, StateAcc} unpack), not the bare AccSt the
-    // pre-fix compiler emitted.
+    // existing {AccList, StateAcc} unpack), not the bare AccSt.
     assert!(
         func.contains("call 'erlang':'element'(1,") && func.contains("call 'erlang':'element'(2,"),
         "the fold fun's accumulator must be unwrapped from a {{ClassVars, AccSt}} \
@@ -3115,7 +3103,7 @@ fn test_class_method_self_send_as_select_predicate_alongside_local_survives_via_
 
 #[test]
 fn test_class_method_self_send_as_collect_transform_still_compiles() {
-    // BT-3150 review follow-up: pins the exact pattern from the real stdlib
+    // Pins the exact pattern from the real stdlib
     // fixture (`test/fixtures/class_method_block.bt`) that an earlier,
     // over-broad version of this fix accidentally broke in CI — a pure
     // (non-mutating) self-send used as `collect:`'s per-item transform,
@@ -3137,7 +3125,7 @@ fn test_class_method_self_send_as_collect_transform_still_compiles() {
 
 #[test]
 fn test_bare_class_method_self_send_in_select_body_skips_loop_threading() {
-    // BT-3150 review follow-up (contrast case): a `select:`/`collect:`/`do:`
+    // Contrast case: a `select:`/`collect:`/`do:`
     // block with ONLY a class-method self-send and no other local-variable
     // mutation never needs state threading — mirroring
     // `test_bare_class_method_self_send_in_times_repeat_body_skips_loop_threading`
@@ -3145,11 +3133,10 @@ fn test_bare_class_method_self_send_in_select_body_skips_loop_threading() {
     // `generate_threaded_loop_body`), routing instead through
     // `generate_block`'s generic fallback.
     //
-    // BT-3151: this is the exact repro from that issue — confirmed
-    // empirically (before the fix) that this shape silently loses the
-    // class-var mutation (`runs` stayed 0). Now caught at compile time by
-    // BT-3151's guard in `generate_block`. Updated from `result.is_ok()`
-    // (BT-3150-era, when this was still a documented open gap) to match.
+    // this is the exact repro from that issue — confirmed
+    // empirically that this shape would otherwise silently lose the
+    // class-var mutation (`runs` staying 0). It must instead be caught at
+    // compile time by the guard in `generate_block`.
     let src = "Value subclass: DriverSelect\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x > 0\n  class positives: aList =>\n    aList select: [:x | self check: x]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -3170,7 +3157,7 @@ fn test_bare_class_method_self_send_in_select_body_skips_loop_threading() {
 
 #[test]
 fn test_class_method_self_send_in_block_compiles_when_class_has_no_class_vars() {
-    // BT-3151 follow-up: BT-3151's unthreaded-block guard can't see a
+    // The unthreaded-block guard can't see a
     // self-send's target selector when it isn't locally defined on the
     // current class (e.g. inherited from a superclass in a different file —
     // `compute_class_var_mutating_selectors` only has this class's own
@@ -3207,7 +3194,7 @@ fn test_class_method_self_send_in_block_compiles_when_class_has_no_class_vars() 
 
 #[test]
 fn test_class_method_mutating_self_send_as_second_cascade_message_in_block_is_compile_error() {
-    // BT-3151 review follow-up: a cascade's 2nd+ message is sent to the same
+    // A cascade's 2nd+ message is sent to the same
     // shared receiver as the first (cascade semantics evaluate the receiver
     // once), but `analyze_expression`'s `Expression::Cascade` arm only ever
     // checked later messages for `is_self_field_value_send` — it never
@@ -3239,7 +3226,7 @@ fn test_class_method_mutating_self_send_as_second_cascade_message_in_block_is_co
 
 #[test]
 fn test_class_method_self_send_in_erlang_interop_block_is_compile_error() {
-    // BT-3151 review follow-up: a block argument crossing the Erlang interop
+    // A block argument crossing the Erlang interop
     // boundary in a direct `(Erlang mod) fn: arg` call
     // (`generate_direct_erlang_call`'s keyword branch, `dispatch_codegen.rs`)
     // routes through the same `generate_erlang_interop_wrapper` →
@@ -3265,7 +3252,7 @@ fn test_class_method_self_send_in_erlang_interop_block_is_compile_error() {
 
 #[test]
 fn test_class_method_self_send_in_any_satisfy_block_is_compile_error() {
-    // BT-3151 review follow-up: `anySatisfy:`/`allSatisfy:` (and every other
+    // `anySatisfy:`/`allSatisfy:` (and every other
     // sibling list-op in `control_flow/list_ops/` with the same
     // `block_needs_mutation_threading`-gated "fall through to a bare/BIF
     // call" shape — `detect:ifNone:`, `count:`, `flatMap:`, `takeWhile:`,
@@ -3295,7 +3282,7 @@ fn test_class_method_self_send_in_any_satisfy_block_is_compile_error() {
 
 #[test]
 fn test_class_method_self_send_in_sort_block_is_compile_error() {
-    // BT-3151 review follow-up: pins `sort:` (a 2-arg comparator block) as
+    // Pins `sort:` (a 2-arg comparator block) as
     // another sibling covered by `check_bare_list_op_block_self_sends` — see
     // `test_class_method_self_send_in_any_satisfy_block_is_compile_error`'s
     // comment for the full list.
@@ -3318,7 +3305,7 @@ fn test_class_method_self_send_in_sort_block_is_compile_error() {
 
 #[test]
 fn test_class_method_self_send_in_each_with_index_block_is_compile_error() {
-    // BT-3151 review follow-up: `eachWithIndex:` desugars to `inject:into:`
+    // `eachWithIndex:` desugars to `inject:into:`
     // (`try_generate_each_with_index`, `enumeration_ops.rs`) only when the
     // user block needs mutation threading; a bare self-send-only block falls
     // through to `collection.bt`'s own self-hosted `eachWithIndex:` — a
@@ -3342,7 +3329,7 @@ fn test_class_method_self_send_in_each_with_index_block_is_compile_error() {
 
 #[test]
 fn test_class_method_self_send_in_do_separated_by_block_is_compile_error() {
-    // BT-3151 review follow-up: `do:separatedBy:`'s desugar
+    // `do:separatedBy:`'s desugar
     // (`try_generate_do_separated_by`, `enumeration_ops.rs`) has the same
     // bare-block fallthrough shape as `eachWithIndex:` above — checks both
     // the element and separator blocks.
@@ -3366,7 +3353,7 @@ fn test_class_method_self_send_in_do_separated_by_block_is_compile_error() {
 #[test]
 fn test_class_method_self_send_in_detect_if_none_block_alongside_mutating_predicate_is_compile_error()
  {
-    // BT-3151 review follow-up: when `detect:ifNone:`'s predicate needs
+    // When `detect:ifNone:`'s predicate needs
     // mutation threading (a co-occurring local-var mutation), execution
     // routes through `generate_list_detect_if_none_with_mutations`, which
     // compiles `if_none` independently via `expression_doc` →
@@ -3393,15 +3380,15 @@ fn test_class_method_self_send_in_detect_if_none_block_alongside_mutating_predic
 
 #[test]
 fn test_class_method_self_send_in_pure_inject_into_block_is_compile_error() {
-    // BT-3151 follow-up: `generate_list_inject`'s BT-1327 pure-block fast
-    // path calls `generate_block_body` directly (to emit an inline
-    // `lists:foldl` with zero wrapper overhead), bypassing
-    // `generate_block`'s own BT-3151 self-send check entirely. Before this
-    // was wired up (`check_no_unsafe_class_method_self_sends`, called from
-    // `generate_list_inject` too), this didn't just silently lose the
-    // mutation — it crashed erlc with malformed Core Erlang (`unbound
-    // variable 'ClassVars1'`), confirmed empirically. Must now be a clean
-    // compile-time error, matching every other bare-block call site.
+    // `generate_list_inject`'s pure-block fast path calls
+    // `generate_block_body` directly (to emit an inline `lists:foldl` with
+    // zero wrapper overhead), bypassing `generate_block`'s own self-send
+    // check entirely — so `generate_list_inject` must call
+    // `check_no_unsafe_class_method_self_sends` itself. Without it, this
+    // doesn't just silently lose the mutation — it crashes erlc with
+    // malformed Core Erlang (`unbound variable 'ClassVars1'`), confirmed
+    // empirically. Must be a clean compile-time error, matching every other
+    // bare-block call site.
     let src = "Value subclass: DriverInject\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x\n  class sumChecked: aList =>\n    aList inject: 0 into: [:acc :x | acc + (self check: x)]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -3421,7 +3408,7 @@ fn test_class_method_self_send_in_pure_inject_into_block_is_compile_error() {
 
 #[test]
 fn test_class_method_self_send_in_while_condition_block_is_compile_error() {
-    // BT-3151 follow-up: a `whileTrue:`/`whileFalse:` loop's *condition*
+    // A `whileTrue:`/`whileFalse:` loop's *condition*
     // block is structurally the same kind of bare, unthreaded block as a
     // `select:`/`inject:into:` argument — `generate_while_loop` (and its
     // direct-params/hybrid-params variants) calls `generate_block_body` on
@@ -3448,11 +3435,11 @@ fn test_class_method_self_send_in_while_condition_block_is_compile_error() {
 
 #[test]
 fn test_class_var_mutation_emits_shadow_write() {
-    // ADR 0110 (BT-3032/BT-3037): a top-frame class-var mutation in a class
+    // ADR 0110: a top-frame class-var mutation in a class
     // method must write the just-updated ClassVars map into the
     // '$bt_class_vars_shadow' process-dictionary key, immediately after the
     // maps:put threading, so a foreign NLR relayed out of the method can
-    // recover the mutation (read + erased by invoke_class_method/7, BT-3036).
+    // recover the mutation (read + erased by invoke_class_method, 7).
     let src = "Object subclass: ShadowCounter\n  classState: runs = 0\n\n  class bump =>\n    self.runs := self.runs + 1\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -3471,19 +3458,19 @@ fn test_class_var_mutation_emits_shadow_write() {
 
 #[test]
 fn test_class_var_mutation_in_while_loop_body_compiles_and_threads_class_vars() {
-    // BT-3140/BT-3168: a class-var mutation made directly inside a
-    // whileTrue: loop body previously couldn't thread through
+    // A class-var mutation made directly inside a
+    // whileTrue: loop body must not thread through
     // `generate_field_assignment_open`'s generic State/StateAcc mechanism —
-    // it silently wrote into the loop's own scratch StateAcc map instead of
-    // ClassVars, losing the mutation on both normal return and a foreign NLR
-    // escape (confirmed empirically via a throwaway BUnit driver/probe
-    // fixture, mirroring fixtures/collection_driver.bt/collection_probe.bt's
-    // shape with the mutation moved inside the loop), so it was rejected at
-    // compile time instead, mirroring BT-2792's FieldAssignmentInUnsupportedBlock
-    // for the analogous "can't thread this state" shape. BT-3168 (ADR 0111
-    // Addendum 9) closes the gap: `ClassVars` now threads through the loop's
-    // own recursive tail call as an extra fun parameter, tagged with the
-    // loop's real frame and a real ADR 0110 shadow write each iteration. See
+    // that would silently write into the loop's own scratch StateAcc map
+    // instead of ClassVars, losing the mutation on both normal return and a
+    // foreign NLR escape (confirmed empirically via a throwaway BUnit
+    // driver/probe fixture, mirroring fixtures/collection_driver.bt/
+    // collection_probe.bt's shape with the mutation moved inside the loop) —
+    // the same "can't thread this state" shape `FieldAssignmentInUnsupportedBlock`
+    // rejects elsewhere. `ClassVars` (ADR 0111 Addendum 9) instead threads
+    // through the loop's own recursive tail call as an extra fun parameter,
+    // tagged with the loop's real frame and a real ADR 0110 shadow write
+    // each iteration. See
     // `stdlib/test/loop_class_var_mutation_test.bt`'s
     // `testFieldAssignmentInWhileLoopAccumulates` for the
     // runtime-behavior pin (this test only pins the codegen shape).
@@ -3511,15 +3498,15 @@ fn test_class_var_mutation_in_while_loop_body_compiles_and_threads_class_vars() 
 
 #[test]
 fn test_bare_class_var_mutation_in_times_repeat_body_hits_existing_stored_closure_guard() {
-    // BT-3140: `needs_mutation_threading` (BT-1346) deliberately excludes bare
+    // `needs_mutation_threading` deliberately excludes bare
     // field writes/self-sends from triggering StateAcc threading in a class
     // method — a `timesRepeat:` body with ONLY a class-var write and no other
     // mutation never reaches `generate_threaded_loop_body`/
     // `generate_field_assignment_open` at all; it falls through to the
-    // generic block path and is already caught by BT-2792's
+    // generic block path and is already caught by
     // `FieldAssignmentInUnsupportedBlock` (`validate_stored_closure`). Pinned
     // here as the contrast case to the co-occurring-local-mutation shape
-    // below, which DOES reach the BT-3140 gap.
+    // below, which DOES reach the class-var-threading construct above.
     let src = "Object subclass: TimesRepeatShadowCounter\n  classState: runs = 0\n\n  class bumpN: n =>\n    n timesRepeat: [self.runs := self.runs + 1]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -3540,13 +3527,13 @@ fn test_bare_class_var_mutation_in_times_repeat_body_hits_existing_stored_closur
 
 #[test]
 fn test_class_var_mutation_alongside_local_in_times_repeat_body_compiles() {
-    // BT-3140/BT-3168: once a `timesRepeat:` body ALSO has a local-variable
+    // once a `timesRepeat:` body ALSO has a local-variable
     // mutation (or self-send), `needs_mutation_threading` fires for that
     // reason and the body IS routed through `generate_threaded_loop_body` —
     // this is the shape that actually matters: a loop that legitimately
     // needs local threading (an accumulator, a counter) with a class-var
     // write alongside it. Now compiles and threads ClassVars correctly
-    // (BT-3168, ADR 0111 Addendum 9) instead of being rejected.
+    // (ADR 0111 Addendum 9) instead of being rejected.
     let src = "Object subclass: TimesRepeatShadowCounter2\n  classState: runs = 0\n\n  class bumpN: n =>\n    seen := 0\n    n timesRepeat: [\n      self.runs := self.runs + 1\n      seen := seen + 1\n    ]\n    seen";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -3568,11 +3555,12 @@ fn test_class_var_mutation_alongside_local_in_times_repeat_body_compiles() {
 
 #[test]
 fn test_class_var_mutation_before_loop_still_emits_shadow_write() {
-    // BT-3140 (contrast case): a class-var mutation BEFORE a whileTrue: loop
+    // contrast case: a class-var mutation BEFORE a whileTrue: loop
     // (top frame, block_depth == 0, not inside the loop's threaded body) is
     // the already-proven ADR 0110 shape and must keep compiling + emitting
-    // the shadow write — the BT-3140 rejection is scoped to mutations
-    // literally inside the loop body, not merely a method that also has one.
+    // the shadow write — the class-var-threading rejection is scoped to
+    // mutations literally inside the loop body, not merely a method that
+    // also has one.
     let src = "Object subclass: LoopShadowCounterOk\n  classState: runs = 0\n\n  class bumpThenLoop: n =>\n    self.runs := self.runs + 1\n    i := 0\n    [i < n] whileTrue: [i := i + 1]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -3590,7 +3578,7 @@ fn test_class_var_mutation_before_loop_still_emits_shadow_write() {
 
 #[test]
 fn test_nested_letrec_direct_field_mutation_in_inner_loop_is_compile_error() {
-    // BT-3172 (BT-3168 follow-up): a `Letrec` loop nested inside another
+    // (follow-up): a `Letrec` loop nested inside another
     // `Letrec` loop, where the INNER loop directly mutates a class var, but
     // the OUTER loop's own top-level statements (`j := 0`, the inner
     // `whileTrue:` send, `i := i + 1`) have no bare class-var mutation of
@@ -3623,8 +3611,9 @@ fn test_nested_letrec_direct_field_mutation_in_inner_loop_is_compile_error() {
 
 #[test]
 fn test_nested_letrec_self_send_mutation_in_inner_loop_is_compile_error() {
-    // BT-3172: the same gap via a same-class self-send (BT-3150's shape)
-    // inside the inner loop instead of a direct field write — the inner
+    // The same gap via a same-class self-send (the same shape as
+    // `test_nested_letrec_direct_field_mutation_in_inner_loop_is_compile_error`
+    // above) inside the inner loop instead of a direct field write — the inner
     // loop's own `loop_body_threads_class_vars` matches `is_class_method_self_send`,
     // not `is_class_var_assignment`, but the outer loop's discard is
     // identical either way.
@@ -3648,7 +3637,7 @@ fn test_nested_letrec_self_send_mutation_in_inner_loop_is_compile_error() {
 
 #[test]
 fn test_nested_timesrepeat_class_var_mutation_in_inner_loop_is_compile_error() {
-    // BT-3172: the same gap via `timesRepeat:`/`to:do:` nesting, not just
+    // the same gap via `timesRepeat:`/`to:do:` nesting, not just
     // `whileTrue:` — `nested_letrec_loop_body` must recognize all four
     // Letrec-shaped loop selectors, not just `whileTrue:`/`whileFalse:`. The
     // outer body needs its own co-occurring local-variable mutation
@@ -3695,7 +3684,7 @@ fn test_instance_field_mutation_does_not_emit_shadow_write() {
 
 #[test]
 fn test_bt1213_block_value_with_captured_mutation_actor() {
-    // BT-1213: [count := count + 1] value in actor context
+    // [count := count + 1] value in actor context
     // Parse from source to get a realistic AST
     // Build AST manually: Object subclass: BT1213Actor
     //   testIt => count := 0. [count := count + 1] value. count
@@ -3958,7 +3947,7 @@ fn test_native_facade_meta_includes_native_flag() {
 
 #[test]
 fn test_meta_superclass_is_single_quoted_atom() {
-    // BT-2328: the leaf-constructor migration must emit the meta-map superclass as a
+    // the leaf-constructor migration must emit the meta-map superclass as a
     // single-quoted atom (`'superclass' => 'Actor'`). A stray leading quote ahead of
     // leaf::atom produced `''Actor'`, which desyncs Core Erlang atom quoting.
     let module = make_native_actor_module();
@@ -4036,7 +4025,7 @@ fn test_native_facade_register_class_includes_meta() {
     );
 }
 
-/// BT-2385: `native:` facade `register_class/0` bakes a `methodXref` list into
+/// `native:` facade `register_class/0` bakes a `methodXref` list into
 /// its `BuilderState`, exactly like the standard `register_class/0` path. Before
 /// this fix native classes (e.g. `Subprocess`, `TranscriptStream`) loaded with no
 /// baked `method_xref`, so they were absent from `beamtalk_xref` and every
@@ -4091,7 +4080,7 @@ fn test_native_facade_spawn_error_raises_instantiation_error() {
 
 #[test]
 fn test_native_facade_spawn_handles_ignore() {
-    // BT-1337: spawn/1 should handle `ignore` from start_link (init/1 returned ignore)
+    // spawn/1 should handle `ignore` from start_link (init/1 returned ignore)
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
@@ -4107,7 +4096,7 @@ fn test_native_facade_spawn_handles_ignore() {
 
 #[test]
 fn test_native_facade_spawn_wraps_crash_in_try_catch() {
-    // BT-1337: spawn/1 should wrap start_link in try-catch for crash handling
+    // spawn/1 should wrap start_link in try-catch for crash handling
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
@@ -4228,12 +4217,12 @@ fn test_native_facade_class_methods_exported() {
 
 #[test]
 fn test_native_facade_class_method_alias_param_emits_user_type_and_named_type() {
-    // BT-2909: `gen_server/native_facade.rs`'s `generate_class_specs` call
+    // `gen_server/native_facade.rs`'s `generate_class_specs` call
     // site must resolve alias-typed annotations to `user_type` references,
     // with the module also declaring the matching named `-type` in the
     // same attribute list (an `erlc` compile error otherwise). Native
     // facade modules use the same `is_value_type: false` spec path as
-    // regular actors (BT-1944 — instance methods don't get standalone
+    // regular actors (instance methods don't get standalone
     // specs), so this uses the class-side `connect:` method.
     let mut module = make_native_actor_with_class_methods();
     module.type_aliases.push(TypeAliasDefinition {
@@ -4268,7 +4257,7 @@ fn test_native_facade_class_method_alias_param_emits_user_type_and_named_type() 
 
 #[test]
 fn test_native_facade_cross_module_alias_reference_emits_user_type() {
-    // BT-2932: same wiring check as
+    // same wiring check as
     // `test_native_facade_class_method_alias_param_emits_user_type_and_named_type`
     // above, but the alias is declared in a *different* compiled module —
     // threaded in via `CodegenOptions::with_pre_loaded_aliases` — instead of
@@ -4346,12 +4335,12 @@ fn test_native_facade_doc_comments_in_builder_state() {
 }
 
 // ===========================================================================
-// BT-1210: Dispatch functions for self delegate methods
+// Dispatch functions for self delegate methods
 // ===========================================================================
 
 #[test]
 fn test_native_facade_dispatch_exported() {
-    // BT-1210: Dispatch functions for self delegate methods must be exported
+    // Dispatch functions for self delegate methods must be exported
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
@@ -4367,7 +4356,7 @@ fn test_native_facade_dispatch_exported() {
 
 #[test]
 fn test_native_facade_dispatch_extracts_pid() {
-    // BT-1210: Dispatch functions extract pid from Self via element(4, Self)
+    // Dispatch functions extract pid from Self via element(4, Self)
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
@@ -4384,7 +4373,7 @@ fn test_native_facade_dispatch_extracts_pid() {
 
 #[test]
 fn test_native_facade_dispatch_calls_sync_send() {
-    // BT-1210: Dispatch functions call beamtalk_actor:sync_send/3
+    // Dispatch functions call beamtalk_actor:sync_send/3
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
@@ -4400,7 +4389,7 @@ fn test_native_facade_dispatch_calls_sync_send() {
 
 #[test]
 fn test_native_facade_dispatch_unary_arity() {
-    // BT-1210: Unary self delegate dispatch has arity 1 (just Self)
+    // Unary self delegate dispatch has arity 1 (just Self)
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
@@ -4412,7 +4401,7 @@ fn test_native_facade_dispatch_unary_arity() {
 
 #[test]
 fn test_native_facade_dispatch_keyword_arity() {
-    // BT-1210: Keyword self delegate dispatch has arity = params + 1 (for Self)
+    // Keyword self delegate dispatch has arity = params + 1 (for Self)
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
@@ -4424,7 +4413,7 @@ fn test_native_facade_dispatch_keyword_arity() {
 
 #[test]
 fn test_native_facade_no_dispatch_for_beamtalk_body() {
-    // BT-1210: Methods with full Beamtalk bodies should NOT get dispatch functions
+    // Methods with full Beamtalk bodies should NOT get dispatch functions
     let module = make_native_actor_with_class_methods();
     let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
     let code = result.unwrap();
@@ -4437,7 +4426,7 @@ fn test_native_facade_no_dispatch_for_beamtalk_body() {
 
 #[test]
 fn test_class_method_self_send_in_block() {
-    // BT-1397: Class method self-send inside a block should produce valid Core Erlang.
+    // Class method self-send inside a block should produce valid Core Erlang.
     // Previously, the open-scope `let ... in ` from the self-send was not closed,
     // resulting in `syntax error before: ']'` from the Core Erlang parser.
     let src = r"Object subclass: Foo
@@ -4457,7 +4446,7 @@ fn test_class_method_self_send_in_block() {
     );
     let code = result.unwrap();
     // The block body should call class_compare:with: directly and close with the result var.
-    // Before BT-1397, the open-scope `let ... in` was left unclosed, producing a parse error.
+    // The open-scope `let ... in` must be closed, not left unclosed (which would produce a parse error).
     assert!(
         code.contains("'class_compare:with:'"),
         "Should call class_compare:with: directly. Got:\n{code}"
@@ -4474,7 +4463,7 @@ fn test_class_method_self_send_in_block() {
 
 #[test]
 fn test_class_method_self_send_in_block_local_assignment() {
-    // BT-1397: Local assignment with class method self-send as RHS inside a block.
+    // Local assignment with class method self-send as RHS inside a block.
     // The open-scope from the self-send must be emitted before the let binding.
     let src = r"Object subclass: Bar
   class double: x => x * 2
@@ -4505,7 +4494,7 @@ fn test_class_method_self_send_in_block_local_assignment() {
     );
 }
 
-/// BT-1610: A module with only Protocol definitions (no classes) should still
+/// A module with only Protocol definitions (no classes) should still
 /// generate `register_class/0` that registers the protocols.
 #[test]
 fn protocol_only_module_generates_register_class() {
@@ -4569,7 +4558,7 @@ fn protocol_only_module_generates_register_class() {
         "Should reference protocol name. Got:\n{code}"
     );
 
-    // BT-1611: Should include required_class_methods key
+    // Should include required_class_methods key
     assert!(
         code.contains("'required_class_methods'"),
         "Should include required_class_methods key. Got:\n{code}"
@@ -4585,7 +4574,7 @@ fn protocol_only_module_generates_register_class() {
 #[test]
 #[allow(clippy::similar_names)]
 fn test_bt_1944_typed_param_does_not_change_actor_codegen() {
-    // BT-1944: Type annotations on method params should be erasable — they
+    // Type annotations on method params should be erasable — they
     // must NOT change the generated Core Erlang dispatch/body code for actors.
     // Uses a multi-keyword method matching the original reproducer:
     // `executeActivity:selector:args:timeout:` with `:: Integer | Nil` on last param.
@@ -4628,7 +4617,7 @@ fn test_bt_1944_typed_param_does_not_change_actor_codegen() {
                 !line.contains("'param_types'")
                     && !line.contains("'methodSource'")
                     && !line.contains("'methodSignatures'")
-                    // ADR 0087 Phase 2 (BT-2298): the typed param adds a class
+                    // ADR 0087 Phase 2: the typed param adds a class
                     // reference in its type annotation, which methodXref records.
                     // That is metadata, not dispatch/body, so strip it too.
                     && !line.contains("'methodXref'")
@@ -4653,7 +4642,7 @@ fn test_bt_1944_typed_param_does_not_change_actor_codegen() {
     );
 }
 
-/// ADR 0087 Phase 2 (BT-2298): `register_class/0` bakes a `methodXref` field
+/// ADR 0087 Phase 2: `register_class/0` bakes a `methodXref` field
 /// into the `BuilderState` map. Each entry records the method's defining line,
 /// the selectors it sends (with receiver kind), and class references — all with
 /// `source_status => indexed`.
@@ -4710,13 +4699,12 @@ fn test_method_xref_baked_into_register_class() {
         code.contains("'source_status' => 'indexed'"),
         "rows should be tagged indexed. Got:\n{code}"
     );
-    // BT-3073: `Counter` no longer carries synthetic class-side rows for
-    // `new`/`new:`/`spawn`/`spawnWith:` — BT-3071/BT-3072 lifted those bodies
-    // into real, source-backed class methods on `Actor` itself
+    // `Counter` no longer carries synthetic class-side rows for
+    // `new`/`new:`/`spawn`/`spawnWith:` — those bodies are real,
+    // source-backed class methods on `Actor` itself
     // (`stdlib/src/actor.bt`), so a subclass like `Counter` genuinely
     // *inherits* them rather than *defining* them, and its own methodXref
-    // carries no row for them at all (the honest Smalltalk answer — see
-    // BT-2614, which introduced the now-removed rows). Bound the methodXref
+    // carries no row for them at all (the honest Smalltalk answer). Bound the methodXref
     // payload to the next class-info field (`'classState'`) so the assertions
     // below cannot be satisfied by unrelated parts of the generated module.
     let mx_start = code.find("'methodXref' => [").expect("methodXref present");
@@ -4728,7 +4716,7 @@ fn test_method_xref_baked_into_register_class() {
     // is not tripped by unrelated nested rows. The increment row runs from its
     // `'selector' => 'increment'` key up to the start of the next xref row — NOT
     // the first nested `}~`, which would truncate the slice mid-row inside the
-    // `sends` list (BT-2622).
+    // `sends` list.
     let inc_pos = mx_seg
         .find("'selector' => 'increment'")
         .expect("increment row present");
@@ -4745,7 +4733,7 @@ fn test_method_xref_baked_into_register_class() {
         !inc_row.contains("synthetic_origin"),
         "synthetic_origin must be omitted for the indexed increment row. Got:\n{inc_row}"
     );
-    // BT-3073: `new`/`new:`/`spawn`/`spawnWith:` are inherited from `Actor`,
+    // `new`/`new:`/`spawn`/`spawnWith:` are inherited from `Actor`,
     // not defined by `Counter` — no top-level row for them, synthetic or
     // otherwise. Match on the `class_side` + `selector` pair (not just
     // `'selector' => '<sel>'` in isolation) so a legitimate nested `sends`
@@ -4760,13 +4748,13 @@ fn test_method_xref_baked_into_register_class() {
     }
 }
 
-/// BT-3439: `register_class/0` bakes a `stateVarXref` field into the
+/// `register_class/0` bakes a `stateVarXref` field into the
 /// `BuilderState` map, the state-var analogue of `methodXref` — one row per
 /// declared instance variable, carrying its name and 1-based declaration
 /// line. Covers both a defaulted `state:` slot and a typed slot with *no*
 /// default value (`state: name :: Type`, no `= ...`) — the exact shape the
-/// VS Code sidebar's `findStateVarDeclaration` regex fails to match (BT-3439
-/// investigation), which is precisely why this baked line data exists: so
+/// VS Code sidebar's `findStateVarDeclaration` regex fails to match, which
+/// is precisely why this baked line data exists: so
 /// `beamtalk.navigateToStateVar` no longer needs that regex to succeed.
 #[test]
 fn test_state_var_xref_baked_into_register_class() {
@@ -4803,7 +4791,7 @@ fn test_state_var_xref_baked_into_register_class() {
     );
 }
 
-/// ADR 0087 Phase 6 (BT-2304): compiler-generated auto-accessors for a
+/// ADR 0087 Phase 6: compiler-generated auto-accessors for a
 /// `Value subclass:` class ride the `method_xref` write path with
 /// `source_status => synthetic` and a derived `synthetic_origin` line pointing
 /// at the generating slot declaration. They are included by default — the
@@ -4866,7 +4854,7 @@ fn test_method_xref_emits_synthetic_accessors_for_value_class() {
     );
 }
 
-/// ADR 0087 Phase 6 (BT-2304): an `Object subclass:` (not a value class) gets no
+/// ADR 0087 Phase 6: an `Object subclass:` (not a value class) gets no
 /// auto-accessors, so no synthetic rows are emitted.
 #[test]
 fn test_method_xref_no_synthetic_rows_for_object_class() {
@@ -4886,7 +4874,7 @@ fn test_method_xref_no_synthetic_rows_for_object_class() {
     );
 }
 
-/// ADR 0087 Phase 6 (BT-2304): a user-defined accessor suppresses the synthetic
+/// ADR 0087 Phase 6: a user-defined accessor suppresses the synthetic
 /// one for that slot — `compute_auto_slot_methods` already excludes hand-defined
 /// selectors, so the synthetic emission must not double-emit. The hand-written
 /// `x` getter is `indexed`, and there is no synthetic `x` row.
@@ -4937,7 +4925,7 @@ fn test_method_xref_user_accessor_suppresses_synthetic() {
     );
 }
 
-/// ADR 0087 Phase 2 (BT-2298): a send to a selector longer than the 255-byte
+/// ADR 0087 Phase 2: a send to a selector longer than the 255-byte
 /// Erlang atom limit (e.g. a 20-keyword auto-constructor) must be dropped from
 /// the xref `sends` list — emitting it as an atom would fail `core_scan` at
 /// BEAM-compile time. The generated Core Erlang must still be well-formed.
@@ -4977,9 +4965,9 @@ fn test_method_xref_drops_oversized_selectors() {
     );
 }
 
-// ── BT-2499: initialize chain codegen coverage ────────────────────────────
+// ── initialize chain codegen coverage ────────────────────────────
 
-/// BT-1417/BT-1541: When an Actor defines an `initialize` method, `init/1`
+/// When an Actor defines an `initialize` method, `init/1`
 /// must NOT call it inline. Instead it emits a `__skip_initialize__` guard
 /// and returns `{'ok', CleanState1, {'continue', 'initialize'}}` so OTP
 /// invokes `handle_continue/2` after the message loop starts, avoiding
@@ -4998,7 +4986,7 @@ fn test_actor_with_initialize_defers_to_handle_continue() {
     let code =
         generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
 
-    // init/1 must contain the __skip_initialize__ guard (BT-1541) so that when
+    // init/1 must contain the __skip_initialize__ guard so that when
     // a subclass calls this as a parent state-builder, initialize is not
     // dispatched a second time.
     assert!(
@@ -5020,7 +5008,7 @@ fn test_actor_with_initialize_defers_to_handle_continue() {
     );
 }
 
-/// BT-1951 (ADR 0078): When an Actor defines `initialize`, `handle_continue/2`
+/// ADR 0078: When an Actor defines `initialize`, `handle_continue/2`
 /// must build a pdict-stash + `safe_dispatch` loop so each class in the
 /// initialize chain gets a chance to run. Verifies the pdict stash/restore,
 /// the `safe_dispatch` call, and the final `noreply` return.
@@ -5050,7 +5038,7 @@ fn test_handle_continue_dispatches_initialize_chain() {
         "handle_continue/2 must match on 'initialize' continuation. Got:\n{code}"
     );
 
-    // BT-1325: pdict stash/restore brackets every safe_dispatch call to
+    // pdict stash/restore brackets every safe_dispatch call to
     // preserve re-entrant self-send semantics inside initialize.
     assert!(
         code.contains("'$bt_actor_state'"),
@@ -5070,12 +5058,12 @@ fn test_handle_continue_dispatches_initialize_chain() {
     );
 }
 
-/// BT-1417: When a class inherits from a user-defined Actor (not directly
+/// When a class inherits from a user-defined Actor (not directly
 /// from `Actor`), `init/1` must call the parent's `init/1` to accumulate
 /// inherited state, then merge the child's own fields on top, and propagate
 /// any `{error, Reason}` the parent returns.
 ///
-/// BT-2768: This is also the cross-file inherited-state regression coverage.
+/// This is also the cross-file inherited-state regression coverage.
 /// The parent (`Counter`) is compiled in a *separate* module — its AST is absent
 /// here — yet the child correctly pulls the parent's state via `bt@counter:init/1`.
 /// This is why the old AST-only `collect_inherited_fields` was removed: the
@@ -5248,7 +5236,7 @@ fn test_actor_typed_union_non_nil_field_triggers_validation() {
         code.contains("'uninitialized_state_error'"),
         "Non-nil Union field should trigger typed-no-default validation. Got:\n{code}"
     );
-    // BT-2717: the typed-no-default field-check path must also strip __local__
+    // the typed-no-default field-check path must also strip __local__
     // threading temps from the committed post-initialize state — the `let
     // InitCleanState = …` binding is emitted before the nested field-check case,
     // and the success arm replies with it.
@@ -5534,7 +5522,7 @@ fn test_inherited_typed_no_default_fallback_false_or_type_display() {
 
 #[test]
 fn test_bt_2720_native_object_instance_delegate_lowers_to_native_call() {
-    // ADR 0101 / BT-2720: an instance-side `self delegate` on a `native:`
+    // ADR 0101: an instance-side `self delegate` on a `native:`
     // Object lowers through beamtalk_erlang_proxy:native_call/4, prepending
     // Self and carrying {Class, Sel} context.
     let src = concat!(
@@ -5567,7 +5555,7 @@ fn test_bt_2720_native_object_instance_delegate_lowers_to_native_call() {
 
 #[test]
 fn test_bt_2720_native_object_class_delegate_omits_self() {
-    // ADR 0101 / BT-2720: a class-side `self delegate` omits self from the arg
+    // ADR 0101: a class-side `self delegate` omits self from the arg
     // list (class methods are not instances).
     let src = concat!(
         "Object subclass: Stream native: beamtalk_stream\n",
@@ -5795,7 +5783,7 @@ fn test_code_change_delegates_to_beamtalk_hot_reload() {
 
 #[test]
 fn test_terminate_lifecycle_stop_telemetry() {
-    // generate_terminate must emit lifecycle-stop telemetry (BT-1638) via
+    // generate_terminate must emit lifecycle-stop telemetry via
     // beamtalk_actor:maybe_execute_telemetry with the 'stop' event path.
     let code = codegen("Actor subclass: TestActor\n  state: x = 0\n");
     assert!(
@@ -5814,7 +5802,7 @@ fn test_terminate_lifecycle_stop_telemetry() {
 
 #[test]
 fn test_terminate_uses_class_name_for_telemetry_metadata() {
-    // BT-1642: terminate/2 telemetry 'class' metadata must use the clean Beamtalk
+    // terminate/2 telemetry 'class' metadata must use the clean Beamtalk
     // class name (e.g. 'EventStore'), not the compiled module name (e.g.
     // 'bt@event_store'). This matches how dispatch traces report class names.
     let src = "Actor subclass: EventStore\n  state: count = 0\n";
@@ -5831,7 +5819,7 @@ fn test_terminate_uses_class_name_for_telemetry_metadata() {
 #[test]
 fn test_terminate_wraps_dispatch_in_try_catch() {
     // generate_terminate must wrap the 'terminate:' method dispatch in try-catch
-    // so that user exceptions cannot prevent OTP gen_server shutdown (BT-29).
+    // so that user exceptions cannot prevent OTP gen_server shutdown.
     let code = codegen("Actor subclass: TestActor\n  state: x = 0\n");
     assert!(
         code.contains("let _TermDisp = try call"),
@@ -6056,7 +6044,7 @@ fn test_generate_has_method_from_expression_based_module() {
     );
 }
 
-// ── BT-3467: actor has_method/1 matches value-type has_method/1 ────────────
+// ── actor has_method/1 matches value-type has_method/1 ────────────
 //
 // `gen_server::dispatch::generate_has_method` (actor) and
 // `value_type_codegen::generate_primitive_has_method` (value type) implement
@@ -6139,7 +6127,7 @@ fn unary_method(name: &str) -> MethodDefinition {
 }
 
 /// A `doesNotUnderstand:args:` method whose body is a structural (unquoted)
-/// intrinsic (BT-1763) — the shape `class_has_catch_all_dnu` recognizes as a
+/// intrinsic — the shape `class_has_catch_all_dnu` recognizes as a
 /// catch-all DNU handler (e.g. `Erlang`/`ErlangModule` in stdlib), as
 /// opposed to a regular Beamtalk-body DNU override (e.g. `TimeoutProxy`),
 /// which does *not* count.
@@ -6184,7 +6172,7 @@ fn test_generate_has_method_actor_checks_extension_registry() {
     // a selector it doesn't recognize locally (`generate_primitive_has_method`),
     // so `anActor respondsTo: #anExtensionMethod` and `aValue respondsTo:
     // #anExtensionMethod` must answer the same way for the identical
-    // situation. BT-3467: actor has_method/1 now consults the extension
+    // situation. Actor has_method/1 now consults the extension
     // registry too, via the shared `DispatchSpec` emitter.
     let class = actor_class_def("Counter", "Actor", vec![unary_method("increment")]);
     let module = module_with_class(class);
@@ -6202,14 +6190,14 @@ fn test_generate_has_method_actor_checks_extension_registry() {
 fn test_generate_has_method_actor_delegates_to_superclass() {
     // Value-type has_method/1 delegates to its superclass module for a
     // selector it doesn't recognize locally, so an inherited method reports
-    // `respondsTo:` true. BT-3467: actor has_method/1 now does the same
+    // `respondsTo:` true. Actor has_method/1 now does the same
     // reflection — an inherited selector answers `respondsTo:` true — but
     // *dynamically*, via `beamtalk_dispatch:responds_to/2`'s live
     // class-registry walk (the same mechanism actor message dispatch and
     // `respondsTo:` already use), not a compile-time module reference — see
     // `SuperclassDelegation`'s doc comment. A subclass no longer answers
     // `respondsTo:` false for a selector only an ancestor defines, and stays
-    // correct across a hot-reloaded ancestor (BT-845).
+    // correct across a hot-reloaded ancestor.
     let class = actor_class_def("Counter", "Actor", vec![unary_method("increment")]);
     let module = module_with_class(class);
     let generator = CoreErlangGenerator::new("counter");
@@ -6226,10 +6214,10 @@ fn test_generate_has_method_actor_delegates_to_superclass() {
 #[test]
 fn test_generate_has_method_actor_honors_catch_all_dnu() {
     // A class whose doesNotUnderstand:args: is a structural (unquoted)
-    // intrinsic (BT-1763, e.g. Erlang/ErlangModule) accepts every selector —
+    // intrinsic (e.g. Erlang, ErlangModule) accepts every selector —
     // value-type has_method/1 short-circuits to `true` unconditionally for
-    // such a class. BT-3467: actor has_method/1 now does the same, via the
-    // shared `DispatchSpec` emitter. BT-3482: actor has_method/1 also emits
+    // such a class. Actor has_method/1 now does the same, via the
+    // shared `DispatchSpec` emitter. Actor has_method/1 also emits
     // a has_method_local/1 sibling — the strictly-local probe used by
     // beamtalk_dispatch:class_chain_step/6 — which short-circuits to true
     // too, since a catch-all-DNU class handles every selector at its own
@@ -6251,8 +6239,8 @@ fn test_generate_has_method_actor_honors_catch_all_dnu() {
 #[test]
 fn test_generate_safe_dispatch_structure() {
     // safe_dispatch/3 must wrap dispatch/4 in a try/catch that returns the
-    // stacktrace on failure (BT-1822) and calls beamtalk_actor:make_self/1 first
-    // (BT-161). The generated call must reference the module's own dispatch fn.
+    // stacktrace on failure and calls beamtalk_actor:make_self/1 first.
+    // The generated call must reference the module's own dispatch fn.
     let mut generator = CoreErlangGenerator::new("my_counter");
     let doc = generator.generate_safe_dispatch().unwrap();
     let output = doc.to_pretty_string();
@@ -6261,7 +6249,7 @@ fn test_generate_safe_dispatch_structure() {
         output.contains("'safe_dispatch'/3 = fun (Selector, Args, State) ->"),
         "Should generate safe_dispatch/3 header. Got: {output}"
     );
-    // BT-161: Self must be constructed via make_self before dispatch
+    // Self must be constructed via make_self before dispatch
     assert!(
         output.contains("call 'beamtalk_actor':'make_self'(State)"),
         "Should construct Self via make_self/1. Got: {output}"
@@ -6280,7 +6268,7 @@ fn test_generate_safe_dispatch_structure() {
         output.contains("of Result -> Result"),
         "Happy path should pass Result through. Got: {output}"
     );
-    // BT-1822: stacktrace captured and returned in error tuple
+    // stacktrace captured and returned in error tuple
     assert!(
         output.contains("catch <Type, Error, Stacktrace>"),
         "Should catch with stacktrace variable. Got: {output}"
@@ -6356,7 +6344,7 @@ fn test_method_table_with_script_methods_includes_arity() {
     );
 }
 
-// ─── BT-2998: bare `new` on an opaque `native:` class ────────────────────────
+// ─── bare `new` on an opaque `native:` class ────────────────────────
 
 #[test]
 fn test_bt_2998_native_class_without_fields_raises_on_new() {
@@ -6454,8 +6442,8 @@ fn test_bt_2998_non_native_value_class_unaffected() {
 
 #[test]
 fn test_bt_2998_opaque_native_class_registers_as_non_constructible() {
-    // BT-877's compile-time `isConstructible` flag must agree with the
-    // now-raising `new/0`, instead of leaving the runtime to discover it.
+    // The compile-time `isConstructible` flag must agree with the
+    // raising `new/0`, instead of leaving the runtime to discover it.
     let src = concat!(
         "Value subclass: Uuid native: beamtalk_uuid\n",
         "  class sealed v4 -> Uuid => self delegate\n",
@@ -6469,7 +6457,7 @@ fn test_bt_2998_opaque_native_class_registers_as_non_constructible() {
 
 // ── Foreign cross-class extension codegen (gen_server/extensions.rs) ──────
 
-/// BT-2250: A unary foreign extension on a stdlib value class generates a
+/// A unary foreign extension on a stdlib value class generates a
 /// `beamtalk_extensions:register/5` call with a 2-arity fun.
 ///
 /// The target class (`String`) is not declared in this module, so the
@@ -6501,7 +6489,7 @@ fn test_foreign_extension_unary_emits_register_with_2arity_fun() {
     );
 }
 
-/// BT-2250: A keyword foreign extension generates `_ExtArgs` list unpacking
+/// A keyword foreign extension generates `_ExtArgs` list unpacking
 /// for each declared parameter.
 #[test]
 fn test_foreign_extension_keyword_unpacks_ext_args() {
@@ -6522,7 +6510,7 @@ fn test_foreign_extension_keyword_unpacks_ext_args() {
     );
 }
 
-/// BT-2250: A class-side foreign extension (`Target class >> sel`) registers
+/// A class-side foreign extension (`Target class >> sel`) registers
 /// under the metaclass tag `'Target class'` (with a space), not the bare class
 /// name. This is the established tag convention for metaclass registration.
 #[test]
@@ -6544,7 +6532,7 @@ fn test_foreign_extension_class_side_uses_metaclass_tag() {
     );
 }
 
-/// BT-2250: A self-extension (target class declared in the same module) is
+/// A self-extension (target class declared in the same module) is
 /// folded into the host class module and must NOT emit a
 /// `beamtalk_extensions:register` call.
 #[test]
@@ -6566,10 +6554,10 @@ fn test_self_extension_not_registered_via_beamtalk_extensions() {
 
 #[test]
 fn test_nested_foldl_self_send_in_inner_do_is_compile_error() {
-    // BT-3172 audit (acceptance criteria bullet 3): the same silent-loss gap
+    // The same silent-loss gap is
     // reachable via `Foldl*`-in-`Foldl*` nesting (`do:`-in-`do:`), not just
     // `Letrec`-in-`Letrec`. Confirmed empirically to be WORSE than silent
-    // loss before this fix: the outer `do:`'s own `plan.threads_class_vars`
+    // loss: the outer `do:`'s own `plan.threads_class_vars`
     // comes back `true` (Foldl's gate is `body_analysis.has_self_sends`,
     // which — unlike `loop_body_threads_class_vars` — recurses into the
     // nested `do:`'s own block and finds `self bump`), so the outer fold
@@ -6603,7 +6591,7 @@ fn test_nested_foldl_self_send_in_inner_do_is_compile_error() {
 
 #[test]
 fn test_nested_letrec_self_send_buried_in_conditional_compiles() {
-    // BT-3172 review follow-up: a same-class self-send buried inside an
+    // A same-class self-send buried inside an
     // `ifTrue:` conditional (NOT a bare top-level statement) within an
     // inner `whileTrue:` that's itself nested inside an outer `whileTrue:`
     // must NOT be rejected. `Letrec`'s own real `threads_class_vars` gate
@@ -6615,7 +6603,7 @@ fn test_nested_letrec_self_send_buried_in_conditional_compiles() {
     // `class_var_sub_expr_test.bt`'s
     // `testTickInLoopConditionalCompilesAndRuns` already pins as
     // accepted, silently-non-threading behavior at a single loop level
-    // (BT-2308, out of BT-3172's scope). The inner loop was never going to
+    // (out of scope here). The inner loop was never going to
     // attempt `ClassVars` threading for this self-send in the first place,
     // so nothing is "lost" here for the outer loop to fail to recover —
     // rejecting only the nested-loop variant of this exact same shape
@@ -6640,7 +6628,7 @@ fn test_nested_letrec_self_send_buried_in_conditional_compiles() {
 
 #[test]
 fn test_nested_foldl_self_send_buried_in_conditional_is_compile_error() {
-    // BT-3172 review follow-up (contrast case): the same "self-send buried
+    // Contrast case: the same "self-send buried
     // in a conditional, not a bare top-level statement" shape as the
     // Letrec test above, but inside a `Foldl*` (`do:`) body instead —
     // `Foldl*`'s own real `threads_class_vars` gate
@@ -6667,7 +6655,7 @@ fn test_nested_foldl_self_send_buried_in_conditional_is_compile_error() {
 
 #[test]
 fn test_nested_detect_self_send_in_inner_detect_is_compile_error() {
-    // BT-3172 review follow-up: `nested_loop_or_fold_body` must also cover
+    // `nested_loop_or_fold_body` must also cover
     // the predicate-based `Foldl*` shapes (`detect:`/`count:`/`takeWhile:`/
     // `dropWhile:`/`partition:`/`groupBy:`), not just `do:`/`collect:`/
     // `select:`/`reject:`/`anySatisfy:`/`allSatisfy:`/`inject:into:` —
@@ -6697,7 +6685,7 @@ fn test_nested_detect_self_send_in_inner_detect_is_compile_error() {
 
 #[test]
 fn test_mixed_letrec_nested_in_foldl_is_compile_error() {
-    // BT-3172 audit (acceptance criteria bullet 3): mixed nesting — a
+    // Mixed nesting — a
     // `Letrec` (`whileTrue:`) loop with a direct class-var field write,
     // nested inside a `Foldl*` (`do:`) body — hits the same gap. The inner
     // `whileTrue:`'s own `ThreadingPlan::threads_class_vars` (Letrec's
@@ -6727,7 +6715,7 @@ fn test_mixed_letrec_nested_in_foldl_is_compile_error() {
 
 #[test]
 fn test_mixed_foldl_nested_in_letrec_is_compile_error() {
-    // BT-3172 audit (acceptance criteria bullet 3): the reverse mixed
+    // The reverse mixed
     // nesting — a `Foldl*` (`do:`) body with a direct class-var field
     // write, nested inside a `Letrec` (`whileTrue:`) loop. The inner `do:`
     // never reaches Foldl's own `ClassVars` threading at all here (a bare
@@ -6756,7 +6744,7 @@ fn test_mixed_foldl_nested_in_letrec_is_compile_error() {
 
 #[test]
 fn test_class_builder_cascade_in_second_field_assignment_does_not_corrupt_state_version() {
-    // BT-3289: a `classBuilder … addClassMethod:body:`/`classMethods:` cascade
+    // a `classBuilder … addClassMethod:body:`/`classMethods:` cascade
     // lowers its block via `generate_class_method_fun_from_block`, which resets
     // the instance-`State` version counter (`reset_state_version`) to give the
     // class-method fun its own fresh count — but nothing saved/restored the
@@ -6800,7 +6788,8 @@ fn test_class_builder_cascade_in_second_field_assignment_does_not_corrupt_state_
 
 #[test]
 fn test_nested_class_builder_cascade_does_not_corrupt_current_method_params() {
-    // BT-3300: the same unguarded-reset shape as BT-3289's `state_version` leak
+    // The same unguarded-reset shape as the `state_version` leak in
+    // `test_class_builder_cascade_in_second_field_assignment_does_not_corrupt_state_version`
     // above, for `current_method_params`/`current_method_param_types` instead.
     // `generate_class_method_fun_from_block` unconditionally clears both at its
     // start to give the class-method fun its own fresh parameter list — but
@@ -6819,8 +6808,8 @@ fn test_nested_class_builder_cascade_does_not_corrupt_current_method_params() {
     // hardcoded `"Selector"` var name that was never bound in this scope —
     // `beamtalk_erlang_proxy:dispatch(Selector, Arguments, Self)` — which
     // would fail `erlc` with an unbound-variable error rather than a clean
-    // Rust-side panic (so, unlike BT-3289, this isn't caught by the ADR-0111
-    // ThreadedIr verifier). Same reachability caveat as BT-3289: unreachable
+    // Rust-side panic (so, unlike the sibling test above, this isn't caught
+    // by the ADR-0111 ThreadedIr verifier). Same reachability caveat: unreachable
     // through the CLI (one class per `.bt` file) or the REPL (one expression
     // per turn) — only direct `generate_module` library use, as fuzzing does,
     // can construct this AST shape.
@@ -6849,7 +6838,7 @@ fn test_nested_class_builder_cascade_does_not_corrupt_current_method_params() {
     );
 }
 
-// ── Abstract actor codegen (BT-105, BT-403) ──────────────────────────────────
+// ── Abstract actor codegen ──────────────────────────────────
 //
 // abstract Actor subclass generates:
 //  - spawn/0 and spawn/1 as instantiation_error stubs (not safe_spawn calls)
@@ -6861,7 +6850,7 @@ fn test_nested_class_builder_cascade_does_not_corrupt_current_method_params() {
 
 #[test]
 fn test_abstract_actor_spawn_raises_instantiation_error() {
-    // BT-105: abstract classes generate spawn/0 as an error stub, not safe_spawn.
+    // abstract classes generate spawn/0 as an error stub, not safe_spawn.
     let src = "abstract Actor subclass: AbstractShape\n  area => 0\n";
     let code = codegen(src);
     assert!(
@@ -6880,7 +6869,7 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
 
 #[test]
 fn test_abstract_actor_spawn_1_is_error_stub() {
-    // BT-105: abstract classes generate spawn/1 as an error stub too.
+    // abstract classes generate spawn/1 as an error stub too.
     let src = "abstract Actor subclass: AbstractShape\n  area => 0\n";
     let code = codegen(src);
     assert!(
@@ -6895,7 +6884,7 @@ fn test_abstract_actor_spawn_1_is_error_stub() {
 
 #[test]
 fn test_abstract_actor_has_stub_handle_continue() {
-    // BT-403: abstract classes emit a minimal handle_continue/2 stub with no
+    // abstract classes emit a minimal handle_continue/2 stub with no
     // initialize dispatch chain — the chain would be unreachable anyway since
     // abstract actors can never be instantiated.
     let src = "abstract Actor subclass: AbstractShape\n  area => 0\n";
@@ -6912,7 +6901,7 @@ fn test_abstract_actor_has_stub_handle_continue() {
 
 #[test]
 fn test_abstract_actor_has_stub_handle_cast_and_call() {
-    // BT-403: abstract actor handle_cast/2 and handle_call/3 are stubs.
+    // abstract actor handle_cast/2 and handle_call/3 are stubs.
     let src = "abstract Actor subclass: AbstractShape\n  area => 0\n";
     let code = codegen(src);
     assert!(
@@ -6927,7 +6916,7 @@ fn test_abstract_actor_has_stub_handle_cast_and_call() {
 
 #[test]
 fn test_abstract_actor_safe_dispatch_is_simple_passthrough() {
-    // BT-403: abstract actor safe_dispatch/3 is a plain call to dispatch/4, not
+    // abstract actor safe_dispatch/3 is a plain call to dispatch/4, not
     // the try-catch error-isolation wrapper used by concrete actors.
     let src = "abstract Actor subclass: AbstractShape\n  area => 0\n";
     let code = codegen(src);
@@ -6986,7 +6975,7 @@ fn test_abstract_actor_with_class_method_exports_class_method() {
 
 #[test]
 fn bt3382_self_dispatch_receiver_of_conditional_threads_state_and_compiles_through_erlc() {
-    // BT-3382: `(self recordOnce: which) ifTrue:ifFalse:` — the self-send is
+    // `(self recordOnce: which) ifTrue:ifFalse:` — the self-send is
     // the RECEIVER of the conditional, not a block-body statement, so the
     // `_with_mutations` branch generators' block-mutation scan never even
     // sees it (neither block body itself contains a mutation). Confirms the
@@ -7011,10 +7000,10 @@ fn bt3382_self_dispatch_receiver_of_conditional_threads_state_and_compiles_throu
 
 #[test]
 fn bt3392_self_dispatch_nested_in_binary_op_operand_threads_state_and_compiles_through_erlc() {
-    // BT-3392: `1 + (self bumpCount)` inside an `ifTrue:` block body — the
+    // `1 + (self bumpCount)` inside an `ifTrue:` block body — the
     // self-send is a binary-op operand nested inside the block's own (only)
     // statement, neither the block's top-level statement (C11/C12b, already
-    // correct) nor the conditional's receiver (BT-3382, already fixed).
+    // correct) nor the conditional's receiver (already fixed).
     // Confirms the self-send's mutation is threaded via a real `Bind` AND
     // the generated code is real, erlc-valid Core Erlang.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly: flag =>\n    flag ifTrue: [\n      1 + (self bumpCount)\n    ] ifFalse: [\n      0\n    ].\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
@@ -7035,7 +7024,7 @@ fn bt3392_self_dispatch_nested_in_binary_op_operand_threads_state_and_compiles_t
 
 #[test]
 fn bt3433_pure_block_arg_state_mutation_does_not_leak_state_version_and_compiles_through_erlc() {
-    // BT-3433: a generic keyword message (not a recognized control-flow
+    // a generic keyword message (not a recognized control-flow
     // intrinsic) taking two block-literal arguments, where the FIRST block
     // has no direct field write and no *captured local* mutation (so
     // `generate_block` picks the plain/Tier-1 path, not
@@ -7067,7 +7056,7 @@ fn bt3433_pure_block_arg_state_mutation_does_not_leak_state_version_and_compiles
 
 #[test]
 fn bt3392_binary_op_hoist_does_not_reorder_past_a_non_self_send_operand() {
-    // BT-3392 code review finding: `(self.items at: idx) + (self
+    // `(self.items at: idx) + (self
     // bumpCount)` — the left operand is a message send but NOT a self-send,
     // so `hoist_self_sends_for_binary_op` must not treat it as safe to
     // hoist past. Confirms the self-dispatch for `bumpCount` is compiled
@@ -7088,21 +7077,18 @@ fn bt3392_binary_op_hoist_does_not_reorder_past_a_non_self_send_operand() {
 
 #[test]
 fn adr0118_order_unsafe_self_send_in_binary_op_now_threads_with_no_warning() {
-    // BT-3399/ADR 0118 phase 2a (BT-3417): same order-unsafe shape as the
+    // ADR 0118 phase 2a: same order-unsafe shape as the
     // test above — `(self.items at: idx) + (self bumpCount)`, non-last
     // inside an `ifTrue:` block reached through `generate_conditional_branch_inline`'s
-    // C12 catch-all — but this test used to be named
-    // `bt3399_order_unsafe_self_send_in_binary_op_emits_warning_and_still_compiles`
-    // and asserted the *fallback's* old behavior: the un-hoisted self-send's
-    // mutation silently dropped, with a compile-time warning naming it. ADR
-    // 0118's universal sequencing rule (`sequence_children`, reached here
-    // via C12's `thread_ahead`) makes that drop unrepresentable: the
-    // non-self-send `(self.items at: 1)` operand is bound to a temp AHEAD
-    // of `bumpCount`'s dispatch (preserving `at:`'s own evaluation-order
-    // guarantee), and `bumpCount`'s mutation threads through a real `Bind`
-    // instead. So `bumpCount`'s `NewState` is now genuinely extracted via
-    // `element(2, ...)`, and the BT-3399 warning no longer fires for this
-    // shape. Mirrors the stdlib regression coverage at
+    // C12 catch-all. ADR 0118's universal sequencing rule (`sequence_children`,
+    // reached here via C12's `thread_ahead`) makes an un-hoisted self-send's
+    // mutation silently dropping (with only a compile-time warning naming
+    // it) unrepresentable: the non-self-send `(self.items at: 1)` operand is
+    // bound to a temp AHEAD of `bumpCount`'s dispatch (preserving `at:`'s
+    // own evaluation-order guarantee), and `bumpCount`'s mutation threads
+    // through a real `Bind` instead. So `bumpCount`'s `NewState` is
+    // genuinely extracted via `element(2, ...)`, and no warning fires for
+    // this shape. Mirrors the stdlib regression coverage at
     // `stdlib/test/actor_conditional_mutations_test.bt`'s
     // `testSelfSendAsBinaryOpArgumentInBoundsThreadsMutation`.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = 0\n\n  triggerDirectly: flag =>\n    flag ifTrue: [\n      (self.items at: 1) + (self bumpCount)\n    ] ifFalse: [\n      0\n    ].\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
@@ -7136,10 +7122,10 @@ fn adr0118_order_unsafe_self_send_in_binary_op_now_threads_with_no_warning() {
 #[test]
 fn bt3396_self_dispatch_nested_in_conditional_receiver_and_threads_state_and_compiles_through_erlc()
 {
-    // BT-3396 shape 1: `((self recordOnce: which) and: [true]) ifTrue:ifFalse:`
+    // Shape 1: `((self recordOnce: which) and: [true]) ifTrue:ifFalse:`
     // — the conditional's receiver is an `and:` send whose OWN receiver is
     // the self-send. Neither block mutates, and the receiver is not itself
-    // a self-send (BT-3382's check), so only the widened
+    // a self-send (a separate check), so only the widened
     // `conditional_receiver_needs_threading` probe makes this conditional
     // inline; `compile_conditional_receiver` then threads the nested
     // dispatch ahead of the `and:` send. The generated code must be real,
@@ -7171,7 +7157,7 @@ fn bt3396_self_dispatch_nested_in_conditional_receiver_and_threads_state_and_com
 #[test]
 fn bt3396_self_dispatch_as_keyword_argument_in_method_body_threads_state_and_compiles_through_erlc()
 {
-    // BT-3396 shape 2: `#(10, 20, 30) at: (self bumpCount)` as a top-level
+    // Shape 2: `#(10, 20, 30) at: (self bumpCount)` as a top-level
     // method-body statement (`BodyExprKind::Pure`, not inside any
     // conditional) — the self-send is an argument to an arbitrary non-self
     // keyword send. The method-body `Pure` arm must hoist it as a real
@@ -7199,15 +7185,15 @@ fn bt3396_self_dispatch_as_keyword_argument_in_method_body_threads_state_and_com
 #[test]
 fn bt3396_self_dispatch_in_field_assignment_rhs_snapshots_prior_field_read_and_compiles_through_erlc()
  {
-    // BT-3396 shape 3 + evaluation order: `self.count := self.count + (self
+    // Shape 3 + evaluation order: `self.count := self.count + (self
     // bumpCount)` — the self-send is a sub-expression of a field
     // assignment's RHS (the `lower_field_assignment_bind`/`FieldAssignment`
-    // `source_version` hazard BT-3382's reverted prototype hit), AND the
+    // `source_version` hazard an earlier, reverted prototype hit), AND the
     // `self.count` read precedes it in evaluation order. The read must be
     // bound BEFORE the dispatch runs, so it keeps its source-order
     // (pre-bump) value.
     //
-    // ADR 0118 phase 1a (BT-3415): the sequencing rule binds the preceding
+    // ADR 0118 phase 1a: the sequencing rule binds the preceding
     // `self.count` read to a `_TmpN` temp (it is compiled against the
     // pre-dispatch `State` and bound ahead of the dispatch's `Bind`) — the
     // planner's `FieldSnap` snapshot is the same rule applied to one node
@@ -7253,11 +7239,11 @@ fn bt3396_self_dispatch_in_field_assignment_rhs_snapshots_prior_field_read_and_c
 
 #[test]
 fn bt3396_self_dispatch_after_order_unsafe_operand_is_sequenced_behind_a_temp() {
-    // BT-3392/BT-3396 refused to hoist a self-send past a non-self,
+    // This deliberately refuses to hoist a self-send past a non-self,
     // non-effect-free operand (`printString` may raise) and left
-    // `bumpCount` in its natural, state-dropping position (BT-3399).
+    // `bumpCount` in its natural, state-dropping position.
     //
-    // ADR 0118 phase 1a (BT-3415), §Decision 3: in method-body position the
+    // ADR 0118 phase 1a, §Decision 3: in method-body position the
     // sequencing rule binds the earlier operand to a `_TmpN` temp FIRST,
     // then runs the dispatch + real `State` `Bind`, then the `++` on the
     // temp and the dispatch result — evaluation order preserved by
@@ -7307,7 +7293,7 @@ fn bt3396_self_dispatch_after_order_unsafe_operand_is_sequenced_behind_a_temp() 
 
 #[test]
 fn bt3415_binary_operand_self_send_after_raising_operand_is_sequenced_in_method_body() {
-    // ADR 0118 phase 1a (BT-3415) acceptance shape: `(items at: idx) +
+    // ADR 0118 phase 1a acceptance shape: `(items at: idx) +
     // (self bump)` as an Actor method-body statement compiles to
     // `let _Tmp = <at:> in <dispatch> in let State1 = element(2, _SD) in
     // _Tmp + element(1, _SD)` — `at:` raises first (it is bound before the
@@ -7392,18 +7378,17 @@ fn bt3415_ffi_receiver_is_not_sequenced_but_its_self_send_argument_is() {
 
 #[test]
 fn bt3415_early_return_reply_state_threads_the_conditionals_own_mutation() {
-    // Adversarial review finding on #3717, superseded by ADR 0118 phase 4
-    // (BT-3420): `^ 1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])` — before
-    // BT-3420, the conditional receiver's dispatch chain minted `State1`
+    // ADR 0118 phase 4: `^ 1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])` —
+    // the conditional receiver's dispatch chain must not mint `State1`
     // INSIDE the conditional's own closed document
     // (`compile_conditional_receiver`'s open let-chain), invisible to the
-    // `^` arm's `current_state_var()` read, so the reply fell back to the
-    // stale pre-conditional `State` — `flagTrue`'s mutation compiled and
-    // ran, but the method's own reply (and any state read afterward)
-    // couldn't see it. BT-3420 makes the mutation-threaded `ifTrue:ifFalse:`
+    // `^` arm's `current_state_var()` read — that would make the reply fall
+    // back to the stale pre-conditional `State` even though `flagTrue`'s
+    // mutation compiled and ran, so the method's own reply (and any state
+    // read afterward) must see it. The mutation-threaded `ifTrue:ifFalse:` is
     // a real `ThreadedValue` producer whose prelude — including the
     // receiver's own hoisted `flagTrue` dispatch — splices into the `^`
-    // arm's `single_sequenced_child` sequencing, so the reply now correctly
+    // arm's `single_sequenced_child` sequencing, so the reply correctly
     // carries the prelude's own final version: `State1` from the
     // receiver's hoisted `flagTrue` dispatch, then `State2` from
     // `control_flow_tuple_to_threaded_value`'s own wrap of the
@@ -7449,14 +7434,14 @@ fn bt3415_early_return_reply_state_follows_the_prelude_when_there_is_one() {
 
 #[test]
 fn bt3416_thread_ahead_no_longer_warns_once_the_interpolation_segment_threads() {
-    // ADR 0118 phase 1b (BT-3416) superseded the BT-3415-era pin below
+    // ADR 0118 phase 1b superseded the BT-3415-era pin below
     // (`bt3415_thread_ahead_keeps_the_bt3399_warning_for_a_dropped_only_plan`):
     // a `thread_ahead` consumer (here `FieldAssignment`) whose RHS is a
     // `StringInterpolation` with an order-unsafe self-send in a LATER
     // segment — `"{self.items size}-{self bump}"` — used to run the
     // planner, which could not safely hoist `bump` ahead of the first
     // segment's `displayString` dispatch and so dropped the mutation with
-    // the BT-3399 warning. `threaded_string_interpolation` now moves
+    // a warning. `threaded_string_interpolation` now moves
     // BOTH segments' `let`-chains into the RHS's prelude, in order, so
     // `bump` dispatches (after the first segment's `displayString` call,
     // preserving evaluation order) and the warning is gone — the same fix
@@ -7529,7 +7514,7 @@ fn bt3416_self_send_nested_in_a_cast_sends_receiver_still_threads() {
 
 #[test]
 fn bt3418_field_assign_rhs_in_loop_body_threads_nested_self_send() {
-    // ADR 0118 phase 2b (BT-3418): `self.count := self.count + (self
+    // ADR 0118 phase 2b: `self.count := self.count + (self
     // bump)` as a `do:` loop-body statement — the field-assignment RHS
     // path inside `generate_threaded_loop_body_inner`. Before this phase
     // the nested self-send's mutation was silently dropped (no hoist ran
@@ -7555,11 +7540,11 @@ fn bt3418_field_assign_rhs_in_loop_body_threads_nested_self_send() {
 
 #[test]
 fn bt3418_local_assign_rhs_in_loop_body_threads_nested_self_send_with_no_warning() {
-    // ADR 0118 phase 2b (BT-3418): `y := 1 + (self bump)` as a `do:`
+    // ADR 0118 phase 2b: `y := 1 + (self bump)` as a `do:`
     // loop-body statement — `generate_local_var_assignment_in_loop`'s own
-    // RHS. This is the exact shape the BT-3399 warning used to fire for
-    // (an order-unsafe self-send binary-op operand silently dropped);
-    // `thread_ahead` now sequences it ahead of the RHS's own compile via
+    // RHS. This is the exact shape that would otherwise silently drop
+    // an order-unsafe self-send binary-op operand with only a warning;
+    // `thread_ahead` sequences it ahead of the RHS's own compile via
     // the universal sequencing rule, so the mutation threads and the
     // warning is gone.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = #(1, 2)\n\n  go =>\n    y := 0.\n    self.items do: [:x | y := 1 + (self bump)].\n    y\n\n  internal bump =>\n    self.count := self.count + 1\n    self.count\n";
@@ -7660,13 +7645,13 @@ fn bt3415_self_send_argument_of_self_send_sequences_args_before_dispatch() {
 
 #[test]
 fn bt3416_self_dispatch_in_later_interpolation_segment_now_threads_after_earlier_segment() {
-    // BT-3396 found that `generate_string_interpolation` dispatches
+    // `generate_string_interpolation` dispatches
     // `displayString` on each segment's value right after evaluating it,
     // before the next segment runs — a message send that may raise — so
     // hoisting a LATER segment's self-send ahead of an EARLIER segment's
     // `displayString` dispatch would reorder evaluation; the then-current
     // planner's fix was to leave it un-hoisted (dropping the mutation,
-    // with a warning). ADR 0118 phase 1b (BT-3416) replaces that with the
+    // with a warning). ADR 0118 phase 1b replaces that with the
     // sequencing rule: `threaded_string_interpolation` moves every
     // segment's `let`-chain up to and including the LAST one that needs
     // threading into the prelude, in order — so in `"{x}-{self
@@ -7715,13 +7700,13 @@ fn bt3416_self_dispatch_in_later_interpolation_segment_now_threads_after_earlier
     assert_compiles_through_erlc("bt3396_first_interpolation_segment_hoisted", &code);
 }
 
-// BT-3414 (ADR 0118 phase 0): three shapes from the ADR's 47-shape self-send
+// ADR 0118 phase 0: three shapes from the ADR's 47-shape self-send
 // position probe (§Context) PANICKED the ThreadedIr verifier (rather than
 // merely crashing at runtime or silently dropping a mutation) before ADR
-// 0118 phase 3 (BT-3419). A debug-build verifier panic
+// 0118 phase 3. A debug-build verifier panic
 // (`report_threaded_ir_verify_errors`'s `debug_assert!`, control_flow/mod.rs)
 // aborts the WHOLE test-binary invocation, so — unlike every other row in
-// the same probe — the two BT-3419 closes cannot live in a BUnit `.bt`
+// the same probe — the two closes below cannot live in a BUnit `.bt`
 // fixture (see stdlib/test/fixtures/self_send_position_counter.bt's header
 // comment); they are pinned here. The third (`bt3414_bare_and_inside_if_true_branch_inside_do_body`,
 // below) is a different shape — a bare-receiver `and:` inside an `ifTrue:`
@@ -7733,12 +7718,12 @@ fn bt3416_self_dispatch_in_later_interpolation_segment_now_threads_after_earlier
 fn bt3414_self_send_in_and_receiver_inside_while_true_condition_now_compiles_and_threads_state() {
     // `[i := i + 1. (self bumpCount) > 0 and: [i < 3]] whileTrue: [nil]` —
     // a self-send as the RECEIVER of an inline-threaded `and:`, itself the
-    // whileTrue: CONDITION block's last expression. Before ADR 0118 phase 3
-    // (BT-3419), `generate_while_true`'s mode selection only inspected the
-    // BODY's own mutations (trivially none — `[nil]`), so this fell to the
-    // simple (non-threading) codegen path, which compiled the condition as
-    // a genuine stateful Tier-2 closure and panicked the verifier
-    // (`UnboundVersion`). Now: `generate_while_true` also checks the
+    // whileTrue: CONDITION block's last expression. ADR 0118 phase 3:
+    // `generate_while_true`'s mode selection must not only inspect the
+    // BODY's own mutations (trivially none — `[nil]`) — falling to the
+    // simple (non-threading) codegen path would compile the condition as
+    // a genuine stateful Tier-2 closure and panic the verifier
+    // (`UnboundVersion`). `generate_while_true` also checks the
     // condition (`condition_has_state_effects`), routing this into the
     // mutation-threading path, and every iteration's `bumpCount` dispatch
     // correctly advances the actor's `count` field.
@@ -7759,7 +7744,7 @@ fn bt3414_self_send_as_and_receiver_alone_inside_while_true_condition_now_compil
  {
     // `[i := i + 1. (self flagTrue) and: [i < 3]] whileTrue: [nil]` — same
     // shape as above with a bare self-send (no binary-op wrapper) as the
-    // `and:` receiver. Also closed by ADR 0118 phase 3 (BT-3419).
+    // `and:` receiver. Also closed by ADR 0118 phase 3.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    i := 0\n    [\n      i := i + 1\n      (self flagTrue) and: [i < 3]\n    ] whileTrue: [nil]\n    i\n\n  internal flagTrue =>\n    self.count := self.count + 1\n    true\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -7778,14 +7763,14 @@ fn bt3414_self_send_as_and_receiver_alone_inside_while_true_condition_now_compil
 #[test]
 #[allow(clippy::too_many_lines)]
 fn threading_gates_agree_on_fixture_set() {
-    // BT-3414 (ADR 0118 phase 0): "does this conditional-shaped construct
+    // ADR 0118 phase 0: "does this conditional-shaped construct
     // need the inline mutation-threading path" has historically been
     // answered by several overlapping predicates — `control_flow_has_mutations`
     // (gen_server/methods.rs, used by the statement-level C11/C12 dispatch
     // to decide whether a `Match`/conditional send needs threaded lowering),
     // `conditional_receiver_needs_threading` (util.rs, one disjunct of the
     // same question — renamed from `contains_hoistable_self_send` by ADR
-    // 0118 phase 2b/BT-3418, which also moved it out of
+    // 0118 phase 2b, which also moved it out of
     // `control_flow/conditionals.rs`), and the gate behind `ifTrue:`,
     // `ifFalse:`, `ifTrue:ifFalse:`, `ifNotNil:`, and `and:`/`or:`
     // (intrinsics.rs, collapsed by this same issue into
@@ -7953,7 +7938,7 @@ fn bt3414_bare_and_inside_if_true_branch_inside_do_body_panics_verifier() {
     // `ifTrue:` branch, itself inside a `do:` loop body. The conditional
     // branch's own ThreadedIr frame and the enclosing loop body's frame both
     // end up producing a Bind for the same version: `NonLinearVersion`.
-    // Confirmed still panicking after ADR 0118 phase 2b (BT-3418, loop-body
+    // Confirmed still panicking after ADR 0118 phase 2b (loop-body
     // consumers): this statement routes through
     // `generate_threaded_loop_body_inner`'s separate `control_flow_has_mutations`
     // branch (an inline conditional with mutations, not any of phase 2b's

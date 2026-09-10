@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Diagnostic summary counters shared by `beamtalk lint`, `beamtalk build`,
-//! and the MCP `diagnostic_summary` tool (BT-2014).
+//! and the MCP `diagnostic_summary` tool.
 //!
 //! **DDD Context:** Source Analysis
 //!

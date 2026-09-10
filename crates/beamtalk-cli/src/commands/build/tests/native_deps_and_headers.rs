@@ -154,7 +154,7 @@ fn test_has_native_deps_false_when_no_native_anywhere() {
     );
 }
 
-// ── BT-1730: Class module header tests ──────────────────────────────────
+// ── Class module header tests ──────────────────────────────────
 
 #[test]
 fn test_generate_class_header_creates_hrl_with_macros() {

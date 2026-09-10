@@ -32,7 +32,7 @@ pub(crate) fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 
 /// Finds a project's `.bt` source files: `src/` if it exists, else
 /// `project_root` itself — excluding `project_root/stubs/`, which
-/// `load_project_stub_registry` (ADR 0075, BT-1847) scans separately and
+/// `load_project_stub_registry` (ADR 0075) scans separately and
 /// never compiles as ordinary source (a `declare native:` block there is a
 /// hard error everywhere else).
 ///
@@ -84,7 +84,7 @@ pub fn collect_formattable_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8Path
 ///
 /// Falls back to the file stem when no source root is available.
 ///
-/// BT-3435 (ADR 0119 step 0): the segment-validation and per-segment
+/// ADR 0119 step 0: the segment-validation and per-segment
 /// `to_module_name` conversion delegate to
 /// `beamtalk_core::semantic_analysis::relative_module_segments` — the one
 /// implementation of "how a file path becomes module-name segments" shared
@@ -149,7 +149,7 @@ pub(crate) fn compute_file_module_pairs(
 /// Compile a single `.bt` source file to Core Erlang, printing progress.
 ///
 /// When `cached_ast` is `Some`, reuses the pre-parsed source and `Module` from
-/// Pass 1 instead of re-reading and re-parsing the file (BT-1544).
+/// Pass 1 instead of re-reading and re-parsing the file.
 pub(crate) fn compile_file(
     path: &Utf8Path,
     module_name: &str,

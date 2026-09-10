@@ -32,7 +32,7 @@ fn run_lint_structured_non_bt_file() {
 
 #[test]
 fn run_lint_structured_includes_dnu_diagnostics() {
-    // BT-1587: MCP lint must include DNU diagnostics from semantic analysis,
+    // MCP lint must include DNU diagnostics from semantic analysis,
     // matching CLI `beamtalk lint` behavior.
     let temp = tempfile::TempDir::new().unwrap();
     let file = temp.path().join("dnu_test.bt");
@@ -61,7 +61,7 @@ fn run_lint_structured_includes_dnu_diagnostics() {
 
 #[test]
 fn run_lint_structured_expect_type_suppresses_dnu() {
-    // BT-1587: @expect type should suppress DNU diagnostics in MCP lint,
+    // @expect type should suppress DNU diagnostics in MCP lint,
     // just as it does in CLI lint.
     let temp = tempfile::TempDir::new().unwrap();
     let file = temp.path().join("expect_test.bt");
@@ -89,7 +89,7 @@ fn run_lint_structured_expect_type_suppresses_dnu() {
     );
 }
 
-// ── near-miss `// === Name ===` divider (BT-3240/BT-3257) ──────────────
+// ── near-miss `// === Name ===` divider ────────────────────────────────
 //
 // These exercise the real `lint`/`diagnostic_summary` entry points
 // (`run_lint_structured`, `run_module_analysis`), not
@@ -99,10 +99,11 @@ fn run_lint_structured_expect_type_suppresses_dnu() {
 
 #[test]
 fn run_lint_structured_near_miss_divider_span_points_at_comment_line() {
-    // BT-3240/BT-3257: before `source` was threaded through
-    // `run_module_analysis`, MCP `lint` reached this check through the
-    // AST-based `NearMissDividerPass`, whose `Comment::span` is actually
-    // `bar`'s token span (line 3), not the comment's own line (line 2).
+    // `run_module_analysis` threads `source` through so the near-miss
+    // check can scan the raw text directly. The AST-based
+    // `NearMissDividerPass` alternative would report the wrong span here:
+    // its `Comment::span` is actually `bar`'s token span (line 3), not the
+    // comment's own line (line 2).
     let temp = tempfile::TempDir::new().unwrap();
     let file = temp.path().join("near_miss_test.bt");
     std::fs::write(
@@ -155,7 +156,7 @@ fn run_lint_structured_multiple_near_miss_dividers_get_distinct_correctly_attrib
     );
 }
 
-/// BT-3257: `compute_diagnostic_summary`'s public JSON output only
+/// `compute_diagnostic_summary`'s public JSON output only
 /// exposes aggregate severity/category counts, not individual
 /// diagnostic spans — so span accuracy can't be asserted through its
 /// return value directly. This instead calls `run_module_analysis`,
@@ -201,11 +202,11 @@ fn run_module_analysis_near_miss_divider_span_points_at_comment_line() {
     );
 }
 
-/// BT-3431: MCP `lint`/`diagnostic_summary` must report the same
+/// MCP `lint`/`diagnostic_summary` must report the same
 /// file-name/class-name mismatch `beamtalk build`/`beamtalk lint`/the
-/// LSP do — before this fix, `run_module_analysis` never called
-/// `check_class_file_name_agreement` at all, so this surface silently
-/// reported clean regardless of `file_stem`.
+/// LSP do: `run_module_analysis` must call
+/// `check_class_file_name_agreement`, or this surface silently
+/// reports clean regardless of `file_stem`.
 #[test]
 fn run_module_analysis_reports_mismatched_file_name() {
     let source = "Value subclass: ExduraEvent";
@@ -230,7 +231,7 @@ fn run_module_analysis_reports_mismatched_file_name() {
     );
 }
 
-/// BT-3431 negative control.
+/// Negative control for the mismatched-file-name check above.
 #[test]
 fn run_module_analysis_does_not_report_matching_file_name() {
     let source = "Value subclass: ExduraEvent";
@@ -255,30 +256,27 @@ fn run_module_analysis_does_not_report_matching_file_name() {
     );
 }
 
-/// BT-3398 regression, analogous to
+/// Analogous to
 /// `beamtalk_language_service::project_index::tests::is_stub_file_true_for_file_under_a_root_stubs_dir`:
 /// `run_module_analysis`'s `is_stub_file` argument must actually reach
 /// `AnalysisContext::is_stub_file` — verified here by calling it directly
-/// with `is_stub_file: false` (the value every call site used
-/// unconditionally before this fix) on a module containing a `declare
+/// with `is_stub_file: false` on a module containing a `declare
 /// native:` block and confirming `check_native_declaration_location`
 /// still runs (would reject it if this test's own module lived in
 /// `src/`), then with `is_stub_file: true` (what a real `stubs/` call
-/// site now derives) and confirming it no longer would.
+/// site derives) and confirming it no longer would.
 ///
-/// At the time this test was written, `check_native_declaration_location`'s
-/// diagnostic had no `DiagnosticCategory` (a separate, pre-existing gap
-/// shared by `beamtalk lint`'s own `collect_diagnostics` — filed and
-/// fixed as BT-3404), so `run_module_analysis`'s `category.is_some()`
-/// filter dropped it from the *returned* diagnostics regardless of
-/// `is_stub_file`. This test therefore asserts on `analyse_full`'s
+/// This test asserts on `analyse_full`'s
 /// pre-filter diagnostics — built with the identical `AnalysisContext`
 /// construction `run_module_analysis` uses — rather than
-/// `run_module_analysis`'s own return value, so it actually exercises the
-/// `is_stub_file` wiring instead of vacuously passing either way. Now that
-/// BT-3404 has given the diagnostic a category, the *returned* diagnostics
-/// carry it too — see
-/// `run_module_analysis_reports_native_declaration_location_error` below.
+/// `run_module_analysis`'s own return value, because
+/// `check_native_declaration_location`'s diagnostic also needs a
+/// `DiagnosticCategory` to survive `run_module_analysis`'s
+/// `category.is_some()` filter; asserting on the pre-filter diagnostics
+/// isolates the `is_stub_file` wiring from that unrelated filter, so this
+/// test actually exercises it instead of vacuously passing either way. See
+/// `run_module_analysis_reports_native_declaration_location_error` below
+/// for the *returned*-diagnostics (post-filter, with category) case.
 #[test]
 fn run_module_analysis_is_stub_file_suppresses_native_declaration_location_error() {
     let source = "declare native: lists\n";
@@ -305,12 +303,12 @@ fn run_module_analysis_is_stub_file_suppresses_native_declaration_location_error
     );
 }
 
-/// BT-3404 regression: `check_native_declaration_location`'s diagnostic
-/// now carries a `DiagnosticCategory`
+/// `check_native_declaration_location`'s diagnostic
+/// carries a `DiagnosticCategory`
 /// (`NativeDeclarationLocation`), so `run_module_analysis`'s
-/// `category.is_some()` filter no longer silently drops it from the
+/// `category.is_some()` filter does not silently drop it from the
 /// diagnostics MCP `lint`/`diagnostic_summary` actually return — unlike
-/// before this fix, where the previous test had to reach past
+/// the previous test, which has to reach past
 /// `run_module_analysis` into `analyse_full`'s pre-filter diagnostics to
 /// observe the check running at all.
 #[test]
@@ -340,14 +338,13 @@ fn run_module_analysis_reports_native_declaration_location_error() {
     );
 }
 
-/// BT-3398 end-to-end (MCP-level) regression, per the issue's acceptance
-/// criteria: opening a legitimate `stubs/lists.bt` via the MCP `lint`
-/// tool must not report a false "only valid in stubs/ directory" error.
-/// The previous test asserts the `is_stub_file` wiring actually
+/// End-to-end (MCP-level): opening a legitimate `stubs/lists.bt` via the
+/// MCP `lint` tool must not report a false "only valid in stubs/
+/// directory" error. The earlier `run_module_analysis_is_stub_file_...`
+/// test asserts the `is_stub_file` wiring actually
 /// discriminates stub vs. non-stub at the `AnalysisContext` level (the
 /// only level that can observe it, per that test's doc on the
-/// category-filter gap); this one pins the MCP-surface behaviour the
-/// issue is actually about.
+/// category-filter gap); this one pins the MCP-surface behaviour.
 #[test]
 fn run_lint_structured_stub_file_declare_native_no_location_error() {
     let temp = tempfile::TempDir::new().unwrap();
@@ -376,12 +373,11 @@ fn run_lint_structured_stub_file_declare_native_no_location_error() {
     );
 }
 
-/// BT-2858: `build_native_type_registry` extracts live from OTP `.beam`
+/// `build_native_type_registry` extracts live from OTP `.beam`
 /// files for a manifest-backed project with no prior `beamtalk build` —
 /// analogous to `commands::lint`'s
 /// `lint_extracts_type_specs_live_on_cold_cache_bt_2851` in the CLI
-/// binary. Before this fix, MCP `lint`/`diagnostic_summary` had no way to
-/// obtain a registry at all (`run_module_analysis` always passed `None`).
+/// binary.
 #[test]
 fn build_native_type_registry_extracts_live_on_cold_cache() {
     let temp = tempfile::TempDir::new().unwrap();
@@ -415,14 +411,14 @@ fn build_native_type_registry_extracts_live_on_cold_cache() {
     assert!(dir.join("_build").join("type_cache").exists());
 }
 
-/// BT-2858: MCP `lint` must see the same FFI argument-type registry
+/// MCP `lint` must see the same FFI argument-type registry
 /// `beamtalk lint`/`beamtalk build` do, so a well-specced `(Erlang m) f:`
-/// call does not fall back to `Dynamic(UntypedFfi)` and trip the BT-1914
+/// call does not fall back to `Dynamic(UntypedFfi)` and trip the
 /// "Dynamic in typed class" warning — mirrors
 /// `commands::lint`'s `ffi_call_with_registry_does_not_warn_dynamic_in_typed_class`.
-/// Before this fix, `run_module_analysis` always analysed with `None`,
-/// so this warning fired unconditionally regardless of whether the
-/// runtime's `.beam` files carried a real `-spec`.
+/// Without a live registry, `run_module_analysis` analyses with `None`,
+/// so this warning fires unconditionally regardless of whether the
+/// runtime's `.beam` files carry a real `-spec`.
 #[test]
 fn run_lint_structured_ffi_call_does_not_warn_dynamic_in_typed_class() {
     let temp = tempfile::TempDir::new().unwrap();
@@ -461,7 +457,7 @@ fn run_lint_structured_ffi_call_does_not_warn_dynamic_in_typed_class() {
     );
 }
 
-/// BT-2052: MCP lint must resolve cross-file classes from the full package
+/// MCP lint must resolve cross-file classes from the full package
 /// source set (src/ + test/). Without this, `@expect type` annotations that
 /// suppress diagnostics referencing classes from other files in the same
 /// package are falsely reported as stale.
@@ -518,7 +514,7 @@ fn run_lint_structured_cross_file_classes() {
 /// one file and leaks it through a public method's signature in a
 /// *sibling* file, mirroring `docs/beamtalk-language-features.md`'s
 /// TokenBuffer/Parser example (and the CLI's `cli_build.rs` regression
-/// for the same fixture, BT-2920). Returns the fixture's `TempDir` (keep
+/// for the same fixture). Returns the fixture's `TempDir` (keep
 /// it alive for the duration of the test) and the path to
 /// `src/parser.bt`.
 fn write_cross_file_visibility_leak_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -548,10 +544,10 @@ fn write_cross_file_visibility_leak_fixture() -> (tempfile::TempDir, std::path::
     (temp, parser_file)
 }
 
-/// Regression for BT-2921: `current_package` was never threaded into
-/// `run_module_analysis`'s `CompilerOptions`, so `check_class_visibility`
-/// (E0401/E0402) silently emitted zero diagnostics for MCP `lint`, unlike
-/// `beamtalk build`/`beamtalk lint` after BT-2920.
+/// Regression: `current_package` must be threaded into
+/// `run_module_analysis`'s `CompilerOptions`, or `check_class_visibility`
+/// (E0401/E0402) silently emits zero diagnostics for MCP `lint`, unlike
+/// `beamtalk build`/`beamtalk lint`.
 #[test]
 fn run_lint_structured_reports_e0402_for_cross_file_internal_class_leak() {
     let (_temp, parser_file) = write_cross_file_visibility_leak_fixture();
@@ -568,7 +564,7 @@ fn run_lint_structured_reports_e0402_for_cross_file_internal_class_leak() {
 }
 
 /// Same as `run_lint_structured_reports_e0402_for_cross_file_internal_class_leak`
-/// but for the `diagnostic_summary` tool (BT-2921).
+/// but for the `diagnostic_summary` tool.
 #[test]
 fn compute_diagnostic_summary_reports_e0402_for_cross_file_internal_class_leak() {
     let (_temp, parser_file) = write_cross_file_visibility_leak_fixture();

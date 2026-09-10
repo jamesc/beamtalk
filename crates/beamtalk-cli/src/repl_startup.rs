@@ -11,7 +11,7 @@
 //! test harness (`tests/repl_protocol.rs`) consume these helpers so that any
 //! change to the startup sequence is automatically reflected in tests.
 //!
-//! BT-2859: Runtime directory discovery (`RuntimeLayout`, `BeamPaths`,
+//! Runtime directory discovery (`RuntimeLayout`, `BeamPaths`,
 //! `find_runtime_dir_with_layout`, etc.) moved into `beamtalk-core`'s
 //! `ffi_type_specs` module so `beamtalk-lsp` can share it too; re-exported
 //! here so existing `repl_startup::X` references keep working unchanged.
@@ -39,7 +39,7 @@ pub use beamtalk_core::ffi_type_specs::{
 /// 2. Starts the `beamtalk_workspace` OTP application (and its dependencies)
 /// 3. Starts the workspace supervisor (which starts the REPL TCP server,
 ///    actor registry, session supervisor, and all singletons)
-/// 4. Optionally starts the project's OTP application (BT-1340)
+/// 4. Optionally starts the project's OTP application
 /// 5. Prints a ready message
 /// 6. Blocks forever (the BEAM VM stays alive while the REPL runs)
 pub fn build_eval_cmd(
@@ -110,7 +110,7 @@ pub fn format_bind_addr_erl(bind_addr: Option<Ipv4Addr>) -> String {
     }
 }
 
-/// Build the Erlang fragment that starts hex dep OTP applications (BT-1724).
+/// Build the Erlang fragment that starts hex dep OTP applications.
 ///
 /// ADR 0072: When a package has `[native.dependencies]`, the corresponding
 /// OTP applications must be started before user code can call into them.
@@ -133,7 +133,7 @@ pub fn hex_deps_start_fragment(hex_dep_names: &[String]) -> String {
         + ", "
 }
 
-/// Build the Erlang fragment that starts a project's OTP application (BT-1340).
+/// Build the Erlang fragment that starts a project's OTP application.
 ///
 /// When `otp_app_name` is `Some(name)`, returns
 /// `{ok, _} = application:ensure_all_started(name), ` so that the supervision
@@ -157,7 +157,7 @@ fn otp_app_start_fragment(otp_app_name: Option<&str>) -> String {
 /// to an absolute directory at startup to avoid cross-run metadata reuse.
 ///
 /// Removes the default logger handler to prevent crashes when stdout/stderr
-/// are piped (BT-686). This means log messages during application startup
+/// are piped. This means log messages during application startup
 /// (before the file logger is added in `beamtalk_workspace_sup:init/1`) will
 /// be discarded. This is acceptable because:
 /// 1. Application startup errors cause the entire VM to crash anyway (visible via stderr)
@@ -191,7 +191,7 @@ pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>, log_level: &str) 
 /// Uses `OsString` so non-UTF8 filesystem paths are handled without panicking.
 ///
 /// On Windows, converts backslashes to forward slashes since Erlang expects
-/// Unix-style paths in `-pa` arguments (see BT-661).
+/// Unix-style paths in `-pa` arguments.
 pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
     let dirs = [
         &paths.runtime_ebin,
@@ -234,7 +234,7 @@ mod tests {
         assert!(cmd.contains("receive stop -> ok end"));
         // Default bind address should be loopback
         assert!(cmd.contains("bind_addr => {127,0,0,1}"));
-        // BT-2415: web_port plumbing removed (browser workspace gone)
+        // No web_port plumbing (browser workspace gone)
         assert!(!cmd.contains("web_port"));
     }
 
@@ -268,7 +268,7 @@ mod tests {
         assert!(!prelude.contains("receive"));
         // Default bind address
         assert!(prelude.contains("bind_addr => {127,0,0,1}"));
-        // BT-2415: web_port plumbing removed (browser workspace gone)
+        // No web_port plumbing (browser workspace gone)
         assert!(!prelude.contains("web_port"));
     }
 

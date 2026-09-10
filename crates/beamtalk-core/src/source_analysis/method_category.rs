@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Section-divider method categories (BT-2601).
+//! Section-divider method categories.
 //!
 //! **DDD Context:** Source Analysis (shared leaf below Language Service,
 //! Cockpit, REPL, and MCP — see `docs/development/architecture-principles.md`
@@ -18,8 +18,8 @@
 //! The category lives in the source text as the existing `// === Name ===`
 //! divider — no new keyword, no per-method annotation, no sidecar / metadata
 //! store. Categories are *inter-method file structure*, not a property of the
-//! method object (consistent with BT-2594, which stopped the per-method
-//! editor from including a divider in a method's own byte span). So they are
+//! method object (consistent with the per-method editor's own byte span not
+//! including a divider). So they are
 //! surfaced by whoever reads the **source** — this module — not by in-memory
 //! reflection on a loaded class. A class object built from a running system
 //! (no source in hand) carries no category; that is intentional, not a gap.
@@ -62,7 +62,7 @@
 //! checked too), but the declaration itself never becomes a
 //! [`CategorizedMethod`] — matching this module's method-only scope.
 //!
-//! # Known limitations (BT-2601 code review)
+//! # Known limitations (BT-2601)
 //!
 //! - **Fields are not nested into categories.** `beamtalk-language-service`'s
 //!   `queries::document_symbols_provider` still renders a class's
@@ -74,7 +74,7 @@
 //!   that field's byte range even though the field renders as a sibling, not
 //!   a nested child. Cosmetic only (no data loss), tracked for the
 //!   fields-in-categories follow-up alongside Cockpit/REPL/MCP grouped
-//!   listing (BT-2601's PR description).
+//!   listing.
 //! - **Two dividers with nothing between them:** only the nearer one is kept
 //!   (see [`divider_name_from_leading`]'s doc) — the earlier one silently
 //!   disappears from the outline with no diagnostic. Deliberate, not a bug:
@@ -86,7 +86,7 @@
 //!   an ordinary leading comment — so the run of methods below it is
 //!   silently absorbed into whatever category was already open, with no
 //!   warning. A lint that flags a comment with `=`-runs at both ends that
-//!   *isn't* a valid divider would give BT-2626's stdlib-wide curation (and
+//!   *isn't* a valid divider would give the stdlib-wide curation (and
 //!   any hand-written divider) a safety net; tracked as a follow-up.
 //! - **A comment on the last line of a method body, with nothing but blank
 //!   lines before the next declaration, is captured as the *next*
@@ -146,7 +146,7 @@ impl MethodCategory {
     /// Shared by every consumer that needs "the range this category covers"
     /// — `beamtalk-language-service`'s `queries::document_symbols_provider`
     /// (the `DocumentSymbolKind::Category` container) and
-    /// `queries::folding_range_provider` (BT-3237) both call this rather than
+    /// `queries::folding_range_provider` both call this rather than
     /// re-deriving the merge, so outline and foldingRange always agree
     /// exactly.
     ///
@@ -171,7 +171,7 @@ impl MethodCategory {
 /// Parses `content` — the already-`//`-stripped text of a leading line
 /// comment — as a `// === Name ===` section divider, the canonical format
 /// this module locks down for every surface (LSP outline, Cockpit, REPL,
-/// MCP) and that BT-2626's stdlib-wide divider curation must match exactly.
+/// MCP) and that the stdlib-wide divider curation must match exactly.
 ///
 /// Recognized shape (`trimmed` = `content.trim()`):
 /// - `trimmed` starts with a run of 3+ `=` characters and ends with a run of
@@ -222,8 +222,8 @@ fn divider_name_from_leading(leading: &[Comment]) -> Option<&str> {
 /// Walks backward from `member_line_start` (the start of a method's, or a
 /// state/class-variable declaration's, own header line) across intervening
 /// blank lines, `///` doc-comment lines, `@expect`-style directive lines
-/// (BT-2601 review: a divider directly above an `@expect`-annotated
-/// declaration must still be located), and non-divider `//` comment lines,
+/// (a divider directly above an `@expect`-annotated declaration must still
+/// be located), and non-divider `//` comment lines,
 /// looking for the source line that is the `expected_name` divider already
 /// identified via the member's `comments.leading` (mirrors [`method_span`]'s
 /// `doc_block_start` walk, but hunts for a divider line instead of a
@@ -268,7 +268,7 @@ fn find_divider_span(source: &str, member_line_start: u32, expected_name: &str) 
 /// One member of a class body in source order, for the merged walk
 /// [`categorize_methods`] performs. A divider can precede *any* class member
 /// — not only a method — so `state:`/`classState:` declarations must
-/// still be able to start a new category (review finding, BT-2601): without
+/// still be able to start a new category: without
 /// this, `// === Beta ===\nstate: x = 0\nbar => 2` would silently swallow
 /// "Beta" and mis-attribute `bar` to whatever category preceded `state: x`.
 /// A non-method member never contributes a [`CategorizedMethod`] — it only
@@ -290,7 +290,7 @@ enum ClassMember<'a> {
 /// or one written directly above a field rather than a method — still groups
 /// correctly. Only methods are ever collected into a category's `methods`;
 /// state/class-variable declarations merely establish where a new category
-/// begins, matching BT-2601's scope (categories group *methods*).
+/// begins, matching this module's scope (categories group *methods*).
 #[must_use]
 pub fn categorize_methods(class: &ClassDefinition, source: &str) -> Vec<MethodCategory> {
     let mut all: Vec<(Span, &[Comment], ClassMember)> = class
@@ -398,7 +398,7 @@ impl std::fmt::Display for CategorizeMethodsError {
 impl std::error::Error for CategorizeMethodsError {}
 
 /// Parses `source` and categorizes the named `class`'s methods by its
-/// `// === Name ===` section dividers (BT-3239) — the entry point for a
+/// `// === Name ===` section dividers — the entry point for a
 /// caller that has only source text and a class name in hand, not an
 /// already-parsed [`ClassDefinition`] (e.g. the compiler-port bridge that
 /// lets the Erlang REPL/workspace reach this module without reimplementing
@@ -502,15 +502,15 @@ mod tests {
 
     #[test]
     fn tolerates_no_whitespace_around_name() {
-        // BT-3261: no whitespace requirement here — only that the trimmed name
+        // No whitespace requirement here — only that the trimmed name
         // between the two `=` runs be non-empty. The TextMate grammar in
-        // editors/vscode/syntaxes/beamtalk.tmLanguage.json used to require
-        // `\s+` on both sides and so missed this shape (a false negative,
-        // safe direction — see that file's `comment.line.double-slash.
-        // section-divider.beamtalk` pattern comment and the shared
-        // conformance fixture at
+        // editors/vscode/syntaxes/beamtalk.tmLanguage.json's
+        // `comment.line.double-slash.section-divider.beamtalk` pattern
+        // likewise treats surrounding whitespace as optional, not required,
+        // so it recognizes this shape too — see that file's pattern comment
+        // and the shared conformance fixture at
         // tests/fixtures/section_divider_grammar_cases.json, also checked by
-        // `tests/section_divider_grammar_conformance.rs`).
+        // `tests/section_divider_grammar_conformance.rs`.
         assert_eq!(parse_divider_name("===Name==="), Some("Name"));
     }
 
@@ -652,7 +652,7 @@ Object subclass: Counter
     fn three_line_banner_convention_is_not_a_divider() {
         // The pre-existing, unrelated `====...` / heading / `====...`
         // 3-line banner some test files use is deliberately not recognized
-        // (BT-2601 locks down only the single-line `// === Name ===` shape).
+        // (this module locks down only the single-line `// === Name ===` shape).
         let src = "\
 Object subclass: Counter
   // =========================================================================
@@ -810,7 +810,7 @@ Object subclass: Counter
         assert!(text.ends_with("bar => 2"));
     }
 
-    // --- categorize_methods_in_source (BT-3239) ---
+    // --- categorize_methods_in_source ---
 
     #[test]
     fn categorize_methods_in_source_finds_the_named_class() {

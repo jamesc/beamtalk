@@ -1,14 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Folding-range provider for `// === Name ===` section dividers (BT-3237)
-//! and class/method bodies (BT-3260).
+//! Folding-range provider for `// === Name ===` section dividers
+//! and class/method bodies.
 //!
 //! **DDD Context:** Language Service
 //!
-//! Follow-up from BT-2601 (which shipped the shared divider-recognition core,
-//! [`source_analysis::method_category::categorize_methods`], plus
-//! `textDocument/documentSymbol` nesting only). This module implements
+//! Reuses the shared divider-recognition core,
+//! [`source_analysis::method_category::categorize_methods`], which also powers
+//! `textDocument/documentSymbol` nesting. This module implements
 //! `textDocument/foldingRange`, emitting two kinds of range per class in
 //! `module`:
 //!
@@ -24,7 +24,7 @@
 //!   document symbols.
 //! - One range per class body (`ClassDefinition::span`) and one per method
 //!   body (`MethodDefinition::span`, instance- and class-side), i.e.
-//!   indentation-equivalent folding (BT-3260). VS Code stops using its own
+//!   indentation-equivalent folding. VS Code stops using its own
 //!   built-in indentation-based folding the moment *any*
 //!   `FoldingRangeProvider` is registered for a language (there is no
 //!   per-region merge/fallback — see the LSP folding spec and
@@ -41,13 +41,13 @@
 //! Like `document_symbols_provider`, this is computed purely from the parsed
 //! module and source text — there is no runtime-delegation path (see
 //! `docs/development/surface-parity.md`'s `nav-symbols` row, which documents
-//! the same AST-only scope for BT-2601's outline nesting).
+//! the same AST-only scope for the outline nesting).
 
 use beamtalk_core::ast::Module;
 use beamtalk_core::source_analysis::{self, Span};
 
 /// Computes folding ranges for every class in `module`: divider-category
-/// ranges (BT-3237) plus class-body and method-body ranges (BT-3260, the
+/// ranges plus class-body and method-body ranges (the
 /// indentation-equivalent fold points VS Code's built-in strategy would
 /// otherwise have provided).
 ///
@@ -62,8 +62,8 @@ pub fn compute_folding_ranges(module: &Module, source: &str) -> Vec<Span> {
     for class in &module.classes {
         for category in source_analysis::categorize_methods(class, source) {
             // Skip the implicit unnamed leading category, and — review
-            // finding (BT-3237) — skip a *named* category with zero methods
-            // too: a divider can precede any class member (BT-2601), so
+            // finding — skip a *named* category with zero methods
+            // too: a divider can precede any class member, so
             // `// === Beta ===\nstate: x = 0` (divider directly above a
             // state/classState declaration with no method before the next
             // divider or end of class) produces a named category whose
@@ -87,13 +87,13 @@ pub fn compute_folding_ranges(module: &Module, source: &str) -> Vec<Span> {
             }
         }
 
-        // BT-3260: the class body itself, so the outermost fold point
+        // The class body itself, so the outermost fold point
         // (collapse the whole class down to its header line) survives
         // registering this provider, exactly like indentation folding would
         // offer at column 0.
         push_multiline_range(&mut ranges, class.span, source);
 
-        // BT-3260: every method body, instance- and class-side, independent
+        // Every method body, instance- and class-side, independent
         // of whether the class uses dividers at all — the per-method fold
         // arrow indentation folding used to provide everywhere, not just
         // inside divider categories.
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn class_with_no_dividers_and_single_line_members_gets_only_the_class_body_range() {
-        // BT-3260: no dividers, and every method fits on its own single
+        // No dividers, and every method fits on its own single
         // line — nothing to fold *inside* the class, but the class body
         // itself (header through last method) is still a multi-line range,
         // so it must be the one range this returns (indentation folding
@@ -152,8 +152,8 @@ mod tests {
 
     #[test]
     fn class_with_no_dividers_and_multiline_methods_gets_class_and_method_ranges() {
-        // BT-3260: a divider-less file must still get per-method fold
-        // arrows — the regression this issue fixes. Both `foo` and `bar`
+        // A divider-less file must still get per-method fold
+        // arrows. Both `foo` and `bar`
         // have multi-line bodies, so each contributes its own range
         // alongside the class-body range.
         let source = "\
@@ -183,9 +183,9 @@ Object subclass: Counter
 
     #[test]
     fn class_with_dividers_returns_divider_class_and_method_ranges() {
-        // BT-3260: a class that uses dividers must get *both* the
-        // divider-category ranges (BT-3237) and the class/method-body
-        // ranges — the combination this issue calls for, so nesting
+        // A class that uses dividers must get *both* the
+        // divider-category ranges and the class/method-body
+        // ranges, so nesting
         // (fold class -> fold category -> fold method) still works.
         let source = "\
 Object subclass: Counter
@@ -220,7 +220,7 @@ Object subclass: Counter
     fn methods_before_the_first_divider_contribute_no_divider_range() {
         // The implicit unnamed leading category (methods before the first
         // divider) is not a folding range — only named categories are. The
-        // class-body range (BT-3260) is still present alongside it.
+        // class-body range is still present alongside it.
         let source = "\
 Object subclass: Counter
   foo => 1
@@ -286,8 +286,8 @@ Object subclass: B
 
     #[test]
     fn named_category_with_no_methods_contributes_no_divider_range() {
-        // Review finding (BT-3237): a divider can precede any class member
-        // (BT-2601), not only a method. A divider directly above a
+        // A divider can precede any class member,
+        // not only a method. A divider directly above a
         // `state:`/`classState:` declaration with no method before the next
         // divider or the end of the class produces a named category whose
         // `methods` list is empty. Without the `methods.is_empty()` guard,
@@ -295,7 +295,7 @@ Object subclass: B
         // degenerates to just `divider_span`), which would emit a folding
         // range spanning nothing but the divider's own banner line — a
         // misleading fold marker with no real content to collapse. The
-        // class-body range (BT-3260) is still emitted alongside this.
+        // class-body range is still emitted alongside this.
         let source = "\
 Object subclass: Counter
   foo => 1

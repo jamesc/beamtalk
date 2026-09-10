@@ -613,7 +613,7 @@ pub fn sweep(dir: &Path) -> Result<SweepReport> {
         // `remove_record` below backgrounds its Windows RELEASE_TMP retry
         // removal onto its own thread rather than retrying inline,
         // so it no longer delays this loop — but the retrying itself
-        // adversarial-review follow-up) still matters: it absorbs
+        // still matters: it absorbs
         // `TerminateProcess`'s documented asynchronicity, since a `Reap`
         // disposition's target may not have fully exited (and released files
         // it held open under RELEASE_TMP) by the time that call returns
@@ -1376,8 +1376,8 @@ mod tests {
         let _ = child.wait();
     }
 
-    /// Regression test for a mis-ordered `GetProcessTimes` out-param
-    /// adversarial-review follow-up): the call takes four `*mut FILETIME`
+    /// Regression test for a mis-ordered `GetProcessTimes` out-param:
+    /// the call takes four `*mut FILETIME`
     /// slots (creation, exit, kernel, user) and it's easy to read the wrong
     /// one back. `read_start_time_returns_some_for_a_live_process` above only
     /// asserts `.is_some()`, which a swapped-in `exit`/`kernel`/`user` read

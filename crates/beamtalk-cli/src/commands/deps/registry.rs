@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Package registry index resolution (BT-2978).
+//! Package registry index resolution.
 //!
 //! **DDD Context:** Build System
 //!
@@ -39,7 +39,7 @@
 //! miss, retried once. (Refreshing it from `beamtalk deps update` arrives
 //! with registry support for that command.)
 //!
-//! ## Cache location (BT-2996)
+//! ## Cache location
 //!
 //! A git-backed index is cloned once per *registry*, not once per *project*:
 //! every project pointing at the same registry URL shares one clone under
@@ -48,11 +48,11 @@
 //! cache root — a hash of the URL is still appended underneath it, so two
 //! different registry URLs pointed at the same override never clobber each
 //! other's clone. A relative override (e.g. `_build/registry`, for a
-//! per-project cache close to the pre-BT-2996 layout) is resolved against the
+//! per-project cache close to an older per-project layout) is resolved against the
 //! project root, not the process's working directory, so the CLI, LSP and
 //! MCP server — which do not necessarily share a cwd — still agree on one
-//! absolute cache directory and one advisory lock file for the same project
-//! (BT-3007); an absolute path (e.g. a team-wide mount, to share a
+//! absolute cache directory and one advisory lock file for the same project;
+//! an absolute path (e.g. a team-wide mount, to share a
 //! pre-warmed clone across machines) is used as-is. A stale or corrupt cache
 //! is cleared by deleting its directory (or `~/.beamtalk/registry/`
 //! entirely) — it is rebuilt from a fresh clone on the next lookup.
@@ -81,7 +81,7 @@ use crate::commands::manifest::RegistryConfig;
 pub const REGISTRY_ENV_VAR: &str = "BEAMTALK_REGISTRY";
 
 /// The environment variable overriding where a git-backed registry index is
-/// cached on disk (BT-2996). See the "Cache location" section above.
+/// cached on disk. See the "Cache location" section above.
 pub const REGISTRY_CACHE_DIR_ENV_VAR: &str = "BEAMTALK_REGISTRY_CACHE_DIR";
 
 /// The registry index used when neither the environment nor the manifest
@@ -262,7 +262,7 @@ fn raw_registry_value(env_value: Option<&str>, registry: Option<&RegistryConfig>
 }
 
 /// The stable identity of the currently configured registry, for recording
-/// on a lock entry and comparing against on a later build (BT-2993).
+/// on a lock entry and comparing against on a later build.
 ///
 /// Deliberately the *raw* configuration value, not [`resolve_registry_location`]'s
 /// resolved [`RegistryLocation`]: a relative `[registry] url` resolves to a
@@ -282,8 +282,8 @@ pub fn registry_identity(registry: Option<&RegistryConfig>) -> String {
 /// directory: the CLI, LSP and MCP servers all run with different cwds, and the
 /// same `beamtalk.toml` must name the same registry from each of them.
 ///
-/// `pub(crate)` rather than private: `beamtalk registry site` (BT-2990,
-/// `commands::registry`) takes the same kind of raw `--index` value (a local
+/// `pub(crate)` rather than private: `beamtalk registry site`
+/// (`commands::registry`) takes the same kind of raw `--index` value (a local
 /// directory or a git URL) outside of any project, and reuses this instead of
 /// re-implementing the classification.
 pub(crate) fn classify_location(project_root: &Utf8Path, raw: &str) -> RegistryLocation {
@@ -337,7 +337,7 @@ pub fn ensure_index(
     }
 }
 
-/// Where a git-backed registry index for `url` is cached on disk (BT-2996).
+/// Where a git-backed registry index for `url` is cached on disk.
 ///
 /// Everything the clone touches — `index/`, `index.staging/`,
 /// `index.previous/`, and the advisory lock file — lives directly under the
@@ -369,7 +369,7 @@ fn registry_cache_root(url: &str, project_root: &Utf8Path) -> Utf8PathBuf {
             // of them a *different* absolute cache directory (and therefore
             // a different `.lock` file) for what's meant to be one shared
             // cache — silently defeating `lock_registry_cache`'s whole
-            // purpose (BT-3007). `project_root` is the same stable root
+            // purpose. `project_root` is the same stable root
             // `BEAMTALK_REGISTRY`/`[registry] url` already resolve relative
             // paths against (see `classify_location`).
             let override_root = Utf8Path::new(trimmed);
@@ -414,7 +414,7 @@ fn cache_key(url: &str) -> String {
 }
 
 /// Acquire the exclusive advisory lock covering `cache_root`'s clone,
-/// refresh, and swap (BT-2996).
+/// refresh, and swap.
 ///
 /// Returns the locked file; the lock releases when it drops. Hold it for no
 /// longer than the clone/refresh/swap sequence — it blocks every other
@@ -456,7 +456,7 @@ fn lock_registry_cache(cache_root: &Utf8Path) -> Result<std::fs::File> {
 }
 
 /// Clone or refresh the git registry index into its cache directory
-/// (BT-2996; see the module-level "Cache location" section).
+/// (see the module-level "Cache location" section).
 fn ensure_git_index(url: &str, project_root: &Utf8Path, refresh: bool) -> Result<Utf8PathBuf> {
     let cache_root = registry_cache_root(url, project_root);
     let index_dir = cache_root.join("index");
@@ -577,7 +577,7 @@ fn fast_forward_index(index_dir: &Utf8Path) -> bool {
 /// # Relative `file://` URLs
 ///
 /// `git clone` below runs with `current_dir` set to `target`'s parent (the
-/// hash-keyed cache directory, BT-3040 — see the `debug_assert!` just below
+/// hash-keyed cache directory — see the `debug_assert!` just below
 /// for why), not the process's actual working directory. A *relative*
 /// `file://` URL (`validate_git_url` only requires the scheme prefix, not
 /// that what follows is absolute) would therefore resolve against that
@@ -599,7 +599,7 @@ fn clone_index(url: &str, target: &Utf8Path) -> Result<()> {
     }
 
     // `target` is passed to `git clone` unchanged below while `current_dir`
-    // is set to its parent (BT-3040) — that combination is only correct if
+    // is set to its parent — that combination is only correct if
     // `target` is absolute; a relative `target` would have its destination
     // argument re-resolved against its own parent by git, landing one level
     // too deep. Every caller derives `target` from `registry_cache_root`,
@@ -634,7 +634,7 @@ fn clone_index(url: &str, target: &Utf8Path) -> Result<()> {
         target.as_str(),
     ]);
     // Run from `parent` rather than inheriting the process's current
-    // directory (BT-3040): the process cwd is global, so a `git clone`
+    // directory: the process cwd is global, so a `git clone`
     // spawned without an explicit `current_dir` can be handed a directory
     // another thread is concurrently changing (or has since deleted) —
     // Windows surfaces that as a spurious "Unable to read current working
@@ -809,7 +809,7 @@ pub fn resolve_latest_release(
 /// Unlike [`describe_available_packages`] (which stops early — it only ever
 /// needs enough names for a "not found, try one of these" message), this
 /// reads and fully parses every entry. Used by `beamtalk registry site`
-/// (BT-2990) to render the whole index as a static site; reuses
+/// to render the whole index as a static site; reuses
 /// [`read_entry`]/[`parse_index_entry`] rather than re-walking `packages/`
 /// with a second parser.
 ///
@@ -855,7 +855,7 @@ pub fn list_all_entries(index_root: &Utf8Path) -> Result<Vec<RegistryEntry>> {
 /// The scan stops as soon as it has collected more than [`MAX_LISTED`]
 /// names — the message only ever displays the first `MAX_LISTED` of them, so
 /// a registry with thousands of packages must not pay to read, collect, and
-/// sort every one of them on every typo (BT-2996).
+/// sort every one of them on every typo.
 fn describe_available_packages(index_root: &Utf8Path) -> String {
     let mut names = Vec::with_capacity(MAX_LISTED);
     let mut more = false;
@@ -1168,7 +1168,7 @@ git = "g"
         );
     }
 
-    // ── Registry identity (BT-2993) ────────────────────────────────────
+    // ── Registry identity ───────────────────────────────────────────────
 
     /// The identity recorded on a lock entry must be the raw configured
     /// value, not the resolved (and machine-specific) `LocalDir` path — a
@@ -1268,7 +1268,7 @@ git = "g"
     }
 
     #[test]
-    // BT-3040: `registry_cache_root` reads `REGISTRY_CACHE_DIR_ENV_VAR` at
+    // `registry_cache_root` reads `REGISTRY_CACHE_DIR_ENV_VAR` at
     // call time, and this test relies on it being unset (so the index lands
     // under the real, shared `~/.beamtalk/registry/`). Without joining the
     // `env_var` serial group, a concurrently running test that *does* set
@@ -1285,7 +1285,7 @@ git = "g"
         let index_root =
             ensure_index(&RegistryLocation::Git(url.clone()), &project_root, false).unwrap();
 
-        // BT-2996: the clone lands in the shared, user-level cache — never
+        // The clone lands in the shared, user-level cache — never
         // inside the project's `_build/` — so N projects pointing at the
         // same registry URL share one clone instead of each cloning it
         // separately.
@@ -1305,7 +1305,7 @@ git = "g"
     }
 
     #[test]
-    // BT-3040: see the serialization note on `test_ensure_index_clones_git_registry`.
+    // See the serialization note on `test_ensure_index_clones_git_registry`.
     #[serial_test::serial(env_var)]
     fn test_resolve_release_through_git_registry() {
         let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
@@ -1323,7 +1323,7 @@ git = "g"
 
     /// A newly published version is picked up by the miss-then-refresh retry.
     #[test]
-    // BT-3040: see the serialization note on `test_ensure_index_clones_git_registry`.
+    // See the serialization note on `test_ensure_index_clones_git_registry`.
     // This test calls `ensure_index`/`resolve_release` twice (once to seed
     // the cache, once to observe the refresh); an env var flip between the
     // two calls would send them to different cache directories.
@@ -1355,7 +1355,7 @@ git = "g"
     /// A refresh that cannot reach the remote must leave the working index
     /// intact rather than deleting it and failing.
     #[test]
-    // BT-3040: see the serialization note on `test_ensure_index_clones_git_registry`.
+    // See the serialization note on `test_ensure_index_clones_git_registry`.
     #[serial_test::serial(env_var)]
     fn test_failed_refresh_keeps_existing_index() {
         let (repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
@@ -1384,7 +1384,7 @@ git = "g"
     }
 
     #[test]
-    // BT-3040: `ensure_git_index` computes `registry_cache_root` before
+    // `ensure_git_index` computes `registry_cache_root` before
     // validating the URL, so this still touches the env-var-dependent path;
     // see the serialization note on `test_ensure_index_clones_git_registry`.
     #[serial_test::serial(env_var)]
@@ -1413,7 +1413,7 @@ git = "g"
         assert!(msg.contains("packages"), "{msg}");
     }
 
-    // ── Cache location & locking (BT-2996) ────────────────────────────
+    // ── Cache location & locking ────────────────────────────────────────
 
     /// RAII guard restoring an environment variable's previous value on drop.
     /// Callers must serialize tests using this with `#[serial(env_var)]`.
@@ -1525,7 +1525,7 @@ git = "g"
     #[test]
     #[serial_test::serial(env_var)]
     fn test_registry_cache_root_relative_env_var_override_resolves_against_project_root() {
-        // BT-3007: a relative override must resolve against `project_root`,
+        // A relative override must resolve against `project_root`,
         // not the process cwd — matching how a relative `BEAMTALK_REGISTRY`/
         // `[registry] url` already resolves (see `classify_location`).
         let project = TempDir::new().unwrap();
@@ -1544,7 +1544,7 @@ git = "g"
     #[test]
     #[serial_test::serial(env_var, cwd)]
     fn test_registry_cache_root_relative_env_var_override_ignores_process_cwd() {
-        // BT-3007 regression: the CLI and the LSP server can run with
+        // Regression: the CLI and the LSP server can run with
         // different working directories. If a relative override resolved
         // against the process cwd instead of `project_root`, they would
         // compute different absolute cache directories — and therefore
@@ -1595,7 +1595,7 @@ git = "g"
     fn test_registry_cache_root_shared_across_projects() {
         // Two different projects pointing at the same registry URL must
         // resolve to the *same* cache directory — that sharing is the whole
-        // point of BT-2996.
+        // point of the shared cache.
         let project_a = TempDir::new().unwrap();
         let project_b = TempDir::new().unwrap();
         let url = "https://example.test/shared-registry";
@@ -1636,9 +1636,9 @@ git = "g"
 
     /// Two "processes" (threads, standing in for a CLI build racing an LSP
     /// or MCP lookup) resolving against the same git registry at once must
-    /// both succeed, and must never see a half-swapped index (BT-2996).
+    /// both succeed, and must never see a half-swapped index.
     #[test]
-    // BT-3040: see the serialization note on `test_ensure_index_clones_git_registry`.
+    // See the serialization note on `test_ensure_index_clones_git_registry`.
     // The concurrency this test cares about (multiple threads racing the
     // same registry) is internal to the test itself; serializing against
     // *other tests* just keeps the env var stable for the duration.
@@ -1730,7 +1730,7 @@ git = "g"
         );
     }
 
-    /// BT-2996: a not-found error against a huge index must not materialise
+    /// A not-found error against a huge index must not materialise
     /// every package name — the scan stops once it has enough to display.
     #[test]
     fn test_describe_available_packages_caps_the_scan() {
@@ -1772,7 +1772,7 @@ git = "g"
         );
     }
 
-    // ── list_all_entries (BT-2990) ─────────────────────────────────────
+    // ── list_all_entries ─────────────────────────────────────────────────
 
     #[test]
     fn test_list_all_entries_sorted_by_name() {
@@ -1846,7 +1846,7 @@ git = "g"
     }
 
     #[test]
-    // BT-3040: see the serialization note on `test_ensure_index_clones_git_registry`.
+    // See the serialization note on `test_ensure_index_clones_git_registry`.
     #[serial_test::serial(env_var)]
     fn test_resolve_latest_release_through_git_registry() {
         let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);

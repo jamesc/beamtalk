@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Class kind writeback pass (BT-1534).
+//! Class kind writeback pass.
 //!
 //! **DDD Context:** Semantic Analysis
 //!
@@ -16,7 +16,7 @@
 //! Consumed by codegen: `compute_auto_slot_methods` checks `class_kind`
 //! to decide whether to generate `withX:` setters and keyword constructors.
 //!
-//! BT-3086: `ClassHierarchy::resolve_class_kind` is the single authority this
+//! `ClassHierarchy::resolve_class_kind` is the single authority this
 //! pass and codegen's `CoreErlangGenerator::is_actor_class` both call — this
 //! pass corrects the AST's `class_kind` field in place for consumers that
 //! read it directly (e.g. `value_type_codegen.rs`), while `is_actor_class`

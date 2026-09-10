@@ -5,7 +5,7 @@
 use super::*;
 
 // ========================================================================
-// List Literal Tests (BT-402)
+// List Literal Tests
 // ========================================================================
 
 #[test]
@@ -143,7 +143,7 @@ fn parse_list_error_unterminated() {
 }
 
 // ========================================================================
-// List Literal: keyword message elements (BT-1287)
+// List Literal: keyword message elements
 // ========================================================================
 
 #[test]
@@ -271,7 +271,7 @@ fn parse_array_multi_keyword_element() {
 
 #[test]
 fn parse_list_keyword_element_with_map_literal_arg() {
-    // Regression test for BT-1287: the exact reported failing syntax
+    // Regression test: the exact reported failing syntax
     let module = parse_ok("#(Counter supervisionSpec withArgs: #{#value => 42})");
     match &module.expressions[0].expression {
         Expression::ListLiteral { elements, tail, .. } => {
@@ -408,7 +408,7 @@ fn parse_doc_comment_resets_on_regular_comment() {
     // A `//` comment between `///` and the declaration orphans the first
     // `///` block; only the last consecutive block attaches to the class.
     //
-    // BT-2924: the class's own doc comment attaches cleanly here (no blank
+    // The class's own doc comment attaches cleanly here (no blank
     // line or comment directly breaks *it*), so no warning fires — an
     // earlier, unrelated orphaned block must not be misreported as "this
     // declaration's doc comment is not attached" when it plainly is. (The
@@ -451,7 +451,7 @@ fn parse_doc_comment_blank_line_resets() {
     // A blank line between `///` and the declaration orphans the first
     // `///` block; only the last consecutive block attaches to the class.
     //
-    // BT-2924: same rationale as `parse_doc_comment_resets_on_regular_comment`
+    // Same rationale as `parse_doc_comment_resets_on_regular_comment`
     // above — the class's own doc comment attaches cleanly, so no warning
     // fires for it. This exact shape (an earlier doc block, a blank line,
     // then a directly-adjacent doc block that attaches) is also exercised by
@@ -474,7 +474,7 @@ Actor subclass: Counter
     );
 }
 
-// ── BT-980: unattached doc comment warnings ──────────────────────────────
+// ── Unattached doc comment warnings ──────────────────────────────
 
 #[test]
 fn unattached_doc_comment_blank_line_before_class_emits_warning() {
@@ -971,7 +971,7 @@ fn unclosed_map_literal_bare_eof_terminates() {
 }
 
 // ========================================================================
-// Nested keyword messages in map literal values (BT-1854)
+// Nested keyword messages in map literal values
 // ========================================================================
 
 /// Regression test: keyword message as a map value should parse correctly.
@@ -1053,7 +1053,7 @@ fn parse_map_value_keyword_with_binary_arg() {
     }
 }
 
-/// Multiline nested keyword messages in map literal (exact syntax from BT-1854).
+/// Multiline nested keyword messages in map literal.
 #[test]
 fn parse_map_multiline_nested_keyword() {
     let module = parse_ok(
@@ -1105,7 +1105,7 @@ fn parse_map_value_multi_keyword_message() {
 
 #[test]
 fn parse_exponentiation_operator() {
-    // BT-414: `**` is a binary operator
+    // `**` is a binary operator
     let module = parse_ok("2 ** 10");
     assert_eq!(module.expressions.len(), 1);
     match &module.expressions[0].expression {
@@ -1132,7 +1132,7 @@ fn parse_exponentiation_operator() {
 
 #[test]
 fn parse_exponentiation_higher_precedence_than_multiply() {
-    // BT-414: `3 * 2 ** 4` should be `3 * (2 ** 4)`
+    // `3 * 2 ** 4` should be `3 * (2 ** 4)`
     let module = parse_ok("3 * 2 ** 4");
     assert_eq!(module.expressions.len(), 1);
     match &module.expressions[0].expression {
@@ -1171,7 +1171,7 @@ fn parse_exponentiation_higher_precedence_than_multiply() {
 
 #[test]
 fn parse_exponentiation_right_associative() {
-    // BT-414: `2 ** 3 ** 2` should be `2 ** (3 ** 2)` (right-associative)
+    // `2 ** 3 ** 2` should be `2 ** (3 ** 2)` (right-associative)
     let module = parse_ok("2 ** 3 ** 2");
     assert_eq!(module.expressions.len(), 1);
     match &module.expressions[0].expression {

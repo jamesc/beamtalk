@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `SimpleLanguageService` smoke tests (diagnostics, completions, hover,
-//! go-to-definition) and the BT-2243 call-hierarchy prepare classifier
-//!.
+//! go-to-definition) and the call-hierarchy prepare classifier.
 
 use super::common::*;
 
@@ -88,7 +87,7 @@ fn simple_language_service_goto_definition() {
     assert_eq!(loc.span.start(), 0);
 }
 
-// --- BT-2243: call hierarchy prepare classifier ---
+// --- call hierarchy prepare classifier ---
 
 /// Cursor on a method-definition header (instance side) populates
 /// selector + class + `class_side=false`.
@@ -158,7 +157,7 @@ fn call_hierarchy_prepare_at_returns_none_on_local_identifier() {
     assert!(target.is_none());
 }
 
-/// BT-2243: cold-file incoming-calls fallback walks every file and
+/// Cold-file incoming-calls fallback walks every file and
 /// returns *only* sender sites — method-definition headers must be
 /// excluded (otherwise the editor would list the method itself as
 /// "calling itself"). Compare with `find_references`, which also

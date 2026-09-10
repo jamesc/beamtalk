@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3261: keeps `parse_divider_name`
+//! Keeps `parse_divider_name`
 //! ([`beamtalk_core::source_analysis::parse_divider_name`]) and the
 //! `TextMate` `comment.line.double-slash.section-divider.beamtalk` regex in
 //! `editors/vscode/syntaxes/beamtalk.tmLanguage.json` from silently drifting
@@ -19,15 +19,15 @@
 //! reproduce) fails a test, on purpose — see that module's own doc for the
 //! reverse direction.
 //!
-//! BT-3237 review found (and fixed) two real divergences between the two
-//! recognizers; this fixture is what keeps them fixed. The
-//! `===Name===`-with-no-space cases are BT-3261 itself: `parse_divider_name`
-//! never required whitespace around the name (only that the trimmed name be
-//! non-empty), but the regex did, silently under-highlighting a valid
-//! divider — closed by making the regex's whitespace optional (defended
-//! against the mismatched-run-length and whitespace-only-name traps that a
-//! naive `\s+` → `\s*` substitution reopens; see the `.tmLanguage.json`
-//! comment for the two-sided fix).
+//! This fixture guards two real divergences between the two recognizers.
+//! The `===Name===`-with-no-space cases guard a specific asymmetry:
+//! `parse_divider_name` never requires whitespace around the name (only
+//! that the trimmed name be non-empty); the regex's whitespace is likewise
+//! optional rather than required, so a valid whitespace-free divider is not
+//! silently under-highlighted, while the mismatched-run-length and
+//! whitespace-only-name traps that a naive `\s+` → `\s*` substitution would
+//! reopen stay rejected — see the `.tmLanguage.json` comment for the
+//! two-sided implementation.
 
 use beamtalk_core::source_analysis::parse_divider_name;
 

@@ -9,7 +9,7 @@
 //! - Semantic analysis (type checking, name resolution)
 //!
 //! Code generation (Core Erlang output) lives in the standalone
-//! `beamtalk-codegen` crate (ADR 0117 step 5, BT-3362), which depends on
+//! `beamtalk-codegen` crate (ADR 0117 step 5), which depends on
 //! this crate's Compilation context, never the reverse.
 //!
 //! The compiler is designed as a language service, prioritizing
@@ -17,27 +17,26 @@
 
 #![doc = include_str!("../../../README.md")]
 
-// BT-3361 (ADR 0117 Decision step 5): widened from `pub(crate)` — the
-// Language Service context (now the standalone `beamtalk-language-service`
+// This module is `pub`, not `pub(crate)` (ADR 0117 Decision step 5): the
+// Language Service context (the standalone `beamtalk-language-service`
 // crate) reaches `is_announce_selector` as the shared-leaf fact both it and
 // this crate's `semantic_analysis` must agree on (see this module's own doc
-// comment). It was already a public-shaped leaf beneath two DDD contexts;
-// only one of those contexts used to live inside this crate, so a `pub(crate)`
-// item it reached had to become genuinely `pub` once the consumer moved out.
+// comment). It is a public-shaped leaf beneath two DDD contexts, only one of
+// which lives inside this crate, so the other needs genuine `pub`
+// visibility to reach it.
 pub mod announce_selectors;
 pub mod ast;
-// BT-3340: widened from `pub(crate)` — `for_each_expr_seq` is used by the
-// standalone `beamtalk-lint` crate now that `lint` has moved out of this
-// crate (ADR 0117 Decision step 2).
+// This module is `pub`, not `pub(crate)`: `for_each_expr_seq` is used by the
+// standalone `beamtalk-lint` crate (ADR 0117 Decision step 2).
 pub mod ast_walker;
 pub mod compilation;
-// BT-3361 (ADR 0117 Decision step 5): widened from `pub(crate)` — same
+// This module is `pub`, not `pub(crate)` (ADR 0117 Decision step 5) — same
 // rationale as `announce_selectors` above; `erlang_module_of_receiver` is
 // reached from `beamtalk-language-service`'s `queries::ffi_sites_query`.
 pub mod ffi_receiver;
 pub mod ffi_type_specs;
 pub mod file_walker;
-// BT-3361 (ADR 0117 Decision step 5): widened from `pub(crate)` — same
+// This module is `pub`, not `pub(crate)` (ADR 0117 Decision step 5) — same
 // rationale as `announce_selectors` above; `selector_span` is reached from
 // `beamtalk-language-service`'s `queries` module.
 pub mod method_source_walker;
@@ -45,7 +44,7 @@ pub mod near_miss_divider;
 pub mod semantic_analysis;
 pub mod source_analysis;
 pub mod span;
-// BT-3362 (ADR 0117 Decision step 5): widened from `pub(crate)` — the
+// This module is `pub`, not `pub(crate)` (ADR 0117 Decision step 5): the
 // standalone `beamtalk-codegen` crate's `core_erlang` reaches
 // `is_exception_selector`/`is_conditional_selector` to decide state-threading
 // codegen for exception handlers and conditionals.
@@ -57,15 +56,12 @@ pub mod unparse;
 
 /// Re-export commonly used types.
 ///
-/// BT-3361 (ADR 0117 Decision step 5): this used to also re-export
-/// `Completion`, `CompletionKind`, `HoverInfo`, `LanguageService`, `Location`,
-/// `Position`, `ProjectIndex`, and `SimpleLanguageService` from
-/// `language_service` — removed since that module moved into the standalone
+/// Does not re-export `Completion`, `CompletionKind`, `HoverInfo`,
+/// `LanguageService`, `Location`, `Position`, `ProjectIndex`, or
+/// `SimpleLanguageService`: those live in the standalone
 /// `beamtalk-language-service` crate, which this crate cannot depend on
 /// without creating a cycle (Language Service depends on Compilation, never
-/// the reverse). No production code imported these through `prelude` (only
-/// direct `beamtalk_core::language_service::...` / `crate::queries::...`
-/// paths existed), so callers that want them now import directly from
+/// the reverse). Callers that want them import directly from
 /// `beamtalk_language_service::{...}`.
 pub mod prelude {
     pub use crate::ast::{
@@ -90,7 +86,7 @@ pub struct CompilerOptions {
     /// Emits a warning instead of an error.
     pub allow_primitives: bool,
 
-    /// BT-374 / ADR 0010 / ADR 0019: Whether workspace bindings are available.
+    /// ADR 0010 / ADR 0019: Whether workspace bindings are available.
     /// When true, class references resolve through session bindings or class
     /// registry. When false (batch compile), they go directly to the registry.
     pub workspace_mode: bool,
@@ -102,7 +98,7 @@ pub struct CompilerOptions {
     /// When true, treat warnings and hints as errors — compilation fails if any are emitted.
     pub warnings_as_errors: bool,
 
-    /// BT-979: When true, skip the effect-free lint check on `module.expressions`.
+    /// When true, skip the effect-free lint check on `module.expressions`.
     ///
     /// Set this for bootstrap-test compilation, where top-level expressions are
     /// intentional test assertions (paired with `// =>` comments) rather than
@@ -110,7 +106,7 @@ pub struct CompilerOptions {
     /// `beamtalk build` / `beamtalk lint` paths all get the check.
     pub skip_module_expression_lint: bool,
 
-    /// The package name of the module being compiled (ADR 0071, BT-1700).
+    /// The package name of the module being compiled (ADR 0071).
     ///
     /// Threaded into semantic analysis via `AnalysisContext::with_options` to
     /// set the `package` field on `ClassInfo` entries built from AST source.
@@ -118,7 +114,7 @@ pub struct CompilerOptions {
     pub current_package: Option<String>,
 
     /// How complete the cross-file knowledge injected into analysis is
-    /// (BT-2796, ADR 0100 Rule 2 sequencing guard).
+    /// (ADR 0100 Rule 2 sequencing guard).
     ///
     /// Defaults to [`semantic_analysis::KnowledgeScope::ModuleOnly`]. Set to
     /// `ProjectComplete` only by orchestrators that walked the entire project
@@ -128,7 +124,7 @@ pub struct CompilerOptions {
     /// because genuinely unresolved".
     pub knowledge_scope: semantic_analysis::KnowledgeScope,
 
-    /// Whether the package being compiled declares dependencies (BT-2794).
+    /// Whether the package being compiled declares dependencies.
     ///
     /// Pre-WS3 (ADR 0070 amendment), dependency extension contributions are
     /// invisible to the checker, and a dependency can extend any class —

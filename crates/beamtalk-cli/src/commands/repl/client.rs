@@ -19,9 +19,9 @@ use crate::commands::protocol::ProtocolClient;
 /// REPL client that wraps [`ProtocolClient`] with REPL-specific operations.
 pub(crate) struct ReplClient {
     inner: ProtocolClient,
-    /// Session ID assigned by the server (BT-666)
+    /// Session ID assigned by the server
     session_id: Option<String>,
-    /// Host address for this connection (BT-694)
+    /// Host address for this connection
     host: String,
     /// Port used for this connection (needed for interrupt connection)
     port: u16,
@@ -115,13 +115,13 @@ impl ReplClient {
         self.send_request(&RequestBuilder::eval(expression))
     }
 
-    /// Send an eval request that can be interrupted by Ctrl-C (BT-666).
+    /// Send an eval request that can be interrupted by Ctrl-C.
     ///
     /// Sets a read timeout on the socket and polls for the response while
     /// checking the `interrupted` flag. If the flag is set, sends an
     /// interrupt op on a separate connection to the backend.
     ///
-    /// BT-696: Handles multi-message streaming responses. Intermediate
+    /// Handles multi-message streaming responses. Intermediate
     /// messages with `out` field are printed incrementally. The final
     /// message with `status: ["done"]` is returned as the result.
     pub(crate) fn eval_interruptible(
@@ -133,7 +133,7 @@ impl ReplClient {
     }
 
     /// Dispatch a class entry method (`ClassName selector [args]`) in the
-    /// connected session and stream its output (BT-2691, ADR 0099 §3).
+    /// connected session and stream its output (ADR 0099 §3).
     ///
     /// The connected-mode `beamtalk run … --connect` consumer: sends a
     /// `run-entry` op carrying `class` / `selector` / `args`, streams `Console`
@@ -155,7 +155,7 @@ impl ReplClient {
 
     /// Send a request that streams incremental `out` chunks, then return the
     /// terminal response. Shared by [`eval_interruptible`] and [`dispatch_entry`]
-    /// (BT-2691) — both consume the same streaming + `need-input` + interrupt
+    /// — both consume the same streaming + `need-input` + interrupt
     /// protocol; only the request op differs.
     fn send_streaming(
         &mut self,
@@ -168,7 +168,7 @@ impl ReplClient {
         self.inner
             .set_read_timeout(Some(Duration::from_millis(200)))?;
 
-        // BT-696: Track whether we received streaming output chunks
+        // Track whether we received streaming output chunks
         let mut streamed = false;
 
         let result = loop {
@@ -178,7 +178,7 @@ impl ReplClient {
                     let parsed: serde_json::Value = serde_json::from_str(&line)
                         .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {line}"))?;
 
-                    // BT-696: Check for streaming output chunk
+                    // Check for streaming output chunk
                     if parsed.get("out").is_some() && parsed.get("status").is_none() {
                         if let Some(chunk) = parsed["out"].as_str() {
                             print!("{chunk}");
@@ -188,7 +188,7 @@ impl ReplClient {
                         continue;
                     }
 
-                    // BT-698: Check for need-input status (stdin request)
+                    // Check for need-input status (stdin request)
                     if let Some(status) = parsed.get("status").and_then(|s| s.as_array()) {
                         let has_need_input =
                             status.iter().any(|s| s.as_str() == Some("need-input"));
@@ -201,7 +201,7 @@ impl ReplClient {
                     // Final response with status
                     let mut response: ReplResponse = serde_json::from_value(parsed)
                         .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {line}"))?;
-                    // BT-696: Clear output field if already streamed to avoid double-printing
+                    // Clear output field if already streamed to avoid double-printing
                     if streamed {
                         response.output = None;
                     }
@@ -229,7 +229,7 @@ impl ReplClient {
         result
     }
 
-    /// Handle a need-input request from the server (BT-698).
+    /// Handle a need-input request from the server.
     /// Prints the prompt, reads a line from stdin, and sends it back.
     fn handle_stdin_request(&mut self, parsed: &serde_json::Value) -> Result<()> {
         use std::io::{BufRead, Write};
@@ -267,7 +267,7 @@ impl ReplClient {
         Ok(())
     }
 
-    /// Send an interrupt op, for use from the `:interrupt` meta-command (BT-2090).
+    /// Send an interrupt op, for use from the `:interrupt` meta-command.
     ///
     /// Like the internal [`send_interrupt`] (used by Ctrl-C during eval), this
     /// opens a **separate** connection so it works even when the main connection
@@ -296,7 +296,7 @@ impl ReplClient {
         }
     }
 
-    /// Send an interrupt request on a separate WebSocket connection (BT-666).
+    /// Send an interrupt request on a separate WebSocket connection.
     fn send_interrupt(&self) {
         let interrupt_req = match self.session_id {
             Some(ref session) => RequestBuilder::interrupt_with_session(session),
@@ -316,7 +316,7 @@ impl ReplClient {
 
     /// Clear the current session's local bindings.
     ///
-    /// BT-2369 (ADR 0081 Phase 6): the `clear` protocol op was removed; this
+    /// ADR 0081 Phase 6: the `clear` protocol op was removed; this
     /// now evaluates `Session current clear` against the connected session.
     pub(crate) fn clear_bindings(&mut self) -> Result<ReplResponse> {
         self.send_request(&RequestBuilder::eval_with_trace(
@@ -327,7 +327,7 @@ impl ReplClient {
 
     /// Get the current session's local binding names.
     ///
-    /// BT-2369 (ADR 0081 Phase 6): the `bindings` protocol op was removed; this
+    /// ADR 0081 Phase 6: the `bindings` protocol op was removed; this
     /// now evaluates `Session current bindings keys` against the connected
     /// session. The result is the eval `value` (a list of binding-name symbols).
     pub(crate) fn get_bindings(&mut self) -> Result<ReplResponse> {
@@ -359,7 +359,7 @@ impl ReplClient {
         self.send_request(&RequestBuilder::complete(prefix))
     }
 
-    /// Get help for an Erlang module or function (BT-1852).
+    /// Get help for an Erlang module or function.
     ///
     /// Sends `erlang-help` op to the backend with `module` and optional `function`.
     /// Returns combined type signatures and EEP-48 documentation.
@@ -371,12 +371,12 @@ impl ReplClient {
         self.send_request(&RequestBuilder::erlang_help(module, function))
     }
 
-    /// Show generated Core Erlang for an expression (BT-724).
+    /// Show generated Core Erlang for an expression.
     pub(crate) fn show_codegen(&mut self, code: &str) -> Result<ReplResponse> {
         self.send_request(&RequestBuilder::show_codegen(code))
     }
 
-    /// Load/sync a project from its `beamtalk.toml` (BT-1707).
+    /// Load/sync a project from its `beamtalk.toml`.
     ///
     /// Uses `send_raw` (no retry) because `load-project` is not idempotent —
     /// a partial load followed by a retry would cause duplicate loads.
@@ -399,7 +399,7 @@ impl ReplClient {
             .map_err(|e| miette::miette!("Failed to parse load-project response: {e}"))
     }
 
-    /// Unload a class from the workspace by name (BT-1243).
+    /// Unload a class from the workspace by name.
     pub(crate) fn unload(&mut self, class_name: &str) -> Result<ReplResponse> {
         self.send_request(&RequestBuilder::unload(class_name))
     }

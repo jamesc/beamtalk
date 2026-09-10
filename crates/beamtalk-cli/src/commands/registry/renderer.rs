@@ -18,7 +18,7 @@ use super::layout::{page_footer, page_header};
 use crate::commands::util::html_escape;
 
 /// The dependency snippet for a `(name, version)` pair, matching the bare
-/// registry-string `[dependencies]` format `beamtalk.toml` accepts (BT-2978):
+/// registry-string `[dependencies]` format `beamtalk.toml` accepts:
 /// `name = "x.y.z"`.
 fn dependency_snippet(name: &str, version: &str) -> String {
     format!(
@@ -43,7 +43,7 @@ fn versions_newest_first(entry: &RegistryEntry) -> Vec<&RegistryRelease> {
 ///
 /// An empty `entries` list (a registry with no published packages yet) still
 /// renders a complete, valid page — with a "no packages" message in place of
-/// the list — rather than erroring (BT-2990 acceptance criterion).
+/// the list — rather than erroring.
 pub(super) fn write_index_page(output_dir: &Utf8Path, entries: &[RegistryEntry]) -> Result<()> {
     let mut html = String::new();
     html.push_str(&page_header("Beamtalk Package Registry"));

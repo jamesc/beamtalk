@@ -12,7 +12,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
-/// Tuple primitive implementations (BT-417).
+/// Tuple primitive implementations.
 ///
 /// Tuples are Erlang tuples — immutable fixed-size collections, particularly
 /// useful for Erlang interop with {ok, Value} and {error, Reason} patterns.
@@ -72,7 +72,7 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
     }
 }
 
-/// `ProtoObject` primitive implementations (BT-1158).
+/// `ProtoObject` primitive implementations.
 ///
 /// `ProtoObject` is the root of the class hierarchy. Its `doesNotUnderstand:args:`
 /// method raises a `does_not_understand` error so that messages sent to objects
@@ -131,7 +131,7 @@ pub(crate) fn generate_value_bif(selector: &str, _params: &[String]) -> Option<D
     }
 }
 
-/// Set primitive implementations (BT-73).
+/// Set primitive implementations.
 ///
 /// Sets are represented as tagged maps: `#{'$beamtalk_class' => 'Set', elements => OrdsetData}`.
 /// Operations delegate to `beamtalk_set` helper module which wraps Erlang `ordsets`.
@@ -212,10 +212,10 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
                 ")"
             ])
         }
-        // BT-477: Delegate to beamtalk_primitive:print_string/1 which
+        // Delegate to beamtalk_primitive:print_string/1 which
         // formats Sets as "Set(element1, element2, ...)"
         "printString" => Some(super::PRINT_STRING),
-        // Streaming (BT-514)
+        // Streaming
         "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
         _ => None,
     }

@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Corpus-wide conformance tests for the unparser against the byte-span
-//! resolver and the method-source send walker (ADR 0082 / BT-2584 / BT-2594 /
-//! BT-3217).
+//! resolver and the method-source send walker (ADR 0082).
 //!
-//! These moved here from `source_analysis::method_span_corpus_tests` (BT-3346,
-//! ADR 0117 Phase 4): each test below round-trips through `unparse_method` or
+//! These moved here from `source_analysis::method_span_corpus_tests` (ADR
+//! 0117 Phase 4): each test below round-trips through `unparse_method` or
 //! `reindent_method_source`, so — unlike their `source_analysis`-only
 //! siblings that stayed behind (span geometry, resolvability) — they belong in
 //! `unparse`'s own test tree, not `source_analysis`'s.
@@ -70,11 +69,11 @@ fn match_trailing_newline(s: &str, reference: &str) -> String {
     }
 }
 
-/// BT-2584: the install-hook reshape round-trips every method's disk slice
+/// The install-hook reshape round-trips every method's disk slice
 /// byte-for-byte.
 ///
-/// This is the "`source_ref == disk[span]` by construction" proof for the part
-/// BT-2584 owns: the *reshape* the install hook applies to turn a column-0
+/// This is the "`source_ref == disk[span]` by construction" proof for the
+/// *reshape* the install hook applies to turn a column-0
 /// canonical body into the on-disk byte-span shape, and that flush then splices
 /// verbatim. The reshape is two mutually-inverse transforms:
 ///
@@ -91,7 +90,7 @@ fn match_trailing_newline(s: &str, reference: &str) -> String {
 /// reconciliation: whatever the install hook stores re-indents back to the slice
 /// it replaces.
 ///
-/// Since BT-2594 `reindent_method_source` re-lays-out at the target indent (it
+/// Since `reindent_method_source` re-lays-out at the target indent (it
 /// re-parses and re-renders, rather than only shifting whitespace), so this holds
 /// for the whole corpus only because the corpus is `bt fmt`-clean — i.e. every
 /// method's disk shape already *is* its canonical layout at the span's indent.
@@ -162,7 +161,7 @@ fn corpus_reshape_round_trip_is_byte_identical() {
     );
 }
 
-/// BT-2594: the full production save/flush pipeline reproduces `disk[span]`
+/// The full production save/flush pipeline reproduces `disk[span]`
 /// byte-for-byte for **every** method in the corpus — no skipped subset.
 ///
 /// The live save pipeline is: the editor's bare body is re-parsed + re-emitted
@@ -172,16 +171,15 @@ fn corpus_reshape_round_trip_is_byte_identical() {
 /// result must equal `disk[span]` exactly — otherwise saving silently reformats
 /// the file.
 ///
-/// This previously held only for the subset whose on-disk body already matched
-/// the unparser's *column-0* layout (~80%); the rest diverged because
-/// `unparse_method` decides line breaks at column 0 while the method lives
-/// indented on disk (BT-2594, bucket 3), and because the per-method source
-/// dropped the `class ` prefix for class-side methods (bucket 2). With
-/// `reindent_method_source` re-laying-out at the target indent and
-/// `MethodDefinition::is_class_method` carrying the prefix, the pipeline is now
-/// byte-identical for the **whole** corpus — provided the corpus is `bt fmt`-clean
-/// (enforced for stdlib and examples by `fmt-check-beamtalk`). So this asserts
-/// 100%, not a majority subset.
+/// This holds byte-identically for the **whole** corpus, not just the subset
+/// whose on-disk body happens to match the unparser's *column-0* layout:
+/// `unparse_method` decides line breaks at column 0, so an indented method's
+/// disk shape would otherwise diverge, and a class-side method's per-method
+/// source would otherwise drop the `class ` prefix. `reindent_method_source`
+/// re-laying-out at the target indent and `MethodDefinition::is_class_method`
+/// carrying the prefix close both gaps — provided the corpus is `bt
+/// fmt`-clean (enforced for stdlib and examples by `fmt-check-beamtalk`). So
+/// this asserts 100%, not a majority subset.
 #[test]
 fn corpus_methods_round_trip_byte_identical() {
     if !corpus_present() {
@@ -251,7 +249,7 @@ fn corpus_methods_round_trip_byte_identical() {
 /// human-readable label (`Class.selector (side)`) — unlike
 /// [`crate::source_analysis::corpus_test_support::enumerate_methods`], which
 /// returns identity-only targets for `resolve_in_module` round-tripping, this
-/// hands back the actual method AST the BT-3217 conformance test below needs
+/// hands back the actual method AST the conformance test below needs
 /// to run both walkers against.
 fn corpus_method_definitions(module: &Module) -> Vec<(String, &crate::ast::MethodDefinition)> {
     let mut out = Vec::new();
@@ -287,7 +285,7 @@ fn corpus_method_definitions(module: &Module) -> Vec<(String, &crate::ast::Metho
     out
 }
 
-/// BT-3217 (ADR 0115 Phase 2): `build_method_xref_entry` joins
+/// ADR 0115 Phase 2: `build_method_xref_entry` joins
 /// `method_source_walker::collect_receiver_spans`'s span-carrying walk of the
 /// *original* AST to `find_all_sends_in_source`'s syntactic walk of a
 /// re-unparsed/re-parsed copy **by pre-order ordinal** — the two walks must
@@ -301,13 +299,12 @@ fn corpus_method_definitions(module: &Module) -> Vec<(String, &crate::ast::Metho
 /// stdlib + `examples/` corpus, not just an asserted invariant in a comment
 /// (this project's no-"keep-in-sync"-comment-without-a-test rule).
 ///
-/// Was non-empty for two `system_navigation.bt` methods until BT-3223 fixed
-/// the underlying parser bug (`is_at_declaration_level_expect` misclassified
-/// a body-level `@expect` as declaration-level when the enclosing method was
-/// rendered at column 0 — exactly `find_all_sends_in_source`'s synthetic-wrap
-/// shape). Kept empty-but-present rather than removed: any *new* divergence
-/// still fails the test outright, and a future one gets the same narrow,
-/// documented allowlist entry this one did rather than silently masking it.
+/// Kept empty-but-present rather than removed: any *new* divergence
+/// still fails the test outright, and gets a narrow, documented allowlist
+/// entry rather than being silently masked. A body-level `@expect`
+/// misclassified as declaration-level when the enclosing method is rendered
+/// at column 0 (exactly `find_all_sends_in_source`'s synthetic-wrap shape)
+/// is the kind of parser bug this guards against.
 const KNOWN_DIVERGENT_METHODS: &[(&str, &str)] = &[];
 
 #[test]
@@ -334,7 +331,7 @@ fn corpus_receiver_span_walk_matches_syntactic_send_walk() {
 
             // The exact same source channel `build_method_xref_entry` feeds
             // `find_all_sends_in_source` (a direct `unparse_method(method)` call,
-            // deliberately bypassing `extract_method_source`'s BT-3249
+            // deliberately bypassing `extract_method_source`'s
             // inferred-return-type stripping — xref/`referencesTo:` still needs to
             // see writeback-inferred type references, only the human-facing
             // browsable source should hide them).
@@ -405,7 +402,7 @@ fn corpus_receiver_span_walk_matches_syntactic_send_walk() {
          the walk may have silently failed"
     );
     // Every `KNOWN_DIVERGENT_METHODS` entry must still actually diverge — if
-    // BT-3223's parser fix lands, this fails loudly rather than letting a
+    // its underlying bug is fixed, this fails loudly rather than letting a
     // stale exception silently mask a *new*, different divergence at the
     // same (file, label) key.
     assert_eq!(

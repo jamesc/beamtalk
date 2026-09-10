@@ -28,7 +28,7 @@ use miette::{Result, miette};
 /// Write an Erlang args file containing the cookie for secure distribution.
 ///
 /// Uses `-args_file` instead of `-setcookie` on the command line to prevent
-/// the cookie from being visible in `ps aux` / `/proc/{pid}/cmdline` (BT-726).
+/// the cookie from being visible in `ps aux` / `/proc/{pid}/cmdline`.
 /// The file is created with mode 0600 on Unix for owner-only access.
 pub(super) fn write_cookie_args_file(workspace_id: &str, cookie: &str) -> Result<PathBuf> {
     let args_file_path = super::storage::workspace_dir(workspace_id)?.join("vm.args");
@@ -41,7 +41,6 @@ pub(super) fn write_cookie_args_file(workspace_id: &str, cookie: &str) -> Result
 /// Convert a Windows path to Unix-style forward slashes for Erlang.
 ///
 /// Erlang on Windows expects forward slashes in `-pa` arguments, not backslashes.
-/// See BT-661 for details on this Windows-specific issue.
 pub(super) fn path_to_erlang_arg(path: &Path) -> String {
     to_forward_slash(&path.to_string_lossy())
 }
@@ -51,7 +50,7 @@ pub(super) fn path_to_erlang_arg(path: &Path) -> String {
 /// Extracted from `start_detached_node` so the command configuration
 /// (args, env vars) can be inspected in tests without spawning a process.
 ///
-/// # Security hardening (BT-726)
+/// # Security hardening
 ///
 /// - **Environment allowlist**: `env_clear()` prevents leaking sensitive env vars
 ///   (`AWS_*`, `DATABASE_URL`, `SSH_AUTH_SOCK`, etc.) to the BEAM node.
@@ -74,7 +73,7 @@ pub(super) fn build_detached_node_command(
             ("-name", node_name.to_string())
         } else {
             // Short hostname (e.g. localhost) → short names to avoid
-            // "Hostname localhost is illegal" errors (BT-1418)
+            // "Hostname localhost is illegal" errors
             ("-sname", node_name.to_string())
         }
     } else {
@@ -90,7 +89,7 @@ pub(super) fn build_detached_node_command(
         "-noshell".to_string(),
         node_flag.to_string(),
         node_arg,
-        // Cookie via args file instead of -setcookie (BT-726: not visible in ps)
+        // Cookie via args file instead of -setcookie (not visible in ps)
         "-args_file".to_string(),
         path_to_erlang_arg(cookie_args_file),
     ];
@@ -108,7 +107,7 @@ pub(super) fn build_detached_node_command(
 
     cmd.arg("-eval").arg(eval_cmd);
 
-    // Security: clear inherited environment, then allowlist only required vars (BT-726).
+    // Security: clear inherited environment, then allowlist only required vars.
     // Prevents leaking AWS_*, DATABASE_URL, SSH_AUTH_SOCK, etc.
     cmd.env_clear();
 
@@ -148,7 +147,7 @@ pub(super) fn build_detached_node_command(
             cmd.env(var, val);
         }
     }
-    // Windows-specific system variables required for reliable BEAM startup (BT-727).
+    // Windows-specific system variables required for reliable BEAM startup.
     // USERPROFILE is the Windows equivalent of HOME; SystemRoot, COMSPEC, PATHEXT,
     // and APPDATA are needed by Erlang and child processes on Windows.
     #[cfg(windows)]
@@ -173,7 +172,7 @@ pub(super) fn build_detached_node_command(
         cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     }
 
-    // Security: set umask and create new session for proper daemon behavior (BT-726)
+    // Security: set umask and create new session for proper daemon behavior
     #[cfg(unix)]
     {
         // SAFETY: setsid() and umask() are async-signal-safe per POSIX.
@@ -397,7 +396,7 @@ mod tests {
 
     #[test]
     fn node_at_short_hostname_uses_short_names() {
-        // BT-1418: a short (non-dotted) host after `@` must still get
+        // A short (non-dotted) host after `@` must still get
         // `-sname`, not `-name` ("Hostname localhost is illegal" otherwise).
         let cmd = build_with_node_name("ws@localhost");
         let args: Vec<_> = cmd.get_args().collect();

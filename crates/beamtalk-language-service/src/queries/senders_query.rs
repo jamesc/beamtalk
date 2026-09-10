@@ -5,8 +5,7 @@
 //!
 //! **DDD Context:** Language Service
 //!
-//! Backs `SystemNavigation sendersOf:` (BT-2190, moved to `SystemNavigation`
-//! in BT-2214). Given the source text of a single
+//! Backs `SystemNavigation sendersOf:`. Given the source text of a single
 //! compiled method (as returned by `CompiledMethod source`) and a target
 //! selector name, returns the 1-based line numbers, relative to the method
 //! source, at which a `MessageSend` or `Cascade` message with that selector
@@ -309,7 +308,7 @@ mod tests {
         assert!(lines.is_empty());
     }
 
-    /// BT-2195: Class-side methods carry a return-type arrow in their
+    /// Class-side methods carry a return-type arrow in their
     /// signature (e.g. `default -> SystemNavigation =>`). The senders walker
     /// must still find sends inside the body — exercises the source shape
     /// produced by the unparser for class-side definitions.
@@ -324,7 +323,7 @@ mod tests {
         );
     }
 
-    /// BT-2195: The unparser emits doc comments (`///`) and the `@expect`
+    /// The unparser emits doc comments (`///`) and the `@expect`
     /// directive before the body. The senders walker must still recurse into
     /// the body and find sends.
     #[test]
@@ -362,7 +361,7 @@ mod tests {
         assert_eq!(lines, vec![2]);
     }
 
-    // BT-2196: scanning extension method source (registered via
+    // Scanning extension method source (registered via
     // `beamtalk_extensions:register/5`) should produce hits the same way
     // class-body methods do. This is the canonical shape passed by
     // `SystemNavigation collectExtensionSendersFor:into:` when iterating

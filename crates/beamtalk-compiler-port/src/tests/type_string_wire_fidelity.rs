@@ -4,7 +4,7 @@
 //! Property-based tests pinning that a type-annotation *string* —
 //! `method_signature_terms`'s `TypeAnnotation::type_name()` rendering,
 //! carried in `return_type`/`param_types` response fields (see
-//! `method_definition_ok_response`, ADR 0105 Phase 1 / BT-2777) —
+//! `method_definition_ok_response`, ADR 0105 Phase 1) —
 //! crosses the compiler port's `{packet, 4}`-framed ETF wire unchanged.
 //!
 //! `Term::encode`/`Term::decode` (`eetf`) implement the same External

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0082 Phase 1 (BT-2283) method-source-span commands:
+//! ADR 0082 Phase 1 method-source-span commands:
 //! `resolve_method_span`, `reindent_method_source`,
 //! `find_selector_send_spans`, and `find_definition_selector_spans`.
 
@@ -12,7 +12,7 @@ use eetf::{List, Map, Term};
 
 use crate::respond::error_response;
 
-/// Handle a `resolve_method_span` request (ADR 0082, Phase 1 — BT-2283).
+/// Handle a `resolve_method_span` request (ADR 0082, Phase 1).
 ///
 /// Backs the live-patch install hook: given the current on-disk source of a
 /// `.bt` file and a target `(class, selector, side)`, resolve the exact byte
@@ -101,12 +101,12 @@ pub(crate) fn handle_resolve_method_span(request: &Map) -> Term {
     }
 }
 
-/// Handle a `reindent_method_source` request (BT-2584).
+/// Handle a `reindent_method_source` request.
 ///
 /// Re-lays-out a canonical (column-0) method body at the given `base_indent`,
 /// producing the on-disk byte-span shape. It re-parses the body and re-renders
 /// it with the line-width budget reduced by the indent, so width-sensitive lines
-/// re-break exactly as `bt fmt` does on disk (BT-2594), then shifts. The
+/// re-break exactly as `bt fmt` does on disk, then shifts. The
 /// live-patch install hook calls this so the `ChangeEntry`'s stored `source` is a
 /// drop-in for `disk[span]` — `source_ref == disk[span]` by construction — and a
 /// later `Workspace flush` splices it verbatim with no reshaping (retiring the
@@ -135,7 +135,7 @@ pub(crate) fn handle_reindent_method_source(request: &Map) -> Term {
     ]))
 }
 
-/// Handle a `find_selector_send_spans` request (ADR 0114, BT-3279).
+/// Handle a `find_selector_send_spans` request (ADR 0114).
 ///
 /// Backs `Behaviour>>renameSelector:to:`'s reference-site rewrite: given one
 /// owning method's source text (a slice already resolved via
@@ -220,7 +220,7 @@ pub(crate) fn selector_send_span_terms(
         .collect()
 }
 
-/// Handle a `find_definition_selector_spans` request (ADR 0114, BT-3279).
+/// Handle a `find_definition_selector_spans` request (ADR 0114).
 ///
 /// Backs `Behaviour>>renameSelector:to:`'s DEFINITION-site rewrite: given a
 /// class's current full source, resolve `(old_selector, side)`'s own

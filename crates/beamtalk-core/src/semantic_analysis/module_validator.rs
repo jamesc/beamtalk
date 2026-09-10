@@ -6,7 +6,7 @@
 //! **DDD Context:** Semantic Analysis
 //!
 //! Validates module structure constraints:
-//! - Enforces one class or protocol per file (BT-1666)
+//! - Enforces one class or protocol per file
 
 use crate::ast::Module;
 use crate::source_analysis::Diagnostic;
@@ -107,12 +107,12 @@ pub fn validate_single_definition(module: &Module) -> Vec<Diagnostic> {
 }
 
 /// Validates that a file's basename agrees with the class it declares,
-/// under Erlang module-name case-folding (BT-3431).
+/// under Erlang module-name case-folding.
 ///
 /// A `.bt` file's Erlang module name is derived from its own file path
 /// (`to_module_name(file_stem)`), independently of the class name declared
 /// inside it (ADR 0016/0026). Every *other* file's reference to this class —
-/// `compiled_module_name`'s registry lookup (ADR 0119 / BT-3436), hot-reload's
+/// `compiled_module_name`'s registry lookup (ADR 0119), hot-reload's
 /// file-to-module mapping — resolves through that file-path-derived name, so
 /// a class whose file name disagrees with its own declared name cannot be
 /// dispatched to by name from anywhere else, with no diagnostic at the point
@@ -323,12 +323,11 @@ mod tests {
 
     #[test]
     fn test_class_file_name_agreement_mismatch_errors() {
-        // BT-3431's literal real-world scenario (`event.bt` / `class
-        // ExduraEvent`) — and BT-3437's registry-facing regression for it:
-        // this validator is what stands between that mismatch and a silent
-        // cross-file dispatch failure now that `compiled_module_name`
+        // A literal real-world scenario (`event.bt` / `class
+        // ExduraEvent`): this validator is what stands between that mismatch
+        // and a silent cross-file dispatch failure, since `compiled_module_name`
         // resolves other files' references to this class through the
-        // `ClassModuleRegistry` (ADR 0119/BT-3436), which is itself built
+        // `ClassModuleRegistry` (ADR 0119), which is itself built
         // from the file-path-derived name — an undetected mismatch here
         // would mean the registry's module for `ExduraEvent` never matches
         // what the file's own declared name expects.

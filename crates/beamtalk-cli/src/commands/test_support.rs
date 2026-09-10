@@ -3,16 +3,16 @@
 
 //! Shared test-only fixtures for `beamtalk-cli`'s own (synchronous,
 //! `std::net`/blocking-`tungstenite`) ADR 0020 handshake double and on-disk
-//! workspace fixture (BT-3349).
+//! workspace fixture.
 //!
 //! `repl/client.rs`'s `spawn_auth_ok_server`/`spawn_auth_error_server` and
 //! `workspace/shutdown.rs`'s `WorkspaceFixture`/`unique_ws_id` each started
 //! life as one module's own private test helper; both are needed unchanged
-//! by a second call site (`transcript.rs`, BT-3349), so per the repo's
+//! by a second call site (`transcript.rs`), so per the repo's
 //! no-duplicate-implementations rule they move here rather than growing a
 //! third/fourth copy. This is a *within-crate* consolidation of `beamtalk-cli`'s
-//! own synchronous doubles only — separate from BT-3331, which tracks
-//! consolidating the *cross-crate* pile of `tokio`-async doubles in
+//! own synchronous doubles only — separate from consolidating the *cross-crate*
+//! pile of `tokio`-async doubles in
 //! `beamtalk-lsp`/`beamtalk-mcp` (`beamtalk_repl_protocol::test_support`);
 //! see that module's doc comment for why this crate's synchronous transport
 //! deliberately stays out of that shared async implementation.
@@ -43,7 +43,7 @@ pub(crate) fn unique_ws_id(label: &str) -> String {
 
 /// Guards concurrent access to the real `~/.beamtalk` directory versus a
 /// `BEAMTALK_HOME`-overridden hermetic tempdir, across this crate's whole
-/// test binary (BT-3370). `cargo test` runs tests as threads within one
+/// test binary. `cargo test` runs tests as threads within one
 /// process by default, and `std::env::set_var`/`remove_var` are
 /// process-global — so a test that temporarily overrides `BEAMTALK_HOME`
 /// would otherwise race every non-overriding test's real-directory
@@ -107,7 +107,7 @@ impl Drop for BeamtalkHomeOverride {
 /// `~/.beamtalk/workspaces/`, matching the pattern already used by
 /// `storage.rs`'s and `node_state.rs`'s own tests. Holds the shared
 /// (real-directory) side of [`BEAMTALK_HOME_LOCK`] for its whole lifetime
-/// (BT-3370), so it can never run concurrently with a [`BeamtalkHomeOverride`].
+/// so it can never run concurrently with a [`BeamtalkHomeOverride`].
 /// Removes the directory and lockfile on drop, including on panic, so a
 /// failing assertion never leaves real state behind.
 pub(crate) struct WorkspaceFixture {

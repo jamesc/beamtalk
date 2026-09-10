@@ -36,7 +36,7 @@ pub struct ClassMetadata {
 }
 
 /// Metadata for a `type` alias declaration discovered during compilation
-/// (ADR 0108 Phase 8, BT-2903).
+/// (ADR 0108 Phase 8).
 ///
 /// Aliases erase entirely — they produce no BEAM module, so unlike a class
 /// there is no live process or `-file` compile attribute the runtime can
@@ -72,7 +72,7 @@ pub struct AliasMetadata {
     /// source file list — no live module to recover this from at runtime).
     pub source_file: String,
     /// Whether this is an `internal type Foo = ...` alias (ADR 0071 / ADR
-    /// 0108 Phase 5, BT-2898).
+    /// 0108 Phase 5).
     pub internal: bool,
 }
 
@@ -225,7 +225,7 @@ fn format_native_modules_entry(native_module_names: &[String]) -> String {
 
 /// Format the `{type_aliases, [...]}` entry for the `.app` `env` section.
 ///
-/// ADR 0108 Phase 8 (BT-2903): each entry is a map with `name` (atom, same
+/// ADR 0108 Phase 8: each entry is a map with `name` (atom, same
 /// naming rules as a class name), `expansion`/`source_file`/`doc` (Erlang
 /// strings — arbitrary display text, not identifiers, so they are escaped
 /// the same way `description` is rather than emitted as atoms), and
@@ -242,7 +242,7 @@ fn format_native_modules_entry(native_module_names: &[String]) -> String {
 ///
 /// `pub(crate)` (not private): reused by
 /// [`super::build_stdlib::generate_app_file`]/`generate_app_src_file`
-/// (BT-2938) so `beamtalk_stdlib.app`'s `env` gets the same `{type_aliases,
+/// so `beamtalk_stdlib.app`'s `env` gets the same `{type_aliases,
 /// [...]}` key the ordinary `beamtalk build` pipeline already emits here —
 /// see this module's `AliasMetadata` doc for why that key exists.
 pub(crate) fn format_type_aliases_entry(alias_metadata: &[AliasMetadata]) -> String {
@@ -709,7 +709,7 @@ mod tests {
 
     #[test]
     fn test_format_type_aliases_entry_escapes_backslash_in_expansion() {
-        // BT-2903: a `Difference`-typed alias's rendered expansion contains a
+        // A `Difference`-typed alias's rendered expansion contains a
         // literal `\` (e.g. `type PublicTag = Symbol \ (#reserved | #internal)`
         // unparses to `"Symbol \\ (#reserved | #internal)"`, see
         // `unparse::tests::difference_type_unparse` for the Beamtalk-source

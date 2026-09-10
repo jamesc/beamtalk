@@ -119,6 +119,16 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // and its neighbours) where a compile error can actually be asserted.
   bt3484ValueTypeFieldWriteThreadingPending => false
 
+  // Pending switch for BT-3486: on:do:/ensure: is a third construct family
+  // with the same root cause BT-3484 fixed for loops/conditionals — a
+  // value-type self.field := mints an unthreaded Self/SelfN chain the
+  // construct's own carried-state mechanism doesn't know about — but this
+  // one compiles cleanly and SILENTLY returns the pre-ensure: value instead
+  // of erroring (confirmed via the generated Core Erlang: the Self1 binding
+  // is computed inside the try and discarded). See
+  // fragStateFieldEnsureNonLastReadWrite's own doc comment above.
+  bt3486ValueTypeFieldWriteInEnsurePending => true
+
   // ── TestCase-context fragments (the test class is itself a value-type) ──────
   // `frag` prefix keeps BUnit from treating them as test methods.
   fragToDoNonLastWriteOnly =>
@@ -205,6 +215,90 @@ TestCase subclass: ValueTypeMutationMatrixTest
         self.total := self.total + 7
         seen := seen + 1
       ]
+    self.total
+
+  // BT-3484 close-out: bringing axis 4 up to the same construct density as
+  // axes 1-3, rather than stopping at the two shapes BT-3484's own repro
+  // named. BT-3484 fixed the mechanism generically for every LETREC-shaped
+  // loop (to:do:/to:by:do:/timesRepeat:/whileTrue:/whileFalse:) and both
+  // conditional forms — confirmed by hand for each of the four below
+  // (Core-Erlang-inspected: each threads a trailing `Self` letrec parameter
+  // or branch-merge slot exactly like fragStateFieldToDoNonLastReadWrite /
+  // fragStateFieldIfTrueNonLastReadWrite: above), so these are un-gated from
+  // the start rather than landing behind a pending switch.
+  //
+  // FOLDL-shaped list-ops (do:/collect:/select:/reject:/inject:into:/
+  // detect:ifNone:/count:, and a Range's own do:) are a DIFFERENT construct
+  // family BT-3484 explicitly left out of scope (their accumulator has no
+  // matching Self slot — pre-existing BT-3169 tech debt shared with
+  // ClassVars) and are NOT represented here at all: `self.total :=` inside
+  // one of their blocks fails erlc outright (`unbound variable 'State'`),
+  // which would break compilation of this whole file if checked in as a
+  // fixture — tracked in BT-3487 instead, same reasoning that kept the
+  // ifTrue: conditional fragment out until BT-3484 fixed it for real.
+  fragStateFieldToByDoNonLastReadWrite =>
+    seen := 0
+    1
+      to: 10
+      by: 2
+      do: [:i |
+        self.total := self.total + i
+        seen := seen + 1
+      ]
+    self.total
+
+  fragStateFieldTimesRepeatNonLastReadWrite =>
+    seen := 0
+    5
+      timesRepeat: [
+        self.total := self.total + 1
+        seen := seen + 1
+      ]
+    self.total
+
+  fragStateFieldWhileTrueNonLastReadWrite =>
+    n := 0
+    [n < 5]
+      whileTrue: [
+        self.total := self.total + 1
+        n := n + 1
+      ]
+    self.total
+
+  fragStateFieldWhileFalseNonLastReadWrite =>
+    n := 0
+    [n >= 5]
+      whileFalse: [
+        self.total := self.total + 1
+        n := n + 1
+      ]
+    self.total
+
+  fragStateFieldIfTrueIfFalseNonLastReadWrite: flag =>
+    x := 1
+    flag
+      ifTrue: [
+        self.total := self.total + 1
+        x := x + 1
+      ]
+      ifFalse: [self.total := self.total + 100]
+    self.total
+
+  // BT-3486: on:do:/ensure: is a THIRD construct family with the identical
+  // BT-3484 root cause (self.field := mints an unthreaded Self/SelfN chain
+  // the construct's own carried-state mechanism doesn't know about) — but
+  // unlike the Foldl gap above, this one compiles cleanly and SILENTLY
+  // returns the pre-ensure: value instead of erroring, confirmed by
+  // inspecting the generated Core Erlang (the Self1 binding is computed
+  // inside the try and never referenced again). That makes it safe to check
+  // in as a live fixture (nothing crashes), but its ground truth is WRONG
+  // until BT-3486 lands — skipped below rather than asserting the current
+  // (incorrect) behavior as if it were a real regression baseline.
+  fragStateFieldEnsureNonLastReadWrite =>
+    [
+      self.total := self.total + 1
+      nil
+    ] ensure: [nil]
     self.total
 
   // ════════════════════════════════════════════════════════════════════════
@@ -702,6 +796,48 @@ TestCase subclass: ValueTypeMutationMatrixTest
       ]
     self assert: (self fragStateFieldIfTrueNonLastReadWrite: false) equals: 0
 
+  // BT-3484 close-out (axis 4 density): the remaining Letrec/conditional
+  // construct shapes, un-gated since the underlying mechanism is the same
+  // one BT-3484 already fixed and verified for to:do:/ifTrue: above.
+  testStateFieldToByDoNonLastReadWriteTestCase =>
+    self assert: self fragStateFieldToByDoNonLastReadWrite equals: 25
+
+  testStateFieldTimesRepeatNonLastReadWriteTestCase =>
+    self assert: self fragStateFieldTimesRepeatNonLastReadWrite equals: 5
+
+  testStateFieldWhileTrueNonLastReadWriteTestCase =>
+    self assert: self fragStateFieldWhileTrueNonLastReadWrite equals: 5
+
+  testStateFieldWhileFalseNonLastReadWriteTestCase =>
+    self assert: self fragStateFieldWhileFalseNonLastReadWrite equals: 5
+
+  testStateFieldIfTrueIfFalseNonLastReadWriteTrueTestCase =>
+    self assert: (self fragStateFieldIfTrueIfFalseNonLastReadWrite: true) equals: 1
+
+  testStateFieldIfTrueIfFalseNonLastReadWriteFalseTestCase =>
+    self assert: (self fragStateFieldIfTrueIfFalseNonLastReadWrite: false) equals: 100
+
+  // BT-3486: on:do:/ensure: silently returns the pre-ensure: value (0)
+  // instead of the correct threaded value (1) — see
+  // fragStateFieldEnsureNonLastReadWrite's own doc comment. Skipped rather
+  // than asserting the current wrong behavior as a baseline.
+  testStateFieldEnsureNonLastReadWriteTestCase =>
+    self bt3486ValueTypeFieldWriteInEnsurePending
+      ifTrue: [
+        ^self skip: "BT-3486: value-type self.field := inside on:do:/ensure: silently drops the mutation"
+      ]
+    self assert: self fragStateFieldEnsureNonLastReadWrite equals: 1
+
+  // BT-3487/BT-3488: no live fixtures for these — both fail erlc outright
+  // (unbound variable 'State'), which would break compilation of this whole
+  // file if checked in. BT-3487: self.field := inside a Foldl-shaped list-op
+  // (do:/collect:/select:/reject:/inject:into:/detect:ifNone:/count:, and a
+  // Range's own do:). BT-3488: self.field := inside a conditional nested
+  // inside a loop (not itself a top-level loop statement) — inconsistent
+  // with the identical ClassVar shape, which gets a clean "Cannot assign to
+  // field... inside this block" compile-time rejection instead of crashing;
+  // BT-3488 is really about closing that inconsistency, not necessarily
+  // adding full support.
   testClassVarIfTrueNonLastReadWriteTrueClassMethod =>
     self assert: (MutationCorpusClassMethod classVarIfTrueNonLastReadWrite: true) equals: 7
 

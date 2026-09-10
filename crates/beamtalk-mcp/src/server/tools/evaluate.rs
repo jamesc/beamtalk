@@ -154,7 +154,7 @@ impl BeamtalkMcp {
         let mut parts = Vec::new();
 
         if !errors.is_empty() {
-            // BT-1855: Count distinct failed file paths (a single file may
+            // Count distinct failed file paths (a single file may
             // produce multiple diagnostics) to give an accurate summary.
             let failed_paths: std::collections::BTreeSet<&str> = errors
                 .iter()
@@ -216,7 +216,7 @@ impl BeamtalkMcp {
                 )));
             }
 
-            // BT-1855: Include incremental summary even when there are errors,
+            // Include incremental summary even when there are errors,
             // so agents know how many files were processed overall.
             if let Some(summary) = response.summary {
                 parts.push(ContentBlock::text(summary));
@@ -234,7 +234,7 @@ impl BeamtalkMcp {
             )));
         }
 
-        // BT-1685: Include incremental summary if available.
+        // Include incremental summary if available.
         if let Some(summary) = response.summary {
             parts.push(ContentBlock::text(summary));
         }

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `beamtalk publish` — tag and publish a release to the package registry (BT-2980).
+//! `beamtalk publish` — tag and publish a release to the package registry.
 //!
 //! **DDD Context:** Build System
 //!
@@ -80,8 +80,8 @@ pub fn run(dry_run: bool) -> Result<()> {
         .is_some_and(|entry| entry.find_version(version).is_some());
     // A version recorded in the on-disk entry only really counts as
     // *published* once it's committed to the index repository — otherwise
-    // this is reading back a previous `publish`'s partial failure (BT-3000
-    // sibling): `write_index_entry` succeeded but `git add`/`git commit`
+    // this is reading back a previous `publish`'s partial failure:
+    // `write_index_entry` succeeded but `git add`/`git commit`
     // (`commit_and_push_index`) never landed, so the file sits in the index
     // clone staged or untracked. Without this check, that leftover file
     // would make a retry falsely report "already published" and tell the
@@ -699,7 +699,7 @@ mod tests {
     struct TestFixture {
         // Kept alive for the duration of the test — dropping deletes the tempdir.
         _origin_bare: TempDir,
-        // Read back by `index_dir()` (BT-2996) — not just kept alive, hence no
+        // Read back by `index_dir()` — not just kept alive, hence no
         // leading underscore.
         index_bare: TempDir,
         library: TempDir,
@@ -708,8 +708,8 @@ mod tests {
     impl TestFixture {
         /// Where `run()` cached this fixture's registry index clone.
         ///
-        /// BT-2996 moved the default cache out of the project (previously a
-        /// fixed `_build/registry/index/`) into a shared, user-level
+        /// The default cache lives outside the project (not a
+        /// fixed `_build/registry/index/`) in a shared, user-level
         /// directory keyed by the registry URL, so tests resolve it the same
         /// way production code does — via `ensure_index` — rather than
         /// hardcoding a path. `refresh: false` is safe here: every caller
@@ -763,7 +763,7 @@ mod tests {
         // Real projects scaffolded by `beamtalk new` ignore `_build/` — keep
         // that convention here too so the working tree never looks dirty on
         // a re-publish, regardless of where the registry index is cached
-        // (BT-2996: normally a shared, user-level cache outside the project
+        // (normally a shared, user-level cache outside the project
         // entirely, but `BEAMTALK_REGISTRY_CACHE_DIR` can still point it at
         // `_build/registry`).
         std::fs::write(library.path().join(".gitignore"), "/_build/\n").unwrap();
@@ -1126,7 +1126,7 @@ mod tests {
         // (a successful first publish pushes it there), which the
         // remote-tag check reports in preference to the local one — it's
         // the stronger signal that this version really was published, not
-        // just tagged locally and abandoned mid-publish (BT-3000).
+        // just tagged locally and abandoned mid-publish.
         let result = with_cwd(&utf8(&fixture.library), || run(false));
         assert!(result.is_err());
         let msg = flat_err(&result.unwrap_err());
@@ -1224,7 +1224,7 @@ mod tests {
         assert_eq!(entry.description.as_deref(), Some("YAML parsing"));
     }
 
-    /// BT-3000: a `publish` that pushes the release tag (step 2) and then
+    /// A `publish` that pushes the release tag (step 2) and then
     /// dies before the registry index is updated (step 3) — e.g. the index
     /// remote went unreachable — must not tell a retrying user to bump the
     /// version. That advice, correct for a *true* republish, is actively
@@ -1297,7 +1297,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Uncommitted index entry (BT-3002)
+    // Uncommitted index entry
     // -----------------------------------------------------------------------
 
     /// A previous `publish` can push the release tag (step 2), have
@@ -1429,7 +1429,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Commit-failure error message (BT-3002)
+    // Commit-failure error message
     // -----------------------------------------------------------------------
 
     /// If `git commit` itself fails, no local commit exists yet — the user

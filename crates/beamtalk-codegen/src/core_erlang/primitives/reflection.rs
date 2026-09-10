@@ -13,7 +13,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
-/// Symbol primitive implementations (BT-273).
+/// Symbol primitive implementations.
 ///
 /// Symbols are Erlang atoms — interned, immutable identifiers.
 pub(crate) fn generate_symbol_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3124 — corpus-through-BEAM Rust half: generate `.core` text for every
+//! Corpus-through-BEAM Rust half: generate `.core` text for every
 //! `.bt`/`.btscript` file in one or more input corpus directories.
 //!
 //! Pair to `scripts/compile-pipeline-corpus-lint.escript`. This example runs

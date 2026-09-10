@@ -31,9 +31,9 @@ use beamtalk_core::ast::{Block, Expression, MessageSelector, WellKnownSelector};
 /// (`perform:`/`perform:withArguments:`) can't tell — from an
 /// `erlang:is_function/2` arity check alone — whether it's looking at a
 /// genuine Tier 2 (stateful, ADR-0041) block or a Tier 1 block called with
-/// the wrong argument count. Shared by BT-2812's `value*` fallback, BT-2908's
+/// the wrong argument count. Shared by the `value*` fallback, the
 /// loop/exception-handling fallbacks (`while_loops.rs`, `exception_handling.rs`),
-/// and BT-2888's List/Collection guard (which uses its own, differently-worded
+/// and the List/Collection guard (which uses its own, differently-worded
 /// variant — see `generate_stateful_block_guard`).
 pub(in crate::core_erlang) const STATEFUL_BLOCK_DISPATCH_HINT: &str = "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:";
 
@@ -45,7 +45,7 @@ fn block_arity(expr: &Expression) -> Option<usize> {
     }
 }
 
-/// BT-493: Validates that a block has exactly the expected arity.
+/// Validates that a block has exactly the expected arity.
 /// Non-literal blocks are assumed correct (can't check at compile time).
 /// Returns `Ok(())` if valid, `Err(BlockArityError)` if wrong arity.
 pub(in crate::core_erlang) fn validate_block_arity_exact(
@@ -67,7 +67,7 @@ pub(in crate::core_erlang) fn validate_block_arity_exact(
     Ok(())
 }
 
-/// BT-493: Validates that a block has arity within a range (inclusive).
+/// Validates that a block has arity within a range (inclusive).
 /// Non-literal blocks are assumed correct (can't check at compile time).
 /// Returns `Ok(())` if valid, `Err(BlockArityError)` if out of range.
 #[cfg(test)]
@@ -91,7 +91,7 @@ fn validate_block_arity_range(
     Ok(())
 }
 
-/// BT-493: Validates that an `on:do:` handler block has arity 0 or 1.
+/// Validates that an `on:do:` handler block has arity 0 or 1.
 /// Returns `true` if the handler takes an argument (arity 1 or non-literal), `false` for arity 0.
 /// Follows the same pattern as `validate_if_not_nil_block`.
 pub(in crate::core_erlang) fn validate_on_do_handler(
@@ -167,9 +167,9 @@ impl CoreErlangGenerator {
     /// - `whileTrue:` (1 arg) → loop while condition block returns true
     /// - `whileFalse:` (1 arg) → loop while condition block returns false
     /// - `timesRepeat:` (1 arg) → arity validation + mutating-block state threading only;
-    ///   non-mutating falls through to pure-BT Integer method (BT-1054)
-    /// - `to:do:` (2 args) → arity validation + mutating-block state threading only (BT-1054)
-    /// - `to:by:do:` (3 args) → arity validation + mutating-block state threading only (BT-1054)
+    ///   non-mutating falls through to pure-BT Integer method
+    /// - `to:do:` (2 args) → arity validation + mutating-block state threading only
+    /// - `to:by:do:` (3 args) → arity validation + mutating-block state threading only
     pub(in crate::core_erlang) fn try_generate_block_message(
         &mut self,
         receiver: &Expression,
@@ -181,7 +181,7 @@ impl CoreErlangGenerator {
             return self.try_generate_block_value_unary(receiver, arguments);
         }
 
-        // BT-2073: `repeat` is well-known; dispatch via the enum.
+        // `repeat` is well-known; dispatch via the enum.
         if matches!(selector.well_known(), Some(WellKnownSelector::Repeat)) {
             let doc = self.generate_repeat(receiver)?;
             return Ok(Some(doc));
@@ -204,7 +204,7 @@ impl CoreErlangGenerator {
 
     /// Generates code for unary `value` message on a block receiver.
     ///
-    /// BT-335: When the receiver is a block literal, use fast inline apply.
+    /// When the receiver is a block literal, use fast inline apply.
     /// For other receivers, generate a runtime type check to handle both
     /// blocks (apply) and non-blocks (runtime dispatch via send).
     fn try_generate_block_value_unary(
@@ -212,7 +212,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        // BT-2095: A bare class name as receiver (e.g. `Foo value`) is a
+        // A bare class name as receiver (e.g. `Foo value`) is a
         // class-method send, not block application. Fall through so the
         // class-reference handler routes to `class_send` instead of generating
         // a runtime is_function guard that would call
@@ -222,8 +222,8 @@ impl CoreErlangGenerator {
         if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
         }
-        // BT-851: Check if receiver is a Tier 2 block parameter (zero-arg value)
-        // BT-2797: or a local var this method assigned a Tier 2 block literal to.
+        // Check if receiver is a Tier 2 block parameter (zero-arg value)
+        // or a local var this method assigned a Tier 2 block literal to.
         if let Expression::Identifier(id) = receiver {
             if self.tier2_block_params.contains(id.name.as_str())
                 || self.tier2_local_vars.contains(id.name.as_str())
@@ -232,14 +232,14 @@ impl CoreErlangGenerator {
                 return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
             }
         }
-        // BT-1213: Inline Tier 2 block literal with mutations.
+        // Inline Tier 2 block literal with mutations.
         if let Expression::Block(block) = receiver
             && !Self::captured_mutations_for_block(block).is_empty()
         {
             let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
             return Ok(Some(doc));
         }
-        // BT-1481: Block literal with field mutations (actor state threading).
+        // Block literal with field mutations (actor state threading).
         if let Expression::Block(block) = receiver {
             let analysis = block_analysis::analyze_block(block);
             if self.needs_mutation_threading(&analysis) {
@@ -247,7 +247,7 @@ impl CoreErlangGenerator {
                 return Ok(Some(doc));
             }
         }
-        // BT-2814: `self.field value` in sub-expression position (e.g.
+        // `self.field value` in sub-expression position (e.g.
         // `self log: (self.field value)`). `generate_block_value_call_runtime_discriminated`
         // always returns a raw `{Result, NewState}` tuple; this function
         // (reached via the generic `expression_doc` dispatch) is called from
@@ -265,11 +265,11 @@ impl CoreErlangGenerator {
         let doc = if matches!(receiver, Expression::Block { .. }) {
             self.generate_block_value_call(receiver, &[])?
         } else {
-            // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+            // Hoist open-scope receiver (e.g. class method self-send).
             let mut seq = self.sequence_call(&[receiver], "ValRecv")?;
             let recv_doc = seq.next();
             let recv_var = self.fresh_temp_var("ValRecv");
-            // BT-2914: arity-discriminate before applying — a Tier 2
+            // arity-discriminate before applying — a Tier 2
             // (stateful) zero-arg block is an arity-1 fun whose `StateAcc`
             // this call site cannot supply; raise the clear
             // `stateful_block_dispatch` error instead of a raw `badarity`
@@ -296,7 +296,7 @@ impl CoreErlangGenerator {
                 leaf::var(recv_var.clone()),
                 // Only arity >= 2 funs reach this branch (0 and 1 were ruled
                 // out above), so this apply always badarity-crashes — the
-                // pre-BT-2914 behaviour for wrong-arity plain functions,
+                // existing behaviour for wrong-arity plain functions,
                 // preserved deliberately.
                 ") of 'true' when 'true' -> apply ",
                 leaf::var(recv_var.clone()),
@@ -314,7 +314,7 @@ impl CoreErlangGenerator {
     /// Well-known keyword selectors (`value:`/`value:value:`/`value:value:value:`,
     /// `on:do:`, `whileTrue:`/`whileFalse:`, `ensure:`) route through the
     /// `WellKnownSelector` enum so arity is checked structurally by the
-    /// classifier (see BT-1260 / BT-2065 epic / BT-2073). The remaining keyword
+    /// classifier. The remaining keyword
     /// selectors (`timesRepeat:`, `to:do:`, `to:by:do:`) are class-specific
     /// loop helpers and stay as string matches.
     fn try_generate_block_keyword_message(
@@ -364,7 +364,7 @@ impl CoreErlangGenerator {
 
             "to:by:do:" if arguments.len() == 3 => self.try_generate_to_by_do(receiver, arguments),
 
-            // BT-2803: valueWithArguments: (call-site-intercepted @intrinsic,
+            // valueWithArguments: (call-site-intercepted @intrinsic,
             // was previously a bare @primitive with no access to the calling
             // method's state — see stdlib/src/block.bt).
             "valueWithArguments:" if arguments.len() == 1 => {
@@ -377,7 +377,7 @@ impl CoreErlangGenerator {
 
     /// Generates code for `valueWithArguments:` on a block receiver.
     ///
-    /// BT-2803: mirrors `try_generate_block_value_keyword`'s generic
+    /// mirrors `try_generate_block_value_keyword`'s generic
     /// (non-Tier2) fallback path. Deliberately does NOT special-case
     /// `tier2_block_params`/`tier2_local_vars`/`self.field` receivers here —
     /// `generate_block_value_with_arguments_call_runtime_discriminated`
@@ -387,25 +387,25 @@ impl CoreErlangGenerator {
     /// reaching here by the top-level `Tier2ValueCall` classification in
     /// `gen_server/methods.rs` (`is_tier2_value_call`/
     /// `generate_tier2_value_call_doc`), the only place that unpacks the
-    /// tuple (same scoping as `try_generate_block_value_keyword`'s BT-2797
+    /// tuple (same scoping as `try_generate_block_value_keyword`'s
     /// comment for `self.field value:`).
     fn try_generate_block_value_with_arguments_keyword(
         &mut self,
         receiver: &Expression,
         args_expr: &Expression,
     ) -> Result<Option<Document<'static>>> {
-        // BT-2095: A bare class name as receiver is a class-method send, not
+        // A bare class name as receiver is a class-method send, not
         // block application — fall through (mirrors `value:`'s bypass).
         if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
         }
-        // BT-1260: Compile-time Erlang FFI receiver → fall through.
+        // Compile-time Erlang FFI receiver → fall through.
         if Self::is_erlang_ffi_receiver(receiver) {
             return Ok(None);
         }
         // Fast path: block literal receiver never needs the runtime
         // is_function guard. Literal-block-with-mutations is out of scope
-        // (BT-2803) — valueWithArguments: on a literal block is an
+        //  — valueWithArguments: on a literal block is an
         // unmotivated shape; use value:/value:value:/... for those instead.
         if matches!(receiver, Expression::Block(_)) {
             let fun_var = self.fresh_temp_var("Fun");
@@ -435,8 +435,8 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         selector_name: &str,
     ) -> Result<Option<Document<'static>>> {
-        // BT-851: Check if receiver is a Tier 2 block parameter
-        // BT-2797: or a local var this method assigned a Tier 2 block literal to.
+        // Check if receiver is a Tier 2 block parameter
+        // or a local var this method assigned a Tier 2 block literal to.
         if let Expression::Identifier(id) = receiver {
             if self.tier2_block_params.contains(id.name.as_str())
                 || self.tier2_local_vars.contains(id.name.as_str())
@@ -445,14 +445,14 @@ impl CoreErlangGenerator {
                 return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
             }
         }
-        // BT-1213: Inline Tier 2 block literal with mutations (keyword variant)
+        // Inline Tier 2 block literal with mutations (keyword variant)
         if let Expression::Block(block) = receiver
             && !Self::captured_mutations_for_block(block).is_empty()
         {
             let doc = self.generate_block_value_inline_with_mutations(block, arguments)?;
             return Ok(Some(doc));
         }
-        // BT-1481: Block literal with field mutations (actor state threading)
+        // Block literal with field mutations (actor state threading)
         if let Expression::Block(block) = receiver {
             let analysis = block_analysis::analyze_block(block);
             if self.needs_mutation_threading(&analysis) {
@@ -465,11 +465,11 @@ impl CoreErlangGenerator {
             let doc = self.generate_block_value_call(receiver, arguments)?;
             return Ok(Some(doc));
         }
-        // BT-1260: Compile-time Erlang FFI receiver → fall through
+        // Compile-time Erlang FFI receiver → fall through
         if Self::is_erlang_ffi_receiver(receiver) {
             return Ok(None);
         }
-        // BT-2095: A bare class name as receiver (e.g. `Character value: 65`)
+        // A bare class name as receiver (e.g. `Character value: 65`)
         // is a class-method send, not block application. Fall through so the
         // class-reference handler routes to `class_send` instead of generating
         // a runtime is_function guard that ends up calling
@@ -478,7 +478,7 @@ impl CoreErlangGenerator {
         if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
         }
-        // BT-2814: `self.field value: ...` in sub-expression position — see
+        // `self.field value:...` in sub-expression position — see
         // the matching comment (and `close_tier2_value_subexpr_doc`) in
         // `try_generate_block_value_unary`.
         if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
@@ -489,14 +489,14 @@ impl CoreErlangGenerator {
             )?;
             return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
         }
-        // BT-1260: Unknown receiver → runtime is_function guard with fallback
+        // Unknown receiver → runtime is_function guard with fallback
         let doc = self.generate_value_keyword_guard(receiver, arguments, selector_name)?;
         Ok(Some(doc))
     }
 
     /// Generates code for `timesRepeat:` with mutation threading.
     ///
-    /// BT-1054: Only intercept for mutating blocks; non-mutating cases
+    /// Only intercept for mutating blocks; non-mutating cases
     /// fall through to the pure-BT tail-recursive Integer method.
     fn try_generate_times_repeat(
         &mut self,
@@ -514,8 +514,8 @@ impl CoreErlangGenerator {
         )?;
         if let Expression::Block(body_block) = &arguments[0] {
             let analysis = block_analysis::analyze_block(body_block);
-            // BT-1329: Also check for nested list ops with cross-scope mutations.
-            // BT-2308: Also thread when the body mutates an outer local (including
+            // Also check for nested list ops with cross-scope mutations.
+            // Also thread when the body mutates an outer local (including
             // write-only mutations like `[last := i]`) that `needs_mutation_threading`
             // misses in value-type/class-method context. `compute_threaded_locals_for_loop`
             // is the canonical set the loop codegen actually packs into `StateAcc`.
@@ -528,7 +528,7 @@ impl CoreErlangGenerator {
                 let doc = self.generate_times_repeat_with_mutations(receiver, body_block)?;
                 return Ok(Some(doc));
             }
-            // BT-3151: falling through to the stdlib's own tail-recursive
+            // falling through to the stdlib's own tail-recursive
             // `Integer>>timesRepeat:` — a same-process, in-process call, same
             // as `select:`/`do:`. See
             // `check_no_unsafe_class_method_self_sends`'s doc comment.
@@ -539,7 +539,7 @@ impl CoreErlangGenerator {
 
     /// Generates code for `to:do:` with mutation threading.
     ///
-    /// BT-1054: Only intercept for mutating blocks; non-mutating cases
+    /// Only intercept for mutating blocks; non-mutating cases
     /// fall through to the pure-BT tail-recursive Integer method.
     fn try_generate_to_do(
         &mut self,
@@ -556,8 +556,8 @@ impl CoreErlangGenerator {
         )?;
         if let Expression::Block(body_block) = &arguments[1] {
             let analysis = block_analysis::analyze_block(body_block);
-            // BT-1329: Also check for nested list ops with cross-scope mutations.
-            // BT-2308: Also thread write-only outer-local mutations (see try_generate_times_repeat).
+            // Also check for nested list ops with cross-scope mutations.
+            // Also thread write-only outer-local mutations (see try_generate_times_repeat).
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
                 || !self
@@ -568,7 +568,7 @@ impl CoreErlangGenerator {
                     self.generate_to_do_with_mutations(receiver, &arguments[0], body_block)?;
                 return Ok(Some(doc));
             }
-            // BT-3151: see the analogous check in `try_generate_times_repeat`.
+            // see the analogous check in `try_generate_times_repeat`.
             self.check_no_unsafe_class_method_self_sends(&analysis, body_block.span)?;
         }
         Ok(None)
@@ -576,7 +576,7 @@ impl CoreErlangGenerator {
 
     /// Generates code for `to:by:do:` with mutation threading.
     ///
-    /// BT-1054: Only intercept for mutating blocks; non-mutating cases
+    /// Only intercept for mutating blocks; non-mutating cases
     /// fall through to the pure-BT tail-recursive Integer method.
     fn try_generate_to_by_do(
         &mut self,
@@ -593,8 +593,8 @@ impl CoreErlangGenerator {
         )?;
         if let Expression::Block(body_block) = &arguments[2] {
             let analysis = block_analysis::analyze_block(body_block);
-            // BT-1329: Also check for nested list ops with cross-scope mutations.
-            // BT-2308: Also thread write-only outer-local mutations (see try_generate_times_repeat).
+            // Also check for nested list ops with cross-scope mutations.
+            // Also thread write-only outer-local mutations (see try_generate_times_repeat).
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
                 || !self
@@ -609,7 +609,7 @@ impl CoreErlangGenerator {
                 )?;
                 return Ok(Some(doc));
             }
-            // BT-3151: see the analogous check in `try_generate_times_repeat`.
+            // see the analogous check in `try_generate_times_repeat`.
             self.check_no_unsafe_class_method_self_sends(&analysis, body_block.span)?;
         }
         Ok(None)
@@ -620,7 +620,7 @@ impl CoreErlangGenerator {
     /// List methods are structural intrinsics that require inline code generation
     /// for proper state threading when used inside actor methods with field mutations.
     ///
-    /// **BT-416**: This intrinsic now checks the receiver type to avoid intercepting
+    /// This intrinsic now checks the receiver type to avoid intercepting
     /// String primitive methods. String literals use `@primitive` codegen that delegates
     /// to `beamtalk_string`, not `lists:map/filter`.
     ///
@@ -647,7 +647,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        // BT-1489: String receivers are no longer skipped here. The
+        // String receivers are no longer skipped here. The
         // non-mutating simple-list-op path already falls back to
         // `beamtalk_primitive:send(recv, selector, [Body])` for non-list
         // receivers (which dispatches to beamtalk_string helpers). The
@@ -709,7 +709,7 @@ impl CoreErlangGenerator {
                         let doc = self.generate_list_flat_map(receiver, &arguments[0])?;
                         Ok(Some(doc))
                     }
-                    // BT-1487: Medium-risk list selectors
+                    // Medium-risk list selectors
                     "takeWhile:" if arguments.len() == 1 => {
                         let doc = self.generate_list_take_while(receiver, &arguments[0])?;
                         Ok(Some(doc))
@@ -730,7 +730,7 @@ impl CoreErlangGenerator {
                         let doc = self.generate_list_sort(receiver, &arguments[0])?;
                         Ok(Some(doc))
                     }
-                    // BT-2703: `eachWithIndex:`/`do:separatedBy:` are self-hosted in
+                    // `eachWithIndex:`/`do:separatedBy:` are self-hosted in
                     // collection.bt. In an actor method that mutates state, desugar to a
                     // stateful `inject:into:` fold so the mutation threads; otherwise
                     // return `None` and let the ordinary dispatch reach the collection.bt
@@ -749,7 +749,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-1488: Dictionary iteration intrinsics — `do:`, `doWithKey:`, `keysAndValuesDo:`.
+    /// Dictionary iteration intrinsics — `do:`, `doWithKey:`, `keysAndValuesDo:`.
     ///
     /// These are structural intrinsics for dictionary iteration that require inline
     /// code generation for proper state threading when used inside actor methods with
@@ -820,7 +820,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let fun_var = self.fresh_temp_var("Fun");
 
-        // BT-1270: Evaluate receiver first, then hoist field-assignment arguments.
+        // Evaluate receiver first, then hoist field-assignment arguments.
         // This preserves evaluation order: `let _Fun = recv in [hoisted args] apply _Fun (args)`.
         let recv_code = self.expression_doc(receiver)?;
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len() + 2);
@@ -839,21 +839,21 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
-    /// BT-1260: Returns true if `expr` is a compile-time Erlang FFI proxy expression.
+    /// Returns true if `expr` is a compile-time Erlang FFI proxy expression.
     ///
     /// Matches `(Erlang module_name)` — i.e., a `MessageSend` whose inner receiver is
     /// `ClassReference("Erlang")` and whose selector is a unary module name.  These
     /// expressions should **not** be treated as blocks by the `value:` handler; instead
     /// they fall through to `try_handle_erlang_interop` (step 7 of dispatch).
     ///
-    /// BT-3079: delegates to the single shared recognizer in
+    /// delegates to the single shared recognizer in
     /// [`beamtalk_core::ffi_receiver`] (class-protocol filter, package check, and
-    /// BT-2685's parenthesized-receiver peeling all live there now).
+    /// parenthesized-receiver peeling all live there now).
     fn is_erlang_ffi_receiver(expr: &Expression) -> bool {
         beamtalk_core::ffi_receiver::erlang_module_of_receiver(expr).is_some()
     }
 
-    /// BT-1260: Generates a runtime `erlang:is_function/1` guard for keyword `value:` sends.
+    /// Generates a runtime `erlang:is_function/1` guard for keyword `value:` sends.
     ///
     /// When the receiver is not a compile-time-known block or Erlang FFI expression,
     /// emits a runtime check:
@@ -867,14 +867,14 @@ impl CoreErlangGenerator {
     /// end
     /// ```
     ///
-    /// ADR 0118 phase 5b (BT-3422): hoists a receiver operand (which may
+    /// ADR 0118 phase 5b: hoists a receiver operand (which may
     /// need a `ClassVars`/state prelude) binding it to a fresh
     /// `prefix`-named temp var. Appends the necessary `let`-binding(s) to
     /// `parts` in order — `parts` is always a self-contained sequence
     /// (each entry a `let ... in` prefix), so its caller needs no separate
     /// "did anything need hoisting" signal any more. Shared by
     /// `generate_value_keyword_guard` and
-    /// `generate_block_value_with_arguments_call` (BT-2803) — both hoist
+    /// `generate_block_value_with_arguments_call` — both hoist
     /// their receiver the same way, before any argument hoisting.
     fn thread_value_call_receiver(
         &mut self,
@@ -893,12 +893,12 @@ impl CoreErlangGenerator {
         Ok(var)
     }
 
-    /// BT-1270/ADR 0118 phase 5b (BT-3422): hoists an argument-position
+    /// ADR 0118 phase 5b: hoists an argument-position
     /// operand, special-casing a field-assignment argument (`self.field :=
     /// x`) so its `StateN` binding lands outside the let-chain rather than
     /// nested inside it. Appends the necessary `let`-binding(s) to `parts`
     /// in order. Shared by `generate_value_keyword_guard` and
-    /// `generate_block_value_with_arguments_call` (BT-2803).
+    /// `generate_block_value_with_arguments_call`.
     fn thread_value_call_argument(
         &mut self,
         arg: &Expression,
@@ -928,16 +928,16 @@ impl CoreErlangGenerator {
         Ok(var)
     }
 
-    /// This mirrors the runtime guard emitted for the unary `value` case (BT-335).
+    /// This mirrors the runtime guard emitted for the unary `value` case.
     ///
-    /// BT-2914: the function branch discriminates arity before applying. A
+    /// the function branch discriminates arity before applying. A
     /// Tier 2 (stateful, ADR-0041) block compiles to an (N+1)-arg fun expecting
     /// a live `StateAcc` this statically-unknown call site cannot supply — it
     /// reaches here when a stateful block flows through generic dispatch into a
     /// self-hosted method's block parameter (e.g. `perform: #eachWithIndex:`,
     /// whose Collection body invokes `block value:value:`). Applying it N-ary
     /// used to crash with a raw `badarity`; now it raises the same clear
-    /// `stateful_block_dispatch` error BT-2812/BT-2888 established. Any other
+    /// `stateful_block_dispatch` error other stateful-block guards establish. Any other
     /// arity mismatch keeps the pre-existing `badarity` behaviour (the plain
     /// apply in the fallthrough branch), and non-function receivers still fall
     /// back to `beamtalk_primitive:send/3`.
@@ -950,13 +950,13 @@ impl CoreErlangGenerator {
         let mut arg_vars: Vec<String> = Vec::with_capacity(arguments.len());
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len() * 2 + 3);
 
-        // BT-1942: Hoist the receiver (e.g. class method self-send) inline so
+        // Hoist the receiver (e.g. class method self-send) inline so
         // its ClassVarsN binding remains visible to subsequent arg bindings.
         // Each sub-expression is bound sequentially, so per-sub-expression inline
         // hoisting preserves left-to-right evaluation order.
         let recv_var = self.thread_value_call_receiver(receiver, "ValRecv", &mut parts)?;
 
-        // BT-1270: Hoist field-assignment arguments before their _ValArgN bindings so
+        // Hoist field-assignment arguments before their _ValArgN bindings so
         // the StateN binding is in scope after the let-chain, not nested inside it.
         for arg in arguments {
             let arg_var = self.thread_value_call_argument(arg, "ValArg", &mut parts)?;
@@ -969,7 +969,7 @@ impl CoreErlangGenerator {
 
         let send_list = docvec!["[", join(arg_var_docs, &Document::Str(", ")), "]"];
 
-        // BT-2914: same hedged hint as `generate_stateful_block_guard` —
+        // same hedged hint as `generate_stateful_block_guard` —
         // `is_function/2` can't distinguish a genuine Tier 2 block from a pure
         // fun called with one argument too few, and the block can arrive here
         // through any dynamic dispatch, not just `perform:`.
@@ -1010,7 +1010,7 @@ impl CoreErlangGenerator {
             ") end end end",
         ];
 
-        // ADR 0118 phase 5b (BT-3422): `parts` is already a self-contained
+        // ADR 0118 phase 5b: `parts` is already a self-contained
         // `let ... in` prefix sequence regardless of whether any receiver/
         // argument needed a prelude — append the case as the final value.
         parts.push(case_doc);
@@ -1018,7 +1018,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
-    /// BT-2814: Closes a Tier 2 value call's raw `{Result, NewState}` tuple
+    /// Closes a Tier 2 value call's raw `{Result, NewState}` tuple
     /// doc for use in *sub-expression* position (e.g. `10 + (blk value: x)`,
     /// `self log: (self.field value)`), where the caller has no place to
     /// thread `NewState` forward — it can only use a single plain value.
@@ -1031,7 +1031,7 @@ impl CoreErlangGenerator {
     /// pre-existing limitation BT-2797 first called out for
     /// `self.field value(:...)` in argument position, now also correctly
     /// computing the right *value* instead of leaking the raw tuple into the
-    /// caller (which crashed with badarith/badarity — BT-2814). A Tier 2
+    /// caller (which crashed with badarith/badarity). A Tier 2
     /// value call used as a bare STATEMENT (not nested in another
     /// expression) is unaffected: it's classified as
     /// `BodyExprKind::Tier2ValueCall` and still gets full state threading via
@@ -1051,7 +1051,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-851: Generates a Tier 2 stateful block value call (ADR 0041 Phase 0).
+    /// Generates a Tier 2 stateful block value call (ADR 0041 Phase 0).
     ///
     /// Calls a Tier 2 block using the stateful protocol:
     /// `apply _Fun(Args..., State) → {Result, NewState}`
@@ -1098,13 +1098,13 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// BT-2797: Generates a runtime Tier 1/Tier 2 discriminated block value call.
+    /// Generates a runtime Tier 1/Tier 2 discriminated block value call.
     ///
     /// Used when the receiver's Tier-ness can't be determined statically — the
     /// motivating case is a block stored in an instance field and invoked from
     /// a *different* method than the one that assigned it, so no static
     /// local/param tracking (`tier2_block_params` / `tier2_local_vars`, both
-    /// scoped to a single method) can see it. Generalizes the BT-909
+    /// scoped to a single method) can see it. Generalizes the
     /// `erlang:is_function/2` arity-discrimination pattern (used there for
     /// Erlang FFI interop) to Beamtalk-level block value calls.
     ///
@@ -1122,17 +1122,17 @@ impl CoreErlangGenerator {
     ///   `{Result, NewState}` tuple directly (Tier 2 funs already return this
     ///   shape — see `generate_block_stateful`).
     /// - Non-function receiver: falls back to `beamtalk_message_dispatch:send/3`
-    ///   (BT-3377: not `beamtalk_primitive:send/3` — the receiver may be a
+    ///   (not `beamtalk_primitive:send/3` — the receiver may be a
     ///   live actor, whose reply envelope only `beamtalk_actor:sync_send/3`
     ///   knows how to unwrap; mirrors `generate_value_keyword_guard`'s
     ///   fallback), wrapped as `{SendResult, State}`.
     ///
-    /// Callers must unpack this tuple. `is_tier2_value_call` (extended for
-    /// BT-2797 to recognize `self.field` receivers) is what makes
+    /// Callers must unpack this tuple. `is_tier2_value_call` (extended to
+    /// recognize `self.field` receivers) is what makes
     /// `classify_body_expr` route the statement calling this function to
     /// `BodyExprKind::Tier2ValueCall`/`LocalAssignTier2`.
     ///
-    /// BT-2797 (PR #2899 review): called ONLY from
+    /// Called ONLY from
     /// `gen_server/methods.rs`'s `generate_tier2_value_call_doc` — the single
     /// place that actually unpacks this tuple. Deliberately not wired into
     /// the generic `try_generate_block_value_unary`/`try_generate_block_value_keyword`
@@ -1217,12 +1217,12 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
-    /// BT-2812: Generates the fallback method body for `blockValue`/`blockValue1`/
+    /// Generates the fallback method body for `blockValue`/`blockValue1`/
     /// `blockValue2`/`blockValue3` — Block's `value`/`value:`/`value:value:`/
     /// `value:value:value:`. This body is reached only when something bypasses the
     /// call-site interception these selectors normally get (e.g. `perform:`/
     /// `perform:withArguments:`), the same gap `blockValueWithArguments`'s fallback
-    /// (`generate_primitive`, `mod.rs`) closed for real under BT-2803 — but unlike
+    /// (`generate_primitive`, `mod.rs`) closed for real — but unlike
     /// that selector, these can't unconditionally `erlang:apply`: under ADR-0041's
     /// universal state-threading protocol, a Tier 2 (stateful) block compiles to
     /// `fun(Args..., StateAcc) -> {Result, NewStateAcc}`, and invoking it correctly
@@ -1243,7 +1243,7 @@ impl CoreErlangGenerator {
     ///   practice): falls through to the original runtime-dispatch placeholder,
     ///   unchanged from before this fix.
     ///
-    /// Adversarial review (BT-2812): the arity ambiguity above cuts both ways.
+    /// Adversarial review: the arity ambiguity above cuts both ways.
     /// A genuinely Tier 2 block whose *declared* arity is one less than the
     /// selector's (e.g. a 0-arg stateful block `[count := count + 1]`, raw
     /// arity 1, sent `#value:`) satisfies the Tier 1 `is_function(Self, N)`
@@ -1258,7 +1258,7 @@ impl CoreErlangGenerator {
     /// map-shape crashes and reraises everything else untouched (real
     /// `#beamtalk_error{}`s and non-local-return throws must not be masked);
     /// deferred as a separately-scoped follow-up rather than risking a rushed
-    /// version of that here. See BT-2892.
+    /// version of that here.
     pub(in crate::core_erlang) fn generate_block_value_structural_fallback(
         &mut self,
         intrinsic_name: &str,
@@ -1354,11 +1354,11 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-2888: Guards a List/Collection iteration primitive's block argument
+    /// Guards a List/Collection iteration primitive's block argument
     /// (`do:`/`collect:`/`select:`/`reject:`/`inject:into:`) against being a
     /// Tier 2 (stateful) block.
     ///
-    /// Unlike Block's `value*` structural intrinsics (BT-2812), these
+    /// Unlike Block's `value*` structural intrinsics, these
     /// selectors' compiled method bodies are real, already-correct BIF
     /// lowerings (`tier1_doc`, e.g. `lists:map/2`, `beamtalk_list:do/2`) — a
     /// Tier 1 (pure) block reached via generic dispatch (`perform:`) already
@@ -1367,7 +1367,7 @@ impl CoreErlangGenerator {
     /// live `StateAcc` (ADR-0041) that generic dispatch has no way to supply,
     /// which today hits a raw Erlang arity crash (confirmed empirically)
     /// instead of a clear diagnostic. This wraps the existing correct Tier 1
-    /// body with the same `stateful_block_dispatch` error BT-2812
+    /// body with the same `stateful_block_dispatch` error already
     /// established, rather than replacing a placeholder.
     ///
     /// Selector-keyed, not class-keyed: applies wherever a class declares one
@@ -1375,7 +1375,7 @@ impl CoreErlangGenerator {
     /// BIF lowering (confirmed to include List, Array, Binary, Dictionary,
     /// Set, Tuple, Collection, and String's `collect:`/`select:`/`reject:`).
     ///
-    /// Same arity-only ambiguity BT-2812 documented for `blockValue*`
+    /// The same arity-only ambiguity documented for `blockValue*`
     /// (`generate_block_value_structural_fallback`): `erlang:is_function/2`
     /// can't distinguish a genuinely stateful block from a *pure* block
     /// simply called with one fewer argument than the selector expects (both
@@ -1414,7 +1414,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-2803: Generates a runtime `erlang:is_function/1` guard for
+    /// Generates a runtime `erlang:is_function/1` guard for
     /// `valueWithArguments:` sends.
     ///
     /// Mirrors `generate_value_keyword_guard`, but the argument is a single
@@ -1461,7 +1461,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
-    /// BT-2803: Generalizes `generate_block_value_call_runtime_discriminated`
+    /// Generalizes `generate_block_value_call_runtime_discriminated`
     /// to `valueWithArguments:`, whose argument count is a runtime list
     /// length rather than a compile-time-known static arity.
     ///
@@ -1477,7 +1477,7 @@ impl CoreErlangGenerator {
     ///   the block's own `{Result, NewState}` tuple directly (Tier 2 funs
     ///   already return this shape).
     /// - Non-function receiver: falls back to `beamtalk_message_dispatch:send/3`
-    ///   (BT-3377 — see `generate_block_value_call_runtime_discriminated`'s
+    ///   (see `generate_block_value_call_runtime_discriminated`'s
     ///   doc comment for why `beamtalk_primitive:send/3` is wrong here),
     ///   wrapped as `{SendResult, State}`.
     pub(in crate::core_erlang) fn generate_block_value_with_arguments_call_runtime_discriminated(
@@ -1550,7 +1550,7 @@ impl CoreErlangGenerator {
         Ok(docvec![preamble, case_doc])
     }
 
-    /// BT-1213: Generates inline code for `[block_with_mutations] value` (or `value:`).
+    /// Generates inline code for `[block_with_mutations] value` (or `value:`).
     ///
     /// When a block literal has captured mutations (variables read AND written, like
     /// `[errors := errors add: #foo]`), this inlines the block body with state threading
@@ -1653,7 +1653,7 @@ impl CoreErlangGenerator {
         // Actor/REPL context: use StateAcc-based inlining (generate_conditional_branch_inline)
         let outer_state = self.current_state_var();
 
-        // ADR 0111 Addendum 5 (BT-3146): REPL-mode conditional-branch
+        // ADR 0111 Addendum 5: REPL-mode conditional-branch
         // inlining — reaches the SAME `generate_conditional_branch_inline`
         // single-arm helper, which now builds, `verify()`s, and `render()`s
         // this arm's real per-frame ThreadedIr internally; the scalar
@@ -1727,9 +1727,9 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        // BT-412: `class` (unary, well-known) returns class as first-class object.
+        // `class` (unary, well-known) returns class as first-class object.
         if matches!(selector.well_known(), Some(WellKnownSelector::Class)) {
-            // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+            // Hoist open-scope receiver (e.g. class method self-send).
             let mut seq = self.sequence_call(&[receiver], "Obj")?;
             let recv_doc = seq.next();
             let call_doc = docvec![
@@ -1740,13 +1740,13 @@ impl CoreErlangGenerator {
             return Ok(Some(seq.close(self, call_doc, "ClassRes")));
         }
 
-        // BT-2073: `perform:` family routes through the `WellKnownSelector` enum;
+        // `perform:` family routes through the `WellKnownSelector` enum;
         // the classifier guarantees arity, so explicit `arguments.len()` guards
         // become `debug_assert_eq!` for parser-shape invariants.
         match selector.well_known() {
             Some(WellKnownSelector::PerformWithArgs) => {
                 debug_assert_eq!(arguments.len(), 2);
-                // BT-1942: Hoist open-scope receiver + args (e.g. class method self-sends).
+                // Hoist open-scope receiver + args (e.g. class method self-sends).
                 let mut seq =
                     self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "Perf")?;
                 let recv_doc = seq.next();
@@ -1763,11 +1763,11 @@ impl CoreErlangGenerator {
                 ];
                 Ok(Some(seq.close(self, call_doc, "PerfRes")))
             }
-            // BT-1664: Execute a class method in the caller's process,
+            // Execute a class method in the caller's process,
             // bypassing the class object's gen_server.
             Some(WellKnownSelector::PerformLocallyWithArgs) => {
                 debug_assert_eq!(arguments.len(), 2);
-                // BT-1942: Hoist open-scope receiver + args (e.g. class method self-sends).
+                // Hoist open-scope receiver + args (e.g. class method self-sends).
                 let mut seq =
                     self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "PerfLoc")?;
                 let recv_doc = seq.next();
@@ -1786,7 +1786,7 @@ impl CoreErlangGenerator {
             }
             Some(WellKnownSelector::Perform) => {
                 debug_assert_eq!(arguments.len(), 1);
-                // BT-1942: Hoist open-scope receiver + selector arg.
+                // Hoist open-scope receiver + selector arg.
                 let mut seq = self.sequence_call(&[receiver, &arguments[0]], "Perf")?;
                 let recv_doc = seq.next();
                 let sel_doc = seq.next();
@@ -1856,14 +1856,14 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        // BT-2065/BT-2071: Dispatch nil-protocol intrinsics via the `WellKnownSelector`
+        // Dispatch nil-protocol intrinsics via the `WellKnownSelector`
         // enum. The classifier guarantees arity (e.g. `ifNil:ifNotNil:` requires
         // exactly two keyword parts), so explicit `arguments.len()` guards become
         // redundant — we keep one `debug_assert` per arm for paranoia.
         match selector.well_known() {
             Some(WellKnownSelector::IsNil) => {
                 debug_assert!(arguments.is_empty());
-                // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+                // Hoist open-scope receiver (e.g. class method self-send).
                 let mut seq = self.sequence_call(&[receiver], "Obj")?;
                 let recv_doc = seq.next();
                 let recv_var = self.fresh_temp_var("Obj");
@@ -1880,7 +1880,7 @@ impl CoreErlangGenerator {
             }
             Some(WellKnownSelector::NotNil) => {
                 debug_assert!(arguments.is_empty());
-                // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+                // Hoist open-scope receiver (e.g. class method self-send).
                 let mut seq = self.sequence_call(&[receiver], "Obj")?;
                 let recv_doc = seq.next();
                 let recv_var = self.fresh_temp_var("Obj");
@@ -1897,7 +1897,7 @@ impl CoreErlangGenerator {
             }
             Some(WellKnownSelector::IfNil) => {
                 debug_assert_eq!(arguments.len(), 1);
-                // BT-3420 (ADR 0118 phase 4): same inline mutation-threading
+                // ADR 0118 phase 4: same inline mutation-threading
                 // check as `ifNotNil:` below — a self-send or field mutation
                 // inside the `ifNil:` block must not be lost to a plain
                 // closure.
@@ -1913,7 +1913,7 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
-                // BT-1942: Hoist open-scope receiver/block (e.g. class method self-sends).
+                // Hoist open-scope receiver/block (e.g. class method self-sends).
                 let mut seq = self.sequence_call(&[receiver, &arguments[0]], "IfNil")?;
                 let recv_doc = seq.next();
                 let block_doc = seq.next();
@@ -1941,13 +1941,13 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::IfNotNil) => {
                 debug_assert_eq!(arguments.len(), 1);
                 let selector_name = WellKnownSelector::IfNotNil.as_str();
-                // BT-1226: When in actor context or loop body, check if the block
+                // When in actor context or loop body, check if the block
                 // contains field mutations. If so, generate inline state-threaded code
                 // instead of a closure to ensure mutations persist correctly.
                 if self.context == CodeGenContext::Actor || self.in_loop_body {
                     if let Expression::Block(block) = &arguments[0] {
-                        // BT-2356: inline when a nested list op mutates an outer local (see IfTrue).
-                        // BT-3382: also inline for a self-send receiver (see IfTrue above).
+                        // inline when a nested list op mutates an outer local (see IfTrue).
+                        // also inline for a self-send receiver (see IfTrue above).
                         let needs_threading =
                             self.conditional_needs_mutation_threading(receiver, &[block]);
                         if needs_threading {
@@ -1965,7 +1965,7 @@ impl CoreErlangGenerator {
                     }
                 }
                 // If the block has 0 parameters, don't pass the receiver (avoids badarity)
-                // BT-1942: Hoist open-scope receiver/block (e.g. class method self-sends).
+                // Hoist open-scope receiver/block (e.g. class method self-sends).
                 let block_takes_arg = validate_if_not_nil_block(&arguments[0], selector_name)?;
                 let mut seq = self.sequence_call(&[receiver, &arguments[0]], "IfNotNil")?;
                 let recv_doc = seq.next();
@@ -1993,7 +1993,7 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::IfNilIfNotNil) => {
                 debug_assert_eq!(arguments.len(), 2);
                 let selector_name = WellKnownSelector::IfNilIfNotNil.as_str();
-                // BT-3420 (ADR 0118 phase 4): inline mutation-threading
+                // ADR 0118 phase 4: inline mutation-threading
                 // check, same as the single-block `ifNil:`/`ifNotNil:`
                 // arms above.
                 if self.context == CodeGenContext::Actor || self.in_loop_body {
@@ -2015,7 +2015,7 @@ impl CoreErlangGenerator {
                     }
                 }
                 // If the notNil block has 0 parameters, don't pass the receiver
-                // BT-1942: Hoist open-scope sub-expressions (e.g. class method self-sends).
+                // Hoist open-scope sub-expressions (e.g. class method self-sends).
                 let block_takes_arg = validate_if_not_nil_block(&arguments[1], selector_name)?;
                 let mut seq =
                     self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "IfNilNotNil")?;
@@ -2052,7 +2052,7 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::IfNotNilIfNil) => {
                 debug_assert_eq!(arguments.len(), 2);
                 let selector_name = WellKnownSelector::IfNotNilIfNil.as_str();
-                // BT-3420 (ADR 0118 phase 4): inline mutation-threading
+                // ADR 0118 phase 4: inline mutation-threading
                 // check, same as the single-block `ifNil:`/`ifNotNil:`
                 // arms above.
                 if self.context == CodeGenContext::Actor || self.in_loop_body {
@@ -2074,7 +2074,7 @@ impl CoreErlangGenerator {
                     }
                 }
                 // If the notNil block has 0 parameters, don't pass the receiver
-                // BT-1942: Hoist open-scope sub-expressions (e.g. class method self-sends).
+                // Hoist open-scope sub-expressions (e.g. class method self-sends).
                 let block_takes_arg = validate_if_not_nil_block(&arguments[0], selector_name)?;
                 let mut seq =
                     self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "IfNotNilNil")?;
@@ -2124,25 +2124,25 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        // BT-1254: `error:` on a ClassReference is a class method call (e.g. `Result error: reason`),
+        // `error:` on a ClassReference is a class method call (e.g. `Result error: reason`),
         // not the Object#error: error-signaling intrinsic. Skip so class method dispatch handles it.
         // Also covers `Logger error: "msg"` — see `WellKnownSelector::Error` rustdoc
         // for the dual-use caveat (Object >> error: vs Logger class >> error:).
         if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
         }
-        // BT-2685: `(Erlang mod) error: arg` / `error:metadata:` is an Erlang FFI call to a
+        // `(Erlang mod) error: arg` / `error:metadata:` is an Erlang FFI call to a
         // function named `error` (e.g. `Console error:` delegating to `beamtalk_console:error/1`),
         // not the Object#error: error-signaling intrinsic. Skip so the FFI proxy handles it.
         if Self::is_erlang_ffi_receiver(receiver) {
             return Ok(None);
         }
-        // BT-2073: `error:` is well-known; dispatch via the enum.
+        // `error:` is well-known; dispatch via the enum.
         if !matches!(selector.well_known(), Some(WellKnownSelector::Error)) {
             return Ok(None);
         }
         debug_assert_eq!(arguments.len(), 1);
-        // BT-1942: Hoist open-scope receiver + message (e.g. class method self-sends).
+        // Hoist open-scope receiver + message (e.g. class method self-sends).
         let mut seq = self.sequence_call(&[receiver, &arguments[0]], "Err")?;
         let recv_doc = seq.next();
         let msg_doc = seq.next();
@@ -2194,11 +2194,11 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        // BT-2073: `hash` (well-known) — dispatch via the enum so the
+        // `hash` (well-known) — dispatch via the enum so the
         // classifier validates kind/arity.
         if matches!(selector.well_known(), Some(WellKnownSelector::Hash)) {
             debug_assert!(arguments.is_empty());
-            // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+            // Hoist open-scope receiver (e.g. class method self-send).
             let mut seq = self.sequence_call(&[receiver], "Obj")?;
             let recv_doc = seq.next();
             let recv_var = self.fresh_temp_var("Obj");
@@ -2217,7 +2217,7 @@ impl CoreErlangGenerator {
             MessageSelector::Unary(name) => match name.as_str() {
                 "yourself" if arguments.is_empty() => {
                     // Identity: just return the receiver
-                    // BT-1942: Preserve the receiver's own prelude (e.g. class
+                    // Preserve the receiver's own prelude (e.g. class
                     // method self-send) so the mutated ClassVarsN binding
                     // propagates upward — `close_prelude` splices it ahead of
                     // the identity return.
@@ -2225,7 +2225,7 @@ impl CoreErlangGenerator {
                     let recv_doc = seq.next();
                     Ok(Some(seq.close(self, recv_doc, "YourselfRes")))
                 }
-                // BT-477: printString removed as intrinsic — now uses polymorphic
+                // printString removed as intrinsic — now uses polymorphic
                 // dispatch via Object >> printString and per-class overrides.
                 _ => Ok(None),
             },
@@ -2251,11 +2251,11 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        // BT-2073: `fieldNames` (well-known unary). The classifier validates
+        // `fieldNames` (well-known unary). The classifier validates
         // kind/arity, so explicit `arguments.is_empty()` becomes a `debug_assert!`.
         if matches!(selector.well_known(), Some(WellKnownSelector::FieldNames)) {
             debug_assert!(arguments.is_empty());
-            // BT-1321: Fast-path for `self` receiver in actor context.
+            // Fast-path for `self` receiver in actor context.
             // `Self` is a `#beamtalk_object{..., pid: self()}` tuple, so the
             // normal is_tuple branch would call sync_send(self()) which is
             // gen_server:call(self(), ...) → deadlock.
@@ -2274,13 +2274,13 @@ impl CoreErlangGenerator {
                 }
             }
 
-            // BT-1942: Hoist open-scope receiver (e.g. class method self-send).
+            // Hoist open-scope receiver (e.g. class method self-send).
             let mut seq = self.sequence_call(&[receiver], "FNames")?;
             let recv_doc = seq.next();
             let receiver_var = self.fresh_var("Receiver");
             let pid_var = self.fresh_var("Pid");
 
-            // BT-924: If receiver is a map (value object or stdlib tagged map),
+            // If receiver is a map (value object or stdlib tagged map),
             // delegate to beamtalk_primitive:send which routes through the
             // correct dispatch/3 for the receiver's class kind.
             // Actor (tuple) receivers use sync_send (ADR-0043).
@@ -2309,7 +2309,7 @@ impl CoreErlangGenerator {
                 // correctness is guaranteed by the classifier.
                 if matches!(selector.well_known(), Some(WellKnownSelector::RespondsTo)) {
                     debug_assert_eq!(arguments.len(), 1);
-                    // BT-1942: Hoist open-scope receiver + selector (e.g. class method self-sends).
+                    // Hoist open-scope receiver + selector (e.g. class method self-sends).
                     let mut seq = self.sequence_call(&[receiver, &arguments[0]], "RespTo")?;
                     let recv_doc = seq.next();
                     let sel_doc = seq.next();
@@ -2334,13 +2334,13 @@ impl CoreErlangGenerator {
                     return Ok(Some(seq.close(self, call_doc, "RespToRes")));
                 }
 
-                // BT-2073: `fieldAt:` and `fieldAt:put:` route via the enum so
+                // `fieldAt:` and `fieldAt:put:` route via the enum so
                 // the classifier validates kind/arity (`fieldAt:put:` requires
                 // exactly two keyword parts, not a flattened single part).
                 match selector.well_known() {
                     Some(WellKnownSelector::FieldAt) => {
                         debug_assert_eq!(arguments.len(), 1);
-                        // BT-1321: Fast-path for `self` receiver in actor context.
+                        // Fast-path for `self` receiver in actor context.
                         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
                         if let Expression::Identifier(id) = receiver {
                             if id.name == "self"
@@ -2364,7 +2364,7 @@ impl CoreErlangGenerator {
                             }
                         }
 
-                        // BT-1942: Hoist open-scope receiver + name (e.g. class method self-sends).
+                        // Hoist open-scope receiver + name (e.g. class method self-sends).
                         let mut seq = self.sequence_call(&[receiver, &arguments[0]], "FAt")?;
                         let recv_doc = seq.next();
                         let name_doc = seq.next();
@@ -2375,11 +2375,11 @@ impl CoreErlangGenerator {
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
                         let error_hint = self.fresh_var("Err");
-                        // BT-924: primitive value types (Integer, String, etc.) have no slots;
+                        // primitive value types (Integer, String, etc.) have no slots;
                         // user-defined value objects are maps and use beamtalk_reflection.
                         let hint = leaf::binary_lit("Value types have no instance variables");
 
-                        // BT-924: The non-actor branch is split:
+                        // The non-actor branch is split:
                         //   - map receiver → delegate to beamtalk_primitive:send (routes
                         //     through dispatch/3 which respects ClassKind::Value vs Object)
                         //   - other (primitive literal) → raise immutable_value
@@ -2441,10 +2441,10 @@ impl CoreErlangGenerator {
                     }
                     Some(WellKnownSelector::FieldAtPut) => {
                         debug_assert_eq!(arguments.len(), 2);
-                        // BT-1321: Fast-path for `self` receiver in actor context.
+                        // Fast-path for `self` receiver in actor context.
                         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
                         //
-                        // BT-1324: Method-body-level state threading is handled by
+                        // Method-body-level state threading is handled by
                         // lower_body_exprs_with_reply via is_self_field_at_put/
                         // generate_self_field_at_put_open, which intercepts before
                         // expression_doc is called. This intrinsic path is a
@@ -2483,7 +2483,7 @@ impl CoreErlangGenerator {
                             }
                         }
 
-                        // BT-1942: Hoist open-scope receiver + name + value (e.g. class method self-sends).
+                        // Hoist open-scope receiver + name + value (e.g. class method self-sends).
                         let mut seq = self
                             .sequence_call(&[receiver, &arguments[0], &arguments[1]], "FAtPut")?;
                         let recv_doc = seq.next();
@@ -2561,7 +2561,7 @@ impl CoreErlangGenerator {
             MessageSelector::Unary(_) | MessageSelector::Binary(_) => Ok(None),
         }
     }
-    /// BT-915: Tries to generate inline code for Boolean conditionals with field mutation
+    /// Tries to generate inline code for Boolean conditionals with field mutation
     /// state threading.
     ///
     /// Handles `ifTrue:`, `ifFalse:`, and `ifTrue:ifFalse:` in actor context when at
@@ -2578,9 +2578,9 @@ impl CoreErlangGenerator {
         use super::CodeGenContext;
 
         // Only applies in actor context, REPL context, or when inside a loop body
-        // (BT-1053: value-type methods may have inline conditionals mutating captured
+        // (value-type methods may have inline conditionals mutating captured
         // locals inside do: blocks).
-        // BT-1392: Allow REPL context — the REPL State map threads bindings the same
+        // Allow REPL context — the REPL State map threads bindings the same
         // way as actor State, so inline case expressions work directly.
         if self.context != CodeGenContext::Actor
             && self.context != CodeGenContext::Repl
@@ -2589,7 +2589,7 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
 
-        // BT-3402: `and:`/`or:` short-circuit boolean protocol. Both are
+        // `and:`/`or:` short-circuit boolean protocol. Both are
         // ordinary self-hosted `Boolean` methods (`boolean.bt`: `and: aBlock
         // => self ifTrue: aBlock ifFalse: [false]`, `or: aBlock => self
         // ifTrue: [true] ifFalse: aBlock`) — not `WellKnownSelector`s (see
@@ -2597,8 +2597,8 @@ impl CoreErlangGenerator {
         // reaches them with no special-casing at all today, and the block
         // literal argument compiles as an ordinary Tier 1 closure. A
         // self-send (or `self.slot :=` field mutation) nested inside that
-        // closure then discards its own `NewState` exactly like `ifTrue:`
-        // blocks did before BT-915 — see this function's `IfTrue`/`IfFalse`
+        // closure then discards its own `NewState` exactly like a plain
+        // `ifTrue:`/`ifFalse:` closure would — see this function's `IfTrue`/`IfFalse`
         // arms below, which this mirrors. Recognizing the literal `and:`/
         // `or:` call shape here, before generic dispatch (and boolean.bt's
         // self-hosted definition) is ever reached, lets the block compile
@@ -2614,8 +2614,7 @@ impl CoreErlangGenerator {
                 if kw == "and:" || kw == "or:" {
                     if let Expression::Block(block) = &arguments[0] {
                         // Same threading gate as IfTrue/IfFalse below, shared
-                        // with `compile_conditional_receiver` (BT-3402/BT-3396
-                        // interaction fix) so the two can never disagree about
+                        // with `compile_conditional_receiver` so the two can never disagree about
                         // whether a given `and:`/`or:` needs the inline
                         // mutation-threading path — see
                         // `and_or_needs_mutation_threading`'s doc comment.
@@ -2640,16 +2639,16 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::IfTrue) => {
                 debug_assert_eq!(arguments.len(), 1);
                 if let Expression::Block(block) = &arguments[0] {
-                    // BT-1053: When inside a loop body, also trigger for any local write
+                    // When inside a loop body, also trigger for any local write
                     // (the outer loop has already determined which locals need threading).
-                    // BT-2356: also inline when the branch contains a nested list op that
+                    // also inline when the branch contains a nested list op that
                     // mutates an outer local — otherwise the conditional falls through to a
                     // runtime `send` whose `nil`-on-false result breaks the `{Value, State}`
                     // contract the method-body sequencer expects (badarg on element/2).
-                    // BT-3382: also inline when the RECEIVER itself is an actor self-send
+                    // also inline when the RECEIVER itself is an actor self-send
                     // (`(self recordOnce: x) ifTrue:...`) — its own state mutation must be
                     // threaded through before evaluating either branch, even when neither
-                    // block contains a mutation of its own. BT-3396: widened to any
+                    // block contains a mutation of its own — this also widens to any
                     // hoistable self-send in the receiver's sub-tree (`((self recordOnce:
                     // x) and: [y]) ifTrue:`) via the same walker
                     // `compile_conditional_receiver` emits with. See that function's doc
@@ -2657,7 +2656,7 @@ impl CoreErlangGenerator {
                     let needs_threading =
                         self.conditional_needs_mutation_threading(receiver, &[block]);
                     if needs_threading {
-                        // BT-1392: Set repl_loop_mutated so the REPL unpacks {Result, State}
+                        // Set repl_loop_mutated so the REPL unpacks {Result, State}
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
                         }
@@ -2669,8 +2668,8 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::IfFalse) => {
                 debug_assert_eq!(arguments.len(), 1);
                 if let Expression::Block(block) = &arguments[0] {
-                    // BT-2356: inline when a nested list op mutates an outer local (see IfTrue).
-                    // BT-3382: also inline for a self-send receiver (see IfTrue above).
+                    // inline when a nested list op mutates an outer local (see IfTrue).
+                    // also inline for a self-send receiver (see IfTrue above).
                     let needs_threading =
                         self.conditional_needs_mutation_threading(receiver, &[block]);
                     if needs_threading {
@@ -2687,9 +2686,9 @@ impl CoreErlangGenerator {
                 if let (Expression::Block(true_block), Expression::Block(false_block)) =
                     (&arguments[0], &arguments[1])
                 {
-                    // BT-2356: inline when either branch has a nested list op mutating an
+                    // inline when either branch has a nested list op mutating an
                     // outer local (see IfTrue).
-                    // BT-3382: also inline for a self-send receiver (see IfTrue above).
+                    // also inline for a self-send receiver (see IfTrue above).
                     let needs_threading = self
                         .conditional_needs_mutation_threading(receiver, &[true_block, false_block]);
                     if needs_threading {
@@ -2711,7 +2710,7 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
-    /// BT-3402/BT-3396/BT-3405 interaction fix: the shared "does this
+    /// The shared "does this
     /// `and:`/`or:` need the inline mutation-threading path" gate —
     /// block-body mutations, a cross-scope list-op mutation, an outer
     /// loop-body local write, or a hoistable actor self-send anywhere in the
@@ -2727,18 +2726,18 @@ impl CoreErlangGenerator {
     /// generic self-send-hoisting walk).
     ///
     /// Extracting one gate for both call sites matters here specifically:
-    /// before this fix, `compile_conditional_receiver`'s hoist walk treated
-    /// `and:`/`or:` as opaque (`is_conditional_selector`) and left threading
+    /// without it, `compile_conditional_receiver`'s hoist walk would treat
+    /// `and:`/`or:` as opaque (`is_conditional_selector`) and leave threading
     /// entirely to `try_generate_boolean_protocol`'s own re-entrant compile of
     /// the receiver — but that path returns a *tuple*-valued document where
     /// `compile_conditional_receiver`'s contract requires a plain boolean
-    /// value, corrupting the enclosing conditional's state-version numbering
-    /// (`unbound variable 'State1'` from `core_lint` on a fixture combining
-    /// BT-3396's `((self recordOnce: x) and: [true]) ifTrue:ifFalse:` with
-    /// any BT-3402 mutation-threaded `and:`/`or:`). The two decisions must
+    /// value, which would corrupt the enclosing conditional's state-version
+    /// numbering (`unbound variable 'State1'` from `core_lint` on a fixture
+    /// combining `((self recordOnce: x) and: [true]) ifTrue:ifFalse:` with a
+    /// mutation-threaded `and:`/`or:`). The two decisions must
     /// agree on exactly the same predicate — CLAUDE.md's
     /// no-duplicate-implementations rule — so `compile_conditional_receiver`
-    /// now special-cases this shape itself using this same gate.
+    /// special-cases this shape itself using this same gate.
     pub(in crate::core_erlang) fn and_or_needs_mutation_threading(
         &self,
         receiver: &Expression,
@@ -2747,7 +2746,7 @@ impl CoreErlangGenerator {
         self.conditional_needs_mutation_threading(receiver, &[block])
     }
 
-    /// BT-3414 (ADR 0118 phase 0): the one gate behind `ifTrue:`, `ifFalse:`,
+    /// ADR 0118 phase 0: the one gate behind `ifTrue:`, `ifFalse:`,
     /// `ifTrue:ifFalse:`, `ifNotNil:`, and (via
     /// [`Self::and_or_needs_mutation_threading`]) `and:`/`or:` — "does this
     /// conditional-shaped construct need the inline mutation-threading path
@@ -2766,7 +2765,7 @@ impl CoreErlangGenerator {
         blocks: &[&Block],
     ) -> bool {
         blocks.iter().any(|block| {
-            // BT-3423: shares `block_arg_needs_threading`'s block-body check
+            // shares `block_arg_needs_threading`'s block-body check
             // (block-local/field mutations plus a cross-scope list-op
             // mutation) — the same combinator `control_flow_has_mutations`
             // and `enumeration_block_needs_threading` use — extended here
@@ -2778,7 +2777,7 @@ impl CoreErlangGenerator {
         }) || self.conditional_receiver_needs_threading(receiver)
     }
 
-    /// BT-1435: Tries to generate inline `logger:log/3` calls for Logger class sends.
+    /// Tries to generate inline `logger:log/3` calls for Logger class sends.
     ///
     /// Recognizes `Logger debug:`, `Logger info:`, `Logger warn:`, `Logger error:`
     /// (and their `*:metadata:` variants) and generates direct OTP `logger:log/3`
@@ -2847,7 +2846,7 @@ impl CoreErlangGenerator {
         // Passing a binary directly causes the formatter to crash with
         // "FORMATTER CRASH: {string, <<\"...\">>}".
         //
-        // BT-1942: Hoist message arg (and optional metadata arg) so class method
+        // Hoist message arg (and optional metadata arg) so class method
         // self-sends in sub-expression position (e.g. `Logger info: (self tick)`)
         // thread their class var mutations through to the enclosing scope.
         let arg_exprs: Vec<&Expression> = arguments.iter().collect();
@@ -2882,7 +2881,7 @@ impl CoreErlangGenerator {
 
         let log_call_doc = if has_metadata {
             // With user metadata: merge user map with compiler-injected map
-            // BT-1942: user_meta_doc is the hoisted doc for arguments[1].
+            // user_meta_doc is the hoisted doc for arguments[1].
             let user_meta_doc = seq.next();
             let merge_var = self.fresh_temp_var("LogMeta");
             docvec![
@@ -2990,7 +2989,7 @@ mod tests {
         assert!(validate_if_not_nil_block(&expr, "ifNotNil:").unwrap());
     }
 
-    // BT-493: Tests for validate_block_arity_exact
+    // Tests for validate_block_arity_exact
 
     fn make_block(arity: usize) -> Expression {
         let params: Vec<BlockParameter> = (0..arity)
@@ -3082,7 +3081,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // BT-493: Tests for validate_block_arity_range
+    // Tests for validate_block_arity_range
 
     #[test]
     fn test_validate_range_within_bounds() {
@@ -3118,7 +3117,7 @@ mod tests {
         assert!(validate_block_arity_range(&expr, 0, 1, "on:do:", "hint").is_ok());
     }
 
-    // BT-493: Tests for validate_on_do_handler
+    // Tests for validate_on_do_handler
 
     #[test]
     fn test_validate_on_do_handler_zero_args() {

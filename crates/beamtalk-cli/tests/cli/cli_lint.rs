@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Subprocess tests for `beamtalk lint` (BT-2084).
+//! Subprocess tests for `beamtalk lint`.
 //!
 //! Verifies exit codes, stdout JSON shape, and stderr text output for both
 //! happy- and error-path cases. Uses `assert_cmd` against the built
@@ -12,7 +12,7 @@ use crate::cli_common;
 use predicates::prelude::*;
 use predicates::str::contains;
 
-/// ADR 0075 / BT-1846 / BT-1847 end-to-end regression: `beamtalk lint` must
+/// ADR 0075 end-to-end regression: `beamtalk lint` must
 /// not sweep `stubs/*.bt` into ordinary lint input — `collect_lint_files`
 /// has no src/-only scoping (unlike `beamtalk build`'s `find_source_files`),
 /// so without an explicit exclusion, a legitimate `declare native:` stub
@@ -34,7 +34,7 @@ fn lint_succeeds_with_project_local_stubs_directory() {
         .success();
 }
 
-/// BT-3404 review fix: `collect_lint_files`'s `stubs/` exclusion above only
+/// `collect_lint_files`'s `stubs/` exclusion above only
 /// applies to a *directory* walk (no path argument) — a direct single-file
 /// target bypasses it entirely, so once `check_native_declaration_location`'s
 /// diagnostic gained a category (making it survive `collect_diagnostics`'s
@@ -42,7 +42,7 @@ fn lint_succeeds_with_project_local_stubs_directory() {
 /// directly by path would have started reporting a false "only valid in
 /// stubs/ directory" error. `collect_diagnostics`'s caller must derive
 /// `is_stub_file` itself (`beamtalk_project::package::is_under_stubs_dir`),
-/// the same way MCP's `run_module_analysis` already does for BT-3398.
+/// the same way MCP's `run_module_analysis` already does.
 #[test]
 fn lint_direct_file_target_succeeds_on_legitimate_stub_file() {
     let project = cli_common::fixture_project();
@@ -87,12 +87,12 @@ fn lint_json_format_streams_stub_diagnostics_as_json_lines() {
         .stderr(contains("definitelyNotARealExport").not());
 }
 
-/// BT-3404 regression: `check_native_declaration_location`'s diagnostic
-/// previously had no `DiagnosticCategory`, so `collect_diagnostics`'s
-/// `.filter(|d| d.category.is_some())` silently dropped it — a direct
+/// Regression: `check_native_declaration_location`'s diagnostic must
+/// carry a `DiagnosticCategory`, or `collect_diagnostics`'s
+/// `.filter(|d| d.category.is_some())` would silently drop it — a direct
 /// file-target `beamtalk lint <file>` pointed at a `declare native:` block
-/// outside `stubs/` reported no diagnostic at all, even though `beamtalk
-/// build`/`check` would reject the same file. `collect_lint_files`'s
+/// outside `stubs/` would report no diagnostic at all, even though `beamtalk
+/// build`/`check` rejects the same file. `collect_lint_files`'s
 /// `stubs/` exclusion (see `lint_succeeds_with_project_local_stubs_directory`
 /// above) only applies to *directory* walks, so a direct file target
 /// bypasses it entirely and must be judged purely on the diagnostic's own
@@ -102,10 +102,10 @@ fn lint_json_format_streams_stub_diagnostics_as_json_lines() {
 /// here: process exit code — `run_lint`'s own failure threshold
 /// (`total_lint_count`) only counts `Severity::Lint` diagnostics; this one is
 /// `Severity::Error` like several other pre-existing, already-categorized
-/// structural diagnostics (e.g. `EmptyBody`, `Type`, `Visibility`), so it was
-/// already outside that threshold's scope before this fix and stays so —
-/// widening `run_lint`'s failure threshold is a separate concern from
-/// BT-3404's category-filter fix.
+/// structural diagnostics (e.g. `EmptyBody`, `Type`, `Visibility`), so it
+/// stays outside that threshold's scope — widening `run_lint`'s failure
+/// threshold is a separate concern from this diagnostic's category-filter
+/// fix.
 #[test]
 fn lint_direct_file_target_reports_declare_native_outside_stubs() {
     let project = cli_common::fixture_project();
@@ -150,7 +150,7 @@ fn lint_clean_project_json_format_emits_summary() {
 #[test]
 fn lint_dirty_file_text_format_fails() {
     let project = cli_common::fixture_project();
-    // Trigger a real lint (BT-948 unnecessary trailing `.` is Severity::Lint).
+    // Trigger a real lint (unnecessary trailing `.` is Severity::Lint).
     std::fs::write(
         project.path().join("src/Bad.bt"),
         "// Copyright 2026 James Casey\n\
@@ -187,24 +187,25 @@ fn lint_dirty_file_json_format_emits_per_diag_lines() {
         .args(["lint", "--format=json"])
         .assert()
         .failure()
-        // Per-diagnostic JSON lines are emitted to stdout (BT-2031).
+        // Per-diagnostic JSON lines are emitted to stdout.
         .stdout(contains("\"severity\":\"lint\""))
         .stdout(contains("\"type\":\"summary\""));
 }
 
 #[test]
 fn expect_type_on_ffi_arg_mismatch_is_not_stale_across_lint_and_build_bt_2851() {
-    // BT-2851: `beamtalk lint`'s FFI arg-type check and the compiler's own
+    // `beamtalk lint`'s FFI arg-type check and the compiler's own
     // diagnostic pass (used by `build`/`test`) must agree on which
-    // diagnostics an `@expect type` annotation suppresses. Before this fix,
-    // lint populated its native-type registry by reading whatever
-    // `_build/type_cache/` happened to hold (written by a *previous*
-    // `beamtalk build`), while build always extracted live. On a project
-    // that had never been built — the case here — lint's cache read
-    // silently returned no registry, so it skipped the FFI arg-type check
-    // build performs; an `@expect type` written for that build-time
-    // diagnostic was then flagged "stale @expect" by lint even though it
-    // legitimately suppressed the same diagnostic on the build surface.
+    // diagnostics an `@expect type` annotation suppresses. Populating
+    // lint's native-type registry by only reading whatever
+    // `_build/type_cache/` happens to hold (written by a *previous*
+    // `beamtalk build`) would let it drift from build's live extraction:
+    // on a project that has never been built — the case here — a
+    // cache-only read would silently return no registry, so lint would
+    // skip the FFI arg-type check build performs; an `@expect type`
+    // written for that build-time diagnostic would then be flagged "stale
+    // @expect" by lint even though it legitimately suppresses the same
+    // diagnostic on the build surface.
     //
     // `Erlang lists reverse: 42` is a genuine FFI positional arg-type
     // mismatch (`lists:reverse/1` expects `List`) that both surfaces detect
@@ -222,8 +223,8 @@ fn expect_type_on_ffi_arg_mismatch_is_not_stale_across_lint_and_build_bt_2851() 
     )
     .unwrap();
 
-    // No `_build/` exists yet — the cold-cache case that originally
-    // triggered the false "stale @expect" from lint.
+    // No `_build/` exists yet — the cold-cache case that would trigger a
+    // false "stale @expect" from lint without a shared registry.
     assert!(!project.path().join("_build").exists());
 
     cli_common::beamtalk()
@@ -243,7 +244,7 @@ fn expect_type_on_ffi_arg_mismatch_is_not_stale_across_lint_and_build_bt_2851() 
         .stderr(contains("stale @expect").not());
 }
 
-/// BT-3384: `beamtalk lint` requires `@expect dead_assignment` to suppress a
+/// `beamtalk lint` requires `@expect dead_assignment` to suppress a
 /// real `DeadAssignment` diagnostic — without the pragma, lint fails.
 ///
 /// `blk := [x := 2]` stores the block in a variable instead of invoking it
@@ -279,14 +280,14 @@ fn dead_assignment_lint_fires_without_expect_bt_3384() {
         .stderr(contains("lint diagnostic"));
 }
 
-/// BT-3384 (acceptance criterion): a lint-only `@expect` category —
+/// Acceptance criterion: a lint-only `@expect` category —
 /// `dead_assignment`, produced only by `beamtalk lint`'s dedicated
 /// `beamtalk-lint` passes — must not be reported "stale @expect" by
 /// `beamtalk build`/`beamtalk test`, since neither ever runs the check that
-/// could confirm or refute it. Before the fix, `beamtalk lint` required the
-/// pragma (0 diagnostics only with it present) while `beamtalk
-/// build`/`beamtalk test` reported that same pragma as stale on the exact
-/// same file — no state of the source satisfied both simultaneously.
+/// could confirm or refute it. Without this, `beamtalk lint` would require
+/// the pragma (0 diagnostics only with it present) while `beamtalk
+/// build`/`beamtalk test` would report that same pragma as stale on the
+/// exact same file — no state of the source would satisfy both simultaneously.
 ///
 /// Same fixture as [`dead_assignment_lint_fires_without_expect_bt_3384`],
 /// with `@expect dead_assignment` added above the method — mirrors
@@ -322,7 +323,7 @@ fn expect_dead_assignment_not_stale_across_lint_build_and_test_bt_3384() {
 
     // beamtalk build: never runs the lint passes that would produce a
     // DeadAssignment diagnostic in the first place, so the same pragma must
-    // not be flagged stale from build's point of view either (BT-3384).
+    // not be flagged stale from build's point of view either.
     cli_common::beamtalk()
         .current_dir(project.path())
         .arg("build")

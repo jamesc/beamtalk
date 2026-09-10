@@ -19,18 +19,18 @@
     reason = "Loop-mode flags are context switches, not configuration"
 )]
 pub(in crate::core_erlang) struct LoopMode {
-    /// BT-1326: Whether we're inside a hybrid-params loop body.
+    /// Whether we're inside a hybrid-params loop body.
     ///
     /// When `true`, `current_state_var()` and `next_state_var()` use `State*` naming
     /// instead of `StateAcc*`, even when `in_loop_body` is also true.
     /// Set by `generate_counted_stateful_loop_hybrid` and `generate_while_loop_hybrid`.
     pub(in crate::core_erlang) in_hybrid_loop: bool,
-    /// BT-1329: When `true`, the generator is inside a direct-params (or hybrid) counted
+    /// When `true`, the generator is inside a direct-params (or hybrid) counted
     /// loop body. List ops that thread captured outer-scope locals should skip the
     /// `append_repack_stateacc_doc` step and return just the result value (not
     /// `{Result, StateAcc}`), since there is no `StateAcc` variable in scope.
     pub(in crate::core_erlang) in_direct_params_loop: bool,
-    /// BT-3168 (ADR 0111 Addendum 9, Questions 2/3/4): whether the generator
+    /// ADR 0111 Addendum 9, Questions 2/3/4: whether the generator
     /// is directly inside a Letrec loop body that threads a `ClassVars`
     /// mutation through its own recursive tail call. When `true`,
     /// `generate_field_assignment_open`'s class-var branch threads the write
@@ -49,7 +49,7 @@ pub(in crate::core_erlang) struct LoopMode {
     /// immediately after entry, from that specific call's own
     /// `ThreadingPlan::threads_class_vars`.
     pub(in crate::core_erlang) loop_threads_class_vars: bool,
-    /// BT-3168: the current Letrec loop body's final in-body `ClassVars`
+    /// the current Letrec loop body's final in-body `ClassVars`
     /// name (`current_class_var()`, captured just before
     /// `with_branch_context`'s guard restores `class_var_version` to its
     /// pre-loop value), stashed by `generate_threaded_loop_body` for
@@ -59,12 +59,12 @@ pub(in crate::core_erlang) struct LoopMode {
     /// (`Option::take`) by the reader so a stale value can never leak into
     /// an unrelated later loop.
     pub(in crate::core_erlang) last_loop_class_var: Option<String>,
-    /// BT-1329: When a list op in direct-params mode generates an open let-chain
+    /// When a list op in direct-params mode generates an open let-chain
     /// (omitting the trailing result expression), it stores the result variable name
     /// here so the caller can append `let AssignedVar = <result_var> in` separately.
     /// `None` when no list op result is pending.
     pub(in crate::core_erlang) direct_params_list_op_result: Option<String>,
-    /// BT-3169: side channel from `generate_threaded_loop_body_inner`'s
+    /// side channel from `generate_threaded_loop_body_inner`'s
     /// `ClassVars`-threading wrap to `ThreadingPlan::foldl_call_doc` — the
     /// peak `class_var_version` reached *inside* a `Foldl*` body's own
     /// `with_branch_context` scope (captured just before that scope's guard
@@ -87,24 +87,24 @@ pub(in crate::core_erlang) struct LoopMode {
     /// body did not thread `ClassVars` (`plan.threads_class_vars == false`)
     /// or hasn't run yet.
     pub(in crate::core_erlang) last_foldl_class_var_peak: Option<usize>,
-    /// BT-1326: Map of actor field name → Core Erlang variable name for fields
+    /// Map of actor field name → Core Erlang variable name for fields
     /// that have been pre-extracted before a hybrid/full-extract letrec loop.
     ///
     /// When non-empty, `generate_field_access` substitutes the variable name directly
     /// instead of emitting `call 'maps':'get'('field', State)`, eliminating per-iteration
     /// map reads for fields during the loop body.
-    /// Contains both read-only fields (BT-1326) and mutated fields (BT-1342).
+    /// Contains both read-only fields and mutated fields.
     /// Cleared after the loop body is generated.
     pub(in crate::core_erlang) hybrid_readonly_field_params:
         std::collections::HashMap<String, String>,
-    /// BT-1342: Set of actor field names that are mutated inside the current
+    /// Set of actor field names that are mutated inside the current
     /// full-extract loop body. When a field write targets one of these fields,
     /// `generate_field_assignment_open` emits a simple variable rebinding instead
     /// of `maps:put` on State, and updates `hybrid_readonly_field_params` with the
     /// new variable name so subsequent reads see the updated value.
     /// Empty when not in full-extract mode.
     pub(in crate::core_erlang) hybrid_mutated_fields: std::collections::HashSet<String>,
-    /// ADR 0118 phase 5b (BT-3422): narrow side-channel — set deep inside
+    /// ADR 0118 phase 5b: narrow side-channel — set deep inside
     /// `generate_expression` (`generate_list_do_with_mutations`/
     /// `generate_dict_do_with_mutations`) exactly when a mutation-threaded
     /// `do:`/dict-`do:` nested in a direct-params loop (`in_direct_params_loop`)
