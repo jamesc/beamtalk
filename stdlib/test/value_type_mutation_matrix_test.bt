@@ -355,6 +355,7 @@ TestCase subclass: ValueTypeMutationMatrixTest
       nil
     ] ensure: [nil]
     self.total
+
   // ════════════════════════════════════════════════════════════════════════
   //  to:do:  (construct) — BT-2308 regression cells
   // ════════════════════════════════════════════════════════════════════════
