@@ -320,6 +320,15 @@ impl CoreErlangGenerator {
                 });
             }
 
+            // BT-3488: a value-type `self.field := ...` write this loop cannot
+            // thread out — here, one nested inside a conditional branch (or
+            // any other nested block) rather than being a bare top-level
+            // statement, the only shape `plan.threads_value_self` carries.
+            // Rejected with the SAME diagnostic the identical class-var shape
+            // already gets; see
+            // `reject_unthreadable_value_self_field_write`.
+            self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self)?;
+
             if Self::is_field_assignment(expr) {
                 self.lower_letrec_field_assignment(expr, frame, span, &mut stmts)?;
             } else if self.is_actor_self_send(expr) {
@@ -673,6 +682,15 @@ impl CoreErlangGenerator {
                     location,
                 });
             }
+
+            // BT-3488: the `Foldl*` half of the same check the Letrec body
+            // makes — and strictly broader there, since `threads_value_self`
+            // is never set for a `Foldl*` plan (a fold accumulator has no
+            // trailing `Self` slot), so EVERY value-type field write in this
+            // body is unthreadable, top-level statement included. Same shared
+            // helper, so the two call sites cannot drift; see
+            // `reject_unthreadable_value_self_field_write`.
+            self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self)?;
 
             if Self::is_field_assignment(expr) {
                 has_mutations = true;
