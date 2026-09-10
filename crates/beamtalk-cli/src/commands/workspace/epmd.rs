@@ -4,7 +4,7 @@
 //! epmd (Erlang Port Mapper Daemon) client utilities.
 //!
 //! The `NAMES_REQ` TCP protocol implementation and deregistration polling
-//! live in `beamtalk-workspace` (moved there in BT-2985 so the desktop
+//! live in `beamtalk-workspace` (moved there so the desktop
 //! broker's discovery liveness check — the same epmd `NAMES` query — doesn't
 //! need to link the CLI's internals). This module re-exports them under
 //! their original names and keeps the CLI-specific posture-probing
@@ -260,14 +260,14 @@ mod tests {
 
     #[test]
     fn bt2424_default_deployment_keeps_epmd_off_public_interfaces() {
-        // BT-2424 transport-posture smoke check: in the default deployment the
+        // Transport-posture smoke check: in the default deployment the
         // workspace's epmd must not be reachable on a non-loopback interface. A
         // standard CI/host runs at most a loopback epmd (or none), so the probe
         // must not classify it as Promiscuous. A `Promiscuous` result here is a
         // genuine finding (a stray epmd bound to 0.0.0.0), not test flakiness —
         // which is exactly the posture this check is meant to catch.
         //
-        // BT-3235: on a shared dev box running several concurrent Erlang/OTP
+        // On a shared dev box running several concurrent Erlang/OTP
         // toolchain invocations (e.g. multiple agent worktrees building/testing
         // at once), this *can* legitimately fail — epmd is a per-user singleton
         // daemon, and whichever process starts it first wins its bind posture
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn warn_if_epmd_promiscuous_returns_a_posture_without_panicking() {
         // Belt-and-braces: warning is best-effort and must return the posture it
-        // probed (the value the running-posture check in BT-2424 asserts on)
+        // probed (the value the running-posture check above asserts on)
         // without panicking. We don't pin the variant — the sandbox's epmd state
         // is not under test control — only that a valid posture comes back.
         match warn_if_epmd_promiscuous() {

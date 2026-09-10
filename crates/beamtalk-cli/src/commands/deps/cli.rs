@@ -244,7 +244,7 @@ fn add_registry_dependency(
     };
 
     // The index is third-party data (same threat model as the git URLs it
-    // hands out — see BT-2978's `validate_git_url`), so validate whatever
+    // hands out — see `validate_git_url`), so validate whatever
     // version it reports before writing it into the user's manifest. On the
     // `Some(v)` path above this re-validates the same already-valid `v`
     // (`resolve_release` can only return a release whose version equals it)
@@ -770,7 +770,7 @@ mod tests {
         let sha = get_git_sha(path);
         // file:// URLs need forward slashes. On Windows, paths don't start with
         // `/`, so we prepend one to get `file:///C:/...`. On Unix, `display()`
-        // already starts with `/`, giving `file:///tmp/...` (BT-1737).
+        // already starts with `/`, giving `file:///tmp/...`.
         let mut path_str = to_forward_slash(&path.display().to_string());
         if !path_str.starts_with('/') {
             path_str.insert(0, '/');
@@ -1063,7 +1063,7 @@ utils = { path = \"utils\" }
     }
 
     // -----------------------------------------------------------------------
-    // deps add — registry dependencies (BT-2979)
+    // deps add — registry dependencies
     // -----------------------------------------------------------------------
     //
     // These use a local-directory registry index and `file://` git repos —
@@ -1169,7 +1169,7 @@ utils = { path = \"utils\" }
 
     #[test]
     fn test_add_registry_dep_latest_rejects_malformed_index_version() {
-        // The index is third-party data (BT-2978's threat model for the git
+        // The index is third-party data (the same threat model for the git
         // URLs it hands out applies equally to the version string): a
         // malformed `version` in the index must not reach the manifest
         // unvalidated just because `--version` was omitted. The bad version
@@ -1429,7 +1429,7 @@ dep_b = {{ git = \"{url2}\", tag = \"v1.0.0\" }}
     }
 
     // -----------------------------------------------------------------------
-    // deps update — registry dependencies (BT-2979)
+    // deps update — registry dependencies
     // -----------------------------------------------------------------------
 
     #[test]

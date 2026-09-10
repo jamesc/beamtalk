@@ -48,7 +48,7 @@ fn is_comma_opt(kind: Option<&TokenKind>) -> bool {
 
 /// Returns `true` if the optional token kind can begin a type name in
 /// lookahead — an identifier (`Integer`, `Self`) or a singleton symbol
-/// (`#foo`, lexed as [`TokenKind::Symbol`]). BT-2627: singleton type
+/// (`#foo`, lexed as [`TokenKind::Symbol`]). Singleton type
 /// annotations are subtypes of `Symbol` (ADR 0068).
 fn is_type_name_token(kind: Option<&TokenKind>) -> bool {
     matches!(kind, Some(TokenKind::Identifier(_) | TokenKind::Symbol(_)))
@@ -76,7 +76,7 @@ fn is_handle_scope_keyword(kind: &TokenKind) -> bool {
 
 /// Returns `true` for a `state:`/`field:`/`classState:` keyword — the set of
 /// declaration-start keywords that (unlike `handleScope:`) can appear
-/// anywhere in a class body, not just its header. BT-3429: single source for
+/// anywhere in a class body, not just its header. Single source for
 /// this three-keyword set so [`Parser::is_at_member_boundary`] and
 /// [`Parser::parse_method_body`]'s exit condition can't silently drift apart
 /// from each other or from [`Parser::current_token_could_start_a_declaration`].
@@ -84,7 +84,7 @@ fn is_state_like_declaration_keyword(kind: &TokenKind) -> bool {
     is_state_or_field_keyword(kind) || is_class_state_keyword(kind)
 }
 
-/// BT-1856 / BT-2829: a consumed declaration-level `@expect category`,
+/// A consumed declaration-level `@expect category`,
 /// bundled with the doc comment and plain leading comments that sat in its
 /// own leading trivia (see [`Parser::parse_pending_declaration_expect`]).
 /// `Default` (all `None`/empty) means no `@expect` was present.
@@ -100,8 +100,8 @@ impl PendingDeclarationExpect {
     /// declaration that follows it in source. `expect` always overwrites (a
     /// declaration can't already carry one — nothing sets it before this
     /// call); `doc_comment`/`comments` only fill in if the declaration's own
-    /// token had none of its own (BT-2829: both were left dangling on the
-    /// `@expect` token's leading trivia otherwise — see
+    /// token had none of its own (both would otherwise be left dangling on the
+    /// `@expect` token's leading trivia — see
     /// `Parser::parse_pending_declaration_expect`).
     fn apply_to(
         self,
@@ -116,7 +116,7 @@ impl PendingDeclarationExpect {
         if doc_comment.is_none() {
             *doc_comment = self.doc_comment;
         }
-        // BT-2944: decide `leading_blank_line` explicitly, independently of
+        // Decide `leading_blank_line` explicitly, independently of
         // whether `leading`/`trailing` get replaced below, rather than
         // piggybacking on the `comments.is_empty()` check below (which only
         // ever looks at `leading`/`trailing`). When an `@expect` was
@@ -281,7 +281,7 @@ impl Parser {
         // `collect_trailing_comment()` look at `current - 1` unconditionally
         // after parsing it, it would inspect the `#symbol` token's own
         // trailing trivia instead of the header line's, silently dropping a
-        // header-line comment (BT-2942).
+        // header-line comment.
         let header_line_end = self.current.saturating_sub(1);
         let handle_scope_on_new_line = is_handle_scope_keyword(self.current_kind())
             && self.current_token().has_leading_newline();
@@ -293,8 +293,8 @@ impl Parser {
         // Collect a trailing end-of-line comment on the class header line
         // (after the last header token — class name, type params, or
         // `native:` module — or, when `handleScope:` follows on the same
-        // line, its `#symbol`), mirroring the identical fix for type
-        // alias/protocol declarations (BT-2906). When `handleScope:` is on
+        // line, its `#symbol`), mirroring the identical handling for type
+        // alias/protocol declarations. When `handleScope:` is on
         // its own line, prefer a comment on the header line itself, but fall
         // back to the post-`handleScope:` check (its old, only behavior) so
         // a comment trailing the `handleScope: #symbol` line is still
@@ -481,13 +481,13 @@ impl Parser {
         }
     }
 
-    /// BT-1856: If the current token is a declaration-level `@expect
+    /// If the current token is a declaration-level `@expect
     /// category`, consume it (and its own doc comment / leading `//`
     /// comments) for the caller to attach to whichever state/method
     /// declaration follows. Returns `PendingDeclarationExpect::default()`
     /// (all `None`/empty) when the current token isn't `@expect`.
     ///
-    /// BT-2829: both a `/// ...` doc comment and any leading `//`/`/* */`
+    /// Both a `/// ...` doc comment and any leading `//`/`/* */`
     /// comments written above a declaration-level `@expect` sit in the
     /// `@expect` token's own leading trivia, not the following
     /// declaration's — `collect_doc_comment()` and
@@ -535,7 +535,7 @@ impl Parser {
         // Skip any periods/statement terminators
         while self.match_token(&TokenKind::Period) {}
 
-        // BT-903: Set in_class_body so parse_method_body can use indentation
+        // Set in_class_body so parse_method_body can use indentation
         // to detect trailing expressions outside the class.
         let was_in_class_body = self.in_class_body;
         self.in_class_body = true;
@@ -606,7 +606,7 @@ impl Parser {
                     if is_class_method {
                         // `parse_method_definition` also records the `class ` modifier,
                         // but set it here too so every `class_methods` entry carries the
-                        // flag regardless of how the modifier was tokenised (BT-2594).
+                        // flag regardless of how the modifier was tokenised.
                         method.is_class_method = true;
                         class_methods.push(method);
                     } else {
@@ -629,7 +629,7 @@ impl Parser {
                     self.advance(); // consume the symbol argument to recover
                 }
             } else {
-                // BT-1856: @expect before an invalid position (e.g., end of class body)
+                // @expect before an invalid position (e.g., end of class body)
                 if let Some((_, _, span)) = pending.expect {
                     self.diagnostics.push(Diagnostic::error(
                         "@expect in a class body must precede a state/field or method declaration",
@@ -644,13 +644,13 @@ impl Parser {
             while self.match_token(&TokenKind::Period) {}
         }
 
-        // BT-903: Restore in_class_body flag
+        // Restore in_class_body flag
         self.in_class_body = was_in_class_body;
 
         (state, methods, class_methods, class_variables)
     }
 
-    /// BT-2829: checks whether the current token is a declaration-level
+    /// Checks whether the current token is a declaration-level
     /// `@expect` — one sitting at the same class-member boundary
     /// (indentation <= 2, *inside* a class body) a fresh method/state
     /// declaration would.
@@ -673,7 +673,7 @@ impl Parser {
     /// synthetic-wrap strategy (used for xref/LSP send-collection queries)
     /// puts a bare method's header at col 0, so its body sits at col 2 —
     /// a hardcoded `col <= 2` would misidentify a body-level `@expect` there
-    /// as declaration-level and silently truncate the body (BT-3223).
+    /// as declaration-level and silently truncate the body.
     ///
     /// Unlike `is_at_method_definition()`, this is gated on `in_class_body`
     /// alone (no `!self.in_class_body` fallback): declaration-level `@expect`
@@ -729,7 +729,7 @@ impl Parser {
             }
             // Binary method: `+ other =>` or `+ other -> Type =>` or `+ other :: Type =>`
             // Arrow (`->`) is also a valid binary method selector (ADR 0047).
-            // GtGt (`>>`) is also a valid binary method selector (BT-1735).
+            // GtGt (`>>`) is also a valid binary method selector.
             Some(TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt) => {
                 if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
                     return false;
@@ -779,7 +779,7 @@ impl Parser {
 
     /// Skips a single type operand in lookahead context: a type name (with
     /// optional `class` metatype suffix and generic parameter list) or a
-    /// parenthesised type group `( ... )` (BT-2760).
+    /// parenthesised type group `( ... )`.
     ///
     /// Returns the offset after the operand, or `None` if no type operand
     /// starts at `offset`. A malformed generic parameter list after a valid
@@ -804,7 +804,7 @@ impl Parser {
     }
 
     /// Skips a parenthesised type group `( Type (op Type)* )` in lookahead
-    /// context (BT-2760), keeping lookahead in lock-step with
+    /// context, keeping lookahead in lock-step with
     /// `parse_single_type_annotation`'s grouping-paren branch.
     ///
     /// Starting at the `(` token, advances past the matching `)` and returns
@@ -833,7 +833,7 @@ impl Parser {
     ///
     /// Also handles bounded type parameters: `(T :: Printable, E)` — skips the
     /// `:: Bound` portion when present (ADR 0068 Phase 2d). Also handles `class`
-    /// metatype suffixes in type argument position: `List(Actor class)` (BT-2630).
+    /// metatype suffixes in type argument position: `List(Actor class)`.
     pub(super) fn skip_paren_type_params(&self, offset: usize) -> Option<usize> {
         debug_assert!(matches!(self.peek_at(offset), Some(TokenKind::LeftParen)));
         let mut o = offset + 1; // past `(`
@@ -885,7 +885,7 @@ impl Parser {
     ///
     /// Only an identifier bound is accepted — a type parameter bound is a
     /// protocol (e.g. `T :: Printable`), so a singleton `#foo` is intentionally
-    /// not a valid bound (BT-2627).
+    /// not a valid bound.
     ///
     /// **References:** ADR 0068 Phase 2d — type parameter bounds in lookahead
     fn skip_optional_type_param_bound(&self, offset: usize) -> usize {
@@ -937,10 +937,10 @@ impl Parser {
         if matches!(self.peek_at(o), Some(TokenKind::FatArrow)) {
             return true;
         }
-        // Must have at least one type operand: a type name (BT-1952 /
-        // BT-2034: including a trailing `class` metatype token, so `-> Self
+        // Must have at least one type operand: a type name (including a
+        // trailing `class` metatype token, so `-> Self
         // class =>` and `-> Actor class | Nil =>` are recognized) or a
-        // parenthesised group (BT-2760: `-> (A & B) \ #c =>`).
+        // parenthesised group (`-> (A & B) \ #c =>`).
         let Some(after) = self.skip_type_operand(o) else {
             return false;
         };
@@ -960,11 +960,11 @@ impl Parser {
     ///
     /// Given offset `o` pointing at an identifier (e.g. `Self`, `Actor`),
     /// returns the offset after it, plus a trailing `class` if the next token
-    /// is the bare identifier `class` on the *same* line (BT-1952 / BT-2034).
+    /// is the bare identifier `class` on the *same* line.
     /// A `class` token with a leading newline begins a new statement (e.g.
     /// the class-method definition on the following line) and is not consumed.
     ///
-    /// BT-2627: also called with a singleton `#foo` ([`TokenKind::Symbol`]) at
+    /// Also called with a singleton `#foo` ([`TokenKind::Symbol`]) at
     /// `o`. A singleton is a single token with no metatype surface (`#foo class`
     /// is not a valid type), so it advances exactly one token — keeping this
     /// lookahead in lock-step with `parse_single_type_annotation`, which returns
@@ -986,7 +986,7 @@ impl Parser {
 
     /// Returns `true` if the token at `offset` continues a type annotation with
     /// a binary type operator: union `|`, difference `\`, intersection `&`, or
-    /// the `\\` typo for `\` (ADR 0102 §3, BT-2742, BT-2743).
+    /// the `\\` typo for `\` (ADR 0102 §3).
     ///
     /// Used by the lookahead helpers to skip over a type-operator chain when
     /// deciding whether a `-> Type =>` / `:: Type` sequence is a method header.
@@ -1014,9 +1014,9 @@ impl Parser {
     }
 
     /// Parses an `@expect category` or `@expect category "reason"` that
-    /// precedes a declaration (BT-1856, BT-1918), delegating to
+    /// precedes a declaration, delegating to
     /// [`Parser::parse_expect_tail`] for the shared category-list/reason
-    /// grammar (BT-3387).
+    /// grammar.
     ///
     /// Unlike the statement-level form (`parse_expect_directive` in
     /// `expressions.rs`), an unrecognised category here has always fallen
@@ -1038,7 +1038,7 @@ impl Parser {
     /// recognized starts (`state:`/`field:`/`classState:`/`handleScope:`,
     /// or a method definition). Used by [`Parser::parse_expect_tail`] to
     /// avoid ever swallowing a real declaration while discarding garbage
-    /// left over from a malformed `@expect` (BT-3387 review follow-up).
+    /// left over from a malformed `@expect`.
     fn current_token_could_start_a_declaration(&self) -> bool {
         is_state_like_declaration_keyword(self.current_kind())
             || is_handle_scope_keyword(self.current_kind())
@@ -1046,7 +1046,7 @@ impl Parser {
     }
 
     /// Parses the comma-separated category list and optional reason string
-    /// that follow an already-consumed `@expect` token (BT-3387), shared by
+    /// that follow an already-consumed `@expect` token, shared by
     /// the statement-level (`parse_expect_directive`, `expressions.rs`) and
     /// declaration-level (`parse_declaration_expect`, above) forms.
     ///
@@ -1145,7 +1145,7 @@ impl Parser {
                 // current token. At the declaration level in particular,
                 // leaving it dangling makes `parse_class_body`'s caller
                 // treat the position as "not a valid declaration" (see the
-                // BT-1918 comment on the reason-string lookahead below,
+                // comment on the reason-string lookahead below,
                 // which this mirrors) and silently drop every subsequent
                 // state/method declaration in the class.
                 let message: EcoString =
@@ -1159,10 +1159,10 @@ impl Parser {
             }
         }
 
-        // BT-1918: Parse optional reason string after the category list (same line only).
+        // Parse optional reason string after the category list (same line only).
         //
         // Deliberately unconditional — even when nothing valid was found
-        // (`categories` is empty) — matching every pre-BT-3387 `@expect`
+        // (`categories` is empty) — matching every `@expect`
         // parse-error path, all of which attempted this same lookahead
         // regardless of whether a category identifier was present at all.
         // Skipping it in the "no identifier" case might look more
@@ -1265,7 +1265,7 @@ impl Parser {
         })
     }
 
-    /// Parses a class variable declaration (BT-412).
+    /// Parses a class variable declaration.
     ///
     /// Syntax is identical to state declarations but uses `classState:` keyword:
     /// - `classState: varName`
@@ -1341,7 +1341,7 @@ impl Parser {
     /// [`parse_difference_type`](Self::parse_difference_type).
     pub(super) fn parse_type_annotation(&mut self) -> TypeAnnotation {
         // Unions are n-ary and associative, so a grouped union member —
-        // `(A | B) | C`, only reachable via grouping parens (BT-2760) — is
+        // `(A | B) | C`, only reachable via grouping parens — is
         // spliced into the enclosing union rather than nested. This keeps
         // the AST canonical: `(A | B) | C` and `A | B | C` are the same
         // annotation, and unparsing (`type_name`) round-trips.
@@ -1465,11 +1465,11 @@ impl Parser {
     /// - Self type: `Self`
     /// - Self class metatype: `Self class`
     /// - Singleton types: `#foo` (a subtype of `Symbol`, ADR 0068)
-    /// - Grouping parentheses: `(Type)` (BT-2760, see below)
+    /// - Grouping parentheses: `(Type)` (see below)
     pub(super) fn parse_single_type_annotation(&mut self) -> TypeAnnotation {
         if matches!(self.current_kind(), TokenKind::LeftParen) {
-            // Grouping parentheses in type-annotation position (BT-2760,
-            // unblocking ADR 0102 §3's mixed `&`/`\` disambiguation). Parsed
+            // Grouping parentheses in type-annotation position
+            // (unblocking ADR 0102 §3's mixed `&`/`\` disambiguation). Parsed
             // *transparently*: the parenthesised annotation is returned with
             // its original shape — only the span widens to cover the parens
             // — rather than wrapping it in a new AST node. This is enough
@@ -1506,8 +1506,8 @@ impl Parser {
             let span = self.current_token().span();
             if name.as_str() == "Self" {
                 self.advance();
-                // Check for `Self class` metatype annotation on the same line
-                // (BT-1952 / BT-2034). A `class` token with a leading newline
+                // Check for `Self class` metatype annotation on the same line.
+                // A `class` token with a leading newline
                 // starts a new statement — typically a class-method definition
                 // on the next line — and must not be consumed as a metatype
                 // suffix.
@@ -1548,7 +1548,7 @@ impl Parser {
                         span: span.merge(end_span),
                     }
                 } else if let TokenKind::Identifier(next) = self.current_kind() {
-                    // Check for `<ClassName> class` metatype annotation (BT-2034).
+                    // Check for `<ClassName> class` metatype annotation.
                     // Require `class` to be on the same line as the class name so
                     // that `... -> Foo\nclass bar => ...` (a class-method
                     // definition on the next line) still parses correctly as a
@@ -1568,7 +1568,7 @@ impl Parser {
                 }
             }
         } else if let TokenKind::Symbol(name) = self.current_kind() {
-            // BT-2627: Singleton type annotation `#foo` — a subtype of `Symbol`
+            // Singleton type annotation `#foo` — a subtype of `Symbol`
             // (ADR 0068). `#name` is lexed as `TokenKind::Symbol(name)` (the `#`
             // is consumed by the lexer), so it surfaces in type position the
             // same way an identifier does. Composing with `parse_type_annotation`'s
@@ -1620,7 +1620,7 @@ impl Parser {
     /// - `internal methodName => body` (ADR 0071)
     pub(super) fn parse_method_definition(&mut self) -> Option<MethodDefinition> {
         let start = self.current_token().span();
-        // BT-3223: capture this method's own header indentation before any
+        // Capture this method's own header indentation before any
         // tokens are consumed, so `parse_method_body` can tell a genuine
         // class-member declaration boundary apart from body content at the
         // same column a differently-indented header would produce (see
@@ -1673,10 +1673,10 @@ impl Parser {
         // Parse method body
         self.in_method_body = true;
         // Record the enclosing method's selector so a bare `@primitive` can
-        // infer it (BT-2724).
+        // infer it.
         let previous_method_selector = self.current_method_selector.take();
         self.current_method_selector = Some(selector.name());
-        // BT-3223: thread this method's own header indentation through for
+        // Thread this method's own header indentation through for
         // the duration of its body — see `current_method_header_indent`'s
         // doc comment and `parse_method_body`'s declaration-boundary checks.
         let previous_method_header_indent = self.current_method_header_indent.take();
@@ -1718,7 +1718,7 @@ impl Parser {
                 self.advance();
                 Some((selector, Vec::new()))
             }
-            // Binary method: `+ other`, `-> other` (ADR 0047), `>> other` (BT-1735)
+            // Binary method: `+ other`, `-> other` (ADR 0047), `>> other`
             // Arrow and GtGt are separate token kinds but valid binary selectors.
             TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt => {
                 let op_name = match self.current_kind() {
@@ -1803,7 +1803,7 @@ impl Parser {
     }
 
     /// `is_at_type_alias_definition()`, gated by the same indentation guard
-    /// `is_at_method_definition()` uses in `parse_method_body` (BT-1294).
+    /// `is_at_method_definition()` uses in `parse_method_body`.
     ///
     /// Without this guard, an in-body expression like `type Port = 8080`
     /// (`type` used as an ordinary variable, sent the unary message `Port`,
@@ -1818,7 +1818,7 @@ impl Parser {
         // Beamtalk binary expression, so the `type Uppercase =` pattern cannot
         // appear as a legitimate statement start outside declaration position.
         //
-        // BT-3223: the boundary column is the current method's own header
+        // The boundary column is the current method's own header
         // indentation, not a hardcoded `2` — see
         // `current_method_header_indent`'s doc comment.
         (!self.in_class_body
@@ -1847,16 +1847,16 @@ impl Parser {
 
     /// Parses a method body (expressions until the next method or end of class).
     ///
-    /// Statements are separated by periods or newlines (BT-360).
+    /// Statements are separated by periods or newlines.
     pub(super) fn parse_method_body(&mut self) -> Vec<ExpressionStatement> {
         let mut body = Vec::new();
 
         // Parse expressions until we hit something that looks like a new method,
         // state declaration, class definition, or standalone method definition
-        // BT-903: When inside a class body, a token at column 0 after a newline
+        // When inside a class body, a token at column 0 after a newline
         // is outside the class body (trailing expression). Break to avoid consuming it.
         //
-        // BT-1294: Guard `is_at_method_definition()` with an indentation check.
+        // Guard `is_at_method_definition()` with an indentation check.
         // After the formatter breaks 3+ keyword messages onto their own indented
         // lines, continuation keywords appear at col 4–6 inside the method body.
         // `is_at_method_definition()` does a wide lookahead and can find `-> Type =>`
@@ -1864,7 +1864,7 @@ impl Parser {
         // the body early and treats continuation keywords as a new method selector.
         // When `in_class_body` is true, canonical class members start at col 2;
         // any token deeper than col 2 is part of an expression, never a member.
-        // BT-3223: the boundary column is the *current* method's own header
+        // The boundary column is the *current* method's own header
         // indentation (`current_method_header_indent`), not a hardcoded `2` —
         // see that field's doc comment for why a hardcoded literal is wrong
         // for `method_source_walker`'s synthetic-wrap strategy.
@@ -1885,7 +1885,7 @@ impl Parser {
                         .is_none_or(|col| col <= self.current_method_header_indent.unwrap_or(2)))
                     && self.is_at_method_definition()
             )
-            // BT-2829: a declaration-level `@expect` must end the body of the
+            // A declaration-level `@expect` must end the body of the
             // *previous* method, just like a fresh method/state declaration
             // does — see `is_at_declaration_level_expect`'s doc comment.
             && !self.is_at_declaration_level_expect()
@@ -1894,7 +1894,7 @@ impl Parser {
             && !(self.in_class_body && self.current_token().indentation_after_newline() == Some(0))
         {
             let pos_before = self.current;
-            // BT-987: detect blank lines (2+ newlines) before this statement
+            // Detect blank lines (2+ newlines) before this statement
             let has_blank_line =
                 !body.is_empty() && self.current_token().has_blank_line_before_first_comment();
             let mut comments = self.collect_comment_attachment();
@@ -1921,7 +1921,7 @@ impl Parser {
             // If we got an error, try to recover
             if is_error {
                 self.synchronize();
-                // BT-368: After synchronization, check if we can continue parsing
+                // After synchronization, check if we can continue parsing
                 // If synchronize stopped at a method/class/state boundary, break
                 if self.is_at_member_boundary() {
                     break;
@@ -1935,7 +1935,7 @@ impl Parser {
                 // Explicit period — check if next token starts a new method/state/class
                 let period_span = self.tokens[self.current - 1].span();
                 if self.is_at_member_boundary() {
-                    // Trailing period at end of method — not needed (BT-948)
+                    // Trailing period at end of method — not needed
                     self.diagnostics.push(
                         Diagnostic::lint("unnecessary trailing `.` at end of method", period_span)
                             .with_hint("Remove the trailing `.`"),
@@ -1968,13 +1968,13 @@ impl Parser {
                     break;
                 }
             } else if !self.is_at_end() && self.current_token().has_leading_newline() {
-                // BT-885: If the next token is at column 0 (no indentation), it's a
+                // If the next token is at column 0 (no indentation), it's a
                 // top-level expression, not part of this method body. This allows
                 // trailing expressions after inline class definitions.
                 if self.current_token().leading_indent() == Some(0) {
                     break;
                 }
-                // Newline acts as implicit statement separator (BT-360)
+                // Newline acts as implicit statement separator
                 // Continue parsing — the while-loop guard handles method/class boundaries
             } else {
                 // No period and no newline — end of body
@@ -2002,10 +2002,10 @@ impl Parser {
         // comment, or before the class-name token itself if it has none) — this
         // is the accurate signal for "was there a blank line before this
         // standalone method", mirroring how classes/protocols/type-aliases
-        // capture `leading_blank_line` once at the start of their own construct
-        // (BT-2929). The later `collect_comment_attachment()` inside
+        // capture `leading_blank_line` once at the start of their own construct.
+        // The later `collect_comment_attachment()` inside
         // `parse_method_definition()` looks at the selector token instead, which
-        // would otherwise silently lose this signal (BT-2943).
+        // would otherwise silently lose this signal.
         let initial_comments = self.collect_comment_attachment();
         let leading_blank_line = initial_comments.leading_blank_line;
         let mut class_leading_comments = initial_comments.leading;
@@ -2029,7 +2029,7 @@ impl Parser {
         // Check for optional `class` modifier
         let is_class_method = if matches!(self.current_kind(), TokenKind::Identifier(name) if name == "class")
         {
-            // Only treat as modifier if next token is `>>` (GtGt since BT-663)
+            // Only treat as modifier if next token is `>>` (GtGt)
             if matches!(self.peek_at(1), Some(TokenKind::GtGt)) {
                 self.advance(); // consume `class`
                 true
@@ -2040,7 +2040,7 @@ impl Parser {
             false
         };
 
-        // Consume `>>` (GtGt token since BT-663)
+        // Consume `>>` (GtGt token)
         if !self.match_token(&TokenKind::GtGt) {
             self.error("Expected '>>' in standalone method definition");
         }
@@ -2064,11 +2064,11 @@ impl Parser {
             class_leading_comments.append(&mut method.comments.leading);
             method.comments.leading = class_leading_comments;
         }
-        // BT-2943: `leading_blank_line` is consulted only by the module-level
+        // `leading_blank_line` is consulted only by the module-level
         // unparser, to decide whether to re-emit a blank line before this
         // whole standalone-method construct (mirroring
         // `TopLevelDecl::preceding_blank_line` for classes/protocols/type
-        // aliases, BT-2929) — never to control spacing *within* the leading
+        // aliases) — never to control spacing *within* the leading
         // comment block, which `unparse_comment_attachment_leading` handles
         // itself via each comment's own `preceding_blank_line`. So the value
         // captured before the class-name token — the true start of this
@@ -2161,7 +2161,7 @@ impl Parser {
 
         // Collect a trailing end-of-line comment on the declaration line
         // (e.g. `type Port = Integer // comment`), mirroring the state
-        // declaration handling above (BT-2906).
+        // declaration handling above.
         comments.trailing = self.collect_trailing_comment();
 
         TypeAliasDefinition {
@@ -2223,7 +2223,7 @@ impl Parser {
 
         // Collect a trailing end-of-line comment on the declaration header
         // line (e.g. `Protocol define: Sortable // comment`), mirroring the
-        // identical fix for `type` declarations (BT-2906). Collected before
+        // identical handling for `type` declarations. Collected before
         // `extending:`/the body since those start on their own indented
         // lines and aren't part of the header.
         comments.trailing = self.collect_trailing_comment();
@@ -2274,7 +2274,7 @@ impl Parser {
     /// method signatures — the same shape as a protocol body, reusing
     /// [`Self::parse_protocol_method_signature_with_doc`] for each entry.
     /// No `=>` bodies, no class-side signatures, and no header type
-    /// parameters (BT-1846): type parameters in a native declaration's
+    /// parameters: type parameters in a native declaration's
     /// signatures — `T`, `A`, `B`, `Acc` — are method-scoped, introduced
     /// per-signature rather than declared once at the header like a
     /// protocol's `Collection(E)`.
@@ -2282,7 +2282,7 @@ impl Parser {
     /// Whether `declare native:` is valid at this file's location (only
     /// `stubs/`, never `src/`) is not a parser concern — the parser has no
     /// notion of source paths. That check is enforced by the build
-    /// pipeline, which knows each module's file path (BT-1846/BT-1847).
+    /// pipeline, which knows each module's file path.
     pub(super) fn parse_native_declaration(&mut self) -> NativeDeclaration {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
@@ -2309,7 +2309,7 @@ impl Parser {
 
         // Collect a trailing end-of-line comment on the declaration header
         // line (e.g. `declare native: lists // comment`), mirroring
-        // `parse_protocol_definition`'s identical handling (BT-2906).
+        // `parse_protocol_definition`'s identical handling.
         comments.trailing = self.collect_trailing_comment();
 
         // Parse the declaration body (method signatures without `=>`)
@@ -2368,7 +2368,7 @@ impl Parser {
     /// Protocol method signatures have the same selector and parameter syntax as
     /// class methods, but end before `=>`. They may include optional type annotations
     /// and return types. Signatures prefixed with `class` are collected separately
-    /// as class method requirements (BT-1611).
+    /// as class method requirements.
     ///
     /// The body ends when we hit:
     /// - EOF
@@ -2393,14 +2393,14 @@ impl Parser {
             && !self.is_at_native_declaration()
             && !self.is_at_standalone_method_definition()
         {
-            // BT-1618/BT-2930: Collect the doc comment and any non-doc leading
+            // Collect the doc comment and any non-doc leading
             // comments *before* checking for `class` prefix, because both are
             // leading trivia on the `class` token and would be lost when we
             // advance past it.
             let doc_comment = self.collect_doc_comment();
             let comments = self.collect_comment_attachment();
 
-            // BT-1611: Detect `class` prefix for class method signatures.
+            // Detect `class` prefix for class method signatures.
             // Use the same lookahead as class definition parsing: `class` followed
             // by something other than `=>` or `-> Type =>` means it's a modifier.
             let is_class_method = matches!(
@@ -2439,7 +2439,7 @@ impl Parser {
     /// comments, respectively, already collected by the caller before
     /// consuming an optional `class` prefix — both live in the `class`
     /// token's leading trivia and would be lost once the parser advances
-    /// past it (BT-1618, BT-2930).
+    /// past it.
     ///
     /// Syntax:
     /// - Unary: `asString -> String`
@@ -2467,7 +2467,7 @@ impl Parser {
                 self.advance();
                 (selector, Vec::new())
             }
-            // Binary: `+ other`, `< other`, `-> other` (ADR 0047), `>> other` (BT-1735)
+            // Binary: `+ other`, `< other`, `-> other` (ADR 0047), `>> other`
             // Arrow and GtGt are separate token kinds but valid binary selectors.
             TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt => {
                 let op_name = match self.current_kind() {

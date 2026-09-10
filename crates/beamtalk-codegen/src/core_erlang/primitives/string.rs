@@ -26,7 +26,7 @@ pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<D
         | "drop:" | "padLeft:" | "padRight:" | "padLeft:with:" | "padRight:with:" => {
             generate_string_search_bif(selector, params)
         }
-        // Regex operations (BT-709)
+        // Regex operations
         "matchesRegex:"
         | "matchesRegex:options:"
         | "firstMatch:"
@@ -49,7 +49,7 @@ fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Do
         ]),
         "length" => Some(Document::Str("call 'string':'length'(Self)")),
         "at:" => Some(call_self_p0("beamtalk_string", "at", p0)),
-        // BT-3021: grapheme-aware element accessors; both raise
+        // Grapheme-aware element accessors; both raise
         // `empty_collection` on `""`, matching `List first`/`last`.
         "first" => Some(Document::Str("call 'beamtalk_string':'first'(Self)")),
         "last" => Some(Document::Str("call 'beamtalk_string':'last'(Self)")),
@@ -188,7 +188,7 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
     }
 }
 
-/// String regex primitive implementations (BT-709).
+/// String regex primitive implementations.
 ///
 /// These delegate to `beamtalk_regex` helper functions that accept both
 /// String patterns and compiled Regex objects.
@@ -544,7 +544,7 @@ mod tests {
         );
     }
 
-    // Regex group (BT-709)
+    // Regex group
 
     #[test]
     fn test_matches_regex() {

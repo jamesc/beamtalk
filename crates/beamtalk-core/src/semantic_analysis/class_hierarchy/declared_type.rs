@@ -1,18 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! A span-free, structured representation of a declared type (BT-3076).
+//! A span-free, structured representation of a declared type.
 //!
 //! **DDD Context:** Semantic Analysis — Value Object
 //!
 //! [`MethodInfo::return_type`](super::MethodInfo::return_type) and
-//! `param_types` now store this type directly (BT-3076 stage 3), rather than
-//! the flattened `EcoString` (see [`crate::ast::TypeAnnotation::type_name`])
-//! they stored before. Before this module existed, every consumer that
-//! needed structure back out of one of those strings had hand-rolled its own
-//! parser — `TypeChecker::resolve_type_string` (BT-3075) was the canonical,
-//! merged one, since deleted (BT-3076 stage 3c / BT-3080) now that every
-//! call site resolves a `DeclaredType` directly via
+//! `param_types` store this type directly, rather than the flattened
+//! `EcoString` (see [`crate::ast::TypeAnnotation::type_name`]) a hand-rolled
+//! consumer-side parser would otherwise have to re-derive structure from.
+//! Every call site resolves a `DeclaredType` directly via
 //! [`resolve_declared_type`](crate::semantic_analysis::type_checker::type_resolver::resolve_declared_type).
 //! `DeclaredType` gives that structure a proper value type: a span-free
 //! mirror of [`TypeAnnotation`] that can be built directly from an AST
@@ -92,18 +89,16 @@ impl DeclaredType {
     ///
     /// [`MethodInfo::return_type`](super::MethodInfo::return_type) /
     /// `param_types` and `ClassHierarchy::state_field_type` are structured
-    /// `DeclaredType`s directly since BT-3076 stage 3 — built via
-    /// `DeclaredType::from(&TypeAnnotation)` at the AST boundary, never
-    /// stringified and reparsed. This parser instead serves the boundaries
-    /// that still only have a flat string in hand: a pre-BT-3076 compiled
-    /// `.beam` artifact's ETF metadata (`beamtalk-compiler-port`'s
-    /// `term_to_declared_type`), and a handful of string-keyed helpers
-    /// elsewhere in the type checker not worth restructuring (documented at
-    /// their own call sites).
+    /// `DeclaredType`s directly — built via `DeclaredType::from(&TypeAnnotation)`
+    /// at the AST boundary, never stringified and reparsed. This parser
+    /// instead serves the boundaries that still only have a flat string in
+    /// hand: a compiled `.beam` artifact's ETF metadata
+    /// (`beamtalk-compiler-port`'s `term_to_declared_type`), and a handful of
+    /// string-keyed helpers elsewhere in the type checker not worth
+    /// restructuring (documented at their own call sites).
     ///
-    /// Grammar mirrors the deleted `TypeChecker::resolve_type_string`'s
-    /// parsing (BT-3075, removed by BT-3076 stage 3c): split on top-level
-    /// `|` (respecting parenthesis nesting) for unions, then
+    /// Grammar: split on top-level `|` (respecting parenthesis nesting) for
+    /// unions, then
     /// `Base(Arg1, Arg2)` for generics (args themselves split on top-level
     /// `,`, respecting nesting), with `#name` recognised as a
     /// [`DeclaredType::Singleton`]. This is **parse only** — no keyword
@@ -124,12 +119,11 @@ impl DeclaredType {
     ///
     /// Never panics. This grammar has no representation for `\`
     /// (difference) or `&` (intersection) — strings in those shapes (which
-    /// *can* occur in a legacy artifact, since a pre-BT-3076
-    /// `MethodInfo::return_type` was populated via
-    /// [`TypeAnnotation::type_name`], which does render them) degrade to an
-    /// opaque `Simple(whole_string)` — an unparsed string becomes a nominal
-    /// class name. Malformed/unbalanced input (e.g. `"Array(Integer"`, no
-    /// closing paren) degrades the same way.
+    /// *can* occur in a legacy artifact, since [`TypeAnnotation::type_name`]
+    /// does render them) degrade to an opaque `Simple(whole_string)` — an
+    /// unparsed string becomes a nominal class name. Malformed/unbalanced
+    /// input (e.g. `"Array(Integer"`, no closing paren) degrades the same
+    /// way.
     #[must_use]
     pub fn parse(s: &str) -> DeclaredType {
         let trimmed = s.trim();
@@ -216,12 +210,11 @@ impl DeclaredType {
     ///   `None` — these don't have a single canonical declared-type spelling
     ///   the writeback path should commit to. Note the top-level/nested
     ///   asymmetry for `Dynamic`: a bare `Dynamic` return is *not* written
-    ///   back (same as the pre-BT-3076 `Known | Never` filter), but a
-    ///   `Dynamic` nested inside a `Known`/`Union` converts to
-    ///   `Simple("Dynamic")` so partially-inferred generics like
-    ///   `List(Dynamic)` still write back — matching the old
-    ///   `display_name()` string path, which rendered exactly
-    ///   `"List(Dynamic)"` (BT-3101). Lossy cases that remain: a nested
+    ///   back (only `Known`/`Never` are), but a `Dynamic` nested inside a
+    ///   `Known`/`Union` converts to `Simple("Dynamic")` so
+    ///   partially-inferred generics like `List(Dynamic)` still write back —
+    ///   matching the `display_name()` string path, which renders exactly
+    ///   `"List(Dynamic)"`. Lossy cases that remain: a nested
     ///   `Meta`/`Negation`/`Intersection` still aborts the whole conversion.
     #[must_use]
     pub fn from_inferred(ty: &InferredType) -> Option<DeclaredType> {
@@ -262,7 +255,7 @@ impl DeclaredType {
     /// `Simple("Dynamic")` — the resolver normalises that name back to
     /// `Dynamic`, so the round-trip is faithful. Kept out of `from_inferred`
     /// itself so a bare top-level `Dynamic` return type still skips
-    /// writeback entirely (see its doc, BT-3101).
+    /// writeback entirely (see its doc).
     fn from_inferred_nested(ty: &InferredType) -> Option<DeclaredType> {
         match ty {
             InferredType::Dynamic(_) => Some(DeclaredType::Simple("Dynamic".into())),
@@ -330,7 +323,7 @@ impl DeclaredType {
 /// `TypeAnnotation` itself does across `type_name` / `needs_parens_in_*`.
 /// This invariant (and parity with the third independent renderer,
 /// `unparse::unparse_type_annotation_display`) is enforced by the
-/// `assert_display_parity` fixture tests below (BT-3089) — not just this
+/// `assert_display_parity` fixture tests below — not just this
 /// comment, per this repo's "No duplicate implementations" rule.
 impl fmt::Display for DeclaredType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -542,7 +535,7 @@ mod tests {
 
     #[test]
     fn parse_intersection_with_parenthesised_union_operand_degrades_to_simple() {
-        // BT-3102: `split_generic_base` finds the first top-level `(` with
+        // `split_generic_base` finds the first top-level `(` with
         // no awareness that `&`/`\` can't appear in a class/generic base
         // name, so naively it would misread this as
         // `Generic { base: "A &", parameters: [Union([B, C])] }`. The
@@ -565,7 +558,7 @@ mod tests {
 
     #[test]
     fn parse_difference_with_parenthesised_union_operand_degrades_to_simple() {
-        // BT-3102: same misparse, but for `\` (difference).
+        // Same misparse, but for `\` (difference).
         let dt = DeclaredType::Difference {
             base: Box::new(DeclaredType::simple("A")),
             excluded: Box::new(DeclaredType::Union(vec![
@@ -672,8 +665,8 @@ mod tests {
     /// module's own doc comments make about `DeclaredType::Display` vs
     /// `TypeAnnotation::type_name` — and additionally against the third
     /// independent renderer, `unparse::unparse_type_annotation_display`
-    /// (BT-3089; per this repo's "No duplicate implementations" rule, a
-    /// "keep in sync" comment needs an enforcing test, not just a comment).
+    /// (per this repo's "No duplicate implementations" rule, a "keep in
+    /// sync" comment needs an enforcing test, not just a comment).
     ///
     /// All three are legitimately separate *implementations* — they operate
     /// on different types (`TypeAnnotation` carries spans/`Identifier`s;
@@ -893,11 +886,11 @@ mod tests {
 
     #[test]
     fn from_inferred_nested_dynamic_arg_writes_back_as_dynamic_name() {
-        // BT-3101: `List(Dynamic)` must still write back — the pre-BT-3076
-        // string path always produced `"List(Dynamic)"`; skipping the whole
-        // conversion was a precision regression. The nested `Dynamic`
-        // becomes `Simple("Dynamic")`, which the resolver normalises back
-        // to the real `Dynamic` variant (BT-2865).
+        // `List(Dynamic)` must still write back — matching what the
+        // `display_name()` string path always produced, `"List(Dynamic)"`;
+        // skipping the whole conversion would be a precision regression. The
+        // nested `Dynamic` becomes `Simple("Dynamic")`, which the resolver
+        // normalises back to the real `Dynamic` variant.
         use crate::semantic_analysis::type_checker::{DynamicReason, TypeProvenance};
         let ty = InferredType::Known {
             class_name: "List".into(),
@@ -948,7 +941,7 @@ mod tests {
 
     #[test]
     fn from_inferred_nested_meta_still_aborts() {
-        // The nested-`Dynamic` carve-out (BT-3101) is deliberately narrow:
+        // The nested-`Dynamic` carve-out is deliberately narrow:
         // a nested `Meta` still has no declared-type spelling the writeback
         // should commit to, so the whole conversion aborts as before.
         use crate::semantic_analysis::type_checker::TypeProvenance;
@@ -964,7 +957,7 @@ mod tests {
     }
 }
 
-/// Property-based tests for type-string fidelity (BT-3100): does a
+/// Property-based tests for type-string fidelity: does a
 /// [`DeclaredType`] survive the round trip through its own textual form
 /// (`Display`) and back (`parse`)?
 ///
@@ -977,17 +970,16 @@ mod tests {
 /// structured value and text it started converging toward — the round trip
 /// never drifts, loses a branch, or panics, no matter how deeply
 /// union/intersection/difference/`FalseOr`/generic shapes are nested
-/// (BT-2760 grouping-paren shapes included).
+/// (grouping-paren shapes included).
 ///
-/// BT-3102 fixed a first-pass non-idempotence this suite uncovered: an
-/// intersection/difference whose right/excluded operand needs
-/// parenthesising (e.g. `A & (B | C)`) used to be misread by `parse` on the
-/// first pass as a single-argument `Generic` whose "base name" was the
+/// An intersection/difference whose right/excluded operand needs
+/// parenthesising (e.g. `A & (B | C)`) must not be misread by `parse` on the
+/// first pass as a single-argument `Generic` whose "base name" is the
 /// literal text `"A &"` — `split_generic_base` finds the first `(` in the
 /// whole string and doesn't know `&`/`\` aren't part of a class name.
-/// `parse` now rejects a would-be generic base that isn't a bare identifier
+/// `parse` rejects a would-be generic base that isn't a bare identifier
 /// and falls through to the documented opaque-`Simple` degrade instead, so
-/// this case now lands on the correct value on the very first pass — see
+/// this case lands on the correct value on the very first pass — see
 /// `parse_intersection_with_parenthesised_union_operand_degrades_to_simple`
 /// / `parse_difference_with_parenthesised_union_operand_degrades_to_simple`
 /// above for the pinned regression.

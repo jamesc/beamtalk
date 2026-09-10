@@ -34,13 +34,13 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         .unwrap_or(true);
 
     let pre_class_hierarchy = extract_class_hierarchy(request);
-    // BT-3477: a class/protocol-defining compile needs the ambient protocol
+    // A class/protocol-defining compile needs the ambient protocol
     // cache too, not just `diagnostics/3` — see `extract_protocol_registry`'s
     // doc. Without this, a live REPL `compile` of a class whose method
     // signature references a cross-file protocol hits the same nominal-
-    // mismatch/Dnu false positive BT-3473 fixed for `diagnostics/3`.
+    // mismatch/Dnu false positive already fixed for `diagnostics/3`.
     let pre_loaded_protocols = extract_protocol_registry(request);
-    // BT-2899 (ADR 0108): a class/protocol-defining compile needs session
+    // ADR 0108: a class/protocol-defining compile needs session
     // carried-over type aliases too, not just `compile_expression` — see
     // `extract_known_type_aliases`'s doc. Without this, a live REPL
     // redefinition of a class/protocol over an earlier turn's `type Foo =
@@ -53,12 +53,12 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
     let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
-    // Run semantic analysis. BT-2899: also capture `referenced_aliases` —
+    // Run semantic analysis, also capturing `referenced_aliases` —
     // shipped back in the response so the Erlang side can populate
     // `beamtalk_alias_xref`'s alias-name → dependent-class index at class
     // install time (see `diagnostics_ok_response`/this handler's response
     // builder for where the field is attached).
-    // BT-3123: `compute_diagnostics_and_analysis` additionally returns the
+    // `compute_diagnostics_and_analysis` additionally returns the
     // full `AnalysisResult`, threaded into codegen below via
     // `CodegenOptions::with_analysis` so it doesn't re-derive the class
     // hierarchy, semantic facts, and inferred method return types from
@@ -89,7 +89,7 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         );
     all_diagnostics.extend(primitive_diags);
 
-    // BT-738: Warn when user code shadows a stdlib class name (not for stdlib itself).
+    // Warn when user code shadows a stdlib class name (not for stdlib itself).
     if !stdlib_mode {
         let mut stdlib_shadow_diags = Vec::new();
         beamtalk_core::semantic_analysis::check_stdlib_name_shadowing(
@@ -106,8 +106,8 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         return diagnostic_error_response(&error_diags, &source);
     }
 
-    // BT-571: Merge standalone method definitions into their target classes.
-    // BT-3123: captured *before* the merge so the class-codegen call below
+    // Merge standalone method definitions into their target classes.
+    // Captured *before* the merge so the class-codegen call below
     // knows whether `analysis` (computed pre-merge) is still trustworthy —
     // see `handle_compile_expression`'s identical `analysis` gating for why.
     let had_standalone_method_definitions = !module.method_definitions.is_empty();
@@ -141,14 +141,14 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         }
     }
 
-    // BT-775 / BT-1670: Accept optional module_name override from caller.
+    // Accept optional module_name override from caller.
     // When provided, use it directly instead of deriving from the class name.
     // This allows the REPL/MCP load path to produce package-qualified names
     // matching the build system (e.g., bt@my_app@scheme@symbol).
     // Uses the unified derive_class_module_name function.
     let module_name_override = map_get(request, "module_name").and_then(term_to_string);
 
-    // Derive module name from the sole top-level definition. BT-1666 enforces
+    // Derive module name from the sole top-level definition, which enforces
     // a single top-level definition per file (one class OR one protocol).
     let primary_name = module
         .classes
@@ -175,13 +175,13 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
             Err(resp) => return resp,
         };
 
-    // BT-1950: Protocol-only files need the same early-return path as
-    // handle_compile_expression (BT-1612). generate_module assumes at least
+    // Protocol-only files need the same early-return path as
+    // handle_compile_expression. generate_module assumes at least
     // one class exists and errors with "Value type module has no class" for
     // protocol-only files. Route through the protocol codegen instead.
     if !module.protocols.is_empty() && module.classes.is_empty() {
         let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
-        // BT-2917: `referenced_aliases` was already computed above (BT-2899)
+        // `referenced_aliases` was already computed above
         // for this file-compile path — thread it through so a protocol-only
         // file's alias-typed method signatures get the same
         // `beamtalk_alias_xref` registration a class-defining compile gets.
@@ -207,7 +207,7 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
         .collect();
 
-    // BT-845/BT-860: Extract optional source file path to embed as beamtalk_source attribute.
+    // Extract optional source file path to embed as beamtalk_source attribute.
     let source_path = map_get(request, "source_path").and_then(term_to_string);
 
     // Generate Core Erlang
@@ -220,11 +220,11 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         .with_class_hierarchy(pre_class_hierarchy)
         .with_pre_loaded_aliases(pre_loaded_aliases)
         .with_source_path_opt(source_path.as_deref());
-    // BT-3123: only trust `analysis` (computed pre-merge) when nothing was
+    // Only trust `analysis` (computed pre-merge) when nothing was
     // merged into `module` afterward — see `had_standalone_method_definitions`'s
     // doc above.
     if !had_standalone_method_definitions {
-        // BT-3125: prepare the AST at the driver boundary using the same
+        // Prepare the AST at the driver boundary using the same
         // still-trustworthy analysis handed off to codegen just below —
         // codegen no longer schedules this writeback itself in that case.
         beamtalk_core::semantic_analysis::lower_module_for_codegen(

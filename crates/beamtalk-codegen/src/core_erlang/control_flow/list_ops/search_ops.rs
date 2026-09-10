@@ -11,7 +11,7 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 
-/// BT-3028: binds the `detect:` answer out of a mutation-threading fold result,
+/// binds the `detect:` answer out of a mutation-threading fold result,
 /// raising `not_found` when nothing matched.
 ///
 /// The fold seeds its accumulator with `{'nil', 'false', …}` and processes every
@@ -46,7 +46,7 @@ fn bind_detect_found_or_raise_doc(
 }
 
 impl CoreErlangGenerator {
-    /// BT-1481: Generates code for `list anySatisfy:` with mutation analysis.
+    /// Generates code for `list anySatisfy:` with mutation analysis.
     pub(in crate::core_erlang) fn generate_list_any_satisfy(
         &mut self,
         receiver: &Expression,
@@ -65,7 +65,7 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: fall through to simple BIF call (lists:any/2)
-        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        // see `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -95,7 +95,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1481: Generates code for `list allSatisfy:` with mutation analysis.
+    /// Generates code for `list allSatisfy:` with mutation analysis.
     pub(in crate::core_erlang) fn generate_list_all_satisfy(
         &mut self,
         receiver: &Expression,
@@ -114,7 +114,7 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: fall through to simple BIF call (lists:all/2)
-        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        // see `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -144,7 +144,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1481: Generates stateful `anySatisfy:`/`allSatisfy:` using `lists:foldl`
+    /// Generates stateful `anySatisfy:`/`allSatisfy:` using `lists:foldl`
     /// with state threading and a boolean accumulator.
     ///
     /// Note: Unlike `lists:any/2` and `lists:all/2`, this does NOT short-circuit.
@@ -270,7 +270,7 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
         // unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -337,7 +337,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// BT-1486: Generates code for `list detect:` with mutation analysis.
+    /// Generates code for `list detect:` with mutation analysis.
     ///
     /// Without mutations: falls through to `beamtalk_list:detect/2` BIF.
     /// With mutations: uses `lists:foldl` to process all elements (no short-circuit)
@@ -361,7 +361,7 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: fall through to BIF call (beamtalk_list:detect/2)
-        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        // see `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -391,7 +391,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// ADR 0118 phase 4 (BT-3420): compiles `detect:ifNone:`'s `ifNone:`
+    /// ADR 0118 phase 4: compiles `detect:ifNone:`'s `ifNone:`
     /// handler as a BRANCH ARM seeded from `state_var` — the same
     /// `generate_conditional_branch_inline` per-frame `ThreadedIr` machinery
     /// `ifTrue:`/`ifFalse:` branches use — returning a `Document` that
@@ -412,7 +412,7 @@ impl CoreErlangGenerator {
         if_none: &Expression,
         state_var: &str,
     ) -> Result<Document<'static>> {
-        // BT-3151: unconditional (both branches below) — a class-method
+        // unconditional (both branches below) — a class-method
         // self-send here still cannot thread its `ClassVars` mutation
         // through `detect:ifNone:`'s fold result, branch-arm routing or
         // not, so it stays a compile error regardless of which shape
@@ -444,7 +444,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1486: Generates code for `list detect:ifNone:` with mutation analysis.
+    /// Generates code for `list detect:ifNone:` with mutation analysis.
     ///
     /// Without mutations: falls through to runtime dispatch.
     /// With mutations: uses `lists:foldl` like `detect:`, then applies the ifNone
@@ -473,7 +473,7 @@ impl CoreErlangGenerator {
         if let Some(pred_block) = self.block_needs_mutation_threading(predicate) {
             return self.generate_list_detect_if_none_with_mutations(receiver, pred_block, if_none);
         }
-        // BT-3420 (ADR 0118 phase 4): the predicate alone may be mutation-
+        // ADR 0118 phase 4: the predicate alone may be mutation-
         // free while the `ifNone:` handler itself contains a self-send or
         // field mutation (`items detect: [:x | x > 100] ifNone: [self
         // bumpCount]`) — route through the with-mutations fold so
@@ -500,7 +500,7 @@ impl CoreErlangGenerator {
         predicate: &Expression,
         if_none: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-3151: both blocks reach `generate_block` via `expression_doc`
+        // both blocks reach `generate_block` via `expression_doc`
         // below — see `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(predicate)?;
         self.check_bare_list_op_block_self_sends(if_none)?;
@@ -534,7 +534,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1486: Wrapper for `detect:ifNone:` with mutations — runs the detect foldl,
+    /// Wrapper for `detect:ifNone:` with mutations — runs the detect foldl,
     /// then checks the `FoundFlag` and evaluates the ifNone block when no match was found.
     ///
     /// The detect foldl accumulator uses `{FoundItem, FoundFlag, State...}`. We extract
@@ -628,11 +628,11 @@ impl CoreErlangGenerator {
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
             if self.loop_mode.in_direct_params_loop {
-                // BT-3151: direct-params loops are a value-type-only
+                // direct-params loops are a value-type-only
                 // optimization with no actor `State` to thread through the
                 // `ifNone:` handler in the first place (see
                 // `check_bare_list_op_block_self_sends`'s doc comment) —
-                // compiled as an ordinary closure, unaffected by BT-3420.
+                // compiled as an ordinary closure, unaffected by mutation threading.
                 self.check_bare_list_op_block_self_sends(if_none)?;
                 let none_code = self.expression_doc(if_none)?;
                 self.loop_mode.direct_params_list_op_result = Some(final_result.clone());
@@ -716,7 +716,7 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
         // unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -801,7 +801,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// BT-1486: Generates stateful `detect:` using `lists:foldl`
+    /// Generates stateful `detect:` using `lists:foldl`
     /// with state threading and a found-item accumulator.
     ///
     /// All elements are processed (no short-circuit) because field mutations must
@@ -932,7 +932,7 @@ impl CoreErlangGenerator {
             list_var.clone(),
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
         // unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.

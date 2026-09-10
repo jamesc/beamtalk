@@ -11,8 +11,6 @@
 //!
 //! **DDD Context:** Shared Kernel (AST layer — consumed by Semantic Analysis,
 //! Code Generation, and Language Service)
-//!
-//! **References:** BT-2069, BT-2065 (parent epic), BT-2064 (`WellKnownClass`)
 
 use super::MessageSelector;
 
@@ -129,14 +127,14 @@ pub enum WellKnownSelector {
     PerformLocallyWithArgs,
 
     // --- Actor timeout ---
-    /// `withTimeout:` — BT-3462: an `Actor` (or subclass) send wrapped with an
+    /// `withTimeout:` — an `Actor` (or subclass) send wrapped with an
     /// explicit reply timeout. Only the type checker's transparency rule
     /// (`inference.rs`) special-cases this selector by name today; it is not
     /// codegen-intrinsified.
     WithTimeout,
 
     // --- Indexed access ---
-    /// `at:` — BT-3462: indexed/keyed element access. Recognised by the type
+    /// `at:` — indexed/keyed element access. Recognised by the type
     /// checker for `Tuple`'s literal-index element-type narrowing
     /// (`infer_literal_index_tuple_at`); every receiver class implements its
     /// own `at:` primitive in codegen (`List`, `Dictionary`, `String`, …), so
@@ -305,28 +303,28 @@ impl WellKnownSelector {
     }
 }
 
-/// BT-3385: returns `true` if a block-literal argument at `arg_index` for
+/// Returns `true` if a block-literal argument at `arg_index` for
 /// `selector` forms a *nested loop/fold shape* that
 /// `beamtalk-codegen`'s `block_arg_for_selector`/`nested_loop_or_fold_body`
 /// (`core_erlang/control_flow/mod.rs`) recognizes for its own nested-mutation
 /// / class-var-loss detection — deliberately narrower than, and NOT derived
 /// from, `beamtalk_core::state_threading_selectors::is_state_threaded_block_arg`
 /// (the canonical "which selectors thread which block-argument positions"
-/// table, BT-3423 / ADR 0118 §7): that broader table also covers
+/// table, ADR 0118 §7): that broader table also covers
 /// conditionals (`ifTrue:`/`ifNotNil:`/`and:`/`or:`/…) and exception
 /// selectors (`on:do:`/`ensure:`), each of which has its own dedicated
 /// `_with_mutations`/`_with_mutations`-style generator reached through a
 /// different codegen path, never through `nested_loop_or_fold_body`'s
 /// generic loop/fold walk — widening THIS function to match would change
 /// what `nested_loop_or_fold_body` classifies as a nested loop/fold, which
-/// is exactly the kind of codegen-shape change BT-3423 (a decision-only
-/// refactor) must not make.
+/// is exactly the kind of codegen-shape change a decision-only refactor
+/// must not make.
 ///
 /// The `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` entries exist here (despite
 /// the caveat above) only because `block_arg_for_selector` excludes them
 /// explicitly before ever consulting this table — see its doc comment.
-/// Their own threading is dedicated codegen (BT-1392/BT-2359 in
-/// `value_type_codegen.rs`), not this lookup; conformance instead rests on
+/// Their own threading is dedicated codegen in
+/// `value_type_codegen.rs`, not this lookup; conformance instead rests on
 /// the existing runtime test corpus that exercises exactly this shape
 /// (`stdlib/test/conditional_local_mutation_test.bt`,
 /// `stdlib/test/value_type_mutation_matrix_test.bt`): if that codegen ever

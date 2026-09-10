@@ -21,25 +21,25 @@ pub enum ExpectCategory {
     Type,
     /// Suppress unused-variable warnings.
     Unused,
-    /// Suppress dead-block-assignment warnings (BT-1476).
+    /// Suppress dead-block-assignment warnings.
     DeadAssignment,
-    /// Suppress deprecation warnings — wrong keyword/class-kind (BT-1529).
+    /// Suppress deprecation warnings — wrong keyword/class-kind.
     Deprecation,
-    /// Suppress actor-new errors — using `new`/`new:` on an Actor subclass (BT-1559).
+    /// Suppress actor-new errors — using `new`/`new:` on an Actor subclass.
     ActorNew,
-    /// Suppress visibility errors/warnings — cross-package internal method access (ADR 0071, BT-1702).
+    /// Suppress visibility errors/warnings — cross-package internal method access (ADR 0071).
     Visibility,
-    /// Suppress unresolved class warnings (BT-1726).
+    /// Suppress unresolved class warnings.
     UnresolvedClass,
-    /// Suppress unresolved FFI module warnings (BT-1726).
+    /// Suppress unresolved FFI module warnings.
     UnresolvedFfi,
-    /// Suppress arity mismatch warnings (BT-1726).
+    /// Suppress arity mismatch warnings.
     ArityMismatch,
-    /// Suppress workspace-binding-shadows-class warnings (BT-1759).
+    /// Suppress workspace-binding-shadows-class warnings.
     ShadowedClass,
-    /// Suppress missing type annotation warnings in typed classes (BT-1918).
+    /// Suppress missing type annotation warnings in typed classes.
     TypeAnnotation,
-    /// Suppress inheritance constraint errors — sealed subclass/method (BT-2087).
+    /// Suppress inheritance constraint errors — sealed subclass/method.
     Inheritance,
     /// Suppress sendability advisories — scoped handle crossing a process
     /// boundary or undeclared handle-wrapping class (ADR 0103).
@@ -249,10 +249,10 @@ pub enum Expression {
     ///
     /// Example: `value match: [{#ok, x} -> x; {#error, e} -> nil]`
     ///
-    /// BT-2763 / ADR 0106: `value matchExhaustive: [...]` is the same shape
+    /// ADR 0106: `value matchExhaustive: [...]` is the same shape
     /// with `exhaustive: true` — an opt-in assertion that the checker must
     /// *prove* the match covers every case (asserted `Error` severity),
-    /// rather than merely warn when it happens to notice a gap (BT-2745's
+    /// rather than merely warn when it happens to notice a gap (the
     /// advisory path, `exhaustive: false`).
     Match {
         /// The value being matched against.
@@ -260,7 +260,7 @@ pub enum Expression {
         /// The match arms.
         arms: Vec<MatchArm>,
         /// `true` when written as `matchExhaustive:` rather than `match:` —
-        /// an opt-in, asserted exhaustiveness check (BT-2763 / ADR 0106).
+        /// an opt-in, asserted exhaustiveness check (ADR 0106).
         exhaustive: bool,
         /// Source location of the entire match.
         span: Span,
@@ -315,13 +315,13 @@ pub enum Expression {
         /// Whether the name was quoted (`"+"`) vs bare (`basicNew`).
         ///
         /// Inferred selectors set this to `true` so that codegen treats them
-        /// identically to an explicit quoted selector (BT-2724).
+        /// identically to an explicit quoted selector.
         is_quoted: bool,
         /// Whether the original source used `@intrinsic` instead of `@primitive`.
         is_intrinsic: bool,
         /// Whether the selector was inferred from the enclosing method because
-        /// the source wrote a bare `@primitive` with no selector string
-        /// (BT-2724). Only affects unparsing (round-tripping back to bare
+        /// the source wrote a bare `@primitive` with no selector string.
+        /// Only affects unparsing (round-tripping back to bare
         /// form); codegen and analysis use `name`/`is_quoted` unchanged.
         is_inferred: bool,
         /// Source location of the entire `@primitive name` expression.
@@ -349,12 +349,12 @@ pub enum Expression {
     /// immediately following expression in the same expression list.
     ///
     /// Example: `@expect dnu` before a message send that may produce a DNU
-    /// hint. BT-3387: `@expect unresolved_ffi, type` suppresses both
+    /// hint. `@expect unresolved_ffi, type` suppresses both
     /// categories on a single following expression.
     ExpectDirective {
         /// The categories of diagnostic to suppress (non-empty).
         categories: Vec<ExpectCategory>,
-        /// Optional human-readable reason for the suppression (BT-1918).
+        /// Optional human-readable reason for the suppression.
         ///
         /// Parsed from `@expect category "reason string"`. When present, the
         /// reason is included in stale `@expect` warnings for better diagnostics.
@@ -425,11 +425,11 @@ impl Expression {
     /// expression. `(Erlang lists)` and `Erlang lists`, or `(x)` and `x`,
     /// must be recognized identically by any shape-matching code.
     ///
-    /// Single authority for "unwrap parens" (BT-3089) — this was
-    /// independently reimplemented in `ffi_receiver.rs`,
+    /// Single authority for "unwrap parens" — `ffi_receiver.rs`,
     /// `codegen::core_erlang` (`CoreErlangGenerator::peel_parens`),
     /// `queries::ffi_sites_query`, and
-    /// `semantic_analysis::type_checker::narrowing::extract`. Lives on
+    /// `semantic_analysis::type_checker::narrowing::extract` must call this
+    /// rather than reimplementing the loop. Lives on
     /// `Expression` itself, in `ast` — the bottom of the dependency graph —
     /// so every consumer above it (codegen, queries, `semantic_analysis`) can
     /// call it directly instead of duplicating the loop.
@@ -589,11 +589,11 @@ impl MessageSelector {
     /// For keyword messages, this concatenates all keyword parts.
     /// For unary and binary messages, returns the operator/name directly.
     ///
-    /// This is the single authority for selector → string text (BT-3089):
+    /// This is the single authority for selector → string text:
     /// codegen also uses it directly (e.g. `leaf::atom(selector.name())`) as
     /// the Erlang atom's textual content — Beamtalk selector characters
     /// (letters, digits, `:`, operator symbols) never need escaping to be
-    /// valid atom *content*; `leaf::atom` (the BT-875-sanctioned funnel, see
+    /// valid atom *content*; `leaf::atom` (the sanctioned funnel, see
     /// `beamtalk_cerl_doc::escape::escape_atom_chars`) is what decides
     /// whether/how the text gets quoted for Core Erlang output. There is no
     /// separate "mangling" step.
@@ -621,12 +621,12 @@ impl MessageSelector {
     /// there) — this takes only the first.
     ///
     /// This is the naming convention `native: self delegate` methods use to
-    /// name their backing Erlang function (ADR 0101 / BT-2720,
-    /// `docs/beamtalk-native-erlang.md`). Single authority (BT-3089) for a
-    /// rule previously reimplemented in both
+    /// name their backing Erlang function (ADR 0101,
+    /// `docs/beamtalk-native-erlang.md`). Single authority for a
+    /// rule shared by both
     /// `codegen::core_erlang::value_type_codegen::native_delegate_fn_name`
     /// and `semantic_analysis::validators::native_validators`'s
-    /// reserved-word check — moved down onto `MessageSelector` itself (the
+    /// reserved-word check — it lives on `MessageSelector` itself (the
     /// bottom of the dependency graph) since neither of those two modules
     /// may depend on the other (`semantic_analysis` must not depend on
     /// `codegen`).
@@ -944,7 +944,7 @@ impl TypeAnnotation {
     /// the variant and all its contents unchanged.
     ///
     /// Used to fold grouping parentheses in type-annotation position
-    /// (BT-2760, e.g. `(A & B) \ C`) into the inner annotation transparently:
+    /// (e.g. `(A & B) \ C`) into the inner annotation transparently:
     /// the parsed shape is exactly what the parens contained, but the span
     /// grows to cover the parens themselves so diagnostics/hover point at the
     /// whole written group.
@@ -1039,7 +1039,7 @@ impl TypeAnnotation {
     /// structural reasons (different input types / rendering mechanisms),
     /// not accidental duplication — kept honest by the
     /// `assert_display_parity` fixture tests in `declared_type`'s test
-    /// module (BT-3089) rather than by comment alone.
+    /// module rather than by comment alone.
     #[must_use]
     pub fn type_name(&self) -> EcoString {
         match self {
@@ -1124,7 +1124,7 @@ impl TypeAnnotation {
     }
 
     /// `true` when `self`, used as an operand of `\`, must be parenthesised
-    /// for the printed form to re-parse to the same AST (BT-2760).
+    /// for the printed form to re-parse to the same AST.
     ///
     /// `\` binds tighter than `|` and shares a tier with `&`, so a grouped
     /// union or intersection operand keeps its parens. The *excluded* (right)
@@ -1144,7 +1144,7 @@ impl TypeAnnotation {
     }
 
     /// `true` when `self`, used as an operand of `&`, must be parenthesised
-    /// for the printed form to re-parse to the same AST (BT-2760).
+    /// for the printed form to re-parse to the same AST.
     ///
     /// Mirror image of [`needs_parens_in_difference`](Self::needs_parens_in_difference):
     /// grouped union/difference operands keep parens, and the *right* operand

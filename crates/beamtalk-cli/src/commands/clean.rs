@@ -14,8 +14,8 @@
 //! Scopes:
 //! - default: the project's `_build/<profile>/` output plus the type cache.
 //! - `--deps`: additionally the fetched/compiled dependency artifacts
-//!   (`_build/deps/`) and any project-local registry index (`_build/registry/`,
-//!   BT-2996 — the shared, user-level registry cache at
+//!   (`_build/deps/`) and any project-local registry index (`_build/registry/`
+//!   — the shared, user-level registry cache at
 //!   `~/.beamtalk/registry/` lives outside `_build/` entirely and is cleared
 //!   by deleting that directory directly).
 //! - `--all`: the entire `_build/` directory, including any shared caches.
@@ -241,8 +241,8 @@ mod tests {
         assert!(targets.contains(&layout.profile_dir()));
     }
 
-    /// BT-2996: `--deps` must be able to clear a corrupted project-local
-    /// registry index too — previously only `--all` reached `_build/registry/`.
+    /// `--deps` must be able to clear a corrupted project-local
+    /// registry index too, not just `--all`.
     #[test]
     fn deps_targets_add_registry_dir() {
         let temp = TempDir::new().unwrap();

@@ -6,8 +6,8 @@
 //!
 //! **DDD Context:** Language Service
 //!
-//! Backs `SystemNavigation fieldReadersOf:in:` and `fieldWritersOf:in:`
-//! (BT-2208). Where `sendersOf:` answers "who calls this method?" and
+//! Backs `SystemNavigation fieldReadersOf:in:` and `fieldWritersOf:in:`.
+//! Where `sendersOf:` answers "who calls this method?" and
 //! `referencesTo:` answers "who mentions this class?", these queries answer
 //! "which methods read (or write) this slot?". Given the source text of a
 //! single compiled method (as returned by `CompiledMethod source`) and an

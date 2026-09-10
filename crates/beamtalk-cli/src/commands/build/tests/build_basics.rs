@@ -46,7 +46,7 @@ fn test_find_source_files_no_src_directory() {
 
 #[test]
 fn test_find_source_files_excludes_stubs_dir_with_src() {
-    // ADR 0075 / BT-1847 regression: stubs/ is a sibling of src/, so
+    // ADR 0075 regression: stubs/ is a sibling of src/, so
     // when src/ exists it's already excluded by the src/-only scoping —
     // this pins that behavior so a future refactor can't reintroduce it.
     let temp = TempDir::new().unwrap();
@@ -69,10 +69,10 @@ fn test_find_source_files_excludes_stubs_dir_with_src() {
 
 #[test]
 fn test_find_source_files_excludes_stubs_dir_without_src() {
-    // ADR 0075 / BT-1847 regression: without a src/ directory,
-    // find_source_files used to fall back to scanning the whole
-    // project root — sweeping stubs/*.bt into the normal compile
-    // pipeline, where `declare native:` is a hard error (BT-1846).
+    // ADR 0075 regression: without a src/ directory, find_source_files
+    // must not fall back to scanning the whole project root — that would
+    // sweep stubs/*.bt into the normal compile pipeline, where
+    // `declare native:` is a hard error.
     let temp = TempDir::new().unwrap();
     let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
     let stubs_path = project_path.join("stubs");

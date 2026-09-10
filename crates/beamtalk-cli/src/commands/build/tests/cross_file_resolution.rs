@@ -31,7 +31,7 @@ fn test_build_class_module_index_handles_parse_errors_gracefully() {
     assert!(result.is_ok());
 }
 
-/// BT-906: Verify that `build_class_module_index` correctly maps actor classes
+/// Verify that `build_class_module_index` correctly maps actor classes
 /// defined in subdirectories to their full subdirectory-qualified module names.
 ///
 /// When a package has `src/observer/event_bus.bt` defining `EventBus`, the index
@@ -61,7 +61,7 @@ fn test_build_class_module_index_subdirectory_actor_class() {
     );
 }
 
-/// BT-906: Verify end-to-end that cross-file actor spawn uses the correct
+/// Verify end-to-end that cross-file actor spawn uses the correct
 /// subdirectory-qualified module path in the generated Core Erlang.
 ///
 /// When `src/main.bt` calls `EventBus spawn` and `EventBus` is defined in
@@ -135,7 +135,7 @@ fn test_cross_file_subdirectory_actor_spawn_uses_correct_module() {
     );
 }
 
-/// BT-1523: Verify cross-file class hierarchy resolution.
+/// Verify cross-file class hierarchy resolution.
 ///
 /// When `InheritingCounter` (file 2) subclasses `Counter` (file 1) and calls
 /// `self getValue`, the type checker should NOT emit a DNU warning because
@@ -211,22 +211,21 @@ fn test_cross_file_inheritance_no_false_dnu_warning() {
     assert!(core_file.exists());
 }
 
-/// BT-2928: cross-file/package type-alias resolution for a manifest-based
+/// Cross-file/package type-alias resolution for a manifest-based
 /// package build's Pass 1.
 ///
 /// File A declares `type Direction = ...` and a method returning it;
 /// file B calls that method and passes the result as an argument to a
 /// parameter typed with the *same* union spelled out directly (mirroring
 /// the real `stdlib/src/actor.bt` / `stdlib/src/supervision_spec.bt`
-/// `RestartStrategy` bug this issue fixes: the declared parameter side
-/// already resolved correctly same-file, but the cross-file argument's
+/// `RestartStrategy` shape: the declared parameter side
+/// already resolves correctly same-file, but the cross-file argument's
 /// inferred type — read back from `A`'s `ClassInfo`/`MethodInfo` as an
-/// opaque `"Direction"` string — never expanded through the alias table,
-/// so it never matched the union's members). Before BT-2928's
-/// `resolve_type_name_string` alias-awareness fix, this produced a
-/// spurious "Argument 1 of 'useDirection:' ... expects ..., got
-/// Direction" warning; after the fix, `A new heading`'s type expands to
-/// the same union and no warning fires.
+/// opaque `"Direction"` string — must expand through the alias table via
+/// `resolve_type_name_string`'s alias-awareness so it matches the union's
+/// members), rather than producing a spurious "Argument 1 of
+/// 'useDirection:' ... expects ..., got Direction" warning: `A new
+/// heading`'s type must expand to the same union and no warning fires.
 #[test]
 fn test_cross_file_alias_resolution_no_false_type_mismatch() {
     let temp = TempDir::new().unwrap();
@@ -296,8 +295,8 @@ fn test_cross_file_alias_resolution_no_false_type_mismatch() {
     );
 
     // Negative control: WITHOUT `pre_loaded_aliases`, the same compile
-    // reproduces the pre-BT-2928 false positive — proving this test
-    // actually exercises the fix rather than a scenario that never warned.
+    // reproduces the false positive the alias table fixes — proving this
+    // test actually exercises the fix rather than a scenario that never warned.
     let core_file_unfixed = build_dir.join("bt@test_pkg@b_unfixed.core");
     let diagnostics_unfixed = compile_file(
         &src_path.join("b.bt"),
@@ -326,7 +325,7 @@ fn test_cross_file_alias_resolution_no_false_type_mismatch() {
     );
 }
 
-/// BT-2928 (review follow-up): `collect_project_alias_infos` scans every
+/// `collect_project_alias_infos` scans every
 /// source file in the compilation unit, including the one currently being
 /// compiled — unlike `ClassHierarchy::cross_file_class_infos`, which
 /// explicitly filters out the current file's own classes before
@@ -389,7 +388,7 @@ fn test_cross_file_alias_resolution_no_false_duplicate_for_own_alias() {
     );
 }
 
-/// BT-2965: `package_identity` is the single source of truth for "which
+/// `package_identity` is the single source of truth for "which
 /// package is this build compiling", consumed by `build` (for
 /// `CompilerOptions::current_package`) and `build_class_index` (for the
 /// `AliasInfo::package` stamp). Those two must agree or
@@ -410,7 +409,7 @@ fn package_identity_names_stdlib_for_manifest_less_stdlib_mode() {
     assert_eq!(package_identity(Some(&manifest), true), Some("my_pkg"));
 
     // Manifest-less: only `--stdlib-mode` has a package boundary, and it is
-    // named the same way `build_stdlib::stdlib_compiler_options` (BT-2964)
+    // named the same way `build_stdlib::stdlib_compiler_options`
     // and the LSP's `STDLIB_PACKAGE_MARKER` name it.
     assert_eq!(
         package_identity(None, true),
@@ -419,14 +418,14 @@ fn package_identity_names_stdlib_for_manifest_less_stdlib_mode() {
     assert_eq!(package_identity(None, false), None);
 }
 
-/// BT-2965 regression: `beamtalk build --stdlib-mode <dir>` over a bare
+/// Regression: `beamtalk build --stdlib-mode <dir>` over a bare
 /// directory (no `beamtalk.toml`) must still collect cross-file type
 /// aliases. This is exactly what `just dialyzer-specs` does — it copies
-/// `stdlib/src/*.bt` flat into a temp dir and builds it — and before the
-/// fix `build_class_index` returned an empty `all_alias_infos` for every
+/// `stdlib/src/*.bt` flat into a temp dir and builds it. Without this,
+/// `build_class_index` would return an empty `all_alias_infos` for every
 /// manifest-less build, so `supervision_spec.bt`'s `field: restart ::
-/// RestartStrategy = #temporary` never saw `actor.bt`'s `type
-/// RestartStrategy = ...` and drew a false state-default type mismatch.
+/// RestartStrategy = #temporary` would never see `actor.bt`'s `type
+/// RestartStrategy = ...` and would draw a false state-default type mismatch.
 #[test]
 fn stdlib_mode_manifest_less_build_collects_cross_file_aliases() {
     let temp = TempDir::new().unwrap();
@@ -484,7 +483,7 @@ fn stdlib_mode_manifest_less_build_collects_cross_file_aliases() {
     );
 }
 
-/// BT-2965 regression, symptom level: with cross-file aliases seeded, a
+/// Regression, symptom level: with cross-file aliases seeded, a
 /// `field: x :: SomeAlias = <member>` default whose alias is declared in
 /// *another* file draws no "Type mismatch: state ... declared as ...,
 /// default is ..." warning. The negative control (no `pre_loaded_aliases`)
@@ -573,7 +572,7 @@ fn state_default_with_cross_file_alias_draws_no_type_mismatch() {
     );
 }
 
-/// BT-2910: `collect_project_protocol_infos`/`collect_all_protocol_infos`
+/// `collect_project_protocol_infos`/`collect_all_protocol_infos`
 /// and `collect_all_alias_infos` are the merge helpers `build_class_index`
 /// uses to combine same-package cross-file protocol/alias metadata with
 /// a dependency's exported protocol/alias metadata (`ResolvedDependency`).
@@ -679,16 +678,17 @@ fn dependency_protocol_and_alias_infos_merge_and_resolve() {
     );
 }
 
-/// BT-2932: cross-module `AliasRegistry` wiring into codegen — the
+/// Cross-module `AliasRegistry` wiring into codegen — the
 /// codegen counterpart of `test_cross_file_alias_resolution_no_false_type_mismatch`
 /// above. File A declares `type Direction = ...`; file B has no alias
 /// declarations of its own, only a method parameter explicitly
-/// annotated `:: Direction`. Before this issue, `compile_file`'s codegen
-/// call (`write_core_erlang_with_bindings` → `CodegenOptions`) only ever
-/// built `AliasRegistry::from_module_declarations(module)` — B's own
-/// (empty) `type_aliases` — so this parameter's generated `-spec` fell
-/// through to `any()` even though semantic analysis (BT-2928) already
-/// resolved the reference correctly. With `pre_loaded_aliases` threaded
+/// annotated `:: Direction`. Without `pre_loaded_aliases` threaded through,
+/// `compile_file`'s codegen call (`write_core_erlang_with_bindings` →
+/// `CodegenOptions`) would only ever build
+/// `AliasRegistry::from_module_declarations(module)` — B's own
+/// (empty) `type_aliases` — so this parameter's generated `-spec` would fall
+/// through to `any()` even though semantic analysis already
+/// resolves the reference correctly. With `pre_loaded_aliases` threaded
 /// through (`ClassHierarchyContext::pre_loaded_aliases` →
 /// `codegen_hierarchy` → `CodegenOptions::with_pre_loaded_aliases`), B's
 /// generated `.core` file must contain a `user_type` reference to the

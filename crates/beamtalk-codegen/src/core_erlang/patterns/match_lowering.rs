@@ -5,8 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! BT-3465: split out of `expressions.rs`, no logic changes. This module
-//! handles:
+//! This module handles:
 //! - `match:` expression compilation (`generate_match`), including the
 //!   all-native fast path and the `Pattern::Array`/`Pattern::Type` chain
 //!   fallback (`generate_match_chain`, `generate_array_match_arm`)
@@ -108,8 +107,8 @@ impl CoreErlangGenerator {
                     span: Some(*span),
                 });
             }
-            // Rest patterns in match arms are not yet supported (BT-1251 only adds
-            // rest to destructuring assignments).
+            // Rest patterns in match arms are not yet supported (rest is only
+            // supported in destructuring assignments).
             if let Pattern::Array {
                 rest: Some(_),
                 span,
@@ -126,7 +125,7 @@ impl CoreErlangGenerator {
         let has_array_arm = arms
             .iter()
             .any(|arm| matches!(arm.pattern, Pattern::Array { .. }));
-        // BT-2855 / ADR 0107 Phase A: a `Pattern::Type` arm needs the same
+        // ADR 0107 Phase A: a `Pattern::Type` arm needs the same
         // chain-of-nested-`case`s path as `Pattern::Array` — its runtime
         // test (a guard-safe BIF, an atom-exclusion guard, or a
         // `maps:get`-based class-tag check) isn't expressible as a single
@@ -140,7 +139,7 @@ impl CoreErlangGenerator {
             .iter()
             .any(|arm| matches!(arm.pattern, Pattern::Type { .. }));
 
-        // BT-2880: decide once, for the whole `match:`, whether any arm needs
+        // Decide once, for the whole `match:`, whether any arm needs
         // actor state threading (e.g. an arm body that is a state-mutating
         // `[...] value` block). When it does, every arm below is compiled to a
         // uniform `{Value, State}` shape via `generate_match_arm_body`, so the
@@ -196,11 +195,10 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-2880: Compiles a `match:` arm body.
+    /// Compiles a `match:` arm body.
     ///
     /// When `base_state` is `None` (no arm in this `match:` needs actor state
-    /// threading — the common case), this is exactly `expression_doc`,
-    /// byte-for-byte unchanged from before BT-2880.
+    /// threading — the common case), this is exactly `expression_doc`.
     ///
     /// When `base_state` is `Some` (`match_needs_mutation_threading` found at
     /// least one arm that does), every arm must yield a `{Value, State}` tuple
@@ -213,7 +211,7 @@ impl CoreErlangGenerator {
     ///   `generate_conditional_branch_inline` — the same mechanism `ifTrue:`/
     ///   `ifFalse:` branches use — so `self.<field> :=` assignments inside it
     ///   thread state correctly instead of leaking their raw internal tuple
-    ///   as the match's value (BT-2880).
+    ///   as the match's value.
     /// - An arm body that is itself a nested control-flow-with-mutations
     ///   construct — `ifTrue:`/`ifFalse:`/a nested `match:`/etc., e.g. `nil ->
     ///   flag ifTrue: [self.x := 1]` with no `[...] value` wrapper — already
@@ -228,7 +226,7 @@ impl CoreErlangGenerator {
     ///   named `tier2_local_vars`/`tier2_block_params` identifier receiver,
     ///   or a `Cascade` of safe `value:` sends, e.g. `blk value: a; value:
     ///   b`), for which `expression_doc` already unwraps/discards that
-    ///   call's own state via `close_tier2_value_subexpr_doc` (the BT-2814
+    ///   call's own state via `close_tier2_value_subexpr_doc` (a
     ///   sub-expression-position limitation) — is wrapped unchanged as
     ///   `{<value>, <base_state>}`.
     pub(super) fn generate_match_arm_body(
@@ -243,14 +241,12 @@ impl CoreErlangGenerator {
         if self.is_tier2_value_call(body) {
             if let Expression::MessageSend { receiver, .. } = body {
                 if let Expression::Block(block) = receiver.as_ref() {
-                    // ADR 0111 Addendum 5 (BT-3146): tier2 conditional-branch
+                    // ADR 0111 Addendum 5: tier2 conditional-branch
                     // inlining inside a `match:` arm — reaches the SAME
                     // `generate_conditional_branch_inline` single-arm helper
-                    // conditionals.rs's ifTrue:/ifFalse: use, which now
-                    // builds, `verify()`s, and `render()`s this arm's real
-                    // per-frame ThreadedIr internally; the scalar
-                    // `check_branch_frame_linearity` scaffolding check that
-                    // used to run here is gone.
+                    // conditionals.rs's ifTrue:/ifFalse: use, which builds,
+                    // `verify()`s, and `render()`s this arm's real per-frame
+                    // ThreadedIr internally.
                     let (branch_doc, _branch_final) = self.with_branch_context(|this| {
                         this.generate_conditional_branch_inline(block)
                     })?;
@@ -266,14 +262,13 @@ impl CoreErlangGenerator {
                 // a Cascade of safe value: sends) isn't a literal block, so
                 // there's no block to inline here — fall through to
                 // expression_doc below, which already unwraps/discards that
-                // call's own state via close_tier2_value_subexpr_doc
-                // (BT-2814).
+                // call's own state via close_tier2_value_subexpr_doc.
             }
         }
         if self.control_flow_has_mutations(body) {
             return self.expression_doc(body);
         }
-        // BT-3420 (ADR 0118 phase 4): an arm body that is plain AST-directed
+        // ADR 0118 phase 4: an arm body that is plain AST-directed
         // code but contains a (possibly nested, hoistable) actor self-send —
         // `1 -> 1 + (self bumpCount)` — must not compile through a bare
         // `expression_doc` call, which has no hoisting of its own and
@@ -380,7 +375,7 @@ impl CoreErlangGenerator {
             return self.generate_array_match_arm(match_var, arm, elements, rest, base_state);
         }
 
-        // BT-2855 / ADR 0107 Phase A: `Pattern::Type` (`binding :: ClassName`)
+        // ADR 0107 Phase A: `Pattern::Type` (`binding :: ClassName`)
         // dispatches to a per-class runtime test (BIF test, atom-exclusion
         // guard, or map-tag check) — see `generate_type_pattern`. Like
         // `Pattern::Array` above, this can't reuse the plain native-arm path
@@ -1107,7 +1102,7 @@ impl CoreErlangGenerator {
                 }
             }
             // `Pattern::Type`'s `binding` is bound directly by
-            // `generate_type_pattern` (BT-2855) when it's the arm's
+            // `generate_type_pattern` when it's the arm's
             // top-level pattern — this helper is only reached for *nested*
             // sub-patterns (inside `Tuple`/`List`/`Map`/`Constructor`), and
             // `generate_pattern` already rejects a nested `Pattern::Type`

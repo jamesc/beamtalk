@@ -15,7 +15,7 @@
 //! - **Class/protocol references**: All `Identifier` and `ClassReference` nodes matching the name,
 //!   plus class definitions referencing it as a superclass, plus protocol definitions referencing
 //!   it as an `extending:` target, plus `TypeParamDecl` protocol bounds on both class and protocol
-//!   generic type parameters (BT-1936). Classes and protocols share a namespace and are collected
+//!   generic type parameters. Classes and protocols share a namespace and are collected
 //!   through the same entry point.
 //! - **Method selector references**: All `MessageSend` and `Cascade` nodes with matching selector,
 //!   plus method definitions with matching selector
@@ -41,8 +41,8 @@ use camino::Utf8PathBuf;
 
 /// Find all references to a class or protocol name across files.
 ///
-/// Classes and protocols share a single namespace (BT-1933 registers protocol
-/// names as synthetic class entries), so this function collects references for
+/// Classes and protocols share a single namespace (protocol
+/// names are registered as synthetic class entries), so this function collects references for
 /// both shapes through the same entry point.
 ///
 /// Collects all locations where the name appears as:
@@ -50,10 +50,10 @@ use camino::Utf8PathBuf;
 /// - A class reference expression
 /// - A superclass in class definitions
 /// - A class definition name
-/// - A protocol definition name (BT-1936)
-/// - An `extending:` target in another protocol (BT-1936)
+/// - A protocol definition name
+/// - An `extending:` target in another protocol
 /// - A protocol bound on a generic type parameter — e.g. `T :: Printable` —
-///   on either a class or a protocol definition (BT-1936)
+///   on either a class or a protocol definition
 pub fn find_class_references<'a>(
     class_name: &str,
     files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
@@ -74,7 +74,7 @@ pub fn find_class_references<'a>(
         // Type alias definitions: declaration name and any reference to
         // `class_name` inside the RHS annotation — e.g. `type B = A | #z`
         // referencing alias `A`, or an alias RHS referencing a real class
-        // (ADR 0108 Phase 8, BT-2901). `class_name` here may itself be a
+        // (ADR 0108 Phase 8). `class_name` here may itself be a
         // class, protocol, or alias name; `collect_type_annotation_refs` is
         // shape-generic and doesn't care which.
         for alias in &module.type_aliases {
@@ -82,7 +82,7 @@ pub fn find_class_references<'a>(
         }
 
         // Standalone method definitions: class name references and signature
-        // type annotations (BT-1936: parity with class-method signatures).
+        // type annotations (parity with class-method signatures).
         for smd in &module.method_definitions {
             if smd.class_name.name == class_name {
                 results.push(Location::new(file_path.clone(), smd.class_name.span));
@@ -138,7 +138,7 @@ fn collect_class_definition_refs(
     }
     collect_type_param_bound_refs(&class.type_params, name, file_path, results);
 
-    // BT-1936: state and class-variable type annotations — e.g. `state: x :: Printable = nil`.
+    // State and class-variable type annotations — e.g. `state: x :: Printable = nil`.
     for state in class.state.iter().chain(class.class_variables.iter()) {
         collect_state_type_annotation_refs(state, name, file_path, results);
     }
@@ -168,7 +168,7 @@ fn collect_protocol_definition_refs(
     }
     collect_type_param_bound_refs(&protocol.type_params, name, file_path, results);
 
-    // BT-1936: protocol method signatures can mention protocol names in
+    // Protocol method signatures can mention protocol names in
     // parameter and return type annotations, e.g. `do: block :: Block(E, Object)`.
     for sig in protocol
         .method_signatures
@@ -182,7 +182,7 @@ fn collect_protocol_definition_refs(
 /// Emit alias-definition references (declaration name, and any reference to
 /// `name` inside the RHS annotation) — the alias-namespace counterpart to
 /// [`collect_class_definition_refs`] / [`collect_protocol_definition_refs`]
-/// (ADR 0108 Phase 8, BT-2901).
+/// (ADR 0108 Phase 8).
 fn collect_alias_definition_refs(
     alias: &TypeAliasDefinition,
     name: &str,
@@ -380,7 +380,7 @@ fn collect_class_refs(
         Expression::Match { value, arms, .. } => {
             collect_class_refs(value, class_name, file_path, results);
             for arm in arms {
-                // BT-1940: walk arm patterns so constructor pattern class names
+                // Walk arm patterns so constructor pattern class names
                 // (e.g. `Result` in `Result ok: v`) are reported as references.
                 collect_pattern_class_refs(&arm.pattern, class_name, file_path, results);
                 if let Some(guard) = &arm.guard {
@@ -414,7 +414,7 @@ fn collect_class_refs(
     }
 }
 
-/// Recursively collect class name references inside a destructuring pattern. (BT-1940)
+/// Recursively collect class name references inside a destructuring pattern.
 ///
 /// Only `Pattern::Constructor` carries a class identifier (`Result` in
 /// `Result ok: v`). All other variants just host nested patterns, which we walk
@@ -482,7 +482,7 @@ fn collect_pattern_class_refs(
 /// Find call sites of a selector across files — sends only, no
 /// method-definition headers.
 ///
-/// BT-2243: backs the LSP `callHierarchy/incomingCalls` cold-file fallback.
+/// Backs the LSP `callHierarchy/incomingCalls` cold-file fallback.
 /// Incoming calls are by definition *places that call the method*, so a
 /// method's own definition header must be excluded — otherwise the editor
 /// would list the method itself (and every other implementor) as an
@@ -600,7 +600,7 @@ fn collect_method_def_refs(
 /// **without** the call/cascade sites.
 ///
 /// Used by [`crate`] to overlay declaration sites onto
-/// runtime-attached `textDocument/references` results (BT-2240). The
+/// runtime-attached `textDocument/references` results. The
 /// runtime path returns `senders_of/1` (call sites only); merging this
 /// helper's output back in restores parity with the cold-file walker
 /// when `includeDeclaration = true`.
@@ -631,7 +631,7 @@ pub fn find_selector_declarations<'a>(
 /// references, type-annotation occurrences, or other reference sites).
 ///
 /// Used by [`crate`] to overlay class declaration sites
-/// onto runtime-attached `textDocument/references` results (BT-2240). The
+/// onto runtime-attached `textDocument/references` results. The
 /// runtime path's `references_to/1` returns sites that *use* the class
 /// (type annotations, class literals, etc.) but never the declaration site
 /// itself; merging this helper's output back in restores parity with the
@@ -652,7 +652,7 @@ pub fn find_class_declarations<'a>(
                 results.push(Location::new(file_path.clone(), protocol.name.span));
             }
         }
-        // ADR 0108 Phase 8 (BT-2901): a type-alias declaration name is also
+        // ADR 0108 Phase 8: a type-alias declaration name is also
         // a valid target here — `SimpleLanguageService::alias_name_at` uses
         // this function (via `find_class_declarations`) to find an alias's
         // own declaration site so the LSP `references` handler can exclude
@@ -899,7 +899,7 @@ mod tests {
         );
     }
 
-    // BT-1936: Find-references for protocol names.
+    // Find-references for protocol names.
     //
     // `find_class_references` now also walks `module.protocols`, protocol
     // `extending:` targets, and `TypeParamDecl` bounds on class and protocol
@@ -1023,7 +1023,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // BT-1936: Parity with find_identifier_at_position — state / class-variable /
+    // Parity with find_identifier_at_position — state / class-variable /
     // method-signature type annotations must be reported as references so that
     // goto-definition and find-references see the same set of sites.
     // -----------------------------------------------------------------------
@@ -1094,10 +1094,10 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // BT-1940: Constructor patterns in match arms must report the class name
-    // as a reference. Prior to this fix, `find_class_references` walked the
-    // arm body and guard but not the pattern, so `Result ok: v -> v` was
-    // invisible to find-references on `Result`.
+    // Constructor patterns in match arms must report the class name
+    // as a reference: `find_class_references` walks the
+    // arm body, guard, and pattern, so `Result ok: v -> v` is
+    // visible to find-references on `Result`.
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1155,7 +1155,7 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
-    // BT-2240: declaration-only helpers (declaration-merge support).
+    // Declaration-only helpers (declaration-merge support).
     // ----------------------------------------------------------------
 
     #[test]
@@ -1248,7 +1248,7 @@ mod tests {
         assert_eq!(decls.len(), 1, "expected 1 protocol declaration");
     }
 
-    // ---- ADR 0108 Phase 8 (BT-2901): find-references for type aliases ----
+    // ---- ADR 0108 Phase 8: find-references for type aliases ----
 
     #[test]
     fn find_references_alias_definition_name() {
@@ -1290,7 +1290,7 @@ mod tests {
     #[test]
     fn find_references_alias_referenced_inside_another_alias_rhs() {
         // `type B = A | #z` referencing alias `A` — the transitive-edge case
-        // ADR 0108 calls out for the hot-reload trigger (BT-2899) and that
+        // ADR 0108 calls out for the hot-reload trigger and that
         // find-references must also see (a redefinition of `A` alone must
         // still be discoverable as affecting `B`'s declaration site).
         let file = Utf8PathBuf::from("aliases.bt");

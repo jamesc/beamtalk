@@ -6,12 +6,12 @@
 use super::*;
 use beamtalk_language_service::HoverInfo;
 
-/// BT-3442: a class-side method sharing a selector with an instance
+/// A class-side method sharing a selector with an instance
 /// method must map to a different LSP `SymbolKind` (and carry a
 /// disambiguating `detail`) so VS Code's Outline, breadcrumbs, and Go
-/// to Symbol can tell the two apart — before this fix both sides
-/// mapped to `SymbolKind::METHOD` with no `detail`, so the two entries
-/// were visually identical.
+/// to Symbol can tell the two apart — otherwise both sides
+/// map to `SymbolKind::METHOD` with no `detail`, and the two entries
+/// are visually identical.
 #[test]
 fn to_lsp_symbol_distinguishes_class_and_instance_method_sharing_a_selector() {
     use beamtalk_core::source_analysis::Span;
@@ -119,7 +119,7 @@ fn extract_hover_class_name_from_class_hover() {
 
 #[test]
 fn extract_hover_class_name_from_package_qualified_hover() {
-    // BT-1658: class name extraction must work with package provenance suffix
+    // Class name extraction must work with package provenance suffix
     let text = "Class: `Parser` (from package `json`)";
     assert_eq!(extract_hover_class_name(text), Some("Parser"));
 }

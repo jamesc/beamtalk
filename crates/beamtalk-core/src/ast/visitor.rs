@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Generic AST visitor with **opaque-block** default recursion (BT-2063).
+//! Generic AST visitor with **opaque-block** default recursion.
 //!
 //! This visitor exists for the type-checker's narrowing machinery, where an
 //! inert [`Block`] literal is a *value*, not a point of control flow.
@@ -60,7 +60,7 @@ pub(crate) trait Visitor<'ast>: Sized {
     /// Called when a nested [`Expression::Block`] literal is encountered.
     ///
     /// **Default: opaque** — the block's body is not visited. This matches
-    /// the narrowing semantics (BT-2050 / BT-2051): an inert block literal
+    /// the narrowing semantics: an inert block literal
     /// is a value construction, not a point of control flow, so walkers
     /// answering "does this diverge?" / "does this return?" must not descend.
     ///
@@ -79,7 +79,7 @@ pub(crate) trait Visitor<'ast>: Sized {
 ///
 /// This match is deliberately **not** a catch-all: every variant must appear
 /// explicitly, so that adding a new [`Expression`] variant in the future is
-/// a compile error at this site (see BT-2063 acceptance criteria).
+/// a compile error at this site.
 pub(crate) fn walk_expr<'ast, V: Visitor<'ast>>(v: &mut V, expr: &'ast Expression) {
     match expr {
         Expression::FieldAccess { receiver, .. } => {

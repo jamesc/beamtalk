@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration tests for Dialyzer spec validation (BT-1565).
+//! Integration tests for Dialyzer spec validation.
 //!
 //! These tests verify the full round-trip:
 //! `.bt` source → Core Erlang with `-spec` attributes → validation via escript

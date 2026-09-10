@@ -138,7 +138,7 @@ pub fn resolve_dependency_graph(
             &resolved,
         )?;
 
-        // BT-1654: Set transitivity metadata
+        // Set transitivity metadata
         compiled.is_direct = direct_dep_names.contains(dep_name.as_str());
         if !compiled.is_direct {
             compiled.via_chain = compute_via_chain(dep_name, &direct_dep_names, &graph);
@@ -209,7 +209,7 @@ struct DiscoveryContext<'a> {
     /// Where registry dependencies resolve from, taken from the root manifest.
     registry_location: RegistryLocation,
     /// The stable identity of `registry_location`, recorded on lock entries
-    /// and compared against on later builds (BT-2993). Distinct from
+    /// and compared against on later builds. Distinct from
     /// `registry_location.to_string()` — see [`registry::registry_identity`].
     registry_identity: String,
 }
@@ -315,7 +315,7 @@ fn resolve_registry_dep(
     // registry*, so we can go straight to the git checkout without reading
     // (or fetching) the index.
     //
-    // The registry comparison matters as much as the version one (BT-2993):
+    // The registry comparison matters as much as the version one:
     // without it, a lock entry produced by a since-abandoned registry (env
     // var unset, `[registry] url` edited, or a mirror swapped in) would keep
     // satisfying every build from the old registry's git URL forever — the
@@ -386,7 +386,7 @@ fn resolve_registry_dep(
 /// against a package whose tag and `beamtalk.toml` have drifted apart — either
 /// would otherwise silently build the wrong code.
 ///
-/// `pub(crate)` so `deps add` (`cli.rs`, BT-2979) can run the same check
+/// `pub(crate)` so `deps add` (`cli.rs`) can run the same check
 /// immediately when adding a registry dependency, rather than only
 /// discovering a bad index entry on the next `beamtalk build`.
 pub(crate) fn validate_checkout_version(
@@ -1256,7 +1256,7 @@ middle = {{ path = "{middle_str}" }}"#
         );
     }
 
-    // ── Registry dependencies (BT-2978) ──────────────────────────────
+    // ── Registry dependencies ────────────────────────────────────────
     //
     // These drive the whole path: manifest → registry index → git checkout →
     // lockfile. The index is a plain local directory and the "remote" is a
@@ -1294,7 +1294,7 @@ middle = {{ path = "{middle_str}" }}"#
             &format!(
                 // A TOML *literal* string: a Windows temp path contains
                 // backslashes, and `\U` in a basic string is a unicode escape
-                // (BT-1737's `file://` handling has the same hazard).
+                // (the same hazard `file://` handling has).
                 "[registry]\nurl = '{index_root}'\n\n[dependencies]\n{dep_name} = \"{version}\"\n"
             ),
         );
@@ -1625,8 +1625,7 @@ middle = {{ path = "{middle_str}" }}"#
 
     /// Switching `[registry] url` to a registry serving a different git URL
     /// for the *same* version must re-resolve through the new registry,
-    /// rather than treating the old registry's lock entry as still valid
-    /// (BT-2993).
+    /// rather than treating the old registry's lock entry as still valid.
     ///
     /// Regression: `resolve_registry_dep`'s lock-hit fast path only compared
     /// `registry_version`, never which registry produced it — so a lockfile

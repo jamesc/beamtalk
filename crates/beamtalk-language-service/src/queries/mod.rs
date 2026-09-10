@@ -13,7 +13,7 @@
 //! - [`document_symbols_provider`] - Return document outline symbols
 //! - [`folding_range_provider`] - Return foldable ranges for section dividers
 //! - [`hover_provider`] - Show information on hover
-//! - [`implementors_provider`] - Find every class that defines a given selector (BT-2241)
+//! - [`implementors_provider`] - Find every class that defines a given selector
 //! - [`references_provider`] - Find all references to a symbol across files
 //! - [`signature_help_provider`] - Show parameter info for keyword messages
 //!
@@ -57,7 +57,7 @@ use beamtalk_core::semantic_analysis::{AliasRegistry, ClassHierarchy, infer_type
 pub(crate) use beamtalk_core::method_source_walker::selector_span;
 
 /// Enriches a class hierarchy with method return types inferred from a module's source,
-/// and returns the [`TypeMap`] from the same single [`TypeChecker`] pass (BT-1047).
+/// and returns the [`TypeMap`] from the same single [`TypeChecker`] pass.
 ///
 /// Returns `(Some(enriched_copy), type_map)` when inference produces any results,
 /// cloning the hierarchy and applying the inferred types. Returns `(None, type_map)`
@@ -67,17 +67,17 @@ pub(crate) use beamtalk_core::method_source_walker::selector_span;
 /// a second `infer_types` call.
 ///
 /// Used by [`completion_provider`] and [`hover_provider`] so both share identical
-/// enrichment logic (BT-1014).
+/// enrichment logic.
 ///
-/// BT-2867: `native_type_registry`, when `Some`, lets expressions *downstream*
+/// `native_type_registry`, when `Some`, lets expressions *downstream*
 /// of a typed FFI call (e.g. `x := (Erlang m) f:. x bar`) see `x`'s real type
 /// in the returned [`TypeMap`] too — not just the FFI call site itself, which
 /// callers already special-case separately via their own `native_types`
 /// parameter.
 ///
-/// `alias_registry` is `None` here (ADR 0108, BT-2897) — [`ProjectIndex`]
+/// `alias_registry` is `None` here (ADR 0108) — [`ProjectIndex`]
 /// does not yet track a project-wide alias table (that's LSP integration,
-/// deferred to the later ADR 0108 phase BT-2901), so completions see aliases
+/// deferred to a later ADR 0108 phase), so completions see aliases
 /// as ordinary unresolved names for now. [`hover_provider::compute_hover`]
 /// takes its own `alias_registry` parameter and calls
 /// [`enrich_hierarchy_with_inferred_returns_and_aliases`] directly instead of
@@ -103,7 +103,7 @@ pub(crate) fn enrich_hierarchy_with_inferred_returns(
 }
 
 /// [`enrich_hierarchy_with_inferred_returns`], additionally threading a type
-/// alias registry (ADR 0108, BT-2897) through to
+/// alias registry (ADR 0108) through to
 /// [`infer_types_and_returns_with_aliases`] so the underlying [`TypeMap`]
 /// resolves and tags alias references (see [`TypeProvenance::Aliased`]).
 /// `alias_registry = None` is identical to

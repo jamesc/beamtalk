@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared AST expression walker for lint and validator passes.
+//! Shared AST expression walker for lint, validator and codegen passes.
 //!
 //! **DDD Context:** Compilation
 //!
@@ -43,7 +43,7 @@ use crate::ast::{Expression, ExpressionStatement, Module, StringSegment};
 /// Block bodies are **not** included — they are nested inside expression trees,
 /// not top-level statement sequences.
 ///
-/// `pub` (not `pub(crate)`): BT-3340 moved lint passes into the standalone
+/// `pub` (not `pub(crate)`): lint passes live in the standalone
 /// `beamtalk-lint` crate; `unnecessary_parens`'s pass calls this from there.
 pub fn for_each_expr_seq<F>(module: &Module, mut f: F)
 where
@@ -67,7 +67,18 @@ where
 /// The visitor is called on the current node **before** recursing into its children.
 /// All nineteen `Expression` variants are handled — including `ArrayLiteral`,
 /// which was missing from several hand-rolled walkers.
-pub(crate) fn walk_expression<F>(expr: &Expression, f: &mut F)
+///
+/// Unlike [`crate::ast::visitor::Visitor`], this walker **descends into nested
+/// [`crate::ast::Block`] bodies** — see that module's comparison table, which
+/// names lint, validators and *codegen* as this walker's audience.
+///
+/// `pub` (not `pub(crate)`): BT-3488 — `beamtalk-codegen`'s
+/// `reject_unthreadable_value_self_field_write` needs the same descend-into-blocks
+/// walk to find a `self.field :=` write buried in a loop-body statement's
+/// nested block, and re-deriving a second exhaustive `Expression` match there
+/// is exactly the "silent-miss on a new variant" duplication this module
+/// exists to prevent (CLAUDE.md's no-duplicate-implementations rule).
+pub fn walk_expression<F>(expr: &Expression, f: &mut F)
 where
     F: FnMut(&Expression),
 {

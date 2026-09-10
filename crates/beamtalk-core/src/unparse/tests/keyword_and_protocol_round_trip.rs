@@ -1,13 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Keyword-message block-argument formatting (BT-1064), 3+/4-keyword
-//! always-break rules (BT-1294), protocol definition round-trips (BT-1618),
-//! and type-alias round-trips (ADR 0108 Phase 1, BT-2894).
+//! Keyword-message block-argument formatting, 3+/4-keyword
+//! always-break rules, protocol definition round-trips,
+//! and type-alias round-trips (ADR 0108 Phase 1).
 
 use super::common::*;
 
-// --- Keyword message formatting with block arguments (BT-1064) ---
+// --- Keyword message formatting with block arguments ---
 
 #[test]
 fn keyword_single_stmt_block_stays_inline() {
@@ -56,7 +56,7 @@ fn keyword_single_keyword_multi_stmt_breaks() {
     );
 }
 
-// --- BT-1294: 3+ keyword always-break, block body multiline, no ]] stacking ---
+// --- 3+ keyword always-break, block body multiline, no ]] stacking ---
 
 #[test]
 fn three_keywords_always_break() {
@@ -147,7 +147,7 @@ fn block_with_single_short_keyword_stays_inline() {
     );
 }
 
-// --- BT-1294: class-side method with 3+ keyword body (non-idempotency regression) ---
+// --- Class-side method with 3+ keyword body (non-idempotency regression) ---
 
 #[test]
 fn class_side_four_keyword_body_idempotent() {
@@ -189,11 +189,11 @@ fn class_side_four_keyword_body_identity() {
     assert_identity(source);
 }
 
-// --- Protocol round-trip (BT-1618) ---
+// --- Protocol round-trip ---
 
 #[test]
 fn protocol_class_method_doc_comment_round_trip() {
-    // BT-1618: `class` prefix must appear on the signature line, after doc comments.
+    // `class` prefix must appear on the signature line, after doc comments.
     let source = concat!(
         "Protocol define: Parseable\n",
         "  /// Reconstruct from string.\n",
@@ -210,7 +210,7 @@ fn protocol_class_method_no_doc_comment_round_trip() {
 
 #[test]
 fn bare_primitive_round_trips_without_selector_string() {
-    // BT-2724: a bare `@primitive` (selector inferred from the method) must
+    // A bare `@primitive` (selector inferred from the method) must
     // not be rewritten with an explicit selector string by the formatter.
     let source = concat!("Object subclass: Foo\n", "  size => @primitive\n");
     let formatted = format_source(source).expect("format_source must succeed");
@@ -227,7 +227,7 @@ fn bare_primitive_round_trips_without_selector_string() {
 
 #[test]
 fn explicit_primitive_selector_string_preserved() {
-    // BT-2724: an explicit selector string (genuine rename) is preserved.
+    // An explicit selector string (genuine rename) is preserved.
     let source = concat!(
         "Object subclass: Foo\n",
         "  signal => @primitive \"classSignal\"\n"
@@ -249,14 +249,14 @@ fn protocol_instance_method_doc_comment_round_trip() {
     assert_identity(source);
 }
 
-// --- BT-2930 regression: leading `//`/`/* */` comments on protocol
+// --- Regression: leading `//`/`/* */` comments on protocol
 // method signatures must survive a `beamtalk fmt` round-trip. ---
 
 #[test]
 fn protocol_instance_method_leading_comment_round_trip() {
-    // Exact repro from BT-2930: an ordinary leading `//` comment (no doc
-    // comment) directly above an instance-side signature was silently
-    // dropped because `unparse_protocol_method_signature` never called
+    // An ordinary leading `//` comment (no doc
+    // comment) directly above an instance-side signature must survive:
+    // `unparse_protocol_method_signature` must call
     // `unparse_comment_attachment_leading`.
     let source = concat!(
         "Protocol define: Displayable\n",
@@ -316,9 +316,9 @@ fn protocol_class_method_leading_comment_and_doc_comment_round_trip() {
 
 #[test]
 fn protocol_trailing_comment_round_trip() {
-    // BT-2906: a trailing end-of-line comment on the `Protocol define:`
+    // A trailing end-of-line comment on the `Protocol define:`
     // declaration line must round-trip losslessly, mirroring the
-    // identical fix for `type` declarations below.
+    // identical handling for `type` declarations below.
     let source = concat!(
         "Protocol define: Sortable  // comment\n",
         "  sortKey -> Object\n",
@@ -326,10 +326,10 @@ fn protocol_trailing_comment_round_trip() {
     assert_identity(source);
 }
 
-// --- BT-2946 regression: blank lines between protocol method
+// --- Regression: blank lines between protocol method
 // signatures must survive a `beamtalk fmt` round-trip, without being
-// force-inserted when absent (mirrors BT-2929 for top-level
-// declarations). ---
+// force-inserted when absent (mirrors the top-level
+// declarations handling). ---
 
 #[test]
 fn protocol_blank_line_between_instance_signatures_round_trip() {
@@ -390,7 +390,7 @@ fn protocol_no_blank_line_at_instance_class_boundary_not_inserted() {
 fn protocol_blank_line_before_first_signature_not_preserved() {
     // A blank line between the header and the very first signature is
     // dropped, same as pre-existing behaviour for top-level
-    // declarations (BT-2929) — only inter-signature gaps are
+    // declarations — only inter-signature gaps are
     // preserved.
     let source = concat!(
         "Protocol define: Displayable\n",
@@ -406,7 +406,7 @@ fn protocol_blank_line_before_first_signature_not_preserved() {
 
 #[test]
 fn protocol_blank_line_with_leading_comment_round_trip() {
-    // Interaction with BT-2930: a blank line before a signature that
+    // A blank line before a signature that
     // also has a leading `//` comment must place the blank line before
     // the comment, not between the comment and the signature.
     let source = concat!(
@@ -419,7 +419,7 @@ fn protocol_blank_line_with_leading_comment_round_trip() {
     assert_identity(source);
 }
 
-// --- Type alias round-trip (ADR 0108, Phase 1, BT-2894) ---
+// --- Type alias round-trip (ADR 0108, Phase 1) ---
 
 #[test]
 fn type_alias_simple_round_trip() {
@@ -456,14 +456,14 @@ fn type_alias_difference_round_trip() {
 
 #[test]
 fn internal_type_alias_round_trip() {
-    // ADR 0071, ADR 0108 Phase 5, BT-2898.
+    // ADR 0071, ADR 0108 Phase 5.
     let source = "internal type ParserState = Integer | String\n";
     assert_identity(source);
 }
 
 #[test]
 fn type_alias_trailing_comment_round_trip() {
-    // BT-2906: a trailing end-of-line comment on the declaration line
+    // A trailing end-of-line comment on the declaration line
     // must round-trip losslessly instead of being dropped.
     let source = "type Port = Integer  // comment\n";
     assert_identity(source);

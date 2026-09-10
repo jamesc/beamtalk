@@ -13,8 +13,8 @@
 //! Only runtime-only classes without `.bt` source files (e.g., `Future`) are
 //! defined manually here.
 //!
-//! `Future` has no source file by deliberate design, not by omission (BT-1057,
-//! confirmed BT-3438): ADR 0043 made actor message sends synchronous by
+//! `Future` has no source file by deliberate design, not by omission:
+//! ADR 0043 makes actor message sends synchronous by
 //! default, so ordinary Beamtalk code no longer receives a `Future` from a
 //! message send, and `Parallel` (`stdlib/src/parallel.bt`) — not `Future` —
 //! is the fan-out/join combinator surface (`all:`/`any:`), chosen specifically
@@ -64,7 +64,7 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
 /// Includes both generated stdlib classes (from `stdlib/src/*.bt`) and runtime-only
 /// built-ins like `Future`.
 pub(super) fn is_builtin_class(name: &str) -> bool {
-    // Future is the only runtime-only built-in (no stdlib/src/Future.bt source; see BT-507).
+    // Future is the only runtime-only built-in (no stdlib/src/Future.bt source).
     // All other built-ins (including Value) are in the generated set.
     name == "Future" || generated::is_generated_builtin_class(name)
 }
@@ -86,9 +86,9 @@ pub(super) fn is_runtime_protected_class(name: &str) -> bool {
 /// `stdlib/src/*.bt` source file, parsed by `beamtalk build-stdlib`.
 ///
 /// Unlike [`is_builtin_class`], this deliberately excludes `Future`: `Future`
-/// has no `.bt` source (BT-1057) and does not compile to a `bt@stdlib@{snake}`
+/// has no `.bt` source and does not compile to a `bt@stdlib@{snake}`
 /// module (ADR 0016), so it is not a "known stdlib type" in the sense
-/// `beamtalk-codegen`'s `is_known_stdlib_type` needs (BT-3435, ADR 0119 step 0).
+/// `beamtalk-codegen`'s `is_known_stdlib_type` needs (ADR 0119 step 0).
 pub(super) fn is_generated_builtin_class(name: &str) -> bool {
     generated::is_generated_builtin_class(name)
 }
@@ -101,7 +101,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
     let mut classes = generated::generated_builtin_classes();
 
     // Future — runtime-only class (no stdlib/src/Future.bt source), by
-    // deliberate design; see the module doc comment above (BT-3438).
+    // deliberate design; see the module doc comment above.
     classes.insert(
         "Future".into(),
         ClassInfo {
@@ -130,13 +130,13 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
 
     // Value is already present in the generated set (stdlib/src/value.bt).
     // Do NOT insert it manually here — that would silently overwrite generated
-    // metadata (methods, state) if value.bt ever gains them (BT-507, ADR 0042).
+    // metadata (methods, state) if value.bt ever gains them (ADR 0042).
 
     classes
 }
 
 /// Returns every stdlib type alias (`type Name = ...`), reconstructed from
-/// `generated_builtins.rs`'s persisted declaration-text table (BT-2935).
+/// `generated_builtins.rs`'s persisted declaration-text table.
 ///
 /// Mirrors [`builtin_classes`] immediately above — both are a bootstrap read
 /// of data `beamtalk build-stdlib` snapshotted at the end of its *previous*
@@ -239,7 +239,7 @@ mod tests {
         assert!(!value.is_sealed, "Value should not be sealed");
     }
 
-    // ---- BT-2935: stdlib_aliases() ----
+    // ---- stdlib_aliases() ----
 
     #[test]
     fn stdlib_aliases_reconstructs_known_generated_entries() {

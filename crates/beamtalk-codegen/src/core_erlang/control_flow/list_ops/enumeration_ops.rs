@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2703: Actor state threading for `eachWithIndex:` and `do:separatedBy:`.
+//! Actor state threading for `eachWithIndex:` and `do:separatedBy:`.
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
@@ -122,7 +122,7 @@ fn inlined_body(body: &[ExpressionStatement]) -> Vec<Expression> {
 impl CoreErlangGenerator {
     /// Returns `true` if `block` mutates field/local state in a way that requires
     /// threading (and so cannot be served by a plain dispatch to the `collection.bt`
-    /// method). BT-3423: shares [`Self::block_arg_needs_threading`] — the same
+    /// method). shares [`Self::block_arg_needs_threading`] — the same
     /// combinator `control_flow_has_mutations` and
     /// `conditional_needs_mutation_threading` use for their own per-block check.
     fn enumeration_block_needs_threading(&self, block: &Block) -> bool {
@@ -189,7 +189,7 @@ impl CoreErlangGenerator {
         self.generate_message_send(receiver, selector, arguments)
     }
 
-    /// BT-2703: Desugars `receiver eachWithIndex: [:elem :idx | body]` into a
+    /// Desugars `receiver eachWithIndex: [:elem :idx | body]` into a
     /// threaded `inject:into:` fold when the block mutates state. Returns `None`
     /// (so the caller dispatches to the `collection.bt` method as before) for
     /// non-literal callables, the wrong block arity, or a non-mutating block.
@@ -206,7 +206,7 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
         if !self.enumeration_block_needs_threading(user_block) {
-            // BT-3151: falling through to `collection.bt`'s own self-hosted
+            // falling through to `collection.bt`'s own self-hosted
             // `eachWithIndex:` (built on `do:`) — a same-process, in-process
             // call, same as the other list-op call sites. See
             // `check_bare_list_op_block_self_sends`'s doc comment.
@@ -239,7 +239,7 @@ impl CoreErlangGenerator {
         Ok(Some(self.finalize_enumeration_fold(&inject_send)?))
     }
 
-    /// BT-2703: Desugars `receiver do: [:elem | body] separatedBy: [sep]` into a
+    /// Desugars `receiver do: [:elem | body] separatedBy: [sep]` into a
     /// threaded `inject:into:` fold when either block mutates state, threading the
     /// "between elements" flag through the accumulator. Returns `None` (so the
     /// caller dispatches to the `collection.bt` method as before) for non-literal
@@ -262,7 +262,7 @@ impl CoreErlangGenerator {
         if !self.enumeration_block_needs_threading(element_block)
             && !self.enumeration_block_needs_threading(separator_block)
         {
-            // BT-3151: falling through to `collection.bt`'s own self-hosted
+            // falling through to `collection.bt`'s own self-hosted
             // `do:separatedBy:` (built on `inject:into:`) — same-process,
             // in-process call. See `check_bare_list_op_block_self_sends`'s
             // doc comment.

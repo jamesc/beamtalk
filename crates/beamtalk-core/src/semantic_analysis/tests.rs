@@ -854,8 +854,8 @@ fn test_field_assignment_in_stored_block_emits_error() {
 
 #[test]
 fn test_field_assignment_in_passed_block_no_error() {
-    // BT-1140: obj callWith: [:x | self.sum := 0] no longer emits an error.
-    // Field-write blocks are now promoted to Tier 2 (stateful) when passed to HOMs,
+    // obj callWith: [:x | self.sum := 0] does not emit an error.
+    // Field-write blocks are promoted to Tier 2 (stateful) when passed to HOMs,
     // so field mutations thread through StateAcc correctly.
     // "callWith:" is not a control flow selector, so block is Passed context.
     let field_assignment = Expression::Assignment {
@@ -890,7 +890,7 @@ fn test_field_assignment_in_passed_block_no_error() {
     let module = Module::new(vec![bare(message_send)], test_span());
     let result = analyse(&module);
 
-    // Should NOT have a field assignment error for passed blocks (BT-1140).
+    // Should NOT have a field assignment error for passed blocks.
     // (may have unrelated errors for undefined variables, which is expected)
     let has_field_error = result
         .diagnostics
@@ -905,11 +905,11 @@ fn test_field_assignment_in_passed_block_no_error() {
 
 #[test]
 fn test_field_assignment_in_field_stored_block_no_error() {
-    // BT-2797: self.onTick := [:x | self.sum := 0] must NOT emit the
+    // self.onTick := [:x | self.sum := 0] must NOT emit the
     // stored-closure field error, unlike a *local* var (see
     // test_field_assignment_in_stored_block_emits_error above, which is
     // unaffected — this test is specifically about `self.field := [block]`).
-    // Every `self.field value(:...)` call site now runtime-discriminates
+    // Every `self.field value(:...)` call site runtime-discriminates
     // Tier 1 vs Tier 2, so a block stored into a field is unconditionally
     // safe regardless of which method later invokes it.
     let field_assignment = Expression::Assignment {
@@ -958,9 +958,8 @@ fn test_field_assignment_in_field_stored_block_no_error() {
 
 #[test]
 fn test_captured_variable_mutation_in_stored_block_no_warning() {
-    // BT-856 (ADR 0041 Phase 3): Captured variable mutations in stored blocks are
-    // now valid and supported via the Tier 2 stateful block protocol (BT-852).
-    // The old warning ("has no effect on outer scope") was incorrect — Tier 2
+    // ADR 0041 Phase 3: Captured variable mutations in stored blocks are
+    // valid and supported via the Tier 2 stateful block protocol. Tier 2
     // threads state through StateAcc maps so mutations propagate correctly.
     let count_def = Expression::Assignment {
         target: Box::new(Expression::Identifier(Identifier::new(
@@ -1189,7 +1188,7 @@ fn test_analyse_with_known_vars_handles_reassignment() {
     );
 }
 
-// --- ClassHierarchy integration tests (BT-279) ---
+// --- ClassHierarchy integration tests ---
 
 #[test]
 fn test_analyse_populates_class_hierarchy() {
@@ -1336,7 +1335,7 @@ fn test_analyse_reports_sealed_class_diagnostic() {
     );
 }
 
-// --- Method Validator Integration Tests (BT-244) ---
+// --- Method Validator Integration Tests ---
 
 #[test]
 fn test_responds_to_with_symbol_no_diagnostic() {
@@ -1378,7 +1377,7 @@ fn test_responds_to_with_symbol_no_diagnostic() {
 
 #[test]
 fn test_responds_to_with_identifier_no_error() {
-    // BT-1168: counter respondsTo: sel — identifier arg is now allowed
+    // counter respondsTo: sel — identifier arg is allowed
     let expr = Expression::MessageSend {
         receiver: Box::new(Expression::Identifier(Identifier::new(
             "counter",
@@ -1539,7 +1538,7 @@ fn test_non_reflection_method_no_validation() {
 
 #[test]
 fn test_cascade_responds_to_with_identifier_no_error() {
-    // BT-1168: counter respondsTo: sel; size — identifier arg is now allowed in cascade
+    // counter respondsTo: sel; size — identifier arg is allowed in cascade
     let cascade = Expression::Cascade {
         receiver: Box::new(Expression::Identifier(Identifier::new(
             "counter",
@@ -1591,7 +1590,7 @@ fn test_cascade_responds_to_with_identifier_no_error() {
 fn test_abstract_class_instantiation_error() {
     use crate::ast::{ClassDefinition, ClassKind, CommentAttachment, MethodDefinition, MethodKind};
 
-    // BT-105: abstract class cannot be instantiated
+    // abstract class cannot be instantiated
     let class = ClassDefinition {
         name: Identifier::new("Shape", test_span()),
         superclass: Some(Identifier::new("Actor", test_span())),
@@ -1670,7 +1669,7 @@ fn test_abstract_class_instantiation_error() {
     assert!(abstract_errors[0].message.contains("Shape"));
 }
 
-// --- Self misuse diagnostic tests (BT-595) ---
+// --- Self misuse diagnostic tests ---
 
 #[test]
 fn test_self_outside_method_gives_specialized_error() {
@@ -1767,7 +1766,7 @@ fn test_self_inside_method_no_error() {
     assert!(self_errors.is_empty());
 }
 
-// --- Unused variable warning tests (BT-595) ---
+// --- Unused variable warning tests ---
 
 #[test]
 fn test_unused_variable_in_method_warns() {
@@ -1995,7 +1994,7 @@ fn test_underscore_prefixed_variable_no_warning() {
 
 #[test]
 fn test_unused_parameter_emits_warning() {
-    // BT-954: Unused method parameter should warn
+    // Unused method parameter should warn
     // process: newValue => 0  // Warning: parameter newValue unused
     let class = ClassDefinition {
         name: Identifier::new("Counter", test_span()),
@@ -2064,7 +2063,7 @@ fn test_unused_parameter_emits_warning() {
 
 #[test]
 fn test_unused_parameter_underscore_suppresses_warning() {
-    // BT-954: Parameter prefixed with _ should not warn
+    // Parameter prefixed with _ should not warn
     // process: _newValue => 0  // No warning
     let class = ClassDefinition {
         name: Identifier::new("Counter", test_span()),
@@ -2131,7 +2130,7 @@ fn test_unused_parameter_underscore_suppresses_warning() {
 
 #[test]
 fn test_used_parameter_no_warning() {
-    // BT-954: Used method parameter should not warn
+    // Used method parameter should not warn
     // process: x => x  // No warning
     let class = ClassDefinition {
         name: Identifier::new("Counter", test_span()),
@@ -2713,7 +2712,7 @@ fn test_variable_used_via_closure_no_warning() {
     assert!(warnings.is_empty());
 }
 
-// --- Dead code after early return tests (BT-596) ---
+// --- Dead code after early return tests ---
 
 #[test]
 fn test_dead_code_after_return_in_method() {
@@ -2991,7 +2990,7 @@ fn test_return_at_end_no_warning() {
     assert!(dead_code.is_empty());
 }
 
-// --- Super outside method tests (BT-596) ---
+// --- Super outside method tests ---
 
 #[test]
 fn test_super_outside_method_gives_error() {
@@ -3096,7 +3095,7 @@ fn test_super_in_class_scope_gives_error() {
     assert_eq!(super_errors.len(), 1);
 }
 
-// --- Variable shadowing tests (BT-596) ---
+// --- Variable shadowing tests ---
 
 #[test]
 fn test_block_param_shadows_outer_variable() {
@@ -3352,7 +3351,7 @@ fn test_no_shadow_warning_different_names() {
 
 #[test]
 fn test_block_match_pattern_var_not_treated_as_capture() {
-    // BT-655: A block containing a match expression where the pattern variable
+    // A block containing a match expression where the pattern variable
     // has the same name as an outer variable should NOT treat the pattern
     // variable as a captured variable.
     //
@@ -3459,7 +3458,7 @@ fn test_block_match_captures_real_outer_variable() {
     assert_eq!(block_info.captures[0].name, "y");
 }
 
-// --- BT-656: Validator coverage tests ────────────────────────────────────
+// --- Validator coverage tests ─────────────────────────────────────────────
 
 /// Helper: create an abstract class definition for validator tests.
 fn make_abstract_class(name: &str) -> ClassDefinition {
@@ -3506,7 +3505,7 @@ fn make_spawn_expr(class_name: &str) -> Expression {
 fn test_abstract_instantiation_in_class_method() {
     use crate::ast::MethodKind;
 
-    // BT-656: abstract instantiation inside a class-side method should be detected
+    // abstract instantiation inside a class-side method should be detected
     let mut shape = make_abstract_class("Shape");
     shape.class_methods.push(MethodDefinition {
         selector: MessageSelector::Unary("create".into()),
@@ -3553,7 +3552,7 @@ fn test_abstract_instantiation_in_class_method() {
 
 #[test]
 fn test_abstract_instantiation_in_string_interpolation() {
-    // BT-656: abstract instantiation inside string interpolation should be detected
+    // abstract instantiation inside string interpolation should be detected
     let shape = make_abstract_class("Shape");
 
     let interp = Expression::StringInterpolation {
@@ -3596,7 +3595,7 @@ fn test_abstract_instantiation_in_string_interpolation() {
 fn test_abstract_instantiation_in_standalone_method() {
     use crate::ast::{MethodKind, StandaloneMethodDefinition};
 
-    // BT-656: abstract instantiation inside a standalone method definition should be detected
+    // abstract instantiation inside a standalone method definition should be detected
     let shape = make_abstract_class("Shape");
 
     let standalone = StandaloneMethodDefinition {
@@ -3652,7 +3651,7 @@ fn test_abstract_instantiation_in_standalone_method() {
 fn test_actor_new_error_in_standalone_method() {
     use crate::ast::{MethodKind, StandaloneMethodDefinition};
 
-    // BT-656: actor `new` usage warning inside standalone method definitions
+    // actor `new` usage warning inside standalone method definitions
     let counter = ClassDefinition {
         name: Identifier::new("Counter", test_span()),
         superclass: Some(Identifier::new("Actor", test_span())),
@@ -3743,7 +3742,7 @@ fn test_actor_new_error_in_standalone_method() {
 
 #[test]
 fn test_object_new_error() {
-    // BT-1540: Object-kind classes cannot use new/new:
+    // Object-kind classes cannot use new/new:
     let source = "
 Object subclass: MyService
   doStuff => 42
@@ -3773,7 +3772,7 @@ Value subclass: Caller
 
 #[test]
 fn test_object_new_allowed_with_own_class_method() {
-    // BT-1540: Object-kind classes with their own class-side new: are exempt
+    // Object-kind classes with their own class-side new: are exempt
     let source = "
 Object subclass: Factory
   class new: name => 42
@@ -3798,7 +3797,7 @@ Value subclass: Caller
     );
 }
 
-// ── BT-2998: `new` on an opaque `native:` class ──
+// ── `new` on an opaque `native:` class ──
 
 /// Collects the "cannot be instantiated" errors `analyse` reports for `source`.
 fn uninstantiable_new_errors(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
@@ -4018,12 +4017,12 @@ fn analyse_with_known_vars_and_classes_empty_is_equivalent_to_base() {
     assert_eq!(result_base.diagnostics.len(), result_new.diagnostics.len());
 }
 
-// --- Singleton type annotations end-to-end (BT-2627) ---
+// --- Singleton type annotations end-to-end ---
 
-/// BT-2627: a `:: Integer | #infinity` annotation parses, resolves, and forms
+/// A `:: Integer | #infinity` annotation parses, resolves, and forms
 /// the union `InferredType` that flows to the type checker — proven by the
-/// union-send diagnostic naming both members. This is the pipeline the
-/// previously env-seeded BT-2624 tests could not reach from source.
+/// union-send diagnostic naming both members. This is the pipeline that
+/// env-seeded tests cannot reach from source.
 #[test]
 fn bt2627_singleton_union_annotation_flows_to_type_checker() {
     let src = "Object subclass: D\n  m: x :: Integer | #infinity =>\n    x size\n";
@@ -4042,7 +4041,7 @@ fn bt2627_singleton_union_annotation_flows_to_type_checker() {
     );
 }
 
-// --- ADR 0103: handleScope: only valid on Object-kind classes (BT-2754) ---
+// --- ADR 0103: handleScope: only valid on Object-kind classes ---
 
 #[test]
 fn handle_scope_on_object_class_is_silent() {
@@ -4077,7 +4076,7 @@ fn handle_scope_on_value_class_warns() {
     );
 }
 
-// --- ADR 0103: Announcement payload sendability + companion lint (BT-2757) ---
+// --- ADR 0103: Announcement payload sendability + companion lint ---
 
 #[test]
 fn announcement_payload_port_warns() {
@@ -4146,7 +4145,7 @@ fn plain_object_class_not_nudged() {
     );
 }
 
-// --- ADR 0103: block-capture sendability (BT-2756) ---
+// --- ADR 0103: block-capture sendability ---
 
 fn sendability_diags(src: &str) -> Vec<Diagnostic> {
     let tokens = crate::source_analysis::lex_with_eof(src);
@@ -4158,7 +4157,7 @@ fn sendability_diags(src: &str) -> Vec<Diagnostic> {
         .collect()
 }
 
-// --- ADR 0103: end-to-end diagnostic integration (BT-2758) ---
+// --- ADR 0103: end-to-end diagnostic integration ---
 // User-declared handleScope crossing a boundary, and #node silence.
 
 #[test]
@@ -4244,7 +4243,7 @@ fn block_captures_sendable_value_is_silent() {
     );
 }
 
-// --- Extension method integration with type checker (BT-1518) ---
+// --- Extension method integration with type checker ---
 
 #[test]
 fn extension_method_suppresses_dnu_in_analyse_pipeline() {
@@ -4337,7 +4336,7 @@ fn missing_method_still_warns_with_extensions() {
 
 #[test]
 fn extension_double_colon_return_type_flows_through_pipeline() {
-    // BT-1519: Extension `Integer >> double :: -> Integer => self * 2`
+    // Extension `Integer >> double :: -> Integer => self * 2`
     // `42 double + 1` should not produce a DNU warning because
     // `double` returns `Integer`, and `Integer` understands `+`.
     let src = r"
@@ -4380,7 +4379,7 @@ fn class_side_extension_suppresses_dnu_in_pipeline() {
     );
 }
 
-// ── BT-1759: Workspace binding shadows class ──
+// ── Workspace binding shadows class ──
 
 #[test]
 fn workspace_binding_shadowing_class_emits_warning() {
@@ -4498,7 +4497,7 @@ fn workspace_binding_not_in_hierarchy_no_shadow_warning() {
     );
 }
 
-// BT-2006: Fixture-sourced protocol names must resolve in downstream modules.
+// Fixture-sourced protocol names must resolve in downstream modules.
 //
 // The BUnit test pipeline compiles fixture files, extracts their ProtocolInfo,
 // and threads them through as `pre_loaded_protocols`. This test verifies that a
@@ -4578,15 +4577,16 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
 }
 
 // The language service registers every protocol as a synthetic class entry
-// (`register_protocol_classes`, BT-1933) and hands those to the checker along
-// with the real cross-file classes. A protocol defined in *another* file thus
-// reached `analyse_full` as a plain `pre_loaded_classes` entry: `has_class`
-// became true, `is_type_compatible`'s "unknown type → compatible" escape hatch
-// no longer applied, and the nominal walk flagged a false "declares return
-// type P, but body returns C" (and "expects P, got C" for params) for a class
-// that structurally conforms — while `beamtalk build`, which never has such
-// entries, stayed silent. BT-2088 already drops entries named like a protocol
-// in the *current* module; cross-file protocols must be dropped the same way.
+// (`register_protocol_classes`) and hands those to the checker along with the
+// real cross-file classes. A protocol defined in *another* file would
+// otherwise reach `analyse_full` as a plain `pre_loaded_classes` entry:
+// `has_class` would become true, defeating `is_type_compatible`'s "unknown
+// type → compatible" escape hatch, and the nominal walk would flag a false
+// "declares return type P, but body returns C" (and "expects P, got C" for
+// params) for a class that structurally conforms — while `beamtalk build`,
+// which never has such entries, stays silent. Entries named like a protocol
+// in the *current* module are already dropped; cross-file protocols must be
+// dropped the same way.
 #[test]
 fn pre_loaded_synthetic_protocol_class_entry_does_not_shadow_protocol() {
     use crate::semantic_analysis::{ClassHierarchy, ProtocolRegistry};
@@ -4659,10 +4659,10 @@ fn pre_loaded_synthetic_protocol_class_entry_does_not_shadow_protocol() {
     );
 }
 
-// BT-2898 (ADR 0108 Phase 5): pre-loaded aliases must be seeded into the
-// alias registry the same way pre-loaded protocols are (BT-2006), with
-// current-module definitions winning and cross-package `internal` entries
-// excluded at the seeding boundary.
+// ADR 0108 Phase 5: pre-loaded aliases must be seeded into the alias
+// registry the same way pre-loaded protocols are, with current-module
+// definitions winning and cross-package `internal` entries excluded at the
+// seeding boundary.
 #[test]
 fn pre_loaded_alias_is_seeded_and_current_module_wins() {
     use crate::semantic_analysis::alias_registry::AliasInfo;
@@ -4754,7 +4754,7 @@ fn pre_loaded_alias_is_seeded_and_current_module_wins() {
     );
 }
 
-// BT-2898: an `internal` alias from the *same* package (e.g. another file in
+// An `internal` alias from the *same* package (e.g. another file in
 // a same-package multi-file compilation) must still be seeded — ADR 0108
 // scopes `internal` to the whole declaring package, not just the declaring
 // file, so this is not the seeding-boundary exclusion case above.
@@ -4796,17 +4796,17 @@ fn pre_loaded_internal_alias_from_same_package_is_still_seeded() {
     );
 }
 
-// BT-2916 (BT-2899 follow-up, ADR 0108 hot-reload re-check trigger): a
-// cross-package `referenced_aliases`/`beamtalk_alias_xref` dependency edge
-// must be recorded when a *seeded* (pre-loaded, from a dependency package)
-// alias is referenced by the current module — and a foreign `internal`
-// alias must never appear as such an edge, since `add_pre_loaded`'s
-// seeding-boundary exclusion (see its doc) means it was never seeded into
-// the consumer's alias table in the first place, so a reference to it
-// resolves as an ordinary unknown-class annotation, not an alias
-// dependency. Both halves matter for BT-2899's live-redefinition re-check:
-// only a *recorded* dependency edge lets `beamtalk_alias_xref` find the
-// dependent class when the alias is later redefined live.
+// ADR 0108 hot-reload re-check trigger: a cross-package
+// `referenced_aliases`/`beamtalk_alias_xref` dependency edge must be
+// recorded when a *seeded* (pre-loaded, from a dependency package) alias is
+// referenced by the current module — and a foreign `internal` alias must
+// never appear as such an edge, since `add_pre_loaded`'s seeding-boundary
+// exclusion (see its doc) means it is never seeded into the consumer's
+// alias table in the first place, so a reference to it resolves as an
+// ordinary unknown-class annotation, not an alias dependency. Both halves
+// matter for the live-redefinition re-check: only a *recorded* dependency
+// edge lets `beamtalk_alias_xref` find the dependent class when the alias
+// is later redefined live.
 #[test]
 fn referenced_aliases_records_a_seeded_cross_package_alias_and_excludes_a_foreign_internal_one() {
     use crate::semantic_analysis::alias_registry::AliasInfo;
@@ -4885,12 +4885,11 @@ fn referenced_aliases_records_a_seeded_cross_package_alias_and_excludes_a_foreig
     );
 }
 
-// BT-2917 (BT-2899 follow-up, ADR 0108 hot-reload re-check trigger): a
-// protocol's own declared method-signature annotations must record
-// `referenced_aliases` dependency edges exactly like a class method's do —
-// confirmed missing by inspection before this fix (protocol method
-// signatures have no body, so the class-method-body-only call sites that
-// normally populate this field never visit them). Both an instance-side
+// ADR 0108 hot-reload re-check trigger: a protocol's own declared
+// method-signature annotations must record `referenced_aliases` dependency
+// edges exactly like a class method's do — protocol method signatures have
+// no body, so the class-method-body-only call sites that normally populate
+// this field would otherwise never visit them. Both an instance-side
 // parameter annotation (`heading:`) and a class-side return-type annotation
 // (`class default`) are covered, since `beamtalk_alias_xref` needs edges for
 // both sides of a protocol's signature.
@@ -4915,7 +4914,7 @@ fn protocol_method_signature_records_referenced_aliases() {
     );
 }
 
-// BT-2898: end-to-end wiring check — the E0402 alias-leak checks (Phase 8)
+// End-to-end wiring check — the E0402 alias-leak checks (Phase 8)
 // must fire through the full `analyse_full` pipeline, not just when
 // the validator functions are called directly in `visibility_validators.rs`.
 #[test]
@@ -4942,15 +4941,15 @@ fn analyse_full_pipeline_reports_internal_alias_leaked_in_public_signature() {
     );
 }
 
-// ── BT-2043: typed block parameters should not cause false-positive
+// ── Typed block parameters should not cause false-positive
 //    "Unused variable" warnings for method-local names read on a later line.
 
 #[test]
 fn typed_block_param_in_typed_class_nested_if_false_no_unused_warning() {
-    // BT-2043: In a `typed` class, a local assigned inside a deeply nested
-    // `ifFalse:` block and read on the next line was reported as "Unused"
-    // because the typed block param `:: Dictionary` on the inner block
-    // confused the parser, corrupting the surrounding AST.
+    // In a `typed` class, a local assigned inside a deeply nested
+    // `ifFalse:` block and read on the next line must not be reported as
+    // "Unused" — the typed block param `:: Dictionary` on the inner block
+    // must not confuse the parser or corrupt the surrounding AST.
     let source = r#"
 typed Value subclass: UnusedInTyped
   field: states :: List(String) = #()
@@ -4992,7 +4991,7 @@ typed Value subclass: UnusedInTyped
 
 #[test]
 fn typed_block_param_does_not_affect_unused_variable_pass() {
-    // BT-2043: The Unused-variable pass must behave identically with or
+    // The Unused-variable pass must behave identically with or
     // without a `typed` class modifier. Both variants should be warning-free.
     let typed_src = r"
 typed Value subclass: UnusedInTypedSmall
@@ -5025,7 +5024,7 @@ Value subclass: UnusedUntypedSmall
     }
 }
 
-// ── BT-2796: KnowledgeScope plumbing ─────────────────────────────────────────
+// ── KnowledgeScope plumbing ───────────────────────────────────────────────────
 
 #[test]
 fn analyse_stamps_default_knowledge_scope() {
@@ -5055,7 +5054,7 @@ fn analyse_with_options_stamps_project_complete_scope() {
     );
 }
 
-// ── BT-2795: project-wide cross-file extension visibility ────────────────────
+// ── Project-wide cross-file extension visibility ──────────────────────────────
 
 #[test]
 fn cross_file_extension_resolves_instead_of_dnu_hint() {
@@ -5131,7 +5130,7 @@ fn genuinely_unresolved_selector_still_hints_with_extensions_registered() {
     );
 }
 
-// ── BT-2794: ADR 0100 Rule 2 end-to-end ──────────────────────────────────────
+// ── ADR 0100 Rule 2 end-to-end ─────────────────────────────────────────────────
 
 #[test]
 fn typo_hints_in_project_complete_dependency_free_package() {
@@ -5158,7 +5157,7 @@ fn typo_hints_in_project_complete_dependency_free_package() {
 
 #[test]
 fn dependency_package_suppresses_unresolved_selector_hints_pre_ws3() {
-    // BT-2794 pre-WS3 guard: with dependencies declared, a dependency could
+    // Pre-WS3 guard: with dependencies declared, a dependency could
     // extend any class, so unresolved-selector hints are withheld until WS3
     // loads cross-package extension metadata (ADR 0100 Rule 1, third
     // downgrade; hints go down, not up).

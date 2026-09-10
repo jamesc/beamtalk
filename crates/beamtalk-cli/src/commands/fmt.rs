@@ -15,7 +15,7 @@
 //! separate lines directly after each expression.
 //!
 //! Native `.erl` files in `native/` and `native/test/` are formatted via
-//! `erlfmt` (BT-1909). If erlfmt is unavailable, `.erl` files are skipped
+//! `erlfmt`. If erlfmt is unavailable, `.erl` files are skipped
 //! with a warning.
 //!
 //! `beamtalk fmt-check <path>...` performs the same parse/unparse pass but
@@ -133,7 +133,7 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
 
         // .btscript files use identity formatting — the `// => X` assertion
         // comments must remain on separate lines for the btscript test runner
-        // (BT-1016). We only verify that the file parses without errors;
+        // We only verify that the file parses without errors;
         // if it's valid, leave the file unchanged without running the unparser.
         if file.extension() == Some("btscript") {
             let tokens = lex_with_eof(&original);
@@ -170,7 +170,7 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
         }
     }
 
-    // Format native .erl files via erlfmt (BT-1909).
+    // Format native .erl files via erlfmt.
     if !collected.erl_files.is_empty() {
         let root = collected.project_root.unwrap_or_else(|| {
             collected
@@ -387,7 +387,7 @@ mod tests {
         );
     }
 
-    // --- .btscript file support (BT-1016) ---
+    // --- .btscript file support ---
 
     #[test]
     fn fmt_accepts_btscript_file() {
@@ -421,7 +421,7 @@ mod tests {
     fn fmt_btscript_assertion_comments_preserved_idempotent() {
         // .btscript files use identity formatting — the file is never rewritten,
         // only checked for parse errors. Both passes must leave the file unchanged
-        // and pass1 must equal the original source (BT-1016).
+        // and pass1 must equal the original source.
         let source = "3 + 4\n// => 7\n\n10 - 3\n// => 7\n";
         let (_dir, path) = write_temp_btscript(source);
 

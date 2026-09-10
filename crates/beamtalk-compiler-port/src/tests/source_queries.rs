@@ -5,8 +5,7 @@
 //! (`find_senders_in_source`, `find_all_sends_in_source`,
 //! `find_announce_sites_in_source`, `find_references_to_in_source`,
 //! `find_field_readers_in_source`, `find_field_writers_in_source`,
-//! `find_ffi_sites_in_source`) introduced in BT-2190/BT-2200/BT-2203/
-//! BT-2206/BT-2208/BT-2211.
+//! `find_ffi_sites_in_source`).
 //!
 //! These handlers are thin ETF wrappers over language-service query
 //! functions.  The tests below verify the wire protocol: that each handler

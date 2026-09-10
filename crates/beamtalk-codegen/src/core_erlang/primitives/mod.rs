@@ -10,8 +10,8 @@
 //! provides the actual Core Erlang expression to emit instead of delegating
 //! through a hand-written dispatch module.
 //!
-//! This is part of BT-340: making compiled stdlib modules self-sufficient
-//! so hand-written Erlang dispatch modules can be deleted.
+//! Compiled stdlib modules are self-sufficient: hand-written Erlang
+//! dispatch modules can be deleted.
 
 mod actor_types;
 mod array;
@@ -69,7 +69,7 @@ pub fn generate_primitive_bif(
 /// the selector has no inline lowering).
 type PrimitiveLowerFn = fn(&str, &[String]) -> Option<Document<'static>>;
 
-/// The single authoritative primitive-lowering registry (BT-2234).
+/// The single authoritative primitive-lowering registry.
 ///
 /// This is the one place that maps a class to how its primitives lower,
 /// replacing the former per-class `match class_name` dispatch. Classes that
@@ -78,7 +78,7 @@ type PrimitiveLowerFn = fn(&str, &[String]) -> Option<Document<'static>>;
 /// [`behaviour::generate_tower_bif`], so a primitive's lowering follows the
 /// primitive, not the class that happens to declare it. That closes the gap
 /// that let `className` silently fall through to runtime dispatch when it moved
-/// up the tower (BT-2232).
+/// up the tower.
 const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
     ("Array", array::generate_array_bif),
     ("Binary", binary::generate_binary_bif),
@@ -98,7 +98,7 @@ const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
     ("CompiledMethod", reflection::generate_compiled_method_bif),
     ("Character", character::generate_character_bif),
     ("Collection", collection::generate_collection_bif),
-    // Behaviour / Class / Metaclass tower: one shared table (BT-2234).
+    // Behaviour / Class / Metaclass tower: one shared table.
     ("Behaviour", behaviour::generate_tower_bif),
     ("Class", behaviour::generate_tower_bif),
     ("Metaclass", behaviour::generate_tower_bif),
@@ -111,7 +111,7 @@ const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
     ("FileHandle", actor_types::generate_file_handle_bif),
 ];
 
-/// BT-2233: Quoted `@primitive "selector"` / `@intrinsic "selector"`
+/// Quoted `@primitive "selector"` / `@intrinsic "selector"`
 /// declarations that intentionally route through runtime dispatch instead of an
 /// inline BIF, so the fail-loud cross-check (and `generate_primitive`'s hard
 /// error in `mod.rs`) must not flag them as unmapped. (Both labels lower
@@ -482,7 +482,7 @@ mod tests {
         );
     }
 
-    // Character primitive tests (BT-339)
+    // Character primitive tests
 
     #[test]
     fn test_character_as_integer() {
@@ -610,7 +610,7 @@ mod tests {
         assert_eq!(result, Some("call 'erlang':'<'(Self, Other)".to_string()));
     }
 
-    // Pid primitive tests (BT-1553)
+    // Pid primitive tests
 
     #[test]
     fn test_pid_is_alive() {
@@ -643,7 +643,7 @@ mod tests {
         );
     }
 
-    // Integer character predicate tests (BT-339)
+    // Integer character predicate tests
 
     #[test]
     fn test_integer_is_letter() {
@@ -678,7 +678,7 @@ mod tests {
         assert_eq!(doc.to_pretty_string(), "call 'lists':'map'(Block, Self)");
     }
 
-    // Array primitive tests (BT-822)
+    // Array primitive tests
 
     #[test]
     fn test_array_size() {
@@ -817,7 +817,7 @@ mod tests {
         assert!(result.is_none());
     }
 
-    // Dictionary primitive tests (BT-418)
+    // Dictionary primitive tests
 
     #[test]
     fn test_dictionary_size() {
@@ -1546,7 +1546,7 @@ mod tests {
         assert_eq!(result, Some("call 'erlang':'>='(Self, Other)".to_string()));
     }
 
-    // String primitive tests — regex group (BT-709)
+    // String primitive tests — regex group
 
     #[test]
     fn test_string_matches_regex() {
@@ -1715,7 +1715,7 @@ mod tests {
         assert!(result.is_none());
     }
 
-    // Integer arithmetic — remaining ops (BT-2161)
+    // Integer arithmetic — remaining ops
 
     #[test]
     fn test_integer_minus() {
@@ -1774,7 +1774,7 @@ mod tests {
         );
     }
 
-    // Integer comparisons — all 7 operators (BT-2161)
+    // Integer comparisons — all 7 operators
 
     #[test]
     fn test_integer_eq() {
@@ -1846,7 +1846,7 @@ mod tests {
         assert_eq!(result, Some("call 'erlang':'>='(Self, Other)".to_string()));
     }
 
-    // Integer conversions — asFloat and printString (BT-2161)
+    // Integer conversions — asFloat and printString
 
     #[test]
     fn test_integer_as_float() {
@@ -1863,7 +1863,7 @@ mod tests {
         );
     }
 
-    // Integer bitwise operations (BT-2161)
+    // Integer bitwise operations
 
     #[test]
     fn test_integer_bit_and() {
@@ -1925,7 +1925,7 @@ mod tests {
         );
     }
 
-    // Integer character predicates — remaining three (BT-2161)
+    // Integer character predicates — remaining three
 
     #[test]
     fn test_integer_is_uppercase() {
@@ -1954,7 +1954,7 @@ mod tests {
         );
     }
 
-    // Integer math functions (BT-2161)
+    // Integer math functions
 
     #[test]
     fn test_integer_sqrt() {
@@ -2036,7 +2036,7 @@ mod tests {
         );
     }
 
-    // Integer edge cases (BT-2161)
+    // Integer edge cases
 
     #[test]
     fn test_integer_unknown_selector() {
@@ -2119,12 +2119,12 @@ mod tests {
         );
     }
 
-    /// BT-2233: Cross-check that every quoted `@primitive "X"` declared in the
+    /// Cross-check that every quoted `@primitive "X"` declared in the
     /// stdlib resolves to a registered inline BIF lowering. An unmapped quoted
     /// primitive in a value-type class would silently fall back to runtime
-    /// dispatch and raise `does_not_understand` at runtime (the BT-2232
-    /// regression: moving `name` to Behaviour left `className` unmapped). This
-    /// fast `cargo test` catches such gaps before the slower stdlib build does.
+    /// dispatch and raise `does_not_understand` at runtime — as happened when
+    /// moving `name` to Behaviour left `className` unmapped. This fast
+    /// `cargo test` catches such gaps before the slower stdlib build does.
     ///
     /// Exclusions, to avoid false positives (acceptance criterion 3):
     /// - Unquoted `@primitive` (structural intrinsics) — handled by the compiler
@@ -2248,7 +2248,7 @@ mod tests {
             unmapped.join("\n  ")
         );
 
-        // BT-2233: Keep the allowlist honest — a stale entry (for a quoted
+        // Keep the allowlist honest — a stale entry (for a quoted
         // primitive that no longer exists in the stdlib) would silently mask a
         // future unmapped-primitive bug. Every allowlist entry must still
         // correspond to a real quoted @primitive declaration.

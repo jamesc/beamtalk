@@ -36,7 +36,7 @@ pub(crate) fn history_path() -> Result<PathBuf> {
 /// Format a value for REPL display with optional coloring.
 ///
 /// Delegates to the shared [`beamtalk_repl_protocol::format::format_value`]
-/// helper (BT-2086) so CLI / MCP / future surfaces share a single rendering
+/// helper so CLI / MCP / future surfaces share a single rendering
 /// for REPL eval results.
 pub(crate) fn format_value(value: &serde_json::Value) -> String {
     fmt::format_value(value, output_mode())
@@ -45,7 +45,7 @@ pub(crate) fn format_value(value: &serde_json::Value) -> String {
 /// Format an error message for REPL display.
 ///
 /// Delegates to the shared [`beamtalk_repl_protocol::format::format_diagnostic`]
-/// helper (BT-2086).
+/// helper.
 pub(crate) fn format_error(msg: &str) -> String {
     fmt::format_diagnostic(&FmtDiagnostic::new(msg), output_mode())
 }
@@ -117,7 +117,7 @@ pub(crate) fn print_help() {
     println!("awaited for a synchronous REPL experience.");
 }
 
-/// Display generated Core Erlang source (BT-724).
+/// Display generated Core Erlang source.
 pub(crate) fn display_codegen(core_erlang: &str) {
     // Try to pretty-print using external `core_pp` if available; fall back to raw output.
     if let Ok(mut child) = Command::new("core_pp")
@@ -182,7 +182,7 @@ pub(crate) fn display_codegen(core_erlang: &str) {
     println!("{}", color::paint(color::CYAN, core_erlang));
 }
 
-/// Display symbol info from the :info command (BT-724).
+/// Display symbol info from the :info command.
 #[allow(dead_code)]
 pub(crate) fn display_info(info: &serde_json::Value) {
     let found = info
@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn float_string_displays_as_number() {
-        // BT-1336: Floats come as strings from the backend to preserve ".0"
+        // Floats come as strings from the backend to preserve ".0"
         let val = serde_json::json!("6.0");
         let rendered = strip_ansi(&format_value(&val));
         assert_eq!(rendered, "6.0");

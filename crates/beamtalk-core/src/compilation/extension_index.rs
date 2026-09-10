@@ -176,7 +176,7 @@ impl ExtensionIndex {
         self.entries.is_empty()
     }
 
-    /// Merges all entries from `other` into this index (BT-2795).
+    /// Merges all entries from `other` into this index.
     ///
     /// Locations accumulate per key, matching `add_module`'s behaviour when
     /// the same extension is defined in multiple files.
@@ -189,7 +189,7 @@ impl ExtensionIndex {
         }
     }
 
-    /// Inserts pre-collected entries, e.g. restored from a build cache (BT-2795).
+    /// Inserts pre-collected entries, e.g. restored from a build cache.
     pub fn add_entries(
         &mut self,
         entries: impl IntoIterator<Item = (ExtensionKey, Vec<ExtensionLocation>)>,
@@ -199,8 +199,8 @@ impl ExtensionIndex {
         }
     }
 
-    /// Returns this index's entries restricted to definitions in `file`
-    /// (BT-2795). Used to regroup a project-wide index per file, e.g. when
+    /// Returns this index's entries restricted to definitions in `file`.
+    /// Used to regroup a project-wide index per file, e.g. when
     /// writing the incremental Pass 1 cache.
     ///
     /// Matching is byte-exact on the stored path: callers must pass the same
@@ -434,7 +434,7 @@ mod tests {
         assert!(index.lookup(&key).is_none());
     }
 
-    // --- Type info collection tests (BT-1517) ---
+    // --- Type info collection tests ---
 
     #[test]
     fn type_info_unary_method_no_annotations() {
@@ -524,7 +524,7 @@ mod tests {
         assert_eq!(locs[0].type_info.return_type.as_deref(), Some("Integer"));
     }
 
-    // --- BT-1519: Extension type annotation syntax (:: -> ReturnType) ---
+    // --- Extension type annotation syntax (:: -> ReturnType) ---
 
     #[test]
     fn type_info_unary_double_colon_return_type() {

@@ -5,7 +5,7 @@
 //!
 //! Covers loop constructs (whileTrue, whileFalse, repeat), stored-closure
 //! validation, conditional inline-case generation for ifTrue/ifFalse, and
-//! match: arms with array/map destructuring patterns (BT-1296).
+//! match: arms with array/map destructuring patterns.
 
 use super::*;
 
@@ -65,7 +65,7 @@ fn test_block_while_true_loop() {
         output.contains("<'false'> when 'true' -> 'nil'"),
         "whileTrue: should return nil when condition is false. Got: {output}"
     );
-    // Binary ops no longer wrap operands with maybe_await (ADR-0043 / BT-1321)
+    // Binary ops no longer wrap operands with maybe_await (ADR-0043)
     assert!(
         !output.contains("maybe_await"),
         "whileTrue: binary ops should not wrap operands with maybe_await. Got: {output}"
@@ -249,7 +249,7 @@ fn test_validate_stored_closure_with_captured_mutation() {
 
 #[test]
 fn test_validate_stored_closure_with_new_local_definition() {
-    // BT-665: Block with only new local variable definition: [temp := 1]
+    // Block with only new local variable definition: [temp := 1]
     // `temp` is never read from outer scope → should be allowed
     let block = Block {
         parameters: vec![],
@@ -275,7 +275,7 @@ fn test_validate_stored_closure_with_new_local_definition() {
 
 #[test]
 fn test_validate_stored_closure_with_new_local_used_later() {
-    // BT-665: Block defines a new local and uses it later: [:x | temp := x * 2. temp + 1]
+    // Block defines a new local and uses it later: [:x | temp := x * 2. temp + 1]
     // `temp` is defined then read — NOT a captured variable → should be allowed
     let block = Block {
         parameters: vec![BlockParameter::new("x", Span::new(1, 2))],
@@ -415,7 +415,7 @@ fn test_validate_stored_closure_field_takes_precedence_contract() {
 
 #[test]
 fn test_codegen_rejects_stored_closure_with_field_assignment() {
-    // BT-2792: Integration test covering the full codegen pipeline for
+    // Integration test covering the full codegen pipeline for
     // test := [ myBlock := [self.value := 1]. myBlock ]
     //
     // This used to be asserted as allowed (BT-852, "supported via Tier 2 stateful
@@ -574,7 +574,7 @@ fn test_codegen_allows_stored_closure_with_local_mutation() {
         file_trailing_comments: Vec::new(),
     };
 
-    // BT-852: Stored closures with local mutations are now allowed via Tier 2 protocol.
+    // Stored closures with local mutations are now allowed via Tier 2 protocol.
     let result = generate(&module);
     assert!(
         result.is_ok(),
@@ -584,7 +584,7 @@ fn test_codegen_allows_stored_closure_with_local_mutation() {
 
 #[test]
 fn test_if_true_with_field_mutation_generates_inline_case() {
-    // BT-915: `flag ifTrue: [self.count := self.count + 1]` inside an actor method
+    // `flag ifTrue: [self.count := self.count + 1]` inside an actor method
     // should compile to an inline case expression that threads state through the
     // true branch, returning {Result, NewState} so the outer method body can
     // update its state chain.
@@ -632,7 +632,7 @@ fn test_if_true_with_field_mutation_generates_inline_case() {
 
 #[test]
 fn test_if_false_with_field_mutation_generates_inline_case() {
-    // BT-915: `flag ifFalse: [self.count := self.count - 1]` should compile to
+    // `flag ifFalse: [self.count := self.count - 1]` should compile to
     // an inline case expression with state threading in the false branch.
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  decrement: flag =>\n    flag ifFalse: [self.count := self.count - 1].\n    self.count\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -661,7 +661,7 @@ fn test_if_false_with_field_mutation_generates_inline_case() {
 
 #[test]
 fn test_if_true_if_false_with_field_mutation_generates_inline_case() {
-    // BT-915: `flag ifTrue: [...] ifFalse: [...]` with field mutations in both
+    // `flag ifTrue: [...] ifFalse: [...]` with field mutations in both
     // branches should compile to an inline case with two state-threading branches.
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  toggle: flag =>\n    flag ifTrue: [self.count := self.count + 10]\n         ifFalse: [self.count := self.count - 1].\n    self.count\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -697,7 +697,7 @@ fn test_if_true_if_false_with_field_mutation_generates_inline_case() {
 
 #[test]
 fn test_if_true_without_mutation_uses_runtime_dispatch() {
-    // BT-915: `flag ifTrue: [42]` with no mutations should still use runtime dispatch,
+    // `flag ifTrue: [42]` with no mutations should still use runtime dispatch,
     // not the inline case generation. This ensures we don't break the non-mutation path.
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  check: flag =>\n    flag ifTrue: [42]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -719,7 +719,7 @@ fn test_if_true_without_mutation_uses_runtime_dispatch() {
 
 #[test]
 fn test_nested_if_true_with_field_mutation_threads_state() {
-    // BT-915: Nested `flag1 ifTrue: [flag2 ifTrue: [self.count := ...]]` should
+    // Nested `flag1 ifTrue: [flag2 ifTrue: [self.count := ...]]` should
     // correctly unpack the inner {Result, State} tuple so the outer branch
     // threads state from the inner conditional.
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  nested: a and: b =>\n    a ifTrue: [\n      b ifTrue: [self.count := self.count + 100]\n    ].\n    self.count\n";
@@ -747,11 +747,11 @@ fn test_nested_if_true_with_field_mutation_threads_state() {
     );
 }
 
-// BT-1296: match: arms with array and map patterns
+// match: arms with array and map patterns
 
 #[test]
 fn test_match_array_pattern_arm_generates_is_map_guard_chain() {
-    // BT-1296: `arr match: [#[h, t] -> h + t; _ -> 0]` should compile to a
+    // `arr match: [#[h, t] -> h + t; _ -> 0]` should compile to a
     // conditional chain using is_map + maps:get('$beamtalk_class', ..., 'undefined') + size check.
     let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[h, t] -> h + t;\n      _ -> 0\n    ]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -781,7 +781,7 @@ fn test_match_array_pattern_arm_generates_is_map_guard_chain() {
 
 #[test]
 fn test_match_map_pattern_arm_generates_core_erlang_map_pattern() {
-    // BT-1296: `d match: [#{#event => evName} -> evName; _ -> "none"]`
+    // `d match: [#{#event => evName} -> evName; _ -> "none"]`
     // should compile to a native Core Erlang map pattern `~{'event' := EvName}~`.
     let src = "Object subclass: Foo\n  test: d =>\n    d match: [\n      #{#event => evName} -> evName;\n      _ -> \"none\"\n    ]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -807,7 +807,7 @@ fn test_match_map_pattern_arm_generates_core_erlang_map_pattern() {
 
 #[test]
 fn test_match_array_pattern_fallthrough_to_wildcard() {
-    // BT-1296: When the array pattern fails (wrong type/size), execution must
+    // When the array pattern fails (wrong type/size), execution must
     // fall through to the next arm — not crash.
     // Wildcard fallback arm should be present in the generated code.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #[a, b] -> a + b;\n      _ -> 42\n    ]\n";
@@ -830,7 +830,7 @@ fn test_match_array_pattern_fallthrough_to_wildcard() {
 
 #[test]
 fn test_match_nested_array_pattern_arm() {
-    // BT-1296: `arr match: [#[#[a, b], c] -> a+b+c; _ -> 0]`
+    // `arr match: [#[#[a, b], c] -> a+b+c; _ -> 0]`
     // should generate nested is_map + size checks for the inner array.
     let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[#[a, b], c] -> a + b + c;\n      _ -> 0\n    ]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -856,7 +856,7 @@ fn test_match_nested_array_pattern_arm() {
 
 #[test]
 fn test_match_array_pattern_uses_maps_get_with_default_not_map_get() {
-    // BT-1296: The class-tag lookup must use maps:get/3 with a default value so
+    // The class-tag lookup must use maps:get/3 with a default value so
     // that a plain Erlang map (Beamtalk Dictionary) as the match subject does not
     // crash with {badkey, '$beamtalk_class'} — it should fall through instead.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #[a, b] -> a + b;\n      _ -> 0\n    ]\n";
@@ -879,7 +879,7 @@ fn test_match_array_pattern_uses_maps_get_with_default_not_map_get() {
 
 #[test]
 fn test_match_array_pattern_duplicate_variable_emits_equality_check() {
-    // BT-1315: `arr match: [#[x, x] -> "equal"; _ -> "differ"]`
+    // `arr match: [#[x, x] -> "equal"; _ -> "differ"]`
     // The second occurrence of `x` must emit an `erlang:=:=` equality check
     // rather than a bare re-binding.
     let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[x, x] -> \"equal\";\n      _ -> \"differ\"\n    ]\n";
@@ -907,7 +907,7 @@ fn test_match_array_pattern_duplicate_variable_emits_equality_check() {
     );
 }
 
-// BT-2854 / ADR 0107 Phase A: `Pattern::Nil` and `Pattern::Type` codegen
+// ADR 0107 Phase A: `Pattern::Nil` and `Pattern::Type` codegen
 
 #[test]
 fn test_match_nil_pattern_compiles_to_atom_literal() {
@@ -927,7 +927,7 @@ fn test_match_nil_pattern_compiles_to_atom_literal() {
     );
 }
 
-// BT-2855 / ADR 0107 Phase A: `Pattern::Type` codegen (`generate_type_pattern`)
+// ADR 0107 Phase A: `Pattern::Type` codegen (`generate_type_pattern`)
 
 #[test]
 fn test_match_type_pattern_string_compiles_to_is_binary_test() {
@@ -1054,7 +1054,7 @@ fn test_match_type_pattern_true_false_nil_use_exact_atom_match() {
 
 #[test]
 fn test_match_type_pattern_actor_class_uses_tuple_tag_check_and_compiles() {
-    // BT-2855: an actor reference is `{'beamtalk_object', ClassAtom,
+    // an actor reference is `{'beamtalk_object', ClassAtom,
     // ModuleAtom, Pid}` — a 4-tuple, not a map. Naively generalizing the
     // tagged-class `is_map` check to Actor subclasses would silently never
     // match a live actor instance. Verifies both the generated shape and
@@ -1112,7 +1112,7 @@ fn test_match_type_pattern_pid_reference_port_use_guard_safe_bifs() {
 
 #[test]
 fn test_match_type_pattern_tuple_excludes_actor_reference_shape() {
-    // BT-2855: an actor reference is *also* a plain Erlang tuple
+    // an actor reference is *also* a plain Erlang tuple
     // structurally (`{'beamtalk_object', ClassAtom, ModuleAtom, Pid}`), so
     // `x :: Tuple` must explicitly exclude the reserved actor/supervisor
     // tags or it would incorrectly match a live actor reference too.
@@ -1140,7 +1140,7 @@ fn test_match_type_pattern_tuple_excludes_actor_reference_shape() {
 
 #[test]
 fn test_match_type_pattern_supervisor_subclass_uses_tuple_tag_check_and_compiles() {
-    // BT-2870: a live Supervisor reference is `{'beamtalk_supervisor' |
+    // a live Supervisor reference is `{'beamtalk_supervisor' |
     // 'beamtalk_supervisor_new', ClassAtom, ModuleAtom, Pid}` — a 4-tuple,
     // not a map, and tagged differently from an actor reference
     // (`'beamtalk_object'`). Naively reusing the tagged-map strategy would
@@ -1185,7 +1185,7 @@ fn test_match_type_pattern_supervisor_subclass_uses_tuple_tag_check_and_compiles
 
 #[test]
 fn test_match_type_pattern_dynamic_supervisor_subclass_uses_tuple_tag_check_and_compiles() {
-    // BT-2870: `DynamicSupervisor` subclasses use the same
+    // `DynamicSupervisor` subclasses use the same
     // `'beamtalk_supervisor'`/`'beamtalk_supervisor_new'` tuple shape as
     // `Supervisor` subclasses — verifies the dispatch also routes a
     // `DynamicSupervisor(C)` subclass through the supervisor strategy.
@@ -1218,7 +1218,7 @@ fn test_match_type_pattern_dynamic_supervisor_subclass_uses_tuple_tag_check_and_
 
 #[test]
 fn test_match_type_pattern_actor_subclass_resolves_through_cross_file_stub_chain() {
-    // BT-2882: `LeafActor`'s superclass `MidActor` is *not* declared
+    // `LeafActor`'s superclass `MidActor` is *not* declared
     // anywhere in this compilation unit — only `LeafActor subclass:`
     // itself is parsed here. `MidActor` and its own superclass `BaseActor`
     // are supplied purely as `add_external_superclasses` stubs (simulating
@@ -1263,7 +1263,7 @@ fn test_match_type_pattern_actor_subclass_resolves_through_cross_file_stub_chain
 
 #[test]
 fn test_match_type_pattern_supervisor_subclass_resolves_through_cross_file_stub_chain() {
-    // BT-2882: same concern as the actor test above, for the Supervisor
+    // same concern as the actor test above, for the Supervisor
     // strategy. `LeafSupervisor`'s superclass `MidSupervisor` and *its*
     // superclass `BaseSupervisor` are both supplied only as cross-file
     // stubs — neither is declared in this compilation unit. If
@@ -1354,7 +1354,7 @@ fn test_match_type_pattern_nested_in_tuple_pattern_is_codegen_error() {
 
 #[test]
 fn test_match_arm_self_mutating_value_block_threads_actor_state() {
-    // BT-2880: a `match:` arm body that is a multi-statement `[...] value`
+    // a `match:` arm body that is a multi-statement `[...] value`
     // block mutating `self.<state>` must thread actor state correctly and
     // unwrap to the block's real value — not leak the internal `{Value,
     // NewState}` state-threading tuple as the match's result. Mixes a
@@ -1397,7 +1397,7 @@ fn test_match_arm_self_mutating_value_block_threads_actor_state() {
 
 #[test]
 fn test_match_two_adjacent_mutating_arms_each_thread_from_the_same_base_state() {
-    // BT-2880 review follow-up: two DIFFERENT arms in the same match: each
+    // Two DIFFERENT arms in the same match: each
     // mutate a different field via a `[...] value` block. Since only one arm
     // fires at runtime, each arm's `with_branch_context` call must reset to
     // the SAME pre-match base_state — arm 2's compilation must not see any
@@ -1439,7 +1439,7 @@ fn test_match_two_adjacent_mutating_arms_each_thread_from_the_same_base_state() 
 
 #[test]
 fn test_match_arm_self_field_held_block_value_call_compiles_without_double_wrapping() {
-    // BT-2880 / BT-2814: a match: arm body that invokes a *dynamically held*
+    // a match: arm body that invokes a *dynamically held*
     // Tier 2 block via `self.<field> value` (not a `[...] value` block
     // literal) is a different receiver shape than the one this fix inlines.
     // `is_tier2_value_call` still classifies it as needing threading (so
@@ -1447,7 +1447,7 @@ fn test_match_arm_self_field_held_block_value_call_compiles_without_double_wrapp
     // but `generate_match_arm_body`'s literal-block branch doesn't match a
     // `self.field` receiver, so it falls to `expression_doc`, which already
     // unwraps+discards that call's own NewState via
-    // `close_tier2_value_subexpr_doc` (the same BT-2814 sub-expression-
+    // `close_tier2_value_subexpr_doc` (the same sub-expression-
     // position limitation `test_bt2814_field_stored_tier2_value_call_in_argument_position_unpacks_result`
     // pins elsewhere — the held block's mutation is not threaded forward,
     // by design, both before and after this fix). This test only pins that
@@ -1461,7 +1461,7 @@ fn test_match_arm_self_field_held_block_value_call_compiles_without_double_wrapp
 
     eprintln!("Generated code for match: arm self.field-held block value call:\n{code}");
 
-    // The arm's own value: call must be unwrapped exactly once (BT-2814's
+    // The arm's own value: call must be unwrapped exactly once (via
     // close_tier2_value_subexpr_doc), not left as a raw tuple nor wrapped a
     // second time by generate_match_arm_body's plain-arm fallback.
     assert!(
@@ -1475,19 +1475,19 @@ fn test_match_arm_self_field_held_block_value_call_compiles_without_double_wrapp
 
 #[test]
 fn test_match_arm_cascade_tier2_value_call_compiles_without_double_wrapping() {
-    // BT-2880 review follow-up: a match: arm body that is a `Cascade`
-    // (`blk value: a; value: b`, BT-2808) on a Tier 2 local var is a third
+    // A match: arm body that is a `Cascade`
+    // (`blk value: a; value: b`) on a Tier 2 local var is a third
     // `is_tier2_value_call` receiver shape besides the block-literal one
     // this fix inlines and the self.field-held one the sibling test above
     // pins. `generate_match_arm_body`'s literal-block branch only matches an
     // `Expression::MessageSend` with an `Expression::Block` receiver, so a
     // `Cascade` body falls through to `expression_doc`. Two separate layers
     // are at work here, and this test only pins the outer one:
-    // - BT-2808's own cascade codegen correctly threads state BETWEEN the
+    // - The cascade codegen correctly threads state BETWEEN the
     //   two cascaded `value:` sends (each sees the prior send's mutation),
     //   which is why `maps:put('total'...)` appears in the generated code
     //   at all.
-    // - But per the BT-2814 sub-expression-position limitation,
+    // - But per the sub-expression-position limitation,
     //   `close_tier2_value_subexpr_doc` then discards that cascade's FINAL
     //   NewState and returns only its logical value — so as a match: arm
     //   body, `self.total`'s mutation across the whole cascade does not
@@ -1516,7 +1516,7 @@ fn test_match_arm_cascade_tier2_value_call_compiles_without_double_wrapping() {
 
 #[test]
 fn test_match_arm_nested_if_true_mutation_without_value_wrapper_threads_actor_state() {
-    // BT-2880 (generalization): the same bug also reproduces when an arm
+    // generalization: the same bug also reproduces when an arm
     // body is itself a nested control-flow-with-mutations construct — here
     // `flag ifTrue: [self.count := ...]` — directly, with no `[...] value`
     // wrapper around it. `ifTrue:`/`ifFalse:` already compile such a body to
@@ -1568,7 +1568,7 @@ fn test_match_arm_nested_if_true_mutation_without_value_wrapper_threads_actor_st
 
 #[test]
 fn test_match_two_adjacent_nested_if_true_mutation_arms_thread_from_the_same_base_state() {
-    // BT-2880 review follow-up: the `control_flow_has_mutations` pass-through
+    // The `control_flow_has_mutations` pass-through
     // branch of `generate_match_arm_body` (a nested `ifTrue:`/`ifFalse:` arm
     // body with no `[...] value` wrapper) is separately verified by
     // `test_match_two_adjacent_mutating_arms_each_thread_from_the_same_base_state`
@@ -1623,11 +1623,11 @@ fn test_match_two_adjacent_nested_if_true_mutation_arms_thread_from_the_same_bas
 
 #[test]
 fn test_match_arm_self_mutating_value_block_threads_actor_state_all_native_fast_path() {
-    // BT-2880: same bug, but with every arm using a native Core Erlang
+    // same bug, but with every arm using a native Core Erlang
     // pattern (`nil` and `_`, no `Pattern::Type`/`Pattern::Array`) — this
     // routes through `generate_match`'s flat all-native fast path (the
     // single `case` built directly in `generate_match`) rather than the
-    // recursive `generate_match_chain`, which the other BT-2880 regression
+    // recursive `generate_match_chain`, which the other regression
     // tests exercise via their `x :: Integer` arm. Both arm-body compile
     // call sites needed the same fix.
     let src = "Actor subclass: Registry\n  state: count :: Integer\n\n  initialize -> Nil =>\n    self.count := 0\n    nil\n\n  bumpMatch -> Integer =>\n    nil match: [\n      nil -> [\n        self.count := self.count + 1\n        self.count\n      ] value;\n      _ -> -1\n    ]\n";
@@ -1658,12 +1658,12 @@ fn test_match_arm_self_mutating_value_block_threads_actor_state_all_native_fast_
     assert_compiles_through_erlc("registry", &code);
 }
 
-// BT-2359: value-type outer-local threading for count:/detect: predicates and
+// value-type outer-local threading for count:/detect: predicates and
 // threading constructs used as a (parenthesized) assignment RHS.
 
 #[test]
 fn test_vt_count_predicate_threads_outer_local() {
-    // BT-2359: `count:` whose predicate read+writes a captured outer local must
+    // `count:` whose predicate read+writes a captured outer local must
     // thread the mutation back so the post-`count:` read sees the final value.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    n := 0\n    #(1, 2, 3) count: [:i | n := n + 1. i > 0]\n    n\n";
     let code = codegen(src);
@@ -1682,7 +1682,7 @@ fn test_vt_count_predicate_threads_outer_local() {
 
 #[test]
 fn test_vt_detect_if_none_predicate_threads_outer_local() {
-    // BT-2359: `detect:ifNone:` whose predicate read+writes a captured outer
+    // `detect:ifNone:` whose predicate read+writes a captured outer
     // local must thread the mutation back.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    n := 0\n    #(1, 2, 3) detect: [:i | n := n + 1. i > 10] ifNone: [-1]\n    n\n";
     let code = codegen(src);
@@ -1695,7 +1695,7 @@ fn test_vt_detect_if_none_predicate_threads_outer_local() {
 
 #[test]
 fn test_vt_loop_as_parenthesized_assign_rhs_threads_sibling_local() {
-    // BT-2359: a counted loop used as a parenthesized RHS — `_r := (1 to: 5 do:
+    // a counted loop used as a parenthesized RHS — `_r := (1 to: 5 do:
     // [...])` — must thread its sibling outer local (`sum`) into method scope.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    sum := 0\n    _r := (1 to: 5 do: [:i | sum := sum + i])\n    sum\n";
     let code = codegen(src);
@@ -1710,7 +1710,7 @@ fn test_vt_loop_as_parenthesized_assign_rhs_threads_sibling_local() {
 
 #[test]
 fn test_vt_conditional_as_assign_rhs_threads_sibling_local() {
-    // BT-2359: a threading conditional as an assignment RHS — `_r := flag ifTrue:
+    // a threading conditional as an assignment RHS — `_r := flag ifTrue:
     // [x := 5. 42] ifFalse: [0]` — must bind the target to the branch's logical
     // value AND thread the sibling local (`x`) into method scope.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run: flag =>\n    x := 0\n    _r := flag ifTrue: [x := 5. 42] ifFalse: [0]\n    x\n";
@@ -1730,7 +1730,7 @@ fn test_vt_conditional_as_assign_rhs_threads_sibling_local() {
 
 #[test]
 fn test_vt_nested_loop_in_conditional_assign_rhs_threads_local() {
-    // BT-2359 (CodeRabbit follow-up): a threaded loop *nested* inside an
+    // CodeRabbit follow-up: a threaded loop *nested* inside an
     // assign-RHS conditional branch must still rebind its outer local, so a
     // later read in the same branch (and after) sees the update.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run: flag =>\n    sum := 0\n    _r := flag ifTrue: [1 to: 5 do: [:i | sum := sum + i]. sum] ifFalse: [0]\n    sum\n";
@@ -1746,7 +1746,7 @@ fn test_vt_nested_loop_in_conditional_assign_rhs_threads_local() {
 
 #[test]
 fn test_actor_conditional_last_expr_lower_actor_threaded_last() {
-    // BT-2378: When the LAST expression of an Actor method is a conditional with
+    // When the LAST expression of an Actor method is a conditional with
     // field mutations, `lower_actor_threaded_last` must bind element 1 of the
     // {Value, NewState} tuple as the reply value and element 2 as the new
     // gen_server State, then emit {'reply', ReplyValue, NewState}.
@@ -1781,7 +1781,7 @@ fn test_actor_conditional_last_expr_lower_actor_threaded_last() {
 
 #[test]
 fn test_actor_conditional_assign_rhs_emit_actor_threaded_assign_rhs() {
-    // BT-2378: `result := flag ifTrue: [...] ifFalse: [...]` with local variable
+    // `result := flag ifTrue: [...] ifFalse: [...]` with local variable
     // mutations in an Actor method must route through `emit_actor_threaded_assign_rhs`:
     //   - bind element 1 of the {Value, NewState} tuple → assignment target
     //   - bind element 2 → next gen_server State version
@@ -1813,7 +1813,7 @@ fn test_actor_conditional_assign_rhs_emit_actor_threaded_assign_rhs() {
 
 #[test]
 fn test_immediately_invoked_literal_block_with_field_mutation_compiles() {
-    // BT-2792: `[self.total := self.total + n] value` — a literal block that is
+    // `[self.total := self.total + n] value` — a literal block that is
     // immediately invoked (the block is the *receiver* of `value`, not stored or
     // passed) — must NOT hit the FieldAssignmentInUnsupportedBlock rejection. The
     // compiler inlines this case correctly (state threads through StateAcc, same
@@ -1828,9 +1828,9 @@ fn test_immediately_invoked_literal_block_with_field_mutation_compiles() {
 
 #[test]
 fn test_immediately_invoked_literal_block_value_keyword_with_field_mutation_compiles() {
-    // BT-2792 (PR review follow-up): same as the unary `value` case above, but
+    // PR review follow-up: same as the unary `value` case above, but
     // for the keyword form `[...] value: arg`. This goes through a separate
-    // code path (`try_generate_block_value_keyword`'s BT-1481 check in
+    // code path (`try_generate_block_value_keyword`'s check in
     // intrinsics.rs) that must also inline field mutations rather than falling
     // through to generate_block's rejection.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: n =>\n    [:x | self.total := self.total + x] value: n\n";
@@ -1843,12 +1843,12 @@ fn test_immediately_invoked_literal_block_value_keyword_with_field_mutation_comp
 
 #[test]
 fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
-    // BT-2792: `^[self.total := self.total + 1]` — a block *returned as a value*
+    // `^[self.total := self.total + 1]` — a block *returned as a value*
     // (never invoked in this method) is not caught by any of the semantic-analysis
     // passes that guard field mutations in blocks (they only flag blocks that are
     // stored to a variable or passed as a literal argument to an unsafe message
     // send — see block_analyzer.rs's BlockContext::Stored check and
-    // class_validators.rs's BT-1793 check). It still reaches generate_block's
+    // class_validators.rs's check). It still reaches generate_block's
     // generic fallback and must be rejected there.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  makeBlock =>\n    ^[self.total := self.total + 1]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -1869,7 +1869,7 @@ fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
 
 #[test]
 fn test_block_with_mixed_local_and_field_mutation_stored_then_invoked_compiles() {
-    // BT-2792 (PR review follow-up): a block with BOTH a captured-local
+    // PR review follow-up: a block with BOTH a captured-local
     // mutation and a field write — e.g. `[:x | outerCount := outerCount + x.
     // self.total := self.total + outerCount]` stored in a var and invoked
     // later — used to bypass the field-write check entirely: captured_mutations
@@ -1878,13 +1878,13 @@ fn test_block_with_mixed_local_and_field_mutation_stored_then_invoked_compiles()
     // That produced Core Erlang that *compiled* (passed erlc) but crashed at
     // runtime: the resulting block is a 2-arity stateful fun (params + State),
     // but generate_block_value_call and friends called it with only its
-    // declared params (no State argument) — `badarity`. BT-2792 closed that
-    // gap by making it a compile-time error instead.
+    // declared params (no State argument) — `badarity`. That gap is now
+    // closed by making it a compile-time error instead.
     //
-    // BT-2797 replaces the compile-time error with a real fix for exactly
-    // this shape: `blk`'s only use in the rest of the method is the `value:`
-    // call below, which `prescan_tier2_local_vars` proves is safe (BT-2797),
-    // so the block is now compiled via `generate_block_stateful` and invoked
+    // For exactly this shape, though, a real fix applies instead of the
+    // compile-time error: `blk`'s only use in the rest of the method is the
+    // `value:` call below, which `prescan_tier2_local_vars` proves is safe,
+    // so the block is compiled via `generate_block_stateful` and invoked
     // through the Tier 2 calling convention (`apply Fun(Args, State)`,
     // unpacking the `{Result, NewState}` tuple) — see
     // `test_bt2797_same_method_tier2_local_var_threads_state_correctly` below
@@ -1920,7 +1920,7 @@ fn test_block_with_mixed_local_and_field_mutation_stored_then_invoked_compiles()
 
 #[test]
 fn test_bt2797_same_method_tier2_local_var_threads_state_correctly() {
-    // BT-2797: verifies the *shape* of the generated Core Erlang for the
+    // verifies the *shape* of the generated Core Erlang for the
     // scenario above, not just that codegen returns Ok(..). `blk` must be a
     // 2-arity fun taking a trailing state accumulator and returning a
     // `{Result, NewState}` tuple, and the call site must `apply` it with the
@@ -1967,7 +1967,7 @@ fn test_bt2797_same_method_tier2_local_var_threads_state_correctly() {
 
 #[test]
 fn test_bt2808_cascade_on_tier2_local_var_compiles_and_threads_state() {
-    // BT-2808: `blk value: item; value: item` — a cascade sending two safe
+    // `blk value: item; value: item` — a cascade sending two safe
     // `value:` sends to the SAME Tier 2 local var. Before the fix,
     // `scan_var_uses`'s `Cascade` arm hit the generic `Identifier` arm on the
     // receiver (since the receiver *is* `blk`) and unconditionally reported it
@@ -2012,7 +2012,7 @@ fn test_bt2808_cascade_on_tier2_local_var_compiles_and_threads_state() {
 
 #[test]
 fn test_bt2797_local_tier2_block_never_invoked_again_is_still_compile_error() {
-    // BT-2797 regression guard: `blk := [block needing Tier 2]` where `blk` is
+    // Regression guard: `blk := [block needing Tier 2]` where `blk` is
     // never referenced again in the rest of the method — here because the
     // assignment is the method's *last* statement, so the raw Tier 2 fun value
     // implicitly escapes as the method's own return value. `prescan_tier2_local_vars`
@@ -2044,7 +2044,7 @@ fn test_bt2797_local_tier2_block_never_invoked_again_is_still_compile_error() {
 
 #[test]
 fn test_bt2797_local_tier2_block_invoked_inside_nested_do_block_is_still_compile_error() {
-    // BT-2797 regression guard (PR review follow-up): `blk value: item` found
+    // Regression guard: `blk value: item` found
     // only *inside* a nested block literal (here, the `do:` iteration block)
     // must NOT be treated as a safe use, even though it looks identical to a
     // safe top-level `value:` call. A nested block compiles through a
@@ -2074,7 +2074,7 @@ fn test_bt2797_local_tier2_block_invoked_inside_nested_do_block_is_still_compile
 
 #[test]
 fn test_bt2797_local_tier2_block_invoked_inside_nested_if_true_block_is_still_compile_error() {
-    // BT-2797 regression guard (PR review follow-up): same as the `do:` case
+    // Regression guard: same as the `do:` case
     // above, but for a `ifTrue:` control-flow block — the other concrete
     // trigger the reviewer flagged.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: n =>\n    blk := [:x | self.total := self.total + x]\n    n > 0 ifTrue: [blk value: n]\n";
@@ -2097,7 +2097,7 @@ fn test_bt2797_local_tier2_block_invoked_inside_nested_if_true_block_is_still_co
 
 #[test]
 fn test_bt2797_field_stored_block_invoked_from_different_method_threads_state_correctly() {
-    // BT-2797: the main real-world motivator — a block with field mutations,
+    // the main real-world motivator — a block with field mutations,
     // assigned to an instance field in one method (`setup`) and invoked via
     // `value:` from a *different* method (`tick:`). Static per-method tracking
     // (tier2_block_params / tier2_local_vars) can't see across methods, so this
@@ -2107,8 +2107,8 @@ fn test_bt2797_field_stored_block_invoked_from_different_method_threads_state_co
     //    `self.field value(:...)` call site now runtime-discriminates), and
     // 2. `generate_block_value_call_runtime_discriminated` (intrinsics.rs)
     //    checking the field's *runtime* arity (`is_function/2`) at the call
-    //    site to decide whether to thread state — the BT-909 precedent
-    //    generalized from Erlang FFI interop to Beamtalk-level block calls.
+    //    site to decide whether to thread state — the same precedent already
+    //    used for Erlang FFI interop, generalized to Beamtalk-level block calls.
     let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup =>\n    self.onTick := [:x | self.total := self.total + x]\n\n  tick: x =>\n    self.onTick value: x\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
@@ -2158,7 +2158,7 @@ fn test_bt2797_field_stored_block_invoked_from_different_method_threads_state_co
 
 #[test]
 fn test_bt2797_field_stored_block_with_captured_local_and_field_write_is_still_compile_error() {
-    // BT-2797 (PR #2899 review fix): a block stored in a field that mutates
+    // PR #2899 review fix: a block stored in a field that mutates
     // BOTH a captured outer local AND a field must still be rejected at
     // compile time, not silently promoted to Tier 2 like the field-writes-only
     // case. `generate_block_stateful`'s captured-local handling reads a
@@ -2166,11 +2166,10 @@ fn test_bt2797_field_stored_block_with_captured_local_and_field_write_is_still_c
     // back to the value closed over at block-definition time when absent —
     // correct only when the block is invoked from the same method it was
     // defined in. A field-stored block can be invoked from a *different*
-    // method (that's the entire point of BT-2797), so that fallback would
+    // method (this is deliberately supported), so that fallback would
     // silently return a stale value forever, and the key would then leak
     // into the actor's persistent state once the returned NewState is merged
-    // back in. This combination was a compile-time error before BT-2797 and
-    // must remain one.
+    // back in. This combination must remain a compile-time error.
     let src = "Actor subclass: Ctr\n  state: total = 0\n  state: callback = nil\n\n  setup =>\n    count := 0\n    self.callback := [:n | count := count + n. self.total := self.total + count]\n\n  process: n =>\n    self.callback value: n\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
@@ -2193,7 +2192,7 @@ fn test_bt2797_field_stored_block_with_captured_local_and_field_write_is_still_c
 
 #[test]
 fn test_bt2797_nonliteral_field_mutating_block_passed_to_self_send_is_compile_error() {
-    // BT-2797 (verification, acceptance criterion 5): a field-mutating block
+    // verification, acceptance criterion 5: a field-mutating block
     // held in a local var and passed as a *non-literal* argument to a
     // self-send — `self applyBlock: blk to: x`, where `blk` was assigned
     // separately — is a case `scan_class_for_tier2_blocks`
@@ -2209,7 +2208,7 @@ fn test_bt2797_nonliteral_field_mutating_block_passed_to_self_send_is_compile_er
     // here `blk` is passed as an *argument* to `applyBlock:to:`, not a value:
     // receiver, so prescan correctly leaves it unpromoted and it falls through
     // to `generate_block`'s existing `FieldAssignmentInUnsupportedBlock` gate
-    // (BT-2792) — a safe compile-time failure, not a silent runtime crash.
+    // — a safe compile-time failure, not a silent runtime crash.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  applyBlock: aBlock to: x =>\n    aBlock value: x\n\n  run: x =>\n    blk := [:y | self.total := self.total + y]\n    self applyBlock: blk to: x\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
@@ -2230,10 +2229,10 @@ fn test_bt2797_nonliteral_field_mutating_block_passed_to_self_send_is_compile_er
 
 #[test]
 fn test_bt2797_no_regression_pure_block_value_fast_path() {
-    // BT-2797 (acceptance criterion 7): the zero-cost fast path for a pure
+    // acceptance criterion 7: the zero-cost fast path for a pure
     // (non-mutating) block literal immediately invoked via `value`/`value:`
     // must be untouched — no `is_function` runtime check, no state-threading
-    // overhead. BT-2797's new runtime-discrimination codegen
+    // overhead. The runtime-discrimination codegen
     // (generate_block_value_call_runtime_discriminated) is deliberately
     // scoped to `self.field value(:...)` receivers only (see
     // try_generate_block_value_unary/keyword in intrinsics.rs) — a literal
@@ -2257,10 +2256,10 @@ fn test_bt2797_no_regression_pure_block_value_fast_path() {
 
 #[test]
 fn test_bt2797_no_regression_pure_local_var_block_value_fast_path() {
-    // BT-2797: a block held in a local var (not a field) that has NO captured
+    // a block held in a local var (not a field) that has NO captured
     // or field mutations must also stay on the pre-existing plain
-    // `is_function` guard (generate_value_keyword_guard, unaffected by
-    // BT-2797) — never the new self.field-scoped runtime-discrimination path,
+    // `is_function` guard (generate_value_keyword_guard) — never the
+    // self.field-scoped runtime-discrimination path,
     // and never the Tier 2 stateful protocol.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | x + 1]\n    blk value: item\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -2280,8 +2279,8 @@ fn test_bt2797_no_regression_pure_local_var_block_value_fast_path() {
 
 #[test]
 fn test_bt2803_field_stored_block_invoked_via_value_with_arguments_threads_state_correctly() {
-    // BT-2803: valueWithArguments: on a self.field receiver needs the same
-    // runtime Tier 1/Tier 2 discrimination as `value:` (BT-2797), but the
+    // valueWithArguments: on a self.field receiver needs the same
+    // runtime Tier 1/Tier 2 discrimination as `value:`, but the
     // argument count is a runtime list length instead of a compile-time-known
     // static arity —
     // generate_block_value_with_arguments_call_runtime_discriminated
@@ -2356,8 +2355,8 @@ fn test_bt2803_field_stored_block_invoked_via_value_with_arguments_threads_state
 
 #[test]
 fn test_bt2803_no_regression_pure_block_value_with_arguments_fast_path() {
-    // BT-2803 (mirrors BT-2797's fast-path regression guard): a literal
-    // block receiver never needs the runtime is_function guard —
+    // Mirrors the same fast-path regression guard as the field case: a
+    // literal block receiver never needs the runtime is_function guard —
     // try_generate_block_value_with_arguments_keyword's literal-block fast
     // path applies Args directly via erlang:apply, no runtime check at all.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run =>\n    [:x :y | x + y] valueWithArguments: #(3, 4)\n";
@@ -2382,7 +2381,7 @@ fn test_bt2803_no_regression_pure_block_value_with_arguments_fast_path() {
 
 #[test]
 fn test_bt2803_no_regression_pure_local_var_value_with_arguments_fast_path() {
-    // BT-2803: a block held in a local var (not a field, no captured/field
+    // a block held in a local var (not a field, no captured/field
     // mutations) reaches the generic is_function/1 guard
     // (generate_block_value_with_arguments_call) — never the Tier 2 runtime-
     // discriminated path, and never the stateful protocol.
@@ -2417,13 +2416,13 @@ fn test_bt2803_no_regression_pure_local_var_value_with_arguments_fast_path() {
 
 #[test]
 fn test_bt2813_bare_tier2_value_call_inside_do_loop_body_unpacks_tuple() {
-    // BT-2813: a bare (non-assigned) `self.field value:` statement inside a
-    // `do:` loop body. Before the fix, the outer loop was correctly routed
-    // into the state-threading (StateAcc) path by `block_needs_mutation_threading`
-    // (BT-2807's `has_field_value_call` fact), but the loop body's own
-    // statement codegen (`generate_threaded_loop_body_inner`) had no case for
-    // a bare Tier2ValueCall — it fell through to `emit_non_assign_expr`,
-    // which emitted a plain (Tier-1-only) apply and crashed with badarity for
+    // A bare (non-assigned) `self.field value:` statement inside a
+    // `do:` loop body. The outer loop is correctly routed
+    // into the state-threading (StateAcc) path by `block_needs_mutation_threading`'s
+    // `has_field_value_call` fact, but the loop body's own
+    // statement codegen (`generate_threaded_loop_body_inner`) needs its own case for
+    // a bare Tier2ValueCall — falling through to `emit_non_assign_expr`
+    // would emit a plain (Tier-1-only) apply and crash with badarity for
     // a genuinely Tier 2 (2-arity) field-stored block. Structural check only
     // (see stdlib/test/tier2stored_block_matrix_test.bt for the runtime
     // end-to-end check).
@@ -2449,7 +2448,7 @@ fn test_bt2813_bare_tier2_value_call_inside_do_loop_body_unpacks_tuple() {
 
 #[test]
 fn test_bt2813_bare_tier2_value_call_inside_collect_block_unpacks_tuple() {
-    // BT-2813: same gap as the do: case above, but for collect: — the loop
+    // same gap as the do: case above, but for collect: — the loop
     // body must also extract element(1) of the tuple as the collected value.
     let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  tickEachCollect: items =>\n    items collect: [:x | self.onTick value: x]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -2472,7 +2471,7 @@ fn test_bt2813_bare_tier2_value_call_inside_collect_block_unpacks_tuple() {
 
 #[test]
 fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() {
-    // BT-2814: a Tier 2 block held in a local var, invoked via `value:` in
+    // a Tier 2 block held in a local var, invoked via `value:` in
     // *argument* (sub-expression) position. Before the fix,
     // `try_generate_block_value_keyword` intercepted this receiver shape
     // (tier2_local_vars) and called `generate_block_value_call_stateful`
@@ -2491,10 +2490,10 @@ fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() 
     )
     .expect("should compile (BT-2814)");
 
-    // ADR 0116/BT-3263: the right operand (`blk value: x`) is not statically
-    // numeric, so this call site now let-binds it to `_BinRight<N>` before
+    // ADR 0116: the right operand (`blk value: x`) is not statically
+    // numeric, so this call site let-binds it to `_BinRight<N>` before
     // wrapping the addition in the number-on-the-left coercion try/catch —
-    // the underlying BT-2814 fix (the block's `{Result, NewState}` tuple is
+    // the underlying unwrap (the block's `{Result, NewState}` tuple is
     // unpacked to a plain value via `element(1, ...)`, never leaked raw into
     // the arithmetic) still holds; it's just bound to a variable ahead of
     // the `try` now instead of inlined directly as `erlang:'+'`'s 2nd arg.
@@ -2513,7 +2512,7 @@ fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() 
 
 #[test]
 fn test_bt2814_field_stored_tier2_value_call_in_argument_position_unpacks_result() {
-    // BT-2814: the self.field variant of the same gap. Before the fix,
+    // the self.field variant of the same gap. Before the fix,
     // `try_generate_block_value_keyword`/`_unary` deliberately did NOT
     // intercept a self.field receiver in sub-expression position at all,
     // falling back to a Tier-1-only (arity-N, no State) apply — badarity for
@@ -2542,17 +2541,17 @@ fn test_bt2814_field_stored_tier2_value_call_in_argument_position_unpacks_result
 }
 #[test]
 fn test_bt2815_named_local_var_captured_mutation_rebinds_after_call() {
-    // BT-2815: a block assigned to a LOCAL variable (not a field) whose only
+    // a block assigned to a LOCAL variable (not a field) whose only
     // mutation is a captured outer local, invoked later via `value:` in the
-    // same method. Before the fix, `get_inline_block_captured_mutations`
-    // only recognized an INLINE block literal receiver (the original BT-1213
-    // scope) — a NAMED `tier2_local_vars` identifier receiver fell through
-    // with no rebinding, so the caller's own `outer` variable silently kept
-    // its stale pre-call value even though the call itself succeeded and
-    // internally computed the right value. `prescan_tier2_local_vars` now
-    // records the captured-mutation var names keyed by variable name
+    // same method. `get_inline_block_captured_mutations` recognizes only an
+    // INLINE block literal receiver — a NAMED `tier2_local_vars` identifier
+    // receiver needs `prescan_tier2_local_vars` instead, which records the
+    // captured-mutation var names keyed by variable name
     // (`tier2_local_var_captured_mutations`) so the call site can rebind
-    // them the same way it already does for an inline literal. Structural
+    // them the same way it already does for an inline literal; otherwise
+    // the caller's own `outer` variable would silently keep its stale
+    // pre-call value even though the call itself succeeded and internally
+    // computed the right value. Structural
     // check only (see stdlib/test/tier2stored_block_matrix_test.bt for the
     // runtime end-to-end check).
     let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run =>\n    outer := 0\n    blk := [:n | outer := outer + n]\n    blk value: 5\n    outer\n";
@@ -2579,8 +2578,8 @@ fn test_bt2815_named_local_var_captured_mutation_rebinds_after_call() {
 
 #[test]
 fn test_bt2815_named_local_var_cascade_captured_mutation_rebinds_after_call() {
-    // BT-2815 acceptance criteria: verify the cascade variant too —
-    // `blk value: x; value: x` (BT-2808's cascade codegen) invoked twice
+    // Verify the cascade variant too —
+    // `blk value: x; value: x` (cascade codegen) invoked twice
     // must also rebind the caller's `outer` var from the cascade's final
     // NewState, not just the single-send case above.
     let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run =>\n    outer := 0\n    blk := [:n | outer := outer + n]\n    blk value: 4; value: 4\n    outer\n";
@@ -2606,7 +2605,7 @@ fn test_bt2815_named_local_var_cascade_captured_mutation_rebinds_after_call() {
 
 #[test]
 fn test_local_var_assignment_with_tier2_block_value_call_inside_conditional_branch() {
-    // BT-912/ADR 0111 Addendum 5 C3: `lower_local_var_assignment_bind`'s Tier 2
+    // ADR 0111 Addendum 5 C3: `lower_local_var_assignment_bind`'s Tier 2
     // sub-branch — `result := aBlock value` where `aBlock` is a Tier 2 block
     // parameter, inside an `ifTrue:` branch that also has field mutations.
     //
@@ -2664,15 +2663,15 @@ fn test_local_var_assignment_with_tier2_block_value_call_inside_conditional_bran
     );
 }
 
-// ─── BT-3484: value-type `Self` threading through loops and conditionals ────
+// ─── value-type `Self` threading through loops and conditionals ────
 //
 // `CodeGenContext::ValueType` reaches `self.field := value` only via the
-// documented, permanent `TestCase` exemption (BT-1533; see
+// documented, permanent `TestCase` exemption (see
 // `check_value_slot_assignment` in `beamtalk-core`'s `class_validators.rs`) —
 // a genuine `Value subclass:` rejects the write outright (ADR 0042). So every
 // fixture below is a `TestCase subclass:`, matching the only shape a user can
 // actually write. The runtime ground truths for these exact shapes are pinned
-// in `stdlib/test/value_type_mutation_matrix_test.bt`'s BT-3176 axis-4 cells.
+// in `stdlib/test/value_type_mutation_matrix_test.bt`'s axis-4 cells.
 
 #[test]
 fn test_value_type_field_write_in_to_do_threads_self_through_tail_call() {
@@ -2682,6 +2681,10 @@ fn test_value_type_field_write_in_to_do_threads_self_through_tail_call() {
     // reached the recursive `apply`, so every iteration discarded it and the
     // method's trailing `self.total` read the ORIGINAL `Self` parameter.
     // Compiled fine; returned 0 instead of 15.
+    //
+    // Doubles as BT-3488's guard rail: this is the top-level-statement shape
+    // that `reject_unthreadable_value_self_field_write` must let through, so
+    // an over-firing rejection surfaces here as a failed `expect` below.
     let src = concat!(
         "TestCase subclass: VtLoopSelfThread\n",
         "  field: total = 0\n\n",
@@ -2732,6 +2735,10 @@ fn test_value_type_field_only_loop_packs_from_fresh_map_not_state() {
     // short-circuited to the ambient `initial_state_var` — the actor `State`,
     // which does not exist in a value-type method. `erlc` rejected the result
     // with "unbound variable 'State'".
+    //
+    // Doubles as BT-3488's second guard-rail fixture: the same top-level
+    // write with NO sibling local to thread, which must likewise survive
+    // `reject_unthreadable_value_self_field_write`'s root-node skip.
     let src = concat!(
         "TestCase subclass: VtLoopSelfOnly\n",
         "  field: total = 0\n\n",
@@ -2760,10 +2767,9 @@ fn test_value_type_field_only_loop_packs_from_fresh_map_not_state() {
 
 #[test]
 fn test_value_type_field_write_in_if_true_merges_self_out_of_branch() {
-    // Before BT-3484 the true arm bound `Self1` inside its own nested `let`
-    // while the code AFTER the `case` referenced it unconditionally — `erlc`
-    // rejected the whole module with "unbound variable 'Self1'". The fix
-    // gives the branch-merge tuple a trailing `Self` slot both arms carry.
+    // The true arm must not bind `Self1` only inside its own nested `let`
+    // while the code AFTER the `case` references it unconditionally — the
+    // branch-merge tuple needs a trailing `Self` slot both arms carry.
     let src = concat!(
         "TestCase subclass: VtCondSelfThread\n",
         "  field: total = 0\n\n",
@@ -2836,7 +2842,7 @@ fn test_value_type_field_write_in_if_true_if_false_merges_both_arms() {
 
 #[test]
 fn test_value_type_field_write_in_nested_loop_is_compile_error() {
-    // BT-3484's accepted scope limit, mirroring BT-3172's identical one for
+    // This construct's accepted scope limit mirrors the identical one for
     // class vars (`ClassVarMutationLostAcrossNestedLoop`): the inner loop
     // threads its own `Self` correctly, but nothing unpacks a nested loop's
     // trailing `Self` slot back into the OUTER loop's statement sequence, so
@@ -2871,13 +2877,13 @@ fn test_value_type_field_write_in_nested_loop_is_compile_error() {
 
 #[test]
 fn test_value_type_field_write_in_last_position_conditional_still_rejected() {
-    // BT-3484's deliberate boundary: the LAST-position conditional path
+    // This construct's deliberate boundary: the LAST-position conditional path
     // (`emit_vt_conditional_case_to_var`) and the assignment-RHS path
     // (`emit_vt_conditional_assign_rhs`) thread outer LOCALS only, never
     // `Self` — routing a field write into either would silently drop it
     // (last position) or emit an `erlc`-rejected reference to a branch-scoped
-    // `Self{N}` (assign RHS). Both are strictly worse than the clean
-    // pre-BT-3484 diagnostic, so
+    // `Self{N}` (assign RHS). Both are strictly worse than a clean
+    // diagnostic, so
     // `is_conditional_with_vt_self_field_threading` (and hence
     // `VtBodyExprKind::ConditionalWithSelfFieldThreading`) is scoped to the
     // non-last statement position only, and these shapes keep erroring.
@@ -2903,41 +2909,374 @@ fn test_value_type_field_write_in_last_position_conditional_still_rejected() {
     );
 }
 
+/// BT-3488: compiles `src` and returns the field name from the
+/// `FieldAssignmentInUnsupportedBlock` it must produce.
+///
+/// Both halves of every parity pair below assert through this one helper, so a
+/// test can only pass by producing the SAME error variant — the whole point of
+/// the parity claim (a `ClassVar` and a `ValueType` write of the identical
+/// shape get the identical diagnostic), rather than each half asserting its own
+/// error in its own way.
+///
+/// Also asserts the RENDERED message opens with the exact wording BT-3488's
+/// acceptance criteria name ("Cannot assign to field '…' inside this block"),
+/// so a future edit that keeps the variant but rewrites the text — or that
+/// drops the `field_capitalized` derivation
+/// `CodeGenError::field_assignment_in_unsupported_block` centralises — cannot
+/// pass silently.
+fn field_assignment_rejection_field(src: &str, module_name: &str) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new(module_name).with_workspace_mode(true),
+    );
+    let err = match result {
+        Err(err @ CodeGenError::FieldAssignmentInUnsupportedBlock { .. }) => err,
+        other => {
+            panic!("Expected FieldAssignmentInUnsupportedBlock for {module_name}. Got: {other:?}")
+        }
+    };
+    // Render before destructuring — `to_string()` is `thiserror`'s `Display`
+    // over the whole variant, which is what a user actually sees.
+    let rendered = err.to_string();
+    let CodeGenError::FieldAssignmentInUnsupportedBlock {
+        field,
+        field_capitalized,
+        ..
+    } = err
+    else {
+        unreachable!("the match above admits no other variant")
+    };
+    assert!(
+        rendered.starts_with(&format!(
+            "Cannot assign to field '{field}' inside this block at "
+        )),
+        "{module_name} must produce BT-3488's agreed diagnostic wording. Got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains(&format!("addTo{field_capitalized}:")),
+        "the message's method suggestion must use the capitalized field name. Got:\n{rendered}"
+    );
+    field
+}
+
 #[test]
-fn test_value_type_field_write_in_conditional_nested_in_loop_compiles() {
-    // BT-3484's other accepted scope limit, inherited verbatim from the
-    // class-var precedent (`class_var_sub_expr_test.bt`'s
-    // `testTickInLoopConditionalCompilesAndRuns`, BT-2308): the field write
-    // is not a TOP-LEVEL statement of the loop body, so
-    // `loop_body_threads_value_self` reports `false` and the loop threads no
-    // `Self` — the conditional's own rebind stays scoped to its nested `let`
-    // and the mutation is lost. Pinned here as compiling cleanly (no erlc
-    // crash, no verifier violation), matching that precedent exactly, rather
-    // than silently regressing into one.
+fn test_class_var_write_in_conditional_nested_in_loop_is_compile_error() {
+    // BT-3488, the reference half of the parity pair: a class-var write
+    // inside an `ifTrue:` inside a `to:do:` has ALWAYS been rejected cleanly.
+    // `needs_mutation_threading`'s `in_class_method()` arm does not count
+    // field writes, so the branch block never reaches the inline
+    // mutation-threading path and falls through to `generate_block`'s
+    // `validate_stored_closure` diagnostic. Pinned here so the value-type
+    // half below is measured against real, executed behaviour rather than a
+    // remembered claim.
+    let field = field_assignment_rejection_field(
+        concat!(
+            "Object subclass: CvCondInLoop\n",
+            "  classState: total = 0\n\n",
+            "  class computeTotal: flag =>\n",
+            "    seen := 0\n",
+            "    1 to: 3 do: [:i |\n",
+            "      flag ifTrue: [self.total := self.total + i]\n",
+            "      seen := seen + 1\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@cvcondinloop",
+    );
+    assert_eq!(field, "total");
+}
+
+#[test]
+fn test_value_type_field_write_in_conditional_nested_in_loop_is_compile_error() {
+    // BT-3488, the half this issue fixes — byte-for-byte the class-var
+    // fragment above, with `classState:`/`class ` swapped for the BT-1533
+    // `TestCase` value-type exemption.
+    //
+    // The write is not a TOP-LEVEL statement of the loop body, so
+    // `loop_body_threads_value_self` (and hence
+    // `ThreadingPlan::threads_value_self`) reports `false` and the loop
+    // threads no `Self`: the conditional's own `Self{N}` rebind stays scoped
+    // to its nested `let`. Before this issue that meant a silently dropped
+    // mutation here, and — with the field write as the loop body's ONLY
+    // mutation, see the sibling test below — an outright `erlc` crash.
+    // `reject_unthreadable_value_self_field_write` now rejects it with the same
+    // diagnostic the class-var half above already got.
+    let field = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtCondInLoopSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal: flag =>\n",
+            "    seen := 0\n",
+            "    1 to: 3 do: [:i |\n",
+            "      flag ifTrue: [self.total := self.total + i]\n",
+            "      seen := seen + 1\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtcondinloopself",
+    );
+    assert_eq!(field, "total");
+}
+
+#[test]
+fn test_value_type_field_write_in_conditional_nested_in_loop_without_sibling_local_is_compile_error()
+ {
+    // BT-3488's headline repro: the same shape with NO sibling local
+    // mutation, so the loop has no threaded locals at all. Before this issue
+    // `generate_pack_prefix` short-circuited to the ambient actor `State` —
+    // a variable a value-type method does not have — and `erlc` rejected the
+    // whole module with "unbound variable 'State'", the crash that made this
+    // shape worse than its silently-dropping sibling above rather than merely
+    // equal to it.
+    let field = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtCondInLoopOnly\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    1 to: 5 do: [:i |\n",
+            "      i > 2 ifTrue: [self.total := self.total + i]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtcondinlooponly",
+    );
+    assert_eq!(field, "total");
+}
+
+#[test]
+fn test_value_type_field_write_in_foldl_body_is_compile_error() {
+    // BT-3488: a `Foldl*` (`do:`/`collect:`/…) accumulator has no trailing
+    // `Self` slot, so `ThreadingPlan::threads_value_self` is never set for a
+    // fold plan and EVERY value-type field write in a fold body is
+    // unthreadable — top-level statement included, unlike the `Letrec` case.
+    // Both shapes crashed `erlc` with "unbound variable 'State'" before this
+    // issue; both are now the same clean diagnostic the class-var equivalents
+    // already produced.
+    let nested = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtFoldlCondSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    #(1, 2, 3) do: [:i |\n",
+            "      i > 2 ifTrue: [self.total := self.total + i]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtfoldlcondself",
+    );
+    assert_eq!(nested, "total");
+
+    let top_level = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtFoldlTopSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    #(1, 2, 3) do: [:i | self.total := self.total + i]\n",
+            "    self.total\n",
+        ),
+        "bt@vtfoldltopself",
+    );
+    assert_eq!(top_level, "total");
+
+    // `collect:` too, so the "EVERY `Foldl*` selector" claim above is backed
+    // by a second member of the family rather than by `do:` alone — the two
+    // share `lower_foldl_body`, and this pins that they also share its
+    // BT-3488 rejection.
+    let collect = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtFoldlCollectSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    #(1, 2, 3) collect: [:i | self.total := self.total + i]\n",
+            "    self.total\n",
+        ),
+        "bt@vtfoldlcollectself",
+    );
+    assert_eq!(collect, "total");
+}
+
+#[test]
+fn test_value_type_field_write_nested_in_other_loop_families_and_constructs_is_compile_error() {
+    // BT-3488: the headline repro is a `to:do:`, but the gap was never
+    // specific to that selector — every loop family that reaches
+    // `lower_letrec_body`/`lower_foldl_body` carried it. Each fixture below
+    // was verified BROKEN on the parent commit (d2bbdc9) before being pinned
+    // here, so none of these is a shape the rejection newly takes away:
+    //
+    // * `whileTrue:` — the worst of the set: it COMPILED and silently
+    //   returned 0 instead of 12, the "silently dropped" half of BT-3484's
+    //   bug class rather than a crash.
+    // * `timesRepeat:`, a loop nested in a loop, and `inject:into:` — all
+    //   three crashed `erlc` with "unbound variable 'State'".
+    let while_true = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtWhileCondSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    i := 0\n",
+            "    [i < 5] whileTrue: [\n",
+            "      i := i + 1\n",
+            "      i > 2 ifTrue: [self.total := self.total + i]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtwhilecondself",
+    );
+    assert_eq!(while_true, "total");
+
+    let times_repeat = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtTimesRepeatCondSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal: flag =>\n",
+            "    3 timesRepeat: [\n",
+            "      flag ifTrue: [self.total := self.total + 1]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vttimesrepeatcondself",
+    );
+    assert_eq!(times_repeat, "total");
+
+    let nested_loop = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtNestedLoopCondSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    1 to: 3 do: [:i |\n",
+            "      1 to: 2 do: [:j |\n",
+            "        j > 1 ifTrue: [self.total := self.total + 1]\n",
+            "      ]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtnestedloopcondself",
+    );
+    assert_eq!(nested_loop, "total");
+
+    let inject_into = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtInjectCondSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    r := #(1, 2, 3) inject: 0 into: [:acc :i |\n",
+            "      i > 1 ifTrue: [self.total := self.total + i]\n",
+            "      acc + i\n",
+            "    ]\n",
+            "    r + self.total\n",
+        ),
+        "bt@vtinjectcondself",
+    );
+    assert_eq!(inject_into, "total");
+
+    // Not a loop family but the same gap on a different axis: the nested
+    // construct hiding the write is an `ensure:` handler rather than a
+    // conditional. It lowers through its own (exception) path, so it would
+    // not be covered by any amount of `ifTrue:` fixtures above — and it too
+    // crashed `erlc` with "unbound variable 'State'" on the parent commit.
+    let ensure_block = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtEnsureInLoopSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    1 to: 3 do: [:i |\n",
+            "      [i] ensure: [self.total := self.total + i]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtensureinloopself",
+    );
+    assert_eq!(ensure_block, "total");
+}
+
+#[test]
+fn test_value_type_nested_field_write_rejected_beside_threadable_top_level_write() {
+    // BT-3488's sharpest case, and the one that pins the rejection's
+    // SELECTIVITY rather than merely its existence: one loop body holding
+    // BOTH a bare top-level write (`total`, which `plan.threads_value_self`
+    // does carry and the root-node skip must let through) AND a write nested
+    // in a conditional (`other`, which nothing carries).
+    //
+    // The asserted field name is the discriminator. A rejection keyed off the
+    // loop body as a whole — or one that forgot the root-node skip — would
+    // name `total` here and still "produce the right error variant"; only a
+    // per-statement walk that skips the threadable root reports `other`.
+    //
+    // On the parent commit this fixture did not merely miscompile: it
+    // panicked the compiler outright (a `Result::expect` unwind out of
+    // `run`), making it the most severe of the shapes this issue closes.
+    let field = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtMixedWriteSelf\n",
+            "  field: total = 0\n",
+            "  field: other = 0\n\n",
+            "  computeTotal: flag =>\n",
+            "    1 to: 3 do: [:i |\n",
+            "      self.total := self.total + i\n",
+            "      flag ifTrue: [self.other := 1]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtmixedwriteself",
+    );
+    assert_eq!(
+        field, "other",
+        "the rejection must name the NESTED write, not the threadable \
+         top-level one beside it"
+    );
+}
+
+#[test]
+fn test_value_type_multiple_top_level_field_writes_in_loop_still_thread() {
+    // BT-3488 guard rail, complementing the two BT-3484 fixtures named in the
+    // comment below: those pin a SINGLE top-level write, so neither would
+    // catch a rejection that fired once a loop body held more than one. Two
+    // top-level writes are still fully threadable (verified running correctly
+    // on the parent commit and unchanged here), so this must keep compiling
+    // with a `Self`-threaded tail call.
     let src = concat!(
-        "TestCase subclass: VtCondInLoopSelf\n",
-        "  field: total = 0\n\n",
-        "  computeTotal: flag =>\n",
-        "    seen := 0\n",
+        "TestCase subclass: VtMultiTopWrite\n",
+        "  field: total = 0\n",
+        "  field: count = 0\n\n",
+        "  computeTotal =>\n",
         "    1 to: 3 do: [:i |\n",
-        "      flag ifTrue: [self.total := self.total + i]\n",
-        "      seen := seen + 1\n",
+        "      self.total := self.total + i\n",
+        "      self.count := self.count + 1\n",
         "    ]\n",
-        "    self.total\n",
+        "    self.total + self.count\n",
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt@vtcondinloopself").with_workspace_mode(true),
+        CodegenOptions::new("bt@vtmultitopwrite").with_workspace_mode(true),
     )
-    .expect("a field write nested inside a conditional inside a loop must still compile");
-    assert!(
-        !code.contains("apply 'loop'/3"),
-        "the loop must NOT grow a Self parameter for a non-top-level write. Got:\n{code}"
-    );
-    assert_compiles_through_erlc("bt@vtcondinloopself", &code);
+    .expect("two bare top-level value-type writes must still compile");
+    assert_compiles_through_erlc("bt@vtmultitopwrite", &code);
 }
+
+// BT-3488's guard rail — that the new rejection stays scoped to writes the
+// loop genuinely cannot carry, and never swallows a BARE, TOP-LEVEL
+// `self.field := ...` statement in a `Letrec` body (the one shape
+// `plan.threads_value_self` does carry, and hence the one shape
+// `reject_unthreadable_value_self_field_write`'s root-node skip lets through)
+// — is `test_value_type_field_write_in_to_do_threads_self_through_tail_call`
+// and `test_value_type_field_only_loop_packs_from_fresh_map_not_state` above.
+// Those two BT-3484 tests already pin exactly the two single-write guard-rail
+// fixtures (with and without a sibling local mutation) and assert the full
+// `Self` threading, not merely that `erlc` accepts the module, so an
+// over-firing rejection turns them red. Deliberately NOT restated as a third,
+// weaker copy here (CLAUDE.md's no-duplicate-implementations rule).
+//
+// The two cases those fixtures leave open — a loop body with MORE THAN ONE
+// top-level write, and one mixing a threadable top-level write with an
+// unthreadable nested one — are covered above by
+// `test_value_type_multiple_top_level_field_writes_in_loop_still_thread` and
+// `test_value_type_nested_field_write_rejected_beside_threadable_top_level_write`,
+// which together pin that the root-node skip is per-statement rather than
+// per-body.
 
 // ── BT-3489: `self.field := ...` as a bare `match:` arm body ────────────────
 

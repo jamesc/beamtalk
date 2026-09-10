@@ -9,7 +9,7 @@ use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 ///
 /// `Utf8PathBuf`'s `Display`/`ToString` preserves native separators (backslash
 /// on Windows), which is wrong for values embedded in generated or protocol
-/// strings that must be byte-identical regardless of the developer's OS (BT-3067).
+/// strings that must be byte-identical regardless of the developer's OS.
 /// Backslash cannot appear as a legitimate path separator on Unix, so a plain
 /// byte-level replace is safe on all supported platforms.
 ///
@@ -35,9 +35,9 @@ pub fn normalize_path(path: &Utf8Path) -> Utf8PathBuf {
             }
             Utf8Component::ParentDir => match components.last().copied() {
                 // Already at the filesystem root — an extra `..` is a no-op
-                // rather than something to pop or accumulate (BT-2836 review
-                // finding: popping `RootDir` here would turn `/foo/../..`
-                // into `.` instead of `/`).
+                // rather than something to pop or accumulate: popping
+                // `RootDir` here would turn `/foo/../..` into `.` instead of
+                // `/`.
                 Some(Utf8Component::RootDir) => {}
                 // Nothing to pop yet, or a run of leading `..`s in a
                 // relative path — accumulate.
@@ -93,7 +93,7 @@ mod tests {
     fn normalize_path_parent_at_root() {
         // A `..` chain that consumes every real component and then hits
         // root must not pop `RootDir` itself — `/foo/../..` is still `/`,
-        // not `.` (BT-2836 review finding).
+        // not `.`.
         let path = Utf8PathBuf::from("/foo/../..");
         assert_eq!(normalize_path(&path), Utf8PathBuf::from("/"));
     }

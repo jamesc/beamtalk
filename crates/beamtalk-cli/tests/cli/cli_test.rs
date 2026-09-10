@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Subprocess tests for `beamtalk test` (BT-2084).
+//! Subprocess tests for `beamtalk test`.
 //!
 //! Verifies exit code mapping (pass = 0, fail = nonzero) and the text
 //! summary format. Uses a hermetic fixture project per test.
@@ -47,10 +47,9 @@ fn test_fails_for_failing_suite() {
 
 #[test]
 fn test_fails_with_e0402_for_internal_class_leak_in_test_file() {
-    // Regression for BT-2922: `beamtalk test`'s BUnit test-file compilation
-    // never set `current_package`, so E0401/E0402 visibility checks silently
-    // emitted zero diagnostics on the direct test-file path (the
-    // `build_packages` path was already covered by BT-2920). A test class
+    // `beamtalk test`'s BUnit test-file compilation must set
+    // `current_package` so E0401/E0402 visibility checks run on the direct
+    // test-file path (not just the `build_packages` path). A test class
     // leaking an internal class through a public method signature must fail
     // the test run, matching `beamtalk build`'s behaviour.
     let project = cli_common::fixture_project();

@@ -65,14 +65,14 @@ impl Analyser {
         for mutation in &mutations {
             match &mutation.kind {
                 MutationKind::Field { name } => {
-                    // BT-1140: Field assignments in Passed blocks are now supported via
+                    // Field assignments in Passed blocks are supported via
                     // Tier 2 state threading — the actor State IS the StateAcc, so
                     // field reads/writes inside the block propagate back to the caller.
                     //
-                    // BT-2797: Field assignments in blocks stored into an instance
-                    // field (`self.field := [block]`) are also now supported —
+                    // Field assignments in blocks stored into an instance
+                    // field (`self.field := [block]`) are also supported —
                     // every `self.field value(:...)` call site runtime-discriminates
-                    // Tier 1 vs Tier 2 (generalizing the BT-909 is_function/2
+                    // Tier 1 vs Tier 2 (generalizing the `is_function/2`
                     // precedent from Erlang FFI interop to Beamtalk-level block
                     // calls), regardless of which method performs the call.
                     //
@@ -82,13 +82,13 @@ impl Analyser {
                     // specific local's later uses are safe, but this pass has no
                     // equivalent whole-body lookahead, so it stays conservative.
                     //
-                    // BT-2797 (PR #2899 review fix): the field-stored exemption
+                    // The field-stored exemption
                     // is only safe when the block does NOT also capture and
                     // mutate an outer local. `generate_block_stateful` reads a
                     // captured local's `'__local__<var>'` key from the calling
                     // method's `StateAcc` with a fallback to the value closed
                     // over at block-*definition* time — correct for a block
-                    // invoked from the same method (BT-856), but wrong here: a
+                    // invoked from the same method, but wrong here: a
                     // field-stored block can be invoked from a *different*
                     // method whose `StateAcc` never had that key seeded, so the
                     // fallback silently returns the stale definition-time value
@@ -116,23 +116,23 @@ impl Analyser {
                     }
                 }
                 MutationKind::CapturedVariable { name } => {
-                    // BT-856 (ADR 0041 Phase 3): Captured variable mutations in Stored/Passed
-                    // blocks are supported via the Tier 2 stateful block protocol (BT-852).
+                    // ADR 0041 Phase 3: Captured variable mutations in Stored/Passed
+                    // blocks are supported via the Tier 2 stateful block protocol.
                     // State is threaded through the *calling method's own* StateAcc map, so
                     // mutations propagate correctly back to that same method — this is valid
                     // and working behaviour, and needs no diagnostic in that case.
                     //
-                    // BT-2809: that threading mechanism breaks down for a block stored into
+                    // That threading mechanism breaks down for a block stored into
                     // an instance field (`self.field := [block]`), because the field may be
-                    // invoked from a *different* method than the one that assigned it (the
-                    // whole point of BT-2797). `generate_block_stateful`'s captured-var
+                    // invoked from a *different* method than the one that assigned it.
+                    // `generate_block_stateful`'s captured-var
                     // codegen keys the mutation into `'__local__<var>'` on the *calling*
                     // method's own State — a different method's State was never seeded with
                     // that key, so the runtime fallback silently returns the value the
                     // variable had at block-*definition* time forever, and the stray key
                     // then leaks into the actor's persistent gen_server state once the call
-                    // site merges the returned state back in. Unlike a field mutation (BT-2797
-                    // made those cross-method-safe via runtime is_function/2 discrimination),
+                    // site merges the returned state back in. Unlike a field mutation (made
+                    // cross-method-safe via runtime is_function/2 discrimination),
                     // a captured local has no cross-method-visible home to thread through, so
                     // this is flagged the same way a field-write-plus-captured-local mix
                     // already is above (`has_captured_local_mutations`) — just for the
@@ -281,7 +281,7 @@ impl Analyser {
                     // Extract pattern-bound variable names so we can exclude them
                     // from captures. Without this, a pattern variable with the same
                     // name as an outer-scope variable would be incorrectly treated
-                    // as a captured variable (BT-655).
+                    // as a captured variable.
                     let (bindings, _) =
                         crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
                     let pattern_names: std::collections::HashSet<&str> =
@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn bt2809_captured_local_only_field_stored_block_produces_error() {
-        // BT-2809: a block stored in a field whose ONLY mutation is a captured
+        // A block stored in a field whose ONLY mutation is a captured
         // local (no field write) must be flagged — it can be invoked from a
         // different method whose State never seeded the captured variable's
         // '__local__' key, silently returning the stale definition-time value.
@@ -479,10 +479,10 @@ mod tests {
 
     #[test]
     fn captured_local_only_stored_in_local_var_same_method_produces_no_error() {
-        // BT-856/BT-2809 sanity check: a block stored in a *local variable* (not
+        // Sanity check: a block stored in a *local variable* (not
         // a field) with only a captured-local mutation must remain undiagnosed —
         // codegen's prescan_tier2_local_vars proves per-method safety for this
-        // shape (BT-2797), and it's the well-established BT-856 pattern.
+        // shape, and it's the well-established Tier 2 pattern.
         let src = "Object subclass: Foo\n  bar =>\n    count := 0\n    blk := [:n | count := count + n]\n    blk value: 5";
         let module = parse_bt(src);
         let result = analyse(&module);
@@ -496,7 +496,7 @@ mod tests {
         );
     }
 
-    // BT-3347: the tests below close specific gaps left by the tests above —
+    // The tests below close specific gaps left by the tests above —
     // an `Unknown` block context, mutation-kind/context combinations that
     // must produce *no* diagnostic, and `collect_captures_and_mutations`
     // recursion arms (message sends, cascades, plain field reads, returns,
@@ -528,7 +528,7 @@ mod tests {
 
     #[test]
     fn field_mutation_in_passed_block_produces_no_error() {
-        // BT-1140: field mutation in a Passed (message-argument) block is
+        // Field mutation in a Passed (message-argument) block is
         // supported via Tier 2 state threading, so it must not be flagged.
         let src = "Object subclass: Foo\n  state: x = 0\n  bar =>\n    self doWith: [self.x := 1]";
         let module = parse_bt(src);
@@ -560,7 +560,7 @@ mod tests {
 
     #[test]
     fn pure_field_write_only_field_stored_block_produces_no_error() {
-        // BT-2797: a block stored in a field whose ONLY mutation is a field
+        // A block stored in a field whose ONLY mutation is a field
         // write (no captured local) is the supported cross-method-safe case
         // — `is_field_stored` should suppress the diagnostic entirely.
         let src = "Actor subclass: Ctr\n  state: total = 0\n  state: callback = nil\n\n  setup =>\n    self.callback := [self.total := 1]\n";
@@ -660,7 +660,7 @@ mod tests {
 
     #[test]
     fn collect_captures_via_match_arm_pattern_exclusion() {
-        // BT-655: a match arm's own pattern-bound variable ('n') must not be
+        // A match arm's own pattern-bound variable ('n') must not be
         // reported as a capture of an outer variable with the same name —
         // and here there is no such outer variable, so 'n' must never
         // appear. The guard-less wildcard arm's body still captures the

@@ -7,7 +7,7 @@
 //!
 //! [`SemanticFacts`] is a side-car produced before code generation begins.
 //! Codegen consumes it via hash-map lookup instead of re-deriving facts
-//! inline at every call site (BT-1288).
+//! inline at every call site.
 
 use crate::ast::{
     Block, CascadeMessage, Expression, ExpressionStatement, MessageSelector, MethodKind, Module,
@@ -33,7 +33,7 @@ pub enum DispatchKind {
     Unknown,
 }
 
-/// BT-3423 (ADR 0118 §Decision 7): "does this expression sub-tree have a
+/// ADR 0118 §Decision 7: "does this expression sub-tree have a
 /// state effect that needs threading" — one semantic fact replacing the
 /// several codegen predicates (`needs_mutation_threading`'s self-send arm,
 /// `contains_hoistable_self_send`, `control_flow_has_mutations`, …) that
@@ -173,7 +173,7 @@ pub struct SemanticFacts {
     pub block_profiles: HashMap<Span, BlockProfile>,
     /// Dispatch classification for every [`Expression::MessageSend`] node, keyed by message span.
     pub dispatch_kinds: HashMap<Span, DispatchKind>,
-    /// BT-3423: [`StateEffects`] fact for every expression node reachable from
+    /// [`StateEffects`] fact for every expression node reachable from
     /// a method/block body, keyed by that node's span. See [`StateEffects`]'s
     /// doc comment for how it's computed and the closure-boundary rule.
     pub state_effects: HashMap<Span, StateEffects>,
@@ -349,15 +349,16 @@ fn block_has_nlr(block: &Block) -> bool {
 
 #[cfg(any(test, feature = "test"))]
 thread_local! {
-    /// BT-3123 test-only instrumentation: counts calls to
+    /// Test-only instrumentation: counts calls to
     /// [`compute_semantic_facts`]. Used by a codegen test to verify that a driver
     /// threading an `AnalysisResult` into codegen via `CodegenOptions::with_analysis`
     /// doesn't trigger a second pass. `#[cfg(any(test, feature = "test"))]` —
-    /// compiled out of plain release/production builds. BT-3362 (ADR 0117
-    /// Decision step 5): widened from `#[cfg(test)]` — the codegen test that
-    /// reads this now lives in the standalone `beamtalk-codegen` crate, whose
-    /// own tests need the `feature = "test"` half to see it (`#[cfg(test)]`
-    /// alone only applies to this crate's own `--cfg test` build).
+    /// compiled out of plain release/production builds (ADR 0117
+    /// Decision step 5): the `feature = "test"` half exists because the
+    /// codegen test that reads this lives in the standalone
+    /// `beamtalk-codegen` crate, whose own tests need it to see this
+    /// (`#[cfg(test)]` alone only applies to this crate's own `--cfg test`
+    /// build).
     ///
     /// Thread-local, not a shared global counter — see
     /// `type_checker::CHECK_MODULE_CALL_COUNT`'s doc for why a global counter's
@@ -373,7 +374,7 @@ thread_local! {
 /// - Populates `dispatch_kinds` for every [`Expression::MessageSend`] node.
 /// - Populates `methods_with_block_nlr` for methods whose body contains `^` inside a block.
 pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
-    // BT-3123 test-only instrumentation — see `COMPUTE_SEMANTIC_FACTS_CALL_COUNT`'s doc.
+    // Test-only instrumentation — see `COMPUTE_SEMANTIC_FACTS_CALL_COUNT`'s doc.
     #[cfg(any(test, feature = "test"))]
     COMPUTE_SEMANTIC_FACTS_CALL_COUNT.with(|c| c.set(c.get() + 1));
 
@@ -628,7 +629,7 @@ fn classify_dispatch(
     DispatchKind::Unknown
 }
 
-/// BT-3423: computes the [`StateEffects`] fact for `expr` directly, without
+/// Computes the [`StateEffects`] fact for `expr` directly, without
 /// consulting or populating a `SemanticFacts` side-car — the fallback
 /// [`SemanticFacts::state_effects_or_compute`] uses when facts haven't been
 /// computed for the enclosing module (mirrors `has_block_nlr_or_walk`'s
@@ -1352,7 +1353,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
-    // StateEffects (BT-3423 / ADR 0118 §7)
+    // StateEffects (ADR 0118 §7)
     // ---------------------------------------------------------------
 
     fn self_send(name: &str, span: Span) -> Expression {

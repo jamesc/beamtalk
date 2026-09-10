@@ -10,15 +10,15 @@
 //! dependency `.beam` files into a [`NativeTypeRegistry`](crate::semantic_analysis::type_checker::NativeTypeRegistry)
 //! via a `beamtalk_build_worker` BEAM node (ADR 0075).
 //!
-//! BT-2859: This lives in `beamtalk-core` — not `beamtalk-cli` — specifically
+//! This lives in `beamtalk-core` — not `beamtalk-cli` — specifically
 //! so `beamtalk-lsp` can call the same single source of truth `beamtalk
 //! build`/`beamtalk lint` (via `beamtalk-cli`) and the MCP `lint`/
-//! `diagnostic_summary` tools (BT-2858, via `beamtalk-cli`'s
+//! `diagnostic_summary` tools (via `beamtalk-cli`'s
 //! `native_type_specs` module, now a thin wrapper around this one) already
 //! share, without a `beamtalk-lsp -> beamtalk-cli` dependency (forbidden —
 //! see `docs/development/architecture-principles.md`, and the identical
 //! rationale for `beamtalk.toml` `[diagnostics]` table parsing living here,
-//! ADR 0100 Rule 3 / BT-2800).
+//! ADR 0100 Rule 3).
 //!
 //! [`extract_type_specs`] is deliberately layout-agnostic — it takes an
 //! explicit cache directory and dependency ebin directories rather than a
@@ -43,7 +43,7 @@ use tracing::{debug, info, instrument, warn};
 /// OTP kernel logger configuration that redirects the default handler to stderr.
 ///
 /// Used as `-kernel logger <this>` VM arg across REPL, workspace, and compilation
-/// nodes (BT-1431). Ensures early boot OTP logger events go to stderr instead of
+/// nodes. Ensures early boot OTP logger events go to stderr instead of
 /// stdout, preventing them from being lost (detached nodes) or mixed into protocol
 /// output (REPL/compilation nodes).
 pub const KERNEL_LOGGER_STDERR: &str =
@@ -242,15 +242,15 @@ struct TypeCacheEntry {
     /// skip the entry if the live mtime no longer matches what was cached.
     /// Persisting an absolute path means `beamtalk lint` can validate the
     /// cache regardless of which cwd it is invoked from. Empty only for
-    /// legacy entries written before BT-2139 — those are tolerated as fresh
+    /// legacy entries that predate this field — those are tolerated as fresh
     /// until the next build rewrites them with a path.
     #[serde(default)]
     beam_path: String,
     /// The producing compiler's Erlang→Beamtalk type-mapping stamp — a
     /// content hash of `beamtalk_spec_reader.erl` baked in at compile time
-    /// via `BEAMTALK_SPEC_MAPPING_STAMP` (BT-2852). Compared against
+    /// via `BEAMTALK_SPEC_MAPPING_STAMP`. Compared against
     /// [`current_spec_mapping_stamp`] on read; a mismatch (including the
-    /// empty default for entries written before BT-2852) is a cache miss, so
+    /// empty default for entries that predate this field) is a cache miss, so
     /// a compiler upgrade that changes how Erlang types map to Beamtalk types
     /// invalidates stale FFI signatures instead of waiting for an unrelated
     /// `.beam` mtime or OTP-version change that may never happen.
@@ -261,7 +261,7 @@ struct TypeCacheEntry {
     specs_line: String,
 }
 
-/// The current compiler's Erlang→Beamtalk type-mapping stamp (BT-2852) — see
+/// The current compiler's Erlang→Beamtalk type-mapping stamp — see
 /// [`TypeCacheEntry::mapping_stamp`]. Baked in at compile time by
 /// `beamtalk-cli/build.rs` via `beamtalk_build::emit_spec_mapping_stamp`, so
 /// comparing it is a cheap `&str` comparison, not a per-build filesystem hash.
@@ -279,7 +279,7 @@ pub fn current_spec_mapping_stamp() -> &'static str {
 /// (matching mtime), the protocol line is replayed into the
 /// `NativeTypeRegistry` without spawning a BEAM node.
 ///
-/// # Tiers (BT-2470)
+/// # Tiers
 ///
 /// The cache has two tiers:
 ///
@@ -312,7 +312,7 @@ impl TypeCache {
     }
 
     /// Creates a two-tier cache: a project-local tier plus a shared,
-    /// OTP-version-keyed tier (BT-2470).
+    /// OTP-version-keyed tier.
     pub fn with_shared(local_dir: Utf8PathBuf, shared_dir: Utf8PathBuf) -> Self {
         Self {
             local_dir,
@@ -412,8 +412,8 @@ impl TypeCache {
     /// Reads a fresh cache entry from `base`, or `None` if missing/stale.
     ///
     /// Freshness requires both the `.beam` mtime to match *and* the entry's
-    /// mapping stamp to match the running compiler's (BT-2852) — an entry
-    /// written before BT-2852 carries the empty default stamp, which never
+    /// mapping stamp to match the running compiler's — an entry
+    /// that predates this field carries the empty default stamp, which never
     /// matches a real hash, so it is a miss rather than a crash.
     fn read_fresh(
         base: &Utf8Path,
@@ -437,7 +437,7 @@ impl TypeCache {
 
     /// Writes a single cache entry into `base`, creating the directory if
     /// needed. The write is atomic (temp file + rename) so concurrent builds
-    /// sharing the OTP tier never observe a half-written entry (BT-2470).
+    /// sharing the OTP tier never observe a half-written entry.
     fn write_entry(
         base: &Utf8Path,
         module_name: &str,
@@ -450,7 +450,7 @@ impl TypeCache {
             debug!("Failed to create type cache dir {base}: {e}");
             return;
         }
-        // BT-2139: persist an absolute (canonicalised) path so freshness
+        // Persist an absolute (canonicalised) path so freshness
         // validation in `load_type_cache_registry` works when `beamtalk lint`
         // runs from a different working directory than the build that wrote
         // the cache. If `canonicalize_utf8` fails (typically because the
@@ -524,7 +524,7 @@ impl TypeCache {
 
 /// Returns the shared, OTP-version-keyed type-spec cache directory for the
 /// given OTP version string, or `None` if no suitable base directory can be
-/// determined (BT-2470).
+/// determined.
 ///
 /// The OTP portion of the FFI type cache (stdlib, kernel, erts, crypto, …)
 /// only changes when the OTP/ERTS version changes — it is not project-specific.
@@ -595,7 +595,7 @@ pub fn extract_beam_specs(
 }
 
 /// Like [`extract_beam_specs`], but adds a shared, OTP-version-keyed cache tier
-/// (BT-2470) in front of the project-local `local_cache_dir`.
+/// in front of the project-local `local_cache_dir`.
 ///
 /// On a fresh `_build/` (e.g. a newly cloned workspace) the local tier misses
 /// for every OTP module, but a warm shared tier — populated by a previous build
@@ -713,7 +713,7 @@ fn extract_beam_specs_with_cache(
 /// Reads `<module>_<hash>.json` files from `cache_dir` and replays the
 /// freshest cached `specs_line` per module into a new [`NativeTypeRegistry`].
 ///
-/// Used by `beamtalk lint` (BT-2134) to populate the same FFI type registry
+/// Used by `beamtalk lint` to populate the same FFI type registry
 /// `beamtalk build` uses, so the type checker's "Dynamic in typed class"
 /// warning agrees with build on whether an FFI call is typed. Without this,
 /// lint sees every `(Erlang m) f:` call as `Dynamic(UntypedFfi)` even when
@@ -722,16 +722,16 @@ fn extract_beam_specs_with_cache(
 /// `TypeCache::cache_path` keys filenames by the BEAM path hash, so multiple
 /// `<module>_<hash>.json` entries can accumulate after dependency upgrades or
 /// BEAM path changes. Replaying every file would let `read_dir` order pick a
-/// stale signature, reintroducing the lint/build disagreement BT-2134 fixed.
+/// stale signature, reintroducing the lint/build disagreement this dedup avoids.
 /// Instead, group by module name and pick the entry with the latest file
 /// mtime — that's the one the most recent build wrote, and it matches what
 /// build's `extract_beam_specs` resolved for the current BEAM set.
 ///
-/// Each entry's `beam_path` is re-stat'd against the live filesystem (BT-2139).
+/// Each entry's `beam_path` is re-stat'd against the live filesystem.
 /// If the underlying `.beam` has changed since the build wrote the cache —
 /// e.g. `cargo build` rebuilt a NIF module, or an OTP upgrade replaced
 /// `gen_tcp.beam` — the entry is skipped so lint does not warn off stale FFI
-/// signatures. Entries written before BT-2139 carry an empty `beam_path`;
+/// signatures. Legacy entries that predate `beam_path` carry an empty value;
 /// those are pessimistically accepted as fresh until the next build rewrites
 /// them with a path.
 ///
@@ -815,16 +815,15 @@ fn sanitize_module_name(name: &str) -> &str {
 
 /// Returns `true` if the cache entry still describes the live `.beam` file —
 /// i.e. the file at `beam_path` exists and its mtime matches what was cached
-/// — *and* the entry's type-mapping stamp matches the running compiler's
-/// (BT-2852).
+/// — *and* the entry's type-mapping stamp matches the running compiler's.
 ///
-/// The mapping-stamp check is evaluated first: an entry written before
-/// BT-2852 carries the empty default stamp, which never matches a real hash,
-/// so every pre-BT-2852 entry is a miss (cache rebuild), never a crash —
+/// The mapping-stamp check is evaluated first: an entry that predates this
+/// field carries the empty default stamp, which never matches a real hash,
+/// so every such entry is a miss (cache rebuild), never a crash —
 /// including legacy entries with an empty `beam_path` that the check below
 /// would otherwise pessimistically accept.
 ///
-/// Legacy entries written before BT-2139 carry an empty `beam_path`; we have
+/// Legacy entries that predate `beam_path` carry an empty value; we have
 /// no way to validate them, so — once the mapping stamp matches — they are
 /// pessimistically accepted as fresh. The next `beamtalk build` rewrites them
 /// with a path, which then enables validation on subsequent lint runs.
@@ -916,7 +915,7 @@ fn extract_specs_from_child(
 /// Spawns a `beamtalk_build_worker` BEAM node with the given `-pa` path arguments.
 ///
 /// Applies the standard boot flags (`-noshell -mode minimal -boot no_dot_erlang`) and
-/// the kernel logger redirect (BT-1431).  Callers supply the variable `-pa` paths and
+/// the kernel logger redirect. Callers supply the variable `-pa` paths and
 /// add a context-specific `wrap_err` message on the returned `Result`.
 ///
 /// # Errors
@@ -929,7 +928,7 @@ pub fn spawn_build_worker_node(pa_args: &[String]) -> Result<std::process::Child
         .arg("minimal")
         .arg("-boot")
         .arg("no_dot_erlang")
-        // Redirect OTP default logger to stderr (BT-1431). Without this, logger
+        // Redirect OTP default logger to stderr. Without this, logger
         // output goes to stdout and mixes into the compilation protocol.
         .arg("-kernel")
         .arg("logger")
@@ -952,7 +951,7 @@ pub fn spawn_build_worker_node(pa_args: &[String]) -> Result<std::process::Child
 /// directories are added to the `-pa` list alongside the runtime's own ebin
 /// dirs so that sibling modules (e.g. a package's own `native/` ebin dir, per
 /// ADR 0075 "package-bundled native code") can be resolved by `code:which/1`
-/// when a `-spec` references one of their remote types (BT-2861).
+/// when a `-spec` references one of their remote types.
 fn spawn_build_worker_for_specs(beam_files: &[Utf8PathBuf]) -> Result<std::process::Child> {
     let (runtime_dir, layout) = find_runtime_dir_with_layout().map_err(|_| {
         miette::miette!(
@@ -989,7 +988,7 @@ fn spawn_build_worker_for_specs(beam_files: &[Utf8PathBuf]) -> Result<std::proce
         paths.workspace_ebin.clone(),
     ];
 
-    // Also add the ebin directories the beam files themselves live in (BT-2861).
+    // Also add the ebin directories the beam files themselves live in.
     // A package's own native/ ebin dir isn't one of the runtime dirs above, so
     // without this a module's `-spec` referencing a sibling native module's
     // type (e.g. `beamtalk_http_response:t()`) can't be resolved by
@@ -1076,7 +1075,7 @@ fn read_specs_protocol(
     Ok(results)
 }
 
-/// Result of probing the OTP installation for spec extraction (BT-2470).
+/// Result of probing the OTP installation for spec extraction.
 #[derive(Debug, Default, Clone)]
 pub struct OtpDiscovery {
     /// OTP version key (`<otp_release>-<erts_version>`, e.g. `27-15.0.1`) used
@@ -1092,7 +1091,7 @@ pub struct OtpDiscovery {
 /// files.
 ///
 /// This is the **same** key [`discover_otp_beam_files`] reports and the same one
-/// that keys the shared type-spec cache (BT-2470). ADR 0098 provenance stamps
+/// that keys the shared type-spec cache. ADR 0098 provenance stamps
 /// must use this compound — not bare `erlang:system_info(otp_release)`, which
 /// returns only `"27"` — so a minor OTP/ERTS bump still invalidates artifacts.
 ///
@@ -1141,7 +1140,7 @@ pub fn discover_otp_version() -> Option<String> {
 pub fn discover_otp_beam_files() -> Result<OtpDiscovery> {
     // Apps we want type specs from. `erts` is included so `erlang.beam`
     // (BIFs like `whereis/1`, `spawn/3`, `self/0`) gets covered — its specs
-    // are on disk even though `code:which(erlang)` returns `preloaded`. BT-2159.
+    // are on disk even though `code:which(erlang)` returns `preloaded`.
     //
     // We probe `code:lib_dir(App)` per app rather than globbing `<lib_dir>/<app>-*`
     // because OTP layouts differ: upstream/kerl/brew put `erts-<vsn>` directly
@@ -1153,7 +1152,7 @@ pub fn discover_otp_beam_files() -> Result<OtpDiscovery> {
 
     let apps_atom_list = COMMON_APPS.join(",");
     // The probe prints one `otp-version:<release>-<erts>` line (the shared
-    // cache key, BT-2470) followed by one ebin directory per discovered app.
+    // cache key) followed by one ebin directory per discovered app.
     let probe = format!(
         "io:format(\"otp-version:~s-~s~n\", [erlang:system_info(otp_release), erlang:system_info(version)]), \
          lists:foreach(fun(App) -> case code:lib_dir(App) of {{error,_}} -> ok; Dir -> io:format(\"~s~n\", [filename:join(Dir, \"ebin\")]) end end, [{apps_atom_list}]), halt()."
@@ -1317,15 +1316,15 @@ pub fn discover_dependency_beam_files(ebin_dirs: &[Utf8PathBuf]) -> Vec<Utf8Path
     beam_files
 }
 
-/// ADR 0075 Phase 1 / BT-2851 / BT-2859: Extract type specs from OTP and
+/// ADR 0075 Phase 1: Extract type specs from OTP and
 /// dependency `.beam` files and cache them.
 ///
 /// This is the single source of truth for populating a [`NativeTypeRegistry`]
 /// from `.beam` files, shared by `beamtalk build`/`beamtalk lint` (via
 /// `beamtalk-cli`'s `native_type_specs::extract_project_type_specs`, which
 /// resolves `cache_dir`/`dependency_ebin_dirs` from a `BuildLayout`),
-/// `beamtalk-mcp`'s `lint`/`diagnostic_summary` tools (BT-2858, same path),
-/// and `beamtalk-lsp` (BT-2859). All callers obtain `dependency_ebin_dirs`
+/// `beamtalk-mcp`'s `lint`/`diagnostic_summary` tools (same path),
+/// and `beamtalk-lsp`. All callers obtain `dependency_ebin_dirs`
 /// via [`collect_project_dependency_ebin_dirs`].
 ///
 /// `dependency_ebin_dirs` should include the project's path-dependency ebin
@@ -1369,7 +1368,7 @@ pub fn extract_type_specs(
         return None;
     }
 
-    // BT-2470: OTP specs go through the shared, version-keyed cache tier (which
+    // OTP specs go through the shared, version-keyed cache tier (which
     // survives a wiped `_build/`); dependency/native specs stay project-local.
     let shared_dir = otp.version.as_deref().and_then(shared_otp_cache_dir);
     if let Some(shared) = &shared_dir {
@@ -1415,7 +1414,7 @@ mod tests {
     use tempfile::TempDir;
 
     // -----------------------------------------------------------------------
-    // Runtime discovery (moved from beamtalk-cli's repl_startup, BT-2859)
+    // Runtime discovery (moved from beamtalk-cli's repl_startup)
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1532,7 +1531,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // extract_type_specs (BT-2859)
+    // extract_type_specs
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1647,11 +1646,11 @@ mod tests {
         );
     }
 
-    /// BT-2852: A cache entry written by a *different* compiler build — same
+    /// A cache entry written by a *different* compiler build — same
     /// module, same `.beam` mtime, same path, but a different
     /// `mapping_stamp` — must be treated as a miss. This is the exact warm-cache
-    /// scenario the issue describes: a `beamtalk_spec_reader.erl` mapping-logic
-    /// change (e.g. BT-2817 widening `string()` to `String | List`) must
+    /// scenario that matters: a `beamtalk_spec_reader.erl` mapping-logic
+    /// change (e.g. widening `string()` to `String | List`) must
     /// invalidate previously-cached specs even though nothing about the
     /// `.beam` file itself changed.
     #[test]
@@ -1723,7 +1722,7 @@ mod tests {
         );
     }
 
-    /// BT-2470: a fresh project (empty local tier) resolves OTP specs via the
+    /// A fresh project (empty local tier) resolves OTP specs via the
     /// shared tier, and the shared hit is mirrored into the local tier so the
     /// LSP and `beamtalk lint` keep finding specs in `_build/type_cache/`.
     #[test]
@@ -1803,7 +1802,7 @@ mod tests {
         assert!(dir.is_none(), "empty version must not yield a cache dir");
     }
 
-    /// BT-2159: `erts` must be in the OTP discovery set so `erlang.beam`
+    /// `erts` must be in the OTP discovery set so `erlang.beam`
     /// (BIFs like `whereis/1`, `spawn/3`, `self/0`) gets spec extraction.
     /// `code:which(erlang)` returns `preloaded`, but the `.beam` exists in
     /// `<erts-app>/ebin/erlang.beam` with full abstract code.
@@ -1825,7 +1824,7 @@ mod tests {
             beams.len(),
             beams
         );
-        // BT-2470: a successful probe must also report the OTP version key
+        // A successful probe must also report the OTP version key
         // used to scope the shared type-spec cache.
         assert!(
             discovery.version.is_some(),

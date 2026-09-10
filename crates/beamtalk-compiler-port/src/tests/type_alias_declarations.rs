@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0108 Phase 8 (BT-2902): type Name = ... REPL declarations -- with and without a doc comment, rejecting multiple declarations in one turn, and `known_type_aliases` resolving/round-tripping an alias declared in an earlier turn.
+//! ADR 0108 Phase 8: type Name = ... REPL declarations -- with and without a doc comment, rejecting multiple declarations in one turn, and `known_type_aliases` resolving/round-tripping an alias declared in an earlier turn.
 
 use super::*;
 
 // -------------------------------------------------------------------
-// ADR 0108 Phase 8 (BT-2902): `type Name = ...` REPL declarations
+// ADR 0108 Phase 8: `type Name = ...` REPL declarations
 // -------------------------------------------------------------------
 
 /// True when a response field is present and is the atom `undefined`

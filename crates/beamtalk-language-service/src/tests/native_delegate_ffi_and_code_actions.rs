@@ -6,7 +6,7 @@
 
 use super::common::*;
 
-// ── native delegate tests (BT-1215) ────────────────────────────────────
+// ── native delegate tests ────────────────────────────────────
 
 #[test]
 fn check_native_delegate_on_self_delegate_method() {
@@ -157,7 +157,7 @@ fn check_ffi_call_line_is_none_without_registry() {
     assert!(ffi.unwrap().line.is_none());
 }
 
-// ── code_actions tests (BT-1067) ────────────────────────────────────────
+// ── code_actions tests ────────────────────────────────────────
 
 /// Helper: byte length of a source string as `u32` (test-only).
 #[expect(

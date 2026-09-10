@@ -8,7 +8,7 @@
 //! Parses `beamtalk.toml` manifests that define a package's identity and metadata.
 //! See ADR 0026 for the package definition and manifest format.
 //!
-//! BT-2823: This module lives in the `beamtalk_cli` **library** crate (not
+//! This module lives in the `beamtalk_cli` **library** crate (not
 //! the `beamtalk` binary) so `beamtalk-mcp` can depend on it too. The
 //! `beamtalk` binary's `crate::commands::manifest` is a `pub use
 //! beamtalk_cli::manifest;` re-export (see `commands/mod.rs`) that keeps
@@ -266,7 +266,7 @@ fn validate_dependency(name: &str, dep: &TomlDependency) -> Result<DependencySpe
 /// ranges are deliberately not supported, so the resolved graph is always
 /// reproducible without a constraint solver.
 ///
-/// `pub` (rather than crate-private) so `deps add --version` (BT-2979, in the
+/// `pub` (rather than crate-private) so `deps add --version` (in the
 /// `beamtalk` binary crate that depends on this lib crate) can validate a
 /// user-supplied version up front, with the identical error a manual
 /// `beamtalk.toml` edit would get, before touching the registry index.
@@ -306,7 +306,7 @@ pub fn validate_registry_dependency(name: &str, version: &str) -> Result<Depende
 /// Every segment must be a non-empty run of ASCII digits. Returns a short
 /// human-readable reason on failure (the caller adds the surrounding context).
 ///
-/// `pub` so `commands::version` (`beamtalk version X.Y.Z`, BT-2980) can apply
+/// `pub` so `commands::version` (`beamtalk version X.Y.Z`) can apply
 /// the same exact-version rule a registry dependency's version is held to,
 /// rather than duplicating it.
 ///
@@ -607,7 +607,7 @@ fn parse_native_dependencies(native: Option<&NativeSection>) -> Result<NativeDep
     Ok(result)
 }
 
-// ADR 0100 Rule 3 (BT-2793) / BT-2800: `DiagnosticSeverityOverride` and
+// ADR 0100 Rule 3: `DiagnosticSeverityOverride` and
 // `DiagnosticsTable` — plus the `[diagnostics]`-table parser
 // (`parse_diagnostics_table`) — moved to `beamtalk-core`
 // (`beamtalk_core::compilation::diagnostics_policy`) so that `beamtalk-lsp`
@@ -1514,7 +1514,7 @@ utils = { path = "../my-utils" }
         );
     }
 
-    // --- Registry dependency parsing (BT-2978) ---
+    // --- Registry dependency parsing ---
 
     /// Render an error as a single line.
     ///
@@ -1700,8 +1700,8 @@ url = "https://example.test/registry"
 
     /// A Windows path in `[registry] url` must be written as a TOML *literal*
     /// string — in a basic string its backslashes are escapes, and `\U` in
-    /// particular is a unicode escape that fails to parse (the same hazard as
-    /// BT-1737's `file://` handling).
+    /// particular is a unicode escape that fails to parse (the same hazard
+    /// `file://` handling has).
     #[test]
     fn test_registry_url_accepts_windows_path_as_literal_string() {
         let temp = TempDir::new().unwrap();
@@ -2602,7 +2602,7 @@ utils = { path = "../utils" }
         }
     }
 
-    // --- BT-2793: ADR 0100 Rule 3 `[diagnostics]` table tests ---
+    // --- ADR 0100 Rule 3 `[diagnostics]` table tests ---
 
     #[test]
     fn test_parse_no_diagnostics_section() {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Cross-boundary conformance fixture for the ADR 0110 class-var shadow
-//! write-through contract (ADR 0111 Phase D / BT-3135).
+//! write-through contract (ADR 0111 Phase D).
 //!
 //! CLAUDE.md's duplication rule: "A rule crossing the Rust/Erlang boundary
 //! needs a shared conformance fixture or code generation, not a comment."

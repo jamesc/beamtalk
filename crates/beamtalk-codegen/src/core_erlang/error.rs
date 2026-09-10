@@ -339,6 +339,29 @@ pub enum CodeGenError {
 }
 
 impl CodeGenError {
+    /// BT-3488: builds a [`CodeGenError::FieldAssignmentInUnsupportedBlock`]
+    /// from just the field name and location, deriving `field_capitalized`
+    /// (the `addTo{Field}:` method suggestion in the message) here.
+    ///
+    /// The single place that capitalization happens, shared by both producers
+    /// of this error — `validate_stored_closure` (the generic stored/opaque
+    /// block path, BT-2792) and `reject_unthreadable_value_self_field_write` (the
+    /// value-type-write-inside-a-loop-body path) — so the two can't drift
+    /// (CLAUDE.md's no-duplicate-implementations rule).
+    pub(super) fn field_assignment_in_unsupported_block(field: &str, location: String) -> Self {
+        let mut chars = field.chars();
+        let field_capitalized = chars
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_default()
+            + chars.as_str();
+        CodeGenError::FieldAssignmentInUnsupportedBlock {
+            field: field.to_string(),
+            field_capitalized,
+            location,
+        }
+    }
+
     /// Returns the source span associated with this error, if any.
     ///
     /// Consumers with source text can use this for rich error formatting:
@@ -355,3 +378,94 @@ impl CodeGenError {
 
 /// Result type for code generation operations.
 pub type Result<T> = std::result::Result<T, CodeGenError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use beamtalk_core::source_analysis::Span;
+
+    #[test]
+    fn span_returns_some_for_unsupported_feature() {
+        let span = Span::new(5, 15);
+        let err = CodeGenError::UnsupportedFeature {
+            feature: "closures".to_string(),
+            span: Some(span),
+        };
+        assert_eq!(err.span(), Some(span));
+    }
+
+    #[test]
+    fn span_returns_some_for_unmapped_primitive() {
+        let span = Span::new(0, 5);
+        let err = CodeGenError::UnmappedPrimitive {
+            class: "Integer".to_string(),
+            selector: "factorial".to_string(),
+            span: Some(span),
+        };
+        assert_eq!(err.span(), Some(span));
+    }
+
+    #[test]
+    fn span_returns_none_for_internal() {
+        let err = CodeGenError::Internal("some error".to_string());
+        assert_eq!(err.span(), None);
+    }
+
+    #[test]
+    fn span_returns_none_for_class_var_assignment_in_threaded_body() {
+        let err = CodeGenError::ClassVarAssignmentInThreadedBody {
+            field: "counter".to_string(),
+            location: "MyClass:myMethod:5".to_string(),
+        };
+        assert_eq!(err.span(), None);
+    }
+
+    #[test]
+    fn span_returns_none_for_block_arity_mismatch() {
+        let err = CodeGenError::BlockArityMismatch {
+            selector: "ifNotNil:".to_string(),
+            arity: 2,
+        };
+        assert_eq!(err.span(), None);
+    }
+
+    #[test]
+    fn display_unsupported_feature_with_span_includes_offset() {
+        let err = CodeGenError::UnsupportedFeature {
+            feature: "closures".to_string(),
+            span: Some(Span::new(10, 20)),
+        };
+        let s = err.to_string();
+        assert!(s.contains("closures"), "expected 'closures' in: {s}");
+        assert!(
+            s.contains("at offset 10"),
+            "expected 'at offset 10' in: {s}"
+        );
+    }
+
+    #[test]
+    fn display_unsupported_feature_without_span_omits_offset() {
+        // Exercises the `None => Ok(())` branch in DisplayOptionalSpan::fmt.
+        let err = CodeGenError::UnsupportedFeature {
+            feature: "closures".to_string(),
+            span: None,
+        };
+        let s = err.to_string();
+        assert!(s.contains("closures"), "expected 'closures' in: {s}");
+        assert!(!s.contains("at offset"), "unexpected 'at offset' in: {s}");
+    }
+
+    #[test]
+    fn display_block_arity_mismatch() {
+        let err = CodeGenError::BlockArityMismatch {
+            selector: "ifNotNil:".to_string(),
+            arity: 2,
+        };
+        let s = err.to_string();
+        assert!(s.contains("ifNotNil:"), "expected 'ifNotNil:' in: {s}");
+        assert!(
+            s.contains("0 or 1 arguments"),
+            "expected '0 or 1 arguments' in: {s}"
+        );
+    }
+}

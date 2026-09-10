@@ -15,7 +15,7 @@ fn s() -> Span {
 }
 
 /// Index of the `HANDLERS` entry named `name`, or panics — shared by the
-/// BT-3474 ordering tests below.
+/// ordering tests below.
 fn handlers_index_of(name: &str) -> usize {
     super::HANDLERS
         .iter()
@@ -35,7 +35,7 @@ fn handlers_have_unique_names() {
     }
 }
 
-/// BT-3474: `character_typed` must precede `protoobject`/`object` in
+/// `character_typed` must precede `protoobject`/`object` in
 /// `HANDLERS` — those two unconditionally claim `class`/`respondsTo:`/
 /// `perform:` family selectors for *any* receiver (keyed on runtime
 /// `class_of/1`), so a Character-typed receiver's `class`/`respondsTo:`/
@@ -673,7 +673,7 @@ fn character_value_factory_receiver_dispatches_to_character_module() {
     );
 }
 
-// ─── BT-3466: generate_field_assignment_open (Closure::Open) × FieldWriteSite ─
+// ─── generate_field_assignment_open (Closure::Open) × FieldWriteSite ─
 
 /// Builds `self.<field_name> := <value>` as an `Expression::Assignment` over
 /// a `self`-receiver `FieldAccess` target — the shape
@@ -704,11 +704,10 @@ fn test_field_assignment_open_actor_threads_state() {
     assert_eq!(val_var, "_Val1");
 }
 
-/// BT-3466's actual bug fix: before this issue,
-/// `generate_field_assignment_open` had no `ValueType` arm at all — a
-/// value-type field write reaching it (from inside a loop/conditional/block
-/// body) silently threaded through the actor `State`/`StateAcc` map, a
-/// variable that does not exist in a value-type method, instead of `Self`.
+/// `generate_field_assignment_open`'s `ValueType` arm: a value-type field
+/// write reaching it (from inside a loop/conditional/block body) threads
+/// through `Self`, not the actor `State`/`StateAcc` map — a variable that
+/// does not exist in a value-type method.
 #[test]
 fn test_field_assignment_open_value_type_threads_self() {
     let mut generator = CoreErlangGenerator::new("test");
@@ -728,7 +727,7 @@ fn test_field_assignment_open_value_type_threads_self() {
 }
 
 /// A class-var write directly inside a Letrec loop body that threads
-/// `ClassVars` through the loop's own recursive tail call (BT-3168) —
+/// `ClassVars` through the loop's own recursive tail call —
 /// `generate_field_assignment_open`'s one pre-existing `ClassVar` arm.
 #[test]
 fn test_field_assignment_open_class_var_threads_class_vars_with_shadow_write() {

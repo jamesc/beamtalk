@@ -1,17 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2240: declaration-merge in textDocument/references, exercised through the cold-file (AST-fallback) path since the runtime path needs a live `beamtalk_workspace` WebSocket the test harness doesn't spin up -- covers the includeDeclaration round-trip, polymorphic call sites, and type-alias find-references (declaration/annotation sites, and the preload-completeness warning).
+//! Declaration-merge in textDocument/references, exercised through the cold-file (AST-fallback) path since the runtime path needs a live `beamtalk_workspace` WebSocket the test harness doesn't spin up -- covers the includeDeclaration round-trip, polymorphic call sites, and type-alias find-references (declaration/annotation sites, and the preload-completeness warning).
 
 use super::*;
 
 // -----------------------------------------------------------------
-// BT-2240: declaration-merge in `textDocument/references`.
+// Declaration-merge in `textDocument/references`.
 //
 // These tests exercise the cold-file (AST-fallback) path because the
 // runtime path requires a live `beamtalk_workspace` WebSocket and a
-// populated `beamtalk_xref` table — which the BT-2241 sister PR's
-// `delegate_nav_query` test fixture also avoids. The acceptance criterion
+// populated `beamtalk_xref` table — which `delegate_nav_query`'s own test
+// fixture also avoids. The acceptance criterion
 // we cover here is the `includeDeclaration` round-trip semantics: with
 // the flag on, the result must include method-definition headers; with
 // the flag off, declarations must be filtered out and only call sites
@@ -129,7 +129,7 @@ async fn references_with_declaration_includes_polymorphic_definitions() {
     );
 }
 
-// ---- ADR 0108 Phase 8 (BT-2901): type alias find-references ----
+// ---- ADR 0108 Phase 8: type alias find-references ----
 
 /// Shared fixture: a `type RestartStrategy = ...` declaration on line 0,
 /// used as a parameter type annotation on line 3.
@@ -228,7 +228,7 @@ async fn references_on_type_alias_warns_when_workspace_preload_incomplete() {
 #[tokio::test]
 async fn references_on_type_alias_is_silent_when_workspace_preload_complete() {
     // Same fixture, but with `project_complete = true` (as the LSP
-    // server sets after a full-coverage workspace preload, BT-2796) —
+    // server sets after a full-coverage workspace preload) —
     // find-references coverage is now known-exhaustive, so no warning
     // should fire.
     use futures_util::{FutureExt, StreamExt};
@@ -261,12 +261,12 @@ async fn references_on_type_alias_is_silent_when_workspace_preload_complete() {
 
 #[tokio::test]
 async fn references_warns_on_unresolved_type_reference_when_declaring_file_unindexed() {
-    // BT-2919: `Foo` is referenced in parameter-annotation position
+    // `Foo` is referenced in parameter-annotation position
     // (`policy :: Foo`) but no file declaring `type Foo = ...` (or
     // `Object subclass: Foo`) has ever been opened/indexed in this test.
-    // `alias_name_at` alone would return `None` here (it only recognizes
-    // already-registered aliases), which used to mean the incompleteness
-    // warning never fired for this case — even though the cursor
+    // `alias_name_at` alone returns `None` here (it only recognizes
+    // already-registered aliases), so the incompleteness
+    // warning cannot depend on it alone — even though the cursor
     // position proves `Foo` can only be a class/protocol/alias
     // reference, and the project isn't known-complete. The handler must
     // still surface the `window/showMessage` warning via

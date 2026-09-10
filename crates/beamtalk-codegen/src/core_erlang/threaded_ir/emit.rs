@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `ThreadedIr` -> Core Erlang [`Document`] emission (BT-3144). [`render`]
+//! `ThreadedIr` -> Core Erlang [`Document`] emission. [`render`]
 //! and its helpers reach the live generator only through [`RenderCtx`]'s
 //! three narrow accessors, never through a raw field or an AST-directed
 //! emission path. Depends only on [`super::ir`]; nothing here verifies IR.
@@ -14,7 +14,7 @@ use super::ir::{
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 
-// ─── RenderCtx (BT-3144, ADR 0111 §Addendum "Renderer design sketch") ──────
+// ─── RenderCtx (ADR 0111 §Addendum "Renderer design sketch") ──────
 
 /// Loop-context flags captured/restored around rendering a nested
 /// [`ThreadedStmt::Threaded`] body — see [`RenderCtx::with_loop_context`].
@@ -62,7 +62,7 @@ impl<'g> RenderCtx<'g> {
     /// Fresh-variable allocation for `letrec` loop-function names and NLR
     /// token variables — delegates to
     /// [`CoreErlangGenerator::fresh_temp_var`], the single canonical
-    /// allocator (BT-875: naming stays centralized, never re-derived).
+    /// allocator (naming stays centralized, never re-derived).
     fn fresh_temp_var(&mut self, base: &str) -> String {
         self.generator.fresh_temp_var(base)
     }
@@ -142,14 +142,14 @@ impl Drop for LoopContextGuard<'_, '_> {
     }
 }
 
-// ─── render: full-fidelity ThreadedIr -> Document (BT-3144) ────────────────
+// ─── render: full-fidelity ThreadedIr -> Document ────────────────
 
 /// Renders `ir` to a [`Document`], full-fidelity for `Bind`, `Return`,
 /// `TupleAccUnpack`, `NlrCatch`, and `Threaded` under every
 /// [`ThreadingMode`] — real `letrec`/try-catch scaffolding for
 /// `DirectParams`/`Hybrid`, and (ADR 0111 Addendum 15's Foldl migration) a
 /// real merged unpack+body+epilogue sequence for `TupleAcc`/`StateAcc`, not
-/// the pre-BT-3144 skeleton. See the module docs §Status for the full
+/// an earlier partial skeleton. See the module docs §Status for the full
 /// per-shape history.
 ///
 /// An [`ThreadedStmt::NlrCatch`] node has no `body` field of its own by
@@ -164,10 +164,10 @@ impl Drop for LoopContextGuard<'_, '_> {
 /// migration this module's §Status log records (conditionals, exception
 /// handling, `gen_server` state threading, class-var/NLR routing) renders
 /// through this function; see module docs §Status for the full history.
-/// The FIRST such caller, `control_flow::while_loops`'s
-/// `try_render_while_direct_via_threaded_ir` pilot (BT-3145, gated behind
-/// `BEAMTALK_THREADED_IR_WHILE_DIRECT=1`), was deleted by BT-3182 — see
-/// §Status (BT-3182) / ADR 0111 Addendum 13.
+/// The FIRST such caller was `control_flow::while_loops`'s
+/// `try_render_while_direct_via_threaded_ir` pilot (gated behind
+/// `BEAMTALK_THREADED_IR_WHILE_DIRECT=1`), later deleted — see the module
+/// docs §Status / ADR 0111 Addendum 13.
 pub(in crate::core_erlang) fn render(
     ir: &[ThreadedStmt],
     ctx: &mut RenderCtx,
@@ -243,7 +243,7 @@ pub(in crate::core_erlang) fn render(
 
 /// Full-fidelity rendering of a [`ThreadedStmt::Threaded`] node: real
 /// `letrec` scaffolding for [`ThreadingMode::DirectParams`]/
-/// [`ThreadingMode::Hybrid`] (the while-loop family modes BT-3144's
+/// [`ThreadingMode::Hybrid`] (the while-loop family modes a
 /// dual-run harness proves parity for — see `render_tests` below);
 /// `TupleAcc`/`StateAcc` flatten `body` (`render`'s straight-line
 /// concatenation) — ADR 0111 Addendum 15's Foldl migration is what makes
@@ -290,12 +290,12 @@ fn render_threaded(
 /// case-split shape needs, so [`render_loop_skeleton`] can share its
 /// `param_list`/`body_doc`/`final_args` plumbing with the bare unconditional
 /// [`Threaded`](ThreadedStmt::Threaded) skeleton via one `Option`. ADR 0118
-/// phase 3 (BT-3419): `condition`/`condition_value` replace the pre-BT-3419
+/// phase 3: `condition`/`condition_value` replace the earlier
 /// opaque `continue_header` — the condition must render INSIDE this
 /// function's own loop-context closure (alongside `body_doc`), never
 /// outside it, because a self-send in the condition references the SAME
 /// per-iteration params `body_doc` does (see the variant's own doc
-/// comment). `Copy`: every field is a borrow, mirroring the pre-BT-3419
+/// comment). `Copy`: every field is a borrow, mirroring the earlier
 /// `header_and_exit: Option<(&Document, &Document)>` tuple this replaces.
 #[derive(Clone, Copy)]
 struct ConditionalLoopHeader<'a> {
@@ -337,7 +337,7 @@ struct ConditionalLoopHeader<'a> {
 /// `render_loop_letrec` so the bare unconditional [`Threaded`](ThreadedStmt::Threaded)
 /// skeleton (`header: None`) and [`ConditionalLoop`](ThreadedStmt::ConditionalLoop)'s
 /// real condition/case-split skeleton (`header: Some(ConditionalLoopHeader { .. })`,
-/// ADR 0118 phase 3/BT-3419) share one implementation instead of two
+/// ADR 0118 phase 3) share one implementation instead of two
 /// near-duplicates (CLAUDE.md's no-duplicate-implementations rule applies
 /// within this file, not just across the Rust/Erlang boundary).
 ///
@@ -424,7 +424,7 @@ fn render_loop_skeleton(
         &Document::Str(", "),
     );
 
-    // BT-3144 review: `param_list` (the `fun (...)` declaration) and
+    // `param_list` (the `fun (...)` declaration) and
     // `final_args` (the recursive self-call's arguments) both sit textually
     // inside the SAME `fun (...) -> <body_doc> apply ...` block as
     // `body_doc`, so all three must resolve `produces`' prefixes under the
@@ -446,7 +446,7 @@ fn render_loop_skeleton(
                 })),
             &Document::Str(", "),
         );
-        // ADR 0118 phase 3 (BT-3419): the condition prelude renders INSIDE
+        // ADR 0118 phase 3: the condition prelude renders INSIDE
         // this closure, under the identical loop-context flags as
         // `body_doc` — a self-send's `Bind` in `condition` must resolve
         // `State`/`StateAcc` the same way the body's own Binds do (the
@@ -589,7 +589,7 @@ fn final_loop_arg_identities(
 }
 
 /// Full-fidelity rendering of a [`ThreadedStmt::ConditionalLoop`] node (ADR
-/// 0111 Addendum 2, Gap 1; condition fields per ADR 0118 phase 3, BT-3419):
+/// 0111 Addendum 2, Gap 1; condition fields per ADR 0118 phase 3):
 /// delegates to [`render_loop_skeleton`] with the real `condition`/
 /// `condition_value`/`continue_arm`/`exit_arm` bundle, reusing the exact
 /// same `param_list`/`outer_args` plumbing the bare loop shape uses.
@@ -652,8 +652,8 @@ fn render_conditional_loop(
 /// (1-based, past the leading gate slots) for the first target. No generator
 /// context needed (every target renders through [`VersionPrefix::Gensym`]'s
 /// context-independent verbatim naming, [`build_tuple_acc_unpack`]'s doc
-/// comment). Real production output as of BT-3147 — see module docs §Status
-/// — not just a byte-identical-by-inspection shape as pre-BT-3147.
+/// comment). Real production output — see module docs §Status — not just a
+/// byte-identical-by-inspection shape.
 fn render_tuple_acc_unpack(
     param: &AccParam,
     gate_slots: usize,

@@ -7,7 +7,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! BT-3459: split out of `control_flow/mod.rs`, no logic changes.
+//! split out of `control_flow/mod.rs`, no logic changes.
 
 use super::super::threaded_ir::StateAccFallbackReason;
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
@@ -26,7 +26,7 @@ pub(in crate::core_erlang) enum KeyStyle {
     ReplPlain,
 }
 
-/// BT-3147 (ADR 0111 Phase C completion): classifies which family of
+/// ADR 0111 Phase C completion: classifies which family of
 /// `TupleAcc`-mode accumulator shape a foldl list-op uses, each with its own
 /// canonical leading gate-slot count — the reserved tuple positions ahead of
 /// the threaded locals that hold the op's own in-flight result/continuation
@@ -55,7 +55,7 @@ pub(in crate::core_erlang) enum ListOpKind {
 
 impl ListOpKind {
     /// The canonical leading gate-slot count for this op family — the
-    /// `mode_gate_slots` half of BT-3147's independent derivation.
+    /// `mode_gate_slots` half of this type's independent derivation.
     pub(in crate::core_erlang) const fn gate_slots(self) -> usize {
         match self {
             Self::Do => 0,
@@ -86,7 +86,7 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     pub context: CodeGenContext,
     /// When `true`, thread locals as direct fun parameters instead of a `StateAcc` map.
     ///
-    /// Set when the loop body has no field mutations or self-sends (BT-1275).
+    /// Set when the loop body has no field mutations or self-sends.
     /// Eliminates per-iteration `maps:get` / `maps:put` overhead; the `StateAcc`
     /// map is only rebuilt once at loop exit (in the false arm).
     pub use_direct_params: bool,
@@ -94,13 +94,13 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     ///
     /// Set for `do:`, `collect:`, `select:`/`reject:`, `inject:into:` (Group B — foldl-based)
     /// when the body has only local variable mutations (no field writes, no self-sends,
-    /// no complex control flow that generates `StateAcc`-dependent code). BT-1276.
+    /// no complex control flow that generates `StateAcc`-dependent code).
     ///
     /// Eliminates per-iteration `maps:get` / `maps:put` for locally-threaded vars.
     /// The accumulator becomes `{Var1, Var2, ..., VarN}` (for `do:`) or
     /// `{FoldAcc, Var1, ..., VarN}` (for `collect:` / `inject:`).
     pub use_tuple_acc: bool,
-    /// BT-3147: the `TupleAcc` mode's canonical leading gate-slot count,
+    /// the `TupleAcc` mode's canonical leading gate-slot count,
     /// declared at lowering time from the constructing call site's
     /// [`ListOpKind`] (`0` for plain `Do`; see [`ListOpKind::gate_slots`]).
     /// Only meaningful when `use_tuple_acc` is `true`; independent of each
@@ -108,7 +108,7 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     /// `node_gate_slots`) — see
     /// [`threaded_ir::build_tuple_acc_unpack`]'s doc comment.
     pub tuple_acc_gate_slots: usize,
-    /// BT-1326/BT-1342: When `true`, use full-extract direct-params for letrec loops.
+    /// When `true`, use full-extract direct-params for letrec loops.
     ///
     /// Set when the loop body has BOTH local variable mutations AND actor field mutations
     /// (but no self-sends). The loop fun signature becomes
@@ -119,7 +119,7 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     /// variable rebindings, repacked into the state map only at loop exit.
     /// Mutually exclusive with `use_direct_params`.
     pub use_hybrid_params: bool,
-    /// BT-1326: Actor fields that are read but never written in the loop body.
+    /// Actor fields that are read but never written in the loop body.
     ///
     /// In hybrid mode, read-only fields are pre-extracted before the letrec with a single
     /// `maps:get` and passed as direct fun parameters — eliminating per-iteration
@@ -127,9 +127,9 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     ///
     /// Empty when `use_hybrid_params` is false (sorted for deterministic codegen).
     pub readonly_fields: Vec<String>,
-    /// BT-1343: Why `StateAcc` fallback was chosen (if no optimized mode was selected).
+    /// Why `StateAcc` fallback was chosen (if no optimized mode was selected).
     pub fallback_reason: StateAccFallbackReason,
-    /// BT-1342: Actor fields that are written (mutated) inside the loop body.
+    /// Actor fields that are written (mutated) inside the loop body.
     ///
     /// In full-extract mode, mutated fields are pre-extracted before the letrec via
     /// `maps:get` and passed as direct fun parameters. Inside the loop, field writes
@@ -138,12 +138,12 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     ///
     /// Empty when `use_hybrid_params` is false (sorted for deterministic codegen).
     pub mutated_fields: Vec<String>,
-    /// BT-3168/BT-3169 (ADR 0111 Addendum 9, Questions 3/4/6): `true` when
+    /// ADR 0111 Addendum 9, Questions 3/4/6: `true` when
     /// this loop/fold body threads a `ClassVars` mutation. Two mutually
     /// exclusive shapes, distinguished by `allow_direct_params` at
     /// construction time (never both true for the same plan):
     ///
-    /// * **Letrec** (`new_for_letrec`, `allow_direct_params: true`, BT-3168):
+    /// * **Letrec** (`new_for_letrec`, `allow_direct_params: true`):
     ///   `true` when the body has a direct class-var field write or a
     ///   same-class self-send (`generator.loop_body_threads_class_vars`).
     ///   Threads through the loop's own recursive tail call as an extra,
@@ -154,7 +154,7 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     ///   loop generators (`while_loops.rs`, `counted_loops.rs`) ever consult
     ///   it in this shape.
     /// * **`Foldl*`** (`new`/`new_for_foldl_list_op`, `allow_direct_params:
-    ///   false`, BT-3169): `true` when this is a class-method loop/fold body
+    ///   false`): `true` when this is a class-method loop/fold body
     ///   (`generator.in_class_method()`, `context != Actor` — see this
     ///   field's own construction site for why the `Actor`-context exclusion
     ///   matters) that contains a self-send (`body_analysis.has_self_sends`)
@@ -164,15 +164,14 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     ///   whenever it's true. When `true`, the fold's own accumulator must
     ///   carry an extra `ClassVars` slot (a leading tuple position, Question
     ///   6) so a class-var mutation made by the self-send survives the fold
-    ///   instead of being silently discarded — the exact BT-3151 gap BT-3169
-    ///   closes.
+    ///   instead of being silently discarded.
     ///
     /// A bare class-var field write (not a self-send) inside a threaded
     /// `Foldl*` body is unaffected by the `Foldl*` shape above —
     /// `reject_class_var_field_assignment` already rejects that at compile
     /// time, unchanged by this field.
     pub threads_class_vars: bool,
-    /// BT-3169: the class-var version name (`generator.current_class_var()`)
+    /// the class-var version name (`generator.current_class_var()`)
     /// in effect immediately before this loop/fold begins — mirrors
     /// `initial_state_var`'s own capture-at-construction-time discipline.
     /// Only meaningful for the `Foldl*` shape of `threads_class_vars`
@@ -180,7 +179,7 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     /// via its own recursive-call fun parameter instead, never consulting
     /// this field.
     pub initial_class_var: String,
-    /// BT-3484: `true` when this **Letrec** loop body threads a value-type
+    /// `true` when this **Letrec** loop body threads a value-type
     /// `Self` mutation (`self.field := ...` in
     /// [`CodeGenContext::ValueType`], outside a class method) through the
     /// loop's own recursive tail call — the `SelfVt` mirror of
@@ -220,9 +219,9 @@ struct BodyEffects {
     cond_has_state_effects: bool,
     /// Body has a tier-2 value call assigned to a threaded local.
     has_tier2_threaded_assign: bool,
-    /// Body has nested list ops incompatible with direct-params (BT-1329).
+    /// Body has nested list ops incompatible with direct-params.
     has_non_tuple_safe_list_op: bool,
-    /// BT-2363: Body has a nested counted loop (`timesRepeat:`/`to:do:`/`to:by:do:`)
+    /// Body has a nested counted loop (`timesRepeat:`/`to:do:`/`to:by:do:`)
     /// that mutates a threaded outer local. The inner loop returns a `{value, StateAcc}`
     /// tuple that must be unpacked via `element(2, …)` to thread the local back out —
     /// incompatible with direct-params mode (which has no `StateAcc` to rebuild into).
@@ -238,7 +237,7 @@ struct BodyEffects {
 /// Whether a `whileTrue:`/`whileFalse:` `condition` expression has state
 /// effects (a field write or self-send) that need to thread through the
 /// loop. Factored out of [`BodyEffects::analyze`]'s own `cond_has_state_effects`
-/// so `while_loops.rs`'s mode-SELECTION check (ADR 0118 phase 3, BT-3419:
+/// so `while_loops.rs`'s mode-SELECTION check (ADR 0118 phase 3:
 /// a condition-only mutation must route a trivially-pure body to the
 /// mutation-threading path too — see `generate_while_true`/
 /// `generate_while_false`) shares one implementation with `ThreadingPlan`'s
@@ -275,7 +274,7 @@ impl BodyEffects {
             false
         });
 
-        // BT-1329: Check for nested list ops with cross-scope mutations whose inner
+        // Check for nested list ops with cross-scope mutations whose inner
         // blocks can't use tuple-acc. These fall back to map-acc which references
         // StateAcc — incompatible with direct-params mode.
         let has_non_tuple_safe_list_op = body.body.iter().any(|s| {
@@ -285,7 +284,7 @@ impl BodyEffects {
             )
         });
 
-        // BT-2363: Detect a nested counted loop that mutates a threaded outer local.
+        // Detect a nested counted loop that mutates a threaded outer local.
         // Such an inner loop returns a `{value, StateAcc}` tuple; the outer loop must
         // unpack `element(2, …)` to propagate the local — only possible in StateAcc mode.
         let has_nested_counted_loop_mutation = body.body.iter().any(|s| {
@@ -346,7 +345,7 @@ impl ThreadingPlan {
 
     /// Creates a `ThreadingPlan` for a letrec-based loop body (whileTrue:, timesRepeat:, etc.).
     ///
-    /// BT-1275: Sets `use_direct_params = true` when the body has no field mutations or
+    /// Sets `use_direct_params = true` when the body has no field mutations or
     /// self-sends, eliminating per-iteration `maps:get`/`maps:put` overhead.
     ///
     /// Only valid for letrec loops where each variable can be passed as a fun parameter.
@@ -358,7 +357,7 @@ impl ThreadingPlan {
         Self::new_impl(generator, body, condition, true, None)
     }
 
-    /// BT-1276: Creates a `ThreadingPlan` for a foldl list-op body with tuple accumulator
+    /// Creates a `ThreadingPlan` for a foldl list-op body with tuple accumulator
     /// optimization (`do:`, `collect:`, `select:`/`reject:`, `inject:into:`).
     ///
     /// Sets `use_tuple_acc = true` when eligible: body has only simple local variable
@@ -366,7 +365,7 @@ impl ThreadingPlan {
     /// assignments to threaded locals). Replaces per-iteration `StateAcc` map operations
     /// with a flat tuple accumulator.
     ///
-    /// BT-3147: `kind` declares this call site's canonical `TupleAcc` gate-slot
+    /// `kind` declares this call site's canonical `TupleAcc` gate-slot
     /// count ([`ListOpKind::gate_slots`]) at construction time — independent
     /// of whatever `index_offset` the caller later passes as
     /// `generate_foldl_loop_body`'s `node_gate_slots`.
@@ -404,7 +403,7 @@ impl ThreadingPlan {
         // Pre-compute all body-effect predicates once to avoid repeated iteration.
         let effects = BodyEffects::analyze(generator, body, condition, &threaded_locals);
 
-        // BT-1275: Direct fun parameters for letrec loops.
+        // Direct fun parameters for letrec loops.
         let use_direct_params = Self::select_direct_params(
             allow_direct_params,
             &threaded_locals,
@@ -412,7 +411,7 @@ impl ThreadingPlan {
             &effects,
         );
 
-        // BT-1276: Tuple accumulator for foldl list-ops.
+        // Tuple accumulator for foldl list-ops.
         let use_tuple_acc = Self::select_tuple_acc(
             allow_tuple_acc,
             &threaded_locals,
@@ -421,19 +420,19 @@ impl ThreadingPlan {
             &effects,
         );
 
-        // BT-3133 (ADR 0111 Phase C, invariant class 2) / BT-3147: no runtime
+        // ADR 0111 Phase C, invariant class 2: no runtime
         // check here anymore — `select_tuple_acc`'s own `matches!(context,
         // CodeGenContext::ValueType)` early return (above) already makes
         // `use_tuple_acc && context_is_value_type` unconditionally
         // unreachable BY INSPECTION of that one function, the same
-        // already-structural shape BT-3154 found for
+        // already-structural shape found for
         // `ThreadingModeUnpackMismatch`. `VerifyError::TupleAccInValueTypeContext`,
         // `threaded_ir::verify_tuple_acc_value_type_exclusion`, and their
         // hand-built-IR unit tests remain as regression pins (ADR 0111
         // §Verifier honesty) — only this now-tautological production call
         // site is gone.
 
-        // BT-3133 (ADR 0111 Phase C, invariant class 3) / BT-3147: likewise
+        // ADR 0111 Phase C, invariant class 3: likewise
         // no runtime check here — `select_direct_params`'s own
         // `!effects.has_non_tuple_safe_list_op` conjunct (above) already
         // makes `use_direct_params && effects.has_non_tuple_safe_list_op`
@@ -442,8 +441,8 @@ impl ThreadingPlan {
         // `threaded_ir::verify_nested_list_op_stateacc_compat`, and their
         // hand-built-IR unit tests remain as regression pins.
 
-        // BT-1326: Hybrid direct-params + State threading for letrec loops.
-        // BT-3169 (ADR 0111 Addendum 9, Question 4 Part B): also excluded for
+        // Hybrid direct-params + State threading for letrec loops.
+        // ADR 0111 Addendum 9, Question 4 Part B: also excluded for
         // any class-method loop/fold body — a class method has no instance
         // `State` map to amortize `Hybrid`'s pre-extraction against, and
         // `field_writes` inside a class method is, by construction, 100%
@@ -461,7 +460,7 @@ impl ThreadingPlan {
             generator,
         );
 
-        // BT-1326: In hybrid mode, collect fields that are read but never written.
+        // In hybrid mode, collect fields that are read but never written.
         let readonly_fields = if use_hybrid_params {
             let mut fields: Vec<String> = body_analysis
                 .field_reads
@@ -474,7 +473,7 @@ impl ThreadingPlan {
             vec![]
         };
 
-        // BT-1343: Determine fallback reason when no optimized convention was selected.
+        // Determine fallback reason when no optimized convention was selected.
         let optimized_selected = use_direct_params || use_tuple_acc || use_hybrid_params;
         let any_optimization_allowed = allow_direct_params || allow_tuple_acc;
         let fallback_reason = Self::determine_fallback_reason(
@@ -486,7 +485,7 @@ impl ThreadingPlan {
             &effects,
         );
 
-        // BT-1342: In hybrid mode, collect fields that are written (mutated).
+        // In hybrid mode, collect fields that are written (mutated).
         let mutated_fields = if use_hybrid_params {
             let mut fields: Vec<String> = body_analysis.field_writes.iter().cloned().collect();
             fields.sort(); // deterministic codegen
@@ -495,18 +494,18 @@ impl ThreadingPlan {
             vec![]
         };
 
-        // BT-3147: the mode's canonical gate-slot count, declared here at
+        // the mode's canonical gate-slot count, declared here at
         // lowering time from the caller's `ListOpKind` — independent of
         // whatever `index_offset` a later `generate_foldl_loop_body` call
         // computes its own `node_gate_slots` from.
         let tuple_acc_gate_slots = tuple_acc_kind.map_or(0, ListOpKind::gate_slots);
 
-        // BT-3168 (ADR 0111 Addendum 9, Question 3/4): whether this Letrec
+        // ADR 0111 Addendum 9, Question 3/4: whether this Letrec
         // loop body threads a `ClassVars` mutation through its own recursive
         // tail call. Only ever true for `new_for_letrec`-constructed plans
         // (`allow_direct_params`).
         //
-        // BT-3169 (ADR 0111 Addendum 9, Questions 3/4/6): a class-method
+        // ADR 0111 Addendum 9, Questions 3/4/6: a class-method
         // `Foldl*` body containing a self-send needs to thread `ClassVars`
         // through the fold's own accumulator. Excluded for `Actor` context:
         // `is_actor_self_send` (checked before any class-method-self-send
@@ -525,11 +524,11 @@ impl ThreadingPlan {
         // `new_for_letrec` passes `allow_direct_params: true` unconditionally,
         // so a `whileTrue:`/`timesRepeat:`/`to:do:` (`BodyKind::Letrec`) plan
         // never sets this field, regardless of self-sends. This is a hard
-        // safety boundary, not merely an optimization: BT-3169's own
+        // safety boundary, not merely an optimization: the
         // `generate_threaded_loop_body_inner` wrap (below, guarded on this
         // same field) is Foldl-only by design (Question 6's `{ClassVars,
         // StateAcc}` accumulator shape has no Letrec analogue — Letrec's own
-        // `ClassVars` threading is BT-3168's parallel, independent migration,
+        // `ClassVars` threading is a parallel, independent migration,
         // via an extra `letrec` fun parameter, never this accumulator wrap).
         // A direct top-level self-send statement inside a real Letrec body is
         // already unconditionally rejected before reaching this wrap
@@ -545,10 +544,10 @@ impl ThreadingPlan {
         // separately-constructed Foldl plan still threads correctly on its
         // own terms).
         let threads_class_vars = if allow_direct_params {
-            // Letrec shape (BT-3168): `new_for_letrec`-constructed plans only.
+            // Letrec shape: `new_for_letrec`-constructed plans only.
             generator.loop_body_threads_class_vars(body)
         } else {
-            // Foldl* shape (BT-3169): `new`/`new_for_foldl_list_op`-constructed
+            // Foldl* shape: `new`/`new_for_foldl_list_op`-constructed
             // plans only.
             !matches!(context, CodeGenContext::Actor)
                 && generator.in_class_method()
@@ -556,7 +555,7 @@ impl ThreadingPlan {
         };
         let initial_class_var = generator.current_class_var();
 
-        // BT-3484: the `SelfVt` mirror of `threads_class_vars`' Letrec
+        // the `SelfVt` mirror of `threads_class_vars`' Letrec
         // branch above — Letrec-shaped plans only (`allow_direct_params`),
         // for the same reason: a `Foldl*` accumulator has no trailing `Self`
         // slot to carry the mutation out through.
@@ -581,7 +580,7 @@ impl ThreadingPlan {
         }
     }
 
-    /// BT-1275: Select direct fun parameters for letrec loops when the body has no
+    /// Select direct fun parameters for letrec loops when the body has no
     /// field mutations, self-sends, tier-2 threaded assignments, or nested list ops
     /// incompatible with direct-params mode.
     fn select_direct_params(
@@ -600,7 +599,7 @@ impl ThreadingPlan {
             && !effects.has_nested_counted_loop_mutation
     }
 
-    /// BT-1276: Select tuple accumulator for foldl list-ops when eligible: body has
+    /// Select tuple accumulator for foldl list-ops when eligible: body has
     /// only simple local var mutations — no field writes, self-sends, tier-2 assignments,
     /// complex control flow, conditional threaded writes, or destructure-as-last-expr.
     ///
@@ -626,13 +625,13 @@ impl ThreadingPlan {
             && !effects.last_is_destructure
     }
 
-    /// BT-1326: Select hybrid direct-params + State threading for letrec loops.
+    /// Select hybrid direct-params + State threading for letrec loops.
     ///
     /// Eligible when body has field mutations but NOT self-sends, and no guards
     /// (tier-2 assignments, control-flow mutations, conditional writes, nested list ops)
     /// prevent it. Actor context only (`ValueType` has no actor State to thread).
     ///
-    /// BT-3168 (ADR 0111 Addendum 9, Question 4 Part B): also excluded for ANY
+    /// ADR 0111 Addendum 9, Question 4 Part B: also excluded for ANY
     /// class-method loop/fold body (`generator.in_class_method()`), not just
     /// `ValueType` ones. A class method has no instance `self.field` at all —
     /// `field_writes` inside a class-method body is, by construction, 100%
@@ -674,7 +673,7 @@ impl ThreadingPlan {
             && !effects.has_non_tuple_safe_list_op
     }
 
-    /// BT-1343: Determine why `StateAcc` fallback was chosen (if no optimized mode was selected).
+    /// Determine why `StateAcc` fallback was chosen (if no optimized mode was selected).
     ///
     /// `optimized_selected` is true when any optimized convention was chosen.
     /// `any_optimization_allowed` is true when the caller allows direct-params or tuple-acc.
@@ -734,7 +733,7 @@ impl ThreadingPlan {
         }
     }
 
-    /// BT-1343: Returns a human-readable label for the selected calling convention.
+    /// Returns a human-readable label for the selected calling convention.
     pub fn convention_label(&self) -> &'static str {
         if self.use_direct_params {
             "direct-params"
@@ -747,7 +746,7 @@ impl ThreadingPlan {
         }
     }
 
-    /// BT-1343: Returns the total number of extracted parameters (locals + readonly fields).
+    /// Returns the total number of extracted parameters (locals + readonly fields).
     pub fn total_extracted_params(&self) -> usize {
         self.threaded_locals.len() + self.readonly_fields.len()
     }
@@ -765,19 +764,19 @@ impl ThreadingPlan {
     /// Returns `(pack_doc, init_state_var)` where `init_state_var` names the variable
     /// to pass as the initial `StateAcc` argument to the loop.
     ///
-    /// For value-type methods (BT-1053), starts from a fresh `maps:new()` instead
+    /// For value-type methods, starts from a fresh `maps:new()` instead
     /// of the actor State (which does not exist in value-type context).
     ///
-    /// For class methods (BT-3055), also starts from a fresh `maps:new()`: a class
+    /// For class methods, also starts from a fresh `maps:new()`: a class
     /// method's signature is `(ClassSelf, ClassVars, Args...)` — there is no `State`
     /// parameter to pack from, even when `self.context` is `Actor` (an actor class's
     /// class methods still run with `context == Actor`, since the enclosing class is
     /// an actor even though the *method* itself has no per-instance state).
     ///
-    /// In direct-params mode (BT-1275) this is a no-op — returns `(Nil, initial_state_var)` since
+    /// In direct-params mode this is a no-op — returns `(Nil, initial_state_var)` since
     /// variables are passed as separate fun arguments instead.
     ///
-    /// BT-3484: `threaded_locals.is_empty()` normally also short-circuits to
+    /// `threaded_locals.is_empty()` normally also short-circuits to
     /// `initial_state_var` (nothing to pack) — but that name is the ambient
     /// actor `State`, which does not exist in a value-type method. Before
     /// this issue that only ever mattered for a loop no value-type method
@@ -798,7 +797,7 @@ impl ThreadingPlan {
             return (Document::Nil, self.initial_state_var.clone());
         }
         let mut pack_docs: Vec<Document<'static>> = Vec::new();
-        // BT-1053/BT-3055: Value-type methods and class methods have no actor State
+        // Value-type methods and class methods have no actor State
         // to pack from — start from a fresh empty map instead.
         let mut current =
             if matches!(self.context, CodeGenContext::ValueType) || generator.in_class_method() {
@@ -840,7 +839,7 @@ impl ThreadingPlan {
     ///
     /// Returns the binding documents to prepend to the loop body.
     ///
-    /// In direct-params mode (BT-1275) the variables are already fun parameters,
+    /// In direct-params mode the variables are already fun parameters,
     /// so this only registers the bindings and returns no documents.
     pub fn generate_unpack_at_iteration_start(
         &self,
@@ -864,7 +863,7 @@ impl ThreadingPlan {
         docs
     }
 
-    /// BT-3169 (ADR 0111 Addendum 9, Question 6): returns the fold fun's own
+    /// ADR 0111 Addendum 9, Question 6: returns the fold fun's own
     /// second (accumulator) parameter name to print at the `fun (Item, <here>) ->`
     /// position, plus a prelude `Document` binding `real_param_name` (and,
     /// when threading, the loop-entry `ClassVars` name) from it.
@@ -908,7 +907,7 @@ impl ThreadingPlan {
         (raw, doc)
     }
 
-    /// BT-3169 (ADR 0111 Addendum 9, Question 6): builds
+    /// ADR 0111 Addendum 9, Question 6: builds
     /// `" in let <fold_result> = call 'lists':'foldl'(<lambda>, <init_acc>,
     /// <list>) in "` — transparently wrapping `init_acc` with a leading
     /// `ClassVars` slot, and unwrapping the fold's own result back out
@@ -945,7 +944,7 @@ impl ThreadingPlan {
             ];
         }
         let raw = generator.fresh_temp_var("RawFoldCV");
-        // BT-3169: fast-forward past whatever peak the fold body's own
+        // fast-forward past whatever peak the fold body's own
         // closure reached internally (already restored by now) before
         // minting — otherwise this mint can collide with an
         // already-used-inside-the-closure name (Core Erlang requires
@@ -1006,7 +1005,7 @@ impl ThreadingPlan {
     }
 
     /// Generates the exit `{'nil', StateAcc}` expression for the false arm of a
-    /// direct-params loop (BT-1275).
+    /// direct-params loop.
     ///
     /// Because variables are carried as fun parameters, not in a map, the
     /// `StateAcc` must be rebuilt once at loop exit so that the caller can extract
@@ -1016,7 +1015,7 @@ impl ThreadingPlan {
     /// ITERATION (i.e. the fun parameter names at the point of the false arm).
     /// For the false-arm case these are the initial parameter names, not updated ones.
     ///
-    /// BT-3055: mirrors `generate_pack_prefix`'s `ValueType`/`in_class_method` check —
+    /// mirrors `generate_pack_prefix`'s `ValueType`/`in_class_method` check —
     /// this is the direct-params fast path's own `StateAcc` rebuild, and class methods
     /// have no `State` to rebuild from here either.
     pub fn generate_exit_stateacc(
@@ -1030,7 +1029,7 @@ impl ThreadingPlan {
             return docvec!["{'nil', ", leaf::var(self.initial_state_var.clone()), "}",];
         }
         let mut docs: Vec<Document<'static>> = Vec::new();
-        // BT-1053/BT-3055: Value-type methods and class methods have no actor State
+        // Value-type methods and class methods have no actor State
         // to rebuild from — start from a fresh empty map instead.
         let mut current = if starts_from_fresh_map {
             let exit_var = generator.fresh_temp_var("ExitSA");
@@ -1063,7 +1062,7 @@ impl ThreadingPlan {
         Document::Vec(docs)
     }
 
-    /// BT-1342: Generates the exit `{'nil', ExitSA}` expression for the false arm of a
+    /// Generates the exit `{'nil', ExitSA}` expression for the false arm of a
     /// full-extract loop (no State parameter).
     ///
     /// In full-extract mode, ALL fields (both read-only and mutated) are direct params,
@@ -1130,7 +1129,7 @@ impl ThreadingPlan {
     /// Generates `let X = maps:get(key, FinalState) in` for each threaded local
     /// to extract updated values after the loop completes.
     ///
-    /// Returns the extract code as a `Document` (BT-2216: replaces the legacy
+    /// Returns the extract code as a `Document` (replacing the legacy
     /// `String` variant that used `format!` to produce CE syntax).
     pub fn generate_extract_suffix_doc(
         &self,
@@ -1157,7 +1156,7 @@ impl ThreadingPlan {
         Document::Vec(docs)
     }
 
-    // ─── BT-1276: Tuple accumulator helpers ───────────────────────────────────
+    // ─── Tuple accumulator helpers ───────────────────────────────────
 
     /// Returns the current Core Erlang bindings of all threaded locals as a `Document`.
     ///
@@ -1221,7 +1220,7 @@ impl ThreadingPlan {
         Document::Vec(docs)
     }
 
-    /// BT-1276: Re-packs updated locals back into the `StateAcc` map after a tuple-acc loop,
+    /// Re-packs updated locals back into the `StateAcc` map after a tuple-acc loop,
     /// returning a `(Document, final_var_name)` pair instead of mutating a `String`.
     ///
     /// The returned `Document` contains the `let PkSt1 = maps:put(...) in ...` chain.

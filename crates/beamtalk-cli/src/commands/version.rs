@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `beamtalk version` — show, set, or bump the package version (BT-2980).
+//! `beamtalk version` — show, set, or bump the package version.
 //!
 //! **DDD Context:** Build System
 //!

@@ -9,13 +9,13 @@
 //! which is private to the binary target) specifically so the integration
 //! test — which links only the library target — can call the real parsing
 //! logic instead of re-implementing it. A hand-copied "mirror" of
-//! `remove_method_expr_for`'s logic in the test harness previously drifted
-//! from the real implementation twice in a row (BT-3189); `:flush <sel>`'s
-//! equivalent duplication was extracted the same way in BT-3196.
+//! `remove_method_expr_for`'s logic in a test harness risks drifting
+//! from the real implementation; `:flush <sel>`'s equivalent duplication
+//! was extracted the same way, for the same reason.
 
 /// Construct the `<Class> removeSelector: #<selector>` expression a
 /// `:remove-method <Class> <selector>` REPL line dispatches to (ADR 0112
-/// Phase 4, BT-3189).
+/// Phase 4).
 ///
 /// Splits on the first run of whitespace: the first token is the class, the
 /// remainder (trimmed) is the selector. A leading `#` on the selector is
@@ -39,7 +39,7 @@ pub fn remove_method_expr_for(arg: &str) -> Option<String> {
 }
 
 /// Construct the `Workspace flush: <selector>` expression a `:flush
-/// <selector>` REPL line dispatches to (ADR 0082 Phase 3, BT-2287).
+/// <selector>` REPL line dispatches to (ADR 0082 Phase 3).
 ///
 /// `selector` is passed through **verbatim** (only trimmed) into the
 /// generated expression, so callers can pass a Class (`Counter`), a Symbol
@@ -52,8 +52,8 @@ pub fn remove_method_expr_for(arg: &str) -> Option<String> {
 /// only whitespace, once trimmed), so the caller can print a usage hint
 /// instead of evaluating a malformed bare `Workspace flush: ` send — this
 /// emptiness check is exactly the kind of guard a hand-copied test-harness
-/// mirror can silently drop (as `remove_method_expr_for`'s did for its own
-/// `#`-stripping order in BT-3189); routing both callers through this one
+/// mirror can silently drop (as a hand-copied mirror of
+/// `remove_method_expr_for`'s own `#`-stripping order could); routing both callers through this one
 /// function makes that class of drift structurally impossible.
 pub fn flush_expr_for(selector: &str) -> Option<String> {
     let selector = selector.trim();
@@ -64,7 +64,7 @@ pub fn flush_expr_for(selector: &str) -> Option<String> {
 }
 
 /// Construct the `<Class> removeFromSystem` expression a `:remove-class
-/// <Class>` REPL line dispatches to (ADR 0113 Phase 4, BT-3210).
+/// <Class>` REPL line dispatches to (ADR 0113 Phase 4).
 ///
 /// `arg` is a single class name — trimmed, and returned as `None` when empty
 /// (including whitespace-only) so the caller can print a usage hint instead
@@ -87,7 +87,7 @@ pub fn remove_class_expr_for(arg: &str) -> Option<String> {
 }
 
 /// The unscoped `Workspace flushIncludingDestructive` expression a bare
-/// `:flush-destructive` REPL line dispatches to (ADR 0113 Phase 4, BT-3210).
+/// `:flush-destructive` REPL line dispatches to (ADR 0113 Phase 4).
 ///
 /// A `const`, not a function, because the bare form takes no argument to
 /// build from — mirroring `Flush`'s own bare-form handling in
@@ -100,7 +100,7 @@ pub const FLUSH_INCLUDING_DESTRUCTIVE_EXPR: &str = "Workspace flushIncludingDest
 
 /// Construct the `Workspace flush: <selector> confirmDestructive: true`
 /// expression a `:flush-destructive <selector>` REPL line dispatches to
-/// (ADR 0113 Phase 4, BT-3210).
+/// (ADR 0113 Phase 4).
 ///
 /// `selector` is passed through **verbatim** (only trimmed), exactly like
 /// [`flush_expr_for`] — a Class, a Symbol kind (`#'remove-class'`), or a
@@ -133,7 +133,7 @@ pub fn flush_destructive_expr_for(selector: &str) -> Option<String> {
 }
 
 /// Construct the `<Class> renameTo: #<NewName>` expression a `:rename-class
-/// <Class> <NewName>` REPL line dispatches to (ADR 0114 Phase 5, BT-3276).
+/// <Class> <NewName>` REPL line dispatches to (ADR 0114 Phase 5).
 ///
 /// Splits on whitespace into exactly two tokens — the current class name and
 /// the new one. Unlike [`remove_method_expr_for`]'s selector, the first
@@ -165,7 +165,7 @@ pub fn rename_class_expr_for(arg: &str) -> Option<String> {
 
 /// Construct the `<Class> renameSelector: #<OldSelector> to: #<NewSelector>`
 /// expression a `:rename-method <Class> <OldSelector> <NewSelector>` REPL
-/// line dispatches to (ADR 0114 Phase 5, BT-3276). Instance-side only — sent
+/// line dispatches to (ADR 0114 Phase 5). Instance-side only — sent
 /// to a bare class name, this always touches the instance-side method table;
 /// a class-side rename needs a direct `Counter class renameSelector: ... to:
 /// ...` eval, the same chokepoint limitation [`remove_method_expr_for`] has

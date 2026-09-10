@@ -111,7 +111,7 @@ fn read_port_file_nonce(workspaces_root: &std::path::Path, port: u16) -> Option<
         let Ok(contents) = std::fs::read_to_string(&port_file_path) else {
             continue;
         };
-        // Port file format (BT-611): PORT\nNONCE (two lines of plain text)
+        // Port file format: PORT\nNONCE (two lines of plain text)
         let mut lines = contents.lines();
         if let Some(port_line) = lines.next() {
             if let Ok(file_port) = port_line.trim().parse::<u16>() {
@@ -127,7 +127,7 @@ fn read_port_file_nonce(workspaces_root: &std::path::Path, port: u16) -> Option<
     None
 }
 
-/// Response from a health probe (BT-611).
+/// Response from a health probe.
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)] // Used in workspace lifecycle and integration tests
 pub struct HealthProbeResponse {
@@ -142,7 +142,7 @@ pub struct HealthProbeResponse {
     pub status: Vec<String>,
 }
 
-/// Send a WebSocket health probe to a workspace (BT-611, ADR 0020).
+/// Send a WebSocket health probe to a workspace (ADR 0020).
 ///
 /// Connects to the workspace's WebSocket endpoint, authenticates with the
 /// cookie, sends a `{"op":"health"}` message, and returns the parsed response
@@ -165,7 +165,7 @@ pub fn tcp_health_probe(host: &str, port: u16, cookie: &str) -> Result<HealthPro
 
 /// Check whether a process is alive by PID.
 ///
-/// Shared with `tests/cli_common` (BT-3077's stale test-cache-dir sweep),
+/// Shared with `tests/cli_common`'s stale test-cache-dir sweep,
 /// so this lives in the lib-level `pid_liveness` module rather than here.
 pub(super) use beamtalk_cli::pid_liveness::is_process_alive;
 
@@ -336,7 +336,7 @@ mod tests {
         // matches that unrelated entry (with a different nonce) instead and
         // `is_node_running` returns `false` — a directory-listing-order race
         // that widens under the slower, more heavily loaded parallel test
-        // execution seen on macOS CI runners (BT-3401). `BeamtalkHomeOverride`
+        // execution seen on macOS CI runners. `BeamtalkHomeOverride`
         // points the scan at a fresh, exclusive temp directory instead, so no
         // other test's entries can ever be present during the scan.
         let tmp = tempfile::TempDir::new().unwrap();

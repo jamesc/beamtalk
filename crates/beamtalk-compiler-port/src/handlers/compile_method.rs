@@ -54,11 +54,11 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
         .and_then(term_to_bool)
         .unwrap_or(true);
     let pre_class_hierarchy = extract_class_hierarchy(request);
-    // BT-3477: see `handle_compile`'s equivalent comment — a `compile_method`
+    // See `handle_compile`'s equivalent comment — a `compile_method`
     // patch is a class-defining/-patching compile too, so it needs the
     // ambient protocol cache for the same reason.
     let pre_loaded_protocols = extract_protocol_registry(request);
-    // BT-2899 (ADR 0108): see `handle_compile`'s equivalent comment — a
+    // ADR 0108: see `handle_compile`'s equivalent comment — a
     // `compile_method` patch is a class-defining/-patching compile too, so
     // it needs session carried-over aliases for the same reason.
     let pre_loaded_aliases = extract_known_type_aliases(request);
@@ -125,8 +125,8 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     // while the surviving methods index into `class_source`; the AST merge left
     // those two span bases mixed in `module`. Re-parsing the unparsed merge rebases
     // them all, so `span_to_line` annotates the freshly-patched method with the
-    // right BEAM line (BT-2563 #1) and semantic diagnostics resolve against a
-    // single coherent source (BT-2563 #2) — no fragile per-diagnostic source
+    // right BEAM line and semantic diagnostics resolve against a
+    // single coherent source — no fragile per-diagnostic source
     // routing. `unparse_module` round-trips a valid module, so the re-parse is
     // clean; a non-empty diag list here means an unparser regression.
     let merged_tokens = beamtalk_core::source_analysis::lex_with_eof(&merged_class_source);
@@ -151,7 +151,7 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
 
     // Locate the freshly-patched method in the re-parsed module so method-body
     // diagnostics can be reported relative to the method snippet the user edits
-    // (BT-2563 #2). Its span now indexes into `merged_class_source`, the same
+    // Its span indexes into `merged_class_source`, the same
     // coordinate system as every diagnostic span.
     let patched_method = merged_module
         .classes
@@ -168,7 +168,7 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
                 .find(|m| m.selector.name() == selector && m.kind == patched_kind)
         });
     let patched_method_span = patched_method.map(|m| m.span);
-    // ADR 0105 Phase 1 (BT-2777): declared signature of the patched method, read
+    // ADR 0105 Phase 1: declared signature of the patched method, read
     // from the re-parsed merged module so it reflects exactly what was installed
     // (not the standalone pre-merge parse). Falls back to "Dynamic"/no params in
     // the never-should-happen case the method isn't found post-merge.
@@ -182,8 +182,8 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     //    indexes into `merged_class_source`; method-body errors are then reported
     //    relative to the patched method (so the method editor shows a snippet-local
     //    line) while rarer class-context errors keep their merged-source line — all
-    //    accurate and in-range (BT-2563 #2).
-    // BT-3123: `compute_diagnostics_and_analysis` additionally returns the
+    //    accurate and in-range.
+    // `compute_diagnostics_and_analysis` additionally returns the
     // full `AnalysisResult` for the already-merged `merged_module` — no
     // further mutation happens before the codegen call below, so it's always
     // safe to thread through via `CodegenOptions::with_analysis`.
@@ -243,7 +243,7 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
         .collect();
     let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
 
-    // BT-3125: prepare the AST at the driver boundary using the same
+    // Prepare the AST at the driver boundary using the same
     // still-trustworthy analysis (computed on `merged_module` with no
     // mutation since) handed off to codegen just below — codegen no longer
     // schedules this writeback itself in that case.
@@ -260,7 +260,7 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
         .with_class_hierarchy(pre_class_hierarchy)
         .with_pre_loaded_aliases(pre_loaded_aliases)
         .with_source_path_opt(source_path.as_deref())
-        // BT-3123: `analysis` was computed on `merged_module` with no
+        // `analysis` was computed on `merged_module` with no
         // mutation since — always safe to hand off.
         .with_analysis(analysis);
     match beamtalk_codegen::core_erlang::generate_module(&merged_module, codegen_options) {

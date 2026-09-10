@@ -8,12 +8,12 @@
 //! These types and functions represent the parsed `[diagnostics]` section of
 //! `beamtalk.toml` — a per-category severity-override table — plus the pass
 //! that applies it to a list of diagnostics. They live in `beamtalk-core`
-//! (not `beamtalk-cli`, where the table was first implemented, BT-2793) so
-//! that both the CLI (`beamtalk build`) and the LSP (`beamtalk-lsp`) can
-//! apply the same policy without `beamtalk-lsp` depending on `beamtalk-cli`
-//! (see `docs/development/architecture-principles.md` — dependencies flow
+//! (not `beamtalk-cli`) so that both the CLI (`beamtalk build`) and the LSP
+//! (`beamtalk-lsp`) can apply the same policy without `beamtalk-lsp`
+//! depending on `beamtalk-cli` (see
+//! `docs/development/architecture-principles.md` — dependencies flow
 //! downward only; `beamtalk-lsp` may depend on `beamtalk-core`, never on
-//! `beamtalk-cli`). BT-2800 is the surface-parity fix that moved this here.
+//! `beamtalk-cli`).
 
 use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
@@ -297,7 +297,7 @@ pub fn load_diagnostics_table_for_root(root: &std::path::Path) -> DiagnosticsTab
 }
 
 /// Parse `[package] name` directly out of a `beamtalk.toml` file's raw TOML
-/// content (BT-2960), for the same reason
+/// content, for the same reason
 /// [`parse_diagnostics_table_from_manifest_toml`] exists: the LSP has no
 /// `Manifest`/`PackageManifest` struct of its own to deserialize into and
 /// must not depend on `beamtalk-cli` just to read one field of
@@ -355,7 +355,7 @@ pub fn apply_diagnostics_table(
                 return Some(diagnostic);
             };
             // Severity floor: a diagnostic that already arrived as `Error`
-            // (e.g. `ActorNew` — BT-1524's "Actor subclass must use spawn,
+            // (e.g. `ActorNew` — "Actor subclass must use spawn,
             // not new" — or `Inheritance` / `EmptyBody` hard-error checks) is
             // never a Rule 1 completeness-ladder soft diagnostic; it's a
             // structural compile error unrelated to open-world uncertainty.
@@ -390,15 +390,15 @@ pub fn apply_diagnostics_table(
         .collect()
 }
 
-// BT-3361 (ADR 0117 Decision step 5): `compute_diagnostics`,
+// ADR 0117 Decision step 5: `compute_diagnostics`,
 // `compute_diagnostics_with_known_vars`, `apply_expect_directives`, and its
-// private helpers moved here from `beamtalk-language-service`'s
+// private helpers live here rather than in `beamtalk-language-service`'s
 // `queries::diagnostic_provider` (which re-exports them under their
-// original names/paths for existing call sites). They were always pure
+// original names/paths for existing call sites), because they are pure
 // Compilation-context diagnostics post-processing — like
-// `apply_diagnostics_table` above, their new neighbor — with zero
-// Language-Service-specific types (no `Position`, `Completion`, ...); moving
-// them here is what lets `beamtalk-core`'s own extensive
+// `apply_diagnostics_table` above, their neighbor — with zero
+// Language-Service-specific types (no `Position`, `Completion`, ...). Living
+// here is what lets `beamtalk-core`'s own extensive
 // `semantic_analysis::type_checker` unit-test suite (67+ call sites across
 // its `tests/` submodule) keep computing full-pipeline `@expect`-suppressed
 // diagnostics without `beamtalk-core` taking a dev-dependency on
@@ -468,7 +468,7 @@ pub fn compute_diagnostics_with_known_vars(
 
 /// Diagnostic categories that `beamtalk lint`'s dedicated lint passes
 /// (`beamtalk_lint::run_lint_passes`) can produce for a shape `analyse_full`'s
-/// semantic analysis itself never checks (BT-3384).
+/// semantic analysis itself never checks.
 ///
 /// `DiagnosticCategory::DeadAssignment` is **not** exclusively lint-pass-only:
 /// `analyse_full`'s own `warn_assignment_in_match_arms`
@@ -476,7 +476,7 @@ pub fn compute_diagnostics_with_known_vars(
 /// an assignment as the direct body of a `match:` arm — every caller of this
 /// module already runs that check, lint pass or not. The only shape genuinely
 /// unreachable without `run_lint_passes` is `beamtalk-lint`'s
-/// `DeadBlockAssignmentPass` (BT-3385): a captured outer local reassigned
+/// `DeadBlockAssignmentPass`: a captured outer local reassigned
 /// inside a block literal that isn't passed to a selector the compiler's
 /// state-threading recognizes — and that shape, by construction, always
 /// contains a block literal. [`expect_category_unchecked`] uses this list
@@ -501,7 +501,7 @@ const LINT_PASS_ONLY_CATEGORIES: &[DiagnosticCategory] = &[DiagnosticCategory::D
 
 /// Returns `true` if this specific directive's staleness cannot be evaluated
 /// because the check that could confirm or refute it was never run in this
-/// invocation (BT-3384).
+/// invocation.
 ///
 /// `unchecked` names the categories this invocation didn't run lint passes
 /// for (see [`LINT_PASS_ONLY_CATEGORIES`]); `contains_block` says whether
@@ -517,8 +517,8 @@ const LINT_PASS_ONLY_CATEGORIES: &[DiagnosticCategory] = &[DiagnosticCategory::D
 /// `all` is deliberately exempted regardless of `contains_block`: narrowing
 /// it here would silently defang staleness checking for *every* `@expect
 /// all` in a build, not just the ones that happen to depend on a lint-only
-/// category — BT-3384's fix stays scoped to the specific categories that are
-/// genuinely lint-only.
+/// category — staleness checking stays scoped to the specific categories
+/// that are genuinely lint-only.
 ///
 /// This match is intentionally exhaustive (no `_` arm): adding a new
 /// [`ExpectCategory`] variant is a compile error here until this function
@@ -570,7 +570,7 @@ fn expect_category_unchecked(
 /// Validates staleness for every category. Only appropriate for a pipeline
 /// that has actually run `beamtalk_lint::run_lint_passes` (`beamtalk lint`,
 /// and the MCP server's lint-equivalent path) — every other caller should use
-/// [`apply_expect_directives_excluding_lint_only`] instead (BT-3384).
+/// [`apply_expect_directives_excluding_lint_only`] instead.
 pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
     apply_expect_directives_impl(module, diagnostics, &[]);
 }
@@ -579,7 +579,7 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
 /// category is produced only by `beamtalk lint`'s dedicated lint passes (see
 /// [`LINT_PASS_ONLY_CATEGORIES`]) is neither validated as stale nor treated
 /// as satisfied — silently left alone — because this invocation never ran
-/// the check that could confirm or refute it (BT-3384).
+/// the check that could confirm or refute it.
 ///
 /// Use this from any pipeline that does not call
 /// `beamtalk_lint::run_lint_passes` before checking staleness: `beamtalk
@@ -592,7 +592,7 @@ pub fn apply_expect_directives_excluding_lint_only(
     apply_expect_directives_impl(module, diagnostics, LINT_PASS_ONLY_CATEGORIES);
 }
 
-/// A collected `@expect` directive: its (possibly multi-category, BT-3387)
+/// A collected `@expect` directive: its (possibly multi-category)
 /// category list, optional reason, the directive's own span (for stale
 /// warnings), the span of the expression/declaration it targets (for
 /// diagnostic matching), and whether that target contains a block literal
@@ -612,7 +612,7 @@ fn apply_expect_directives_impl(
 
     collect_directives_from_exprs(&module.expressions, &mut directives);
     for class in &module.classes {
-        // BT-1856: Collect declaration-level @expect from state declarations.
+        // Collect declaration-level @expect from state declarations.
         // directive_span = the @expect token span (for stale warnings),
         // target_span = the declaration span (for matching diagnostics).
         for state_decl in class.state.iter().chain(class.class_variables.iter()) {
@@ -631,7 +631,7 @@ fn apply_expect_directives_impl(
             }
         }
         for method in class.methods.iter().chain(class.class_methods.iter()) {
-            // BT-1856: Collect declaration-level @expect from method declarations.
+            // Collect declaration-level @expect from method declarations.
             //
             // `contains_block` here is deliberately whole-method, matching a
             // declaration-level `@expect`'s own suppression scope (it covers
@@ -691,7 +691,7 @@ fn apply_expect_directives_impl(
                 matched = true;
             }
         }
-        // BT-3387: a compound `@expect a, b` is only reported stale when
+        // A compound `@expect a, b` is only reported stale when
         // *none* of its categories could be validated as matching — if any
         // category matched a real diagnostic, the directive earns its keep
         // even though another listed category turned out unnecessary.
@@ -710,8 +710,8 @@ fn apply_expect_directives_impl(
         diagnostics.remove(i);
     }
 
-    // Emit warnings for stale directives (BT-1412: warning, not error, so
-    // compilation can proceed — the annotation is just unnecessary).
+    // Emit warnings for stale directives: warning, not error, so
+    // compilation can proceed — the annotation is just unnecessary.
     for (cats, reason, span) in stale_directives {
         let cats_str = cats
             .iter()
@@ -745,9 +745,9 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
     expect_cat == ExpectCategory::All
         || matches!(
             (expect_cat, diag_cat),
-            // BT-1273: @expect type also covers method-not-found (Dnu) hints so that
+            // @expect type also covers method-not-found (Dnu) hints so that
             // callers can use a single annotation for all type-related suppressions.
-            // BT-1918: @expect type also covers missing type-annotation warnings
+            // @expect type also covers missing type-annotation warnings
             // (TypeAnnotation) for backward compatibility.
             (
                 ExpectCategory::Dnu | ExpectCategory::Type,
@@ -804,7 +804,7 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
 /// the expression at index `i + 1` (if present).
 ///
 /// After scanning the flat statement list, recurses into expression subtrees
-/// to find `@expect` directives inside block bodies (BT-2010).
+/// to find `@expect` directives inside block bodies.
 fn collect_directives_from_exprs(
     exprs: &[ExpressionStatement],
     directives: &mut Vec<ExpectDirectiveEntry>,
@@ -831,14 +831,14 @@ fn collect_directives_from_exprs(
                 directives.push((categories.clone(), reason.clone(), *span, *span, false));
             }
         }
-        // BT-2010: Recurse into expression subtrees to find block bodies
+        // Recurse into expression subtrees to find block bodies
         // containing @expect directives.
         collect_directives_from_expr(&stmt.expression, directives);
     }
 }
 
-/// Returns `true` if `exprs` contains a block literal anywhere in its tree
-/// (BT-3384) — see [`expression_contains_block`].
+/// Returns `true` if `exprs` contains a block literal anywhere in its tree —
+/// see [`expression_contains_block`].
 fn exprs_contain_block(exprs: &[ExpressionStatement]) -> bool {
     exprs
         .iter()
@@ -847,7 +847,7 @@ fn exprs_contain_block(exprs: &[ExpressionStatement]) -> bool {
 
 /// Returns `true` if `expr`'s tree contains an [`Expression::Block`] literal
 /// anywhere — the only shape `beamtalk-lint`'s `DeadBlockAssignmentPass`
-/// (BT-3385) can apply to, used by [`expect_category_unchecked`] (BT-3384) to
+/// can apply to, used by [`expect_category_unchecked`] to
 /// tell a plausibly-lint-only `@expect dead_assignment` target apart from one
 /// `analyse_full`'s own match-arm check already covers.
 fn expression_contains_block(expr: &Expression) -> bool {
@@ -861,7 +861,7 @@ fn expression_contains_block(expr: &Expression) -> bool {
 }
 
 /// Recursively walks an expression tree to find nested `Block` bodies and
-/// collects `@expect` directives from them (BT-2010).
+/// collects `@expect` directives from them.
 ///
 /// This handles `@expect` inside `ifTrue: [...]`, `collect: [:x | ...]`,
 /// nested blocks, match arms, and any other expression that contains
@@ -1195,7 +1195,7 @@ dnu = "error"
         );
     }
 
-    // ── BT-3384: @expect staleness scoped to lint-vs-non-lint categories ───
+    // ── @expect staleness scoped to lint-vs-non-lint categories ───
 
     /// Plain `apply_expect_directives` (used by `beamtalk lint`, which always
     /// runs `beamtalk_lint::run_lint_passes` first) validates every category
@@ -1220,7 +1220,7 @@ dnu = "error"
         );
     }
 
-    /// BT-3384: `beamtalk build`/`beamtalk test`/the LSP/the REPL never run
+    /// `beamtalk build`/`beamtalk test`/the LSP/the REPL never run
     /// `beamtalk_lint::run_lint_passes`, so a `DeadBlockAssignmentPass`
     /// diagnostic can never appear in their diagnostics list. An `@expect
     /// dead_assignment` whose target contains a block literal — the only
@@ -1246,7 +1246,7 @@ dnu = "error"
         );
     }
 
-    /// BT-3384 review follow-up: `DiagnosticCategory::DeadAssignment` is not
+    /// `DiagnosticCategory::DeadAssignment` is not
     /// exclusively lint-pass-only — `analyse_full`'s own
     /// `warn_assignment_in_match_arms` also produces it, for an assignment
     /// inside a `match:` arm, and every caller already runs that check. A
@@ -1275,7 +1275,7 @@ dnu = "error"
         );
     }
 
-    /// BT-3384's fix is scoped to categories that are genuinely lint-only: a
+    /// This scoping applies only to categories that are genuinely lint-only: a
     /// category `beamtalk build` DOES check via `analyse_full` (`dnu`, here)
     /// must still be validated for staleness by the excluding variant, same
     /// as plain `apply_expect_directives` — only `dead_assignment` (today's
@@ -1331,7 +1331,7 @@ dnu = "error"
         );
     }
 
-    // ── BT-3387: combined `@expect cat1, cat2` form ──
+    // ── combined `@expect cat1, cat2` form ──
 
     /// The motivating case: a single expression that genuinely triggers two
     /// distinct diagnostic categories at once (e.g. an unresolved-FFI call

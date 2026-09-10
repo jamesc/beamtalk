@@ -9,7 +9,7 @@ const COMPILE_METHOD_CLASS: &str = "Actor subclass: EventStore\n  state: events 
 
 #[test]
 fn diagnostics_method_mode_accepts_a_bare_method_body() {
-    // BT-2569: the System Browser method editor sends a BARE method body. Under
+    // The System Browser method editor sends a BARE method body. Under
     // the default (expression) grammar the `=>` body separator is not a valid
     // top-level token, so the parser reports a false
     // `Unexpected token: expected expression, found ⇒` — the bug. With
@@ -73,7 +73,7 @@ fn compile_method_preserves_source_and_compiles() {
     // A `// --- … ---` banner over a `///` doc block over the header. The
     // per-method canonical `method_source` keeps the `///` doc block but drops
     // the leading `//` banner — the banner is inter-method file structure, not
-    // part of the method's edit unit, and the byte span excludes it (BT-2594).
+    // part of the method's edit unit, and the byte span excludes it.
     // It is preserved in the file via `merged_class_source` (whole-file unparse).
     let method_source = "// --- Execution CRUD ---\n\n/// Store a new workflow execution.\n/// Raises if the workflowId already exists.\ncreateExecution: execution :: Object -> Object =>\n  execution";
     let request = Term::from(Map::from([
@@ -128,7 +128,7 @@ fn compile_method_preserves_source_and_compiles() {
 
 #[test]
 fn compile_method_response_carries_declared_signature() {
-    // ADR 0105 Phase 1 (BT-2777): the compile_method response must carry the
+    // ADR 0105 Phase 1: the compile_method response must carry the
     // patched method's declared return/param types so the workspace can
     // capture them into the signature-generation store before install.
     let request = Term::from(Map::from([
@@ -220,7 +220,7 @@ fn compile_method_rejects_multi_class_source_cleanly() {
 
 #[test]
 fn compile_method_replaces_class_side_method_without_duplicating() {
-    // BT-2563 #3: the instance/class side is chosen by which method list the
+    // The instance/class side is chosen by which method list the
     // backend merges into (driven by `is_class_method`), NOT by `MethodKind`.
     // A class-side patch must REPLACE the existing class method, never push a
     // duplicate alongside it — there is no "kind trap".
@@ -261,7 +261,7 @@ fn compile_method_replaces_class_side_method_without_duplicating() {
 
 #[test]
 fn compile_method_annotates_patched_method_at_its_merged_line() {
-    // BT-2563 #1: the patched method is parsed standalone, so its raw span
+    // The patched method is parsed standalone, so its raw span
     // indexes into the bare snippet (line 1). Codegen must annotate the
     // method's message sends with the line they occupy in the MERGED class
     // source (the send carries the BEAM stacktrace line), not line 1.
@@ -300,7 +300,7 @@ fn compile_method_annotates_patched_method_at_its_merged_line() {
 
 #[test]
 fn compile_method_class_context_diagnostic_resolves_against_merged_source() {
-    // BT-2563 #2: a post-merge semantic diagnostic whose span lands in the
+    // A post-merge semantic diagnostic whose span lands in the
     // CLASS (not the patched method body) must resolve against the merged
     // class source, not the short `method_source`. The one-class-per-file
     // error points at the second class declaration, several lines into the
@@ -341,7 +341,7 @@ fn compile_method_class_context_diagnostic_resolves_against_merged_source() {
 
 #[test]
 fn compile_method_body_diagnostic_is_method_relative() {
-    // BT-2563 #2: a semantic error INSIDE the patched method body must report a
+    // A semantic error INSIDE the patched method body must report a
     // line relative to the method snippet the user is editing — not its absolute
     // line in the merged class. `probe` is appended below the multi-line
     // `initialize` method, so its absolute merged line is well past 2; the

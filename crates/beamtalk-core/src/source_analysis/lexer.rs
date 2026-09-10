@@ -1813,7 +1813,7 @@ mod tests {
 
     #[test]
     fn lex_bang_as_cast_terminator() {
-        // BT-919: `!` is a cast (fire-and-forget) statement terminator
+        // `!` is a cast (fire-and-forget) statement terminator
         assert_eq!(
             lex_kinds("foo bar!"),
             vec![
@@ -2205,7 +2205,7 @@ mod tests {
         );
     }
 
-    // --- BT-1396: Unescaped brace error messages ---
+    // --- Unescaped brace error messages ---
 
     #[test]
     fn lex_unescaped_open_brace_produces_helpful_error() {
@@ -2482,7 +2482,7 @@ mod tests {
         );
     }
 
-    /// BT-3368 review follow-up: the REPL's `beamtalk_repl_eval` module
+    /// The REPL's `beamtalk_repl_eval` module
     /// (`runtime/apps/beamtalk_workspace/src/beamtalk_repl_eval.erl`) has a
     /// hand-rolled Erlang mirror of `lex_string`/`lex_character`'s span
     /// computation (`skip_string_literal/1`/`skip_character_literal/1`),
@@ -2539,8 +2539,8 @@ mod tests {
         }
     }
 
-    /// BT-3372: `beamtalk_repl_eval`'s statement scanner
-    /// (`scan_for_second_top_level_statement/2`) gained a hand-rolled Erlang
+    /// `beamtalk_repl_eval`'s statement scanner
+    /// (`scan_for_second_top_level_statement/2`) has a hand-rolled Erlang
     /// mirror of `lex_line_comment`/`lex_block_comment`'s span computation
     /// (`skip_line_comment/1`/`skip_block_comment/1`), for the same
     /// cross-crate-dependency reason as the string/character mirror above. A

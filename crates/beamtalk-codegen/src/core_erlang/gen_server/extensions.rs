@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Foreign cross-class extension method registration (ADR 0066, BT-2250).
+//! Foreign cross-class extension method registration (ADR 0066).
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
@@ -71,7 +71,7 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the load-time `beamtalk_extensions:register/5` registration
-    /// chain for every foreign extension method in `module` (BT-2250).
+    /// chain for every foreign extension method in `module`.
     ///
     /// Each registration is emitted as an open `let _Ext{N} = <register call> in`
     /// fragment so the calls compose into the surrounding `register_class/0`
@@ -202,7 +202,7 @@ impl CoreErlangGenerator {
             .as_ref()
             .is_some_and(|h| h.is_actor_subclass(ext.class_name.name.as_str()));
 
-        // BT-2250: scope the generator's class identity to the extension's
+        // scope the generator's class identity to the extension's
         // TARGET class while generating the body, so a `super` send inside the
         // extension walks the target class's hierarchy rather than the host
         // module's (which `class_name()` would otherwise return). The bare class
@@ -406,7 +406,7 @@ impl CoreErlangGenerator {
     }
 
     /// Annotates the extension fun expression with its source line when the span
-    /// resolves, matching how the regular method paths annotate funs (BT-940).
+    /// resolves, matching how the regular method paths annotate funs.
     fn maybe_annotate_extension_fun(
         &self,
         fun_doc: Document<'static>,

@@ -121,7 +121,7 @@ fn compile_module_full(module_name: &str, source: &str) -> String {
     let tokens = lex_with_eof(source);
     let (mut module, _) = parse(tokens);
     let analysis = analyse(&module);
-    // BT-3125: drivers prepare the AST (writeback trio) at this boundary,
+    // Drivers prepare the AST (writeback trio) at this boundary,
     // before codegen — matches the fixed pipeline's actual call sequence.
     lower_module_for_codegen(
         &mut module,
@@ -207,11 +207,11 @@ fn bench_codegen(c: &mut Criterion) {
     group.finish();
 }
 
-/// BT-3123: threads `analyse`'s `AnalysisResult` into codegen via
-/// `CodegenOptions::with_analysis` — the fixed pipeline every real driver
-/// (CLI build, compiler-port) now uses, so this benchmark measures the
-/// analyse+codegen path new code actually takes, not the doubled-up
-/// analyse-then-codegen-re-derives-its-own-view path the fix eliminated.
+/// Threads `analyse`'s `AnalysisResult` into codegen via
+/// `CodegenOptions::with_analysis` — the pipeline every real driver
+/// (CLI build, compiler-port) uses, so this benchmark measures the
+/// analyse+codegen path real code actually takes, not a doubled-up
+/// analyse-then-codegen-re-derives-its-own-view path.
 fn bench_end_to_end(c: &mut Criterion) {
     let mut group = c.benchmark_group("end_to_end");
 
@@ -298,14 +298,14 @@ fn bench_project_otp(c: &mut Criterion) {
     });
 }
 
-/// Token allocation overhead investigation (BT-1680).
+/// Token allocation overhead investigation.
 ///
 /// Measures `Vec<Token>::clone()` cost in isolation vs parse cost, to determine
 /// whether token allocation is a meaningful overhead. Clone is required because
 /// `parse()` takes `Vec<Token>` by value, so benchmarking requires a fresh copy
 /// each iteration.
 ///
-/// ## Findings (BT-1680)
+/// ## Findings
 ///
 /// **Token clone cost is significant in benchmarks but not in production.**
 /// `Vec<Token>::clone()` costs ~61 ns/token (880 tokens: ~54 µs). In

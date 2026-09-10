@@ -6,7 +6,7 @@
 //! All `_build/dev/*` paths are constructed through [`BuildLayout`] to ensure
 //! consistency across commands (build, test, run, repl, deps).
 //!
-//! BT-2823: This module lives in the `beamtalk_cli` **library** crate (not
+//! This module lives in the `beamtalk_cli` **library** crate (not
 //! the `beamtalk` binary) so `beamtalk-mcp` can depend on it too — see the
 //! same note in `crate::manifest` for why every item here must stay `pub`
 //! rather than `pub(crate)`.
@@ -115,7 +115,7 @@ impl BuildLayout {
     }
 
     /// `_build/deps/.dep-graph.json` — snapshot of the effective dependency
-    /// graph recorded after the last successful resolve (BT-3009).
+    /// graph recorded after the last successful resolve.
     ///
     /// Compared against the currently declared graph so a *structural* change
     /// — most importantly a dependency's source type swapping between git and
@@ -155,7 +155,7 @@ impl BuildLayout {
     ///
     /// A git-backed registry index is cached in a shared, user-level
     /// directory by default (`~/.beamtalk/registry/<hash>/`, see
-    /// `commands::deps::registry`'s "Cache location" docs — BT-2996), so
+    /// `commands::deps::registry`'s "Cache location" docs), so
     /// this path is only used as the fallback when the home directory can't
     /// be determined, or when a project explicitly overrides the cache
     /// location (`BEAMTALK_REGISTRY_CACHE_DIR`) back to a project-local

@@ -8,7 +8,7 @@
 //! For `native:` classes, generates a thin facade module instead of a full
 //! `gen_server` module. The facade delegates spawn to `BackingModule:start_link/1`
 //! and provides `has_method/1`, `__beamtalk_meta/0`, `register_class/0`, and
-//! dispatch functions for `self delegate` methods (BT-1210).
+//! dispatch functions for `self delegate` methods.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -41,18 +41,18 @@ impl CoreErlangGenerator {
 
         let has_classes = !module.classes.is_empty();
 
-        // BT-411: Build class method exports
+        // Build class method exports
         let class_method_export_doc = Self::build_class_method_export_doc(module);
 
-        // BT-586: Generate spec attributes from type annotations
-        // BT-2909/BT-2932: use the generator's cross-module-aware alias
+        // Generate spec attributes from type annotations
+        // use the generator's cross-module-aware alias
         // registry (this module's own `type_aliases` merged with any
         // pre-loaded aliases from other modules in the same compilation
         // unit — see `CoreErlangGenerator::alias_registry`'s doc) so an
         // alias-named annotation resolves to a `user_type` reference (ADR
         // 0108) instead of falling through to `any()`, regardless of which
         // module declared the alias.
-        // BT-2940: tracks which alias names the specs below actually
+        // tracks which alias names the specs below actually
         // reference, so `generate_alias_type_attrs` only emits `-type`
         // declarations for those (plus transitive deps) instead of every
         // pre-loaded alias in the compilation unit.
@@ -71,7 +71,7 @@ impl CoreErlangGenerator {
             .unwrap_or_default();
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
-        // BT-2909: every class module that could contain a `user_type`
+        // every class module that could contain a `user_type`
         // reference must also declare the matching named `-type` in the same
         // module attribute list (an `erlc` compile error otherwise) — empty
         // for a module with no `type_aliases`, so this is a no-op change for
@@ -82,15 +82,15 @@ impl CoreErlangGenerator {
             spec_codegen::format_alias_type_attributes(&alias_type_attrs)
                 .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
-        // BT-745: Build beamtalk_class attribute
+        // Build beamtalk_class attribute
         let beamtalk_class_attr = super::super::util::beamtalk_class_attribute(&module.classes);
 
-        // BT-845/BT-860: Source path attribute
+        // Source path attribute
         let source_path_attr = self.source_path_attr();
-        // BT-940: File attribute for stacktraces
+        // File attribute for stacktraces
         let file_attr = self.file_attr();
 
-        // BT-1210: Collect self delegate methods for dispatch function generation
+        // Collect self delegate methods for dispatch function generation
         let self_delegate_methods: Vec<&MethodDefinition> = module
             .classes
             .first()
@@ -119,7 +119,7 @@ impl CoreErlangGenerator {
         };
 
         // Native facade exports: spawn, new errors, reflection, dispatch, class methods, registration
-        // BT-3482: has_method_local/1 is only emitted alongside has_method/1
+        // has_method_local/1 is only emitted alongside has_method/1
         // for a class-definition module (generate_has_method's
         // emit_local_probe: true path) — see actor_codegen.rs's identical
         // has_method_local_export.
@@ -208,13 +208,13 @@ impl CoreErlangGenerator {
         // has_method/1
         docs.push(self.generate_has_method(module)?);
 
-        // BT-1210: Generate dispatch functions for self delegate methods
+        // Generate dispatch functions for self delegate methods
         for method in &self_delegate_methods {
             docs.push(Document::Str("\n"));
             docs.push(Self::generate_dispatch_function(method));
         }
 
-        // BT-411: Generate class-side method standalone functions
+        // Generate class-side method standalone functions
         if let Some(class) = module.classes.first() {
             if !class.class_methods.is_empty() {
                 docs.push(self.generate_class_method_functions(class)?);
@@ -358,7 +358,7 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
-                                    // BT-1337: Wrap start_link in try-catch to handle crashes
+                                    // Wrap start_link in try-catch to handle crashes
                                     docvec![
                                         "let StartResult = try call ",
                                         leaf::atom(backing_module.to_string()),
@@ -408,7 +408,7 @@ impl CoreErlangGenerator {
                                                 ]
                                             ),
                                             line(),
-                                            // BT-1337: Handle `ignore` from init/1
+                                            // Handle `ignore` from init/1
                                             "<'ignore'> when 'true' ->",
                                             nest(
                                                 INDENT,
@@ -421,7 +421,7 @@ impl CoreErlangGenerator {
                                                 ]
                                             ),
                                             line(),
-                                            // BT-1337: Handle crash from start_link
+                                            // Handle crash from start_link
                                             "<{'__bt_spawn_crash', SpawnCrashReason}> when 'true' ->",
                                             nest(
                                                 INDENT,
@@ -552,7 +552,7 @@ impl CoreErlangGenerator {
                 .filter(|m| m.kind == MethodKind::Primary)
                 .collect();
 
-            // ADR 0087 Phase 2 (BT-2298) / BT-2385: per-method cross-reference
+            // ADR 0087 Phase 2: per-method cross-reference
             // index. The standard `register_class/0` path bakes this for every
             // class; native-facade classes (`native:` actors like Subprocess and
             // TranscriptStream) went down their own builder-state path that
@@ -614,7 +614,7 @@ impl CoreErlangGenerator {
             }
             let class_method_sigs_doc = Document::Vec(class_method_sig_docs);
 
-            // BT-2195: Class-side method source (mirrors method_source for the
+            // Class-side method source (mirrors method_source for the
             // instance side). Allows SystemNavigation source-text scanners to
             // walk class-side method bodies.
             let mut class_method_source_docs: Vec<Document<'static>> = Vec::new();
@@ -718,7 +718,7 @@ impl CoreErlangGenerator {
                         class_method_sigs_doc,
                         "}~,",
                         line(),
-                        // ADR 0087 Phase 2 (BT-2298) / BT-2385: per-method xref
+                        // ADR 0087 Phase 2: per-method xref
                         // index. A list of maps, not a `~{ }~` map, so it is
                         // wrapped only by build_method_xref_list.
                         "'methodXref' => ",
@@ -840,7 +840,7 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Generates a dispatch function for a `self delegate` method (BT-1210).
+    /// Generates a dispatch function for a `self delegate` method.
     ///
     /// For each method whose body is `self delegate`, generates:
     ///

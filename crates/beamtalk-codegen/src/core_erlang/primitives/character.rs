@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Character primitive implementations (BT-339).
+//! Character primitive implementations.
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
@@ -13,7 +13,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
-/// Character primitive implementations (BT-339).
+/// Character primitive implementations.
 pub(crate) fn generate_character_bif(
     selector: &str,
     params: &[String],

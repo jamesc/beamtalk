@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration tests for `beamtalk generate native` (BT-1214).
+//! Integration tests for `beamtalk generate native`.
 //!
 //! These tests verify the full round-trip:
 //! `.bt` source with `native:` to skeleton `.erl` `gen_server` file.

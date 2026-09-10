@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Subprocess tests for `beamtalk workspace transcript` (BT-2084).
+//! Subprocess tests for `beamtalk workspace transcript`.
 //!
 //! `transcript` requires a running workspace to actually stream entries.
 //! These tests cover the input-validation surface — error paths the user

@@ -106,7 +106,7 @@ impl CoreErlangGenerator {
     /// extension, via superclass delegation, or unconditionally for a
     /// catch-all-DNU class — `false` otherwise.
     ///
-    /// BT-3467 (ADR 0006): renders through the same [`DispatchSpec`]-driven
+    /// ADR 0006: renders through the same [`DispatchSpec`]-driven
     /// emitter as `value_type_codegen::generate_primitive_has_method`, so an
     /// actor's `respondsTo:` answers consistently with a value type's given
     /// the identical situation. Only class-based modules get the full
@@ -120,7 +120,7 @@ impl CoreErlangGenerator {
     /// `Static`: an actor's `dispatch/4` and `respondsTo:` already resolve
     /// an inherited selector via `beamtalk_dispatch`'s live class-registry
     /// walk (ADR 0006, ADR 0032 Phase 3), so `has_method/1` delegates the
-    /// same way — a hot-reloaded ancestor (BT-845) is seen immediately,
+    /// same way — a hot-reloaded ancestor is seen immediately,
     /// instead of `has_method/1` alone still answering from the module
     /// compiled at this class's own compile time.
     ///
@@ -169,7 +169,7 @@ impl CoreErlangGenerator {
             ));
         }
 
-        // BT-3467 follow-up: delegate dynamically (by class name, through
+        // Delegate dynamically (by class name, through
         // beamtalk_dispatch:responds_to/2's live registry walk), not via a
         // module name resolved at this class's own compile time — see
         // SuperclassDelegation's doc comment. ProtoObject is the hierarchy
@@ -197,7 +197,7 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// The pre-BT-3467 `has_method/1` shape for script/workspace modules —
+    /// The `has_method/1` shape for script/workspace modules —
     /// a plain selector-membership check, no extension/superclass/DNU
     /// awareness. Kept only for expression-based modules, which have no
     /// class definition to build a [`DispatchSpec`] from.
@@ -253,11 +253,11 @@ impl CoreErlangGenerator {
 
     /// Generates the `safe_dispatch/3` function with error isolation.
     ///
-    /// Per BT-29 design doc, errors in method dispatch are caught and returned
+    /// Errors in method dispatch are caught and returned
     /// to the caller rather than crashing the actor instance.
     ///
     /// Note: Core Erlang try expression uses simple variable patterns (not case-style).
-    /// BT-1822: Stacktrace is captured and returned in the error tuple so crash
+    /// Stacktrace is captured and returned in the error tuple so crash
     /// reports and caller-side re-raises preserve full diagnostic information.
     ///
     /// # Generated Code
@@ -280,7 +280,7 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    // Construct Self object reference using beamtalk_actor:make_self/1 (BT-161)
+                    // Construct Self object reference using beamtalk_actor:make_self/1
                     "let Self = call 'beamtalk_actor':'make_self'(State) in",
                     line(),
                     // Core Erlang try uses simple variable patterns in of/catch, not case-style
@@ -292,7 +292,7 @@ impl CoreErlangGenerator {
                     line(),
                     "of Result -> Result",
                     line(),
-                    // BT-1822: Capture stacktrace and return in error tuple for diagnostics
+                    // Capture stacktrace and return in error tuple for diagnostics
                     "catch <Type, Error, Stacktrace> -> {'error', {Type, Error, Stacktrace}, State}",
                 ]
             ),
@@ -306,7 +306,7 @@ impl CoreErlangGenerator {
     /// Handles both expression-based script/workspace modules (top-level
     /// `name := [block]` assignments become methods — a live mode used by the
     /// package/workspace compiler) and class definitions, including the
-    /// `doesNotUnderstand:args:` fallback per BT-29.
+    /// `doesNotUnderstand:args:` fallback.
     pub(in crate::core_erlang) fn generate_dispatch(
         &mut self,
         module: &Module,
@@ -383,7 +383,7 @@ impl CoreErlangGenerator {
         self.reset_state_version();
         self.push_scope();
 
-        // BT-470: Register parameters BEFORE generating body so field
+        // Register parameters BEFORE generating body so field
         // references resolve to parameter variables (not maps:get)
         let param_vars: Vec<String> = block
             .parameters
@@ -391,7 +391,7 @@ impl CoreErlangGenerator {
             .map(|p| self.fresh_var(&p.name))
             .collect();
 
-        // BT-761: Detect whether any block in this method body contains ^.
+        // Detect whether any block in this method body contains ^.
         let needs_nlr = self
             .semantic_facts
             .has_block_nlr_or_walk(&block.span, &block.body);
@@ -414,9 +414,9 @@ impl CoreErlangGenerator {
         };
         self.set_current_nlr_token(None);
 
-        // BT-3171 (ADR 0111 Addendum 4/6): prepend a real `NlrCatch` stmt and
+        // ADR 0111 Addendum 4/6: prepend a real `NlrCatch` stmt and
         // verify+render once, instead of rendering the body then wrapping the
-        // `Document`. BT-761/BT-764: the body sits inside a `case` arm, so it
+        // `Document`. The body sits inside a `case` arm, so it
         // still needs the letrec function frame when NLR is present.
         let span = block
             .body
@@ -581,7 +581,7 @@ impl CoreErlangGenerator {
 
     /// Generates the hierarchy walk via `beamtalk_dispatch:super`, falling back to DNU.
     ///
-    /// BT-2842: `beamtalk_dispatch:super/5` returns `{error, #beamtalk_error{}}`
+    /// `beamtalk_dispatch:super/5` returns `{error, #beamtalk_error{}}`
     /// for two semantically different situations — the selector genuinely
     /// isn't found anywhere in the hierarchy (`kind = does_not_understand`),
     /// or the selector *was* found and invoked but the method itself raised a

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Subprocess tests for `beamtalk fmt` and `beamtalk fmt-check` (BT-2084).
+//! Subprocess tests for `beamtalk fmt` and `beamtalk fmt-check`.
 //!
 //! Verifies in-place rewriting, unified diff output, and exit codes.
 

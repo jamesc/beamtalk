@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `resolve_completion_type` tests (BT-1068) and `load_native_type_registry_from`'s live/missing-cache FFI type-registry resolution.
+//! `resolve_completion_type` tests and `load_native_type_registry_from`'s live/missing-cache FFI type-registry resolution.
 
 use super::*;
 
-// --- resolve_completion_type tests (BT-1068) ---
+// --- resolve_completion_type tests ---
 
 #[test]
 fn resolve_completion_type_string_literal() {
@@ -41,7 +41,7 @@ fn resolve_completion_type_parenthesized_binary_send() {
     );
 }
 
-/// BT-2891: `load_native_type_registry_from` reads `<module>_<16-hex>.json`
+/// `load_native_type_registry_from` reads `<module>_<16-hex>.json`
 /// entries from `<root>/_build/type_cache/` (the same on-disk format
 /// `beamtalk build`/`beamtalk lint` write via
 /// `beamtalk_core::ffi_type_specs`) and replays their `specs_line` into a
@@ -70,9 +70,9 @@ fn load_native_type_registry_from_reads_type_cache() {
     assert_eq!(sig.return_type, InferredType::known("List"));
 }
 
-/// BT-2891: a project that has never run `beamtalk build` (no
+/// A project that has never run `beamtalk build` (no
 /// `_build/type_cache/`) yields an empty registry rather than an error —
-/// the REPL must keep evaluating, registry-blind, exactly like pre-BT-2891.
+/// the REPL must keep evaluating, registry-blind.
 #[test]
 fn load_native_type_registry_from_missing_cache_is_empty() {
     let dir = tempfile::tempdir().expect("failed to create temp dir");
@@ -80,8 +80,8 @@ fn load_native_type_registry_from_missing_cache_is_empty() {
     assert_eq!(registry.module_count(), 0);
 }
 
-/// BT-2891: with an empty native type registry (the pre-BT-2891 state,
-/// and what a project that has never run `beamtalk build` yields), an FFI
+/// With an empty native type registry (the state
+/// a project that has never run `beamtalk build` yields), an FFI
 /// expression still falls back to `not_found` (`Dynamic`) — unchanged
 /// behaviour. Exercises `resolve_completion_type_response` directly with
 /// an explicit empty registry rather than `handle_resolve_completion_type`'s
@@ -107,12 +107,12 @@ fn resolve_completion_type_response_ffi_expression_with_empty_registry_stays_not
     );
 }
 
-/// BT-2891: with a populated native type registry, `resolve_completion_type`
+/// With a populated native type registry, `resolve_completion_type`
 /// resolves an FFI expression to its real return class instead of falling
 /// back to `Dynamic`/`not_found`. Exercises `resolve_completion_type_response`
 /// directly (rather than `handle_resolve_completion_type`'s process-wide
 /// `OnceLock`) so the registry-provided path is covered without touching
-/// the filesystem or global state — mirroring BT-2887's
+/// the filesystem or global state — mirroring the equivalent
 /// `resolve_expression_type_with_native_registry_resolves_ffi_call` test in
 /// `completion_provider.rs`.
 #[test]

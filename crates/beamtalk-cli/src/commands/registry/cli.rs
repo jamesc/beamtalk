@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! CLI interface for registry-site commands (BT-2990).
+//! CLI interface for registry-site commands.
 //!
 //! **DDD Context:** CLI / Documentation
 //!

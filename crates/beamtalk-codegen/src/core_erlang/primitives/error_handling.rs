@@ -12,7 +12,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
-/// Exception primitive implementations (BT-338).
+/// Exception primitive implementations.
 ///
 /// Exception field access delegates to `beamtalk_exception_handler` runtime module.
 /// This avoids naming conflict: compiled exception.bt produces `beamtalk_exception`,
@@ -36,7 +36,7 @@ pub(crate) fn generate_exception_bif(
                 "], Self)",
             ])
         }
-        // BT-1524: Class-side signal primitives — raise exceptions without instance allocation.
+        // Class-side signal primitives — raise exceptions without instance allocation.
         "classSignal:" => {
             let p0 = param(params, 0, "_Msg");
             Some(docvec![
@@ -48,7 +48,7 @@ pub(crate) fn generate_exception_bif(
         "classSignal" => Some(Document::Str(
             "call 'beamtalk_exception_handler':'class_signal'(ClassSelf)",
         )),
-        // BT-3042: the general, pure-Beamtalk way to signal a named error
+        // The general, pure-Beamtalk way to signal a named error
         // kind (index_out_of_bounds, empty_collection, or another kind in
         // ExceptionKind) with a hint specific to the call site, instead of
         // the generic user_error kind `self error:` always raises.
@@ -76,7 +76,7 @@ pub(crate) fn generate_exception_bif(
     }
 }
 
-/// `StackFrame` primitive implementations (BT-107).
+/// `StackFrame` primitive implementations.
 ///
 /// `StackFrame` field access delegates to `beamtalk_stack_frame` runtime module.
 pub(crate) fn generate_stack_frame_bif(

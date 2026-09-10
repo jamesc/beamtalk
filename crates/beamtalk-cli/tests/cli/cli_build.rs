@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Subprocess tests for `beamtalk build` (BT-2084).
+//! Subprocess tests for `beamtalk build`.
 //!
 //! Verifies exit code, the `_build/` artefact set produced by a successful
 //! build, and error output when sources fail to parse.
@@ -11,7 +11,7 @@ use crate::cli_common;
 use predicates::prelude::*;
 use predicates::str::contains;
 
-/// ADR 0075 / BT-1846 / BT-1847 end-to-end regression: a project with a
+/// ADR 0075 end-to-end regression: a project with a
 /// `stubs/` directory must build successfully — `stubs/*.bt` is scanned
 /// separately by `load_project_stub_registry` and must never reach the
 /// ordinary compile pipeline, where `declare native:` is a hard error
@@ -37,7 +37,7 @@ fn build_succeeds_with_project_local_stubs_directory() {
 
 /// Companion to the above: the stub isn't just tolerated, it's actually
 /// consumed — a stubbed function's argument-type mismatch is caught by the
-/// type checker (BT-1847's function/arity-level registry override), proving
+/// type checker (via the function/arity-level registry override), proving
 /// `stubs/` is both excluded from ordinary compilation and loaded into the
 /// FFI type registry in the same build.
 #[test]
@@ -130,7 +130,7 @@ fn build_force_recompiles_unchanged_sources() {
         .success();
 }
 
-/// BT-3120 acceptance criterion, exercised through the real `beamtalk build`
+/// Acceptance criterion, exercised through the real `beamtalk build`
 /// subprocess rather than the internal `detect_changes`/`partition_files`
 /// unit tests: rewriting a source file with byte-for-byte identical content
 /// (e.g. `touch`, or an editor save-without-edit) bumps its mtime but must
@@ -177,21 +177,20 @@ fn build_touch_without_content_change_is_not_recompiled() {
         .stderr(contains("unchanged").not());
 }
 
-/// BT-3410 acceptance criterion: an unchanged file's previously-known
+/// Acceptance criterion: an unchanged file's previously-known
 /// diagnostics must still be reported on every `build` invocation, not just
-/// the one that first recompiled it. Before the fix, `beamtalk build`'s
-/// incremental change-detection skipped diagnostic computation entirely for
-/// an unchanged file — a real diagnostic (even a non-fatal `Hint`, as here)
-/// was shown once and then silently vanished from every subsequent plain
-/// `build` until something forced a full recompile.
+/// the one that first recompiled it. Skipping diagnostic computation
+/// entirely for an unchanged file would let a real diagnostic (even a
+/// non-fatal `Hint`, as here) show once and then silently vanish from
+/// every subsequent plain `build` until something forced a full recompile.
 #[test]
 fn build_replays_diagnostics_for_unchanged_file_on_every_run() {
     let project = cli_common::fixture_project();
     let greeter = project.path().join("src/Greeter.bt");
     let original = std::fs::read_to_string(&greeter).unwrap();
     // A DNU is only a `Hint` (non-fatal) — the build must still succeed both
-    // times, exercising the exact "shown once, then vanishes" trap from the
-    // issue rather than an error that would fail the build outright.
+    // times, exercising the exact "shown once, then vanishes" trap this test
+    // guards against, rather than an error that would fail the build outright.
     std::fs::write(
         &greeter,
         format!("{original}\n  typo => 3 fooBarBaz: 1 quux: 2\n"),
@@ -229,7 +228,7 @@ fn build_replays_diagnostics_for_unchanged_file_on_every_run() {
         .stderr(contains("does not understand"));
 }
 
-/// BT-3410 review follow-up: a diagnostics-cache miss for an otherwise
+/// A diagnostics-cache miss for an otherwise
 /// unchanged file (simulating a fresh sidecar right after upgrading to this
 /// feature, corruption, or a version bump) must self-heal within the *same*
 /// build — recompiling just that file — rather than silently reporting
@@ -287,13 +286,13 @@ fn build_recompiles_unchanged_file_on_diagnostics_cache_miss() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-2920: E0401/E0402 visibility checks must fire at build time
+// E0401/E0402 visibility checks must fire at build time
 // ---------------------------------------------------------------------------
 
 #[test]
 fn build_fails_with_e0402_for_cross_file_internal_class_leak() {
-    // Regression for BT-2920: `current_package` was never threaded into the
-    // CLI build path, so `check_class_visibility` silently emitted zero
+    // Regression: `current_package` must be threaded into the
+    // CLI build path, or `check_class_visibility` silently emits zero
     // diagnostics. Mirrors docs/beamtalk-language-features.md's
     // TokenBuffer/Parser example — the internal class lives in a *sibling*
     // file from the public method that leaks it, exercising the cross-file
@@ -334,7 +333,7 @@ fn build_fails_with_e0402_for_cross_file_internal_class_leak() {
 
 #[test]
 fn build_fails_with_e0402_for_internal_type_alias_leak() {
-    // Regression for BT-2920 (ADR 0108 Semantics, BT-2898): a public type
+    // Regression (ADR 0108 Semantics): a public type
     // alias whose expansion transitively reaches an internal alias must fail
     // the build with E0402, not just an LSP squiggle.
     let project = cli_common::fixture_project();
@@ -361,15 +360,15 @@ fn build_fails_with_e0402_for_internal_type_alias_leak() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-3044: genuine cross-package alias collision must be reported once
+// Genuine cross-package alias collision must be reported once
 // ---------------------------------------------------------------------------
 
 #[test]
 fn build_reports_genuine_cross_package_alias_collision_exactly_once() {
-    // BT-3044 (follow-up from BT-3043): `beamtalk lint` was fixed to dedupe
-    // repeat sightings of a genuine cross-package alias collision across its
-    // whole per-file loop. This test proves `beamtalk build` never needed the
-    // equivalent fix: `execute_build_passes`'s Pass 2 loop (`build.rs`)
+    // `beamtalk lint` dedupes repeat sightings of a genuine cross-package
+    // alias collision across its whole per-file loop. This test proves
+    // `beamtalk build` needs no equivalent fix: `execute_build_passes`'s
+    // Pass 2 loop (`build.rs`)
     // propagates each file's compile error with `?`, so it stops at the
     // *first* file whose `AliasRegistry::add_pre_loaded` seeding rediscovers
     // the collision — the diagnostic is inherently printed once, then the

@@ -5,7 +5,7 @@
 //!
 //! Tests are organized into feature-focused sub-modules:
 //! - [`stub_registry`] — stub-registry resolution precedence and collisions
-//!   (ADR 0075 Phase 2, BT-1847)
+//!   (ADR 0075 Phase 2)
 //! - [`build_basics`] — source discovery and basic single/multi-file builds
 //! - [`module_naming`] — `compute_relative_module` and manifest-driven
 //!   package/module naming, including declared-alias metadata

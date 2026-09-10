@@ -140,14 +140,34 @@ pub(super) fn is_character_typed_receiver(expr: &Expression) -> bool {
 /// This is used to detect state mutations that require threading through
 /// control flow constructs.
 pub(super) fn is_field_assignment(expr: &Expression) -> bool {
-    if let Expression::Assignment { target, .. } = expr {
-        if let Expression::FieldAccess { receiver, .. } = target.as_ref() {
-            if let Expression::Identifier(recv_id) = receiver.as_ref() {
-                return recv_id.name == "self";
-            }
-        }
-    }
-    false
+    field_assignment_name(expr).is_some()
+}
+
+/// BT-3488: the assigned field's name for exactly the shape
+/// [`is_field_assignment`] accepts (`self.<field> := ...`), or `None`.
+///
+/// [`is_field_assignment`] is defined in terms of this function rather than
+/// beside it, so the "is this a field write?" test and the "which field?"
+/// answer can never disagree. A caller that needs the name — such as
+/// `reject_unthreadable_value_self_field_write`, which puts it in a user-facing
+/// diagnostic — would otherwise have to re-destructure the same shape by hand,
+/// and a later widening of one copy (say, to accept an aliased `self`) would
+/// silently turn a rejection into a no-op rather than a compile error
+/// (CLAUDE.md's no-duplicate-implementations rule).
+pub(super) fn field_assignment_name(expr: &Expression) -> Option<&str> {
+    let Expression::Assignment { target, .. } = expr else {
+        return None;
+    };
+    let Expression::FieldAccess {
+        receiver, field, ..
+    } = target.as_ref()
+    else {
+        return None;
+    };
+    let Expression::Identifier(recv_id) = receiver.as_ref() else {
+        return None;
+    };
+    (recv_id.name == "self").then(|| field.name.as_str())
 }
 
 /// BT-2797: Checks if an expression is a self-field access (`self.field`).
@@ -452,6 +472,11 @@ impl CoreErlangGenerator {
     /// See [`is_field_assignment`].
     pub(super) fn is_field_assignment(expr: &Expression) -> bool {
         is_field_assignment(expr)
+    }
+
+    /// See [`field_assignment_name`].
+    pub(super) fn field_assignment_name(expr: &Expression) -> Option<&str> {
+        field_assignment_name(expr)
     }
 
     /// See [`is_self_field_access`].

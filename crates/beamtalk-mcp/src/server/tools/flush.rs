@@ -19,7 +19,7 @@ use crate::server::{BeamtalkMcp, ToolTimer, check_response, validate_class_name}
 #[tool_router(router = flush_tool_router, vis = "pub(crate)")]
 impl BeamtalkMcp {
     /// Flush pending `ChangeLog` entries to disk (ADR 0082 Phase 3;
-    /// destructive tier added ADR 0113 Phase 2/4, BT-3207/BT-3210).
+    /// destructive tier added ADR 0113 Phase 2/4).
     ///
     /// Compiles to `Workspace flush` / `Workspace flush: <selector>` (Tier 1
     /// only), or — when `confirm_destructive: true` — `Workspace
@@ -179,7 +179,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
-    /// Whole-image re-check (ADR 0105 Phase 3, BT-2782).
+    /// Whole-image re-check (ADR 0105 Phase 3).
     ///
     /// Compiles to `Workspace recheckImage` — the "complete but unbounded"
     /// path kept out of the automatic per-reload check: re-checks every live

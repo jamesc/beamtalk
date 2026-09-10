@@ -17,7 +17,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-493: Validate body block arity (must be 1-arg)
+        // Validate body block arity (must be 1-arg)
         validate_block_arity_exact(
             body,
             1,
@@ -26,7 +26,7 @@ impl CoreErlangGenerator {
              \x20 list select: [:item | item > 0]",
         )?;
 
-        // BT-904: Check if body has state-affecting operations
+        // Check if body has state-affecting operations
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
             return self.generate_list_filter_with_mutations(receiver, body_block, false);
         }
@@ -40,7 +40,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-493: Validate body block arity (must be 1-arg)
+        // Validate body block arity (must be 1-arg)
         validate_block_arity_exact(
             body,
             1,
@@ -49,14 +49,14 @@ impl CoreErlangGenerator {
              \x20 list reject: [:item | item < 0]",
         )?;
 
-        // BT-904: Check if body has state-affecting operations
+        // Check if body has state-affecting operations
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
             return self.generate_list_filter_with_mutations(receiver, body_block, true);
         }
 
         // list reject: is opposite of filter - we need to negate the predicate
-        // BT-416: Add runtime is_list guard for non-list receivers
-        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        // Add runtime is_list guard for non-list receivers
+        // see `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -91,10 +91,10 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-904: Generates stateful `select:`/`reject:` using `lists:foldl` with state threading.
+    /// Generates stateful `select:`/`reject:` using `lists:foldl` with state threading.
     ///
     /// In map mode: accumulator is `{ResultList, StateAcc}`.
-    /// In tuple mode (BT-1276): accumulator is `{ResultList, Var1, ..., VarN}`.
+    /// In tuple mode: accumulator is `{ResultList, Var1, ..., VarN}`.
     #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang) fn generate_list_filter_with_mutations(
         &mut self,
@@ -102,12 +102,12 @@ impl CoreErlangGenerator {
         body: &Block,
         negate: bool,
     ) -> Result<Document<'static>> {
-        // BT-1276: Use tuple accumulator when eligible.
+        // Use tuple accumulator when eligible.
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
-        // BT-1489: Save recv var for is_binary check after foldl (String-aware result).
+        // Save recv var for is_binary check after foldl (String-aware result).
         let recv_var_for_str_check = list_var.clone();
         let recv_code = self.expression_doc(receiver)?;
         let safe_list_var = self.fresh_temp_var("temp");
@@ -117,7 +117,7 @@ impl CoreErlangGenerator {
         let acc_state_var = self.fresh_temp_var("AccSt");
 
         if plan.use_tuple_acc {
-            // BT-1276: Tuple-accumulator path.
+            // Tuple-accumulator path.
             let vars_doc = plan.current_vars_doc(self); // Before push_scope.
             let init_tuple_doc = docvec!["{ [], ", vars_doc, "}"];
 
@@ -163,12 +163,12 @@ impl CoreErlangGenerator {
             // Extract each updated local var from tuple positions 2..N.
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
 
-            // BT-1489: String-aware result wrapping for filter ops.
+            // String-aware result wrapping for filter ops.
             let (str_binding, str_result) =
                 self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
             if self.loop_mode.in_direct_params_loop {
-                // BT-1329: Skip StateAcc repack. Emit open let-chain so variable rebindings
+                // Skip StateAcc repack. Emit open let-chain so variable rebindings
                 // escape to the outer scope. Store the result var for the caller.
                 self.loop_mode.direct_params_list_op_result = Some(str_result);
                 docs.push(docvec![
@@ -194,7 +194,7 @@ impl CoreErlangGenerator {
                     extract_doc,
                 ]);
             } else {
-                // BT-1276: Re-pack into StateAcc for outer method-body `maps:get` extraction.
+                // Re-pack into StateAcc for outer method-body `maps:get` extraction.
                 let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
                 docs.push(docvec![
                     " in let ",
@@ -238,7 +238,7 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
         // unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -281,7 +281,7 @@ impl CoreErlangGenerator {
         let final_list = self.fresh_temp_var("FinalList");
         let state_out = self.fresh_temp_var("StOut");
 
-        // BT-1489: String-aware result wrapping for map-acc filter path.
+        // String-aware result wrapping for map-acc filter path.
         let (str_binding_doc, str_result) =
             self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 

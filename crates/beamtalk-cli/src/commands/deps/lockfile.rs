@@ -27,7 +27,7 @@
 //! # A registry dependency additionally records the exact version requested
 //! # in beamtalk.toml, plus which registry produced it, so resolution can
 //! # skip the registry index on a hit — and re-consult it when the
-//! # configured registry changes (BT-2993).
+//! # configured registry changes.
 //! [[package]]
 //! name = "yaml"
 //! version = "0.2.1"
@@ -88,7 +88,7 @@ pub struct LockEntry {
 }
 
 /// Registry provenance recorded on a [`LockEntry`] for a dependency resolved
-/// through a registry index (BT-2978/BT-2993).
+/// through a registry index.
 ///
 /// Serialized as two separate lockfile fields: `version` and `registry` (the
 /// latter's name matches the field ADR 0073 reserves for this purpose).
@@ -100,7 +100,7 @@ pub struct RegistryVersion {
     /// Where the registry index that produced this entry was resolved from
     /// (its location string — a git URL or local directory path).
     ///
-    /// `None` for a lock entry written before this field existed (BT-2993) —
+    /// `None` for a lock entry written before this field existed —
     /// such an entry never matches the currently configured registry, so it
     /// is always treated as a miss and re-resolved once, after which it
     /// carries a real value.
@@ -150,7 +150,7 @@ struct TomlLockEntry {
     /// therefore still parse, and their entries simply carry no version.
     #[serde(default)]
     version: Option<String>,
-    /// Which registry produced this entry (BT-2993). Absent in lockfiles
+    /// Which registry produced this entry. Absent in lockfiles
     /// written before this field existed, and in plain git-dependency
     /// entries — both still parse.
     #[serde(default)]
@@ -216,7 +216,7 @@ impl Lockfile {
 
     /// Collect all native (hex) dependency names from the lockfile.
     ///
-    /// ADR 0072 (BT-1724): After a build with `[native.dependencies]`,
+    /// ADR 0072: After a build with `[native.dependencies]`,
     /// `beamtalk.lock` contains all resolved hex packages — including
     /// transitive hex deps (e.g., ranch via cowboy) and hex deps from
     /// transitive BT dependencies. This is the authoritative source for
@@ -595,7 +595,7 @@ mod tests {
         assert_eq!(original, parsed);
     }
 
-    // --- Registry version field (BT-2978) ---
+    // --- Registry version field ---
 
     fn registry_version(version: &str, registry: &str) -> RegistryVersion {
         RegistryVersion {
@@ -647,7 +647,7 @@ mod tests {
         );
     }
 
-    // --- Registry field (BT-2993) ---
+    // --- Registry field ---
 
     #[test]
     fn test_registry_field_is_serialized_alongside_version() {
@@ -761,8 +761,8 @@ mod tests {
 
     #[test]
     fn test_lockfile_without_registry_still_parses_and_omits_registry() {
-        // A lockfile written after BT-2978 but before BT-2993 carried `version`
-        // but no `registry` key. It must still parse — the entry simply
+        // A lockfile with `version` but no `registry` key (an intermediate
+        // schema shape) must still parse — the entry simply
         // carries no recorded registry, which a resolution-freshness check
         // (graph.rs / mod.rs) treats as an unconditional miss.
         let legacy = r#"

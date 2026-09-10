@@ -6,8 +6,8 @@
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! Generates state field initializers for actor `init/1` callbacks. Inherited
-//! state from a stateful parent is supplied by the super-init chain (BT-1417,
-//! see `gen_server/callbacks.rs`), not by this module.
+//! state from a stateful parent is supplied by the super-init chain
+//! (see `gen_server/callbacks.rs`), not by this module.
 
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
@@ -58,8 +58,8 @@ impl CoreErlangGenerator {
     ///
     /// Inherited state from a *non-base* parent is NOT collected here. A subclass
     /// of a stateful actor instead has its `init/1` call the parent's compiled
-    /// `init/1` and merge its own fields on top — the super-init chain (BT-1417,
-    /// see `gen_server/callbacks.rs`). That `has_parent_init` path resolves the
+    /// `init/1` and merge its own fields on top — the super-init chain
+    /// (see `gen_server/callbacks.rs`). That `has_parent_init` path resolves the
     /// parent's compiled module and so handles cross-file, stdlib, and package
     /// parents uniformly; this function is only reached with a base-class parent.
     /// It also emits fields from module-level `x := literal` assignments for
@@ -87,12 +87,12 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Find the current class being compiled (identity check — ADR 0119/BT-3436).
+        // Find the current class being compiled (identity check — ADR 0119).
         let current_class = self.current_class(module);
 
         if let Some(class) = current_class {
             // Emit this class's own fields. Inherited state from a non-base parent
-            // is supplied at runtime by the super-init chain (BT-1417), not collected
+            // is supplied at runtime by the super-init chain, not collected
             // here — this branch is only reached when the parent is a base class.
             for state in &class.state {
                 let value_code = if let Some(ref default_value) = state.default_value {

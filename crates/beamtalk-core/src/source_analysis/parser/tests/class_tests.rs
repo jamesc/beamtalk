@@ -6,7 +6,7 @@
 use super::*;
 
 // ========================================================================
-// native: keyword argument tests (BT-1206, ADR 0056)
+// native: keyword argument tests (ADR 0056)
 // ========================================================================
 
 #[test]
@@ -50,7 +50,7 @@ fn parse_no_native_keyword_leaves_backing_module_none() {
 }
 
 // ========================================================================
-// handleScope: keyword tests (ADR 0103, BT-2754)
+// handleScope: keyword tests (ADR 0103)
 // ========================================================================
 
 #[test]
@@ -136,7 +136,7 @@ fn parse_handle_scope_missing_symbol_emits_error() {
 
 #[test]
 fn parse_handle_scope_on_new_line_captures_header_trailing_comment() {
-    // BT-2942: when `handleScope:` sits on its own line, the trailing
+    // When `handleScope:` sits on its own line, the trailing
     // comment on the class header line itself (e.g. `Object subclass: Foo
     // // header comment`) must still be captured — it lives in the class
     // name token's trailing trivia, not the `#symbol` token's.
@@ -168,8 +168,7 @@ fn parse_handle_scope_on_new_line_captures_header_trailing_comment() {
 
 #[test]
 fn parse_handle_scope_on_new_line_falls_back_to_its_own_trailing_comment() {
-    // BT-2942 (edge case guarding against a regression from the fix above):
-    // when the class header line has no trailing comment but the
+    // Edge case: when the class header line has no trailing comment but the
     // `handleScope:` line does, that comment must still be captured (the
     // clause's own `#symbol` token trailing trivia) rather than silently
     // dropped now that header-line comments are preferred.
@@ -197,7 +196,7 @@ fn parse_handle_scope_on_new_line_falls_back_to_its_own_trailing_comment() {
 
 #[test]
 fn parse_handle_scope_on_new_line_prefers_header_over_scope_comment_when_both_present() {
-    // BT-2942 (Claude review bot follow-up): `comments.trailing` is a single
+    // `comments.trailing` is a single
     // slot, so when *both* the header line and the `handleScope:` line carry
     // a trailing comment, only one can survive. The header-line comment
     // deliberately wins (it's the more prominent of the two) — this is not
@@ -310,11 +309,11 @@ fn parse_block_with_params() {
 
 #[test]
 fn parse_block_with_typed_param_simple() {
-    // BT-2043: `[:b :: Dictionary | b isNil]` — the `:: Type` annotation is
-    // consumed (and currently discarded). Prior to the fix the parser left
-    // `::` in place, producing cascading errors that also corrupted the
-    // surrounding method body and caused a spurious "Unused variable"
-    // warning for the assignment receiving the block.
+    // `[:b :: Dictionary | b isNil]` — the `:: Type` annotation is
+    // consumed (and currently discarded). Leaving `::` unconsumed would
+    // produce cascading errors that also corrupt the surrounding method
+    // body and cause a spurious "Unused variable" warning for the
+    // assignment receiving the block.
     let module = parse_ok("[:b :: Dictionary | b isNil]");
     match &module.expressions[0].expression {
         Expression::Block(block) => {
@@ -328,7 +327,7 @@ fn parse_block_with_typed_param_simple() {
 
 #[test]
 fn parse_block_with_typed_params_multiple() {
-    // BT-2043: multiple typed block parameters.
+    // Multiple typed block parameters.
     let module = parse_ok("[:x :: Integer :y :: Integer | x + y]");
     match &module.expressions[0].expression {
         Expression::Block(block) => {
@@ -343,7 +342,7 @@ fn parse_block_with_typed_params_multiple() {
 
 #[test]
 fn parse_block_with_typed_param_generic() {
-    // BT-2043: Generic types such as `List(Integer)` should not confuse the
+    // Generic types such as `List(Integer)` should not confuse the
     // block parser, since the parens are balanced inside the type annotation.
     let module = parse_ok("[:xs :: List(Integer) | xs size]");
     match &module.expressions[0].expression {
@@ -430,7 +429,7 @@ fn parse_error_recovery() {
 
 #[test]
 fn parse_top_level_error_recovery_unchanged() {
-    // BT-368: Top-level parsing currently treats newlines as statement separators.
+    // Top-level parsing currently treats newlines as statement separators.
     // This test ensures that error recovery on the first statement does not
     // regress that behaviour and that we still parse subsequent top-level
     // expressions after a newline.
@@ -502,12 +501,12 @@ fn parse_cascade_simple() {
 
 #[test]
 fn bt2811_cascade_method_immediately_followed_by_keyword_method() {
-    // BT-2811: a cascade-bodied method immediately followed (no method in
-    // between) by a keyword method used to corrupt the keyword method's own
-    // parameter parsing — parse_cascade_message's keyword-parsing loop had no
-    // boundary check for "this keyword actually starts the next sibling class
-    // member", unlike parse_keyword_message's equivalent loop, so it silently
-    // swallowed the next method's `nextMethod:` keyword and `x` parameter as
+    // A cascade-bodied method immediately followed (no method in
+    // between) by a keyword method must not corrupt the keyword method's own
+    // parameter parsing — parse_cascade_message's keyword-parsing loop needs the
+    // same boundary check for "this keyword actually starts the next sibling class
+    // member" that parse_keyword_message's equivalent loop has, or it would
+    // silently swallow the next method's `nextMethod:` keyword and `x` parameter as
     // additional keyword parts/arguments of the cascade message.
     let source = "Object subclass: MinimalRepro\n  cascadeMethod => Transcript show: \"a\"; show: \"b\"\n\n  nextMethod: x => x";
     let tokens = lex_with_eof(source);
@@ -554,10 +553,10 @@ fn bt2811_cascade_method_immediately_followed_by_keyword_method() {
 
 #[test]
 fn bt2811_cascade_method_followed_by_keyword_method_in_middle_of_class() {
-    // BT-2811: the corruption is not specific to the class's LAST method — a
+    // This is not specific to the class's LAST method — a
     // keyword method in the middle of the class, immediately after a cascade
-    // method, is affected identically, and (pre-fix) the desync propagated
-    // further and corrupted the method after that too.
+    // method, is affected identically, with the desync propagating
+    // further to corrupt the method after that too.
     let source = "Object subclass: MinimalRepro2\n  cascadeMethod => Transcript show: \"a\"; show: \"b\"\n\n  middleMethod: x => x\n\n  lastMethod => 1";
     let tokens = lex_with_eof(source);
     let (module, diagnostics) = parse(tokens);
@@ -579,9 +578,8 @@ fn bt2811_cascade_method_followed_by_keyword_method_in_middle_of_class() {
 
 #[test]
 fn bt2811_cascade_method_followed_by_binary_selector_method() {
-    // BT-2811 completeness check: a binary-selector method immediately after
-    // a cascade method (not exercised by the original bug report, which only
-    // covered keyword methods) — binary selectors don't loop over multiple
+    // Completeness check: a binary-selector method immediately after
+    // a cascade method — binary selectors don't loop over multiple
     // parts the way keyword messages do, so this was never actually at risk,
     // but is worth a regression test given how surprising the keyword case was.
     let source = "Object subclass: BinaryRepro\n  cascadeMethod => Transcript show: \"a\"; show: \"b\"\n\n  + other => other";
@@ -602,7 +600,7 @@ fn bt2811_cascade_method_followed_by_binary_selector_method() {
 
 #[test]
 fn bt2811_consecutive_cascade_bodied_methods() {
-    // BT-2811 completeness check: two cascade-bodied methods immediately
+    // Completeness check: two cascade-bodied methods immediately
     // adjacent to each other (the exact topology the fix enables — see the
     // removed cascadeBuffer1/cascadeBuffer2 workaround methods in
     // stdlib/test/fixtures/tier2stored_block_matrix_actor.bt). Each
@@ -652,12 +650,12 @@ fn bt2811_consecutive_cascade_bodied_methods() {
 
 #[test]
 fn bt2811_trailing_semicolon_before_sibling_method_reports_error() {
-    // BT-2811 follow-up: parse_cascade_message's keyword branch lacked the
-    // pre-loop guard parse_keyword_message has, so a stray trailing `;` in a
-    // cascade immediately followed by the next sibling method's keyword
-    // would hit the class-member boundary on the loop's very first
-    // iteration and silently produce a malformed empty-keyword
-    // CascadeMessage instead of a parse error. It must now report an error
+    // parse_cascade_message's keyword branch needs the
+    // same pre-loop guard parse_keyword_message has: without it, a stray
+    // trailing `;` in a cascade immediately followed by the next sibling
+    // method's keyword would hit the class-member boundary on the loop's
+    // very first iteration and silently produce a malformed empty-keyword
+    // CascadeMessage instead of a parse error. It must report an error
     // rather than fabricate an empty message.
     let source =
         "Object subclass: D\n  cascadeMethod => Transcript show: \"a\";\n\n  nextMethod: x => x";
@@ -878,7 +876,7 @@ fn parse_block_multiple_statements_with_binary_op() {
 
 #[test]
 fn parse_block_newline_separated_statements() {
-    // BT-360: newlines act as implicit statement separators
+    // Newlines act as implicit statement separators
     let module = parse_ok("[\n  Transcript show: \"a\"\n  Transcript show: \"b\"\n  42\n]");
     match &module.expressions[0].expression {
         Expression::Block(block) => {
@@ -894,7 +892,7 @@ fn parse_block_newline_separated_statements() {
 
 #[test]
 fn parse_block_mixed_period_and_newline_separators() {
-    // BT-360: periods and newlines can be mixed
+    // Periods and newlines can be mixed
     let module = parse_ok("[\n  1 + 2.\n  3 + 4\n  5\n]");
     match &module.expressions[0].expression {
         Expression::Block(block) => {
@@ -910,7 +908,7 @@ fn parse_block_mixed_period_and_newline_separators() {
 
 #[test]
 fn parse_block_error_recovery_with_newlines() {
-    // BT-368: Blocks should continue parsing after errors (implicit newline separation)
+    // Blocks should continue parsing after errors (implicit newline separation)
     let source = "[\n  x := 1\n  y := @\n  z := 3\n]";
     let tokens = lex_with_eof(source);
     let (module, diagnostics) = parse(tokens);
@@ -952,7 +950,7 @@ fn parse_block_error_recovery_with_newlines() {
 
 #[test]
 fn parse_method_body_newline_separated() {
-    // BT-360: method bodies parse multiple newline-separated statements
+    // Method bodies parse multiple newline-separated statements
     let module = parse_ok(
         "Object subclass: Chatty\n\n  greet =>\n    Transcript show: \"Hello\"\n    Transcript show: \"World\"\n    42",
     );
@@ -968,7 +966,7 @@ fn parse_method_body_newline_separated() {
 
 #[test]
 fn parse_method_body_period_still_works() {
-    // BT-360: explicit periods still work (backward compat)
+    // Explicit periods still work (backward compat)
     let module = parse_ok("Object subclass: Test\n\n  go =>\n    1 + 2.\n    3 + 4.\n    5");
     let method = &module.classes[0].methods[0];
     assert_eq!(
@@ -980,7 +978,7 @@ fn parse_method_body_period_still_works() {
 
 #[test]
 fn parse_method_body_error_recovery_with_newlines() {
-    // BT-368: Parser should recover at newline boundaries after errors in method bodies
+    // Parser should recover at newline boundaries after errors in method bodies
     let source = "Object subclass: Test\n\n  methodOne =>\n    x := 1\n    y := @\n    z := 3";
     let tokens = lex_with_eof(source);
     let (module, diagnostics) = parse(tokens);
@@ -1026,7 +1024,7 @@ fn parse_method_body_error_recovery_with_newlines() {
 
 #[test]
 fn parse_method_body_error_recovery_multiple_methods() {
-    // BT-368: Parser should not skip following methods after error recovery
+    // Parser should not skip following methods after error recovery
     let source =
         "Object subclass: Test\n\n  methodOne =>\n    x := @\n\n  methodTwo =>\n    y := 42";
     let tokens = lex_with_eof(source);
@@ -1065,10 +1063,9 @@ fn parse_method_body_error_recovery_multiple_methods() {
 
 #[test]
 fn parse_method_body_bare_error_recovery_at_newline() {
-    // BT-368: A bare error token (not in an assignment) should not cause
+    // A bare error token (not in an assignment) should not cause
     // synchronize() to skip the first token of the next statement.
-    // This tests the fix where synchronize() checks recovery points
-    // before the initial advance().
+    // synchronize() checks recovery points before the initial advance().
     let source = "Object subclass: Test\n\n  go =>\n    x := 1\n    #\n    z := 3";
     let tokens = lex_with_eof(source);
     let (module, diagnostics) = parse(tokens);
@@ -1137,7 +1134,7 @@ fn parse_standalone_method_with_field_assignment() {
 
 #[test]
 fn parse_standalone_method_with_typed_keyword_param() {
-    // BT-1136: is_keyword_method_selector_at must handle `:: Type` typed params
+    // is_keyword_method_selector_at must handle `:: Type` typed params
     let source = "Counter >> deposit: amount :: Integer => self";
     let tokens = lex_with_eof(source);
     let (module, diagnostics) = parse(tokens);
@@ -1155,7 +1152,7 @@ fn parse_standalone_method_with_typed_keyword_param() {
 
 #[test]
 fn parse_standalone_method_with_typed_binary_param() {
-    // BT-1136: is_method_selector_at must handle `:: Type` for binary methods
+    // is_method_selector_at must handle `:: Type` for binary methods
     let source = "Number >> + other :: Number => self";
     let tokens = lex_with_eof(source);
     let (module, diagnostics) = parse(tokens);
@@ -1360,7 +1357,7 @@ fn parse_nested_maps() {
 
 #[test]
 fn parse_map_value_binary_expression() {
-    // BT-664: Map values should support binary expressions
+    // Map values should support binary expressions
     let module = parse_ok("#{#x => 1 + 2}");
     assert_eq!(module.expressions.len(), 1);
     match &module.expressions[0].expression {
@@ -1396,7 +1393,7 @@ fn parse_map_value_binary_expression() {
 
 #[test]
 fn parse_map_value_multiple_binary_expressions() {
-    // BT-664: Multiple map values with binary expressions
+    // Multiple map values with binary expressions
     let module = parse_ok("#{#x => 1 + 2, #y => 3 * 4}");
     assert_eq!(module.expressions.len(), 1);
     match &module.expressions[0].expression {
@@ -1423,7 +1420,7 @@ fn parse_map_value_multiple_binary_expressions() {
 
 #[test]
 fn parse_map_value_unary_on_binary() {
-    // BT-664: Map values with unary messages on binary results
+    // Map values with unary messages on binary results
     let module = parse_ok("#{#x => self x + other x}");
     assert_eq!(module.expressions.len(), 1);
     match &module.expressions[0].expression {
@@ -1489,7 +1486,7 @@ fn parse_multiple_map_assignments() {
 
 #[test]
 fn parse_map_with_bare_identifier_keys_is_error() {
-    // BT-1240: Bare identifiers before `=>` in map literals are now a compile error
+    // Bare identifiers before `=>` in map literals are a compile error
     let (module, diags) = parse(lex_with_eof("#{name => \"Alice\", age => 30}"));
     // Two errors: one for `name`, one for `age`
     let errors: Vec<_> = diags
@@ -1534,7 +1531,7 @@ fn parse_map_with_mixed_keys() {
 
 #[test]
 fn parse_map_uppercase_key_not_converted() {
-    // BT-591: Uppercase identifiers (class references) used as map keys are NOT converted to symbols
+    // Uppercase identifiers (class references) used as map keys are NOT converted to symbols
     let module = parse_ok("#{Counter => 1}");
     assert_eq!(module.expressions.len(), 1);
     match &module.expressions[0].expression {
@@ -1553,7 +1550,7 @@ fn parse_map_uppercase_key_not_converted() {
 
 #[test]
 fn parse_map_value_keyword_message() {
-    // BT-1854: Nested keyword messages with map literal arguments inside outer map literals
+    // Nested keyword messages with map literal arguments inside outer map literals
     let module =
         parse_ok("#{#session => SessionInfo new: #{#turnCount => 0}, #tokens => TokenUsage new}");
     assert_eq!(module.expressions.len(), 1);
@@ -1595,7 +1592,7 @@ fn parse_map_value_keyword_message() {
 
 #[test]
 fn parse_map_value_multi_keyword_message() {
-    // BT-1854: Multi-keyword messages as map values
+    // Multi-keyword messages as map values
     let module = parse_ok("#{#key => Foo from: 1 to: 2}");
     assert_eq!(module.expressions.len(), 1);
     match &module.expressions[0].expression {
@@ -1698,7 +1695,7 @@ fn parse_root_class_nil_superclass() {
 
 #[test]
 fn parse_method_named_class_with_return_type() {
-    // BT-1031: `class -> Type =>` must be parsed as a method named `class`
+    // `class -> Type =>` must be parsed as a method named `class`
     // with a return type annotation, not as a class-side binary method `->`.
     let module = parse_ok(
         "Object subclass: Class
@@ -1913,9 +1910,9 @@ fn double_colon_type_annotation_no_diagnostic() {
     );
 }
 
-/// BT-2759: the `=` token still plays its original role as the
+/// The `=` token still plays its original role as the
 /// field/state/classState default-value separator — only its role as an
-/// equality *binary selector* was removed (BT-2762). Regression-test all
+/// equality *binary selector* was removed. Regression-test all
 /// three declaration forms in one place so a future change to `=` handling
 /// can't silently regress the initializer path.
 #[test]
@@ -2250,7 +2247,7 @@ fn parse_arrow_method_with_keyword_typed_param() {
 
 #[test]
 fn parse_gtgt_as_binary_method_selector() {
-    // BT-1735: `>>` (GtGt token) is a valid binary method selector in class bodies
+    // `>>` (GtGt token) is a valid binary method selector in class bodies
     let module = parse_ok(
         "Object subclass: Behaviour
   sealed >> aSelector :: Symbol -> CompiledMethod => @primitive \"methodLookup\"",
@@ -2267,7 +2264,7 @@ fn parse_gtgt_as_binary_method_selector() {
 
 #[test]
 fn parse_binary_method_with_union_typed_param() {
-    // BT-1136/Copilot: `+ other :: Integer | Nil =>` — union type in binary param
+    // `+ other :: Integer | Nil =>` — union type in binary param
     let module = parse_ok(
         "Object subclass: Number
   + other :: Integer | Nil -> Integer => self",
@@ -2280,7 +2277,7 @@ fn parse_binary_method_with_union_typed_param() {
 
 #[test]
 fn parse_keyword_method_with_union_typed_param() {
-    // BT-1136/Copilot: `deposit: amount :: Integer | Float =>` — union type in keyword param
+    // `deposit: amount :: Integer | Float =>` — union type in keyword param
     let module = parse_ok(
         "Actor subclass: BankAccount
   deposit: amount :: Integer | Float => self",
@@ -2292,7 +2289,7 @@ fn parse_keyword_method_with_union_typed_param() {
 
 #[test]
 fn parse_standalone_method_with_union_typed_binary_param() {
-    // BT-1136/Copilot: standalone `+` method with union-typed param
+    // Standalone `+` method with union-typed param
     let source = "Number >> + other :: Integer | Nil => self";
     let tokens = lex_with_eof(source);
     let (module, diagnostics) = parse(tokens);
@@ -2310,7 +2307,7 @@ fn parse_standalone_method_with_union_typed_binary_param() {
 
 #[test]
 fn parse_standalone_method_with_union_typed_keyword_param() {
-    // BT-1136/Copilot: standalone keyword method with union-typed param
+    // Standalone keyword method with union-typed param
     let source = "Counter >> deposit: amount :: Integer | Float => self";
     let tokens = lex_with_eof(source);
     let (module, diagnostics) = parse(tokens);
@@ -2328,7 +2325,7 @@ fn parse_standalone_method_with_union_typed_keyword_param() {
 
 #[test]
 fn parse_multi_keyword_method_with_union_typed_last_param() {
-    // BT-1944: Multi-keyword method with `:: Integer | Nil` on last param
+    // Multi-keyword method with `:: Integer | Nil` on last param
     let module = parse_ok(
         "Actor subclass: WorkerPool
   executeActivity: act selector: sel args: a timeout: t :: Integer | Nil =>
@@ -2555,7 +2552,7 @@ fn parse_mixed_case_identifier() {
 }
 
 // ========================================================================
-// BT-1698: `internal` modifier for classes and methods (ADR 0071)
+// `internal` modifier for classes and methods (ADR 0071)
 // ========================================================================
 
 #[test]

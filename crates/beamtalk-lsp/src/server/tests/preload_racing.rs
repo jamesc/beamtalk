@@ -5,13 +5,14 @@
 
 use super::*;
 
-/// BT-2960: two sibling workspace roots, each a genuinely different real
+/// Two sibling workspace roots, each a genuinely different real
 /// package (per its own `beamtalk.toml` `[package] name`), each
 /// declaring an `internal type Foo = ...` with a different expansion.
-/// Before this fix, every same-project file in every root shared the
-/// same fixed `$project` marker, so root B's file would resolve root A's
-/// `internal` alias instead of it being excluded. Confirms the two
-/// roots' `Foo` aliases now carry distinct, root-derived package stamps.
+/// Without root-derived stamps, every same-project file in every root
+/// would share the same fixed `$project` marker, so root B's file would
+/// resolve root A's `internal` alias instead of it being excluded.
+/// Confirms the two roots' `Foo` aliases carry distinct, root-derived
+/// package stamps.
 #[tokio::test]
 async fn load_root_packages_gives_sibling_roots_distinct_alias_package_stamps() {
     let temp = unique_temp_dir("beamtalk_lsp_root_packages_multi_root");
@@ -60,7 +61,7 @@ async fn load_root_packages_gives_sibling_roots_distinct_alias_package_stamps() 
     let _ = fs::remove_dir_all(&temp);
 }
 
-/// BT-2961: a `didOpen` racing `initialized()`'s startup sequence indexes
+/// A `didOpen` racing `initialized()`'s startup sequence indexes
 /// its file (via `svc.update_file`, exactly what the `did_open` handler
 /// does) *before* `load_root_packages` has registered any root — the
 /// file's aliases get the `$project` fallback stamp. `set_root_packages`
@@ -112,7 +113,7 @@ async fn did_open_racing_load_root_packages_still_gets_real_package_stamp() {
     let _ = fs::remove_dir_all(&temp);
 }
 
-/// BT-2961: the stdlib counterpart of the race above — a `didOpen` for a
+/// The stdlib counterpart of the race above — a `didOpen` for a
 /// stdlib file indexed *before* `preload_workspace_source_files` marks
 /// stdlib membership must still end up stamped with the stdlib package
 /// marker after preload runs.
@@ -175,15 +176,14 @@ async fn did_open_racing_preload_still_gets_stdlib_stamp() {
     let _ = fs::remove_dir_all(&temp);
 }
 
-/// BT-3433: rules out a *state* bug as the cause of the reported false
-/// `Unresolved class` warning. `svc.diagnostics()` always recomputes
-/// fresh against the current `ProjectIndex`, so once
+/// Rules out a *state* bug as the cause of the false
+/// `Unresolved class` warning fixed below. `svc.diagnostics()` always
+/// recomputes fresh against the current `ProjectIndex`, so once
 /// `preload_workspace_source_files` has indexed a sibling class, every
 /// subsequent diagnosis sees it — regardless of whether the referencing
 /// file was indexed (via a racing `didOpen`) before or after that
-/// preload ran. This held true even before the BT-3433 fix below; the
-/// real bug was a *notification send-order* race, not a stale
-/// `ProjectIndex`/`pre_loaded_classes` snapshot — see
+/// preload ran. The actual bug is a *notification send-order* race, not a
+/// stale `ProjectIndex`/`pre_loaded_classes` snapshot — see
 /// `did_open_during_preload_defers_to_republish_for_sibling_class` for
 /// the test that actually exercises the fix.
 #[tokio::test]
@@ -237,7 +237,7 @@ async fn did_open_racing_preload_resolves_sibling_class() {
     let _ = fs::remove_dir_all(&temp);
 }
 
-/// BT-3433: end-to-end counterpart of
+/// End-to-end counterpart of
 /// `did_open_racing_preload_resolves_sibling_class` — drives the real
 /// `did_open` handler (not direct `ProjectIndex` state checks) through a
 /// real `LspService`/socket pair, with `preload_in_progress` set exactly
@@ -245,19 +245,18 @@ async fn did_open_racing_preload_resolves_sibling_class() {
 /// `textDocument/publishDiagnostics` notification actually sent for the
 /// opened file.
 ///
-/// Before the BT-3433 fix, `did_open` always published immediately, so a
-/// `didOpen` racing preload sent a stale `Unresolved class` notification
-/// that `republish_open_diagnostics` (BT-2027) had to race to overwrite —
-/// a real send-order race between two concurrent tasks on `tower-lsp`'s
-/// capacity-1 notification channel, not guaranteed to resolve in the
-/// correct notification's favor (unlike the *strictly sequential*
-/// "`did_open` fully completes, then preload starts" case the removed
-/// predecessor of this test exercised, which already self-healed
-/// correctly without the fix — the race this test guards is the
-/// concurrent one, only reproducible by controlling the flag directly).
-/// After the fix, `did_open` skips the send outright while preload is
-/// in-flight, so there is no second, wrong notification to race against —
-/// `republish_open_diagnostics` is the *only* publish for this URI.
+/// `did_open` must skip its own diagnostics send outright while preload is
+/// in-flight, so `republish_open_diagnostics` is the *only* publish for
+/// this URI. Without that guard, `did_open` would publish immediately, and
+/// a `didOpen` racing preload would send a stale `Unresolved class`
+/// notification that `republish_open_diagnostics` would have to race to
+/// overwrite — a real send-order race between two concurrent tasks on
+/// `tower-lsp`'s capacity-1 notification channel, not guaranteed to
+/// resolve in the correct notification's favor (unlike the *strictly
+/// sequential* "`did_open` fully completes, then preload starts" case,
+/// which self-heals correctly regardless — the race this test guards is
+/// the concurrent one, only reproducible by controlling the flag
+/// directly).
 #[tokio::test]
 async fn did_open_during_preload_defers_to_republish_for_sibling_class() {
     use futures_util::StreamExt;
@@ -280,7 +279,7 @@ async fn did_open_during_preload_defers_to_republish_for_sibling_class() {
     fs::write(&workflow_context_path, workflow_context_source).expect("write workflow_context.bt");
     let workflow_context_uri = Url::from_file_path(&workflow_context_path).expect("path → uri");
 
-    // BT-3433's actual trigger: `check_unresolved_classes` only runs at
+    // The actual trigger: `check_unresolved_classes` only runs at
     // all when `pre_loaded_classes` is non-empty (an open-world
     // assumption — with *zero* other files known, any class reference
     // might legitimately live in one not yet indexed). A single file
@@ -313,7 +312,7 @@ async fn did_open_during_preload_defers_to_republish_for_sibling_class() {
     });
 
     // Mirrors the flag flip `initialized()` performs before starting
-    // preload (BT-3433) — see that method's doc for why this must be
+    // preload — see that method's doc for why this must be
     // set before any racing didOpen's own `publish_diagnostics` check.
     {
         let mut svc = backend.service.lock().expect("service lock poisoned");

@@ -30,13 +30,13 @@ use beamtalk_core::source_analysis::Span;
 
 // ─── StateAccFallbackReason ─────────────────────────────────────────────────
 
-/// BT-1343: Reason why a loop fell back to `StateAcc` threading instead of an optimized mode.
+/// Reason why a loop fell back to `StateAcc` threading instead of an optimized mode.
 ///
-/// BT-3129: `PartialEq`/`Eq` added so [`ThreadingMode`] (which wraps this in
+/// `PartialEq`/`Eq` added so [`ThreadingMode`] (which wraps this in
 /// its `StateAcc` variant) can derive them too — needed for verifier
 /// unit-test assertions comparing [`VerifyError`]s.
 ///
-/// BT-3459: moved here (out of `control_flow/mod.rs`) together with
+/// Moved here (out of `control_flow/mod.rs`) together with
 /// [`CoreErlangGenerator::report_threaded_ir_verify_errors`] to remove a
 /// `threaded_ir → control_flow` import cycle — `control_flow` code that
 /// needs either now imports from `threaded_ir` instead.
@@ -129,12 +129,12 @@ impl FrameId {
 /// NAMING AND IDENTITY ONLY — plus [`VersionPrefix::Local`] (see module docs
 /// §Deviations). Per-prefix scope discipline (state: reset+restore per
 /// branch; `class_vars`: restore-only, mutated-flag sticky; self: reset+
-/// restore, BT-3131's fix for the prior "neither" landmine — see
+/// restore, closing the prior "neither" landmine — see
 /// `with_branch_context`'s doc comment in `mod.rs`) remains explicit
 /// per-prefix policy, enforced by the generator's `BranchContextGuard`; this
 /// type only unifies the *shape*.
 ///
-/// BT-3131: `State`/`ClassVars`/`SelfVt` get their first production call
+/// `State`/`ClassVars`/`SelfVt` get their first production call
 /// site here — [`VersionCounter`] is the single implementation behind
 /// `CoreErlangGenerator`'s three (formerly independently implemented)
 /// counters (`StateThreading`, `ClassContext::class_var_version`,
@@ -143,7 +143,7 @@ impl FrameId {
 /// remain unit-test-only until a control-flow generator migrates onto the
 /// full `ThreadedIr`/`verify()` pipeline (later issues — this issue is
 /// naming/identity unification only, not IR construction). `Local` gets its
-/// own production call site as of BT-3133's
+/// own production call site via
 /// [`verify_tuple_acc_unpack_invariant`]. `#[allow(dead_code)]` here
 /// documents that the remaining variants stay test-only for now, instead of
 /// forcing artificial non-test construction sites.
@@ -151,7 +151,7 @@ impl FrameId {
 pub(in crate::core_erlang) enum VersionPrefix {
     /// Actor/instance state (`State`, `State1`, … — rendered as `StateAcc{N}`
     /// inside non-hybrid loop bodies, `with_branch_context` conditional
-    /// branches (BT-3134), and `on:do:`/`ensure:` bodies; that rendering
+    /// branches, and `on:do:`/`ensure:` bodies; that rendering
     /// choice is a function of generator context and stays outside the IR,
     /// decided at Document-construction time).
     State,
@@ -170,8 +170,8 @@ pub(in crate::core_erlang) enum VersionPrefix {
     /// `fresh_temp_var` (a single module-wide gensym counter shared across
     /// ALL codegen in the method), never through [`VersionPrefix::Local`]'s
     /// bare-prefix-plus-sequential-version scheme (`Sum1`, `Sum2`, …) —
-    /// confirmed against real compiled output, not just source reading (the
-    /// investigation trail is on the BT-3145 Linear issue). `render_name`
+    /// confirmed against real compiled output, not just source reading.
+    /// `render_name`
     /// returns the stored string VERBATIM, regardless of `version` — minting
     /// happens once, at LOWERING time (via the same `fresh_temp_var` call
     /// production already makes, in the same order), never at render time.
@@ -216,14 +216,14 @@ impl VersionedVar {
 
     /// Renders this variable's Core Erlang name (e.g. `State2`, `ClassVars1`,
     /// `Sum`). Delegates to [`super::super::util::versioned_var`], the single
-    /// canonical `prefix{version}` namer (BT-875: never `format!()` for Core
+    /// canonical `prefix{version}` namer (never `format!()` for Core
     /// Erlang fragments). `Local` names are passed through
     /// [`super::super::CoreErlangGenerator::to_core_erlang_var`] — the same
     /// capitalization every other Core Erlang variable name goes through —
     /// so callers may pass the raw Beamtalk identifier (`"sum"`) as it comes
     /// out of `ThreadingPlan::threaded_locals`.
     ///
-    /// BT-3131: `pub(in crate::core_erlang)` (widened from private) so [`VersionCounter`]'s
+    /// `pub(in crate::core_erlang)` (widened from private) so [`VersionCounter`]'s
     /// emitter-facing accessors — and `CoreErlangGenerator`'s `StateAcc*`
     /// rendering, which stays outside the IR (see [`VersionPrefix::State`]'s
     /// doc comment) — can render through this single canonical namer instead
@@ -244,7 +244,7 @@ impl VersionedVar {
     }
 }
 
-// ─── AccParam (BT-3133) ─────────────────────────────────────────────────────
+// ─── AccParam ─────────────────────────────────────────────────────
 
 /// An unversioned foldl-accumulator lambda **parameter** — e.g. the literal
 /// `"StateAcc"` bound by `fun (Item, StateAcc) -> ...` in `basic_ops.rs:84`/
@@ -258,8 +258,8 @@ impl VersionedVar {
 /// nodes." `AccParam` is that distinct node — never a [`VersionedVar`] (it is
 /// bound exactly once per lambda invocation, not threaded across a version
 /// sequence), so [`verify`]'s linearity/liveness checks do not apply to it;
-/// only [`ThreadedStmt::TupleAccUnpack`]'s mode/shape checks do (BT-3133
-/// invariant class 1 — "flat positional-unpack accumulator distinct from
+/// only [`ThreadedStmt::TupleAccUnpack`]'s mode/shape checks do (invariant
+/// class 1 — "flat positional-unpack accumulator distinct from
 /// parameter threading").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) struct AccParam(pub(in crate::core_erlang) String);
@@ -316,10 +316,10 @@ impl LoopCounter {
     }
 }
 
-// ─── VersionCounter (BT-3131) ───────────────────────────────────────────────
+// ─── VersionCounter ───────────────────────────────────────────────
 
 /// The single counter implementation behind `CoreErlangGenerator`'s three
-/// (formerly independently implemented) version counters — the pre-BT-3131
+/// (formerly independently implemented) version counters — the earlier
 /// `StateThreading` struct (`state_codegen.rs`), `ClassContext`'s raw
 /// `class_var_version: usize` arithmetic, and `ValueTypeContext`'s raw
 /// `self_version: usize` arithmetic. One implementation, reused per prefix.
@@ -340,7 +340,7 @@ impl LoopCounter {
 ///
 /// **Frame identity**: always [`FrameId::ROOT`]. `CoreErlangGenerator` does
 /// not track frame identity today (that is the later `ThreadedIr`/`verify()`
-/// migration's job, BT-3132 onward) — this counter's own per-prefix
+/// migration's job) — this counter's own per-prefix
 /// save/reset/restore *policy* around branch entry/exit is enforced by the
 /// generator's `BranchContextGuard` (`mod.rs`), not by this type.
 #[derive(Debug, Clone, Copy, Default)]
@@ -392,12 +392,12 @@ impl VersionCounter {
 /// test-only for now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum ThreadingMode {
-    /// `fun (Var1, ..., VarN)` — no `StateAcc` map at all (BT-1275).
+    /// `fun (Var1, ..., VarN)` — no `StateAcc` map at all.
     DirectParams,
     /// A flat `{Gate1, ..., GateG, Var1, ..., VarN}` positional-unpack
-    /// accumulator (foldl list-ops, BT-1276). The `usize` is `gate_slots` —
+    /// accumulator (foldl list-ops). The `usize` is `gate_slots` —
     /// the count of leading tuple positions reserved for the op's own result
-    /// channel(s) *before* the threaded locals begin (BT-3133 invariant class
+    /// channel(s) *before* the threaded locals begin (invariant class
     /// 4, "early-exit accumulator liveness"): `0` for `do:`
     /// (`{Var1, ..., VarN}`, `basic_ops.rs`'s `index_offset: 1`); `1` for
     /// `collect:`/`select:`/`reject:`/`inject:into:`/`anySatisfy:`/
@@ -411,16 +411,16 @@ pub(in crate::core_erlang) enum ThreadingMode {
     /// result list — same tuple shape, no early exit involved), read
     /// directly by the op's post-fold wrapper (e.g. `search_ops.rs`'s
     /// `bind_detect_found_or_raise_doc`) rather than threaded back out as a
-    /// [`VersionedVar`]. See `control_flow::ListOpKind` (BT-3147) for the
-    /// canonical per-op table this classification is now independently
+    /// [`VersionedVar`]. See `control_flow::ListOpKind` for the
+    /// canonical per-op table this classification is independently
     /// cross-checked against.
     TupleAcc(usize),
     /// `fun (Var1, ..., VarN, RField1, ..., MField1, ...)` — locals plus
-    /// pre-extracted read-only/mutated fields as direct params (BT-1326/BT-1342).
+    /// pre-extracted read-only/mutated fields as direct params.
     Hybrid,
     /// Fallback: threading rides a `StateAcc` map, unpacked at iteration
     /// start. `reason` records why an optimized mode was not selected
-    /// (BT-1343 diagnostics).
+    /// (diagnostics).
     StateAcc(StateAccFallbackReason),
 }
 
@@ -466,7 +466,7 @@ pub(in crate::core_erlang) enum ValueRef {
     /// A previously-bound versioned variable (e.g. the source of a chained
     /// mutation).
     ///
-    /// BT-3149: still genuinely unconstructed in production — every real
+    /// Still genuinely unconstructed in production — every real
     /// `Bind`/`Return` producer that reaches for a prior version threads
     /// it through the `source: VersionedVar` field directly (`Bind`'s own
     /// dedicated slot) rather than wrapping it as a `ValueRef`; nothing
@@ -508,7 +508,7 @@ pub(in crate::core_erlang) enum ValueRef {
 pub(in crate::core_erlang) enum BindOp {
     /// A field/class-var mutation: `call 'maps':'put'(field, value, source)`.
     /// `class_tag` is the dynamic class-identity value the shadow write (when
-    /// `shadow_write` is set) is keyed on — ADR 0110's BT-3039 amendment:
+    /// `shadow_write` is set) is keyed on — ADR 0110's amendment:
     /// `{'$bt_class_vars_shadow', element(2, class_tag)}`, never a bare atom,
     /// so two classes relaying through the same process don't clobber each
     /// other's shadow (see `generate_field_assignment`, `expressions.rs:576-588`).
@@ -522,11 +522,11 @@ pub(in crate::core_erlang) enum BindOp {
     /// only inside a [`ThreadingMode::StateAcc`] body; see
     /// [`VerifyError::ThreadingModeUnpackMismatch`].
     ///
-    /// BT-3149: still genuinely unconstructed in production —
+    /// Still genuinely unconstructed in production —
     /// `generate_unpack_at_iteration_start`'s `StateAcc`-mode per-iteration
-    /// unpack never migrated to real `ThreadedIr` emission in this
-    /// close-out (only the `TupleAcc`-mode unpack did, via
-    /// [`ThreadedStmt::TupleAccUnpack`], BT-3147). `render_bind`'s arm for
+    /// unpack never migrated to real `ThreadedIr` emission (only the
+    /// `TupleAcc`-mode unpack did, via
+    /// [`ThreadedStmt::TupleAccUnpack`]). `render_bind`'s arm for
     /// it is real, tested production code (see `render_bind_tests`) —
     /// only a lowering-side constructor is missing.
     #[allow(dead_code)]
@@ -596,7 +596,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// alongside it.
     Return(ValueRef, VersionedVar, Span),
 
-    /// BT-3133 (ADR 0111 Phase C): the `TupleAcc` mode's per-iteration
+    /// ADR 0111 Phase C: the `TupleAcc` mode's per-iteration
     /// positional destructure of a flat `{Gate1, .., GateG, Var1, .., VarN}`
     /// accumulator into fresh per-iteration versions of each threaded local —
     /// `generate_foldl_loop_body`'s `element(idx, source)` chain. `param`
@@ -616,7 +616,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     },
 
     /// A while/counted loop's condition/case-split skeleton (ADR 0111
-    /// Addendum 2, Gap 1; condition fields per ADR 0118 phase 3, BT-3419):
+    /// Addendum 2, Gap 1; condition fields per ADR 0118 phase 3):
     /// `letrec 'fn_name'/N = fun (Params) -> <condition> case
     /// <condition_value> of <continue_arm> <body> apply 'fn_name'/N
     /// (<final_args>) <exit_arm> in apply 'fn_name'/N (<outer_args>)`.
@@ -663,8 +663,8 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// `timesRepeat:`/`repeat`) — `None` for while/`whileFalse:`. See
         /// [`LoopCounter`]'s doc comment.
         counter: Option<LoopCounter>,
-        /// ADR 0118 phase 3 (BT-3419): the condition block's own prelude,
-        /// verified in the SAME frame as `body` (unlike the pre-BT-3419
+        /// ADR 0118 phase 3: the condition block's own prelude,
+        /// verified in the SAME frame as `body` (unlike the earlier
         /// `continue_header`, an opaque `Document` compiled OUTSIDE the
         /// loop's frame — the exact shape that panicked the verifier or
         /// miscompiled whenever the condition contained a self-send or an
@@ -682,7 +682,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         condition_value: ValueRef,
         /// Opaque continue-arm pattern, e.g. `"<'true'> when 'true' -> "` —
         /// the counterpart of `exit_arm`, naming which case branch
-        /// continues looping. Split out of the pre-BT-3419 `continue_header`
+        /// continues looping. Split out of the earlier `continue_header`
         /// now that the scrutinee itself (`condition`/`condition_value`) is
         /// real IR; this remaining fragment carries no state-threading
         /// content of its own (a bare case-clause pattern), the same
@@ -719,7 +719,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         ///   ambient `State`/`StateN` only when `threaded_locals` is empty
         ///   and the method already had a live actor state (never true for a
         ///   class method or `ValueType` method, which pack from a fresh
-        ///   `maps:new()` instead — BT-1053/BT-3055), and a fresh `PackedN`
+        ///   `maps:new()` instead), and a fresh `PackedN`
         ///   temp whenever any threaded local is packed.
         ///
         /// `produces`' own generic (version-0, ambient-context) derivation
@@ -779,7 +779,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     Statement(Document<'static>, Span),
 }
 
-// ─── ThreadedValue (ADR 0118, Decision 1 / BT-3415) ────────────────────────
+// ─── ThreadedValue (ADR 0118, Decision 1) ────────────────────────
 
 /// The result of compiling one expression in a state-threading context
 /// (ADR 0118 §Decision 1). `prelude` runs first, in source evaluation
@@ -819,14 +819,14 @@ pub(in crate::core_erlang) struct ThreadedValue {
 /// versioned `Bind`s in its prelude — the single input to
 /// [`ThreadedValue::close`]'s escape check (ADR 0118 §Decision 5).
 ///
-/// ADR 0118 phase 1a (BT-3415): constructed only by [`ThreadedValue::close`]'s
+/// ADR 0118 phase 1a: constructed only by [`ThreadedValue::close`]'s
 /// unit tests so far — every phase-1a consumer *splices*; the production
 /// `close()` call sites arrive with the consumers that must produce a
 /// self-contained `Document` (`expression_doc` in Actor context, phase 2b —
 /// see that function's doc comment for why not sooner). Same status as
 /// [`ValueRef::Version`]'s constructor.
 ///
-/// BT-3430 investigated `Opaque` for exactly the class-method self-send case
+/// An investigation into `Opaque` for exactly the class-method self-send case
 /// this variant's own doc names ("a block passed to a class method"):
 /// `close_threaded_value_doc` (`util.rs`) is the real, already-shipping
 /// choke point every ambient (non-`threaded_expression`) class-method

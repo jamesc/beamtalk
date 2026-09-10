@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Source-span resolution commands (ADR 0082 Phase 1, BT-2283): `resolve_method_span`, `find_selector_send_spans`, `find_definition_selector_spans`, and `resolve_class_span`.
+//! Source-span resolution commands (ADR 0082 Phase 1): `resolve_method_span`, `find_selector_send_spans`, `find_definition_selector_spans`, and `resolve_class_span`.
 
 use super::*;
 
-// --- resolve_method_span tests (ADR 0082 Phase 1, BT-2283) ---
+// --- resolve_method_span tests (ADR 0082 Phase 1) ---
 
 #[test]
 fn resolve_method_span_instance_method() {
@@ -26,7 +26,7 @@ fn resolve_method_span_instance_method() {
         .and_then(term_to_string)
         .expect("prev_source present");
     // The span is a verbatim full-line slice, so it carries the method's
-    // leading indentation (and its doc comment, when present — BT-2577).
+    // leading indentation (and its doc comment, when present).
     assert!(prev.starts_with("  increment =>"), "got: {prev:?}");
     assert!(
         prev.ends_with('\n'),
@@ -96,7 +96,7 @@ fn resolve_method_span_class_not_found_is_structured_error() {
     assert_eq!(map_get(m, "reason"), Some(&atom("class_not_found")));
 }
 
-// --- find_selector_send_spans tests (ADR 0114, BT-3279) ---
+// --- find_selector_send_spans tests (ADR 0114) ---
 
 #[test]
 fn find_selector_send_spans_finds_unary_self_send() {
@@ -173,7 +173,7 @@ fn find_selector_send_spans_keyword_selector_produces_one_span_per_part() {
     assert_eq!(spans.elements.len(), 2, "got {spans:?}");
 }
 
-// --- find_definition_selector_spans tests (ADR 0114, BT-3279) ---
+// --- find_definition_selector_spans tests (ADR 0114) ---
 
 #[test]
 fn find_definition_selector_spans_finds_unary_selector() {
@@ -246,7 +246,7 @@ fn find_definition_selector_spans_selector_not_found_is_structured_error() {
     assert_eq!(map_get(m, "reason"), Some(&atom("selector_not_found")));
 }
 
-// --- resolve_class_span tests (ADR 0082 extension, BT-3248) ---
+// --- resolve_class_span tests (ADR 0082 extension) ---
 
 #[test]
 fn resolve_class_span_header_only_excludes_methods() {
@@ -265,7 +265,7 @@ fn resolve_class_span_header_only_excludes_methods() {
         .expect("prev_source present");
     // SPAN_FIXTURE's `Counter` has no state declarations, so the span is
     // just its (single-line) header — deliberately excluding every
-    // method (BT-3248: a class-span flush must never be able to delete a
+    // method (a class-span flush must never be able to delete a
     // method's source — see class_span.rs's module doc).
     assert_eq!(prev, "Object subclass: Counter\n", "got: {prev:?}");
     assert!(!prev.contains("increment"), "got: {prev:?}");

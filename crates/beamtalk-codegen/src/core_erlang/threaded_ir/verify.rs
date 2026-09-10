@@ -57,7 +57,7 @@ pub(in crate::core_erlang) enum VerifyError {
     /// if a new mutation site is added without it.
     ShadowWriteMissing { mutated: VersionedVar, at: Span },
 
-    /// BT-3133 invariant class 1: a [`ThreadedStmt::TupleAccUnpack`] node
+    /// Invariant class 1: a [`ThreadedStmt::TupleAccUnpack`] node
     /// (the flat positional-unpack accumulator discipline) appeared outside
     /// a [`ThreadingMode::TupleAcc`] body. Mirrors `ThreadingModeUnpackMismatch`
     /// for the tuple-shaped (rather than map-shaped) accumulator; in release
@@ -65,7 +65,7 @@ pub(in crate::core_erlang) enum VerifyError {
     /// `element/2` error, one layer further from the cause.
     TupleAccUnpackModeMismatch { mode: ThreadingMode, at: Span },
 
-    /// BT-3133 invariant class 4 ("early-exit accumulator liveness"): a
+    /// Invariant class 4 ("early-exit accumulator liveness"): a
     /// [`ThreadedStmt::TupleAccUnpack`] node's own `gate_slots` disagrees with
     /// its enclosing [`ThreadingMode::TupleAcc`]'s `gate_slots`. Each list-op
     /// family reserves a different number of leading accumulator slots for
@@ -74,8 +74,8 @@ pub(in crate::core_erlang) enum VerifyError {
     /// `partition:`-family: 2) — a mismatch here means the unpack would read
     /// threaded-local values from the wrong tuple positions: well-formed Core
     /// Erlang, silently wrong values (the ADR 0110 danger class, not a
-    /// `core_lint` failure). BT-3147: a live check, not scaffolding — see
-    /// [`build_tuple_acc_unpack`]'s doc comment for the two now-independent
+    /// `core_lint` failure). A live check, not scaffolding — see
+    /// [`build_tuple_acc_unpack`]'s doc comment for the two independent
     /// sources (`ListOpKind::gate_slots` at lowering time vs. each call
     /// site's own `index_offset - 1` at rendering time).
     EarlyExitGateSlotMismatch {
@@ -84,7 +84,7 @@ pub(in crate::core_erlang) enum VerifyError {
         at: Span,
     },
 
-    /// BT-3133 invariant class 2: `select_tuple_acc`'s `ValueType`-context
+    /// Invariant class 2: `select_tuple_acc`'s `ValueType`-context
     /// exclusion (`control_flow/mod.rs`'s `select_tuple_acc`), pinned
     /// structurally. `ValueType` methods have no actor `State` `gen_server`
     /// variable to reference — `TupleAcc` mode is unconditionally
@@ -101,7 +101,7 @@ pub(in crate::core_erlang) enum VerifyError {
     #[cfg(test)]
     TupleAccInValueTypeContext { at: Span },
 
-    /// BT-3133 invariant class 3: the recursive inter-construct fallback
+    /// Invariant class 3: the recursive inter-construct fallback
     /// invariant `list_op_needs_stateacc_fallback_recursive` encodes
     /// (`control_flow/mod.rs`), pinned structurally. A nested list-op whose
     /// own inner block cannot use tuple-acc (so it falls back to a
@@ -119,7 +119,7 @@ pub(in crate::core_erlang) enum VerifyError {
     #[cfg(test)]
     NestedStateAccFallbackUnderDirectParams { at: Span },
 
-    /// ADR 0118 §Decision 5 (BT-3415): a [`ThreadedValue`] whose prelude
+    /// ADR 0118 §Decision 5: a [`ThreadedValue`] whose prelude
     /// carries a versioned `Bind` for `prefix` was [`ThreadedValue::close`]d
     /// in a context that cannot thread that prefix
     /// ([`CloseContext::Opaque`]) — the closed `Document` scopes the new
@@ -135,12 +135,12 @@ pub(in crate::core_erlang) enum VerifyError {
     /// ADR 0118 phase 1a: constructed by [`ThreadedValue::close`], which has
     /// no production caller yet — see [`CloseContext`].
     ///
-    /// BT-3430: the "genuine boundary such as a Tier 1 closure body" case
+    /// The "genuine boundary such as a Tier 1 closure body" case
     /// above is exactly the class-method self-send-in-a-bare-block scenario
     /// `check_no_unsafe_class_method_self_sends` (`expressions.rs`) already
-    /// diagnoses from a separate, pre-flight static predicate — investigated
-    /// replacing that diagnostic with this variant (surfaced via `close()`
-    /// at `close_threaded_value_doc`, `util.rs`) and found it blocked on a
+    /// diagnoses from a separate, pre-flight static predicate — replacing
+    /// that diagnostic with this variant (surfaced via `close()`
+    /// at `close_threaded_value_doc`, `util.rs`) is blocked on a
     /// real signal-propagation gap, not a small wiring change. See that
     /// predicate's own doc comment for the full finding; still no
     /// production caller.
@@ -220,7 +220,7 @@ fn contains_class_var_nlr_catch(ir: &[ThreadedStmt]) -> bool {
             )
         }
         ThreadedStmt::Threaded { body, .. } => contains_class_var_nlr_catch(body),
-        // ADR 0118 phase 3 (BT-3419): `condition` scans too — a class-var
+        // ADR 0118 phase 3: `condition` scans too — a class-var
         // NLR catch nested there is exactly as relevant to `ShadowWriteMissing`
         // as one nested in `body`, even though no real lowering produces one
         // (a while condition has no NLR boundary of its own).
@@ -252,7 +252,7 @@ fn collect_producer_consumer_counts(
             ThreadedStmt::Threaded { body, .. } => {
                 collect_producer_consumer_counts(body, producers, consumers);
             }
-            // ADR 0118 phase 3 (BT-3419): `condition`'s own Binds are
+            // ADR 0118 phase 3: `condition`'s own Binds are
             // real IR now too — collected in the SAME pass as `body`'s
             // (order doesn't matter here: both just accumulate into the
             // same producer/consumer maps).
@@ -352,7 +352,7 @@ impl VerifyWalk<'_> {
                         }
                     }
                 }
-                // ADR 0118 phase 5a (BT-3421): `BindOp::Put` only — a
+                // ADR 0118 phase 5a: `BindOp::Put` only — a
                 // `BindOp::Direct` rebind (`emit_class_var_result_unwrap`'s
                 // inherited-self-dispatch/loop-construct rebind,
                 // `rebind_class_vars_from_doc`) is never itself a
@@ -362,19 +362,13 @@ impl VerifyWalk<'_> {
                 // the identical `ClassSelf`-tagged key) — `render_bind`'s
                 // `BindOp::Put` arm is the only place the ADR 0110 shadow
                 // write is even constructed, so `shadow_write` is inert for
-                // `Direct`. Before this issue every `Direct`-rebind call
-                // site passed `shadow_write_eligible: false` to
-                // `construct_and_verify_class_var_bind`'s OWN isolated
-                // check and was never spliced into a real, jointly-verified
-                // body (always rendered eagerly into an opaque `Document`
-                // instead) — so this distinction was never exercised here.
-                // Splicing a same-class self-send's real `Bind` directly
-                // (ADR 0118 phase 5a) exercises it for the first time: the
-                // isolated check's `shadow_write_eligible` exemption has no
-                // way to reach this joint walk (it is a fixture-only
-                // wrapping trick, never part of the returned `Bind` node —
-                // see `construct_and_verify_class_var_bind`'s `needs_wrap`),
-                // so the joint check must know the same invariant directly.
+                // `Direct`. `construct_and_verify_class_var_bind`'s own
+                // isolated check exempts `Direct` via a fixture-only
+                // wrapping trick (never part of the returned `Bind` node —
+                // see its `needs_wrap`), which a same-class self-send's
+                // real `Bind`, spliced directly into a jointly-verified
+                // body, does not go through — so this joint check must
+                // exclude `Direct` explicitly, matching that exemption.
                 if matches!(target.prefix, VersionPrefix::ClassVars)
                     && matches!(op, BindOp::Put { .. })
                     && *self.shadow_write_eligible_stack.last().unwrap()
@@ -422,7 +416,7 @@ impl VerifyWalk<'_> {
                 span: _,
                 ..
             } => {
-                // ADR 0111 Addendum 2, Gap 1 / ADR 0118 phase 3 (BT-3419):
+                // ADR 0111 Addendum 2, Gap 1 / ADR 0118 phase 3:
                 // `ConditionalLoop` verifies almost exactly like `Threaded`
                 // — push frame/mode once, walk `condition` THEN `body` (both
                 // in the SAME frame — the condition's own `Bind`s are now
@@ -507,14 +501,13 @@ impl CoreErlangGenerator {
     /// replace did; in release builds (where `debug_assert!` is compiled
     /// out), degrades to an internal-error diagnostic on the compile result
     /// instead of silently doing nothing — the compile still succeeds with
-    /// the generator's (unverified) output. Shared by every BT-3132/BT-3133/
-    /// BT-3134/BT-3135 check in `control_flow`, `expressions.rs`,
-    /// `dispatch_codegen.rs`, and `gen_server/methods.rs` — BT-3134 and
-    /// BT-3135 each deliberately dropped their own independently-added copy
-    /// of this helper (CLAUDE.md's no-duplicate-implementations rule) in
-    /// favor of this one, already on `main` from BT-3133.
+    /// the generator's (unverified) output. Shared by every state-threading
+    /// invariant check in `control_flow`, `expressions.rs`,
+    /// `dispatch_codegen.rs`, and `gen_server/methods.rs` — each consolidated
+    /// onto this one helper instead of an independently-added copy
+    /// (CLAUDE.md's no-duplicate-implementations rule).
     ///
-    /// BT-3459: moved here (out of `control_flow/mod.rs`) together with
+    /// Moved here (out of `control_flow/mod.rs`) together with
     /// [`StateAccFallbackReason`] to remove a `threaded_ir → control_flow`
     /// import cycle — this crate's `control_flow` module previously defined
     /// both and `threaded_ir.rs` imported `StateAccFallbackReason` from it;

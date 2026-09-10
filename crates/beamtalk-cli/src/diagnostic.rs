@@ -40,7 +40,7 @@ pub struct CompileDiagnostic {
 impl CompileDiagnostic {
     /// Create a new diagnostic from a beamtalk-core diagnostic.
     ///
-    /// When the core diagnostic has notes (BT-1588), they are appended to the
+    /// When the core diagnostic has notes, they are appended to the
     /// message with line references for origin tracing.
     pub fn from_core_diagnostic(
         diagnostic: &CoreDiagnostic,
@@ -54,7 +54,7 @@ impl CompileDiagnostic {
             Severity::Hint => "hint here",
         };
 
-        // BT-1588: Append notes to the message for origin tracing.
+        // Append notes to the message for origin tracing.
         // Notes include context like "variable has type V because it came from
         // `Dictionary at:ifAbsent:` at line 42".
         let message = if diagnostic.notes.is_empty() {
@@ -74,7 +74,7 @@ impl CompileDiagnostic {
             msg
         };
 
-        // BT-3043: A diagnostic's span is not always guaranteed to describe
+        // A diagnostic's span is not always guaranteed to describe
         // an offset within *this* file's buffer — e.g. a cross-package alias
         // collision diagnostic carries the span of the pre-loaded alias's
         // declaration site, which belongs to whichever file originally
@@ -105,7 +105,7 @@ impl CompileDiagnostic {
 /// and always skipping `Lint`-severity diagnostics (shown only by `beamtalk
 /// lint`).
 ///
-/// BT-3410: shared by `compile_source_with_bindings` (a freshly-compiled
+/// Shared by `compile_source_with_bindings` (a freshly-compiled
 /// file) and `build.rs`'s incremental-skip path (an unchanged file's
 /// diagnostics, replayed from the on-disk diagnostics cache so they don't
 /// silently vanish from `beamtalk build`'s output once a file stops being
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_from_core_diagnostic_clamps_span_beyond_source_length() {
-        // BT-3043: a diagnostic whose span was computed against a *different*
+        // A diagnostic whose span was computed against a *different*
         // file's (longer) source buffer — e.g. a cross-package alias
         // collision, whose span points into the declaring dependency's file
         // — must not crash miette's snippet extraction with an `OutOfBounds`
@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_from_core_diagnostic_with_notes() {
-        // BT-1588: Notes should be appended to the message with line references
+        // Notes should be appended to the message with line references
         let source =
             "line1\nline2\nval := dict at: key ifAbsent: [\"default\"]\nval ++ \" suffix\"";
         let core_diag = CoreDiagnostic::warning(

@@ -70,7 +70,7 @@ fn set_and_get_native_types() {
 }
 
 // -----------------------------------------------------------------------
-// BT-1933: Protocol class object completions via SimpleLanguageService
+// Protocol class object completions via SimpleLanguageService
 // -----------------------------------------------------------------------
 
 #[test]
@@ -139,7 +139,7 @@ fn protocol_visible_cross_file_in_project_index() {
 }
 
 // -----------------------------------------------------------------------
-// BT-1936: Goto-definition and find-references for protocol names
+// Goto-definition and find-references for protocol names
 // -----------------------------------------------------------------------
 
 #[test]

@@ -69,15 +69,13 @@ impl TypeChecker {
     /// plus the rendered names of the members that did *not* satisfy it.
     ///
     /// BT-2623: the predicate receives each member's *full* type string
-    /// (via [`inferred_type_to_string`], e.g. `"Array(Integer)"`), not the bare
+    /// (via [`InferredType::display_annotation`], e.g. `"Array(Integer)"`), not the bare
     /// `as_known()` class name. Before collection literals carried element types
     /// a union like `Array(Integer) | Array(String)` could not arise (both
     /// branches deduplicated to bare `Array`); now it can, and dropping the type
     /// args would let `Array(String)` silently pass a check against a declared
     /// `Array(Integer)`. The `as_known()` guard is still used solely to skip the
     /// whole union when any member is `Dynamic`/`Union`/`Meta`/`Never`.
-    ///
-    /// [`inferred_type_to_string`]: Self::inferred_type_to_string
     pub(super) fn classify_union_members<F>(
         members: &[InferredType],
         pred: F,
@@ -90,8 +88,10 @@ impl TypeChecker {
         if members.iter().any(|m| m.as_known().is_none()) {
             return None;
         }
-        let member_names: Vec<EcoString> =
-            members.iter().map(Self::inferred_type_to_string).collect();
+        let member_names: Vec<EcoString> = members
+            .iter()
+            .map(InferredType::display_annotation)
+            .collect();
         let compatible = member_names.iter().filter(|m| pred(m)).count();
         let incompatible: Vec<EcoString> =
             member_names.iter().filter(|m| !pred(m)).cloned().collect();
@@ -2594,7 +2594,7 @@ impl TypeChecker {
                     self.alias_registry.as_ref(),
                 );
             self.referenced_aliases.extend(alias_deps);
-            let declared_type = Self::inferred_type_to_string(&resolved_declared);
+            let declared_type = resolved_declared.display_annotation();
             if type_param_names.contains(&declared_type.as_str()) {
                 continue;
             }
@@ -2602,7 +2602,7 @@ impl TypeChecker {
             // `TypeProvenance::Aliased` tag when `type_annotation` names a
             // registered alias (see the doc above) — `display_for_diagnostic`
             // renders it as `AliasName (expansion)` directly. Computed once
-            // here, before the tag is discarded by the `inferred_type_to_string`
+            // here, before the tag is discarded by `display_annotation`'s
             // flattening above (needed for `is_assignable_to`'s structural
             // comparison), and reused by every arm below instead of
             // re-deriving a plain display from the flattened `declared_type`.
@@ -3033,7 +3033,7 @@ impl TypeChecker {
             None,
             Some(registry),
         );
-        (Self::inferred_type_to_string(&resolved), deps)
+        (resolved.display_annotation(), deps)
     }
 
     // ── BT-3469: renderers for facts `inference/` detects ──────────────

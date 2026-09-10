@@ -24,7 +24,7 @@ pub(crate) fn filter_error_diagnostics(
 
 /// Collect warning/hint/lint messages as `Vec<String>` for response construction.
 ///
-/// Includes `Lint` severity so REPL users see effect-free statement hints (BT-979).
+/// Includes `Lint` severity so REPL users see effect-free statement hints.
 pub(crate) fn collect_warning_messages(
     diagnostics: &[beamtalk_core::source_analysis::Diagnostic],
 ) -> Vec<String> {
@@ -50,7 +50,7 @@ pub(crate) struct DiagInfo {
     pub(crate) severity: String,
     /// Diagnostic category (`"Dnu"`, `"Type"`, ...), when the checker tagged
     /// one — `None` for parse errors and other untagged diagnostics
-    /// (ADR 0105 Phase 1, BT-2778: the re-check orchestration filters
+    /// (ADR 0105 Phase 1: the re-check orchestration filters
     /// findings by category).
     pub(crate) category: Option<String>,
     /// Byte offset where the diagnosed span begins.

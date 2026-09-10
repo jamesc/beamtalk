@@ -6,7 +6,7 @@
 //!
 //! **DDD Context:** Language Service
 //!
-//! Backs `SystemNavigation ffiSitesFor:` (BT-2211). Where `sendersOf:` answers
+//! Backs `SystemNavigation ffiSitesFor:`. Where `sendersOf:` answers
 //! "who calls this Beamtalk method?", this query answers "who calls this Erlang
 //! function through the FFI bridge?". Given the source text of a single compiled
 //! method (as returned by `CompiledMethod source`) and a target Erlang
@@ -20,9 +20,9 @@
 //! `(Erlang lists) reverse: xs` parses as a nested [`Expression::MessageSend`]
 //! whose root receiver is the `Erlang` class reference. The receiver
 //! recognition is shared with codegen and semantic analysis via
-//! [`beamtalk_core::ffi_receiver`] (BT-3079); the function/arity derivation below
+//! [`beamtalk_core::ffi_receiver`]; the function/arity derivation below
 //! matches the existing FFI machinery in
-//! [`beamtalk_core::semantic_analysis::validators::structural_validators`] (BT-1726):
+//! [`beamtalk_core::semantic_analysis::validators::structural_validators`]:
 //!
 //! - The **module** is recovered from the receiver: `Erlang <module>` (or
 //!   `(Erlang <module>)`) is a `MessageSend` whose receiver is
@@ -40,7 +40,7 @@
 //! Class-protocol selectors such as `Erlang class` / `Erlang new` are NOT FFI
 //! module lookups (they dispatch to the class protocol), so they are never
 //! reported — recognition is delegated to the single shared implementation in
-//! [`beamtalk_core::ffi_receiver`] (BT-3079), which codegen and the validators also use.
+//! [`beamtalk_core::ffi_receiver`], which codegen and the validators also use.
 //!
 //! # Parsing strategy
 //!
@@ -134,7 +134,7 @@ struct FfiTarget<'a> {
 /// protocol selectors (`Erlang class`, …) are rejected so they are not treated
 /// as module lookups.
 ///
-/// BT-3079: delegates to the single shared recognizer in
+/// Delegates to the single shared recognizer in
 /// [`beamtalk_core::ffi_receiver`].
 fn extract_erlang_module(expr: &Expression) -> Option<&str> {
     beamtalk_core::ffi_receiver::erlang_module_of_receiver(expr)
@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn package_qualified_erlang_is_not_an_ffi_call() {
-        // BT-3079 regression: `json@Erlang lists reverse: xs` names a
+        // `json@Erlang lists reverse: xs` names a
         // package-scoped `Erlang` class, not the compiler's built-in FFI
         // bridge, so it must not be reported as a `lists:reverse` call site.
         let src = "rev: xs => json@Erlang lists reverse: xs";

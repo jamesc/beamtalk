@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! BT-3459: split out of `control_flow/mod.rs`, no logic changes.
+//! split out of `control_flow/mod.rs`, no logic changes.
 
 use super::super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
@@ -17,7 +17,7 @@ use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::Span;
 
 impl CoreErlangGenerator {
-    /// BT-1224: Try to generate a plain `let Var = value in` binding for a block-local
+    /// Try to generate a plain `let Var = value in` binding for a block-local
     /// variable assignment that does NOT need `StateAcc` threading.
     ///
     /// Returns `Some(doc)` when the assignment is:
@@ -45,13 +45,13 @@ impl CoreErlangGenerator {
         if threaded.contains(&id.name.to_string()) {
             return Ok(None);
         }
-        // BT-912: Tier-2 block calls return {Result, NewStateAcc}. Fall back to
+        // Tier-2 block calls return {Result, NewStateAcc}. Fall back to
         // generate_local_var_assignment_in_loop which already handles Tier-2 unpacking
         // and StateAcc propagation correctly.
         if self.is_tier2_value_call(value) {
             return Ok(None);
         }
-        // BT-3428: a control-flow-with-mutations RHS (e.g. a mutating list-op
+        // a control-flow-with-mutations RHS (e.g. a mutating list-op
         // like `collect:` whose block mutates a DIFFERENT outer local than
         // `id.name`, or a nested `ifTrue:ifFalse:`/`match:`/`on:do:` with
         // mutations) also returns a closed `{Value, StateAcc}` 2-tuple — same
@@ -62,7 +62,7 @@ impl CoreErlangGenerator {
         // unwrap the tuple or rethread them — it would bind `core_var` to the
         // raw tuple and silently drop every other local the RHS's block
         // mutated. Fall back to `generate_local_var_assignment_in_loop`,
-        // which (as of BT-3428) unwraps this exact shape and rebinds those
+        // which unwraps this exact shape and rebinds those
         // other locals via `push_control_flow_threaded_var_rereads`'s
         // loop-body counterpart.
         if self.control_flow_has_mutations(value) {
@@ -71,12 +71,12 @@ impl CoreErlangGenerator {
         let core_var = self
             .lookup_var(&id.name)
             .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-        // ADR 0118 phase 5b (BT-3422): a class-method self-send on the RHS
+        // ADR 0118 phase 5b: a class-method self-send on the RHS
         // (`x := self bump`), at any nesting depth, threads as a real
         // prelude via `threaded_expression` — spliced ahead of this
         // `let core_var = ... in` (mirrors
-        // `generate_local_var_assignment_in_loop`'s BT-1397 fix, now built
-        // on `ThreadedValue` rather than an open-chain side channel).
+        // `generate_local_var_assignment_in_loop`'s analogous handling, now
+        // built on `ThreadedValue` rather than an open-chain side channel).
         let frame = self.current_frame();
         let tv = self.threaded_expression(value, frame)?;
         let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
@@ -98,7 +98,7 @@ impl CoreErlangGenerator {
     /// (`control_flow::body::lower_foldl_body`) direct-params/tuple-acc/
     /// hybrid-mode bodies — the sole surviving implementation of this shape
     /// since both migrations' hand-built `Document` predecessor
-    /// (`generate_direct_var_update_in_loop`, BT-1275) was deleted once every
+    /// (`generate_direct_var_update_in_loop`) was deleted once every
     /// call site converted to this `ThreadedStmt::Bind` producer
     /// (`render_bind`'s `Direct` arm renders `"let NewVar = <rhs> in "`,
     /// byte-identical to the deleted function's own `docvec!`), so `render`'s
@@ -135,7 +135,7 @@ impl CoreErlangGenerator {
             VersionedVar::new(VersionPrefix::Gensym(current), 1, frame)
         };
 
-        // BT-1329: Clear any pending list op result before generating the value.
+        // Clear any pending list op result before generating the value.
         self.loop_mode.direct_params_list_op_result = None;
         let value_code = self.expression_doc(value)?;
 
@@ -165,7 +165,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// BT-3428 (Claude Review follow-up on PR #3727): shared by
+    /// Claude Review follow-up on PR #3727: shared by
     /// `generate_local_var_assignment_in_loop`'s Tier 2 value-call case and
     /// its control-flow-with-mutations case — both RHS shapes compile
     /// (`generate_tier2_value_call_doc`/`expression_doc` respectively) to a
@@ -232,14 +232,14 @@ impl CoreErlangGenerator {
         Document::Vec(docs)
     }
 
-    /// BT-153: Generate a local variable assignment inside a loop body with state threading.
+    /// Generate a local variable assignment inside a loop body with state threading.
     ///
     /// Generates code like:
     /// ```erlang
     /// let _Val = <value> in let StateAccN = maps:put('varname', _Val, StateAcc{N-1}) in
     /// ```
     ///
-    /// BT-912: When the RHS is a Tier 2 block call returning `{Result, NewStateAcc}`,
+    /// When the RHS is a Tier 2 block call returning `{Result, NewStateAcc}`,
     /// unpacks the tuple and uses `NewStateAcc` for `maps:put` so that mutations made
     /// by the called block (e.g. captured variable updates) are preserved in the
     /// threading state rather than discarded.
@@ -252,7 +252,7 @@ impl CoreErlangGenerator {
             if let Expression::Identifier(id) = target.as_ref() {
                 let val_var = self.fresh_temp_var("Val");
 
-                // BT-790: In REPL mode, use the plain variable name as the key
+                // In REPL mode, use the plain variable name as the key
                 // (no __local__ prefix) since there are no actor fields to collide with.
                 // This ensures reads (`maps:get('x', StateAcc)`) match writes
                 // (`maps:put('x', ..., StateAcc)`), allowing mutations to accumulate
@@ -263,7 +263,7 @@ impl CoreErlangGenerator {
                     Self::local_state_key(&id.name).into()
                 };
 
-                // BT-912: If the RHS is a Tier 2 block call, it returns {Result, NewStateAcc}.
+                // If the RHS is a Tier 2 block call, it returns {Result, NewStateAcc}.
                 // Unpack the tuple so that:
                 //   - `Val` is bound to `Result` (not the whole tuple)
                 //   - `maps:put` uses `NewStateAcc` (preserving the block's captured mutations)
@@ -278,13 +278,13 @@ impl CoreErlangGenerator {
                         super::super::util::versioned_var("State", self.state_version())
                     };
 
-                    // BT-2703: Rebind the local to the freshly-written value so a later
+                    // Rebind the local to the freshly-written value so a later
                     // read *within the same iteration* (`idx := idx + 1` … `x * idx`) sees
                     // the new value instead of the stale iteration-start `maps:get` binding.
                     // Mirrors the tuple-acc path (`generate_direct_var_update_in_loop`).
                     self.bind_var(&id.name, &val_var);
 
-                    // BT-1053: Return val_var so callers (e.g. generate_conditional_branch_inline)
+                    // Return val_var so callers (e.g. generate_conditional_branch_inline)
                     // can use it as the branch result.
                     let doc = self.emit_tuple_unwrap_pack_and_rebind(
                         ("T2", "T2St"),
@@ -297,7 +297,7 @@ impl CoreErlangGenerator {
                     return Ok((doc, val_var));
                 }
 
-                // BT-3428: RHS is itself control-flow-with-mutations (e.g. a
+                // RHS is itself control-flow-with-mutations (e.g. a
                 // mutating list-op like `collect:`/`do:`/`select:` whose
                 // block — or its own receiver — needs state threading, or a
                 // nested `ifTrue:ifFalse:`/`match:`/`on:do:` with mutations).
@@ -311,8 +311,7 @@ impl CoreErlangGenerator {
                 // (`conditionals.rs`) — the conditional-branch-arm sibling
                 // this loop-body function has always structurally
                 // paralleled — including its rebind of any OTHER outer local
-                // the RHS's own block mutated (BT-3428, found via the review
-                // of that C3b fix).
+                // the RHS's own block mutated.
                 if self.control_flow_has_mutations(value) {
                     let frame = self.current_frame();
                     let mut prelude_stmts: Vec<ThreadedStmt> = Vec::new();
@@ -341,7 +340,7 @@ impl CoreErlangGenerator {
                     return Ok((Document::Vec(vec![prelude_doc, doc]), val_var));
                 }
 
-                // ADR 0118 phase 2b (BT-3418): thread every state-effecting
+                // ADR 0118 phase 2b: thread every state-effecting
                 // sub-expression nested in the RHS (or the RHS itself, `v :=
                 // self bump`) ahead of `value`'s own compile — mirrors
                 // `lower_local_var_assignment_bind`'s identical `thread_ahead`
@@ -359,7 +358,7 @@ impl CoreErlangGenerator {
                 let prelude_doc = self.threaded_prelude_doc(&prelude_stmts);
 
                 // Capture value expression (ADR 0018 bridge). ADR 0118 phase
-                // 5b (BT-3422): `thread_ahead` above already threads any
+                // 5b: `thread_ahead` above already threads any
                 // class-var producer nested in `value` (at any depth) as a
                 // real prelude, so the plain compile here reads the
                 // substituted value back via `precompiled_subexprs` — no
@@ -367,7 +366,7 @@ impl CoreErlangGenerator {
                 let value_code = self.expression_doc(value)?;
                 self.finish_precompiled_scope(thread_scope)?;
 
-                // BT-3418: read AFTER `thread_ahead` above, so a threaded
+                // read AFTER `thread_ahead` above, so a threaded
                 // prelude's own state-version bump (e.g. a nested self-send's
                 // dispatch `Bind`) is reflected in the `maps:put` source
                 // below — reading it any earlier would reference the
@@ -383,13 +382,13 @@ impl CoreErlangGenerator {
                     super::super::util::versioned_var("State", self.state_version())
                 };
 
-                // BT-2703: Rebind the local to the freshly-written value so a later read
+                // Rebind the local to the freshly-written value so a later read
                 // *within the same iteration* sees the new value rather than the stale
                 // iteration-start `maps:get` binding (the map-acc analogue of the
                 // tuple-acc rebind in `generate_direct_var_update_in_loop`).
                 self.bind_var(&id.name, &val_var);
 
-                // BT-1053: Return val_var so callers (e.g. generate_conditional_branch_inline)
+                // Return val_var so callers (e.g. generate_conditional_branch_inline)
                 // can use it as the branch result.
                 return Ok((
                     docvec![

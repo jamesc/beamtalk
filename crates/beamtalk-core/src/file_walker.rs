@@ -122,7 +122,7 @@ impl FileWalker {
     /// Preset for collecting `.bt` source files.
     ///
     /// Recursive, symlink-skipping, sorted, strict errors. Excludes
-    /// `.git`/`target`/`node_modules`/`_build` (BT-3043) — `_build/deps/`
+    /// `.git`/`target`/`node_modules`/`_build` — `_build/deps/`
     /// holds full source checkouts for git/registry dependencies (a path
     /// dependency's source stays wherever the path points, outside
     /// `_build`, but a git/registry dependency is cloned straight into
@@ -369,7 +369,7 @@ mod tests {
         assert!(walker.max_files.is_none());
     }
 
-    /// BT-3043: a directory walk over a project root must never treat a
+    /// A directory walk over a project root must never treat a
     /// git/registry dependency's vendored checkout under `_build/deps/` as
     /// first-party source — see `source_files()`'s doc for the false
     /// alias-collision/spurious-lint-diagnostic consequences when it does.
