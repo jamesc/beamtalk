@@ -1066,29 +1066,19 @@ impl CoreErlangGenerator {
         Ok(result_var)
     }
 
-    /// BT-3492: emits a last/return-position `on:do:`/`ensure:` that mutates
-    /// captured outer locals and/or writes a value-type
-    /// `self.field := ...`, as an open let chain that binds the construct's
-    /// own `{Result, StateAcc[, Self]}` tuple and extracts element 1 (the
-    /// construct's logical result) to a fresh result var.
-    ///
-    /// The `SelfVt` mirror of [`Self::emit_vt_threaded_tuple_unwrap_to_var`]
-    /// for the third construct family — before this, `on:do:`/`ensure:` was
-    /// the one shape [`Self::lower_threaded_last`] did not recognize
-    /// (BT-3177's standing `emit_threaded_last` follow-up), so it fell
-    /// through to the generic last-expression path and leaked the raw tuple
-    /// as the method's own return value. Threaded outer locals (element 2)
-    /// don't escape in last position — same as the loop/conditional cases —
-    /// so, unlike [`Self::generate_vt_exception_construct_open`]'s non-last
-    /// extraction, they are never unpacked here. When the construct also
-    /// threads a value-type `Self`
-    /// ([`Self::is_exception_construct_with_vt_self_field_threading`]),
+    /// Lowers a last/return-position `on:do:`/`ensure:` into its logical
+    /// result var: binds the construct's own `{Result, StateAcc[, Self]}`
+    /// tuple and extracts element 1. The `SelfVt` mirror of
+    /// [`Self::emit_vt_threaded_tuple_unwrap_to_var`] for the
+    /// exception-construct family. Threaded outer locals (element 2) do not
+    /// escape in last position, unlike
+    /// [`Self::generate_vt_exception_construct_open`]'s non-last extraction,
+    /// and are discarded here. When the construct also threads a value-type
+    /// `Self` ([`Self::is_exception_construct_with_vt_self_field_threading`]),
     /// element 3 is rebound via
-    /// [`CoreErlangGenerator::rebind_value_self_from_doc`] — without this a
-    /// field-mutating `on:do:`/`ensure:` in last/return position would
-    /// compile and run, but the method's own returned `Self` (and the
-    /// `{Result, Self{N}}` NLR tuple) would carry the pre-`try` snapshot
-    /// instead of the construct's.
+    /// [`CoreErlangGenerator::rebind_value_self_from_doc`] so the method's
+    /// own returned `Self` (and NLR tuple) reflects the construct's
+    /// mutation rather than the pre-`try` snapshot.
     pub(in crate::core_erlang) fn emit_vt_exception_tuple_unwrap_to_var(
         &mut self,
         expr: &Expression,
@@ -2117,23 +2107,14 @@ impl CoreErlangGenerator {
         Ok(core_var)
     }
 
-    /// BT-3492: emits a value-type/class-method local assignment whose RHS
-    /// is an `on:do:`/`ensure:` that mutates captured outer locals and/or
-    /// writes a value-type `self.field := ...`.
-    ///
-    /// Binds the target variable to element 1 (the construct's logical
-    /// result), rebinds each threaded outer local from element 2
-    /// (`StateAcc`) — unlike last position, an assignment RHS's threaded
-    /// locals DO need to escape to subsequent statements — and, when the
-    /// construct also threads a value-type `Self`
-    /// ([`Self::is_exception_construct_with_vt_self_field_threading`]),
-    /// rebinds `Self` from the trailing element 3. The `on:do:`/`ensure:`
-    /// mirror of [`Self::emit_vt_threaded_local_assignment`], and the
-    /// assign-RHS mirror of
-    /// [`Self::generate_vt_exception_construct_open`]'s non-last extraction.
-    /// Without this the target would be bound to the raw
-    /// `{Result, StateAcc[, Self]}` tuple and every threaded mutation would
-    /// keep its pre-construct value.
+    /// Lowers a value-type/class-method local assignment whose RHS is an
+    /// `on:do:`/`ensure:` construct: binds the target to element 1 (the
+    /// construct's logical result), rebinds each threaded outer local from
+    /// element 2 (`StateAcc` — unlike last position, these must escape to
+    /// later statements), and, when the construct also threads a value-type
+    /// `Self` ([`Self::is_exception_construct_with_vt_self_field_threading`]),
+    /// rebinds it from element 3. The `on:do:`/`ensure:` mirror of
+    /// [`Self::emit_vt_threaded_local_assignment`].
     ///
     /// Returns the Core Erlang variable bound to the assignment target.
     pub(in crate::core_erlang) fn emit_vt_exception_assign_rhs(
