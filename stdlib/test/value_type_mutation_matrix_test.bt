@@ -370,6 +370,51 @@ TestCase subclass: ValueTypeMutationMatrixTest
     ] ensure: [nil]
     self.total
 
+  // BT-3492: the `on:do:`/`ensure:` construct itself is the method's LAST
+  // statement — the shape `classify_vt_body_expr`'s `ExceptionConstructWithThreading`
+  // arm never reached (`emit_threaded_last`/`lower_threaded_last` had no
+  // `on:do:`/`ensure:` case), so the construct's raw `{Result, StateAcc, Self}`
+  // tuple leaked as the METHOD's own return value instead of the unwrapped
+  // logical result. Reading `self.total` as the try body's OWN last statement
+  // (rather than as a trailing statement after the construct, like the
+  // NonLast cells above) makes the mutated field observable through the
+  // method's return value despite Self not persisting across calls.
+  fragStateFieldEnsureLastPosition =>
+    [
+      self.total := self.total + 1
+      self.total
+    ] ensure: [nil]
+
+  // BT-3492: the construct as an assignment RHS — before this fix `r` was
+  // bound to the raw `{Result, StateAcc, Self}` tuple and the method's live
+  // `Self` was never rebound from it, so the trailing `self.total` read the
+  // PRE-try snapshot (0) instead of the mutated value.
+  fragStateFieldEnsureAssignRhs =>
+    _r := [
+      self.total := self.total + 1
+      nil
+    ] ensure: [nil]
+    self.total
+
+  // BT-3492: nested inside another construct's inlined body —
+  // `block_writes_vt_self_field` is deliberately top-level-body-only (the
+  // same reason `loop_body_threads_value_self` is), so a field write buried
+  // inside an INNER `ensure:`'s block is invisible to the OUTER `ensure:`'s
+  // own threading decision and was silently dropped before this fix. Unlike
+  // the two shapes above, this is now a clean compile-time rejection (the
+  // same `FieldAssignmentInUnsupportedBlock` diagnostic BT-3488 gives the
+  // identical loop-nesting shape) rather than something made to work — so,
+  // like BT-3487/BT-3488's Foldl*/nested-conditional shapes, there is no live
+  // fixture for it here: a fragment that compile-errors would break
+  // compilation of this whole file. Pinned at the Rust level instead — see
+  // `crates/beamtalk-codegen/src/core_erlang/tests/control_flow.rs`,
+  // `test_value_type_field_write_in_ensure_nested_in_ensure_is_compile_error`.
+  // The sibling shape — an `ensure:` nested inside a `whileTrue:` LOOP body —
+  // was already rejected before this issue, by the existing loop-nesting walk
+  // (`reject_unthreadable_value_self_field_write`, which descends into every
+  // nested block including an inlined `ensure:`'s); this issue only closes
+  // the exception-in-exception gap that walk does not reach.
+
   // ════════════════════════════════════════════════════════════════════════
   //  to:do:  (construct) — BT-2308 regression cells
   // ════════════════════════════════════════════════════════════════════════
@@ -944,6 +989,16 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testStateFieldEnsureChainedNonLastTestCase =>
     self assert: self fragStateFieldEnsureChainedNonLast equals: 3
+
+  // BT-3492: last-statement / assignment-RHS positions (see the fragments'
+  // own comments). The nested-construct position is a compile-time rejection
+  // rather than a runtime cell — see `fragStateFieldEnsureAssignRhs`'s
+  // neighboring comment for why.
+  testStateFieldEnsureLastPositionTestCase =>
+    self assert: self fragStateFieldEnsureLastPosition equals: 1
+
+  testStateFieldEnsureAssignRhsTestCase =>
+    self assert: self fragStateFieldEnsureAssignRhs equals: 1
 
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3414 (ADR 0118 phase 0) — self-send POSITION axis, Actor-only
