@@ -1227,6 +1227,31 @@ impl CoreErlangGenerator {
             unreachable!("LocalAssign* kinds must ensure assignment target is an Identifier");
         };
 
+        // C2z — BT-3493: the RHS is itself a field write (`r := (self.x
+        // := ...)`, at any parenthesization depth) — the shared ADR 0111
+        // Addendum 5 statement classifier (`classify_body_expr`) sees only
+        // the outer `var := <expr>` shape and hands every RHS here as
+        // `LocalAssignPure`, so this is the "see through the value-carrying
+        // parent" step the field write itself needs: lower it through the
+        // SAME real-`Bind` producer C1 (`lower_field_assignment_bind`) uses
+        // for a bare `self.field := ...` statement — arbitrary-RHS support,
+        // `reject_class_var_field_assignment`'s class-var gate, and
+        // `thread_ahead`-based sequencing all included — then alias this
+        // statement's own local var to the identical assigned value, exactly
+        // as `:=`'s "the whole assignment evaluates to the assigned value"
+        // semantics require. Checked before C3/C3b/C4 below: a field write's
+        // own target is `self.<field>`, which can never itself satisfy
+        // `is_tier2_value_call`/`control_flow_has_mutations`/
+        // `is_dispatching_actor_self_send` (all of which pattern-match a
+        // `MessageSend`, not an `Assignment`), so this check cannot shadow
+        // any of theirs.
+        if let Some(field_write) = Self::local_assign_field_write(value) {
+            let field_val_var =
+                self.lower_field_assignment_bind(field_write, frame, span, stmts)?;
+            self.bind_var(&id.name, &field_val_var);
+            return Ok(field_val_var);
+        }
+
         let val_var = self.fresh_temp_var("Val");
         // In REPL mode, use the plain variable name as the key (no
         // __local__ prefix) — see `generate_local_var_assignment_in_loop`.

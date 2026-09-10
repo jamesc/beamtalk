@@ -29,6 +29,7 @@ use beamtalk_core::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, Expression,
     ExpressionStatement, MatchArm, MessageSelector, Pattern,
 };
+use beamtalk_core::source_analysis::Span;
 
 impl CoreErlangGenerator {
     /// Generates code for a match expression.
@@ -72,19 +73,10 @@ impl CoreErlangGenerator {
             && !self.in_class_method()
         {
             for arm in arms {
-                // Paren-stripped so `1 -> (self.x := 1)` is rejected too — it
-                // crashed `erlc` identically. `is_field_assignment` then
-                // establishes the shape (`Assignment` whose target is a
-                // `self.<field>` `FieldAccess`), so the destructuring below is
-                // total.
-                let bare = arm.body.unwrap_parens();
-                if Self::is_field_assignment(bare)
-                    && let Expression::Assignment { target, span, .. } = bare
-                    && let Expression::FieldAccess { field, .. } = target.as_ref()
-                {
+                if let Some((field, span)) = Self::vt_match_arm_field_write(arm) {
                     return Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm {
-                        field: field.name.to_string(),
-                        location: self.location_label(*span),
+                        field: field.to_string(),
+                        location: self.location_label(span),
                     });
                 }
             }
@@ -193,6 +185,42 @@ impl CoreErlangGenerator {
             " in ",
             inner_doc
         ])
+    }
+
+    /// [`Self::generate_match`]'s value-type-instance rejection detector:
+    /// the assigned field's name and span when `arm`'s body is a
+    /// `self.field := ...` write with no `Self`-version merge to thread
+    /// through — either bare (BT-3489, `1 -> (self.x := 1)`, paren-stripped)
+    /// or wrapped one level deeper in a local assignment (BT-3493, `1 -> r
+    /// := (self.x := ...)`) — or `None` for every other arm-body shape.
+    ///
+    /// Scoped to exactly the two shapes `generate_match`'s caller already
+    /// gates on (a value-type INSTANCE method): a `[...] value`-wrapped
+    /// field write is a separate, pre-existing gap this detector does not
+    /// (yet) cover — see BT-3493's own follow-up notes.
+    fn vt_match_arm_field_write(arm: &MatchArm) -> Option<(&str, Span)> {
+        // Paren-stripped so `1 -> (self.x := 1)` is rejected too — it
+        // crashed `erlc` identically. `is_field_assignment` then establishes
+        // the shape (`Assignment` whose target is a `self.<field>`
+        // `FieldAccess`), so the destructuring below is total.
+        let bare = arm.body.unwrap_parens();
+        let field_write = if Self::is_field_assignment(bare) {
+            Some(bare)
+        } else if let Expression::Assignment { target, value, .. } = bare
+            && matches!(target.as_ref(), Expression::Identifier(_))
+        {
+            let inner = value.unwrap_parens();
+            Self::is_field_assignment(inner).then_some(inner)
+        } else {
+            None
+        };
+        let Expression::Assignment { target, span, .. } = field_write? else {
+            unreachable!("field_write is always an Assignment, set only via is_field_assignment");
+        };
+        let Expression::FieldAccess { field, .. } = target.as_ref() else {
+            unreachable!("is_field_assignment guarantees a FieldAccess target");
+        };
+        Some((field.name.as_str(), *span))
     }
 
     /// Compiles a `match:` arm body.

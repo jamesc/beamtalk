@@ -117,3 +117,74 @@ TestCase subclass: NilTypeMatchSelfMutationActorTest
     a := NilTypeMatchSelfMutationRegistry spawn
     self assert: (a bumpBareNested: 99) equals: 0
     self assert: a currentCount equals: 0
+
+  // --- BT-3493: `self.field := ...` wrapped in a local assignment
+  // (`r := (self.x := ...)`), reproduced with no `match:` involved at all
+  // for the first two: a plain `ifTrue:ifFalse:` branch body and a counted
+  // loop body. -------------------------------------------------------------
+  testBumpWrappedIfTrueTakenBranchSeesFreshlyWrittenLocal =>
+    // r := (self.count := 0 + 10) = 10; self.count := r + 1 = 11.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedIfTrue: true) equals: 11
+    self assert: a currentCount equals: 11
+
+  testBumpWrappedIfTrueNotTakenBranchMutatesIndependently =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedIfTrue: false) equals: -1
+    self assert: a currentCount equals: -1
+
+  testBumpWrappedIfTrueAccumulatesAcrossCalls =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    a bumpWrappedIfTrue: true
+    result := a bumpWrappedIfTrue: true
+    self assert: result equals: 22
+    self assert: a currentCount equals: 22
+
+  testBumpWrappedInLoopAccumulatesOnePerIteration =>
+    // 1+2+3+4 = 10, written and re-read through the wrapped local each
+    // iteration.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedInLoop: 4) equals: 10
+    self assert: a currentCount equals: 10
+
+  testBumpWrappedInLoopZeroIterationsLeavesStateAlone =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedInLoop: 0) equals: 0
+    self assert: a currentCount equals: 0
+
+  testBumpWrappedMatchThreadsMatchingArmMutation =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedMatch: 1) equals: 10
+    self assert: a currentCount equals: 10
+
+  testBumpWrappedMatchThreadsWildcardArmMutation =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedMatch: 99) equals: 1
+    self assert: a currentCount equals: 1
+
+  testBumpWrappedMatchAccumulatesAcrossCalls =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    a bumpWrappedMatch: 1
+    a bumpWrappedMatch: 99
+    result := a bumpWrappedMatch: 1
+    self assert: result equals: 21
+    self assert: a currentCount equals: 21
+
+  testBumpWrappedIfTrueNestedLoopReadsCapturedLocal =>
+    // count: 0 -> (r=10) -> 10 -> +10 -> 20 -> +10 -> 30.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedIfTrueNestedLoopReadsCapturedLocal: true) equals: 30
+    self assert: a currentCount equals: 30
+
+  testBumpWrappedInHybridLoopThreadsBothFieldAndOuterLocal =>
+    // i=1: count 0->1, sum 0->1. i=2: count 1->3, sum 1->4.
+    // i=3: count 3->6, sum 4->10.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedInHybridLoop: 3) equals: 10
+    self assert: a currentCount equals: 6
+
+  testBumpWrappedInDoAccumulatesOverList =>
+    // x=1: count 0->1. x=2: count 1->3. x=3: count 3->6.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedInDo: #(1, 2, 3)) equals: 6
+    self assert: a currentCount equals: 6

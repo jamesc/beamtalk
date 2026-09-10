@@ -322,7 +322,7 @@ impl CoreErlangGenerator {
             self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self)?;
 
             if Self::is_field_assignment(expr) {
-                self.lower_letrec_field_assignment(expr, frame, span, &mut stmts)?;
+                let _ = self.lower_letrec_field_assignment(expr, frame, span, &mut stmts)?;
             } else if self.is_actor_self_send(expr) {
                 // Emit diagnostic for synchronous self-send in loop body.
                 self.emit_self_send_in_loop_diagnostic(expr, span);
@@ -389,13 +389,21 @@ impl CoreErlangGenerator {
     /// other (plain `State`/`StateAcc`) field write reuses
     /// [`Self::lower_field_assignment_bind`] verbatim — its own hybrid bypass
     /// and `reject_class_var_field_assignment` guard apply unchanged.
-    fn lower_letrec_field_assignment(
+    ///
+    /// Returns the assigned value's own temp var — BT-3493's
+    /// `lower_direct_var_update_in_loop_bind` needs it (a field write nested
+    /// inside a hybrid/direct-params loop's own local-var assignment, `r :=
+    /// (self.x := ...)`, must alias `r` to the SAME value); this statement's
+    /// own top-level bare-field-write call site (below, in
+    /// [`Self::lower_letrec_body`]) ignores it, exactly as it ignored the
+    /// three branches' previously-discarded `val_var`s.
+    pub(super) fn lower_letrec_field_assignment(
         &mut self,
         expr: &Expression,
         frame: FrameId,
         span: Span,
         stmts: &mut Vec<ThreadedStmt>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let Expression::Assignment { target, value, .. } = expr else {
             unreachable!("is_field_assignment guarantees an Assignment expr");
         };
@@ -405,11 +413,11 @@ impl CoreErlangGenerator {
 
         if self.is_class_var_assignment(expr) && self.loop_mode.loop_threads_class_vars {
             let branch_frame = self.current_branch_frame();
-            let (preamble_doc, bind, _val_var) =
+            let (preamble_doc, bind, val_var) =
                 self.lower_class_var_field_assignment_bind(&field.name, value, branch_frame)?;
             stmts.push(ThreadedStmt::Statement(preamble_doc, span));
             stmts.push(bind);
-            return Ok(());
+            return Ok(val_var);
         }
 
         if self.loop_mode.in_hybrid_loop
@@ -447,15 +455,14 @@ impl CoreErlangGenerator {
             stmts.push(ThreadedStmt::Bind {
                 target: VersionedVar::new(VersionPrefix::Gensym(new_field_var), 1, frame),
                 source,
-                op: BindOp::Direct(ValueRef::Var(val_var)),
+                op: BindOp::Direct(ValueRef::Var(val_var.clone())),
                 shadow_write: false,
                 span,
             });
-            return Ok(());
+            return Ok(val_var);
         }
 
-        let _ = self.lower_field_assignment_bind(expr, frame, span, stmts)?;
-        Ok(())
+        self.lower_field_assignment_bind(expr, frame, span, stmts)
     }
 
     /// `Bind`-producing lowering of a Letrec body's local-var assignment

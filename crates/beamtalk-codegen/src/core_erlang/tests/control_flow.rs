@@ -3826,3 +3826,84 @@ fn test_value_type_parenthesized_field_write_in_match_arm_is_compile_error() {
         ),
     }
 }
+
+#[test]
+fn test_actor_field_write_wrapped_in_local_assign_in_match_arm_threads_state() {
+    // BT-3493: `self.field := ...` wrapped one level deeper in a LOCAL
+    // ASSIGNMENT (`r := (self.x := ...)`) inside a match: arm's `[...]
+    // value` block body — not the bare shape BT-3489 fixed. The RHS's own
+    // classifier (`classify_body_expr`'s local-var-assignment branch) has
+    // to see through the `r := <expr>` wrapper to notice the field write
+    // underneath, or the field's own `State{N}` `Bind` is never produced,
+    // reproducing BT-3489's exact `erlc: unbound variable 'State1'` crash
+    // one nesting level down.
+    let src = concat!(
+        "Actor subclass: ActorLocalAssignWrappedFieldWriteInMatchArm\n",
+        "  state: total = 0\n\n",
+        "  computeIt: v =>\n",
+        "    v match: [\n",
+        "      1 -> [\n",
+        "        r := (self.total := self.total + 10)\n",
+        "        r\n",
+        "      ] value;\n",
+        "      _ -> [\n",
+        "        r := (self.total := self.total + 1)\n",
+        "        r\n",
+        "      ] value\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@actorlocalassignwrappedfieldwriteinmatcharm")
+            .with_workspace_mode(true),
+    )
+    .expect("a local-assign-wrapped actor field write in a match: arm must compile");
+    assert!(
+        code.contains("let StateAcc = "),
+        "a local-assign-wrapped field-write arm must still be lowered as a threaded branch. \
+         Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@actorlocalassignwrappedfieldwriteinmatcharm", &code);
+}
+
+#[test]
+fn test_value_type_field_write_wrapped_in_local_assign_in_match_arm_is_compile_error() {
+    // BT-3493: the value-type half of the same local-assign-wrapping shape
+    // — same rejection `test_value_type_field_write_in_match_arm_is_compile_error`
+    // gets for the bare form, so the wrapper can't be used to dodge it and
+    // fall back to a crash. Unlike the Actor test above, this uses the
+    // BARE arm-body shape (`1 -> r := (self.x := ...)`, no `[...] value`
+    // wrapper) — `generate_match`'s up-front rejection loop inspects
+    // `arm.body` directly, and only that bare shape reaches it (a
+    // `[...] value`-wrapped field write is a pre-existing, separate gap
+    // this issue's fix does not touch).
+    let src = concat!(
+        "TestCase subclass: VtLocalAssignWrappedFieldWriteInMatchArm\n",
+        "  field: total = 0\n\n",
+        "  computeIt: v =>\n",
+        "    v match: [\n",
+        "      1 -> r := (self.total := self.total + 10);\n",
+        "      _ -> r := (self.total := self.total + 1)\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtlocalassignwrappedfieldwriteinmatcharm")
+            .with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm { field, .. }) => {
+            assert_eq!(field, "total");
+        }
+        other => panic!(
+            "Expected ValueSelfFieldAssignmentInMatchArm for a local-assign-wrapped value-type \
+             field write in a match: arm. Got: {other:?}"
+        ),
+    }
+}

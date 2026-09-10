@@ -68,6 +68,20 @@ impl CoreErlangGenerator {
         if self.control_flow_has_mutations(value) {
             return Ok(None);
         }
+        // BT-3493: the RHS is itself a field write (`r := (self.x :=
+        // ...)`, at any parenthesization depth) — its `State`/`StateAcc`
+        // mutation must fold into this loop's OWN threaded state, which
+        // this plain, unthreaded `let` (built from `threaded_expression`
+        // below) has no way to do: `threaded_expression`'s generic
+        // value-carrying-parent handling compiles the field write via
+        // ordinary `generate_expression`, whose internal state-version bump
+        // never becomes a real `Bind` here. Fall back to
+        // `lower_local_var_assignment_bind` (via the caller,
+        // `lower_letrec_local_var_assignment`), which has its own BT-3493
+        // fix for exactly this shape.
+        if Self::local_assign_field_write(value).is_some() {
+            return Ok(None);
+        }
         let core_var = self
             .lookup_var(&id.name)
             .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
@@ -134,6 +148,34 @@ impl CoreErlangGenerator {
         } else {
             VersionedVar::new(VersionPrefix::Gensym(current), 1, frame)
         };
+
+        // BT-3493: the RHS is itself a field write (`r := (self.x :=
+        // ...)`, at any parenthesization depth) — hybrid/direct-params mode
+        // threads a field write through `lower_letrec_field_assignment`'s
+        // own class-var/hybrid-mutated-field/plain dispatch (the SAME
+        // producer this loop's own bare `self.field := ...` statements
+        // already lower through), never through this function's generic
+        // `expression_doc` compile below, which has no way to fold that
+        // mutation into the field's own direct-param rebind chain (mirrors
+        // `lower_local_var_assignment_bind`'s matching BT-3493 fix for the
+        // StateAcc-fallback sibling of this exact shape). Alias this local
+        // to the field write's own returned value, exactly as `:=`'s "the
+        // whole assignment evaluates to the assigned value" semantics
+        // require.
+        if let Some(field_write) = Self::local_assign_field_write(value) {
+            let field_val_var =
+                self.lower_letrec_field_assignment(field_write, frame, span, stmts)?;
+            let new_var = self.fresh_temp_var(&canonical);
+            self.bind_var(&id.name, &new_var);
+            stmts.push(ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
+                source,
+                op: BindOp::Direct(ValueRef::Var(field_val_var)),
+                shadow_write: false,
+                span,
+            });
+            return Ok(());
+        }
 
         // Clear any pending list op result before generating the value.
         self.loop_mode.direct_params_list_op_result = None;
