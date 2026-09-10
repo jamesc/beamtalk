@@ -5,7 +5,7 @@
 
 use super::*;
 
-/// BT-3095 conformance: every command in the shared wire-vocabulary
+/// Conformance: every command in the shared wire-vocabulary
 /// corpus must be recognized by `handle_request`'s dispatch — i.e. it
 /// must not fall through to the catch-all `"Unknown command: ..."` arm.
 /// The corpus is the single source of truth both implementations are
@@ -58,7 +58,7 @@ fn handle_request_recognizes_shared_command_vocabulary_corpus() {
     }
 }
 
-/// BT-907: Inline class definition with cross-file superclass index must compile
+/// Inline class definition with cross-file superclass index must compile
 /// as a value type, not an Actor, when the parent's chain resolves to Object.
 #[test]
 fn inline_class_definition_with_superclass_index_compiles_as_value_type() {
@@ -196,7 +196,7 @@ fn parse_class_hierarchy_from_term_roundtrip() {
     assert_eq!(info.class_methods[0].arity, 0);
 }
 
-/// BT-3076: a generic return type — the `{'generic', Base, [Params]}`
+/// A generic return type — the `{'generic', Base, [Params]}`
 /// `MetaTypeRepr` tagged tuple codegen emits for e.g. `-> Result(T, E)`
 /// (`crate::codegen::core_erlang::gen_server::methods::MetaTypeRepr`,
 /// beamtalk-core) — must survive the ETF `__beamtalk_meta/0` boundary
@@ -275,11 +275,11 @@ fn generic_return_type_survives_etf_meta() {
             vec![DeclaredType::simple("T"), DeclaredType::simple("Error")],
         )),
         "generic return type must survive the ETF meta boundary structurally, \
-             not degrade to None (the pre-BT-3076 bug this test guards against)"
+             not degrade to None (the bug this test guards against)"
     );
 }
 
-/// BT-3076: `-> Self` / `-> Self class` / `-> <Name> class` return types
+/// `-> Self` / `-> Self class` / `-> <Name> class` return types
 /// cross the ETF `__beamtalk_meta/0` boundary as *flat atoms* (codegen's
 /// `MetaTypeRepr::Atom` fallback renders them via `Display`), so a method
 /// inherited from a class compiled in a previous REPL/workspace step must

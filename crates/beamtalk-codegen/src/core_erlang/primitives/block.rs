@@ -17,7 +17,7 @@ pub(crate) fn generate_block_bif(selector: &str, _params: &[String]) -> Option<D
                  call 'erlang':'element'(2, ArityTuple)",
             ))
         }
-        // valueWithArguments: is a structural intrinsic (BT-2803) handled at
+        // valueWithArguments: is a structural intrinsic handled at
         // the call site (see intrinsics.rs's
         // try_generate_block_value_with_arguments_keyword /
         // generate_block_value_with_arguments_call_runtime_discriminated),
@@ -49,8 +49,8 @@ mod tests {
         assert!(generate_block_bif("on:do:", &[]).is_none());
         assert!(generate_block_bif("ensure:", &[]).is_none());
         assert!(generate_block_bif("value", &[]).is_none());
-        // BT-2803: valueWithArguments: is now a call-site-intercepted
-        // intrinsic (intrinsics.rs), no longer a bare-primitive bif.
+        // valueWithArguments: is a call-site-intercepted intrinsic
+        // (intrinsics.rs), not a bare-primitive bif.
         assert!(generate_block_bif("valueWithArguments:", &[]).is_none());
     }
 }

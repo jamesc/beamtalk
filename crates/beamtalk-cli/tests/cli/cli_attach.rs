@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Subprocess tests for `beamtalk workspace attach` (BT-3326).
+//! Subprocess tests for `beamtalk workspace attach`.
 //!
 //! `attach` requires a running workspace to actually connect to a REPL
 //! backend. These tests cover the input-validation surface — error paths

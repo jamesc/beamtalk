@@ -37,7 +37,7 @@
 //! The caller (method body generator) unpacks `{Result, NewState}` via
 //! `element/2` to thread the new state to subsequent expressions.
 //!
-//! The trailing wildcard clause (BT-3161) is unreachable at runtime — `flag`
+//! The trailing wildcard clause is unreachable at runtime — `flag`
 //! is always a genuine boolean here — but is required to make the `case`
 //! *statically* exhaustive to the Core Erlang compiler; see
 //! `CoreErlangGenerator::case_clause_fallback`'s doc comment for why an
@@ -63,7 +63,7 @@ use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression, MessageSelector};
 use beamtalk_core::source_analysis::Span;
 
-// ─── FieldWriteSite / Closure (BT-3466) ────────────────────────────────────
+// ─── FieldWriteSite / Closure ────────────────────────────────────
 //
 // `self.field := value` emission existed three times before this issue —
 // `expressions.rs`'s `generate_field_assignment` (a complete, "closed"
@@ -78,7 +78,7 @@ use beamtalk_core::source_analysis::Span;
 // three sites above now call through (directly, or via
 // [`CoreErlangGenerator::lower_simple_field_write_bind`] for the
 // un-rendered-`Bind` consumption style). Missing the `ValueType` arm on the
-// "open"/threaded shapes was the BT-3140/BT-3159/BT-3172 bug family's root
+// "open"/threaded shapes was this bug family's root
 // cause (ADR 0110/0111): a value-type field write reaching either shape
 // silently threaded through the actor `State`/`StateAcc` map — a variable
 // that does not exist in a value-type method — instead of `Self`.
@@ -86,7 +86,7 @@ use beamtalk_core::source_analysis::Span;
 pub(in crate::core_erlang) enum FieldWriteSite {
     /// Actor/instance field: threads through `State`/`StateAcc` (ADR 0043).
     Actor,
-    /// Value-type field: threads through `Self` (BT-833).
+    /// Value-type field: threads through `Self`.
     ValueType,
     /// Class variable: threads through `ClassVars`, with ADR 0110's shadow
     /// write and its own `frame`/`block_depth` eligibility rules —
@@ -103,11 +103,11 @@ impl FieldWriteSite {
     /// `self.field := value` write site shares — `ValueType` in
     /// `CodeGenContext::ValueType`, `Actor` otherwise (also covers
     /// `CodeGenContext::Repl`, matching every pre-existing call site's
-    /// implicit default before BT-3466). Never returns `ClassVar` — a
+    /// implicit default). Never returns `ClassVar` — a
     /// caller that may be in a class method decides that axis itself
     /// (`in_class_method()`) before falling back to this for the plain
     /// case, since `context` alone can't distinguish a class method's
-    /// `ClassVars` write from an ordinary instance write (BT-412: a class
+    /// `ClassVars` write from an ordinary instance write (a class
     /// method's own `context` is `Actor`, not a fourth variant).
     ///
     /// The single implementation behind what were three independent
@@ -137,11 +137,11 @@ impl FieldWriteSite {
 /// `FieldWriteSite::Actor`/`ValueType` write uses, matching the two
 /// historical shapes' pre-existing, deliberately different choice there:
 /// `Open` reuses [`CoreErlangGenerator::generate_field_assignment_value_doc`]'s
-/// BT-2797 Tier-2 stateful-block RHS special case (every pre-existing "open"/
+/// Tier-2 stateful-block RHS special case (every pre-existing "open"/
 /// threaded call site already did); `Closed` always compiles the RHS via
 /// plain `expression_doc` (a method's own last-statement field write never
-/// got that optimization). Changing this split is out of this issue's scope
-/// (BT-3466's acceptance criteria: byte-identical output for every
+/// got that optimization). Changing this split is out of scope here (the
+/// acceptance criteria: byte-identical output for every
 /// currently-passing program).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum Closure {
@@ -174,13 +174,13 @@ impl FieldWriteSite {
 }
 
 impl CoreErlangGenerator {
-    /// BT-3466: builds the real, un-rendered `Bind` (plus its `"let Val =
+    /// builds the real, un-rendered `Bind` (plus its `"let Val =
     /// <value> in "` preamble) for an `Actor`/`ValueType` field write — never
     /// `ClassVar`, which keeps its own [`Self::lower_class_var_field_assignment_bind`].
     /// `span` is the constructed `Bind`'s own span (only ever observed by a
     /// `verify()` diagnostic on the node, never by rendering); callers that
     /// already have a `ThreadedStmt`-level span (this module's
-    /// `lower_field_assignment_bind`) pass that one, matching its pre-BT-3466
+    /// `lower_field_assignment_bind`) pass that one, matching its own
     /// hand-rolled `Bind` exactly, while [`Self::lower_field_write`] passes
     /// `value.span()`, matching `generate_field_assignment`'s/
     /// `generate_field_assignment_open`'s pre-existing
@@ -228,7 +228,7 @@ impl CoreErlangGenerator {
                 self.state_version()
             }
         };
-        // BT-3139/BT-3180: isolated-verify this mint against a synthetic,
+        // isolated-verify this mint against a synthetic,
         // backfilled fixture — see the helper's own doc comment.
         self.check_simple_field_bind_invariant(
             prefix.clone(),
@@ -252,14 +252,14 @@ impl CoreErlangGenerator {
         Ok((preamble, bind, val_var))
     }
 
-    /// BT-3466: the single lowering core for `self.field := value`,
+    /// the single lowering core for `self.field := value`,
     /// parameterized over [`FieldWriteSite`] (which storage family) and
     /// [`Closure`] (self-contained vs. open `Document`) — see both enums'
     /// doc comments for the full contract. Always constructs the real
     /// [`ThreadedStmt::Bind`] and renders it through the same
     /// [`threaded_ir::render`] every spliced `Bind` goes through (never a
     /// second, hand-rolled `maps:put` fragment), so a `Closed` result is
-    /// byte-identical to `generate_field_assignment`'s pre-BT-3466 hand-built
+    /// byte-identical to `generate_field_assignment`'s original hand-built
     /// `Document` and an `Open` result is byte-identical to
     /// `generate_field_assignment_open`'s.
     ///
@@ -301,7 +301,7 @@ impl CoreErlangGenerator {
 }
 
 impl CoreErlangGenerator {
-    /// BT-2355: Seeds the `__local__` keys for the outer locals a conditional's
+    /// Seeds the `__local__` keys for the outer locals a conditional's
     /// branches thread, returning `(seed_doc, base_state_var)`.
     ///
     /// Each branch — including the synthetic non-taken branch (`{'nil', State}`)
@@ -315,7 +315,7 @@ impl CoreErlangGenerator {
     /// When there are no threaded locals, returns `(Document::Nil, outer_state)`
     /// so field-only conditionals emit byte-for-byte the same code as before.
     ///
-    /// BT-3160: also reused by `exception_handling.rs`'s `on:do:`/`ensure:`
+    /// also reused by `exception_handling.rs`'s `on:do:`/`ensure:`
     /// generators — a try (receiver) block and its handler/cleanup block(s) are
     /// the same "compiled-but-not-all-taken" shape as a conditional's branches,
     /// so they share this seeding helper rather than re-deriving it.
@@ -356,7 +356,7 @@ impl CoreErlangGenerator {
         (seed_doc, seeded_state)
     }
 
-    /// BT-1942/BT-3382/BT-3396/ADR 0118 phase 2a (BT-3417): compiles a
+    /// ADR 0118 phase 2a: compiles a
     /// conditional/`ifNotNil:` receiver, returning a [`ThreadedValue`] —
     /// `prelude` is any real `Bind`/`Statement` sequence that must run
     /// BEFORE the `case`'s condition binding (so a mutated binding like
@@ -391,20 +391,20 @@ impl CoreErlangGenerator {
     /// into instead of the six callers' own opaque `Document` return.
     ///
     /// Two receiver shapes thread state through this position:
-    /// - BT-1942/ADR 0118 phase 5b (BT-3422): a class-method self-send (or
-    ///   sub-expression containing one) is now recognized by
+    /// - ADR 0118 phase 5b: a class-method self-send (or
+    ///   sub-expression containing one) is recognized by
     ///   `threaded_expression` itself (`compile_conditional_receiver`
     ///   delegates to it directly), so its `ClassVars` mutation is a real
     ///   `Bind`, not an opaque `Statement`.
-    /// - BT-3382/BT-3396/ADR 0118 phase 4 (BT-3420): an ACTOR-INSTANCE
+    /// - ADR 0118 phase 4: an ACTOR-INSTANCE
     ///   self-send anywhere in the receiver's sequenceable sub-tree — the
-    ///   receiver itself (`(self recordOnce: which) ifTrue:ifFalse:`,
-    ///   BT-3382), nested inside it (as the receiver of an `and:`/`or:`,
-    ///   BT-3396), OR the receiver being itself a nested inline-threaded
-    ///   construct (`((self recordOnce: which) and: [x]) ifTrue:`; BT-3420
-    ///   made `and:`/`or:`/the nil-conditional family/`match:` producers
-    ///   [`CoreErlangGenerator::threaded_expression`] recognizes directly,
-    ///   so this no longer needs its own `and:`/`or:` special case) — is
+    ///   receiver itself (`(self recordOnce: which) ifTrue:ifFalse:`),
+    ///   nested inside it (as the receiver of an `and:`/`or:`),
+    ///   OR the receiver being itself a nested inline-threaded
+    ///   construct (`((self recordOnce: which) and: [x]) ifTrue:`; since
+    ///   `and:`/`or:`/the nil-conditional family/`match:` producers are
+    ///   recognized directly by [`CoreErlangGenerator::threaded_expression`],
+    ///   this no longer needs its own `and:`/`or:` special case) — is
     ///   threaded ahead of the receiver expression by [`Self::thread_ahead`]
     ///   into real `Bind`s (the sequencing rule), so the receiver expression
     ///   itself compiles to a plain reference to the already-threaded
@@ -420,7 +420,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         frame: FrameId,
     ) -> Result<ThreadedValue> {
-        // ADR 0118 phase 5b (BT-3422): `threaded_expression` now recognizes
+        // ADR 0118 phase 5b: `threaded_expression` now recognizes
         // every producer this function used to handle by hand (an Actor
         // self-send via the sequencing rule, AND — since `subexpr_needs_prelude`
         // gained the class-var-producer check this issue adds — a
@@ -433,7 +433,7 @@ impl CoreErlangGenerator {
         self.threaded_expression(receiver, frame)
     }
 
-    /// ADR 0118 phase 4 (BT-3420): wraps a `_tuple` builder's raw
+    /// ADR 0118 phase 4: wraps a `_tuple` builder's raw
     /// `{Value, NewState}` case-expression `Document` — the shape every
     /// `generate_*_with_mutations_tuple` builder below still produces
     /// internally — as a [`ThreadedValue`] per §Decision 2: prelude
@@ -493,7 +493,7 @@ impl CoreErlangGenerator {
 }
 
 impl CoreErlangGenerator {
-    /// ADR 0118 phase 4 (BT-3420): the [`ThreadedValue`] producer for `flag
+    /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
     /// ifTrue: [block]` — the expression-position counterpart of
     /// [`Self::generate_if_true_with_mutations_tuple`], whose raw tuple
     /// `Document` this wraps via
@@ -531,11 +531,11 @@ impl CoreErlangGenerator {
         let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
-        // BT-2355: seed threaded outer-locals so the non-taken (false) branch and
+        // seed threaded outer-locals so the non-taken (false) branch and
         // the post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
-        // ADR 0111 Addendum 5 (BT-3146): `generate_conditional_branch_inline`
+        // ADR 0111 Addendum 5: `generate_conditional_branch_inline`
         // now builds, `verify()`s, and `render()`s this arm's real per-frame
         // `ThreadedIr` internally — the pre-migration
         // `check_branch_frame_linearity` scalar-synthesis scaffolding check
@@ -543,7 +543,7 @@ impl CoreErlangGenerator {
         // are live checks against the real IR now.
         let (branch_doc, _branch_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
-        // BT-3161: explicit wildcard so this boolean `case` is statically
+        // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
 
@@ -568,7 +568,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// ADR 0118 phase 4 (BT-3420): the [`ThreadedValue`] producer for `flag
+    /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
     /// ifFalse: [block]` — see [`Self::generate_if_true_with_mutations`]'s
     /// doc comment for the shape every one of these producers shares.
     pub(in crate::core_erlang) fn generate_if_false_with_mutations(
@@ -599,16 +599,16 @@ impl CoreErlangGenerator {
         let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
-        // BT-2355: seed threaded outer-locals so the non-taken (true) branch and
+        // seed threaded outer-locals so the non-taken (true) branch and
         // the post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
-        // ADR 0111 Addendum 5 (BT-3146): see generate_if_true_with_mutations'
+        // ADR 0111 Addendum 5: see generate_if_true_with_mutations'
         // matching comment — real per-frame verify() now runs inside
         // generate_conditional_branch_inline itself.
         let (branch_doc, _branch_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
-        // BT-3161: explicit wildcard so this boolean `case` is statically
+        // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
 
@@ -632,7 +632,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// ADR 0118 phase 4 (BT-3420): the [`ThreadedValue`] producer for `flag
+    /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
     /// and: [block]` — see [`Self::generate_if_true_with_mutations`]'s doc
     /// comment for the shape every one of these producers shares.
     pub(in crate::core_erlang) fn generate_and_with_mutations(
@@ -646,7 +646,7 @@ impl CoreErlangGenerator {
         Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
     }
 
-    /// BT-3402: generates inline code for `flag and: [block]` in actor
+    /// generates inline code for `flag and: [block]` in actor
     /// context when the block contains field mutations (or the receiver is
     /// itself an actor self-send needing threading — see
     /// `compile_conditional_receiver`).
@@ -672,13 +672,13 @@ impl CoreErlangGenerator {
         let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
-        // BT-2355: seed threaded outer-locals so the non-taken (false) branch and
+        // seed threaded outer-locals so the non-taken (false) branch and
         // the post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
         let (branch_doc, _branch_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
-        // BT-3161: explicit wildcard so this boolean `case` is statically
+        // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
 
@@ -703,7 +703,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// ADR 0118 phase 4 (BT-3420): the [`ThreadedValue`] producer for `flag
+    /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
     /// or: [block]` — see [`Self::generate_if_true_with_mutations`]'s doc
     /// comment for the shape every one of these producers shares.
     pub(in crate::core_erlang) fn generate_or_with_mutations(
@@ -717,7 +717,7 @@ impl CoreErlangGenerator {
         Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
     }
 
-    /// BT-3402: generates inline code for `flag or: [block]` in actor
+    /// generates inline code for `flag or: [block]` in actor
     /// context when the block contains field mutations (or the receiver is
     /// itself an actor self-send needing threading).
     ///
@@ -740,13 +740,13 @@ impl CoreErlangGenerator {
         let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
-        // BT-2355: seed threaded outer-locals so the non-taken (true) branch and
+        // seed threaded outer-locals so the non-taken (true) branch and
         // the post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
         let (branch_doc, _branch_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
-        // BT-3161: explicit wildcard so this boolean `case` is statically
+        // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
 
@@ -770,7 +770,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// ADR 0118 phase 4 (BT-3420): the [`ThreadedValue`] producer for `flag
+    /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
     /// ifTrue: [t_block] ifFalse: [f_block]` — see
     /// [`Self::generate_if_true_with_mutations`]'s doc comment for the
     /// shape every one of these producers shares.
@@ -803,7 +803,7 @@ impl CoreErlangGenerator {
         let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
-        // BT-2355: seed threaded outer-locals so a branch that does not itself
+        // seed threaded outer-locals so a branch that does not itself
         // write a given local (and the post-conditional extraction) still sees the
         // `__local__` key.
         let (seed_doc, base_state) =
@@ -817,7 +817,7 @@ impl CoreErlangGenerator {
         let (false_branch_doc, _false_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(false_block))?;
 
-        // ADR 0111 Addendum 5 (BT-3146): the true/false arms are sibling
+        // ADR 0111 Addendum 5: the true/false arms are sibling
         // with_branch_context frames — each `generate_conditional_branch_inline`
         // call mints its own fresh FrameId (`current_branch_frame`) and
         // `verify()`s its own real IR internally, so either arm
@@ -827,7 +827,7 @@ impl CoreErlangGenerator {
         // NonLinearVersion violation — the check that used to run here
         // (`check_branch_frame_linearity`) is gone; real per-frame
         // verification now happens where the IR is actually built.
-        // BT-3161: explicit wildcard so this boolean `case` is statically
+        // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
 
@@ -853,7 +853,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// ADR 0118 phase 4 (BT-3420): the [`ThreadedValue`] producer for the
+    /// ADR 0118 phase 4: the [`ThreadedValue`] producer for the
     /// nil-testing conditional family — `ifNil:` (`nil_block: Some`,
     /// `not_nil_block: None`), `ifNotNil:` (`nil_block: None`,
     /// `not_nil_block: Some`), and `ifNil:ifNotNil:`/`ifNotNil:ifNil:`
@@ -907,7 +907,7 @@ impl CoreErlangGenerator {
         let recv_val_doc = self.threaded_value_doc(&recv_tv.value);
         let obj_var = self.fresh_temp_var("Obj");
         let outer_state = self.current_state_var();
-        // BT-2355: seed threaded outer-locals so a branch that does not
+        // seed threaded outer-locals so a branch that does not
         // itself write a given local (and the post-conditional extraction)
         // still sees the `__local__` key.
         let mut seed_blocks: Vec<&Block> = Vec::new();
@@ -915,7 +915,7 @@ impl CoreErlangGenerator {
         seed_blocks.extend(not_nil_block);
         let (seed_doc, base_state) = self.seed_conditional_locals(&seed_blocks, &outer_state);
 
-        // ADR 0111 Addendum 5 (BT-3146): see generate_if_true_with_mutations'
+        // ADR 0111 Addendum 5: see generate_if_true_with_mutations'
         // matching comment — real per-frame verify() now runs inside
         // generate_conditional_branch_inline itself.
         let nil_arm = if let Some(block) = nil_block {
@@ -976,7 +976,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// ADR 0118 phase 4 (BT-3420): `true` if `expr` (already paren-unwrapped)
+    /// ADR 0118 phase 4: `true` if `expr` (already paren-unwrapped)
     /// is an inline-threaded control-flow construct — `ifTrue:`/`ifFalse:`/
     /// `ifTrue:ifFalse:`, `and:`/`or:`, the nil-conditional family, or
     /// `match:` — that needs mutation threading. The pure gate behind
@@ -1019,7 +1019,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// ADR 0118 phase 4 (BT-3420, ADR 0118 §Decision 2): the [`ThreadedValue`]
+    /// ADR 0118 phase 4 (ADR 0118 §Decision 2): the [`ThreadedValue`]
     /// producer for every inline-threaded control-flow construct that can
     /// sit anywhere in expression position — `ifTrue:`/`ifFalse:`/
     /// `ifTrue:ifFalse:`, `and:`/`or:`, the nil-conditional family, and
@@ -1125,7 +1125,7 @@ impl CoreErlangGenerator {
     /// appending it to `stmts` and returning the assigned value's temp var
     /// name. Mirrors [`CoreErlangGenerator::generate_field_assignment_open`]'s
     /// normal (non hybrid-full-extract) branch exactly — same helper calls,
-    /// same mint order, same [`FieldWriteSite`] dispatch (BT-3466) — but
+    /// same mint order, same [`FieldWriteSite`] dispatch — but
     /// models the state mutation as a [`ThreadedStmt::Bind`] instead of a
     /// hand-rolled `maps:put` `Document` fragment.
     ///
@@ -1134,10 +1134,10 @@ impl CoreErlangGenerator {
     /// no state-version step at all — it rebinds a direct fun parameter
     /// instead of `maps:put`-ing into `StateAcc` — so it is delegated to
     /// unchanged and modeled as a single opaque `Statement`, exactly as it
-    /// already renders. §Scope (BT-3146): a mutation-carrying conditional
+    /// already renders. §Scope: a mutation-carrying conditional
     /// forces `StateAcc` fallback, mutually exclusive with hybrid mode, so
     /// this branch is unreached from `generate_conditional_branch_inline`;
-    /// BT-3149 reuses this helper from `expressions.rs`'s
+    /// This helper is reused by `expressions.rs`'s
     /// `generate_block_stateful_body`, where the exclusion is less directly
     /// self-evident, so the check is real rather than assumed away.
     pub(in crate::core_erlang) fn lower_field_assignment_bind(
@@ -1170,12 +1170,12 @@ impl CoreErlangGenerator {
             return Ok(val_var);
         }
 
-        // BT-3396/ADR 0118 phase 2a (BT-3417): `self.log := self.log ++
+        // ADR 0118 phase 2a: `self.log := self.log ++
         // #(self getValue)` — thread every order-safe self-send nested in
         // the RHS as real `Bind`s *before* `source_version` is read below,
         // so this assignment's own `Bind` chains from the post-dispatch
         // state and the RHS compile that follows is pure (the exact call
-        // site BT-3382's reverted version-bump-on-compile prototype
+        // site an earlier, reverted version-bump-on-compile prototype
         // desynced).
         let site = FieldWriteSite::for_context(self.context);
         let thread_scope = self.thread_ahead(value, stmts, frame)?;
@@ -1198,7 +1198,7 @@ impl CoreErlangGenerator {
     /// conditional-branch statement to its real `Bind` sequence, appending
     /// it to `stmts` and returning the assigned value's temp var name.
     /// Mirrors `generate_local_var_assignment_in_loop`'s three sub-branches
-    /// (BT-153/BT-912/BT-1397) exactly — same helper calls, same mint
+    /// exactly — same helper calls, same mint
     /// order — but models the mutation as a [`ThreadedStmt::Bind`] instead
     /// of a hand-rolled `maps:put` `Document` fragment. Unlike the
     /// top-level `BodyExprKind` shapes `gen_server/methods.rs` lowers
@@ -1208,7 +1208,7 @@ impl CoreErlangGenerator {
     /// its own `is_tier2_value_call`/open-scope checks decide the actual
     /// shape at runtime, not `classify_body_expr`'s static kind.
     ///
-    /// BT-3149 also calls this directly from `expressions.rs`'s
+    /// This is also called directly from `expressions.rs`'s
     /// `generate_block_stateful_body` (the Tier 2 stateful-block-body local
     /// var assignment case) — same shape, same mint order, one fewer
     /// hand-rolled duplicate.
@@ -1228,7 +1228,7 @@ impl CoreErlangGenerator {
         };
 
         let val_var = self.fresh_temp_var("Val");
-        // BT-790: In REPL mode, use the plain variable name as the key (no
+        // In REPL mode, use the plain variable name as the key (no
         // __local__ prefix) — see `generate_local_var_assignment_in_loop`.
         let state_key: String = if self.is_repl_mode() {
             id.name.to_string()
@@ -1236,7 +1236,7 @@ impl CoreErlangGenerator {
             Self::local_state_key(&id.name)
         };
 
-        // C3 — BT-912: Tier 2 block-call RHS returns {Result, NewStateAcc};
+        // C3 — Tier 2 block-call RHS returns {Result, NewStateAcc};
         // the sanctioned Gensym two-hop (ADR 0111 Addendum 5's "opaque
         // nested-construct state extraction feeding a maps:put" idiom).
         if self.is_tier2_value_call(value) {
@@ -1291,7 +1291,7 @@ impl CoreErlangGenerator {
             return Ok(val_var);
         }
 
-        // C3b — BT-3425: RHS is itself control-flow-with-mutations (a
+        // C3b — RHS is itself control-flow-with-mutations (a
         // mutating list-op like `collect:`/`do:`/`select:` whose block —
         // or whose own receiver — needs state threading, or a nested
         // `ifTrue:ifFalse:`/`match:`/`on:do:` with field mutations).
@@ -1356,14 +1356,14 @@ impl CoreErlangGenerator {
             return Ok(val_var);
         }
 
-        // BT-3396/ADR 0118 phase 2a (BT-3417): as in `lower_field_assignment_bind`
+        // ADR 0118 phase 2a: as in `lower_field_assignment_bind`
         // — thread every order-safe self-send nested in the RHS (or the RHS
         // itself, `v := self bump`) as real `Bind`s before the RHS compiles
         // and before either `source_version` below is read. ADR 0118 phase
-        // 5b (BT-3422): `thread_ahead`'s `subexpr_needs_prelude` now
+        // 5b: `thread_ahead`'s `subexpr_needs_prelude` now
         // recognizes a class-var producer too (a same-class self-send or
-        // class-var assignment), so the former open-scope branch here (C4,
-        // BT-1397 — already dead in practice per ADR 0111 Addendum 5, no
+        // class-var assignment), so the former open-scope branch here (C4 —
+        // already dead in practice per ADR 0111 Addendum 5, no
         // live program reached it) is now structurally unreachable: any
         // such producer is threaded ahead of this point, and the plain
         // compile below reads it back via `precompiled_subexprs`
@@ -1411,7 +1411,7 @@ impl CoreErlangGenerator {
     /// Returns `(body_doc, final_state_version)`. The generated code ends with
     /// `{<result>, <final_state>}`.
     ///
-    /// ADR 0111 Addendum 5 (BT-3146): this arm's mutation sequence is built
+    /// ADR 0111 Addendum 5: this arm's mutation sequence is built
     /// as real [`ThreadedStmt`]s (per the addendum's C1–C13 per-shape
     /// decomposition table), wrapped in one [`ThreadedStmt::Threaded`] node
     /// (`mode: StateAcc(None)`, this arm's own [`FrameId`] — Rule 3), then
@@ -1448,7 +1448,7 @@ impl CoreErlangGenerator {
             ));
         }
 
-        // Classify every expression upfront using the shared classifier (BT-1447).
+        // Classify every expression upfront using the shared classifier.
         let plan: Vec<BodyExprKind> = body.iter().map(|e| self.classify_body_expr(e)).collect();
 
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
@@ -1458,7 +1458,7 @@ impl CoreErlangGenerator {
             let is_last = i == body.len() - 1;
             let span = expr.span();
 
-            // C0b — BT-3374: `^self otherMethod` (early return whose value is
+            // C0b — `^self otherMethod` (early return whose value is
             // a dispatching actor self-send, e.g. `ifTrue: [^self
             // configureVictim]`). `classify_body_expr` always classifies the
             // outer `Return` as `EarlyReturn` (never `DispatchingSelfSend` —
@@ -1486,11 +1486,11 @@ impl CoreErlangGenerator {
             // `generate_self_dispatch_open`-vs-closed distinction
             // `lower_body_exprs_with_reply`'s own `DispatchingSelfSend` arm
             // already applies for the top-level (unnested) `^self foo` shape
-            // (BT-1432) — just expressed as this loop's own `Bind`+`Statement`
+            // — just expressed as this loop's own `Bind`+`Statement`
             // pair rather than that flat body lowering's open let-chain, since
             // this arm's `ThreadedIr` wrapper needs the version bump to be a
             // real, verifiable production, not text buried in an opaque `Doc`.
-            // BT-3374: excludes class methods (`in_class_method()`) for the
+            // excludes class methods (`in_class_method()`) for the
             // same reason `mod.rs`'s `Expression::Return` handler does —
             // `generate_self_dispatch_call_doc` unconditionally threads
             // `current_state_var()` (Actor instance state), never
@@ -1506,7 +1506,7 @@ impl CoreErlangGenerator {
                             BodyExprKind::DispatchingSelfSend
                         )
                     {
-                        // ADR 0118 phase 2a (BT-3417): `threaded_expression`'s
+                        // ADR 0118 phase 2a: `threaded_expression`'s
                         // producer path (`is_prelude_producer`, matching this
                         // arm's own `is_dispatching_actor_self_send`
                         // classification exactly, per C12b's identical swap
@@ -1555,7 +1555,7 @@ impl CoreErlangGenerator {
                     let val_var =
                         self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
                     if is_last {
-                        // BT-884: val_var holds the assigned value variable
+                        // val_var holds the assigned value variable
                         last_result = Some(ValueRef::Var(val_var));
                     }
                 }
@@ -1580,7 +1580,7 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
-                // C6 — BT-1477: self.field := <control-flow-with-mutations>.
+                // C6 — self.field := <control-flow-with-mutations>.
                 // The sanctioned Gensym two-hop.
                 BodyExprKind::FieldAssignmentControlFlow => {
                     if let Expression::Assignment { target, value, .. } = expr {
@@ -1645,7 +1645,7 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
-                // C7 — BT-1479: self fieldAt: name put: value. Dynamic field
+                // C7 — self fieldAt: name put: value. Dynamic field
                 // name ⇒ §Dynamic-field-puts option 1 (Direct, not Put).
                 BodyExprKind::SelfFieldAtPut => {
                     if let Expression::MessageSend { arguments, .. } = expr {
@@ -1691,7 +1691,7 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
-                // C8 — BT-1479: self fieldAt: name put: <control-flow-with-mutations>.
+                // C8 — self fieldAt: name put: <control-flow-with-mutations>.
                 BodyExprKind::SelfFieldAtPutControlFlow => {
                     if let Expression::MessageSend { arguments, .. } = expr {
                         let name_var = self.fresh_temp_var("Name");
@@ -1759,7 +1759,7 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
-                // C9 — BT-1479: {a, b} := <control-flow-with-mutations>. No
+                // C9 — {a, b} := <control-flow-with-mutations>. No
                 // Gensym hop — element(2, tuple) binds State(v+1) directly.
                 BodyExprKind::DestructureAssignmentControlFlow => {
                     if let Expression::DestructureAssignment { pattern, value, .. } = expr {
@@ -1867,7 +1867,7 @@ impl CoreErlangGenerator {
                         self.push_control_flow_threaded_var_rereads(expr, span, &mut stmts);
                     }
                 }
-                // C11 — BT-2797: a Tier 2 `value(:...)` call on a stored
+                // C11 — a Tier 2 `value(:...)` call on a stored
                 // block. Non-last carries the newline quirk
                 // (`")\n in let "`) confirmed against real compiled output.
                 BodyExprKind::Tier2ValueCall => {
@@ -1936,7 +1936,7 @@ impl CoreErlangGenerator {
                             shadow_write: false,
                             span,
                         });
-                        // BT-1213: rebind captured local-var mutations from
+                        // rebind captured local-var mutations from
                         // NewState so a later read in this branch sees the
                         // mutated value.
                         if let Some(mutations) = self.get_inline_block_captured_mutations(expr) {
@@ -1962,7 +1962,7 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
-                // C12b — BT-3178: a same-class self-send dispatched through
+                // C12b — a same-class self-send dispatched through
                 // `safe_dispatch`/a sealed call, which itself may mutate
                 // `self`'s state — returns `{Result, NewState}`. Unlike the
                 // C12 catch-all below (whose `expression_doc` render+`let`
@@ -1974,7 +1974,7 @@ impl CoreErlangGenerator {
                 // opposed to a direct `self.field := value`) is silently
                 // dropped once the branch closes.
                 BodyExprKind::DispatchingSelfSend => {
-                    // ADR 0118 phase 2a (BT-3417): `self log: (self
+                    // ADR 0118 phase 2a: `self log: (self
                     // nextId)` — `threaded_expression`'s producer path
                     // (`is_prelude_producer`, matching this arm's own
                     // `is_dispatching_actor_self_send` classification
@@ -2003,17 +2003,17 @@ impl CoreErlangGenerator {
                 // C12 — catch-all pure statements (EarlyReturn, SuperSend,
                 // ErrorSend, Tier2SelfSend, Pure).
                 //
-                // ADR 0118 phase 2a/2b (BT-3417/BT-3418): before compiling,
+                // ADR 0118 phase 2a/2b: before compiling,
                 // thread ahead (as real `Bind`s pushed into `stmts`) every
                 // state-effecting sub-expression nested anywhere inside
                 // this statement, via `thread_ahead` — a producer or a
-                // covered send gets the sequencing rule (BT-3406's
-                // "decide once, sequence all or none" made universal);
+                // covered send gets the sequencing rule ("decide once,
+                // sequence all or none", now made universal);
                 // every parent kind the rule covers (message sends, cast
                 // sends, literal
                 // containers, string interpolation, `^`/`:=`, a self-
                 // cascade) is threaded in full — there is no longer an
-                // order-unsafe subset that only gets a warning (the BT-3399
+                // order-unsafe subset that only gets a warning (the
                 // gap the deleted planner used to leave). When nothing
                 // needed threading (the overwhelmingly common case), this
                 // is a no-op and `expression_doc` below behaves exactly as
@@ -2062,7 +2062,7 @@ impl CoreErlangGenerator {
         Ok(self.verify_and_render_branch_arm(stmts, frame, final_version, block.span))
     }
 
-    /// ADR 0111 Addendum 5 (BT-1213/BT-2355 rebind idiom, shared by C6/C8/
+    /// ADR 0111 Addendum 5 (rebind idiom, shared by C6/C8/
     /// C9/C10): rebinds each of a nested control-flow construct's threaded
     /// `__local__` captured vars from the just-produced state, appending
     /// one `Statement` (or none, if there are no threaded vars) to `stmts`.
@@ -2096,7 +2096,7 @@ impl CoreErlangGenerator {
     /// comment — so an un-wrapped `verify(&stmts)` would falsely reject
     /// every reference to this arm's own frame).
     ///
-    /// BT-3149 also calls this directly from `expressions.rs`'s
+    /// This is also called directly from `expressions.rs`'s
     /// `generate_block_stateful` — a single-arm `with_branch_context` use
     /// (the Tier 2 stateful-block-body threading), same wrap/verify/render
     /// shape as a conditional branch arm.
@@ -2149,7 +2149,7 @@ mod tests {
     use super::*;
     use crate::core_erlang::tests::codegen;
 
-    // ── ADR 0111 Addendum 5 / BT-3146: NonLinearVersion / UnboundVersion ──
+    // ── ADR 0111 Addendum 5: NonLinearVersion / UnboundVersion ──
     // are now LIVE checks for branch-arm IR (previously scaffolding-only —
     // `check_branch_frame_linearity`'s scalar synthesis could never
     // construct two arms colliding on the same frame, by construction).
@@ -2253,7 +2253,7 @@ mod tests {
 
     #[test]
     fn test_bt2797_bare_tier2_value_call_in_conditional_branch_unpacks_tuple() {
-        // BT-2797 (PR #2899 review fix): a bare (non-assigned) `self.field
+        // PR #2899 review fix: a bare (non-assigned) `self.field
         // value:` statement inside an `ifTrue:` branch that *also* contains an
         // explicit field assignment (so `block_analysis` detects the branch
         // needs state threading and routes it through
@@ -2314,7 +2314,7 @@ mod tests {
 
     #[test]
     fn test_nested_list_op_in_branch_threads_outer_local() {
-        // BT-2356 case (B): a nested list op (`do:`) inside an `ifTrue:` branch
+        // Case (B): a nested list op (`do:`) inside an `ifTrue:` branch
         // mutates an outer local. The conditional must be recognised as
         // state-threading (via the nested cross-scope mutation), the local must be
         // seeded, packed by the nested op, and extracted after the conditional.
@@ -2329,9 +2329,9 @@ mod tests {
         let code = codegen(src);
         // The conditional must compile to an inline case, NOT a runtime dispatch.
         // A runtime `send(_, 'ifTrue:', [Fun])` returns `nil` on the false branch, so
-        // the sequencer's `element(2, _)` unpack crashes with badarg (BT-2356 regression).
+        // the sequencer's `element(2, _)` unpack crashes with badarg (regression).
         //
-        // ADR 0087 Phase 2 (BT-2298): `register_class/0` now bakes a methodXref
+        // ADR 0087 Phase 2: `register_class/0` now bakes a methodXref
         // index that lists `ifTrue:` as a sent selector (metadata, not dispatch).
         // Exclude that line so the assertion still checks only for a real runtime
         // dispatch of the selector.
@@ -2396,7 +2396,7 @@ mod tests {
 
     #[test]
     fn test_bt2355_write_only_conditional_seeds_and_extracts_local() {
-        // BT-2355: `flag ifTrue: [m := 9]` then read `m` (non-last). The outer
+        // `flag ifTrue: [m := 9]` then read `m` (non-last). The outer
         // local `m` must thread back even though the block only writes it.
         let src = "Actor subclass: Cps\n\n  m: flag =>\n    val := 0\n    flag ifTrue: [val := 9]\n    val\n";
         let code = codegen(src);
@@ -2414,7 +2414,7 @@ mod tests {
 
     #[test]
     fn test_bt2355_read_write_conditional_extracts_local() {
-        // BT-2355: `flag ifTrue: [sum := sum + 7]` then read `sum` (non-last).
+        // `flag ifTrue: [sum := sum + 7]` then read `sum` (non-last).
         let src = "Actor subclass: Cps\n\n  m: flag =>\n    sum := 0\n    flag ifTrue: [sum := sum + 7]\n    sum\n";
         let code = codegen(src);
         assert!(
@@ -2425,7 +2425,7 @@ mod tests {
 
     #[test]
     fn test_bt2355_if_true_if_false_seeds_local_for_both_branches() {
-        // BT-2355: a local written in only one branch must still be extractable, so
+        // a local written in only one branch must still be extractable, so
         // the seed key must precede the case (be present in both branches' base).
         let src = "Actor subclass: Cps\n\n  m: flag =>\n    x := 1\n    flag ifTrue: [x := x + 1] ifFalse: [x := x + 100]\n    x\n";
         let code = codegen(src);
@@ -2443,7 +2443,7 @@ mod tests {
 
     #[test]
     fn test_local_var_in_if_true_block_reads_back_correctly() {
-        // BT-1225: Local var assigned inside ifTrue: block must be readable in subsequent
+        // Local var assigned inside ifTrue: block must be readable in subsequent
         // expressions of the same block without a {badkey,VarName} runtime crash.
         // The write uses '__local__y' key; reads must resolve to the temp var, not 'y'.
         let src = "Actor subclass: BrokenActor\n  state: x = 5\n\n  myMethod: cond =>\n    cond ifTrue: [\n      y := self.x + 1.\n      self.x := y\n    ].\n    self.x\n";
@@ -2463,7 +2463,7 @@ mod tests {
 
     #[test]
     fn test_local_var_in_if_false_block_reads_back_correctly() {
-        // BT-1225: Same fix applies to ifFalse: blocks.
+        // Same fix applies to ifFalse: blocks.
         let src = "Actor subclass: TestActor\n  state: x = 10\n\n  myMethod: cond =>\n    cond ifFalse: [\n      y := self.x - 1.\n      self.x := y\n    ].\n    self.x\n";
         let code = codegen(src);
         assert!(
@@ -2478,7 +2478,7 @@ mod tests {
 
     #[test]
     fn test_value_type_if_true_local_mutation_generates_inline_case() {
-        // BT-1392: Value type ifTrue: with captured local mutation should
+        // Value type ifTrue: with captured local mutation should
         // generate an inline case expression (not runtime dispatch).
         let src = "Object subclass: Foo\n\n  test: flag =>\n    x := 1\n    flag ifTrue: [x := 2]\n    x\n";
         let code = codegen(src);
@@ -2494,7 +2494,7 @@ mod tests {
 
     #[test]
     fn test_value_type_if_false_local_mutation_generates_inline_case() {
-        // BT-1392: Value type ifFalse: with captured local mutation
+        // Value type ifFalse: with captured local mutation
         let src = "Object subclass: Foo\n\n  test: flag =>\n    x := 1\n    flag ifFalse: [x := 2]\n    x\n";
         let code = codegen(src);
         assert!(
@@ -2505,7 +2505,7 @@ mod tests {
 
     #[test]
     fn test_value_type_if_true_if_false_local_mutation() {
-        // BT-1392: Value type ifTrue:ifFalse: with captured local mutation
+        // Value type ifTrue:ifFalse: with captured local mutation
         let src = "Object subclass: Foo\n\n  test: flag =>\n    x := 1\n    flag ifTrue: [x := 2] ifFalse: [x := 3]\n    x\n";
         let code = codegen(src);
         assert!(
@@ -2516,7 +2516,7 @@ mod tests {
 
     #[test]
     fn test_collect_wrapping_if_true_with_field_mutation() {
-        // BT-1477: collect: block containing ifTrue: with self.field := mutation.
+        // collect: block containing ifTrue: with self.field := mutation.
         // The field mutation inside the conditional must be threaded through the
         // collect: loop accumulator, not silently lost.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  m: list =>\n    list collect: [:each | each > 0 ifTrue: [self.n := self.n + 1]. each * 2]\n    self.n\n";
@@ -2530,7 +2530,7 @@ mod tests {
 
     #[test]
     fn test_if_true_wrapping_do_with_field_mutation() {
-        // BT-1477: ifTrue: wrapping do: block with self.field := mutation.
+        // ifTrue: wrapping do: block with self.field := mutation.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  m: flag list: list =>\n    flag ifTrue: [list do: [:each | self.n := self.n + each]]\n    self.n\n";
         let code = codegen(src);
         assert!(
@@ -2545,7 +2545,7 @@ mod tests {
 
     #[test]
     fn test_do_wrapping_if_true_with_field_mutation() {
-        // BT-1477: do: block containing ifTrue: with self.field := mutation.
+        // do: block containing ifTrue: with self.field := mutation.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  m: list =>\n    list do: [:each | each > 0 ifTrue: [self.n := self.n + each]]\n    self.n\n";
         let code = codegen(src);
         assert!(
@@ -2556,7 +2556,7 @@ mod tests {
 
     #[test]
     fn test_triple_nested_if_true_do_if_true_with_field_mutation() {
-        // BT-1477: ifTrue: wrapping do: wrapping ifTrue: with self.field := mutation.
+        // ifTrue: wrapping do: wrapping ifTrue: with self.field := mutation.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  m: flag list: list =>\n    flag ifTrue: [list do: [:each | each > 0 ifTrue: [self.n := self.n + each]]]\n    self.n\n";
         let code = codegen(src);
         assert!(
@@ -2571,7 +2571,7 @@ mod tests {
 
     #[test]
     fn test_field_assignment_control_flow_rhs_unpacks_tuple() {
-        // BT-1479: self.field := <control-flow-with-mutations> must unpack {Value, State}
+        // self.field := <control-flow-with-mutations> must unpack {Value, State}
         let src = "Actor subclass: A\n  state: x = 0\n  state: y = 0\n\n  m: flag =>\n    self.x := flag ifTrue: [self.y := 1. 42] ifFalse: [0]\n    self.x\n";
         let code = codegen(src);
         assert!(
@@ -2590,7 +2590,7 @@ mod tests {
 
     #[test]
     fn test_self_field_at_put_in_conditional_branch() {
-        // BT-1479: SelfFieldAtPut inside conditional branch must not fall through to wildcard
+        // SelfFieldAtPut inside conditional branch must not fall through to wildcard
         let src = "Actor subclass: A\n  state: x = 0\n\n  m: flag =>\n    flag ifTrue: [self fieldAt: #x put: 42]\n    self.x\n";
         let code = codegen(src);
         assert!(
@@ -2601,7 +2601,7 @@ mod tests {
 
     #[test]
     fn test_self_field_at_put_in_method_body() {
-        // BT-1479: self fieldAt: name put: value in method body (non-conditional context)
+        // self fieldAt: name put: value in method body (non-conditional context)
         let src = "Actor subclass: A\n  state: x = 0\n\n  m =>\n    self fieldAt: #x put: 42\n    self.x\n";
         let code = codegen(src);
         assert!(

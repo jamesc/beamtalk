@@ -6,7 +6,7 @@
 //!
 //! **DDD Context:** Language Service
 //!
-//! Backs `SystemNavigation announcementsSentBy:` (BT-2475) — the static dual of
+//! Backs `SystemNavigation announcementsSentBy:` — the static dual of
 //! the runtime-ETS `AnnouncementNavigation` (ADR 0093 §7). Where
 //! `AnnouncementNavigation` answers "who *listens* for which events" from the
 //! live subscription table, this query answers "which `Announcement` subclasses

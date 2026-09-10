@@ -4,12 +4,12 @@
 //! Process-wide registry loading.
 //!
 //! Caches the project's `[diagnostics]` severity-override table (ADR
-//! 0100 Rule 3) and Erlang FFI native type registry (ADR 0075, BT-2891)
+//! 0100 Rule 3) and Erlang FFI native type registry (ADR 0075)
 //! once per compiler-port process, loaded lazily from the working
 //! directory the process was spawned with.
 
 /// Process-wide cache for the package's `beamtalk.toml` `[diagnostics]`
-/// severity-override table (ADR 0100 Rule 3, BT-2839).
+/// severity-override table (ADR 0100 Rule 3).
 ///
 /// The compiler port is a long-lived process spawned once per BEAM node
 /// session (interactive REPL, `beamtalk run`, or a connected/LiveView
@@ -22,7 +22,7 @@
 /// on every `compile_expression`/`compile`/`diagnostics` request would repeat
 /// disk I/O on a hot path (`diagnostics` in particular fires on a ~150ms
 /// idle-debounce as the user types); caching once per process — mirroring the
-/// LSP's "load once at startup" (`Backend::load_diagnostics_table`, BT-2800)
+/// LSP's "load once at startup" (`Backend::load_diagnostics_table`)
 /// — avoids that while keeping the same lenient, no-manifest-is-a-no-op
 /// semantics.
 static DIAGNOSTICS_OVERRIDES: std::sync::OnceLock<beamtalk_core::compilation::DiagnosticsTable> =
@@ -62,8 +62,8 @@ pub(crate) fn load_diagnostics_overrides_from(
     table
 }
 
-/// Process-wide cache of the project's Erlang FFI type signatures (ADR 0075,
-/// BT-2891), loaded once from `<root>/_build/type_cache/` — the same on-disk
+/// Process-wide cache of the project's Erlang FFI type signatures (ADR 0075),
+/// loaded once from `<root>/_build/type_cache/` — the same on-disk
 /// cache `beamtalk build`/`beamtalk lint` write and read (see
 /// `beamtalk_core::ffi_type_specs`).
 ///
@@ -90,13 +90,13 @@ pub(crate) fn native_type_registry()
 }
 
 /// Load the Erlang FFI type registry from `<root>/_build/type_cache/`
-/// (ADR 0075, BT-2891).
+/// (ADR 0075).
 ///
 /// Lenient by design, mirroring [`load_diagnostics_overrides_from`]: a root
 /// with no `_build/type_cache/` (project never built) yields an empty
 /// registry rather than an error — `resolve_expression_type` already treats
 /// `None`/empty identically (falls back to `Dynamic`), so this degrades to
-/// exactly the pre-BT-2891 registry-blind behaviour. Pure function of `root`
+/// exactly the registry-blind behaviour with no cache present. Pure function of `root`
 /// so it is directly unit-testable without touching the process's real
 /// working directory.
 pub(crate) fn load_native_type_registry_from(

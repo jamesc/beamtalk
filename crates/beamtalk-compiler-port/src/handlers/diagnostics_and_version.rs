@@ -23,22 +23,22 @@ use crate::respond::{diagnostics_ok_response, error_response};
 ///   * `"method"` — the buffer is a BARE method body (the System Browser
 ///     method-editor tabs, e.g. `decrement => self.value := self.value - 1`).
 ///     A bare body is not a valid top-level construct, so `parse` reports a
-///     false `expected expression, found =>` at the method-body separator
-///     (BT-2569). We parse it with `parse_method` (the same standalone entry
+///     false `expected expression, found =>` at the method-body separator.
+///     We parse it with `parse_method` (the same standalone entry
 ///     `compile_method` uses) and return PARSE-ONLY diagnostics: a method
 ///     analysed outside its class has no field/`self`/type context, so running
 ///     semantic analysis here would emit false positives. Those checks run on
 ///     Compile (`compile_method`, which has class context); live squiggles
 ///     cover syntax.
 ///
-/// The optional `class_hierarchy` field (ADR 0105 Phase 1, BT-2778) carries
+/// The optional `class_hierarchy` field (ADR 0105 Phase 1) carries
 /// pre-loaded class metadata — the same channel `compile_expression` /
 /// `compile_method` already accept — so a re-check can inject a reloaded
 /// class's *new* signature and see the resulting diagnostics located and
 /// severity-tagged (`"expression"` mode only; `"method"` mode stays
 /// class-context-free per the paragraph above).
 ///
-/// The optional `protocol_registry` field (BT-3473) rides the same opt-in as
+/// The optional `protocol_registry` field rides the same opt-in as
 /// `class_hierarchy` (`beamtalk_compiler_server` threads both together, gated
 /// on the same `class_hierarchy => true` request flag) and carries the live
 /// image's ambient protocol cache. Without it, a protocol registered in
@@ -48,7 +48,7 @@ use crate::respond::{diagnostics_ok_response, error_response};
 /// defeats `is_type_compatible`'s nominal-mismatch escape hatch and makes
 /// every selector on a protocol-typed receiver look unresolved. Supplying
 /// the real protocol names (and their required selectors) lets the existing
-/// BT-2088/BT-3472 filter in `analyse_full` drop the synthetic class entry
+/// filter in `analyse_full` drop the synthetic class entry
 /// the same way it already does for the LSP's `ProjectIndex` path.
 pub(crate) fn handle_diagnostics(request: &Map) -> Term {
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
@@ -64,7 +64,7 @@ pub(crate) fn handle_diagnostics(request: &Map) -> Term {
         let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
         let pre_class_hierarchy = extract_class_hierarchy(request);
         let pre_loaded_protocols = extract_protocol_registry(request);
-        // BT-2899 (ADR 0108): `known_type_aliases` (the same channel
+        // ADR 0108: `known_type_aliases` (the same channel
         // `compile_expression`/`compile_method` accept) so a re-check
         // round trip (`beamtalk_recheck.erl`) resolves `::` annotations
         // against the *current* session alias table — without this, a

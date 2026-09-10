@@ -11,7 +11,7 @@
 //!
 //! Per ADR 0013, class definitions use `(class)` kind suffix in their display name.
 //!
-//! # Method categories (BT-2601)
+//! # Method categories
 //!
 //! When a class's source contains at least one `// === Name ===` section
 //! divider, its methods are nested one level deeper under a
@@ -62,8 +62,8 @@ pub fn compute_document_symbols(module: &Module, source: &str) -> Vec<DocumentSy
                 // The container's range is the divider banner line merged
                 // with every method in the category — computed by
                 // `MethodCategory::span` so it stays identical to the span
-                // `folding_range_provider` emits for the same category
-                // (BT-3237). Computed before the match below since matching
+                // `folding_range_provider` emits for the same category.
+                // Computed before the match below since matching
                 // `category.name` by value partially moves `category`,
                 // which would leave `category.span()` unable to borrow the
                 // whole struct.
@@ -86,7 +86,7 @@ pub fn compute_document_symbols(module: &Module, source: &str) -> Vec<DocumentSy
                 }
             }
         } else {
-            // No dividers: preserve the pre-BT-2601 flat shape exactly
+            // No dividers: preserve the flat shape exactly
             // (instance methods, then class-side methods).
             for method in &class.methods {
                 children.push(DocumentSymbol {
@@ -127,7 +127,7 @@ pub fn compute_document_symbols(module: &Module, source: &str) -> Vec<DocumentSy
 }
 
 /// Converts one [`CategorizedMethod`] to a leaf [`DocumentSymbol`] (`Method`
-/// or `ClassMethod`, matching the pre-BT-2601 flat-shape mapping).
+/// or `ClassMethod`, matching the flat-shape mapping).
 ///
 /// `name_span` stays `None` here (same latent gap as before: a class-side
 /// method's `selectionRange` falls back to `method.span`'s start, i.e. the

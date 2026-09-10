@@ -7,8 +7,6 @@
 //! structurally rather than via hand-escaped `format!()` strings, eliminating
 //! a class of bugs around exit-code collisions, swallowed reasons, and
 //! mis-escaped special characters.
-//!
-//! See BT-2059 for context.
 
 use crate::beam_compiler::escape_erlang_string;
 

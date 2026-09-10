@@ -5,8 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! BT-3465: split out of `expressions.rs`, no logic changes. These are the
-//! shared helpers used by every body-generation loop (`gen_server` methods,
+//! These are the shared helpers used by every body-generation loop (`gen_server` methods,
 //! value-type methods, block bodies, loop/conditional/exception bodies,
 //! and the REPL via `beamtalk-repl`) to lower a `pattern := value`
 //! destructuring assignment to flat `let` bindings.
@@ -136,8 +135,8 @@ impl CoreErlangGenerator {
     /// Returns [`CodeGenError`] if the pattern uses an unsupported shape or
     /// element extraction otherwise fails.
     #[allow(clippy::too_many_lines, clippy::type_complexity)]
-    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` calls this while
-    // destructuring a REPL binding pattern against an already-evaluated RHS.
+    // Public: `beamtalk-repl` calls this while destructuring a REPL binding
+    // pattern against an already-evaluated RHS.
     pub fn generate_pattern_extractions_from_var(
         &mut self,
         pattern: &Pattern,

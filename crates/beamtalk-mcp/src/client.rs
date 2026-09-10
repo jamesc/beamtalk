@@ -49,7 +49,7 @@ fn test_io_timeout() -> Duration {
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Maximum time to poll for a changed port file and retry connecting during
-/// workspace restart (BT-1416). Covers the race where the port file is updated
+/// workspace restart. Covers the race where the port file is updated
 /// but the new listener isn't accepting connections yet.
 const PORT_REDISCOVERY_WINDOW: Duration = Duration::from_secs(5);
 
@@ -66,13 +66,13 @@ const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 pub struct ReplClient {
     inner: Arc<Mutex<ReplClientInner>>,
     /// Current REPL port. Updated atomically when the workspace restarts on a
-    /// new port (BT-1416).
+    /// new port.
     port: AtomicU16,
     /// Current auth cookie. Updated when the workspace restarts with a new
-    /// cookie (BT-1416).
+    /// cookie.
     cookie: std::sync::Mutex<String>,
     session: tokio::sync::Mutex<Option<String>>,
-    /// Workspace ID for re-reading the port file on reconnect (BT-1416).
+    /// Workspace ID for re-reading the port file on reconnect.
     /// `None` when connected via explicit `--port` (no workspace discovery).
     workspace_id: Option<String>,
     /// Abort handle for the background keepalive task. Uses `std::sync::Mutex`
@@ -110,7 +110,7 @@ impl ReplClient {
     /// This variant supports optional session resume by including a `resume` field
     /// in the auth handshake which the server understands.
     ///
-    /// `workspace_id` enables port re-discovery on reconnect (BT-1416): if the
+    /// `workspace_id` enables port re-discovery on reconnect: if the
     /// cached port fails, the client re-reads the workspace port file and retries
     /// with the new port.
     pub async fn connect_with_resume(
@@ -162,7 +162,7 @@ impl ReplClient {
     /// holds the connection open), the socket is dropped without blocking.
     ///
     /// Call this before the tokio runtime shuts down to prevent the runtime
-    /// teardown from hanging on the close handshake (BT-1363).
+    /// teardown from hanging on the close handshake.
     // Used in integration tests (#[cfg(test)]) — suppress dead_code lint for binary crate.
     #[allow(dead_code)]
     pub async fn close(&self) {
@@ -176,7 +176,7 @@ impl ReplClient {
     /// using the last-known session id if available.
     ///
     /// If the cached port fails and a `workspace_id` is available, re-reads the
-    /// workspace port file and retries with the new port (BT-1416). This handles
+    /// workspace port file and retries with the new port. This handles
     /// `beamtalk run .` restart cycles where the workspace comes back on a
     /// different port.
     ///
@@ -198,7 +198,7 @@ impl ReplClient {
         let (mut ws, connect_port) = match connect_result {
             Ok(Ok((ws, _response))) => (ws, cached_port),
             Ok(Err(cached_err)) => {
-                // Cached port failed — try re-reading the port file (BT-1416).
+                // Cached port failed — try re-reading the port file.
                 self.reconnect_with_new_port(&cached_err.to_string())
                     .await?
             }
@@ -256,7 +256,7 @@ impl ReplClient {
         Ok(resumed)
     }
 
-    /// Re-read the workspace port file and connect to the new port (BT-1416).
+    /// Re-read the workspace port file and connect to the new port.
     ///
     /// Called when the cached port fails during reconnect. If no `workspace_id`
     /// is available or the port file can't be read, falls back to the original
@@ -473,7 +473,7 @@ impl ReplClient {
         self.send_once(&RequestBuilder::eval(code)).await
     }
 
-    /// Evaluate an expression with optional trace mode (BT-1238).
+    /// Evaluate an expression with optional trace mode.
     ///
     /// Unified entry point used by the MCP evaluate tool. When `trace` is false,
     /// behaves identically to the plain `eval` operation. When true, sets
@@ -551,7 +551,7 @@ impl ReplClient {
         self.send(&RequestBuilder::show_codegen(code)).await
     }
 
-    /// Send a show-codegen operation for a loaded class (BT-1236).
+    /// Send a show-codegen operation for a loaded class.
     pub async fn show_codegen_class(
         &self,
         class: &str,
@@ -810,7 +810,7 @@ impl ReplClient {
         unreachable!("send_once loop always returns on attempt 1")
     }
 
-    /// Send a list-classes operation (BT-1404).
+    /// Send a list-classes operation.
     ///
     /// Returns all available classes with one-line descriptions. The optional
     /// `filter` narrows results: `"stdlib"` for built-in classes, `"user"` for
@@ -819,11 +819,11 @@ impl ReplClient {
         self.send(&RequestBuilder::list_classes(filter)).await
     }
 
-    /// Send a `nav-symbols` request (BT-2244) — bulk class+method outline
+    /// Send a `nav-symbols` request — bulk class+method outline
     /// from the live class registry, including each class's `source_file`
     /// when it has one (`None` for a purely runtime-loaded class).
     ///
-    /// Used by the `docs` tool (BT-3239) to locate the on-disk `.bt` file
+    /// Used by the `docs` tool to locate the on-disk `.bt` file
     /// backing a class before reading it locally for divider-based method
     /// categorization — the same op the LSP's `textDocument/documentSymbol`
     /// runtime-delegate path already sends (`crates/beamtalk-lsp/src/runtime.rs`).
@@ -896,7 +896,7 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     // Read auth-required. Frame recognition goes through
-    // `beamtalk_repl_protocol::handshake` (BT-3330) rather than re-matching
+    // `beamtalk_repl_protocol::handshake` rather than re-matching
     // the JSON here — see that module's doc comment for why.
     let auth_required = read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await?;
     let auth_required_json: serde_json::Value = serde_json::from_str(&auth_required)
@@ -1031,7 +1031,7 @@ mod tests {
     ///
     /// Retries up to `MAX_REPL_STARTUP_ATTEMPTS` times to handle transient
     /// failures (e.g. resource exhaustion in CI causing the REPL to crash on
-    /// startup — see BT-1599).
+    /// startup).
     ///
     /// These tests are `#[ignore]` so they only run via `just test-mcp`
     /// (single-threaded with `--test-threads=1`), not in the regular parallel
@@ -1263,7 +1263,7 @@ mod tests {
         Ok(())
     }
 
-    // BT-2369 (ADR 0081 Phase 6): the `bindings` / `clear` ops were removed.
+    // ADR 0081 Phase 6: the `bindings` / `clear` ops were removed.
     // Session state is read and reset via the `Session` API
     // (`Session current bindings keys`, `Session current clear`) over the
     // REPL evaluate path.
@@ -1326,7 +1326,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "integration test"]
     async fn test_supervision_tree() -> Result<(), Box<dyn std::error::Error>> {
-        // ADR 0092 (BT-2431): the supervision-tree snapshot the `supervision_tree`
+        // ADR 0092: the supervision-tree snapshot the `supervision_tree`
         // MCP tool surfaces, driven through the shared eval seam.
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie, None).await?;
@@ -1532,7 +1532,7 @@ mod tests {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie, None).await?;
 
-        // BT-1239: unload op is restored — stdlib classes cannot be removed.
+        // Unload op is restored — stdlib classes cannot be removed.
         // Integer is a stdlib class (bt@stdlib@Integer) and must be rejected.
         let resp = client.unload("Integer").await.unwrap();
         assert!(resp.is_error(), "stdlib class cannot be unloaded");
@@ -1658,7 +1658,7 @@ mod tests {
     }
 
     /// Verifies that `send_once` operations automatically reconnect when the WebSocket
-    /// is closed between requests (BT-1289).
+    /// is closed between requests.
     ///
     /// Before the fix, closing the socket and calling `evaluate_with_options` would
     /// return "Trying to work with closed connection" permanently — requiring Claude
@@ -1686,7 +1686,7 @@ mod tests {
             }
 
             // evaluate_with_options goes through send_once.  It must reconnect
-            // transparently and return the correct result (BT-1289).
+            // transparently and return the correct result.
             let resp = client.evaluate_with_options("staleOnce + 1", false).await?;
             assert!(
                 !resp.is_error(),
@@ -1714,14 +1714,14 @@ mod tests {
         result
     }
 
-    // --- ADR 0112 Phase 4 (BT-3188): remove_method MCP tool round-trip ---
+    // --- ADR 0112 Phase 4: remove_method MCP tool round-trip ---
     //
     // These exercise the same `evaluate` seam and expression shape the
     // `remove_method` MCP tool builds (`crates/beamtalk-mcp::server::remove_method_expr`
     // / `remove_method_if_absent_expr`) against a live workspace — the
     // underlying `removeSelector:` / `removeSelector:ifAbsent:` primitive
     // itself has full E2E coverage in
-    // `tests/repl-protocol/cases/remove_selector.btscript` (BT-3186); these
+    // `tests/repl-protocol/cases/remove_selector.btscript`; these
     // tests pin that the MCP tool's constructed expression round-trips
     // correctly through the same `evaluate` path the tool uses.
 
@@ -1832,7 +1832,7 @@ mod tests {
         Ok(())
     }
 
-    // --- ADR 0113 Phase 4 (BT-3210): remove_class + destructive-flush MCP
+    // --- ADR 0113 Phase 4: remove_class + destructive-flush MCP
     // tool round-trip ---
     //
     // These exercise the same `evaluate` seam and expression shapes the
@@ -1843,8 +1843,8 @@ mod tests {
     // workspace — the underlying `removeFromSystem` ChangeLog-logging and
     // `flushIncludingDestructive`/`confirmDestructive:` staged-delete
     // mechanics have full E2E coverage in
-    // `tests/repl-protocol/cases/remove_from_system.btscript` (BT-3206) and
-    // `workspace_flush_destructive.btscript` (BT-3207); these tests pin that
+    // `tests/repl-protocol/cases/remove_from_system.btscript` and
+    // `workspace_flush_destructive.btscript`; these tests pin that
     // the MCP tools' constructed expressions round-trip correctly through
     // the same `evaluate` path the tools use.
 
@@ -1909,7 +1909,7 @@ mod tests {
 
         // Mirrors `remove_class_expr("Integer")` — `removeFromSystem` raises
         // before the ChangeLog lookup ever runs, same refusal `remove_method`
-        // does not have (BT-785, unchanged by ADR 0113).
+        // does not have (unchanged by ADR 0113).
         let resp = client
             .evaluate_with_options(
                 "Integer removeFromSystem. \
@@ -1927,7 +1927,7 @@ mod tests {
         Ok(())
     }
 
-    // --- ADR 0114 Phase 5 (BT-3276): rename_class/rename_method MCP tool
+    // --- ADR 0114 Phase 5: rename_class/rename_method MCP tool
     // round-trip ---
     //
     // These exercise the same `evaluate` seam and expression shapes the
@@ -1937,9 +1937,9 @@ mod tests {
     // build against a live workspace — the underlying `renameTo:`/
     // `renameSelector:to:` mutation + xref-driven site discovery +
     // ChangeLog-logging mechanics have full unit/e2e coverage in
-    // `stdlib/test/rename_to_test.bt`/`rename_selector_to_test.bt` (BT-3278/
-    // BT-3279) and `tests/repl-protocol/cases/rename_class_flush_roundtrip
-    // .btscript`/`rename_method_flush_roundtrip.btscript` (BT-3271/BT-3273);
+    // `stdlib/test/rename_to_test.bt`/`rename_selector_to_test.bt`
+    // and `tests/repl-protocol/cases/rename_class_flush_roundtrip
+    // .btscript`/`rename_method_flush_roundtrip.btscript`;
     // these tests pin that the MCP tools' constructed expressions round-trip
     // correctly through the same `evaluate` path the tools use, and that the
     // resulting ChangeLog entry has the expected `rename-class`/
@@ -2157,7 +2157,7 @@ mod tests {
     /// Stops the test workspace so the BEAM node doesn't linger for 5 minutes
     /// after the test run. Unlike the previous version, this does NOT call
     /// `process::exit()` — all WebSocket connections are properly closed via
-    /// `ReplClient::close()` in each test (BT-1363).
+    /// `ReplClient::close()` in each test.
     #[tokio::test]
     #[ignore = "integration test"]
     async fn test_zzz_cleanup() {

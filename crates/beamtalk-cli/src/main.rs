@@ -109,7 +109,7 @@ enum Command {
         args: Vec<String>,
 
         /// Dispatch the entry into the project's live shared workspace over the
-        /// REPL protocol instead of starting a fresh run-mode node (BT-2691).
+        /// REPL protocol instead of starting a fresh run-mode node.
         /// The workspace must already be running (`beamtalk repl` / `beamtalk run .`).
         #[arg(long)]
         connect: bool,
@@ -274,7 +274,7 @@ enum Command {
 
     /// Run the metamorphic testing harness: apply semantics-preserving AST
     /// transforms to `.btscript` `// =>` expressions and assert the
-    /// transformed variant still evaluates to the same expected result (BT-3117)
+    /// transformed variant still evaluates to the same expected result
     #[command(hide = true)]
     TestMetamorphic {
         /// File or directory containing .btscript test files
@@ -354,7 +354,7 @@ enum Command {
         action: commands::deps::cli::DepsCommand,
     },
 
-    /// Show, set, or bump the package version in beamtalk.toml (BT-2980)
+    /// Show, set, or bump the package version in beamtalk.toml
     ///
     /// No arguments prints the current version. `beamtalk version X.Y.Z`
     /// sets it exactly (must be greater than the current version).
@@ -366,7 +366,7 @@ enum Command {
         args: Vec<String>,
     },
 
-    /// Tag and publish a release to the package registry (BT-2980)
+    /// Tag and publish a release to the package registry
     ///
     /// Tags the current `beamtalk.toml` version, pushes the tag to `origin`,
     /// and records the release in the package registry index.
@@ -376,7 +376,7 @@ enum Command {
         dry_run: bool,
     },
 
-    /// Render the package registry index as a static site (BT-2990)
+    /// Render the package registry index as a static site
     ///
     /// A read-only view of the registry index — no server, mirroring
     /// `beamtalk doc --site`. Distinct from `beamtalk deps`, which consumes
@@ -438,11 +438,11 @@ enum Command {
         class_filter: Option<String>,
     },
 
-    /// Warm the shared OTP type-spec cache, without a project (BT-2471)
+    /// Warm the shared OTP type-spec cache, without a project
     ///
     /// Extracts Erlang FFI type specs for the running OTP installation into
     /// the shared, OTP-version-keyed cache `beamtalk build`/`beamtalk lint`
-    /// read from (ADR 0075, BT-2470) — a no-op when it's already warm for
+    /// read from (ADR 0075) — a no-op when it's already warm for
     /// the current OTP/ERTS version. Intended for background warming (see
     /// `.claude/hooks/worktree-init.sh` in remote sessions), not interactive
     /// use — exits 0 for every extraction outcome, even if the runtime
@@ -555,7 +555,7 @@ fn run() -> Result<()> {
 
 /// Dispatches a parsed [`Command`] to its subcommand implementation.
 ///
-/// Split out from [`run`] (BT-3375) so the argument-validation branches that
+/// Split out from [`run`] so the argument-validation branches that
 /// don't touch the filesystem or spawn subprocesses (e.g. `--entry`/`-o`
 /// without `--escript`, `fmt --check`) are unit-testable without going
 /// through `Cli::parse()`/tracing/miette setup.

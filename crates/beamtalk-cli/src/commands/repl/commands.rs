@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Canonical REPL meta-command vocabulary (BT-3083).
+//! Canonical REPL meta-command vocabulary.
 //!
 //! Single source of truth for the `:cmd` names, aliases, and help text that
 //! both tab-completion (`helper.rs`) and dispatch (`classify_command` in
@@ -24,7 +24,7 @@
 /// One REPL meta-command: its canonical spelling, short aliases, one-line
 /// help text, and whether its (optional) argument is a class name or
 /// Beamtalk expression that should route through the backend's
-/// receiver-aware completion engine (BT-783) rather than plain command-word
+/// receiver-aware completion engine rather than plain command-word
 /// completion.
 pub(crate) struct ReplCommandSpec {
     pub(crate) name: &'static str,
@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn dead_actor_session_completions_are_absent() {
-        // BT-3083: these were offered by tab-completion with no dispatch arm
+        // These were offered by tab-completion with no dispatch arm
         // — surface-parity.md documents the real capability as message-sends
         // (`Workspace actors`, `anActor stop`) or as not REPL-exposed at all
         // (`inspect` is agent-only, `sessions` is transport-handshake-only).
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn interrupt_and_recheck_are_completable() {
-        // BT-3083: these dispatched but were missing from tab-completion.
+        // These dispatched but were missing from tab-completion.
         let forms: Vec<&str> = all_forms().collect();
         assert!(forms.contains(&":interrupt"));
         assert!(forms.contains(&":int"));

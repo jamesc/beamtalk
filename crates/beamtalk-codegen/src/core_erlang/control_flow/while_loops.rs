@@ -8,7 +8,7 @@
 //! Generates code for `whileTrue:` and `whileFalse:` loop constructs
 //! with both pure and state-threading variants.
 //!
-//! ## BT-3163: `case apply CondFun(...) of <'true'>/<'false'>` needs no
+//! ## `case apply CondFun(...) of <'true'>/<'false'>` needs no
 //! explicit wildcard clause
 //!
 //! Every condition-dispatch `case` this file generates (`generate_while_simple`,
@@ -17,14 +17,14 @@
 //! same non-exhaustive-to-the-compiler
 //! shape [`super::super::CoreErlangGenerator::case_clause_fallback`] exists to
 //! guard (see its doc comment and ADR 0111 Addendum 5, "Production bugs
-//! found", bug 3 / BT-3161). Unlike BT-3161's two flavors, this one is **not
+//! found", bug 3, which has two flavors). Unlike those two, this one is **not
 //! reachable**: the case is always the tail of a `letrec`-bound loop `fun`'s
 //! own body, entered via `apply` — a genuinely separate BEAM function from
 //! whatever function contains the loop expression (e.g. `dispatch/4`'s `try`
 //! body, when the loop is a try's last statement). `beam_validator`'s
 //! `ambiguous_catch_try_state` check tracks catch/try state per function, so
 //! a non-exhaustive case belonging to a *different* function than the `try`
-//! cannot trip it. Confirmed empirically (BT-3163 investigation): a
+//! cannot trip it. Confirmed empirically (investigation): a
 //! `[... whileTrue: [...]]` as an `ensure:`/`on:do:` try body's last
 //! statement, with a field mutation earlier in the same try body (forcing
 //! the inlined, non-closure `try` shape), still compiles cleanly through
@@ -57,7 +57,7 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-493: Validate body block arity (must be 0-arg)
+        // Validate body block arity (must be 0-arg)
         validate_block_arity_exact(
             body,
             0,
@@ -69,10 +69,10 @@ impl CoreErlangGenerator {
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
             // Use mutations version if there are any writes (local or field)
-            // BT-153: Include local_writes only in REPL mode
-            // BT-1329: Also check for nested list ops with cross-scope mutations
+            // Include local_writes only in REPL mode
+            // Also check for nested list ops with cross-scope mutations
             let analysis = block_analysis::analyze_block(body_block);
-            // ADR 0118 phase 3 (BT-3419): a condition-only self-send/field
+            // ADR 0118 phase 3: a condition-only self-send/field
             // write (`whileTrue: [nil]` with a mutating CONDITION) must also
             // route here — `needs_mutation_threading`/
             // `body_has_list_op_cross_scope_mutations` only look at the BODY,
@@ -117,7 +117,7 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-493: Validate body block arity (must be 0-arg)
+        // Validate body block arity (must be 0-arg)
         validate_block_arity_exact(
             body,
             0,
@@ -129,10 +129,10 @@ impl CoreErlangGenerator {
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
             // Use mutations version if there are any writes (local or field)
-            // BT-153: Include local_writes only in REPL mode
-            // BT-1329: Also check for nested list ops with cross-scope mutations
+            // Include local_writes only in REPL mode
+            // Also check for nested list ops with cross-scope mutations
             let analysis = block_analysis::analyze_block(body_block);
-            // ADR 0118 phase 3 (BT-3419): see the analogous comment in
+            // ADR 0118 phase 3: see the analogous comment in
             // `generate_while_true`.
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
@@ -228,9 +228,9 @@ impl CoreErlangGenerator {
     /// `negate = false` → continue when condition is `'true'` (whileTrue:).
     /// `negate = true`  → continue when condition is `'false'` (whileFalse:).
     ///
-    /// In direct-params mode (BT-1275, no field mutations) the fun signature is
+    /// In direct-params mode (no field mutations) the fun signature is
     /// `(Var1, ..., VarN)` instead of `(StateAcc)`.
-    #[allow(clippy::too_many_lines)] // state-threading while-loop codegen, ADR 0118 phase 3 (BT-3419) added the condition-effects branch
+    #[allow(clippy::too_many_lines)] // state-threading while-loop codegen, ADR 0118 phase 3 added the condition-effects branch
     fn generate_while_loop_with_mutations(
         &mut self,
         condition: &Expression,
@@ -248,7 +248,7 @@ impl CoreErlangGenerator {
         }
 
         let cond_var = self.fresh_temp_var("CondFun");
-        // ADR 0118 phase 3 (BT-3419): whether the condition itself has state
+        // ADR 0118 phase 3: whether the condition itself has state
         // effects (a self-send, or an `and:`/`or:`/`ifTrue:ifFalse:` that
         // carries one) — decides whether `CondFun` must return a
         // `{Bool, FinalStateAcc}` pair instead of a bare boolean, below.
@@ -256,7 +256,7 @@ impl CoreErlangGenerator {
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
-        // BT-3168 (ADR 0111 Addendum 9, Question 3): when the body threads a
+        // ADR 0111 Addendum 9, Question 3: when the body threads a
         // `ClassVars` mutation through the loop's own recursive tail call,
         // the letrec fun grows an extra, explicit trailing parameter —
         // `fun (StateAcc, ClassVars)`, never folded into `StateAcc`'s own
@@ -274,7 +274,7 @@ impl CoreErlangGenerator {
         let class_var_seed_version = self.class_var_version();
         let cv_param_doc = super::extra_threaded_arg_doc(class_var_param.as_ref());
 
-        // BT-3484: the value-type `Self` mirror of the three lines above —
+        // the value-type `Self` mirror of the three lines above —
         // same capture-before-body-lowering discipline (`self_version`, like
         // `class_var_version`, is inherited rather than reset across
         // `with_branch_context`), same "extra explicit trailing fun
@@ -285,10 +285,10 @@ impl CoreErlangGenerator {
         let self_seed_version = self.self_version();
         let self_param_doc = super::extra_threaded_arg_doc(self_param.as_ref());
 
-        // BT-598: At the start of each loop iteration, read threaded locals from StateAcc.
+        // At the start of each loop iteration, read threaded locals from StateAcc.
         // Use push_scope so bindings don't leak to caller after the letrec.
         self.push_scope();
-        // BT-3470 (ADR 0111 Addendum 15): the returned unpack docs are real
+        // ADR 0111 Addendum 15: the returned unpack docs are real
         // `let I = call 'maps':'get'(...) in` text that must render at the
         // top of the letrec fun's own body — legacy pushed them into the
         // SAME `docs` vec the fun-body text itself accumulated into,
@@ -305,7 +305,7 @@ impl CoreErlangGenerator {
         // Generate condition inside branch context
         let cond_doc = self.with_branch_context(|this| {
             if let Expression::Block(cond_block) = condition {
-                // BT-3151: this condition block bypasses `generate_block`'s own
+                // this condition block bypasses `generate_block`'s own
                 // self-send check by calling `generate_block_body`/
                 // `generate_stateful_while_condition` directly — see
                 // `check_no_unsafe_class_method_self_sends`'s doc comment.
@@ -330,7 +330,7 @@ impl CoreErlangGenerator {
             "<'true'> when 'true' -> "
         };
         let (condition_stmts, condition_value) = if cond_effects {
-            // ADR 0118 phase 3 (BT-3419): `CondFun` evaluates to
+            // ADR 0118 phase 3: `CondFun` evaluates to
             // `{Bool, FinalStateAcc}` (see `generate_stateful_while_condition`),
             // never a bare boolean — unpack it and REBIND the literal name
             // `StateAcc` (shadowing the fun's own incoming parameter, the
@@ -392,7 +392,7 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
 
-        // BT-3168: the exit arm is reached WITHOUT running the body this
+        // the exit arm is reached WITHOUT running the body this
         // round (the condition check failed) — it must reference the fun's
         // own incoming `ClassVars` parameter (`class_var_param`, the SAME
         // text as the fun signature), never a post-body identity.
@@ -417,7 +417,7 @@ impl CoreErlangGenerator {
             Self::rebase_loop_seed(&mut body_stmts, &real_seed, &gensym_seed);
             produces.push(gensym_seed);
         }
-        // BT-3484: identical treatment for the value-type `Self` slot.
+        // identical treatment for the value-type `Self` slot.
         if let Some(self_name) = &self_param {
             let real_seed = VersionedVar::new(VersionPrefix::SelfVt, self_seed_version, frame);
             let gensym_seed = VersionedVar::new(VersionPrefix::Gensym(self_name.clone()), 0, frame);
@@ -462,7 +462,7 @@ impl CoreErlangGenerator {
         Ok(docvec![pack_doc, rendered])
     }
 
-    /// ADR 0118 phase 3 (BT-3419): compiles a `whileTrue:`/`whileFalse:`
+    /// ADR 0118 phase 3: compiles a `whileTrue:`/`whileFalse:`
     /// condition BLOCK whose tail has state effects (`condition_has_state_effects`)
     /// into a document that evaluates to `{BoolResult, FinalStateAcc}` —
     /// the shape `generate_while_loop_with_mutations`'s condition-application
@@ -563,7 +563,7 @@ impl CoreErlangGenerator {
 
     /// The loop's condition body is ordinary AST-directed expression codegen
     /// with no state-threading content of its own. Factored out of
-    /// `generate_while_loop_direct` (its only caller, BT-3182: the
+    /// `generate_while_loop_direct` (its only caller — the
     /// `ThreadedIr` while-direct pilot this was also shared with, ADR 0111
     /// Addendum 2/13, was deleted).
     fn generate_loop_condition_body(
@@ -572,7 +572,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         self.with_branch_context(|this| {
             if let Expression::Block(cond_block) = condition {
-                // BT-3151: see the analogous check in `generate_while_loop`.
+                // see the analogous check in `generate_while_loop`.
                 let analysis = crate::core_erlang::block_analysis::analyze_block(cond_block);
                 this.check_no_unsafe_class_method_self_sends(&analysis, cond_block.span)?;
                 this.generate_block_body(cond_block)
@@ -582,7 +582,7 @@ impl CoreErlangGenerator {
         })
     }
 
-    /// BT-1275: Direct-params variant of `generate_while_loop_with_mutations`.
+    /// Direct-params variant of `generate_while_loop_with_mutations`.
     ///
     /// Uses `fun (Var1, ..., VarN)` instead of `fun (StateAcc)`.
     /// The `StateAcc` map is rebuilt only once in the false (exit) arm.
@@ -597,7 +597,7 @@ impl CoreErlangGenerator {
     /// [`Self::generate_letrec_body_ir`]; `produces` is each threaded
     /// local's `VersionPrefix::Local` seed, matching `param_list_doc`'s own
     /// bare `to_core_erlang_var` naming.
-    #[allow(clippy::too_many_lines)] // direct-params state-threading codegen, BT-1275
+    #[allow(clippy::too_many_lines)] // direct-params state-threading codegen
     fn generate_while_loop_direct(
         &mut self,
         condition: &Expression,
@@ -707,7 +707,7 @@ impl CoreErlangGenerator {
         Ok(threaded_ir::render(&ir, &mut ctx))
     }
 
-    /// BT-1326/BT-1342: Full-extract variant of `generate_while_loop_with_mutations`.
+    /// Full-extract variant of `generate_while_loop_with_mutations`.
     ///
     /// Uses `fun (Var1, ..., VarN, RField1, ..., MField1, ...)` — locals, read-only fields,
     /// AND mutated fields as direct fun parameters. No `State` parameter.
@@ -721,7 +721,7 @@ impl CoreErlangGenerator {
     /// then mutated fields (`VersionPrefix::Gensym` of each field's
     /// pre-extracted param name, matching `build_hybrid_param_list`'s own
     /// ordering); `body` comes from [`Self::generate_letrec_hybrid_body_ir`].
-    #[allow(clippy::too_many_lines)] // hybrid state-threading codegen, BT-1326/BT-1342
+    #[allow(clippy::too_many_lines)] // hybrid state-threading codegen
     fn generate_while_loop_hybrid(
         &mut self,
         condition: &Expression,
@@ -972,7 +972,7 @@ impl CoreErlangGenerator {
             let prev_hybrid = this.loop_mode.in_hybrid_loop;
             this.loop_mode.in_hybrid_loop = true;
             let result = if let Expression::Block(cond_block) = condition {
-                // BT-3151: see the analogous check in `generate_while_loop`.
+                // see the analogous check in `generate_while_loop`.
                 let analysis = crate::core_erlang::block_analysis::analyze_block(cond_block);
                 this.check_no_unsafe_class_method_self_sends(&analysis, cond_block.span)
                     .and_then(|()| this.generate_block_body(cond_block))
@@ -988,10 +988,10 @@ impl CoreErlangGenerator {
         cond_result
     }
 
-    /// BT-2908: Generates the fallback method body for `whileTrue`/`whileFalse`
+    /// Generates the fallback method body for `whileTrue`/`whileFalse`
     /// — Block's `whileTrue:`/`whileFalse:`. Reached only when something
     /// bypasses the call-site interception these selectors normally get (e.g.
-    /// `perform:`/`perform:withArguments:`) — the same gap BT-2812 closed for
+    /// `perform:`/`perform:withArguments:`) — the same gap already closed for
     /// Block's `value*` family. See
     /// `generate_block_value_structural_fallback`'s doc comment for the full
     /// rationale (Tier 1/Tier 2 discrimination via `erlang:is_function/2`
@@ -1100,7 +1100,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-2908: Generates the fallback method body for `repeat` — Block's
+    /// Generates the fallback method body for `repeat` — Block's
     /// `repeat`. See `generate_while_structural_fallback` for the general
     /// rationale; `repeat` only has a receiver to discriminate (no argument
     /// block — `[self processNextMessage] repeat` takes no arguments).
@@ -1229,7 +1229,7 @@ mod tests {
         );
     }
 
-    // ── BT-1275: direct-params optimisation ──────────────────────────────────
+    // ── direct-params optimisation ──────────────────────────────────
 
     #[test]
     fn test_while_true_local_var_only_uses_direct_params() {
@@ -1279,11 +1279,11 @@ mod tests {
         );
     }
 
-    // ── BT-1326/BT-1342: full-extract direct-params + field extraction ───────
+    // ── full-extract direct-params + field extraction ───────
 
     #[test]
     fn test_while_true_field_plus_local_mutation_uses_full_extract() {
-        // BT-1342: whileTrue: with BOTH local var mutation AND field mutation uses
+        // whileTrue: with BOTH local var mutation AND field mutation uses
         // full-extract mode — mutated field 'n' is a direct param, no State param.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + 1. self.n := self.n + 1]\n    sum\n";
         let code = codegen(src);
@@ -1323,7 +1323,7 @@ mod tests {
 
     #[test]
     fn test_while_true_readonly_field_pre_extracted_as_direct_param() {
-        // BT-1326/BT-1342: whileTrue: body reads self.step (never written) and writes self.n:
+        // whileTrue: body reads self.step (never written) and writes self.n:
         // self.step is pre-extracted as read-only param, self.n is pre-extracted as mutated param.
         let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + self.step. self.n := self.n + 1]\n    sum\n";
         let code = codegen(src);
@@ -1352,7 +1352,7 @@ mod tests {
         );
     }
 
-    // ── BT-1343: codegen diagnostics ─────────────────────────────────────────
+    // ── codegen diagnostics ─────────────────────────────────────────
 
     fn codegen_with_diagnostics(
         src: &str,
@@ -1415,11 +1415,11 @@ mod tests {
         );
     }
 
-    // ── BT-1609: value-type local threading ─────────────────────────────
+    // ── value-type local threading ─────────────────────────────
 
     #[test]
     fn test_value_type_while_true_extracts_threaded_locals() {
-        // BT-1609: whileTrue: in value-type context must extract threaded locals
+        // whileTrue: in value-type context must extract threaded locals
         // from the returned {'nil', StateAcc} tuple after the loop.
         let src = "Object subclass: Calc\n\n  run =>\n    counter := 3\n    steps := 0\n    [counter > 0] whileTrue: [\n      counter := counter - 1\n      steps := steps + 1\n    ]\n    steps\n";
         let code = codegen(src);
@@ -1457,7 +1457,7 @@ mod tests {
 
     #[test]
     fn test_value_type_while_last_expr_unwraps_nil() {
-        // BT-2308: a mutating whileTrue: as the method's LAST expression must return the
+        // a mutating whileTrue: as the method's LAST expression must return the
         // loop's logical value (element 1 = nil), not the raw {nil, StateAcc} tuple.
         let src =
             "Object subclass: Calc\n\n  run =>\n    n := 0\n    [n < 3] whileTrue: [n := n + 1]\n";
@@ -1473,7 +1473,7 @@ mod tests {
 mod bt3419_stateful_condition_tests {
     use crate::core_erlang::tests::{assert_compiles_through_erlc, codegen};
 
-    // ADR 0118 phase 3 (BT-3419): `whileTrue:`/`whileFalse:` conditions with
+    // ADR 0118 phase 3: `whileTrue:`/`whileFalse:` conditions with
     // a state effect (a self-send, or an `and:`/`or:` that carries one) now
     // compile and thread state correctly instead of panicking the verifier
     // or crashing at runtime — see the matching `#[should_panic]`→pass

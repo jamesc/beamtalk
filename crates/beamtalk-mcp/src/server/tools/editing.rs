@@ -250,7 +250,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
-    /// Remove a method from a Beamtalk class (ADR 0112 Phase 4, BT-3188).
+    /// Remove a method from a Beamtalk class (ADR 0112 Phase 4).
     ///
     /// Compiles to `aClass removeSelector: #selector` (or `aClass
     /// removeSelector: #selector ifAbsent: [...]` when `if_absent` is
@@ -306,8 +306,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
-    /// Remove a class from the running Beamtalk system (ADR 0113 Phase 4,
-    /// BT-3210).
+    /// Remove a class from the running Beamtalk system (ADR 0113 Phase 4).
     ///
     /// Compiles to `aClass removeFromSystem`, then looks up and returns the
     /// resulting `remove-class` `ChangeEntry`, reusing the existing
@@ -354,11 +353,10 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
-    /// Rename a class in the running Beamtalk system (ADR 0114 Phase 5,
-    /// BT-3276).
+    /// Rename a class in the running Beamtalk system (ADR 0114 Phase 5).
     ///
     /// Compiles to `aClass renameTo: #NewName` (wraps `Behaviour>>renameTo:`,
-    /// ADR 0114 Phase 2, BT-3278), reusing the existing `evaluate` pathway
+    /// ADR 0114 Phase 2), reusing the existing `evaluate` pathway
     /// per ADR 0082's surface-parity principle — no new workspace-side op.
     /// Auto-rewrites every in-project cross-file reference the xref index
     /// (`referencesTo:`/`direct_subclasses:`) can find and re-registers the
@@ -407,10 +405,10 @@ impl BeamtalkMcp {
     }
 
     /// Rename a method on a class in the running Beamtalk system (ADR 0114
-    /// Phase 5, BT-3276).
+    /// Phase 5).
     ///
     /// Compiles to `aClass renameSelector: #old to: #new` (wraps
-    /// `Behaviour>>renameSelector:to:`, ADR 0114 Phase 3, BT-3279), reusing
+    /// `Behaviour>>renameSelector:to:`, ADR 0114 Phase 3), reusing
     /// the existing `evaluate` pathway per ADR 0082's surface-parity
     /// principle — no new workspace-side op. Instance-side only — sent to a
     /// bare class name, this always touches the instance-side method table;
@@ -467,7 +465,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
-    /// Pre-save advisory precheck (ADR 0105 Phase 3, BT-2782).
+    /// Pre-save advisory precheck (ADR 0105 Phase 3).
     ///
     /// Compiles to `aClass precheckCompile: #selector source: body`. Nothing
     /// installs and nothing is recorded to the `ChangeLog` — this is a

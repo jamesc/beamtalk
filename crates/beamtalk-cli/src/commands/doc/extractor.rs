@@ -48,7 +48,7 @@ pub struct MethodInfo {
 /// that `beamtalk build` compiles — including classes in `src/` subdirectories
 /// (user packages) or `stdlib/src/` subdirectories.
 ///
-/// Build/VCS directories are excluded (`FileWalker::source_files()`, BT-3043)
+/// Build/VCS directories are excluded (`FileWalker::source_files()`)
 /// — `build::find_source_files` avoids them by preferring the package's
 /// `src/` subdirectory, but `doc` walks whatever path it is handed, so
 /// pointing it at a package root would otherwise pull in every dependency's
@@ -117,7 +117,7 @@ pub(super) fn parse_class_info(root: &Utf8Path, path: &Utf8Path) -> Result<Optio
 /// Format a method signature for display.
 ///
 /// Names only, no types, no return arrow — `beamtalk doc`'s listing style is
-/// intentionally less detailed than hover/stub generation (BT-3097): it
+/// intentionally less detailed than hover/stub generation: it
 /// composes through the shared
 /// [`beamtalk_core::unparse::render_signature_text`] core with
 /// [`beamtalk_core::unparse::SignatureRenderOptions::NAMES_ONLY`], the same

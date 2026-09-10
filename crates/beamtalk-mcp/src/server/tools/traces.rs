@@ -58,7 +58,7 @@ impl BeamtalkMcp {
         // Surface the snapshot through the same term-returning eval seam every
         // surface shares (so the structured node data is identical across
         // surfaces). `system` is the privileged whole-node view; `default` is
-        // the runtime-plumbing-filtered Read view (ADR 0091 / BT-2432).
+        // the runtime-plumbing-filtered Read view (ADR 0091).
         let code = if scope == "system" {
             "ProcessNavigation system tree asDictionaries"
         } else {

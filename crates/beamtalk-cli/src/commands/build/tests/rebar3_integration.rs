@@ -321,7 +321,7 @@ fn test_generate_rebar_config_partial_lock() {
     );
 }
 
-/// BT-1722: Verify that `generate_package_corpus` produces `class_corpus.json`
+/// Verify that `generate_package_corpus` produces `class_corpus.json`
 /// and `corpus.json` in the output directory.
 #[test]
 fn test_generate_package_corpus_creates_files() {
@@ -384,7 +384,7 @@ fn test_generate_package_corpus_creates_files() {
     );
 }
 
-/// BT-1722: Internal classes should be excluded from the generated class corpus.
+/// Internal classes should be excluded from the generated class corpus.
 #[test]
 fn test_generate_package_corpus_excludes_internal_classes() {
     let temp = TempDir::new().unwrap();

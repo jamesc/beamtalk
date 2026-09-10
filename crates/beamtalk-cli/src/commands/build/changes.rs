@@ -4,7 +4,7 @@
 //! Per-file change detection and stale-artifact cleanup.
 //!
 //! Compares each `.bt` source file's content hash against the hash recorded
-//! for its corresponding `.beam` output (BT-3120) to decide which files need
+//! for its corresponding `.beam` output to decide which files need
 //! recompilation, and removes `.beam`/`.core`/`.app` artifacts that no longer
 //! correspond to a current source file or package name.
 
@@ -19,7 +19,7 @@ use crate::commands::util::content_hash_of;
 /// Result of per-file change detection.
 ///
 /// Compares each `.bt` source file's content hash against the hash recorded
-/// for its corresponding `.beam` output (BT-3120) to determine which files
+/// for its corresponding `.beam` output to determine which files
 /// need recompilation.
 #[derive(Debug)]
 #[allow(clippy::struct_field_names)] // `_files` postfix is clearer for this domain struct
@@ -34,7 +34,7 @@ pub(crate) struct ChangeDetectionResult {
     /// placed files or renamed sources intentionally).
     pub orphaned_beam_files: Vec<Utf8PathBuf>,
     /// Content hash of every source file considered in this pass, keyed by
-    /// path string (BT-3120). Callers persist this via
+    /// path string. Callers persist this via
     /// `build_cache::save_beam_hash_cache` after a successful build, so the
     /// next `detect_changes` call has something to compare against.
     pub source_hashes: HashMap<String, String>,
@@ -47,7 +47,7 @@ pub(crate) struct ChangeDetectionResult {
 /// changed if:
 /// - Its `.beam` does not exist (new file or first build)
 /// - Its content hash differs from the hash recorded for it in the beam-hash
-///   sidecar (BT-3120), including when no hash was recorded at all
+///   sidecar, including when no hash was recorded at all
 ///
 /// mtime is deliberately not used for this decision: it lies under git
 /// operations (branch switches restore old content under a fresh mtime) and
@@ -63,7 +63,7 @@ pub(crate) struct ChangeDetectionResult {
 /// `known_hashes` is an optional set of already-computed content hashes,
 /// keyed by path string — for a manifest-based package build, `build_rs`'s
 /// Pass 1 (`build_cache::incremental_build_class_module_index`) has already
-/// hashed every source file's content this same build (BT-3120), so a hit
+/// hashed every source file's content this same build, so a hit
 /// here skips reading and hashing that file's content a second time. A miss
 /// (manifest-less builds, where Pass 1 never runs; or any file Pass 1
 /// couldn't read) falls back to hashing it directly here, same as before.
@@ -81,7 +81,7 @@ pub(crate) fn detect_changes(
     force: bool,
     known_hashes: &HashMap<String, String>,
 ) -> ChangeDetectionResult {
-    // BT-3120: content hash of each source file as of the last successful
+    // Content hash of each source file as of the last successful
     // `.beam` build, keyed by path string.
     let previous_hashes = crate::commands::build_cache::load_beam_hash_cache(build_dir);
 

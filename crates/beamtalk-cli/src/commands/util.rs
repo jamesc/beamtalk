@@ -56,7 +56,7 @@ pub(super) fn mtime_of(path: &Utf8Path) -> Option<SystemTime> {
 /// SHA-256 content hash of a file, as a lowercase hex string, or `None` if
 /// the file cannot be read.
 ///
-/// BT-3120: the source of truth for batch-build staleness checks
+/// The source of truth for batch-build staleness checks
 /// (`Pass1Cache` and `detect_changes`'s `.bt`-vs-`.beam` decision). Unlike
 /// mtime, a content hash cannot be fooled by git branch switches (which
 /// restore old content under a fresh mtime) or by tools that preserve or
@@ -76,7 +76,7 @@ pub(super) fn content_hash_of(path: &Utf8Path) -> Option<String> {
 
 /// [`content_hash_of`] for every file in `paths`, keyed by path string.
 ///
-/// BT-3120: a single build hashes each source file's content in more than
+/// A single build hashes each source file's content in more than
 /// one place — Pass 1's staleness check and cache-entry rebuild
 /// (`build_cache::partition_files` / `build_cache::build_cache_entries`),
 /// and Pass 2's `.beam` staleness check (`detect_changes`). Computing every
@@ -84,7 +84,7 @@ pub(super) fn content_hash_of(path: &Utf8Path) -> Option<String> {
 /// (rather than each calling [`content_hash_of`] independently) keeps a
 /// build to one content-hash pass per file instead of two or three — the
 /// difference between a `stat()` and hashing full file contents is real, and
-/// BT-3120's acceptance criteria specifically calls out "no measurable
+/// The acceptance criteria specifically call out "no measurable
 /// regression in warm no-op build time". Files that can't be read are
 /// omitted, matching [`content_hash_of`]'s `None`-on-error behaviour —
 /// callers already treat a missing hash as "must recompute".
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_content_hash_of_same_content_different_mtime() {
-        // BT-3120: the hash must depend only on bytes, not on filesystem
+        // The hash must depend only on bytes, not on filesystem
         // metadata — rewriting identical content (which bumps mtime) must
         // produce the same hash.
         let dir = tempfile::tempdir().unwrap();

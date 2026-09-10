@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tests for `declare native: <module>` type declarations (ADR 0075, Phase 2, BT-1846).
+//! Tests for `declare native: <module>` type declarations (ADR 0075, Phase 2).
 
 use super::*;
 

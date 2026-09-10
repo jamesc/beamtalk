@@ -7,7 +7,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! BT-3459: split out of `control_flow/mod.rs`, no logic changes.
+//! split out of `control_flow/mod.rs`, no logic changes.
 
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
 use beamtalk_cerl_doc::docvec;
@@ -15,13 +15,13 @@ use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Expression;
 
 impl CoreErlangGenerator {
-    /// BT-598: Returns the state map key for a local variable.
+    /// Returns the state map key for a local variable.
     /// Uses a `__local__` prefix to prevent collision with actor field names.
     pub(in crate::core_erlang) fn local_state_key(var_name: &str) -> String {
         format!("__local__{var_name}")
     }
 
-    /// ADR 0111 Addendum 5 (BT-1213/BT-2355/BT-3173 rebind idiom): rebinds
+    /// ADR 0111 Addendum 5 (rebind idiom): rebinds
     /// each of `vars` — a nested control-flow construct's threaded
     /// `__local__` captured vars — from `state_var`, returning one `let V =
     /// maps:get(...) in` `Document` per var and updating each var's own
@@ -61,12 +61,12 @@ impl CoreErlangGenerator {
         docs
     }
 
-    /// BT-598/BT-1053: Compute local variables that need threading through a loop's `StateAcc`.
+    /// Compute local variables that need threading through a loop's `StateAcc`.
     ///
     /// For actor methods: returns vars that are both read and written in the block
     /// (excluding block parameters). Reads from an optional condition block are merged.
     ///
-    /// For value-type methods (BT-1053): returns vars that are captured from the outer
+    /// For value-type methods: returns vars that are captured from the outer
     /// scope AND written in the block. Using `captured_reads` (not all reads) avoids
     /// threading block-internal temporaries that happen to be read+written within the block.
     ///
@@ -84,7 +84,7 @@ impl CoreErlangGenerator {
         let block_params: std::collections::HashSet<String> =
             body.parameters.iter().map(|p| p.name.to_string()).collect();
 
-        // BT-1329: Include variables captured and mutated by nested list op blocks.
+        // Include variables captured and mutated by nested list op blocks.
         // `analyze_block` doesn't propagate local_writes from nested (non-conditional) blocks,
         // so variables mutated inside `do:`, `collect:`, `inject:into:`, `select:`, `reject:`
         // blocks are invisible to the outer loop's threaded_locals computation.
@@ -97,7 +97,7 @@ impl CoreErlangGenerator {
                 &mut list_op_cross_scope_writes,
             );
         }
-        // BT-2363: also thread write-only outer locals mutated inside nested counted/list-op
+        // also thread write-only outer locals mutated inside nested counted/list-op
         // loops (those that the read+write `collect_list_op_cross_scope_mutations` misses).
         for stmt in &body.body {
             self.collect_nested_loop_outer_local_writes(
@@ -109,7 +109,7 @@ impl CoreErlangGenerator {
 
         match self.context {
             CodeGenContext::Actor => {
-                // BT-1224: Only thread vars captured from the outer scope that are also
+                // Only thread vars captured from the outer scope that are also
                 // written in the block. Using `captured_reads` (not `local_reads`) excludes
                 // block-internal temporaries that are first defined then read within the block.
                 // Using `local_reads` caused unbound_var errors in dispatch/4 because packing
@@ -123,14 +123,14 @@ impl CoreErlangGenerator {
                         .union(&cond_analysis.captured_reads)
                         .cloned()
                         .collect();
-                    // BT-1224: Also include writes from the condition block so that
+                    // Also include writes from the condition block so that
                     // variables first written in a condition are included in threading.
                     all_writes = all_writes
                         .union(&cond_analysis.local_writes)
                         .cloned()
                         .collect();
                 }
-                // BT-1329: Add cross-scope list op mutations to both reads and writes.
+                // Add cross-scope list op mutations to both reads and writes.
                 // These vars are both read and written in the nested block, so they need
                 // threading through the outer loop.
                 all_captured_reads = all_captured_reads
@@ -141,7 +141,7 @@ impl CoreErlangGenerator {
                     .union(&list_op_cross_scope_writes)
                     .cloned()
                     .collect();
-                // BT-1329: Also include outer-scope variables that are written in the loop
+                // Also include outer-scope variables that are written in the loop
                 // body but not read (write-only). These variables need their final value
                 // to escape the loop via StateAcc. We detect them by checking if the
                 // variable already has a binding in the generator's scope (meaning it was
@@ -163,7 +163,7 @@ impl CoreErlangGenerator {
                     .collect()
             }
             CodeGenContext::ValueType => {
-                // BT-1053: Only thread vars captured from the outer scope that are also
+                // Only thread vars captured from the outer scope that are also
                 // written in the block. `captured_reads` excludes block-internal temps.
                 let mut captured = analysis.captured_reads.clone();
                 let mut writes = analysis.local_writes.clone();
@@ -172,7 +172,7 @@ impl CoreErlangGenerator {
                     .cloned()
                     .collect();
                 writes = writes.union(&list_op_cross_scope_writes).cloned().collect();
-                // BT-1329: Include outer-scope write-only variables (same as Actor above).
+                // Include outer-scope write-only variables (same as Actor above).
                 for v in &writes {
                     if !block_params.contains(v.as_str())
                         && !captured.contains(v)

@@ -10,17 +10,16 @@
 //! `type_checker/validation.rs` and `protocol_registry.rs` cannot disagree
 //! about the same call site (ADR 0100, "Implementation" section).
 //!
-//! History: BT-2793 centralised the decision (pure refactor); BT-2796 added
-//! the parse-error guard and [`KnowledgeScope`]; BT-2795 made project-wide
-//! extensions visible; BT-2794 completed ADR 0100 Rule 2. With WS1/WS2
-//! landed, `has_cross_file_parent` fires only when an ancestor is genuinely
-//! absent from project-complete knowledge (or in `ModuleOnly` contexts) —
-//! suppression replaced by resolution, staying conservative where knowledge
-//! is genuinely incomplete.
+//! [`KnowledgeScope`] tracks how far cross-file knowledge extends and guards
+//! against parse-error-degraded method surfaces; project-wide extensions are
+//! visible under it, completing ADR 0100 Rule 2. `has_cross_file_parent`
+//! fires only when an ancestor is genuinely absent from project-complete
+//! knowledge (or in `ModuleOnly` contexts) — suppression replaced by
+//! resolution, staying conservative where knowledge is genuinely incomplete.
 
 use super::class_hierarchy::ClassHierarchy;
 
-/// How complete the knowledge injected into an analysis run is (BT-2796, WS2).
+/// How complete the knowledge injected into an analysis run is.
 ///
 /// The orchestrator that assembles cross-file knowledge (CLI build Pass 1,
 /// CLI lint's package walk, the LSP `ProjectIndex` after workspace preload)
@@ -28,7 +27,7 @@ use super::class_hierarchy::ClassHierarchy;
 /// decide whether "a parent class is missing from the hierarchy" means
 /// *incomplete knowledge* (single-file analysis — stay quiet) or *genuinely
 /// unresolved* (project-complete analysis — still conservative, but eligible
-/// for ADR 0100 Rule 2's suppression removal, BT-2794).
+/// for ADR 0100 Rule 2's suppression removal).
 ///
 /// This is the per-hierarchy realisation of ADR 0100's sequencing-guard
 /// "feature flag": no orchestrator claims [`ProjectComplete`](Self::ProjectComplete)
@@ -44,7 +43,7 @@ pub enum KnowledgeScope {
     ModuleOnly,
     /// The orchestrator walked the entire project: every project file's
     /// classes are present in the hierarchy (extensions and protocols ride
-    /// the same channel as they land — WS1/BT-2795).
+    /// the same channel as they land).
     ProjectComplete,
 }
 
@@ -93,25 +92,23 @@ impl ReceiverKnowledge {
 /// Downgrade reasons folded into `Open` here:
 /// - A `doesNotUnderstand:args:` override on the relevant side.
 /// - [`ClassHierarchy::has_cross_file_parent`] — the ancestor chain includes
-///   a class the checker cannot see. With project-scoped compilation
-///   (WS1/WS2) this fires only for genuinely-unresolved parents or in
-///   `ModuleOnly` contexts; in a project-complete build every intra-project
-///   parent is injected, so resolution has replaced suppression
-///   (ADR 0100 Rule 2, BT-2794).
+///   a class the checker cannot see. This fires only for genuinely-unresolved
+///   parents or in `ModuleOnly` contexts; in a project-complete build every
+///   intra-project parent is injected, so resolution has replaced
+///   suppression (ADR 0100 Rule 2).
 /// - [`ClassHierarchy::has_incomplete_surface_in_chain`] — a chain class was
-///   extracted from a file with parse errors (BT-2796).
+///   extracted from a file with parse errors.
 /// - The pre-WS3 dependency guard — `ProjectComplete` scope with
-///   `dependency_extensions_unknown` set (BT-2794; see `classify_receiver`
-///   body).
+///   `dependency_extensions_unknown` set (see `classify_receiver` body).
 ///
-/// **Not folded in here:** BT-1763's "sealed value type dispatches
-/// class-side messages through instance dispatch" carve-out
-/// (`is_sealed_with_instance_dnu`) is specific to the class-side DNU *hint*
-/// decision in `validation.rs::check_class_side_send` — it does not apply to
+/// **Not folded in here:** the "sealed value type dispatches class-side
+/// messages through instance dispatch" carve-out (`is_sealed_with_instance_dnu`)
+/// is specific to the class-side DNU *hint* decision in
+/// `validation.rs::check_class_side_send` — it does not apply to
 /// `protocol_registry.rs`'s class-side conformance check, which has never
 /// granted that carve-out. Folding it into this shared classifier would
-/// silently change conformance behaviour for sealed classes, so BT-2793
-/// keeps it call-site-local rather than widening it to all four sites.
+/// silently change conformance behaviour for sealed classes, so it stays
+/// call-site-local rather than widening it to all four sites.
 #[must_use]
 pub fn classify_receiver(
     class_name: &str,
@@ -131,14 +128,14 @@ pub fn classify_receiver(
         return ReceiverKnowledge::Open;
     }
 
-    // BT-1736 / BT-2793: cross-file inheritance — if the parent class is not
-    // in the hierarchy, the checker can't know the full method set.
+    // Cross-file inheritance — if the parent class is not in the hierarchy,
+    // the checker can't know the full method set.
     if hierarchy.has_cross_file_parent(class_name) {
         return ReceiverKnowledge::Open;
     }
 
-    // BT-2796 (WS2 parse-error guard): a class extracted from a file with
-    // parse errors may have an under-recovered method surface — error
+    // Parse-error guard: a class extracted from a file with parse errors may
+    // have an under-recovered method surface — error
     // recovery can silently drop method definitions. Treat the receiver as
     // Open if any class in its superclass chain carries that mark, so a
     // half-parsed file degrades only its own classes (and their subclasses)
@@ -148,7 +145,7 @@ pub fn classify_receiver(
         return ReceiverKnowledge::Open;
     }
 
-    // BT-2794 (ADR 0100 Rule 2, pre-WS3 guard): until cross-package
+    // ADR 0100 Rule 2, pre-WS3 guard: until cross-package
     // extension metadata is loaded (WS3, ADR 0070 amendment), a dependency
     // can extend *any* class — including `Object`, which every receiver's
     // chain reaches — so a package with dependencies has no receiver whose
@@ -269,11 +266,11 @@ mod tests {
 
     #[test]
     fn sealed_instance_dnu_does_not_open_class_side_here() {
-        // BT-1763's sealed+instance-DNU carve-out is call-site-local to
+        // The sealed+instance-DNU carve-out is call-site-local to
         // `validation.rs::check_class_side_send`, not part of the shared
         // classifier (see the doc comment on `classify_receiver`) — folding
         // it in here would change `protocol_registry.rs`'s conformance
-        // behaviour for sealed classes, which BT-2793 must not do.
+        // behaviour for sealed classes, which must not happen.
         let mut hierarchy = ClassHierarchy::with_builtins();
         let mut info = base_class_info("SealedProxy", "Value");
         info.is_sealed = true;
@@ -301,8 +298,8 @@ mod tests {
 
     #[test]
     fn surface_incomplete_class_is_open() {
-        // BT-2796: a class extracted from a file with parse errors may have
-        // an under-recovered method surface — never diagnose against it.
+        // A class extracted from a file with parse errors may have an
+        // under-recovered method surface — never diagnose against it.
         let mut hierarchy = ClassHierarchy::with_builtins();
         let mut info = base_class_info("HalfParsed", "Object");
         info.surface_incomplete = true;
@@ -319,7 +316,7 @@ mod tests {
 
     #[test]
     fn surface_incomplete_parent_makes_subclass_open() {
-        // BT-2796: the guard is transitive — a subclass inherits from an
+        // The guard is transitive — a subclass inherits from an
         // under-recovered surface, so it cannot be ClosedComplete either.
         let mut hierarchy = ClassHierarchy::with_builtins();
         let mut parent = base_class_info("HalfParsedParent", "Object");
@@ -334,7 +331,7 @@ mod tests {
 
     #[test]
     fn clean_chain_stays_closed_complete() {
-        // BT-2796: the guard must not fire for fully-parsed chains.
+        // The guard must not fire for fully-parsed chains.
         let mut hierarchy = ClassHierarchy::with_builtins();
         let parent = base_class_info("CleanParent", "Object");
         let child = base_class_info("CleanChild2", "CleanParent");
@@ -347,7 +344,7 @@ mod tests {
 
     #[test]
     fn dependency_guard_opens_everything_under_project_complete() {
-        // BT-2794 pre-WS3 guard: a dependency can extend any class
+        // Pre-WS3 guard: a dependency can extend any class
         // (including Object), so with deps present no receiver's surface is
         // provably complete.
         let mut hierarchy = ClassHierarchy::with_builtins();
@@ -366,7 +363,7 @@ mod tests {
 
     #[test]
     fn no_dependencies_stays_closed_complete_under_project_complete() {
-        // BT-2794: dependency-free packages get full Hint precision.
+        // Dependency-free packages get full Hint precision.
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.add_from_beam_meta(vec![base_class_info("LocalThing", "Object")]);
         hierarchy.set_knowledge_scope(KnowledgeScope::ProjectComplete);
@@ -378,7 +375,7 @@ mod tests {
 
     #[test]
     fn dependency_guard_not_applied_under_module_only() {
-        // BT-2794: ModuleOnly contexts (REPL, isolated files) keep today's
+        // ModuleOnly contexts (REPL, isolated files) keep today's
         // behaviour — the ADR 0100 REPL example (`"hello" reverssed` hints)
         // must survive even if a deps flag were somehow set.
         let mut hierarchy = ClassHierarchy::with_builtins();

@@ -1,8 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Runtime-attached navigation: shared types + source-location translation
-//! (BT-2239, foundation for epic BT-2215).
+//! Runtime-attached navigation: shared types + source-location translation.
 //!
 //! **DDD Context:** Language Service
 //!
@@ -155,7 +154,7 @@ pub struct NavQueryResponse {
     pub sites: Vec<NavSite>,
 }
 
-/// One method-header row inside a [`NavSymbolClass`] (BT-2244).
+/// One method-header row inside a [`NavSymbolClass`].
 ///
 /// Decoded from the JSON payload of a successful `nav-symbols` reply.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,7 +175,7 @@ pub struct NavSymbolMethod {
     pub line: Option<u32>,
 }
 
-/// One class row in a `nav-symbols` reply (BT-2244).
+/// One class row in a `nav-symbols` reply.
 ///
 /// Each class contributes a name, an optional `source_file` (`None` for
 /// stdlib / bootstrap / `ClassBuilder` classes — the "headline win" of
@@ -210,8 +209,7 @@ pub struct NavSymbolClass {
     pub methods: Vec<NavSymbolMethod>,
 }
 
-/// JSON payload shape of a successful `nav-symbols` reply's `value` field
-/// (BT-2244).
+/// JSON payload shape of a successful `nav-symbols` reply's `value` field.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Deserialize))]
 pub struct NavSymbolsResponse {
@@ -448,7 +446,7 @@ mod tests {
     // payload assertions there avoids pulling serde_json into
     // `beamtalk-core`'s dev-dependencies just for an in-place test.
 
-    // --- BT-2244: nav-symbols typed payload ---
+    // --- nav-symbols typed payload ---
 
     #[test]
     fn nav_symbol_class_construction_preserves_source_file() {
@@ -472,7 +470,7 @@ mod tests {
 
     #[test]
     fn nav_symbol_class_allows_missing_source_file() {
-        // The headline win of BT-2244: REPL-loaded classes have no
+        // The headline win: REPL-loaded classes have no
         // backing source file. The type accepts that and consumers
         // surface them with a workspace-root anchor + `(no source file)`
         // detail rather than dropping the row.

@@ -32,17 +32,17 @@ type SelectorIndexMap = HashMap<EcoString, HashMap<EcoString, usize>>;
 
 #[cfg(any(test, feature = "test"))]
 thread_local! {
-    /// BT-3123 test-only instrumentation: counts calls to
+    /// Test-only instrumentation: counts calls to
     /// [`ClassHierarchy::build_with_options`] (which [`ClassHierarchy::build`]
     /// delegates to) — the from-scratch hierarchy construction pass. Used by a
     /// codegen test to verify that a driver threading an `AnalysisResult` into
     /// codegen via `CodegenOptions::with_analysis` doesn't trigger a second
     /// build. `#[cfg(any(test, feature = "test"))]` — compiled out of plain
-    /// release/production builds. BT-3362 (ADR 0117 Decision step 5): widened
-    /// from `#[cfg(test)]` — the codegen test that reads this now lives in
-    /// the standalone `beamtalk-codegen` crate, whose own tests need the
-    /// `feature = "test"` half to see it (`#[cfg(test)]` alone only applies
-    /// to this crate's own `--cfg test` build).
+    /// release/production builds (ADR 0117 Decision step 5): the `feature =
+    /// "test"` half exists because the codegen test that reads this lives in
+    /// the standalone `beamtalk-codegen` crate, whose own tests need it to
+    /// see this (`#[cfg(test)]` alone only applies to this crate's own
+    /// `--cfg test` build).
     ///
     /// Thread-local, not a shared global counter — see
     /// `type_checker::CHECK_MODULE_CALL_COUNT`'s doc for why a global counter's
@@ -62,20 +62,20 @@ pub struct ClassHierarchy {
     method_indexes: SelectorIndexMap,
     /// Per-class selector → method-vec index for class methods.
     class_method_indexes: SelectorIndexMap,
-    /// Names of synthetic protocol class entries (BT-1933).
+    /// Names of synthetic protocol class entries.
     ///
     /// Tracked so `merge()` can prefer real class definitions over
     /// synthetic protocol entries when files define both.
     protocol_classes: HashSet<EcoString>,
-    /// How complete the knowledge injected into this hierarchy is (BT-2796).
+    /// How complete the knowledge injected into this hierarchy is.
     ///
     /// Stamped by `analyse_full` from the orchestrator's
     /// `CompilerOptions::knowledge_scope`. Defaults to
     /// [`KnowledgeScope::ModuleOnly`]; consulted by the receiver-knowledge
-    /// classifier (ADR 0100 Rule 2, BT-2794).
+    /// classifier (ADR 0100 Rule 2).
     knowledge_scope: crate::semantic_analysis::receiver_knowledge::KnowledgeScope,
     /// Whether the compiled package declares dependencies whose extension
-    /// contributions are not yet loaded (BT-2794, pre-WS3 guard).
+    /// contributions are not yet loaded (pre-WS3 guard).
     ///
     /// Until WS3 (ADR 0070 amendment) ships cross-package extension metadata,
     /// a dependency can extend *any* class — including `Object`, which every
@@ -95,7 +95,7 @@ impl ClassHierarchy {
     /// Returns true if the given class name has runtime shadowing protection.
     ///
     /// Only stdlib classes with the `bt@stdlib@` module prefix are protected
-    /// at runtime. Runtime-only built-ins like `Future` are excluded (BT-750).
+    /// at runtime. Runtime-only built-ins like `Future` are excluded.
     #[must_use]
     pub fn is_runtime_protected_class(name: &str) -> bool {
         builtins::is_runtime_protected_class(name)
@@ -105,7 +105,7 @@ impl ClassHierarchy {
     /// `beamtalk build-stdlib` (as opposed to a runtime-only built-in like
     /// `Future`, which has no source file — see [`Self::is_builtin_class`]).
     ///
-    /// BT-3435 (ADR 0119 step 0): this is the one correct, already-parsed
+    /// ADR 0119 step 0: this is the one correct, already-parsed
     /// answer to "is this a known stdlib class" — `beamtalk-codegen`'s
     /// `is_known_stdlib_type` delegates to it instead of the deleted
     /// `STDLIB_CLASS_NAMES` file-stem directory scan.
@@ -159,7 +159,7 @@ impl ClassHierarchy {
     /// When `stdlib_mode` is true, built-in classes (e.g. `Character`) are
     /// permitted to subclass sealed classes. This exemption is **not** granted
     /// based on class name alone — only when the compiler knows it is compiling
-    /// stdlib sources (BT-791).
+    /// stdlib sources.
     ///
     /// Returns `(Ok(hierarchy), diagnostics)` per the project convention for
     /// user-facing operations that produce both a result and diagnostics.
@@ -167,7 +167,7 @@ impl ClassHierarchy {
         module: &Module,
         stdlib_mode: bool,
     ) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
-        // BT-3123 test-only instrumentation — see `BUILD_CALL_COUNT`'s doc.
+        // Test-only instrumentation — see `BUILD_CALL_COUNT`'s doc.
         #[cfg(any(test, feature = "test"))]
         BUILD_CALL_COUNT.with(|c| c.set(c.get() + 1));
 
@@ -176,7 +176,7 @@ impl ClassHierarchy {
         hierarchy.rebuild_all_indexes();
         (Ok(hierarchy), diagnostics)
     }
-    /// Register protocol definitions as synthetic class entries (BT-1933).
+    /// Register protocol definitions as synthetic class entries.
     ///
     /// Each protocol definition (e.g., `protocol Printable`) gets a synthetic
     /// `ClassInfo` entry as a sealed abstract subclass of `Protocol`, with
@@ -263,7 +263,7 @@ impl ClassHierarchy {
     ///
     /// The built-in class map is computed once and cached in a `OnceLock`.
     /// Each call clones the cached map so callers can add user-defined
-    /// classes without mutating the shared original. (BT-1677)
+    /// classes without mutating the shared original.
     #[must_use]
     pub fn with_builtins() -> Self {
         static BUILTIN_HIERARCHY: OnceLock<ClassHierarchy> = OnceLock::new();
@@ -287,7 +287,7 @@ impl ClassHierarchy {
     /// Returns every stdlib type alias declaration (`type Name = ...`),
     /// bootstrapped from `generated_builtins.rs`'s persisted alias-source
     /// table the same way [`Self::with_builtins`] bootstraps stdlib classes
-    /// from that file's `generated_builtin_classes()` (BT-2935).
+    /// from that file's `generated_builtin_classes()`.
     ///
     /// Unlike [`Self::with_builtins`], this is *not* baked automatically into
     /// every [`ClassHierarchy`]/[`AliasRegistry`](crate::semantic_analysis::alias_registry::AliasRegistry)
@@ -298,8 +298,7 @@ impl ClassHierarchy {
     /// `ClassHierarchyContext::pre_loaded_aliases`) must call this and thread
     /// the result through explicitly. Wiring this into every ordinary
     /// compile's `AliasRegistry` (so application code can reference a stdlib
-    /// alias without importing it) is BT-2938, deliberately out of scope
-    /// here.
+    /// alias without importing it) is deliberately out of scope here.
     ///
     /// The underlying re-parse (one `AliasRegistry::from_source_text` call
     /// per stdlib alias) is computed once and cached in a `OnceLock`, exactly
@@ -313,14 +312,14 @@ impl ClassHierarchy {
         STDLIB_ALIASES.get_or_init(builtins::stdlib_aliases).clone()
     }
 
-    /// How complete the knowledge injected into this hierarchy is (BT-2796).
+    /// How complete the knowledge injected into this hierarchy is.
     #[must_use]
     pub fn knowledge_scope(&self) -> crate::semantic_analysis::receiver_knowledge::KnowledgeScope {
         self.knowledge_scope
     }
 
     /// Declare how complete the knowledge injected into this hierarchy is
-    /// (BT-2796, ADR 0100 Rule 2 sequencing guard).
+    /// (ADR 0100 Rule 2 sequencing guard).
     ///
     /// Only orchestrators that have genuinely walked the whole project (CLI
     /// build Pass 1, lint's package walk, the LSP after workspace preload)
@@ -332,14 +331,14 @@ impl ClassHierarchy {
         self.knowledge_scope = scope;
     }
 
-    /// Whether dependency extension contributions are unknown (BT-2794).
+    /// Whether dependency extension contributions are unknown.
     #[must_use]
     pub fn dependency_extensions_unknown(&self) -> bool {
         self.dependency_extensions_unknown
     }
 
     /// Declare that the compiled package has dependencies whose extension
-    /// contributions are not loaded (BT-2794, pre-WS3 guard). Set by
+    /// contributions are not loaded (pre-WS3 guard). Set by
     /// `analyse_full` from
     /// `CompilerOptions::has_package_dependencies`.
     pub fn set_dependency_extensions_unknown(&mut self, unknown: bool) {
@@ -347,7 +346,7 @@ impl ClassHierarchy {
     }
 
     /// Mark the classes defined in `module` as having a possibly-incomplete
-    /// method surface (BT-2796 parse-error guard).
+    /// method surface (parse-error guard).
     ///
     /// Called by orchestrators when the file that produced `module` had parse
     /// **errors** — error recovery may have dropped method definitions, so
@@ -370,7 +369,7 @@ impl ClassHierarchy {
     pub fn has_class(&self, name: &str) -> bool {
         self.classes.contains_key(name)
     }
-    /// Check if `name` is a synthetic protocol class entry (BT-1933).
+    /// Check if `name` is a synthetic protocol class entry.
     ///
     /// Returns `true` when `register_protocol_classes` inserted the entry for a
     /// protocol definition. Returns `false` for real classes (even if those
@@ -379,7 +378,7 @@ impl ClassHierarchy {
     ///
     /// Used by goto-definition to distinguish "name refers to a protocol" from
     /// "name refers to a class we haven't loaded a source file for" when a
-    /// protocol and a real class share a name across files (BT-1936).
+    /// protocol and a real class share a name across files.
     #[must_use]
     pub fn is_protocol_class(&self, name: &str) -> bool {
         self.protocol_classes.contains(name)
@@ -388,17 +387,17 @@ impl ClassHierarchy {
     pub fn class_names(&self) -> impl Iterator<Item = &EcoString> {
         self.classes.keys()
     }
-    /// BT-894: Add minimal class entries from a cross-file superclass index.
+    /// Add minimal class entries from a cross-file superclass index.
     ///
     /// For each class in the index that isn't already in the hierarchy, adds a
     /// stub `ClassInfo` with just the name and superclass. This allows
     /// `superclass_chain` to resolve the full inheritance chain for classes
     /// whose parents are defined in other files.
     ///
-    /// BT-1528: After all entries are inserted, walks the ancestor chain for
+    /// After all entries are inserted, walks the ancestor chain for
     /// each new class to resolve `is_value` correctly for indirect subclasses.
     ///
-    /// BT-3123: Returns whether any stub was actually inserted — `false` means
+    /// Returns whether any stub was actually inserted — `false` means
     /// every class in `index` was already present, so a caller holding a
     /// hierarchy-derived cache (e.g. codegen's handed-off `method_return_types`)
     /// can trust it's still valid without recomputing.
@@ -406,7 +405,7 @@ impl ClassHierarchy {
         &mut self,
         index: &std::collections::HashMap<String, String>,
     ) -> bool {
-        // BT-1545: Track which classes are newly inserted so the is_value
+        // Track which classes are newly inserted so the is_value
         // fixup loop only walks them and their descendants, not everything.
         let mut newly_inserted: HashSet<EcoString> = HashSet::new();
         for (class_name, superclass_name) in index {
@@ -427,7 +426,7 @@ impl ClassHierarchy {
                         is_value: superclass_name == "Value",
                         is_native: false,
                         handle_scope: None,
-                        // BT-2796: A stub carries only name + superclass — its
+                        // A stub carries only name + superclass — its
                         // method surface is genuinely unknown, so receivers
                         // whose chain includes it must never be classified
                         // ClosedComplete.
@@ -448,9 +447,9 @@ impl ClassHierarchy {
         if newly_inserted.is_empty() {
             return false;
         }
-        // BT-1528: Fix is_value for indirect Value subclasses now that all
+        // Fix is_value for indirect Value subclasses now that all
         // entries are in the hierarchy and superclass_chain can walk them.
-        // BT-1545: Only check newly-inserted classes and existing classes
+        // Only check newly-inserted classes and existing classes
         // whose direct superclass is newly inserted (transitively). Use a
         // worklist to find all affected descendants without walking every
         // class in the hierarchy.
@@ -491,7 +490,7 @@ impl ClassHierarchy {
     /// in the hierarchy (AST-derived entries from `build()` are authoritative
     /// over cached BEAM metadata, which may be stale during redefinition).
     ///
-    /// BT-3123: Returns whether any entry was actually inserted — see
+    /// Returns whether any entry was actually inserted — see
     /// [`Self::add_external_superclasses`]'s doc for why callers care.
     pub fn add_from_beam_meta(&mut self, classes: Vec<ClassInfo>) -> bool {
         let mut changed = false;
@@ -511,7 +510,7 @@ impl ClassHierarchy {
         changed
     }
     /// Set the `package` field on all non-builtin classes that don't already
-    /// have a package assigned (ADR 0071, BT-1700).
+    /// have a package assigned (ADR 0071).
     ///
     /// Called after `build_with_options` to stamp the current compilation unit's
     /// package name onto AST-derived classes. Classes loaded from BEAM metadata
@@ -526,7 +525,7 @@ impl ClassHierarchy {
     }
     /// Extract `ClassInfo` entries from a parsed module without diagnostics.
     ///
-    /// BT-1523: Same ClassInfo-building logic as `add_module_classes` Pass 1,
+    /// Same ClassInfo-building logic as `add_module_classes` Pass 1,
     /// but without duplicate-method checks or inserting into a hierarchy.
     /// Used by the build's Pass 1 to collect class metadata from all source files
     /// for cross-file hierarchy resolution in Pass 2.
@@ -539,7 +538,7 @@ impl ClassHierarchy {
             .collect()
     }
     /// Set the `package` field on every entry in `class_infos` that doesn't
-    /// already have one (ADR 0071, BT-1700 / BT-2920).
+    /// already have one (ADR 0071).
     ///
     /// [`Self::extract_class_infos`] builds `ClassInfo` purely from a single
     /// file's AST, with `package: None` — it has no project-wide context. A
@@ -612,8 +611,9 @@ impl ClassHierarchy {
                 is_internal: false,
                 spawns_block: false,
                 // `ExtensionTypeInfo` stores flattened strings (compilation-layer
-                // metadata, out of BT-3076's scope) — parse back into structure
-                // rather than carrying the string through as an opaque `Simple`.
+                // metadata, outside `DeclaredType`'s scope) — parse back into
+                // structure rather than carrying the string through as an
+                // opaque `Simple`.
                 return_type: first
                     .type_info
                     .return_type
@@ -665,7 +665,7 @@ impl ClassHierarchy {
     /// User-defined classes from `other` overwrite any existing entry with the
     /// same name, allowing incremental file updates.
     ///
-    /// BT-1933: Synthetic protocol class entries never overwrite real class
+    /// Synthetic protocol class entries never overwrite real class
     /// definitions. A real incoming class *does* overwrite a synthetic protocol.
     pub fn merge(&mut self, other: &ClassHierarchy) {
         let mut changed = false;
@@ -749,10 +749,10 @@ impl ClassHierarchy {
     ///
     /// Returns a diagnostic if the superclass is sealed and the subclass is not
     /// exempt. Exemptions are only granted to built-in classes when compiling
-    /// in stdlib mode (BT-791).
+    /// in stdlib mode.
     ///
     /// Note: This gates on `stdlib_mode` (compilation context) rather than
-    /// class names. Runtime-protected classes (BT-778) are an additional layer
+    /// class names. Runtime-protected classes are an additional layer
     /// that applies at runtime; this compile-time check is stricter.
     fn check_sealed_superclass(
         &self,
@@ -764,7 +764,7 @@ impl ClassHierarchy {
         if super_info.can_be_subclassed() {
             return None;
         }
-        // BT-791: Only exempt built-in classes when compiling stdlib.
+        // Only exempt built-in classes when compiling stdlib.
         // A user-defined class with the same name (e.g. `Character`)
         // must still respect sealed enforcement.
         if stdlib_mode && Self::is_builtin_class(class.name.name.as_str()) {
@@ -810,7 +810,7 @@ impl ClassHierarchy {
             let class_info = ClassInfo::from_class_definition(class);
             self.classes.insert(class.name.name.clone(), class_info);
         }
-        // Pass 1.5 (BT-1528): Propagate ClassKind through the hierarchy.
+        // Pass 1.5: Propagate ClassKind through the hierarchy.
         // Classes whose direct superclass is not "Actor"/"Value" but whose
         // ancestors include Actor or Value need their is_value flag corrected
         // and auto-slot methods synthesized.
@@ -826,9 +826,9 @@ impl ClassHierarchy {
                 diagnostics.push(diag);
             }
             // Check sealed method override enforcement.
-            // BT-803: Built-in stdlib classes (e.g. Metaclass) are allowed to override
+            // Built-in stdlib classes (e.g. Metaclass) are allowed to override
             // sealed methods when compiling in stdlib mode.
-            // BT-807: Abstract stdlib classes (e.g. Behaviour) are also allowed to override
+            // Abstract stdlib classes (e.g. Behaviour) are also allowed to override
             // sealed methods, as they provide class-side dispatch methods whose
             // selectors coincide with sealed instance-side methods on Object, but are
             // dispatched through a separate runtime namespace.

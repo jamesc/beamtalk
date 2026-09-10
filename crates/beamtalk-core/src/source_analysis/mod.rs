@@ -51,13 +51,13 @@ mod token;
 mod lexer_property_tests;
 
 // Shared `.bt` corpus-walking helpers for the corpus test suites below, and
-// for `crate::unparse`'s corpus conformance tests (BT-3346) — `pub(crate)`
+// for `crate::unparse`'s corpus conformance tests — `pub(crate)`
 // rather than private so both can reach it.
 #[cfg(test)]
 pub(crate) mod corpus_test_support;
 
-// Corpus-wide divider validation for method categories (BT-2601 recognizer,
-// BT-2626 stdlib-wide curation).
+// Corpus-wide divider validation for method categories (recognizer and
+// stdlib-wide curation).
 #[cfg(test)]
 mod method_category_corpus_tests;
 
@@ -178,11 +178,11 @@ pub fn validate_selector_input(sel: &str) -> Result<(), String> {
 ///
 /// Deliberately broader than a strict lexical identifier: `:` is included so
 /// keyword selectors like `ifTrue:` and `ifTrue:ifFalse:` complete as a
-/// single unit, and `@` so package-qualified names like `json@Parser` do too
-/// (BT-1659). This is the canonical Rust definition — the CLI REPL's
+/// single unit, and `@` so package-qualified names like `json@Parser` do too.
+/// This is the canonical Rust definition — the CLI REPL's
 /// tab-completer (`crates/beamtalk-cli/src/commands/repl/helper.rs`) and the
 /// LSP's static completion provider (`queries::completion_provider`) both
-/// delegate here rather than keeping their own copies (BT-3083).
+/// delegate here rather than keeping their own copies.
 ///
 /// The live REPL/MCP completion engine (`beamtalk_repl_ops_dev:is_identifier_char/1`
 /// in `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_dev.erl`) cannot
@@ -304,7 +304,7 @@ mod completion_word_boundary_tests {
         assert_eq!(completion_word_start(""), 0);
     }
 
-    /// BT-3083 conformance: every case in the shared corpus must classify
+    /// Conformance: every case in the shared corpus must classify
     /// identically here and in the Erlang REPL/MCP completion engine's
     /// `is_identifier_char/1`. The corpus is the single source of truth both
     /// implementations are pinned to; the Erlang side asserts the identical

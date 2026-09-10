@@ -206,8 +206,8 @@ impl Module {
     /// `for class in &module.classes { for method in … }` and a separate
     /// `for standalone in &module.method_definitions { … }` loop when the
     /// per-method logic does not need the enclosing `ClassDefinition` context.
-    // BT-3340: widened from `pub(crate)` — several lint passes in the
-    // standalone `beamtalk-lint` crate iterate every method this way.
+    // Public rather than `pub(crate)`: the standalone `beamtalk-lint` crate
+    // iterates every method this way.
     pub fn all_methods(&self) -> impl Iterator<Item = &MethodDefinition> {
         self.classes
             .iter()
@@ -259,7 +259,7 @@ impl Comment {
     /// Used to preserve a `///` line as a *leading comment* on a
     /// [`CommentAttachment`] rather than as a declaration's `doc_comment`
     /// field — e.g. a `///` block that a blank line or another comment broke
-    /// away from the declaration it visually precedes (BT-2924). Keeping a
+    /// away from the declaration it visually precedes. Keeping a
     /// distinct kind (instead of re-encoding it as [`CommentKind::Line`])
     /// lets it round-trip byte-for-byte as `///`, not `//`.
     #[must_use]
@@ -281,7 +281,7 @@ pub enum CommentKind {
     /// A block comment (`/* text */`).
     Block,
     /// A `///` doc-style line comment that isn't attached to any
-    /// declaration's `doc_comment` field (BT-2924) — e.g. an earlier block
+    /// declaration's `doc_comment` field — e.g. an earlier block
     /// that a blank line broke away from the declaration it precedes.
     Doc,
 }
@@ -301,7 +301,7 @@ pub struct CommentAttachment {
     /// Whether a blank line preceded this node in the source, before any
     /// leading comments (or before the node itself, if it has none).
     ///
-    /// Mirrors [`ExpressionStatement::preceding_blank_line`] (BT-987), but
+    /// Mirrors [`ExpressionStatement::preceding_blank_line`], but
     /// lives here — rather than as a field on each top-level declaration
     /// type — so that the many existing `CommentAttachment::default()` call
     /// sites (tests, synthetic AST construction) keep compiling unchanged.
@@ -311,7 +311,7 @@ pub struct CommentAttachment {
     /// statements included, not only top-level declarations — but
     /// currently consulted only by the module-level unparser, to preserve
     /// the blank line separating top-level class / protocol / type-alias
-    /// declarations (BT-2929).
+    /// declarations.
     pub leading_blank_line: bool,
     /// Whether a blank line separates the *last* leading comment from
     /// whatever follows it (a doc comment, or the node itself when there is
@@ -320,7 +320,7 @@ pub struct CommentAttachment {
     ///
     /// `leading_blank_line` alone cannot represent the `// note\n\ntype Foo
     /// = Bar` shape: a blank line inside the leading trivia, after the last
-    /// comment, was previously dropped outright on `beamtalk fmt` (BT-2945).
+    /// comment, would otherwise be dropped outright by `beamtalk fmt`.
     /// Meaningless (always `false`) when `leading` is empty — there is no
     /// comment block to have a gap after.
     ///
@@ -337,8 +337,7 @@ impl CommentAttachment {
     /// (discard if it drops the whole attachment on the empty branch,
     /// overwrite if it replaces one attachment with another there). See
     /// `PendingDeclarationExpect::apply_to` for the production call site —
-    /// an overwrite — where this is already known to be harmless
-    /// (tracked as BT-2944).
+    /// an overwrite — where this is already known to be harmless.
     ///
     /// Also ignores `blank_line_after_comments` for the same reason, though
     /// that field is always `false` whenever `leading` is empty (the parser
@@ -355,14 +354,14 @@ impl CommentAttachment {
 ///
 /// Wraps an [`Expression`] with a [`CommentAttachment`] for preserving comments
 /// between statements. Statement-position fields (method bodies, block bodies,
-/// module expressions) use `Vec<ExpressionStatement>` (BT-974).
+/// module expressions) use `Vec<ExpressionStatement>`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExpressionStatement {
     /// Comments attached to this statement.
     pub comments: CommentAttachment,
     /// The expression.
     pub expression: Expression,
-    /// Whether a blank line preceded this statement in the source (BT-987).
+    /// Whether a blank line preceded this statement in the source.
     ///
     /// Set by the parser when 2+ newlines appear before the statement.
     /// The unparser emits an extra blank line before such statements.
@@ -443,16 +442,16 @@ pub fn resolve_qualified_module_name(class_name: &str, package: Option<&str>) ->
     }
 }
 
-/// BT-3081 cross-language conformance fixture for `to_module_name`.
+/// Cross-language conformance fixture for `to_module_name`.
 ///
 /// Kept byte-identical to the Erlang-side fixture in
 /// `runtime/apps/beamtalk_runtime/test/beamtalk_module_name_tests.erl`
 /// (`beamtalk_module_name:camel_to_snake/1`) — the single Erlang authority
 /// this Rust function is mirrored by. If either list changes, update both so
 /// the two implementations stay provably in sync on the same inputs,
-/// including the acronym case-fold collision (`BEAMError`/`Beamerror`,
-/// BT-3081) and the lowercase-initial + Unicode cases that previously drifted
-/// between the four now-deleted Erlang copies of this conversion.
+/// including the acronym case-fold collision (`BEAMError`/`Beamerror`)
+/// and the lowercase-initial + Unicode cases that are easy to drift on
+/// when re-implementing this conversion.
 #[cfg(test)]
 const MODULE_NAME_CONFORMANCE_FIXTURES: &[(&str, &str)] = &[
     ("Counter", "counter"),
@@ -1028,7 +1027,7 @@ mod tests {
         assert!(module.expressions.is_empty());
     }
 
-    // --- CommentAttachment tests (BT-973) ---
+    // --- CommentAttachment tests ---
 
     #[test]
     fn comment_attachment_default_is_empty() {
@@ -1109,7 +1108,7 @@ mod tests {
         assert_eq!(stmt.comments.leading.len(), 1);
     }
 
-    // --- ClassKind tests (BT-922) ---
+    // --- ClassKind tests ---
 
     #[test]
     fn class_kind_from_superclass_name() {

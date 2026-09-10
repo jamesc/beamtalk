@@ -221,7 +221,7 @@ impl CoreErlangGenerator {
     /// which expects a pre-built stacktrace term rather than the raw trace a
     /// catch clause binds). `pub(in crate::core_erlang)` so sibling
     /// modules building their own `try`/`catch` (e.g. `operators.rs`'s
-    /// number-on-the-left coercion wrapper, ADR 0116/BT-3263) reuse this
+    /// number-on-the-left coercion wrapper, ADR 0116) reuse this
     /// instead of re-emitting the same three-arg primop inline.
     pub(in crate::core_erlang) fn emit_raw_raise(
         type_var: String,
@@ -245,7 +245,7 @@ impl CoreErlangGenerator {
     /// Produces an open-ended fragment; caller appends the `<'true'>` branch
     /// body, the `<'false'>` re-raise arm, and the closing `end end`.
     ///
-    /// BT-754/BT-761/BT-854: NLR throws (`{'$bt_nlr', ...}`) must bypass
+    /// NLR throws (`{'$bt_nlr', ...}`) must bypass
     /// on:do: so the enclosing method's NLR handler can intercept them.
     #[allow(clippy::too_many_arguments)]
     fn on_do_catch_preamble(
@@ -362,7 +362,7 @@ impl CoreErlangGenerator {
         ex_class: &Expression,
         handler: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-493: Validate protected block arity (must be 0-arg)
+        // Validate protected block arity (must be 0-arg)
         validate_block_arity_exact(
             receiver,
             0,
@@ -370,11 +370,11 @@ impl CoreErlangGenerator {
             "Fix: The protected block must take no arguments:\n\
              \x20 [riskyOperation] on: Exception do: [:e | handle error]",
         )?;
-        // BT-493: Validate handler block arity (must be 0 or 1-arg)
+        // Validate handler block arity (must be 0 or 1-arg)
         // Returns true if handler takes an argument, false for 0-arg
         let handler_takes_arg = validate_on_do_handler(handler, "on:do:")?;
 
-        // BT-410: Check both blocks for field/state mutations
+        // Check both blocks for field/state mutations
         let receiver_needs = if let Expression::Block(b) = receiver {
             self.needs_mutation_threading(&block_analysis::analyze_block(b))
         } else {
@@ -414,11 +414,11 @@ impl CoreErlangGenerator {
         let handler_apply =
             Self::make_handler_apply(handler_var.clone(), ex_obj_var.clone(), handler_takes_arg);
 
-        // BT-754: Fresh variable names for the NLR pattern guard (Core Erlang
+        // Fresh variable names for the NLR pattern guard (Core Erlang
         // does not support anonymous `_` wildcards — each must be unique).
         let nlr_tok_var = self.fresh_temp_var("NlrCheckTok");
         let nlr_val_var = self.fresh_temp_var("NlrCheckVal");
-        // BT-761: Actor NLR throws include state as a 4th element.
+        // Actor NLR throws include state as a 4th element.
         let nlr_state_var = self.fresh_temp_var("NlrCheckState");
         let nlr_tok_var2 = self.fresh_temp_var("NlrCheckTok");
         let nlr_val_var2 = self.fresh_temp_var("NlrCheckVal");
@@ -470,7 +470,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-3177: the real value to seed this construct's `StateAcc` scratch
+    /// the real value to seed this construct's `StateAcc` scratch
     /// map from — the actor's own `State` parameter in Actor context
     /// (`current_state_var()`, matching `render_state_prefix`'s bare
     /// `"State"` at version 0), or a fresh empty map everywhere else.
@@ -503,7 +503,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-410: Generates `on:do:` with state mutation threading.
+    /// Generates `on:do:` with state mutation threading.
     ///
     /// Inlines receiver (try body) and handler block bodies with state threading
     /// instead of wrapping them as closures. This ensures field mutations in
@@ -548,10 +548,10 @@ impl CoreErlangGenerator {
         let ex_obj_var = self.fresh_temp_var("ExObj");
         let match_var = self.fresh_temp_var("Match");
         let state_after_try = self.fresh_temp_var("StateAfterTry");
-        // BT-754: Unique names for NLR pattern variables (no anonymous _ in Core Erlang).
+        // Unique names for NLR pattern variables (no anonymous _ in Core Erlang).
         let nlr_tok_var = self.fresh_temp_var("NlrCheckTok");
         let nlr_val_var = self.fresh_temp_var("NlrCheckVal");
-        // BT-761: Actor NLR throws include state as a 4th element.
+        // Actor NLR throws include state as a 4th element.
         let nlr_state_var = self.fresh_temp_var("NlrCheckState");
         let nlr_tok_var2 = self.fresh_temp_var("NlrCheckTok");
         let nlr_val_var2 = self.fresh_temp_var("NlrCheckVal");
@@ -562,7 +562,7 @@ impl CoreErlangGenerator {
         let ex_class_code = self.expression_doc(ex_class)?;
         // Rename current state to StateAcc for uniform threading
         let current_state = self.exception_body_outer_state();
-        // BT-3160: seed `__local__` keys for outer locals mutated by either the
+        // seed `__local__` keys for outer locals mutated by either the
         // try (receiver) block or the handler block — only one of the two ever
         // runs at a given call, so (mirroring `ifTrue:ifFalse:`'s two branches)
         // the key must be present in the base state even on the path that
@@ -596,9 +596,9 @@ impl CoreErlangGenerator {
         // Generate try body (receiver block) with state threading
         let (try_result_var, try_final, try_self_slot) =
             self.push_exception_arm(&mut docs, receiver_block, threads_value_self, outer_self)?;
-        // BT-483: Return {Result, State} from try body
+        // Return {Result, State} from try body
         // Success: pass {Result, State} through + catch clause with NLR passthrough.
-        // BT-754/BT-761/BT-854: NLR re-raise via on_do_catch_preamble (see generate_on_do).
+        // NLR re-raise via on_do_catch_preamble (see generate_on_do).
         docs.push(docvec![
             " {",
             leaf::var(try_result_var),
@@ -645,7 +645,7 @@ impl CoreErlangGenerator {
         self.set_self_version(outer_self);
         let (handler_result_var, handler_final, handler_self_slot) =
             self.push_exception_arm(&mut docs, handler_block, threads_value_self, outer_self)?;
-        // BT-483: Return {Result, State} from handler
+        // Return {Result, State} from handler
         docs.push(docvec![
             " {",
             leaf::var(handler_result_var),
@@ -656,7 +656,7 @@ impl CoreErlangGenerator {
         ]);
         self.pop_scope();
 
-        // ADR 0111 Addendum 5 (BT-3165): the try body and the handler body
+        // ADR 0111 Addendum 5: the try body and the handler body
         // are sibling with_branch_context frames (only one of them ever
         // actually runs at a given call, but both are compiled) — each
         // `generate_exception_body_with_threading` call mints its own fresh
@@ -693,7 +693,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         cleanup: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-493: Validate cleanup block arity (must be 0-arg)
+        // Validate cleanup block arity (must be 0-arg)
         validate_block_arity_exact(
             cleanup,
             0,
@@ -702,7 +702,7 @@ impl CoreErlangGenerator {
              \x20 [operation] ensure: [resource close]",
         )?;
 
-        // BT-410: Check both blocks for field/state mutations
+        // Check both blocks for field/state mutations
         let receiver_needs = if let Expression::Block(b) = receiver {
             self.needs_mutation_threading(&block_analysis::analyze_block(b))
         } else {
@@ -771,7 +771,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-410: Generates `ensure:` with state mutation threading.
+    /// Generates `ensure:` with state mutation threading.
     ///
     /// Inlines receiver (try body) and cleanup block bodies with state threading.
     /// On success, cleanup runs with the try body's final state.
@@ -812,7 +812,7 @@ impl CoreErlangGenerator {
 
         // Rename current state to StateAcc
         let current_state = self.exception_body_outer_state();
-        // BT-3160: seed `__local__` keys for outer locals mutated by the try
+        // seed `__local__` keys for outer locals mutated by the try
         // (receiver) block or the cleanup block — mirrors `on:do:`'s seeding
         // (see `generate_on_do_with_mutations`) so a local written only
         // conditionally within one of the blocks (e.g. behind a nested
@@ -838,7 +838,7 @@ impl CoreErlangGenerator {
         // Generate try body with state threading
         let (try_result_var, try_final, try_self_slot) =
             self.push_exception_arm(&mut docs, receiver_block, threads_value_self, outer_self)?;
-        // BT-483: Return {Result, State} from try body
+        // Return {Result, State} from try body
         docs.push(docvec![
             " {",
             leaf::var(try_result_var),
@@ -849,7 +849,7 @@ impl CoreErlangGenerator {
         ]);
 
         // Success: run cleanup starting from try body's state
-        // BT-483: Extract Result and State from {Result, State} tuple using element/N
+        // Extract Result and State from {Result, State} tuple using element/N
         let result_from_try = self.fresh_temp_var("TryResult");
         docs.push(docvec![
             "of ",
@@ -863,7 +863,7 @@ impl CoreErlangGenerator {
             ") in ",
         ]);
 
-        // BT-3486: on the SUCCESS path the cleanup runs after the try body, so
+        // On the SUCCESS path the cleanup runs after the try body, so
         // it must see the try body's field writes — but an Erlang binding made
         // inside `try` is not in scope in the `of` arm, so the try's own
         // `Self{N}` is unreachable here. Re-seed from the tuple's trailing
@@ -893,7 +893,7 @@ impl CoreErlangGenerator {
             &cleanup_success_arm,
         );
         docs.push(cleanup_success_arm.doc);
-        // BT-483: Return try body result with cleanup's final state
+        // Return try body result with cleanup's final state
         docs.push(docvec![
             " {",
             leaf::var(result_from_try),
@@ -925,7 +925,7 @@ impl CoreErlangGenerator {
         // arm seed, since its own frame must verify like any other.
         self.push_exception_arm(&mut docs, cleanup_block, threads_value_self, outer_self)?;
 
-        // ADR 0111 Addendum 5 (BT-3165): three sibling with_branch_context
+        // ADR 0111 Addendum 5: three sibling with_branch_context
         // frames — the try body, the success-path cleanup run, and the
         // error-path cleanup run (`cleanup_block` is compiled twice, once
         // per path, each its own arm) — each `generate_exception_body_with_threading`
@@ -968,8 +968,8 @@ impl CoreErlangGenerator {
         let ex_obj_var = self.fresh_temp_var("ExObj");
         let match_var = self.fresh_temp_var("Match");
         // Two NLR throw shapes `on_do_catch_preamble` matches against: the
-        // 4-tuple actor-NLR-with-state variant (BT-761) and the plain 3-tuple
-        // variant (BT-754) — not nesting levels, hence the `_with_state`/
+        // 4-tuple actor-NLR-with-state variant and the plain 3-tuple
+        // variant — not nesting levels, hence the `_with_state`/
         // `_no_state` naming rather than a generic numeric suffix.
         let nlr_tok_with_state_var = self.fresh_temp_var("NlrCheckTok");
         let nlr_val_with_state_var = self.fresh_temp_var("NlrCheckVal");
@@ -979,8 +979,8 @@ impl CoreErlangGenerator {
         let other_pair_var = self.fresh_temp_var("OtherPair");
 
         // arity 1 is ambiguous between a pure 1-arg handler and a stateful
-        // 0-arg handler — same documented ambiguity as BT-2812's blockValue*
-        // (deferred disambiguation, see BT-2892); anything else is Tier 2.
+        // 0-arg handler — same documented ambiguity as Block's blockValue*
+        // family (deferred disambiguation); anything else is Tier 2.
         let handler_stateful_error = self.generate_stateful_block_dispatch_error(
             "on:do:",
             class_name,
@@ -1034,10 +1034,10 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-2908: Generates the fallback method body for `onDo` — Block's
+    /// Generates the fallback method body for `onDo` — Block's
     /// `on:do:`. Reached only via generic dispatch bypassing the call-site
     /// interception `generate_on_do` normally provides (e.g. `perform:`). See
-    /// `generate_block_value_structural_fallback` (BT-2812) for the general
+    /// `generate_block_value_structural_fallback` for the general
     /// Tier 1/Tier 2 discrimination rationale.
     ///
     /// Reuses `on_do_catch_preamble`'s NLR-passthrough + `matches_class`
@@ -1112,10 +1112,10 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-2908: Generates the fallback method body for `ensure` — Block's
+    /// Generates the fallback method body for `ensure` — Block's
     /// `ensure:`. Reached only via generic dispatch bypassing the call-site
     /// interception `generate_ensure` normally provides (e.g. `perform:`).
-    /// See `generate_block_value_structural_fallback` (BT-2812) for the
+    /// See `generate_block_value_structural_fallback` for the
     /// general Tier 1/Tier 2 discrimination rationale.
     ///
     /// Both receiver and cleanup block must be Tier 1 (pure, 0-arg funs) for
@@ -1223,7 +1223,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-410/BT-483: Generates block body expressions with state mutation threading.
+    /// Generates block body expressions with state mutation threading.
     ///
     /// Follows the same pattern as `generate_while_body_with_threading`:
     /// - Sets `in_loop_body = true` so field reads/writes use `StateAcc`
@@ -1251,7 +1251,7 @@ impl CoreErlangGenerator {
 
     /// Inner implementation called inside `with_branch_context`.
     ///
-    /// ADR 0111 Addendum 5 (BT-3165): this arm's mutation sequence is built
+    /// ADR 0111 Addendum 5: this arm's mutation sequence is built
     /// as real [`ThreadedStmt`]s — the E1–E7 per-shape decomposition table
     /// (E1/E3 reuse `conditionals.rs`'s C1/C2 helpers,
     /// `lower_field_assignment_bind`/`lower_local_var_assignment_bind`,
@@ -1279,13 +1279,13 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<ExceptionArm> {
         let frame = self.current_branch_frame();
-        // BT-3486: the `SelfVt` baseline this arm inherits (see
+        // the `SelfVt` baseline this arm inherits (see
         // `generate_exception_body_with_threading`'s doc comment) — compared
         // against the post-body version below to detect a value-type field
         // write, exactly as `build_vt_conditional_branch_pieces_inner` does
         // for a conditional arm.
         let self_before = self.self_version();
-        // BT-3160: push a scope so a local-var assignment's `bind_var` rebind
+        // push a scope so a local-var assignment's `bind_var` rebind
         // (from `lower_local_var_assignment_bind`) is scoped to this try
         // body and doesn't leak into the enclosing method scope — matching the
         // bracket `generate_conditional_branch_inline` already has (conditionals.rs).
@@ -1316,7 +1316,7 @@ impl CoreErlangGenerator {
                 // E1 — same shape/mint-order as C1; reused directly.
                 let _val_var = self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
                 if is_last {
-                    // BT-483: Field assignment returns the assigned value
+                    // Field assignment returns the assigned value
                     // The val was already bound by lower_field_assignment_bind.
                     // Use the current state var for the state, and the assigned value as result
                     // Note: lower_field_assignment_bind binds _ValN = <value>
@@ -1331,7 +1331,7 @@ impl CoreErlangGenerator {
                 // real Bind (Direct rebind, `element(2, _SD)`) instead of
                 // living inside an opaque Statement's text.
                 //
-                // ADR 0118 phase 2a (BT-3417): `self log: (self nextId)` —
+                // ADR 0118 phase 2a: `self log: (self nextId)` —
                 // thread the arguments' own self-sends ahead of this
                 // dispatch via [`Self::sequence_children`] (the sequencing
                 // rule) instead of the planner's `hoist_self_send_arguments`.
@@ -1370,7 +1370,7 @@ impl CoreErlangGenerator {
                     span,
                 });
                 if is_last {
-                    // BT-483: Self-dispatch result is in dispatch_var
+                    // Self-dispatch result is in dispatch_var
                     let rv = self.fresh_temp_var("ExResult");
                     stmts.push(ThreadedStmt::Statement(
                         docvec![
@@ -1397,10 +1397,10 @@ impl CoreErlangGenerator {
                 }
             } else if is_last {
                 if has_direct_field_assignments {
-                    // E6 — has_direct_field_assignments sub-branch. BT-3177 /
-                    // ADR 0118 phase 2a (BT-3417): thread every
+                    // E6 — has_direct_field_assignments sub-branch.
+                    // ADR 0118 phase 2a: thread every
                     // state-effecting sub-expression (`1 + (self bump)`) —
-                    // AND, since ADR 0118 phase 5b (BT-3422) widened
+                    // AND, since ADR 0118 phase 5b widened
                     // `subexpr_needs_prelude` to recognize a class-var
                     // producer too, a bare class-method self-send with no
                     // enclosing assignment (e.g. `self bump` as this try
@@ -1419,7 +1419,7 @@ impl CoreErlangGenerator {
                     ));
                     result_var = rv;
                 } else {
-                    // BT-483: Last expression with no direct field assignments.
+                    // Last expression with no direct field assignments.
                     // If this is a nested control flow construct returning {Result, State},
                     // destructure it. Otherwise just capture the result.
                     if self.control_flow_has_mutations(expr) {
@@ -1483,17 +1483,17 @@ impl CoreErlangGenerator {
                     }
                 }
             } else {
-                // E7 — non-last plain expression. BT-3177: a discarded
+                // E7 — non-last plain expression. A discarded
                 // non-last statement must keep a class-var mutation visible
                 // to later statements in this same try body (a second
                 // self-send later must see the first one's already-bumped
-                // `ClassVarsN`). ADR 0118 phase 5b (BT-3422): `thread_ahead`
+                // `ClassVarsN`). ADR 0118 phase 5b: `thread_ahead`
                 // now threads any such producer into `stmts` as a real
                 // `Bind`, in the SAME frame every later statement in this
                 // body shares — visible to them by construction, without
                 // the old lexical-nesting trick — so the plain compile
                 // below never has an open scope to propagate.
-                // ADR 0118 phase 2a (BT-3417): see the E6 sub-branch above.
+                // ADR 0118 phase 2a: see the E6 sub-branch above.
                 let hoist_scope = self.thread_ahead(expr, &mut stmts, frame)?;
                 let expr_doc = self.expression_doc(expr)?;
                 self.finish_precompiled_scope(hoist_scope)?;
@@ -1558,7 +1558,7 @@ mod tests {
 
     #[test]
     fn test_ensure_in_class_method_simple() {
-        // BT-1346: ensure: in a class method (no mutations) should compile
+        // ensure: in a class method (no mutations) should compile
         let src = "Object subclass: Foo\n\n  class bar =>\n    [42] ensure: [nil]\n";
         let code = codegen(src);
         assert!(
@@ -1574,7 +1574,7 @@ mod tests {
 
     #[test]
     fn test_ensure_in_class_method_with_captured_local_mutation() {
-        // BT-1346: ensure: in a class method where locals declared outside
+        // ensure: in a class method where locals declared outside
         // the block are reassigned inside — must use closure path, not mutation threading
         let src = "\
 Actor subclass: Foo
@@ -1733,7 +1733,7 @@ Actor subclass: Srv
         );
     }
 
-    // ── ADR 0111 Addendum 5 / BT-3165: NonLinearVersion is now a LIVE check
+    // ── ADR 0111 Addendum 5: NonLinearVersion is now a LIVE check
     // for `on:do:`/`ensure:` arms (previously scaffolding-only —
     // `check_branch_frame_linearity`'s scalar synthesis always allocated a
     // fresh, distinct FrameId per arm by construction, so two arms could

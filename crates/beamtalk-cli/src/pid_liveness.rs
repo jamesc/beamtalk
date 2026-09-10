@@ -4,7 +4,7 @@
 //! Cross-platform process-liveness check.
 //!
 //! Shared leaf module: used by `commands::workspace::node_state` (detached
-//! BEAM node liveness polling) and by `tests/cli_common` (BT-3077's stale
+//! BEAM node liveness polling) and by `tests/cli_common` (its stale
 //! test-cache-dir sweep) so neither has to duplicate the OS-specific PID
 //! check.
 

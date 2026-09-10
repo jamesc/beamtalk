@@ -1,16 +1,16 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0082 extension class-source-span commands: `resolve_class_span`
-//! (BT-3248), `class_state_field_defaults` (BT-3254), and
-//! `build_class_module_index_in_source` (BT-3441).
+//! ADR 0082 extension class-source-span commands: `resolve_class_span`,
+//! `class_state_field_defaults`, and
+//! `build_class_module_index_in_source`.
 
 use beamtalk_etf::{atom, binary_from_str as binary, int_term, map_get, term_to_string};
 use eetf::{List, Map, Term};
 
 use crate::respond::error_response;
 
-/// Handle a `resolve_class_span` request (ADR 0082 extension, BT-3248).
+/// Handle a `resolve_class_span` request (ADR 0082 extension).
 ///
 /// Backs the CHANGES dock's disk-vs-memory diff for a `'class-def'`
 /// `ChangeEntry` (redefining an *existing* class via the cockpit `:def` tab):
@@ -80,8 +80,7 @@ pub(crate) fn handle_resolve_class_span(request: &Map) -> Term {
     }
 }
 
-/// Handle a `class_state_field_defaults` request (ADR 0082 extension,
-/// BT-3254).
+/// Handle a `class_state_field_defaults` request (ADR 0082 extension).
 ///
 /// Backs `beamtalk_repl_loader:class_def_source_is_skeleton_shaped/2`'s
 /// sibling safety check before marking a `'class-def'` `ChangeLog` entry
@@ -142,7 +141,7 @@ pub(crate) fn handle_class_state_field_defaults(request: &Map) -> Term {
     }
 }
 
-/// Handle a `build_class_module_index_in_source` request (BT-3441).
+/// Handle a `build_class_module_index_in_source` request.
 ///
 /// Backs the REPL/workspace cold-load fallback for `class_module_index`
 /// (ADR 0050, `beamtalk_repl_ops_load:build_source_class_module_index/1`):

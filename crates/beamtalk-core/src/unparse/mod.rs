@@ -11,7 +11,7 @@
 //!
 //! - `extract_method_source` in codegen (to include leading comments in
 //!   `CompiledMethod.source` and support synthesized methods with no source text)
-//! - `beamtalk fmt` CLI command (Issue BT-978)
+//! - `beamtalk fmt` CLI command
 //!
 //! # Comment Handling
 //!
@@ -69,27 +69,27 @@ pub fn unparse_module(module: &Module) -> String {
 #[must_use]
 pub fn unparse_method(method: &MethodDefinition) -> String {
     // The per-method source is the method's *edit unit*, and must match the
-    // byte span the resolver assigns it (ADR 0082 / BT-2584: `source_ref ==
+    // byte span the resolver assigns it (ADR 0082: `source_ref ==
     // disk[span]`). That span deliberately starts at the method's `///` doc
     // block or its own line, excluding any leading non-doc `//` comments —
     // notably `// === section ===` dividers, which are inter-method file
-    // structure, not part of the method (BT-2577). Emitting them here would
+    // structure, not part of the method. Emitting them here would
     // make the stored/compiled source diverge from disk, so a no-op cockpit
-    // save/flush would duplicate the divider (BT-2594). Whole-file unparse
+    // save/flush would duplicate the divider. Whole-file unparse
     // (`unparse_class` / `unparse_module`) still preserves them in place.
     // A future change will surface section dividers as first-class method
-    // categories instead of free comments (BT-2601).
+    // categories instead of free comments.
     //
     // The `class ` prefix is emitted from `method.is_class_method` so a class-side
     // method's stored source matches its on-disk span (which includes `class `);
-    // whole-file unparse supplies the prefix from its own context instead (BT-2594).
+    // whole-file unparse supplies the prefix from its own context instead.
     unparse_method_definition_inner(method, class_prefix(method), EmitLeadingComments::No)
         .to_pretty_string()
 }
 
 /// The signature prefix for a stand-alone per-method render: `class ` for a
 /// class-side method, nothing otherwise. Whole-file unparse passes its own
-/// prefix and does not use this (BT-2594).
+/// prefix and does not use this.
 fn class_prefix(method: &MethodDefinition) -> Document<'static> {
     if method.is_class_method {
         Document::Str("class ")
@@ -106,15 +106,15 @@ pub fn unparse_class(class: &ClassDefinition) -> String {
 
 /// Re-lays-out a canonical (column-0) method source at `base_indent`, so the
 /// result is byte-identical to what `bt fmt` (`unparse_module`) produces for the
-/// same method on disk at that indentation (ADR 0082 / BT-2584 / BT-2594).
+/// same method on disk at that indentation (ADR 0082).
 ///
 /// [`unparse_method`] renders a method at **column 0**, where the pretty-printer
 /// makes line-break decisions against the full 80-column budget. On disk the same
 /// method is indented under its class body, so it has `base_indent` fewer columns
 /// available and a line that fit inline at column 0 must break. A pure
-/// whitespace shift (the original BT-2584 behaviour) cannot *re-break* such a
-/// line, so the stored `source_ref` diverged from the on-disk span for any
-/// width-sensitive method — flushing it would reformat the file (BT-2594).
+/// whitespace shift cannot *re-break* such a
+/// line, so the stored `source_ref` would diverge from the on-disk span for any
+/// width-sensitive method — flushing it would reformat the file.
 ///
 /// To make `source_ref == disk[span]` hold by construction, this re-parses the
 /// canonical body and re-renders it with the line-width budget reduced by the
@@ -213,7 +213,7 @@ fn is_blank_line(line: &str) -> bool {
     leading_ws_len(line) == line.len()
 }
 
-/// Unparses a method signature for help display (BT-988).
+/// Unparses a method signature for help display.
 ///
 /// Renders `selector params -> ReturnType` without `sealed` prefix or ` =>` suffix.
 /// Used by codegen to embed display signatures in `methodSignatures` maps.
@@ -273,7 +273,7 @@ pub fn escape_string_literal(s: &str) -> String {
 /// Renders a type annotation to its Beamtalk display form (e.g. `Integer`,
 /// `String | Nil`, `List(Integer)`).
 ///
-/// Used by codegen (BT-2734) to build the `__signature__` string for value-type
+/// Used by codegen to build the `__signature__` string for value-type
 /// auto-accessors, whose slot types come straight from the `StateDeclaration`
 /// annotation rather than a full `MethodDefinition`.
 #[must_use]
@@ -286,7 +286,7 @@ pub fn unparse_type_annotation_display(ty: &TypeAnnotation) -> String {
 ///
 /// This is the single source of truth for literal-to-source rendering — used by
 /// codegen doc comments, hover info, and generated stdlib metadata alike, so all
-/// three agree on escaping/quoting rules instead of drifting (BT-3088).
+/// three agree on escaping/quoting rules instead of drifting.
 #[must_use]
 pub fn unparse_literal_display(lit: &Literal) -> String {
     unparse_literal(lit).to_pretty_string()
@@ -310,10 +310,10 @@ fn unparse_method_display_signature_doc(method: &MethodDefinition) -> Document<'
 /// `+ other :: Number`, or `at: index :: Integer put: value`.
 ///
 /// This is the one place that interleaves keyword parts with parameter
-/// names/types (BT-3097) — shared by [`unparse_method_display_signature_doc`]
+/// names/types — shared by [`unparse_method_display_signature_doc`]
 /// (and, through it, [`unparse_method_signature`]) and
-/// [`unparse_protocol_method_signature`], which previously carried
-/// independently-drifting copies of the same loop. A missing binary
+/// [`unparse_protocol_method_signature`], rather than each keeping its own
+/// independently-drifting copy of the same loop. A missing binary
 /// parameter (`parameters.first()` returns `None` — not producible by the
 /// parser for a real method definition, but reachable for a
 /// hand-constructed/synthesized one) degrades to the bare operator rather
@@ -361,7 +361,7 @@ fn unparse_selector_and_params(
 /// [`Module`] outside of standalone methods and expressions.
 ///
 /// Used only by [`unparse_module_doc`] to interleave classes, protocols, and
-/// type aliases back into their original source order (BT-2907) rather than
+/// type aliases back into their original source order rather than
 /// grouping them by kind.
 enum TopLevelDecl<'a> {
     Class(&'a ClassDefinition),
@@ -370,7 +370,7 @@ enum TopLevelDecl<'a> {
 }
 
 impl TopLevelDecl<'_> {
-    /// Whether a blank line preceded this declaration in the source (BT-2929).
+    /// Whether a blank line preceded this declaration in the source.
     fn preceding_blank_line(&self) -> bool {
         match self {
             Self::Class(class) => class.comments.leading_blank_line,
@@ -392,7 +392,7 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
     }
 
     // Classes, protocols, and type aliases (ADR 0068 Phase 2a, ADR 0108 Phase 1)
-    // are interleaved back into their original source order (BT-2907) rather
+    // are interleaved back into their original source order rather
     // than grouped by kind — a `type` alias declared after a class must stay
     // after that class on a format round-trip. `sort_by_key` is a stable
     // sort, so declarations that legitimately share a start offset
@@ -409,7 +409,7 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
     });
 
     for (i, decl) in top_level_decls.into_iter().enumerate() {
-        // BT-2929: re-emit the blank line the author placed between this
+        // Re-emit the blank line the author placed between this
         // declaration and the previous one. Skipped for the first
         // declaration in the section — a blank line there (before the very
         // first top-level declaration) is dropped, same as pre-existing
@@ -429,13 +429,13 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
 
     // Standalone method definitions
     for (i, smd) in module.method_definitions.iter().enumerate() {
-        // BT-2943: re-emit the blank line the author placed before this
+        // Re-emit the blank line the author placed before this
         // standalone method — either separating it from the previous
         // standalone method (i > 0), or separating the whole
         // standalone-methods section from the class/protocol/type-alias
         // declarations above it (i == 0, but `docs` already has content).
         // Dropped when nothing precedes it (same first-item convention as
-        // the declarations loop above, BT-2929).
+        // the declarations loop above).
         if (i > 0 || !docs.is_empty()) && smd.method.comments.leading_blank_line {
             docs.push(line());
         }
@@ -446,13 +446,13 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
     // Top-level expressions (script / REPL)
     for (i, stmt) in module.expressions.iter().enumerate() {
         if i > 0 {
-            // BT-987: emit an extra blank line if present in source
+            // Emit an extra blank line if present in source
             if stmt.preceding_blank_line {
                 docs.push(line());
             }
             docs.push(line());
         } else if !docs.is_empty() && stmt.preceding_blank_line {
-            // BT-2943: preserve a blank line separating the first top-level
+            // Preserve a blank line separating the first top-level
             // expression from the declarations/standalone-methods section(s)
             // above it. The i > 0 branch above already provides its own
             // separator `line()` between expressions; here, the previous
@@ -488,9 +488,9 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     docs.extend(unparse_comment_attachment_leading(&class.comments));
 
     // Blank line between leading comments (e.g. license block) and doc/header:
-    // either because the source actually had one there (BT-2945), or because
+    // either because the source actually had one there, or because
     // the last leading entry is an orphaned `///` block that must, by
-    // construction, always be separated from what follows (BT-2924) — see
+    // construction, always be separated from what follows — see
     // `leading_ends_with_orphaned_doc_comment`.
     if leading_ends_with_orphaned_doc_comment(&class.comments)
         || class.comments.blank_line_after_comments
@@ -665,12 +665,9 @@ pub(crate) fn unparse_standalone_method_definition(
 ) -> Document<'static> {
     let class = leaf::ident(&smd.class_name.name);
     // Cross-package extension methods (ADR 0070): `package@ClassName >> ...`.
-    // Found while adding BT-2943's package-qualified regression test:
-    // `smd.package` was previously never consulted here, so `beamtalk fmt`
-    // silently dropped the package qualifier from any cross-package
-    // standalone method — a pre-existing, unrelated bug, fixed alongside
-    // this issue since the fix is a one-line addition and the test that
-    // caught it already lives in this file.
+    // `smd.package`, when present, must be consulted here so `beamtalk fmt`
+    // does not drop the package qualifier from a cross-package
+    // standalone method.
     let class = if let Some(package) = &smd.package {
         docvec![leaf::ident(&package.name), "@", class]
     } else {
@@ -696,9 +693,9 @@ fn unparse_type_alias_definition(type_alias: &TypeAliasDefinition) -> Document<'
     docs.extend(unparse_comment_attachment_leading(&type_alias.comments));
 
     // Blank line between this alias's leading comments and its own doc
-    // comment/header: either because the source actually had one there
-    // (BT-2945), or because the last leading entry is a preserved, earlier
-    // `///` block that broke away from a different declaration (BT-2924) —
+    // comment/header: either because the source actually had one there,
+    // or because the last leading entry is a preserved, earlier
+    // `///` block that broke away from a different declaration —
     // see `leading_ends_with_orphaned_doc_comment`.
     if leading_ends_with_orphaned_doc_comment(&type_alias.comments)
         || type_alias.comments.blank_line_after_comments
@@ -733,7 +730,7 @@ fn unparse_type_alias_definition(type_alias: &TypeAliasDefinition) -> Document<'
     ];
 
     // Trailing end-of-line comment on the declaration line, e.g.
-    // `type Port = Integer // comment` (BT-2906).
+    // `type Port = Integer // comment`.
     let header = if let Some(trail) = &type_alias.comments.trailing {
         docvec![header, "  ", unparse_comment(trail)]
     } else {
@@ -757,9 +754,9 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
     docs.extend(unparse_comment_attachment_leading(&protocol.comments));
 
     // Blank line between this protocol's leading comments and its own doc
-    // comment/header: either because the source actually had one there
-    // (BT-2945), or because the last leading entry is a preserved, earlier
-    // `///` block that broke away from a different declaration (BT-2924) —
+    // comment/header: either because the source actually had one there,
+    // or because the last leading entry is a preserved, earlier
+    // `///` block that broke away from a different declaration —
     // see `leading_ends_with_orphaned_doc_comment`.
     if leading_ends_with_orphaned_doc_comment(&protocol.comments)
         || protocol.comments.blank_line_after_comments
@@ -800,7 +797,7 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
     docs.push(Document::Vec(header));
 
     // Trailing end-of-line comment on the declaration header line, e.g.
-    // `Protocol define: Sortable // comment` (BT-2906). Emitted right after
+    // `Protocol define: Sortable // comment`. Emitted right after
     // the header, matching where the parser collects it — before
     // `extending:`/the body, which start on their own indented lines.
     if let Some(trail) = &protocol.comments.trailing {
@@ -827,7 +824,7 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
         ));
     }
 
-    // Class method signatures (BT-1611, indented by 2 spaces, prefixed with `class`)
+    // Class method signatures (indented by 2 spaces, prefixed with `class`)
     for sig in &protocol.class_method_signatures {
         docs.push(nest(
             2,
@@ -840,12 +837,12 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
 
 /// Builds the `Document` for a single protocol method signature entry
 /// within `unparse_protocol_definition`'s signature list — the separating
-/// `line()` before it, plus (BT-2946) an extra blank line re-emitted when
+/// `line()` before it, plus an extra blank line re-emitted when
 /// the signature had one before it in the source. Skipped for the very
 /// first signature in the body — a blank line there (between the header/
 /// `extending:` clause and the first signature) is dropped, same as
-/// pre-existing behaviour and mirroring BT-2929's top-level-declaration
-/// fix; only inter-signature gaps are preserved.
+/// pre-existing behaviour and mirroring the top-level-declaration
+/// handling; only inter-signature gaps are preserved.
 fn unparse_protocol_signature_entry(
     sig: &ProtocolMethodSignature,
     prefix: Option<&'static str>,
@@ -878,7 +875,7 @@ fn unparse_protocol_method_signature(
     docs.extend(unparse_comment_attachment_leading(&sig.comments));
 
     // Blank line between a preserved, earlier `///` block that broke away
-    // from a different declaration (BT-2924) and this signature's own doc
+    // from a different declaration and this signature's own doc
     // comment — see `leading_ends_with_orphaned_doc_comment`.
     if leading_ends_with_orphaned_doc_comment(&sig.comments) {
         docs.push(line());
@@ -901,7 +898,7 @@ fn unparse_protocol_method_signature(
         docs.push(Document::Str(p));
     }
 
-    // Selector and parameters (BT-3097: shared with method signatures via
+    // Selector and parameters (shared with method signatures via
     // `unparse_selector_and_params`, rather than an independent copy of the
     // same keyword/parameter interleaving loop).
     docs.push(unparse_selector_and_params(&sig.selector, &sig.parameters));
@@ -941,7 +938,7 @@ fn unparse_method_definition_with_prefix(
 
 /// Whether to emit a method's leading non-doc comments. Whole-file unparse keeps
 /// them (file fidelity); the per-method [`unparse_method`] drops them so the
-/// per-method source matches its byte span (BT-2594 — see `unparse_method`).
+/// per-method source matches its byte span (see `unparse_method`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EmitLeadingComments {
     Yes,
@@ -956,7 +953,7 @@ fn unparse_method_definition_inner(
     let mut docs: Vec<Document<'static>> = Vec::new();
 
     // Non-doc leading comments (section dividers etc.) — emitted only on the
-    // whole-file path; the per-method edit unit excludes them (BT-2594).
+    // whole-file path; the per-method edit unit excludes them.
     let emit_leading = emit_leading == EmitLeadingComments::Yes;
     if emit_leading {
         docs.extend(unparse_comment_attachment_leading(&method.comments));
@@ -964,7 +961,7 @@ fn unparse_method_definition_inner(
 
     // A method with no doc comment of its own still needs a separator after
     // a preserved, earlier `///` block that broke away from a different
-    // declaration (BT-2924) — otherwise the orphaned block re-attaches to
+    // declaration — otherwise the orphaned block re-attaches to
     // this method as its doc comment on the next parse. When the method
     // *does* have its own doc comment, the blank-line push inside the `if
     // let Some(doc)` block below already covers this (it fires for any
@@ -993,7 +990,7 @@ fn unparse_method_definition_inner(
         }
     }
 
-    // BT-1856: Emit @expect directive before the method declaration
+    // Emit @expect directive before the method declaration
     if let Some((ref cats, ref reason, _)) = method.expect {
         let base = docvec!["@expect ", unparse_expect_categories(cats)];
         if let Some(reason) = reason {
@@ -1047,7 +1044,7 @@ fn unparse_method_definition_inner(
             }
             let mut body_docs: Vec<Document<'static>> = Vec::new();
             for stmt in stmts {
-                // BT-987: emit an extra blank line before statements that had one in source
+                // Emit an extra blank line before statements that had one in source
                 if stmt.preceding_blank_line {
                     // Use a raw newline for blank lines to avoid trailing whitespace
                     // from indentation on empty lines.
@@ -1072,7 +1069,7 @@ fn unparse_method_definition_inner(
 ///
 /// Delegates the selector/parameters/return-type portion to
 /// [`unparse_method_display_signature_doc`] and adds the declaration-only
-/// wrapping: `sealed `/`internal ` prefixes and the trailing ` =>` (BT-3097).
+/// wrapping: `sealed `/`internal ` prefixes and the trailing ` =>`.
 fn unparse_method_signature(method: &MethodDefinition) -> Document<'static> {
     let sealed = if method.is_sealed {
         Document::Str("sealed ")
@@ -1118,7 +1115,7 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
     docs.extend(unparse_comment_attachment_leading(&state.comments));
 
     // Blank line between a preserved, earlier `///` block that broke away
-    // from a different declaration (BT-2924) and this field's own doc
+    // from a different declaration and this field's own doc
     // comment — see `leading_ends_with_orphaned_doc_comment`.
     if leading_ends_with_orphaned_doc_comment(&state.comments) {
         docs.push(line());
@@ -1136,7 +1133,7 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
         }
     }
 
-    // BT-1856: Emit @expect directive before the declaration
+    // Emit @expect directive before the declaration
     if let Some((ref cats, ref reason, _)) = state.expect {
         if let Some(reason) = reason {
             docs.push(docvec![
@@ -1287,7 +1284,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
                 "@primitive"
             };
             if *is_inferred {
-                // Bare `@primitive` — selector inferred from the method (BT-2724).
+                // Bare `@primitive` — selector inferred from the method.
                 docvec![directive]
             } else if *is_quoted {
                 docvec![directive, " \"", leaf::string_content(name), "\""]
@@ -1562,7 +1559,7 @@ fn unparse_block(block: &Block) -> Document<'static> {
             let mut body_docs: Vec<Document<'static>> = Vec::new();
             for (i, stmt) in stmts.iter().enumerate() {
                 if i > 0 {
-                    // BT-987: emit an extra blank line if present in source
+                    // Emit an extra blank line if present in source
                     if stmt.preceding_blank_line {
                         body_docs.push(line());
                     }
@@ -1689,7 +1686,7 @@ fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Docume
 // --- Match unparsing ---
 
 fn unparse_match(value: &Expression, arms: &[MatchArm], exhaustive: bool) -> Document<'static> {
-    // BT-2763 / ADR 0106: `matchExhaustive:` round-trips through unparse just
+    // ADR 0106: `matchExhaustive:` round-trips through unparse just
     // like `match:` — only the keyword selector differs.
     let keyword = if exhaustive {
         " matchExhaustive: ["
@@ -1972,7 +1969,7 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
             docvec![unparse_type_annotation(inner), " | False"]
         }
         TypeAnnotation::Difference { base, excluded, .. } => {
-            // Re-derive grouping parens (BT-2760) where re-parsing would
+            // Re-derive grouping parens where re-parsing would
             // otherwise change the AST. The predicate is shared with
             // `TypeAnnotation::type_name` — single source of truth.
             docvec![
@@ -1999,7 +1996,7 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
 }
 
 /// Unparses a `\`/`&` operand, wrapping it in grouping parentheses
-/// (BT-2760) when `parens` is set — i.e. when re-parsing the bare operand
+/// when `parens` is set — i.e. when re-parsing the bare operand
 /// would bind differently (see the `Difference`/`Intersection` arms of
 /// [`unparse_type_annotation`]).
 fn unparse_grouped_type(ty: &TypeAnnotation, parens: bool) -> Document<'static> {
@@ -2024,7 +2021,7 @@ fn unparse_expect_category(cat: ExpectCategory) -> Document<'static> {
     Document::Str(cat.as_str())
 }
 
-/// Unparses a (possibly multi-category, BT-3387) `@expect` category list as
+/// Unparses a (possibly multi-category) `@expect` category list as
 /// `cat1, cat2, ...`.
 fn unparse_expect_categories(cats: &[ExpectCategory]) -> Document<'static> {
     let docs: Vec<Document<'static>> = cats.iter().copied().map(unparse_expect_category).collect();
@@ -2036,7 +2033,7 @@ fn unparse_expect_categories(cats: &[ExpectCategory]) -> Document<'static> {
 /// Builds a [`Document`] for a single [`Comment`].
 ///
 /// Line comments become `// content`, block comments become `/* content */`,
-/// doc-style leading comments become `/// content` (BT-2924).
+/// doc-style leading comments become `/// content`.
 fn unparse_comment(comment: &Comment) -> Document<'static> {
     match comment.kind {
         CommentKind::Line => {
@@ -2084,7 +2081,7 @@ fn unparse_comment_attachment_leading(ca: &CommentAttachment) -> Vec<Document<'s
 /// Only true when the *last* leading comment is [`CommentKind::Doc`] — a
 /// `///` block that `collect_comment_attachment` preserved because a blank
 /// line (or `//` comment) broke it away from the declaration it visually
-/// precedes (BT-2924). Such a block is, by construction, never adjacent to
+/// precedes. Such a block is, by construction, never adjacent to
 /// what follows in the original source — a blank line always separated it —
 /// so reinserting one here reconstructs that gap and stops the preserved
 /// block from visually gluing onto (and, on the next parse, merging into)

@@ -681,7 +681,7 @@ mod tests {
         assert!(diagnostics.is_empty());
     }
 
-    // ── Transitive dependency detection (BT-1654) ───────────────────────────
+    // ── Transitive dependency detection ─────────────────────────────────────
 
     /// Helper to create a registry with transitivity metadata.
     fn make_transitive_registry(

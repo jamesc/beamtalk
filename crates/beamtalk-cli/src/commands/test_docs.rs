@@ -355,7 +355,7 @@ fn generate_bunit_wrappers(
 
         for test_class in &test_classes {
             let eunit_module = format!("{}_tests", test_class.module_name);
-            // BT-1631: Doc tests still use EUnit wrappers for now.
+            // Doc tests still use EUnit wrappers for now.
             // TODO: Migrate doc tests to use BUnit runner directly like `beamtalk test` does.
             /*
             let erl_source =

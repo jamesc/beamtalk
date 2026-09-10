@@ -38,7 +38,7 @@ use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
 /// Returns `true` if the class is internal and belongs to a different package
-/// than `current_package` (ADR 0071, BT-1703).
+/// than `current_package` (ADR 0071).
 ///
 /// Internal classes should be excluded from cross-package completions.
 /// Returns `false` when:
@@ -58,7 +58,7 @@ fn is_cross_package_internal_class(info: &ClassInfo, current_package: Option<&st
     class_pkg != cur_pkg
 }
 /// Returns `true` if the method is internal and its defining class belongs to a
-/// different package than `current_package` (ADR 0071, BT-1703).
+/// different package than `current_package` (ADR 0071).
 ///
 /// Internal methods should be excluded from cross-package completions.
 fn is_cross_package_internal_method(
@@ -144,7 +144,7 @@ pub fn compute_completions(
 
 /// Like [`compute_completions`], additionally offering type alias names
 /// alongside class/protocol names in type-annotation position when a
-/// project-wide `AliasRegistry` is available (ADR 0108 Phase 8, BT-2901).
+/// project-wide `AliasRegistry` is available (ADR 0108 Phase 8).
 ///
 /// A separate function — rather than adding the parameter to
 /// [`compute_completions`] directly — keeps that function's signature
@@ -190,9 +190,9 @@ pub fn compute_completions_with_aliases(
         }
     }
     // Enrich hierarchy with inferred return types and get the type map in a single
-    // TypeChecker pass (BT-1014, BT-1047). The TypeChecker now consults its own
+    // TypeChecker pass. The TypeChecker consults its own
     // inferred method_return_types during chain resolution, so a second pass is
-    // no longer needed for correct chain completion filtering (BT-1005).
+    // no longer needed for correct chain completion filtering.
     let enriched_hierarchy;
     let (hierarchy, type_map) = {
         let (enriched, type_map) =
@@ -208,13 +208,13 @@ pub fn compute_completions_with_aliases(
     };
     // Try to find receiver type at cursor for type-filtered completions
     let receiver_type = find_receiver_type(module, offset, &type_map);
-    // Add keyword completions (context-aware for field:/state: by class kind, BT-1537)
+    // Add keyword completions (context-aware for field:/state: by class kind)
     add_keyword_completions(&mut completions, &context, hierarchy);
     // Add identifiers from the current scope (including method-local variables)
     add_identifier_completions(module, offset, &mut completions);
     // Add class names as completions (filtering internal classes from other packages)
     add_class_name_completions(module, hierarchy, current_package, &mut completions);
-    // Add type alias names as completions (ADR 0108 Phase 8, BT-2901) — a
+    // Add type alias names as completions (ADR 0108 Phase 8) — a
     // separate loop since aliases are never registered into `hierarchy`
     // (see `add_alias_name_completions`'s doc).
     if let Some(alias_registry) = alias_registry {
@@ -309,7 +309,7 @@ fn compute_erlang_completions(
 /// tab-completer — this module works with raw source bytes, so it re-wraps
 /// each byte as a `char` (safe here: every caller only ever tests ASCII
 /// bytes, and non-ASCII UTF-8 continuation bytes correctly fall through as
-/// "not a word char" either way). See BT-3083.
+/// "not a word char" either way).
 fn is_identifier_char(b: u8) -> bool {
     beamtalk_core::source_analysis::is_completion_word_char(b as char)
 }
@@ -419,7 +419,7 @@ fn add_keyword_completions(
     context: &ClassContext<'_>,
     hierarchy: &ClassHierarchy,
 ) {
-    // BT-3083: this static list and the live REPL/MCP completion engine's
+    // This static list and the live REPL/MCP completion engine's
     // `builtin_keywords/0` (`beamtalk_repl_ops_dev.erl`) are two engines that
     // cannot literally share code (Rust vs. Erlang) but should offer the same
     // control-flow vocabulary — a keyword missing from one and not the other
@@ -456,7 +456,7 @@ fn add_keyword_completions(
         completions
             .push(Completion::new(*keyword, CompletionKind::Keyword).with_documentation(*doc));
     }
-    // Offer field:/state: based on class kind when inside a class body (BT-1537).
+    // Offer field:/state: based on class kind when inside a class body.
     if let ClassContext::ClassBody(class) = context {
         let kind = hierarchy.resolve_class_kind(&class.name.name);
         match kind {
@@ -534,7 +534,7 @@ fn compute_self_dot_completions(
         {
             continue;
         }
-        // Filter internal methods from other packages (ADR 0071, BT-1703)
+        // Filter internal methods from other packages (ADR 0071)
         if is_cross_package_internal_method(&method, hierarchy, current_package) {
             continue;
         }
@@ -639,7 +639,7 @@ fn find_class_context(module: &Module, offset: u32) -> ClassContext<'_> {
                 return ClassContext::ClassMethod(class);
             }
         }
-        // Check if inside class body but not in any method (BT-1537)
+        // Check if inside class body but not in any method
         if in_span(class.span) {
             return ClassContext::ClassBody(class);
         }
@@ -669,7 +669,7 @@ fn add_class_name_completions(
         }
     }
     // Add all known classes from the hierarchy (builtins + any others),
-    // filtering out internal classes from other packages (ADR 0071, BT-1703).
+    // filtering out internal classes from other packages (ADR 0071).
     for class_name in hierarchy.class_names() {
         if seen.insert(class_name.clone()) {
             if let Some(info) = hierarchy.get_class(class_name.as_str()) {
@@ -695,8 +695,7 @@ fn add_class_name_completions(
 }
 /// Adds type alias names as completions (module-local `type` declarations
 /// plus any project-wide aliases in `alias_registry`) — the alias-namespace
-/// counterpart to [`add_class_name_completions`] (ADR 0108 Phase 8,
-/// BT-2901).
+/// counterpart to [`add_class_name_completions`] (ADR 0108 Phase 8).
 ///
 /// Aliases are never registered into [`ClassHierarchy`] (they're checked
 /// bidirectionally against it instead — see `alias_registry.rs`'s module
@@ -892,7 +891,7 @@ fn receiver_side_of_type(ty: &InferredType) -> Option<ReceiverSide> {
         | InferredType::Never
         // A `Negation` (`Symbol \ #foo`) has no single receiver side (ADR 0102).
         | InferredType::Negation { .. }
-        // Nor does an `Intersection` (`P1 & P2`, ADR 0102/BT-2743) — it has no
+        // Nor does an `Intersection` (`P1 & P2`, ADR 0102) — it has no
         // single class name to dispatch instance/class-side completions from.
         | InferredType::Intersection { .. } => None,
     }
@@ -1007,7 +1006,7 @@ fn add_receiver_type_completions(
                 ) {
                     continue;
                 }
-                // Filter internal methods from other packages (ADR 0071, BT-1703)
+                // Filter internal methods from other packages (ADR 0071)
                 if is_cross_package_internal_method(&method, hierarchy, current_package) {
                     continue;
                 }
@@ -1033,7 +1032,7 @@ fn add_receiver_type_completions(
                 ) {
                     continue;
                 }
-                // Filter internal methods from other packages (ADR 0071, BT-1703)
+                // Filter internal methods from other packages (ADR 0071)
                 if is_cross_package_internal_method(&method, hierarchy, current_package) {
                     continue;
                 }
@@ -1112,7 +1111,7 @@ fn should_exclude_delegate(
     receiver_class: Option<&str>,
     hierarchy: &ClassHierarchy,
 ) -> bool {
-    // ADR 0101 / BT-2720: `delegate` is a sentinel on both the `Actor` base
+    // ADR 0101: `delegate` is a sentinel on both the `Actor` base
     // (ADR 0056) and the `Object` base. On non-native classes it raises at
     // runtime, so hide it from completions there. User-defined `delegate`
     // methods on other classes are unaffected.
@@ -1266,7 +1265,7 @@ fn add_hierarchy_completions(
     }
 }
 /// Collects methods into completions, filtering out `delegate` where inappropriate
-/// and internal methods from other packages (ADR 0071, BT-1703).
+/// and internal methods from other packages (ADR 0071).
 #[allow(clippy::too_many_arguments)]
 fn collect_method_completions(
     methods: impl IntoIterator<Item = beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo>,
@@ -1288,7 +1287,7 @@ fn collect_method_completions(
         ) {
             continue;
         }
-        // Filter internal methods from other packages (ADR 0071, BT-1703)
+        // Filter internal methods from other packages (ADR 0071)
         if is_cross_package_internal_method(&method, hierarchy, current_package) {
             continue;
         }
@@ -1316,7 +1315,7 @@ fn deduplicate_completions(completions: &mut Vec<Completion>) {
         }
     });
 }
-/// Resolve the inferred type of an expression for REPL completion fallback (BT-1068).
+/// Resolve the inferred type of an expression for REPL completion fallback.
 ///
 /// Parses `source` as a Beamtalk expression, runs type inference using `hierarchy`,
 /// and returns the class name of the last top-level expression's type.
@@ -1329,7 +1328,7 @@ fn deduplicate_completions(completions: &mut Vec<Completion>) {
 /// expressions that `tokenise_send_chain/1` cannot parse (parenthesised
 /// subexpressions, binary message chains, keyword sends mid-chain).
 ///
-/// `native_type_registry` (BT-2887, ADR 0075) lets an expression whose type
+/// `native_type_registry` (ADR 0075) lets an expression whose type
 /// came from an FFI call resolve to its typed return. `None` when no registry
 /// is available to the caller — the `beamtalk-compiler-port` REPL completion
 /// path currently has none readily available in its call chain.
@@ -1450,7 +1449,7 @@ mod tests {
             );
         }
     }
-    /// BT-3083 conformance: every keyword in the shared corpus must be
+    /// Conformance: every keyword in the shared corpus must be
     /// offered here and by the Erlang REPL/MCP engine's `builtin_keywords/0`.
     /// The corpus is the single source of truth both implementations are
     /// pinned to; the Erlang side asserts the identical cases in
@@ -1747,7 +1746,7 @@ mod tests {
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
-    // --- field:/state: class-kind-aware completion tests (BT-1537) ---
+    // --- field:/state: class-kind-aware completion tests ---
     #[test]
     fn value_class_body_offers_field_not_state() {
         // Cursor inside a Value subclass body, on the blank line between
@@ -2059,11 +2058,11 @@ mod tests {
         assert_eq!(detect_erlang_module_context("FooErlang lists"), None);
         assert_eq!(detect_erlang_module_context("Foo_Erlang lists"), None);
     }
-    // --- Chain resolution tests (BT-1014) ---
+    // --- Chain resolution tests ---
     //
     // Verify that completions are type-filtered when the receiver is a chained
-    // message send whose return type is known (stdlib annotations from BT-1003,
-    // user-defined method annotations, or inferred types from BT-1005).
+    // message send whose return type is known (stdlib annotations,
+    // user-defined method annotations, or inferred types).
     #[test]
     fn chain_resolution_stdlib_single_send_offers_typed_completions() {
         // `"hello" size ` → cursor after Integer result → should offer Integer methods
@@ -2114,7 +2113,7 @@ mod tests {
     }
     #[test]
     fn chain_resolution_user_defined_inferred_method() {
-        // A user-defined method whose return type is inferrable from its body (BT-1005):
+        // A user-defined method whose return type is inferrable from its body:
         // `Object subclass: Box\n  value => 42`  ← body is Integer literal → inferred Integer
         // Completions after `b value ` should include Integer methods
         let source = "Object subclass: Box\n  value => 42\n\nb := Box new\nb value ";
@@ -2139,7 +2138,7 @@ mod tests {
             abs.detail
         );
     }
-    // --- Actor class vs instance method set tests (BT-1056) ---
+    // --- Actor class vs instance method set tests ---
     #[test]
     fn actor_instance_completions_exclude_spawn_methods() {
         // `c <TAB>` where c is an actor instance should NOT offer spawn/spawnWith: (class-side only)
@@ -2163,7 +2162,7 @@ mod tests {
     #[test]
     fn counter_class_reference_completions_include_spawn() {
         // `Counter <TAB>` (ClassReference) should offer spawn/spawnWith:
-        // BT-1524: new/new: overrides removed from Actor — no longer offered as class methods
+        // new/new: overrides removed from Actor — no longer offered as class methods
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nCounter ";
         let completions = completions_at(source, Position::new(5, 8));
         let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
@@ -2179,7 +2178,7 @@ mod tests {
     #[test]
     fn counter_class_message_completions_include_spawn() {
         // `Counter class <TAB>` should offer the same class-side methods as `Counter <TAB>`
-        // BT-1524: new/new: overrides removed from Actor — no longer offered as class methods
+        // new/new: overrides removed from Actor — no longer offered as class methods
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nCounter class ";
         let completions = completions_at(source, Position::new(5, 14));
         let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
@@ -2212,7 +2211,7 @@ mod tests {
             "Actor instance should offer 'isAlive'. Got: {labels:?}"
         );
     }
-    // --- resolve_expression_type tests (BT-1068) ---
+    // --- resolve_expression_type tests ---
     #[test]
     fn resolve_expression_type_string_literal() {
         let hierarchy = ClassHierarchy::with_builtins();
@@ -2265,7 +2264,7 @@ mod tests {
         let result = resolve_expression_type("x", &hierarchy, None);
         assert_eq!(result, None);
     }
-    // --- BT-1070: parenthesised subexpression as receiver ---
+    // --- Parenthesised subexpression as receiver ---
     #[test]
     fn resolve_expression_type_parenthesized_unary_send() {
         // ("hello" size) — the result of String#size (Integer) wrapped in parens
@@ -2280,11 +2279,11 @@ mod tests {
         let result = resolve_expression_type("(myList size)", &hierarchy, None);
         assert_eq!(result, None);
     }
-    // --- BT-1072: keyword sends mid-chain ---
+    // --- Keyword sends mid-chain ---
     #[test]
     fn resolve_expression_type_keyword_send_collect_returns_array() {
         // #[1, 2, 3] collect: [:x | x * 2] — Array(E)#collect: returns Array(R)
-        // BT-1576: Generic return types extract base class for completion.
+        // Generic return types extract base class for completion.
         let hierarchy = ClassHierarchy::with_builtins();
         let result = resolve_expression_type("#[1, 2, 3] collect: [:x | x * 2]", &hierarchy, None);
         assert_eq!(result.as_deref(), Some("Array"));
@@ -2292,7 +2291,7 @@ mod tests {
     #[test]
     fn resolve_expression_type_keyword_send_inject_returns_type_param() {
         // #[1, 2, 3] inject: 0 into: [...] — inject:into: returns type param A
-        // BT-1834: A is now resolved from the initial value argument (0 :: Integer)
+        // A is resolved from the initial value argument (0 :: Integer)
         // via plain param type inference, so the return type is Integer.
         let hierarchy = ClassHierarchy::with_builtins();
         let result = resolve_expression_type(
@@ -2311,7 +2310,7 @@ mod tests {
     }
     #[test]
     fn resolve_expression_type_with_native_registry_resolves_ffi_call() {
-        // BT-2887: with a NativeTypeRegistry, an FFI call's typed return
+        // With a NativeTypeRegistry, an FFI call's typed return
         // resolves instead of staying Dynamic.
         use beamtalk_core::semantic_analysis::type_checker::TypeProvenance;
         use beamtalk_core::semantic_analysis::type_checker::native_type_registry::{
@@ -2347,7 +2346,7 @@ mod tests {
             resolve_expression_type("Erlang lists reverse: #(1, 2, 3)", &hierarchy, None);
         assert_eq!(result_none, None);
     }
-    // ── delegate completion filtering (BT-1215) ─────────────────────────────
+    // ── delegate completion filtering ─────────────────────────────
     #[test]
     fn delegate_excluded_from_completions_in_non_native_actor() {
         // Inside an instance method of a non-native Actor subclass,
@@ -2392,7 +2391,7 @@ mod tests {
             "delegate should be included for native actors"
         );
     }
-    // --- ADR 0071 / BT-1703: Cross-package visibility filtering ---
+    // --- ADR 0071: Cross-package visibility filtering ---
     #[test]
     fn internal_class_excluded_from_cross_package_completions() {
         use std::collections::HashMap;
@@ -2764,7 +2763,7 @@ mod tests {
         assert!(!is_after_self_dot("doself.co", 9));
     }
     // -----------------------------------------------------------------------
-    // BT-1933: Protocol class object completions
+    // Protocol class object completions
     // -----------------------------------------------------------------------
     #[test]
     fn protocol_class_object_completions() {
@@ -2834,8 +2833,8 @@ mod tests {
     }
     #[test]
     fn completions_in_match_pattern_position_include_nil_keyword() {
-        // `nil` is a valid pattern-position keyword in `match:` arms (BT-2854,
-        // ADR 0107) — surface parity with other pattern completions (BT-2857).
+        // `nil` is a valid pattern-position keyword in `match:` arms
+        // (ADR 0107) — surface parity with other pattern completions.
         let source = "x match: [\n  \n]";
         let completions = completions_at(source, Position::new(1, 2));
         assert!(
@@ -2847,7 +2846,7 @@ mod tests {
     }
     #[test]
     fn completions_after_double_colon_in_pattern_include_class_names() {
-        // `::` in pattern position (`binding :: ClassName`, BT-2855, ADR 0107)
+        // `::` in pattern position (`binding :: ClassName`, ADR 0107)
         // is a valid completion trigger — class names should be suggested,
         // the same way they already are after `Constructor` pattern names.
         let source = "x match: [\n  s :: \n]";
@@ -2862,7 +2861,7 @@ mod tests {
         );
     }
 
-    // ---- ADR 0108 Phase 8 (BT-2901): type alias completions ----
+    // ---- ADR 0108 Phase 8: type alias completions ----
 
     fn alias_registry_for(module: &Module, hierarchy: &ClassHierarchy) -> AliasRegistry {
         let protocol_registry =
@@ -2910,7 +2909,7 @@ mod tests {
     #[test]
     fn completions_without_alias_registry_omit_alias_name() {
         // `alias_registry = None` (the default `compute_completions` shape)
-        // must not offer alias names — matches pre-BT-2901 behaviour for
+        // must not offer alias names — matches the behaviour for
         // every caller that hasn't threaded a registry through yet.
         let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
                        Object subclass: Supervisor\n  restart: policy :: \n";

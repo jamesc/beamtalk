@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3217 (ADR 0115 Phase 2): `recv_type` write-path fixture coverage.
+//! ADR 0115 Phase 2: `recv_type` write-path fixture coverage.
 //!
 //! Each test compiles a small module, locates the `method_xref` `sends` row
 //! for a specific selector, and asserts its baked `'recv_type' => ...` value
@@ -97,7 +97,7 @@ fn assert_recv_type(entry: &str, expected: &str) {
 
 /// Like [`assert_recv_type`], but `expected_raw` is the exact literal text
 /// after `'recv_type' => ` — for a composed `{'union', [...]}`/
-/// `{'intersection', [...]}` tuple (BT-3215), which isn't a single quoted
+/// `{'intersection', [...]}` tuple, which isn't a single quoted
 /// atom.
 fn assert_recv_type_raw(entry: &str, expected_raw: &str) {
     let needle = format!("'recv_type' => {expected_raw}");
@@ -165,7 +165,7 @@ fn untyped_local_receiver_coarsens_to_dynamic_class_side() {
 
 // ---------------------------------------------------------------------------
 // Union-typed local — resolves to a composed `{'union', [...]}` recv_type
-// when every member resolves cleanly (BT-3215; write-path v1 coarsened this
+// when every member resolves cleanly (write-path v1 coarsened this
 // to `dynamic`, see ADR 0115 Alternatives Considered).
 // ---------------------------------------------------------------------------
 

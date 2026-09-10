@@ -52,7 +52,7 @@ impl CoreErlangGenerator {
     ///
     /// When inside a normal loop body (`in_loop_body = true`), returns `StateAcc` or `StateAccN`.
     /// Otherwise returns `State` or `StateN`.
-    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` reads the current
+    // widened from `pub(crate)` — `beamtalk-repl` reads the current
     // state variable name while threading REPL bindings.
     pub fn current_state_var(&self) -> String {
         render_state_prefix(
@@ -67,7 +67,7 @@ impl CoreErlangGenerator {
     /// When inside a hybrid-params loop (`in_hybrid_loop = true`) or normal context,
     /// returns `State1`, `State2`, etc.
     /// When inside a normal loop body (`in_loop_body = true`), returns `StateAcc1`, etc.
-    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` advances the
+    // widened from `pub(crate)` — `beamtalk-repl` advances the
     // state version while threading REPL bindings.
     pub fn next_state_var(&mut self) -> String {
         self.state_threading.next_var(VersionPrefix::State);
@@ -103,8 +103,8 @@ impl CoreErlangGenerator {
         self.state_threading.set_version(version);
     }
 
-    /// BT-3146 (ADR 0111 Addendum 5, §Branch-context version discipline,
-    /// "`FrameId` allocation is the one missing production mechanism"): mints
+    /// ADR 0111 Addendum 5, §Branch-context version discipline,
+    /// "`FrameId` allocation is the one missing production mechanism": mints
     /// and returns the [`threaded_ir::FrameId`] for the CURRENT (already
     /// entered) branch context — the frame every real `Bind`/`Threaded` node
     /// a branch-arm lowering constructs must use. Distinct from
@@ -114,12 +114,12 @@ impl CoreErlangGenerator {
         threaded_ir::FrameId::new(self.branch_frame_counter)
     }
 
-    /// ADR 0118 phase 2a (BT-3417): the [`threaded_ir::FrameId`] a
+    /// ADR 0118 phase 2a: the [`threaded_ir::FrameId`] a
     /// `threaded_expression`/`thread_ahead` caller should splice a prelude's
     /// `Bind`s into RIGHT NOW — [`Self::current_branch_frame`] while inside
     /// any `with_branch_context` arm (a conditional branch, an
     /// `on:do:`/`ensure:` body, a Tier 2 stateful-block body, or — since
-    /// ADR 0118 phase 2b (BT-3418) — a real loop body itself, all of which
+    /// ADR 0118 phase 2b — a real loop body itself, all of which
     /// set `in_loop_body`), [`FrameId::ROOT`](threaded_ir::FrameId::ROOT)
     /// at the flat method body.
     pub(in crate::core_erlang) fn current_frame(&self) -> threaded_ir::FrameId {
@@ -130,7 +130,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-412: Returns the current class variable state variable name.
+    /// Returns the current class variable state variable name.
     pub(in crate::core_erlang) fn current_class_var(&self) -> String {
         self.class_context
             .as_ref()
@@ -138,7 +138,7 @@ impl CoreErlangGenerator {
             .current_var(VersionPrefix::ClassVars)
     }
 
-    /// BT-3169: records the peak `class_var_version` reached inside a
+    /// records the peak `class_var_version` reached inside a
     /// `Foldl*` body's own `with_branch_context` scope, for
     /// [`Self::take_foldl_class_var_peak`] to consume once that scope's
     /// guard has restored the live counter — see
@@ -147,7 +147,7 @@ impl CoreErlangGenerator {
         self.loop_mode.last_foldl_class_var_peak = Some(version);
     }
 
-    /// BT-3169: takes (clears) the peak class-var version recorded by
+    /// takes (clears) the peak class-var version recorded by
     /// [`Self::set_foldl_class_var_peak`], if any, and — when it exceeds the
     /// live (already-restored) counter — fast-forwards the live counter to
     /// it, so the next [`Self::next_class_var`] mint is guaranteed not to
@@ -161,7 +161,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-3169: refreshes the live `ClassVars` name after generating an
+    /// refreshes the live `ClassVars` name after generating an
     /// expression whose caller is about to bind the WHOLE returned
     /// `Document` opaquely (`let X = <expr> in ...`, e.g.
     /// `emit_vt_threaded_local_assignment`'s `{Value, StateAcc}`-tuple
@@ -255,7 +255,7 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-833: Returns the current Self variable name for value type Self-threading.
+    /// Returns the current Self variable name for value type Self-threading.
     ///
     /// Version 0 → `"Self"` (the original method parameter).
     /// Version N → `"Self{N}"` (after N field assignments have threaded a new snapshot).
@@ -266,14 +266,14 @@ impl CoreErlangGenerator {
             .current_var(VersionPrefix::SelfVt)
     }
 
-    /// BT-833: Increments the Self version and returns the new variable name.
+    /// Increments the Self version and returns the new variable name.
     pub(in crate::core_erlang) fn next_self_var(&mut self) -> String {
         self.value_type_context_mut()
             .self_version
             .next_var(VersionPrefix::SelfVt)
     }
 
-    /// BT-412: Increments class var version and returns the new variable name.
+    /// Increments class var version and returns the new variable name.
     pub(in crate::core_erlang) fn next_class_var(&mut self) -> String {
         let name = self
             .class_context_mut()
@@ -283,7 +283,7 @@ impl CoreErlangGenerator {
         name
     }
 
-    /// BT-833: Resets the Self version to 0 (call at the start of each value type method).
+    /// Resets the Self version to 0 (call at the start of each value type method).
     pub(in crate::core_erlang) fn reset_self_version(&mut self) {
         self.set_self_version(0);
     }

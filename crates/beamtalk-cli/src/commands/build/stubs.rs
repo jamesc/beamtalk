@@ -27,7 +27,7 @@ use super::sources::collect_source_files_from_dir;
 /// of stdlib `.bt` files without a manifest). Single-file builds without
 /// either signal return `None`.
 ///
-/// BT-2851: This is the single source of truth for populating a
+/// This is the single source of truth for populating a
 /// [`NativeTypeRegistry`] from OTP/dependency `.beam` files. `beamtalk build`
 /// (via [`super::execute_build_passes`]) and `beamtalk lint` (via
 /// [`super::super::lint::run_lint`]) both call this function directly —
@@ -52,7 +52,7 @@ pub(crate) fn extract_type_specs(
         };
     }
 
-    // BT-2858: the manifest-backed extraction path now lives in the
+    // The manifest-backed extraction path lives in the
     // `beamtalk_cli` lib crate (`native_type_specs`) so `beamtalk-mcp` can
     // call the same single source of truth without reading a possibly-stale
     // on-disk cache. This is a thin delegation, not a duplicate.
@@ -72,7 +72,7 @@ pub(crate) fn extract_type_specs(
 /// so a build should never fail over a distribution-stub misconfiguration.
 ///
 /// Returns `None` if no such directory exists on disk — expected until
-/// curated distribution stub content is added (BT-1848); the discovery/merge
+/// curated distribution stub content is added; the discovery/merge
 /// plumbing is still correct with nothing to find.
 pub(crate) fn distribution_stubs_dir() -> Option<Utf8PathBuf> {
     if let Ok(dir) = std::env::var("BEAMTALK_STUBS_DIR") {
@@ -92,7 +92,7 @@ pub(crate) fn distribution_stubs_dir() -> Option<Utf8PathBuf> {
     candidate.is_dir().then_some(candidate)
 }
 
-/// ADR 0075 Phase 2 (BT-1847): scan `project_root/stubs/` for `declare
+/// ADR 0075 Phase 2: scan `project_root/stubs/` for `declare
 /// native:` stub files and build the project-local stub-tier registry, plus
 /// its diagnostics (skipped-signature warnings and version-drift warnings
 /// against `auto_extract`).
@@ -149,7 +149,7 @@ pub(crate) fn load_project_stub_registry(
 ///
 /// `distribution_stubs_dir` is the compiler distribution's own `stubs/`
 /// directory (layer 3), when one is discoverable — `None` until curated
-/// distribution stub content exists (BT-1848). Distribution-vs-package
+/// distribution stub content exists. Distribution-vs-package
 /// overlap is not flagged: package stubs are *meant* to override
 /// distribution stubs, per the resolution order.
 ///
@@ -321,7 +321,7 @@ fn load_stub_registry_from_dir(
         let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
         let (module, mut file_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
-        // BT-1847: this file's own declarations, checked for drift against
+        // This file's own declarations, checked for drift against
         // `auto_extract` *before* merging into the accumulating `registry` —
         // scoping the check to one file's functions lets each warning render
         // against that file's own source (below), rather than losing track

@@ -102,7 +102,7 @@ impl ClassHierarchy {
     /// falls through to `Object`.  All Beamtalk classes ultimately inherit from
     /// `Object`, so this correctly exposes Object-level methods (e.g.
     /// `subclassResponsibility`) without producing false-positive DNU warnings
-    /// for cross-file class hierarchies (BT-889).
+    /// for cross-file class hierarchies.
     #[must_use]
     pub fn resolves_selector(&self, class_name: &str, selector: &str) -> bool {
         let mut current = Some(class_name.to_string());
@@ -132,7 +132,7 @@ impl ClassHierarchy {
                 // that Object-level methods (e.g. subclassResponsibility) are visible.
                 // Guard: only fall through if we already traversed at least one known
                 // class, so that a completely-unknown root class does not incorrectly
-                // resolve Object methods (BT-889).
+                // resolve Object methods.
                 current = if traversed_known {
                     Some("Object".to_string())
                 } else {
@@ -145,7 +145,7 @@ impl ClassHierarchy {
 
     /// Check if a class can respond to a given class-side selector (local or inherited).
     ///
-    /// BT-1611: Used by protocol conformance checking to verify class method requirements.
+    /// Used by protocol conformance checking to verify class method requirements.
     /// Walks the superclass chain checking `class_methods` at each level.
     #[must_use]
     pub fn resolves_class_selector(&self, class_name: &str, selector: &str) -> bool {
@@ -157,7 +157,7 @@ impl ClassHierarchy {
     /// Returns the first matching primary method found in MRO order.
     ///
     /// When an intermediate class in the superclass chain is not found in the
-    /// hierarchy, the walk falls through to `Object` (BT-889).
+    /// hierarchy, the walk falls through to `Object`.
     #[must_use]
     pub fn find_method(&self, class_name: &str, selector: &str) -> Option<MethodInfo> {
         let mut current = Some(class_name.to_string());
@@ -184,7 +184,7 @@ impl ClassHierarchy {
                     .as_ref()
                     .map(std::string::ToString::to_string);
             } else {
-                // Unknown class in the superclass chain — fall through to Object (BT-889).
+                // Unknown class in the superclass chain — fall through to Object.
                 // Guard: only when at least one known class was already traversed.
                 current = if traversed_known {
                     Some("Object".to_string())
@@ -199,7 +199,7 @@ impl ClassHierarchy {
     /// Find a class-side method by selector (including inherited class methods).
     ///
     /// When an intermediate class in the superclass chain is not found in the
-    /// hierarchy, the walk falls through to `Object` (BT-889).
+    /// hierarchy, the walk falls through to `Object`.
     #[must_use]
     pub fn find_class_method(&self, class_name: &str, selector: &str) -> Option<MethodInfo> {
         let mut current = Some(class_name.to_string());
@@ -226,7 +226,7 @@ impl ClassHierarchy {
                     .as_ref()
                     .map(std::string::ToString::to_string);
             } else {
-                // Unknown class in the superclass chain — fall through to Object (BT-889).
+                // Unknown class in the superclass chain — fall through to Object.
                 // Guard: only when at least one known class was already traversed.
                 current = if traversed_known {
                     Some("Object".to_string())
@@ -377,7 +377,7 @@ impl ClassHierarchy {
     ///
     /// This enriches the hierarchy so that type-aware completions and hover can
     /// resolve receiver types for chains involving methods on any class, including
-    /// built-ins (BT-1014).
+    /// built-ins.
     /// Only methods without an existing `return_type` are updated (explicit annotations
     /// are never overwritten).
     ///
@@ -386,11 +386,11 @@ impl ClassHierarchy {
     /// * `inferred` — map from `(ClassName, Selector, IsClassMethod)` to inferred type,
     ///   as returned by `infer_method_return_types`.
     ///
-    /// BT-2022: The map now stores [`InferredType`] instead of bare `EcoString`.
-    /// BT-3076: writeback goes through [`DeclaredType::from_inferred`] — the
-    /// same `Known`/`Never` filter as before, but converted structurally
-    /// instead of via `display_name()` string formatting (which the type
-    /// checker would otherwise have to re-parse on the way back in).
+    /// The map stores [`InferredType`] rather than bare `EcoString`.
+    /// Writeback goes through [`DeclaredType::from_inferred`] — the same
+    /// `Known`/`Never` filter, converted structurally instead of via
+    /// `display_name()` string formatting (which the type checker would
+    /// otherwise have to re-parse on the way back in).
     pub fn apply_inferred_return_types(
         &mut self,
         inferred: &HashMap<(EcoString, EcoString, bool), InferredType>,

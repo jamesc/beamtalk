@@ -136,7 +136,7 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
                 if beam_count == 1 { "class" } else { "classes" }
             );
 
-            // BT-1750: Use BeamEnvironment for unified code path collection.
+            // Use BeamEnvironment for unified code path collection.
             // from_layout may fail if the lockfile is corrupt; treat as compile failure.
             match crate::commands::beam_environment::BeamEnvironment::from_layout(
                 &repl_layout,
@@ -192,8 +192,8 @@ fn read_erlang_cookie() -> Option<String> {
 /// child guard (i.e. the workspace is detached rather than `--foreground`),
 /// AND this invocation is the one that spawned the workspace
 /// (`is_new_workspace`). An ephemeral REPL that merely *attached* to an
-/// already-running, persistent workspace must never tear it down on exit
-/// (BT-3224) — only the invocation that started the node owns its lifecycle.
+/// already-running, persistent workspace must never tear it down on exit —
+/// only the invocation that started the node owns its lifecycle.
 pub(crate) fn should_stop_workspace(
     ephemeral: bool,
     beam_guard_present: bool,
@@ -208,7 +208,7 @@ pub(crate) fn should_stop_workspace(
 /// file redirect, or the null device) the workspace node is already started and
 /// its port printed, so there is nothing for an interactive loop to do — and
 /// entering it hangs on Windows, where rustyline does not return EOF for a
-/// redirected stdin handle the way it does on Unix (BT-2568).
+/// redirected stdin handle the way it does on Unix.
 pub(crate) fn should_enter_interactive_repl(stdin_is_terminal: bool) -> bool {
     stdin_is_terminal
 }
@@ -281,7 +281,7 @@ pub fn run(
     let project_root = workspace::discovery::discover_project_root(&current_dir);
 
     // Read [application] config from beamtalk.toml so the OTP application
-    // supervisor is started after workspace bootstrap (BT-1340).
+    // supervisor is started after workspace bootstrap.
     // The OTP app atom is the Erlang application name derived from the package name.
     let otp_app_name: Option<String> =
         camino::Utf8Path::from_path(&project_root).and_then(|root| {
@@ -339,13 +339,13 @@ pub fn run(
         };
 
         // Drain stderr in a background thread to prevent pipe buffer fill-up
-        // and capture OTP logger/VM diagnostic output (BT-1431).
+        // and capture OTP logger/VM diagnostic output.
         let _stderr_drain = drain_child_stderr(&mut child);
 
         // Foreground mode: use Erlang cookie, or "nocookie" for nodes without -setcookie
         let fg_cookie = read_erlang_cookie().unwrap_or_else(|| "nocookie".to_string());
 
-        // Foreground: compute connect host from bind_addr (BT-694)
+        // Foreground: compute connect host from bind_addr
         let fg_host = if bind_addr == std::net::Ipv4Addr::UNSPECIFIED {
             "127.0.0.1".to_string()
         } else {
@@ -374,7 +374,7 @@ pub fn run(
             );
         }
 
-        // Auto-compile package if beamtalk.toml is present (BT-606)
+        // Auto-compile package if beamtalk.toml is present
         let extra_code_paths = auto_compile_package(&project_root);
 
         // ADR 0072: Collect hex dep names AFTER auto-compile, which may
@@ -504,13 +504,14 @@ pub fn run(
     // to do here. Non-interactive use is served by the port-based protocol and
     // `beamtalk run`/`exec`, not by piping source into the REPL's stdin.
     //
-    // This also fixes a Windows-only hang (BT-2568). On Unix, rustyline returns
-    // EOF for a redirected/null stdin, so the loop previously exited there (a
-    // piped `echo expr | beamtalk repl` was read to EOF and is now skipped
-    // instead — an intentional, undocumented-path change). On Windows rustyline
-    // does NOT return EOF for a redirected stdin handle, so `repl_loop` blocked
-    // forever: `beamtalk repl` never exited and the parent `beamtalk-mcp
-    // --start` (which waits on it) blocked until its MCP `initialize` timed out.
+    // This also avoids a Windows-only hang. On Unix, rustyline returns
+    // EOF for a redirected/null stdin, so entering the loop would immediately
+    // hit EOF and exit — skipping it here for a piped `echo expr | beamtalk
+    // repl` is an intentional, undocumented-path shortcut with no
+    // user-visible difference. On Windows rustyline does NOT return EOF for
+    // a redirected stdin handle, so `repl_loop` would block forever:
+    // `beamtalk repl` would never exit and the parent `beamtalk-mcp
+    // --start` (which waits on it) would block until its MCP `initialize` timed out.
     // Gating on a TTY makes the command exit promptly on every platform; the
     // interactive TTY path is unchanged.
     let repl_res =
@@ -558,7 +559,7 @@ mod ephemeral_tests {
         assert!(!should_stop_workspace(true, true, true));
     }
 
-    /// BT-3224: `beamtalk repl -e` against a pre-existing/persistent
+    /// `beamtalk repl -e` against a pre-existing/persistent
     /// workspace (this invocation only attached, it didn't spawn the node)
     /// must never send a shutdown request on exit.
     #[test]
@@ -578,7 +579,7 @@ mod interactive_repl_tests {
 
     #[test]
     fn skips_loop_when_stdin_not_a_terminal() {
-        // The BT-2568 guard: a pipe / redirect / null stdin must NOT enter the
+        // This guard: a pipe / redirect / null stdin must NOT enter the
         // interactive loop (it hangs on Windows). The workspace is already up.
         assert!(!should_enter_interactive_repl(false));
     }
@@ -627,7 +628,7 @@ enum CommandResult {
 }
 
 /// Which branch of REPL-command handling a line resolves to, without
-/// executing any client I/O (BT-3083).
+/// executing any client I/O.
 ///
 /// [`classify_command`] is the single recognition step both the real
 /// dispatcher (`handle_repl_command`) and a table-completeness test
@@ -824,10 +825,10 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
         CommandAction::ShowCodegenUsage => eprintln!("Usage: :show-codegen <expression>"),
         CommandAction::ShowCodegen(code) => handle_show_codegen(code, client),
         CommandAction::Interrupt => handle_interrupt(client),
-        // BT-2287 / ADR 0082 Phase 3: REPL alias for `Workspace flush`.
+        // ADR 0082 Phase 3: REPL alias for `Workspace flush`.
         CommandAction::Flush => eval_and_display(client, "Workspace flush"),
-        // BT-2287 / ADR 0082 Phase 3 (expression-building extracted to
-        // `beamtalk_cli::repl_meta_exprs` in BT-3196, matching
+        // ADR 0082 Phase 3 (expression-building extracted to
+        // `beamtalk_cli::repl_meta_exprs`, matching
         // `:remove-method`'s pattern): `:flush <selector>` desugars to
         // `Workspace flush: <selector>`.
         CommandAction::FlushArg(selector) => {
@@ -836,17 +837,17 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
                 None => eprintln!("Usage: :flush [<Class>|#kind|#{{ #file => \"path\" }}]"),
             }
         }
-        // BT-2287 / ADR 0082 Phase 3: REPL alias for `Workspace changes`.
+        // ADR 0082 Phase 3: REPL alias for `Workspace changes`.
         CommandAction::Changes => eval_and_display(client, "Workspace changes"),
-        // BT-2287 / ADR 0082 Phase 3: REPL alias for `Workspace changes
+        // ADR 0082 Phase 3: REPL alias for `Workspace changes
         // dirtyMethods` — the per-class set of dirty selectors. Pairs with
         // `:changes` (full summary) and answers "what specifically changed?".
         CommandAction::Dirty => eval_and_display(client, "Workspace changes dirtyMethods"),
         // `:recheck image` (REPL alias for `Workspace recheckImage`, ADR 0105
-        // Phase 3, BT-2782); bare `:recheck` shows the usage hint.
+        // Phase 3); bare `:recheck` shows the usage hint.
         CommandAction::RecheckImage => eval_and_display(client, "Workspace recheckImage"),
         CommandAction::RecheckUsage => eprintln!("Usage: :recheck image"),
-        // ADR 0112 Phase 4 (BT-3189): REPL alias for `Behaviour>>removeSelector:`
+        // ADR 0112 Phase 4: REPL alias for `Behaviour>>removeSelector:`
         // — `:remove-method <Class> <selector>` desugars to
         // `<Class> removeSelector: #<selector>`, matching `:flush`/`:changes`'s
         // existing CLI-side-shortcut pattern (no new workspace-side op).
@@ -859,7 +860,7 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
                 None => eprintln!("Usage: :remove-method <Class> <selector>"),
             }
         }
-        // ADR 0113 Phase 4 (BT-3210): REPL alias for `Behaviour>>removeFromSystem`
+        // ADR 0113 Phase 4: REPL alias for `Behaviour>>removeFromSystem`
         // — `:remove-class <Class>` desugars to `<Class> removeFromSystem`,
         // gated behind a `y/N` terminal confirmation. Memory-only: reaching
         // disk still requires a later, separately-confirmed
@@ -870,7 +871,7 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
             eprintln!("Usage: :remove-class <Class>");
         }
         CommandAction::RemoveClassArg(arg) => handle_remove_class(arg, client),
-        // ADR 0113 Phase 4 (BT-3210): REPL alias for the Tier-2 (destructive)
+        // ADR 0113 Phase 4: REPL alias for the Tier-2 (destructive)
         // flush gate — `:flush-destructive` / `:flush-destructive <selector>`
         // desugar to `Workspace flushIncludingDestructive` /
         // `Workspace flush: <selector> confirmDestructive: true`, mirroring
@@ -883,7 +884,7 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
         CommandAction::FlushDestructiveArg(selector) => {
             handle_flush_destructive_arg(selector, client);
         }
-        // ADR 0114 Phase 5 (BT-3276): REPL alias for `Behaviour>>renameTo:`
+        // ADR 0114 Phase 5: REPL alias for `Behaviour>>renameTo:`
         // — `:rename-class <Class> <NewName>` desugars to `<Class> renameTo:
         // #<NewName>`, gated behind a `y/N` terminal confirmation, matching
         // `:remove-class`'s two-prompt shape: this prompt confirms the
@@ -895,7 +896,7 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
             eprintln!("Usage: :rename-class <Class> <NewName>");
         }
         CommandAction::RenameClassArg(arg) => handle_rename_class(arg, client),
-        // ADR 0114 Phase 5 (BT-3276): REPL alias for
+        // ADR 0114 Phase 5: REPL alias for
         // `Behaviour>>renameSelector:to:` — `:rename-method <Class>
         // <selector> <newSelector>` desugars to `<Class> renameSelector:
         // #<selector> to: #<newSelector>`, gated behind a `y/N` terminal
@@ -910,7 +911,7 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
     CommandResult::Handled
 }
 
-/// `:remove-class <Class>` (ADR 0113 Phase 4, BT-3210): prompts `y/N` at the
+/// `:remove-class <Class>` (ADR 0113 Phase 4): prompts `y/N` at the
 /// terminal (ADR 0113 Surface — the REPL's confirmation gesture for the
 /// memory-mutating half of a destructive removal) before evaluating
 /// `<Class> removeFromSystem`. The file on disk is untouched until a later,
@@ -931,7 +932,7 @@ fn handle_remove_class(arg: &str, client: &mut ReplClient) {
     }
 }
 
-/// Bare `:flush-destructive` (ADR 0113 Phase 4, BT-3210): prompts `y/N`
+/// Bare `:flush-destructive` (ADR 0113 Phase 4): prompts `y/N`
 /// before evaluating the unscoped `Workspace flushIncludingDestructive`,
 /// which deletes every pending `.bt` file the workspace's `ChangeLog` has a
 /// `remove-class` entry for.
@@ -948,7 +949,7 @@ fn handle_flush_destructive(client: &mut ReplClient) {
     }
 }
 
-/// `:flush-destructive <selector>` (ADR 0113 Phase 4, BT-3210): prompts
+/// `:flush-destructive <selector>` (ADR 0113 Phase 4): prompts
 /// `y/N` before evaluating the scoped `Workspace flush: <selector>
 /// confirmDestructive: true`.
 fn handle_flush_destructive_arg(selector: &str, client: &mut ReplClient) {
@@ -968,7 +969,7 @@ fn handle_flush_destructive_arg(selector: &str, client: &mut ReplClient) {
     }
 }
 
-/// `:rename-class <Class> <NewName>` (ADR 0114 Phase 5, BT-3276): prompts
+/// `:rename-class <Class> <NewName>` (ADR 0114 Phase 5): prompts
 /// `y/N` at the terminal (mirroring `:remove-class`'s confirmation gesture
 /// for the memory-mutating half of a destructive operation) before
 /// evaluating `<Class> renameTo: #<NewName>`. Auto-rewrites every in-project
@@ -994,8 +995,8 @@ fn handle_rename_class(arg: &str, client: &mut ReplClient) {
     }
 }
 
-/// `:rename-method <Class> <selector> <newSelector>` (ADR 0114 Phase 5,
-/// BT-3276): prompts `y/N` at the terminal before evaluating `<Class>
+/// `:rename-method <Class> <selector> <newSelector>` (ADR 0114 Phase 5):
+/// prompts `y/N` at the terminal before evaluating `<Class>
 /// renameSelector: #<selector> to: #<newSelector>`. Auto-rewrites only the
 /// self/super sends the cross-reference index can prove are structurally
 /// safe; everything else is reported as a candidate for manual review,
@@ -1036,7 +1037,7 @@ fn handle_rename_method(arg: &str, client: &mut ReplClient) {
 /// without an explicit affirmative (ADR 0113 "Surface": the REPL's
 /// confirmation gesture for a Tier-2/destructive operation).
 ///
-/// Thin wrapper over `confirm_destructive_action_with` (BT-3373), which
+/// Thin wrapper over `confirm_destructive_action_with`, which
 /// takes the confirmation source as an injected `BufRead` — the same
 /// closure/seam-injection pattern `repl::bind::detect_tailscale_ip_with`
 /// uses for its own untestable subprocess call — so the y/N-parsing logic
@@ -1064,13 +1065,13 @@ fn confirm_destructive_action_with<R: std::io::BufRead>(reader: &mut R) -> bool 
 
 /// Handle `:help <topic>` -- look up docs for a class or method.
 ///
-/// `args` is the already-extracted, trimmed argument (BT-3083: extraction
-/// now happens once in `classify_command`, driven by `commands::HELP`'s
+/// `args` is the already-extracted, trimmed argument (extraction
+/// happens once in `classify_command`, driven by `commands::HELP`'s
 /// registered aliases — `:help`, `:h`, and `:? ` all reach this, closing a
-/// pre-existing gap where `:? <Class>` didn't dispatch help despite
+/// gap where `:? <Class>` would otherwise not dispatch help despite
 /// tab-completing as if it did).
 ///
-/// BT-2091: Routes through `Beamtalk help: ClassName` evaluation rather
+/// Routes through `Beamtalk help: ClassName` evaluation rather
 /// than the deprecated `docs` protocol op (which has been removed).
 fn handle_help_topic(args: &str, client: &mut ReplClient) {
     if args.is_empty() {
@@ -1082,7 +1083,7 @@ fn handle_help_topic(args: &str, client: &mut ReplClient) {
     // "ClassName class", or "ClassName class selector"
     let tokens: Vec<&str> = args.split_whitespace().collect();
 
-    // BT-1852: Detect "Erlang <module>" and "Erlang <module> <function>" patterns.
+    // Detect "Erlang <module>" and "Erlang <module> <function>" patterns.
     // "Erlang" alone shows the Erlang class docs; "Erlang <module>" shows FFI help.
     if tokens.first() == Some(&"Erlang") && tokens.len() > 1 {
         handle_erlang_help(&tokens[1..], client);
@@ -1121,7 +1122,7 @@ fn handle_help_topic(args: &str, client: &mut ReplClient) {
     }
 }
 
-/// Handle `:help Erlang <module>` and `:help Erlang <module> <function>` (BT-1852).
+/// Handle `:help Erlang <module>` and `:help Erlang <module> <function>`.
 ///
 /// Queries the backend for type signatures (from `-spec` attributes) combined
 /// with EEP-48 documentation for the given Erlang module or function.
@@ -1150,7 +1151,7 @@ fn handle_erlang_help(tokens: &[&str], client: &mut ReplClient) {
 
 /// Handle `:clear` -- clear the current session's local bindings.
 ///
-/// BT-2369 (ADR 0081 Phase 6): the `clear` op was removed; this evaluates
+/// ADR 0081 Phase 6: the `clear` op was removed; this evaluates
 /// `Session current clear`.
 fn handle_clear(client: &mut ReplClient) {
     match client.clear_bindings() {
@@ -1166,7 +1167,7 @@ fn handle_clear(client: &mut ReplClient) {
 
 /// Handle `:bindings` -- display the current session's local binding names.
 ///
-/// BT-2369 (ADR 0081 Phase 6): the `bindings` op was removed; this evaluates
+/// ADR 0081 Phase 6: the `bindings` op was removed; this evaluates
 /// `Session current bindings keys`, whose result `value` is a list of
 /// binding-name symbols. Workspace globals are a separate layer
 /// (`Workspace globals keys`).
@@ -1231,7 +1232,7 @@ fn handle_sync(client: &mut ReplClient) {
 
 /// Display per-file errors and compiler warnings from a sync response.
 ///
-/// BT-1855: Reports each failed file with its error message, line number, and
+/// Reports each failed file with its error message, line number, and
 /// hint (when available), followed by a summary line listing all failed file
 /// paths so the user can identify problems without manual bisection.
 fn display_sync_diagnostics(response: &ReplResponse) {
@@ -1239,7 +1240,7 @@ fn display_sync_diagnostics(response: &ReplResponse) {
 
     let mode = output_mode();
 
-    // BT-1855: Collect distinct failed file paths for the summary line.
+    // Collect distinct failed file paths for the summary line.
     let mut failed_paths: Vec<&str> = Vec::new();
 
     for err in &response.errors {
@@ -1256,7 +1257,7 @@ fn display_sync_diagnostics(response: &ReplResponse) {
         }
     }
 
-    // BT-1855: Print a summary line listing all failed files.
+    // Print a summary line listing all failed files.
     if !failed_paths.is_empty() {
         let summary = format!(
             "{} file(s) failed to load: {}",
@@ -1298,7 +1299,7 @@ fn sync_tests_then_run(client: &mut ReplClient, test_expr: &str) {
 
 /// Handle `:show-codegen <expr>` -- display generated Core Erlang.
 ///
-/// `code` is the already-extracted, trimmed argument (BT-3083: see
+/// `code` is the already-extracted, trimmed argument (see
 /// `handle_help_topic`'s doc comment for why extraction moved out of here).
 fn handle_show_codegen(code: &str, client: &mut ReplClient) {
     if code.is_empty() {
@@ -1340,7 +1341,7 @@ fn handle_show_codegen(code: &str, client: &mut ReplClient) {
 /// The interrupt is sent on a **separate** connection (out-of-band) so it
 /// works even when the main session connection is blocked waiting for an
 /// eval response. This is the manual counterpart to the automatic Ctrl-C
-/// interrupt that fires during `eval_interruptible` (BT-2090).
+/// interrupt that fires during `eval_interruptible`.
 fn handle_interrupt(client: &mut ReplClient) {
     match client.interrupt() {
         Ok(()) => println!("Interrupt sent."),
@@ -1396,7 +1397,7 @@ fn attempt_reconnect_and_retry(
                 eprintln!("Reconnected (session resumed). Retrying evaluation...");
             } else {
                 eprintln!("Reconnected (new session). Retrying evaluation...");
-                // BT-1021: Emit updated session line so external consumers
+                // Emit updated session line so external consumers
                 // (e.g. VS Code) can track the new session ID.
                 if let Some(session_id) = client.session_id() {
                     println!("[beamtalk] session: {session_id}");
@@ -1430,7 +1431,7 @@ fn attempt_reconnect_and_retry(
 
 /// Display the output, warnings, errors, and value from an eval response.
 fn display_eval_response(response: &ReplResponse) {
-    // Print captured stdout before value/error (BT-355)
+    // Print captured stdout before value/error
     if let Some(ref output) = response.output {
         if !output.is_empty() {
             print!("{output}");
@@ -1440,7 +1441,7 @@ fn display_eval_response(response: &ReplResponse) {
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
     }
-    // Display compilation warnings (BT-407)
+    // Display compilation warnings
     if let Some(ref warnings) = response.warnings {
         for warning in warnings {
             eprintln!(
@@ -1456,7 +1457,7 @@ fn display_eval_response(response: &ReplResponse) {
     if response.is_error() {
         if let Some(msg) = response.error_message() {
             if msg == "Interrupted" {
-                // BT-666: Clean interrupt message
+                // Clean interrupt message
                 eprintln!("{msg}");
             } else {
                 eprintln!("{}", format_error(msg));
@@ -1490,7 +1491,7 @@ pub(crate) fn repl_loop(
     let history_file = history_path()?;
     let _ = rl.load_history(&history_file);
 
-    // BT-666: Register SIGINT handler for interrupt during eval.
+    // Register SIGINT handler for interrupt during eval.
     // Uses signal-hook to non-destructively register alongside rustyline's handler.
     let interrupted = Arc::new(AtomicBool::new(false));
     let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&interrupted));
@@ -1506,7 +1507,7 @@ pub(crate) fn repl_loop(
             Ok(line) => line,
             Err(ReadlineError::Interrupted) => {
                 // Ctrl+C -- cancel multi-line input if buffering, otherwise just newline
-                // BT-666: Clear the interrupt flag (signal handler also fires)
+                // Clear the interrupt flag (signal handler also fires)
                 interrupted.store(false, Ordering::SeqCst);
                 if !line_buffer.is_empty() {
                     line_buffer.clear();
@@ -1579,7 +1580,7 @@ pub(crate) fn repl_loop(
         // Input is complete -- add to history as single entry and evaluate
         let _ = rl.add_history_entry(&accumulated);
 
-        // Evaluate expression (BT-666: interruptible via Ctrl-C)
+        // Evaluate expression (interruptible via Ctrl-C)
         if eval_with_reconnect(client, &rl, &accumulated, &interrupted) {
             break;
         }
@@ -1657,7 +1658,7 @@ mod tests {
     #[serial(color)]
     fn format_value_tuple() {
         let _guard = ColorGuard::disabled();
-        // BT-536: Tuples are pre-formatted as strings by the backend
+        // Tuples are pre-formatted as strings by the backend
         let value = serde_json::json!("{1, hello}");
         assert_eq!(format_value(&value), "{1, hello}");
     }
@@ -1680,7 +1681,7 @@ mod tests {
         assert!(result.contains(color::RESET));
     }
 
-    // --- confirm_destructive_action_with (BT-3373) ---
+    // --- confirm_destructive_action_with ---
 
     #[test]
     fn confirm_destructive_action_accepts_y() {
@@ -1724,16 +1725,16 @@ mod tests {
         assert!(!confirm_destructive_action_with(&mut reader));
     }
 
-    // --- handle_repl_command dispatch (BT-3370) ---
+    // --- handle_repl_command dispatch ---
     //
     // These drive `handle_repl_command` (and the non-stdin-gated handlers it
     // dispatches to) against `spawn_auth_ok_server`'s fake WS backend, the same
-    // pattern `client.rs`'s own tests (BT-3364) established for `ReplClient`.
+    // pattern `client.rs`'s own tests established for `ReplClient`.
     //
     // Handlers gated behind a terminal y/N confirmation — `:remove-class`,
     // `:rename-class`, `:rename-method`, `:flush-destructive[-arg]` — are
-    // still out of scope here (BT-3373 decision): `confirm_destructive_action`
-    // itself gained a `BufRead` injection seam
+    // still out of scope here by design: `confirm_destructive_action`
+    // itself has a `BufRead` injection seam
     // (`confirm_destructive_action_with`, tested directly below) covering its
     // own y/N-parsing branches, but each handler also calls
     // `eval_and_display`/`client.eval` on its own path, so exercising a full
@@ -1741,8 +1742,8 @@ mod tests {
     // `handle_*` call site (and the `CommandAction` dispatch that reaches
     // them) for logic that's otherwise a thin wrapper over the already
     // fully-tested `repl_meta_exprs` expr builders plus the confirm/decline
-    // branch. Not worth the seam for what's left uncovered; still e2e-only,
-    // same as BT-3370 left them.
+    // branch. Not worth the seam for what's left uncovered; these stay
+    // e2e-only, consistent with the rest of this dispatch suite.
     mod handle_repl_command_dispatch {
         use super::*;
         use crate::commands::test_support::spawn_auth_ok_server;
@@ -1977,7 +1978,7 @@ mod tests {
 
         #[test]
         fn flush_changes_dirty_recheck_commands_all_dispatch() {
-            // BT-2287/ADR 0082 Phase 3 aliases: each desugars to a fixed
+            // ADR 0082 Phase 3 aliases: each desugars to a fixed
             // `Workspace ...` eval expression via `eval_and_display` — assert
             // all four reach the server and are handled, one fake server per
             // command since each expects a different `code`. The comparison
@@ -2392,8 +2393,8 @@ mod tests {
         assert_eq!(result, Some("clinode@localhost".to_string()));
     }
 
-    // BT-3083: argument extraction moved from a standalone `extract_command_arg`
-    // helper into `commands::ReplCommandSpec::arg` (table-driven, covers name +
+    // Argument extraction lives in `commands::ReplCommandSpec::arg`, not a
+    // standalone `extract_command_arg` helper (table-driven, covers name +
     // every alias in one place). `commands.rs` has its own unit tests for that
     // method directly; the tests below exercise it through `classify_command`,
     // the actual dispatch entry point.
@@ -2446,7 +2447,7 @@ mod tests {
         );
     }
 
-    /// BT-3083 regression guard: every form (name or alias) offered by
+    /// Regression guard: every form (name or alias) offered by
     /// tab-completion (`commands::all_forms`, consumed by `helper.rs`) must
     /// dispatch to *something* when submitted bare — the exact bug that let
     /// `:actors`/`:kill`/`:inspect`/`:sessions` complete with no dispatch arm
@@ -2463,7 +2464,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // BT-2287 / ADR 0082 Phase 3 — `:flush`, `:flush <sel>`, `:changes`,
+    // ADR 0082 Phase 3 — `:flush`, `:flush <sel>`, `:changes`,
     // `:dirty` meta-command dispatch. The aliases compile to Beamtalk
     // expressions; the surface-parity contract (and the Erlang side) treats
     // them as `evaluate` of a known string. These tests pin the translation.
@@ -2475,7 +2476,7 @@ mod tests {
     /// same shared function `handle_repl_command`'s real dispatch and
     /// `tests/repl_protocol.rs` call — builds the expression, so this test
     /// can only drift from production behaviour if that shared function's
-    /// own contract changes (BT-3196).
+    /// own contract changes.
     fn flush_expr_for(line: &str) -> Option<String> {
         beamtalk_cli::repl_meta_exprs::flush_expr_for(commands::FLUSH.arg(line).unwrap_or(""))
     }
@@ -2514,7 +2515,7 @@ mod tests {
     }
 
     /// Maps a line to the Beamtalk expression `handle_repl_command` evaluates
-    /// for it, by going through the real `classify_command` (BT-3083) rather
+    /// for it, by going through the real `classify_command` rather
     /// than a hand-maintained mirror — so this test can only drift from
     /// production behaviour if `handle_repl_command`'s own match arm changes
     /// without a matching `CommandAction` (which the compiler's exhaustive
@@ -2563,7 +2564,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // ADR 0112 Phase 4 (BT-3189) — `:remove-method <Class> <selector>`
+    // ADR 0112 Phase 4 — `:remove-method <Class> <selector>`
     // meta-command dispatch, matching the `:flush`/`:changes` alias pattern.
     // The expression-building logic itself (`remove_method_expr_for`) lives
     // in `beamtalk_cli::repl_meta_exprs` — shared with, and tested by,
@@ -2588,7 +2589,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // ADR 0113 Phase 4 (BT-3210) — `:remove-class <Class>` and
+    // ADR 0113 Phase 4 — `:remove-class <Class>` and
     // `:flush-destructive [<selector>]` meta-command dispatch, matching the
     // `:remove-method`/`:flush` alias pattern. The expression-building logic
     // (`remove_class_expr_for`, `flush_destructive_expr_for`,
@@ -2633,7 +2634,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // ADR 0114 Phase 5 (BT-3276) — `:rename-class <Class> <NewName>` and
+    // ADR 0114 Phase 5 — `:rename-class <Class> <NewName>` and
     // `:rename-method <Class> <selector> <newSelector>` meta-command
     // dispatch, matching `:remove-class`'s alias pattern. The
     // expression-building logic (`rename_class_expr_for`,

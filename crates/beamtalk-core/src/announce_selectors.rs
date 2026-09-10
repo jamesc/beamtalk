@@ -10,14 +10,13 @@
 //!   (ADR 0103) — treats an announce send's payload argument as crossing a
 //!   process boundary, the same as an actor-instance message argument.
 //! - **`queries::announce_sites_query`** — mines `announce:` emission sites
-//!   out of a method's AST for `SystemNavigation announcementsSentBy:`
-//!   (BT-2475).
+//!   out of a method's AST for `SystemNavigation announcementsSentBy:`.
 //!
 //! `semantic_analysis` (Compilation) and `queries` (Language Service) must
 //! never depend on each other (ADR 0117 §1); since both need this exact
 //! vocabulary fact, it lives here instead — a leaf module beneath both,
 //! following the `synthetic_selectors.rs` / `state_threading_selectors.rs`
-//! pattern (BT-3341).
+//! pattern.
 
 /// The announce selectors recognised as emission sites. The event argument is
 /// always the first keyword argument; `announceAndWait:timeout:` carries the
@@ -27,9 +26,9 @@ const ANNOUNCE_SELECTORS: [&str; 3] = ["announce:", "announceAndWait:", "announc
 /// Whether `selector_name` is one of the recognised announce selectors
 /// (`announce:`, `announceAndWait:`, `announceAndWait:timeout:`).
 ///
-/// BT-3361: widened from `pub(crate)` to `pub` — `queries::announce_sites_query`
+/// This is `pub`, not `pub(crate)`: `queries::announce_sites_query`
 /// (Language Service) reaches this from the standalone `beamtalk-language-service`
-/// crate now, so `pub(crate)` visibility is no longer reachable.
+/// crate, so `pub(crate)` visibility would not reach it.
 #[must_use]
 pub fn is_announce_selector(selector_name: &str) -> bool {
     ANNOUNCE_SELECTORS.contains(&selector_name)

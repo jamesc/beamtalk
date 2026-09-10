@@ -1,26 +1,26 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Class-definition header trailing comments (BT-2933), `handleScope:` unparse
-//! emission (BT-2942), doc-comment/type-alias interactions (BT-2924),
-//! top-level declaration order (BT-2907), and blank-line preservation between
-//! top-level declarations and section boundaries (BT-2929, BT-2945).
+//! Class-definition header trailing comments, `handleScope:` unparse
+//! emission, doc-comment/type-alias interactions,
+//! top-level declaration order, and blank-line preservation between
+//! top-level declarations and section boundaries.
 
 use super::common::*;
 
-// --- Class definition header trailing comment (BT-2933) ---
+// --- Class definition header trailing comment ---
 
 #[test]
 fn class_header_trailing_comment_round_trip() {
-    // BT-2933: a trailing end-of-line comment on the `subclass:` header
-    // line must round-trip losslessly, mirroring the identical fix for
-    // type alias/protocol declarations (BT-2906). Before the fix,
-    // `parse_class_definition` never populated `comments.trailing`, so
-    // `unparse_class_definition`'s trailing-comment branch was dead code
-    // and the comment was silently dropped.
+    // A trailing end-of-line comment on the `subclass:` header
+    // line must round-trip losslessly, mirroring the identical handling for
+    // type alias/protocol declarations. `parse_class_definition` must
+    // populate `comments.trailing` so
+    // `unparse_class_definition`'s trailing-comment branch is reachable
+    // and the comment is not silently dropped.
     // A class with no `state:` declarations always gets a blank line
-    // before its first method (canonical formatting, unrelated to this
-    // fix), hence the blank line in the expected output below.
+    // before its first method (canonical formatting, unrelated to the
+    // header trailing comment), hence the blank line in the expected output below.
     let source = concat!(
         "Object subclass: Foo  // header comment\n",
         "\n",
@@ -31,7 +31,7 @@ fn class_header_trailing_comment_round_trip() {
 
 #[test]
 fn class_header_trailing_comment_with_type_params_round_trip() {
-    // BT-2933: the trailing comment attaches after the last header
+    // The trailing comment attaches after the last header
     // token — here, the type parameter list.
     let source = concat!(
         "Object subclass: Box(T)  // header comment\n",
@@ -43,7 +43,7 @@ fn class_header_trailing_comment_with_type_params_round_trip() {
 
 #[test]
 fn class_header_trailing_comment_with_native_round_trip() {
-    // BT-2933: the trailing comment attaches after the `native:` module
+    // The trailing comment attaches after the `native:` module
     // name — the last header token when present.
     let source = concat!(
         "Object subclass: Foo native: my_module  // header comment\n",
@@ -55,7 +55,7 @@ fn class_header_trailing_comment_with_native_round_trip() {
 
 #[test]
 fn class_header_trailing_comment_with_state_round_trip() {
-    // BT-2933 (review follow-up): the most common real-world class
+    // The most common real-world class
     // shape — a header trailing comment plus a `state:` declaration.
     let source = concat!(
         "Object subclass: Counter  // counter class\n",
@@ -66,12 +66,12 @@ fn class_header_trailing_comment_with_state_round_trip() {
     assert_identity(source);
 }
 
-// --- `handleScope:` unparse emission + header trailing comment (BT-2942) ---
+// --- `handleScope:` unparse emission + header trailing comment ---
 
 #[test]
 fn handle_scope_round_trip() {
-    // BT-2942: the unparser never emitted `handleScope:` at all, so a
-    // class declaring it didn't round-trip. Canonical style (ADR 0103)
+    // The unparser must emit `handleScope:` so a
+    // class declaring it round-trips. Canonical style (ADR 0103)
     // puts the clause on its own indented line following the header.
     let source = concat!(
         "sealed typed Object subclass: MetricsTable\n",
@@ -82,7 +82,7 @@ fn handle_scope_round_trip() {
 
 #[test]
 fn handle_scope_with_state_and_methods_round_trip() {
-    // BT-2942: `handleScope:` alongside a state declaration and a method,
+    // `handleScope:` alongside a state declaration and a method,
     // exercising the blank-line-before-first-method logic together with
     // the new `handleScope:` line.
     let source = concat!(
@@ -97,13 +97,13 @@ fn handle_scope_with_state_and_methods_round_trip() {
 
 #[test]
 fn handle_scope_on_new_line_with_header_trailing_comment_round_trip() {
-    // BT-2942: when `handleScope:` sits on its own line (the canonical
+    // When `handleScope:` sits on its own line (the canonical
     // style), a trailing comment on the class header line itself (e.g.
     // `Object subclass: Foo  // comment`) lives in the class-name
     // token's trailing trivia, not `handleScope:`'s `#symbol` token's.
-    // Before the fix, `collect_trailing_comment()` unconditionally
-    // inspected `current - 1` *after* parsing `handleScope:`, landing on
-    // the `#symbol` token and silently dropping the header comment.
+    // `collect_trailing_comment()` must not unconditionally
+    // inspect `current - 1` *after* parsing `handleScope:`, or it lands on
+    // the `#symbol` token and silently drops the header comment.
     let source = concat!(
         "Object subclass: Foo  // header comment\n",
         "  handleScope: #node\n",
@@ -115,7 +115,7 @@ fn handle_scope_on_new_line_with_header_trailing_comment_round_trip() {
 
 #[test]
 fn handle_scope_with_native_and_header_trailing_comment_round_trip() {
-    // BT-2942: header clauses are parsed in a fixed order — `native:`
+    // Header clauses are parsed in a fixed order — `native:`
     // then `handleScope:` (ADR 0103) — so the trailing-comment anchor
     // must still be the `native:` module token, not the class name,
     // when both a `native:` clause and a following-line `handleScope:`
@@ -129,18 +129,18 @@ fn handle_scope_with_native_and_header_trailing_comment_round_trip() {
     assert_identity(source);
 }
 
-// --- BT-2924 regression: `type` alias sandwiched between a class's doc
+// --- Regression: `type` alias sandwiched between a class's doc
 // comment and the class itself must not lose the class's doc comment. ---
 
-/// The exact repro shape from BT-2924: a class's doc comment, a blank
+/// The repro shape: a class's doc comment, a blank
 /// line, a `type` alias with its own directly-adjacent doc comment, a
 /// blank line, then the class declaration the first doc comment
 /// describes.
 ///
-/// Before the fix, `format_source` deleted the class's doc comment
-/// outright (it lives in the `type` alias token's leading trivia, and
-/// `collect_doc_comment` kept only the alias's own — nearer — block,
-/// discarding the earlier one without preserving it anywhere).
+/// `format_source` must not delete the class's doc comment
+/// outright: it lives in the `type` alias token's leading trivia, and
+/// `collect_doc_comment` keeps only the alias's own — nearer — block, so
+/// the earlier one must be preserved somewhere rather than discarded.
 const HTTPSERVER_REPRO_SOURCE: &str = concat!(
     "/// HTTPServer — cowboy-backed HTTP server actor for Beamtalk.\n",
     "/// Some more description text here.\n",
@@ -198,7 +198,7 @@ fn type_alias_preceded_by_orphaned_class_doc_reattaches_correctly_on_reparse() {
 
 #[test]
 fn type_alias_with_directly_adjacent_doc_comment_has_no_unattached_warning() {
-    // BT-2924 secondary bug: the lint must not flag the alias's own
+    // The lint must not flag the alias's own
     // directly-adjacent `///` comment as unattached just because an
     // earlier, unrelated block shares the same leading trivia.
     use crate::source_analysis::{Severity, lex_with_eof, parse};
@@ -214,19 +214,19 @@ fn type_alias_with_directly_adjacent_doc_comment_has_no_unattached_warning() {
     );
 }
 
-// --- BT-2907: top-level declaration order (classes/protocols/type aliases) ---
+// --- Top-level declaration order (classes/protocols/type aliases) ---
 //
-// `unparse_module_doc` used to always emit type aliases first, then
-// protocols, then classes — regardless of where each declaration
-// appeared in the source. A `type` alias (or a protocol) declared
-// *after* a class would jump to the top of the file on a format
-// round-trip. The three declaration kinds are now interleaved back into
-// their original source order.
+// `unparse_module_doc` must interleave classes, protocols, and type
+// aliases back into their original source order, not group them by
+// kind (type aliases first, then protocols, then classes) regardless of
+// where each declaration appeared in the source — otherwise a `type`
+// alias (or a protocol) declared *after* a class would jump to the top
+// of the file on a format round-trip.
 
 #[test]
 fn type_alias_after_class_preserves_source_order() {
-    // Before the fix, this `type` alias — declared after the class —
-    // would have been hoisted above `Actor subclass: Server`.
+    // This `type` alias — declared after the class — must not be
+    // hoisted above `Actor subclass: Server`.
     let source = concat!(
         "Actor subclass: Server\n",
         "  start => 1\n",
@@ -341,13 +341,13 @@ fn class_protocol_type_alias_interleaved_preserves_relative_order() {
     );
 }
 
-// --- BT-2929: blank line between top-level declarations ---
+// --- Blank line between top-level declarations ---
 //
-// `unparse_module_doc` used to always emit exactly one `line()` after
-// each top-level declaration, regardless of whether the source had a
-// blank line there — so the separating blank line was either silently
-// dropped, or (for a class) looked "relocated" into the class's own
-// body, since a class unconditionally gets a blank line before its
+// `unparse_module_doc` must re-emit a blank line after a top-level
+// declaration only when the source had one there — emitting exactly one
+// `line()` unconditionally would either silently drop the separating
+// blank line, or (for a class) make it look "relocated" into the class's
+// own body, since a class unconditionally gets a blank line before its
 // first method whether or not it has state declarations (an unrelated,
 // pre-existing formatting rule — see the `Blank line before first
 // method` comment in `unparse_class_definition`). All three assertions
@@ -357,7 +357,7 @@ fn class_protocol_type_alias_interleaved_preserves_relative_order() {
 
 #[test]
 fn blank_line_preserved_type_alias_then_class() {
-    // Repro A from BT-2929.
+    // Repro A: type alias then class.
     assert_identity(concat!(
         "type Port = Integer\n",
         "\n",
@@ -369,7 +369,7 @@ fn blank_line_preserved_type_alias_then_class() {
 
 #[test]
 fn blank_line_preserved_class_then_class() {
-    // Repro B from BT-2929 — confirms the bug wasn't type-alias-specific.
+    // Repro B: class then class — confirms this isn't type-alias-specific.
     assert_identity(concat!(
         "Object subclass: A\n",
         "\n",
@@ -383,8 +383,9 @@ fn blank_line_preserved_class_then_class() {
 
 #[test]
 fn blank_line_preserved_type_alias_then_type_alias() {
-    // Repro C from BT-2929 — the blank line was dropped outright here
-    // (neither declaration has a body to "absorb" it into).
+    // Repro C: type alias then type alias — the blank line has nothing
+    // to be relocated into (neither declaration has a body to "absorb"
+    // it), so it must be preserved directly.
     assert_identity(concat!(
         "type Port = Integer\n",
         "\n",
@@ -401,10 +402,10 @@ fn no_blank_line_between_top_level_declarations_stays_absent() {
 
 #[test]
 fn blank_line_before_first_top_level_declaration_is_dropped() {
-    // BT-2929 (review follow-up): the `i > 0` guard in
+    // The `i > 0` guard in
     // `unparse_module_doc`'s loop intentionally does not preserve a
     // blank line before the very first top-level declaration — this
-    // predates BT-2929 and is documented in the loop's comment.
+    // is documented in the loop's comment.
     // Confirmed here with an explicit regression test rather than only
     // a code comment.
     //
@@ -419,7 +420,7 @@ fn blank_line_before_first_top_level_declaration_is_dropped() {
 
 #[test]
 fn multiple_blank_lines_between_top_level_declarations_normalised_to_one() {
-    // BT-2929 (review follow-up): `has_blank_line_before_first_comment`
+    // `has_blank_line_before_first_comment`
     // treats any run of 2+ blank lines as "a blank line preceded this
     // node" — the unparser always re-emits exactly one, so multiple
     // blank lines collapse to one on format (standard normalisation),
@@ -452,14 +453,15 @@ fn blank_line_preserved_across_all_three_declaration_kinds_interleaved() {
 }
 
 // --- Blank line at section boundaries: declarations / standalone methods
-// / expressions (BT-2943) ---
+// / expressions ---
 //
-// BT-2929 only fixed blank-line preservation *within* the interleaved
-// class/protocol/type-alias declaration section. `Module`'s other two
-// sections — standalone methods (`Class >> method => body`) and top-level
-// expressions — are always rendered after it, in that fixed order. These
-// tests cover the three section *boundaries* where a blank line was still
-// silently dropped: declarations→standalone-methods,
+// Blank-line preservation *within* the interleaved
+// class/protocol/type-alias declaration section is handled separately.
+// `Module`'s other two sections — standalone methods (`Class >> method =>
+// body`) and top-level expressions — are always rendered after it, in
+// that fixed order. These tests cover the three section *boundaries*
+// where a blank line must not be silently dropped:
+// declarations→standalone-methods,
 // standalone-method→standalone-method, and
 // standalone-methods→expressions.
 
@@ -536,8 +538,8 @@ fn no_blank_line_between_standalone_method_and_expression_stays_absent() {
 #[test]
 fn blank_line_preserved_across_all_three_section_boundaries() {
     // Full combination: declaration, two standalone methods, and an
-    // expression, each separated by a blank line — every boundary from
-    // BT-2943's acceptance criteria in one round-trip.
+    // expression, each separated by a blank line — every section
+    // boundary in one round-trip.
     assert_identity(concat!(
         "Object subclass: Foo\n",
         "\n",
@@ -553,7 +555,7 @@ fn blank_line_preserved_across_all_three_section_boundaries() {
 
 #[test]
 fn blank_line_before_class_name_wins_over_internal_selector_comment_blank_line() {
-    // BT-2943 regression: when a standalone method has no leading comment
+    // Regression: when a standalone method has no leading comment
     // before its class name, but does have one wedged between `>>` and
     // the selector (unusual, but the parser doesn't reject it), the
     // blank-line signal used for module-level section-boundary spacing
@@ -627,9 +629,9 @@ fn blank_line_preserved_before_package_qualified_standalone_method() {
     ));
 }
 
-// --- Blank line between a leading comment and its declaration (BT-2945) ---
+// --- Blank line between a leading comment and its declaration ---
 //
-// `has_blank_line_before_first_comment` (BT-2929's `leading_blank_line`)
+// `has_blank_line_before_first_comment` (`leading_blank_line`)
 // only detects a blank line *before* the whole leading-comment block; it
 // has no way to represent a blank line *inside* that block, between the
 // last comment and the declaration itself. `blank_line_after_comments`
@@ -666,9 +668,9 @@ fn no_blank_line_between_leading_comment_and_declaration_stays_absent() {
     // The converse of the three tests above, for all three declaration
     // kinds: no blank line in source between the comment and the
     // declaration must not gain one. This also guards against
-    // `unparse_class_definition`'s pre-fix behaviour, which used to
-    // unconditionally insert a blank line after any non-empty leading
-    // comment regardless of what the source actually had.
+    // `unparse_class_definition` unconditionally inserting a blank line
+    // after any non-empty leading comment regardless of what the source
+    // actually had.
     assert_identity("// note\ntype Foo = Bar\n");
     assert_identity(concat!(
         "// note\n",
@@ -685,9 +687,9 @@ fn no_blank_line_between_leading_comment_and_declaration_stays_absent() {
 
 #[test]
 fn blank_line_before_comment_block_and_after_it_are_independent_signals() {
-    // A blank line before the whole comment block (BT-2929's
-    // `leading_blank_line`) and a blank line after the last comment,
-    // before the declaration (BT-2945's `blank_line_after_comments`) are
+    // A blank line before the whole comment block
+    // (`leading_blank_line`) and a blank line after the last comment,
+    // before the declaration (`blank_line_after_comments`) are
     // tracked independently and must both round-trip when both are
     // present in the same source, between two top-level declarations
     // (blank-before-the-first-declaration-in-a-section is dropped by
@@ -703,10 +705,9 @@ fn blank_line_before_comment_block_and_after_it_are_independent_signals() {
 
 #[test]
 fn state_declaration_preceded_by_orphaned_doc_block_does_not_merge_into_own_doc_comment() {
-    // BT-2924 follow-up (found in adversarial review): a `///` block that
-    // breaks away from a *different* declaration must not get glued onto
-    // — and then silently merged into — a state field's own doc comment
-    // on a format round-trip.
+    // A `///` block that breaks away from a *different* declaration must
+    // not get glued onto — and then silently merged into — a state
+    // field's own doc comment on a format round-trip.
     let source = concat!(
         "Object subclass: Foo\n",
         "  /// Section header orphan.\n",
@@ -732,8 +733,8 @@ fn state_declaration_preceded_by_orphaned_doc_block_does_not_merge_into_own_doc_
 
 #[test]
 fn protocol_preceded_by_orphaned_doc_block_does_not_merge_into_own_doc_comment() {
-    // BT-2924 follow-up (found in adversarial review): same shape as
-    // above, for a `Protocol define:` declaration.
+    // Same shape as the state-field case above, for a `Protocol define:`
+    // declaration.
     let source = concat!(
         "/// Orphaned block, meant for something else entirely.\n",
         "\n",
@@ -758,11 +759,12 @@ fn protocol_preceded_by_orphaned_doc_block_does_not_merge_into_own_doc_comment()
 
 #[test]
 fn method_with_no_doc_comment_preceded_by_orphaned_doc_block_does_not_attach_it() {
-    // BT-2924 follow-up (review finding on the fix itself): a `///` block
-    // that breaks away from a different declaration must not attach to a
-    // *method with no doc comment of its own* on a format round-trip —
-    // the class/protocol/state cases were fixed, but the method case was
-    // missed since its blank-line guard lives inside `if let Some(doc)`.
+    // A `///` block that breaks away from a different declaration must
+    // not attach to a *method with no doc comment of its own* on a format
+    // round-trip — this is the method-side counterpart of the
+    // class/protocol/state cases above; its blank-line guard lives inside
+    // `if let Some(doc)`, so a method with no doc comment needs its own
+    // check.
     let source = concat!(
         "Object subclass: Foo\n",
         "  /// Section header (orphaned — blank line below).\n",

@@ -42,9 +42,9 @@ pub(crate) mod scope;
 pub(crate) mod string_utils;
 pub mod supervisor_kind_writeback;
 pub mod type_checker;
-// BT-3340: widened from `pub(crate)` — `check_effect_free_statements` is
-// used by the standalone `beamtalk-lint` crate; the rest of this module
-// stays `pub(crate)`-reexported within it.
+// `pub`, not `pub(crate)`: `check_effect_free_statements` is used by the
+// standalone `beamtalk-lint` crate; the rest of this module stays
+// `pub(crate)`-reexported within it.
 pub mod validators;
 
 // Property-based tests for semantic analysis (ADR 0011 Phase 2)
@@ -85,7 +85,7 @@ pub use type_checker::{
     infer_types_and_returns,
 };
 
-/// BT-738: Warn when a user-defined class name shadows a stdlib built-in.
+/// Warn when a user-defined class name shadows a stdlib built-in.
 ///
 /// Must NOT be called for stdlib compilation (`stdlib_mode = true`). Call
 /// this alongside `validate_primitives`, guarded by `!options.stdlib_mode`.
@@ -98,14 +98,14 @@ pub fn check_stdlib_name_shadowing(
 
 /// Result of semantic analysis.
 ///
-/// BT-3123: Also carries [`SemanticFacts`] and inferred method return types
+/// Also carries [`SemanticFacts`] and inferred method return types
 /// (`method_return_types`) alongside the class hierarchy, protocol registry,
 /// and alias registry already here — the full set of analysis outputs codegen
 /// needs. This lets a driver that already ran [`analyse_full`] for
 /// diagnostics hand the *same* `AnalysisResult` to codegen (via
 /// `CodegenOptions::with_analysis`) instead of codegen re-deriving its own
 /// view (a fresh `ClassHierarchy::build`, a fresh `compute_semantic_facts`,
-/// and a full re-run of `infer_method_return_types` — see BT-3123).
+/// and a full re-run of `infer_method_return_types`).
 #[derive(Debug, Clone)]
 pub struct AnalysisResult {
     /// Diagnostics (errors and warnings) from analysis.
@@ -120,27 +120,27 @@ pub struct AnalysisResult {
     /// Protocol registry (ADR 0068 Phase 2b).
     pub protocol_registry: ProtocolRegistry,
 
-    /// Type alias registry (ADR 0108 Phase 2, BT-2895).
+    /// Type alias registry (ADR 0108 Phase 2).
     pub alias_registry: AliasRegistry,
 
-    /// Pre-codegen semantic facts (BT-1288) computed in the same pass as the
-    /// rest of analysis (BT-3123) — block mutation/capture profiles, dispatch
-    /// classification, and non-local-return spans. Consumed by codegen via
+    /// Pre-codegen semantic facts computed in the same pass as the rest of
+    /// analysis — block mutation/capture profiles, dispatch classification,
+    /// and non-local-return spans. Consumed by codegen via
     /// `CodegenOptions::with_analysis` instead of a second
     /// `compute_semantic_facts` call.
     pub semantic_facts: facts::SemanticFacts,
 
-    /// Inferred return types for unannotated methods (BT-1005), keyed by
+    /// Inferred return types for unannotated methods, keyed by
     /// `(ClassName, Selector, IsClassMethod)`. Populated from the same
-    /// [`TypeChecker`] pass that builds `type_map` during Phase 2 below —
-    /// previously discarded here and re-derived by codegen's return-type
-    /// writeback pass via a second, full `infer_method_return_types` call
-    /// (BT-3123). `Dynamic` results are omitted (absence = dynamic), matching
+    /// [`TypeChecker`] pass that builds `type_map` during Phase 2 below, so
+    /// codegen's return-type writeback pass can consume it instead of
+    /// re-running a second, full `infer_method_return_types` call.
+    /// `Dynamic` results are omitted (absence = dynamic), matching
     /// [`type_checker::infer_method_return_types`]'s own contract.
     pub method_return_types: HashMap<type_checker::MethodReturnKey, InferredType>,
 
     /// Every alias name transitively referenced by an annotation resolved
-    /// during this compile (ADR 0108 hot-reload re-check trigger, BT-2899).
+    /// during this compile (ADR 0108 hot-reload re-check trigger).
     ///
     /// Sorted and deduplicated. Populated from
     /// [`type_checker::TypeChecker::take_referenced_aliases`] — see that
@@ -176,10 +176,9 @@ pub struct AnalysisResult {
     ///
     /// Consumed by codegen (via `CodegenOptions::with_analysis` /
     /// `CoreErlangGenerator::type_map`) to project a message send's receiver
-    /// type onto the xref `recv_type` field (BT-3217, ADR 0115 Phase 2) —
-    /// see `docs/internal/adr-0115-phase1-spike-findings.md` §1a/§1d for why
-    /// this field was previously computed and discarded rather than plumbed
-    /// through.
+    /// type onto the xref `recv_type` field (ADR 0115 Phase 2) — see
+    /// `docs/internal/adr-0115-phase1-spike-findings.md` §1a/§1d for why
+    /// this field is plumbed through here rather than recomputed downstream.
     pub type_map: TypeMap,
 }
 
@@ -279,7 +278,7 @@ pub enum MutationKind {
 }
 
 /// Bundles the knobs threaded through [`analyse_full`], the single semantic
-/// analysis entry point (BT-3114, consolidating BT-2804's wrapper family).
+/// analysis entry point (consolidating what was formerly a wrapper family).
 ///
 /// Call sites build a context with the builder methods below —
 /// `AnalysisContext::default().with_known_vars(...).with_natives(...)` — and
@@ -294,22 +293,22 @@ pub enum MutationKind {
 pub struct AnalysisContext<'a> {
     /// Pre-defined variables treated as already bound (REPL context).
     pub known_vars: &'a [&'a str],
-    /// Permits built-in classes to subclass sealed classes (BT-791);
-    /// only set when compiling stdlib sources.
+    /// Permits built-in classes to subclass sealed classes; only set when
+    /// compiling stdlib sources.
     pub stdlib_mode: bool,
     /// Suppresses the effect-free module-level expression lint
     /// (bootstrap-test compilation).
     pub skip_module_expression_lint: bool,
     /// Cross-file class metadata injected into the class hierarchy before
-    /// type checking (BT-1523, ADR 0050 Phase 4).
+    /// type checking (ADR 0050 Phase 4).
     pub pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
     /// Protocol definitions extracted from other source files, e.g. `BUnit`
-    /// fixtures (BT-2006).
+    /// fixtures.
     pub pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
     /// Type alias definitions extracted from other source files or packages
-    /// (BT-2898, ADR 0108 Phase 5), *or* type aliases declared in earlier
-    /// turns of the same REPL session (ADR 0108 Phase 8, BT-2902) — both
-    /// uses funnel through the same field and the same
+    /// (ADR 0108 Phase 5), *or* type aliases declared in earlier turns of
+    /// the same REPL session (ADR 0108 Phase 8) — both uses funnel through
+    /// the same field and the same
     /// `AliasRegistry::add_pre_loaded` seeding call in `analyse_full`.
     /// `internal` entries are excluded at the seeding boundary before this
     /// ever reaches `AliasRegistry::add_pre_loaded` when compiling with a
@@ -329,20 +328,19 @@ pub struct AnalysisContext<'a> {
     pub current_package: Option<&'a str>,
     /// Native type registry for FFI call inference (ADR 0075).
     pub native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
-    /// How complete the injected cross-file class knowledge is (BT-2796,
-    /// ADR 0100 Rule 2). Defaults to the conservative `ModuleOnly`.
+    /// How complete the injected cross-file class knowledge is (ADR 0100
+    /// Rule 2). Defaults to the conservative `ModuleOnly`.
     pub knowledge_scope: KnowledgeScope,
-    /// Project-wide standalone extension definitions (BT-2795, ADR 0066).
-    /// `None`/empty means only the current module's own extensions are
-    /// visible.
+    /// Project-wide standalone extension definitions (ADR 0066). `None`/empty
+    /// means only the current module's own extensions are visible.
     pub cross_file_extensions: Option<&'a crate::compilation::extension_index::ExtensionIndex>,
     /// Whether the current package has dependencies whose extensions are
-    /// not visible here (BT-2794, ADR 0100 Rule 2).
+    /// not visible here (ADR 0100 Rule 2).
     pub has_package_dependencies: bool,
     /// Whether the module being analysed comes from a `stubs/` directory
-    /// (ADR 0075, BT-1846/BT-1847). `declare native:` is only legal there —
-    /// defaulting to `false` means any caller that doesn't know about stub
-    /// files (the common case today) correctly rejects it.
+    /// (ADR 0075). `declare native:` is only legal there — defaulting to
+    /// `false` means any caller that doesn't know about stub files (the
+    /// common case today) correctly rejects it.
     pub is_stub_file: bool,
 }
 
@@ -370,7 +368,7 @@ impl<'a> AnalysisContext<'a> {
     }
 
     /// Cross-file class metadata injected into the class hierarchy before
-    /// type checking (BT-1523, ADR 0050 Phase 4).
+    /// type checking (ADR 0050 Phase 4).
     #[must_use]
     pub fn with_pre_loaded_classes(
         mut self,
@@ -381,7 +379,7 @@ impl<'a> AnalysisContext<'a> {
     }
 
     /// Protocol definitions extracted from other source files, e.g. `BUnit`
-    /// fixtures (BT-2006).
+    /// fixtures.
     #[must_use]
     pub fn with_pre_loaded_protocols(
         mut self,
@@ -427,8 +425,8 @@ impl<'a> AnalysisContext<'a> {
         self
     }
 
-    /// Project-wide standalone extension definitions (BT-2795, ADR 0066), so
-    /// a cross-file `ClassName >> selector` extension resolves instead of
+    /// Project-wide standalone extension definitions (ADR 0066), so a
+    /// cross-file `ClassName >> selector` extension resolves instead of
     /// producing a false `Dnu` hint. May safely include the current file's
     /// own entries — the current module's extensions are registered first
     /// and duplicates are skipped.
@@ -442,7 +440,7 @@ impl<'a> AnalysisContext<'a> {
     }
 
     /// Whether the module being analysed comes from a `stubs/` directory
-    /// (ADR 0075, BT-1846/BT-1847) — see the `is_stub_file` field's own doc.
+    /// (ADR 0075) — see the `is_stub_file` field's own doc.
     #[must_use]
     pub fn with_is_stub_file(mut self, is_stub_file: bool) -> Self {
         self.is_stub_file = is_stub_file;
@@ -478,11 +476,11 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 }
 
 /// Perform semantic analysis on a module with a fully-populated
-/// [`AnalysisContext`] (BT-3114, the single entry point that replaces the
-/// former `analyse_with_*` wrapper family — REPL known-vars, compiler
+/// [`AnalysisContext`] — the single entry point that replaces the former
+/// `analyse_with_*` wrapper family — REPL known-vars, compiler
 /// options, cross-file classes/protocols/aliases, native FFI types,
 /// cross-file extensions, and package-qualifier validation all thread
-/// through `ctx`, built via its `with_*` builder methods).
+/// through `ctx`, built via its `with_*` builder methods.
 ///
 /// ADR 0075: When `ctx.native_type_registry` is `Some`, FFI calls (`Erlang <module> <function>:`)
 /// get return type inference and keyword mismatch warnings from the registry.
@@ -526,10 +524,10 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
 
     let mut result = AnalysisResult::new();
 
-    // BT-1288 / BT-3123: Compute pre-codegen semantic facts in the same pass
-    // as the rest of analysis, on the same (pre-writeback) module AST that
-    // codegen's own `compute_semantic_facts(module)` call used to re-derive.
-    // A pure AST walk with no hierarchy/type dependency, so it can run
+    // Compute pre-codegen semantic facts in the same pass as the rest of
+    // analysis, on the same (pre-writeback) module AST that codegen's own
+    // `compute_semantic_facts(module)` call would otherwise re-derive. A pure
+    // AST walk with no hierarchy/type dependency, so it can run
     // anywhere in this function; done first for symmetry with the writeback
     // trio's ordering in codegen.
     result.semantic_facts = facts::compute_semantic_facts(module);
@@ -541,23 +539,23 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     result.class_hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
     result.diagnostics.extend(hierarchy_diags);
 
-    // BT-2796: Record how complete the injected cross-file knowledge is so
-    // the receiver-knowledge classifier can consult it (ADR 0100 Rule 2).
+    // Record how complete the injected cross-file knowledge is so the
+    // receiver-knowledge classifier can consult it (ADR 0100 Rule 2).
     result.class_hierarchy.set_knowledge_scope(knowledge_scope);
     result
         .class_hierarchy
         .set_dependency_extensions_unknown(has_package_dependencies);
 
-    // ADR 0071 BT-1700: Stamp current package on AST-derived classes
+    // ADR 0071: Stamp current package on AST-derived classes
     if let Some(pkg) = current_package {
         result.class_hierarchy.stamp_package(pkg);
     }
 
-    // BT-1726: Remember whether cross-file class metadata was provided so the
+    // Remember whether cross-file class metadata was provided so the
     // structural validator can decide whether unresolved-class warnings are useful.
     let has_cross_file_classes = !pre_loaded_classes.is_empty();
 
-    // BT-2088: Filter out pre-loaded class entries whose names match a protocol
+    // Filter out pre-loaded class entries whose names match a protocol
     // definition in the current module. The compiler server's class cache
     // includes synthetic protocol class entries from prior loads; injecting
     // them into the hierarchy would cause a spurious "namespace collision"
@@ -565,7 +563,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     //
     // The same goes for entries named like a *pre-loaded* (cross-file)
     // protocol: the language service registers every protocol as a synthetic
-    // class entry (`register_protocol_classes`, BT-1933) and hands those along
+    // class entry (`register_protocol_classes`) and hands those along
     // with the real cross-file classes, so a protocol defined in another file
     // would reach the hierarchy as a plain class. `has_class` then defeats
     // `is_type_compatible`'s "unknown type → compatible" escape hatch and the
@@ -596,7 +594,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         result
             .class_hierarchy
             .add_from_beam_meta(pre_loaded_classes);
-        // BT-1559: Re-propagate class kind after cross-file classes are injected.
+        // Re-propagate class kind after cross-file classes are injected.
         // Both module-local classes (whose superclass is in another file) and
         // cross-file classes (whose is_value wasn't set at extraction time) may
         // need fixup. propagate_class_kind handles AST classes from this module;
@@ -615,10 +613,10 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         result.class_hierarchy.register_extensions(&ext_index);
     }
 
-    // BT-2795 (ADR 0066 / ADR 0100 Rule 2 WS1): Register project-wide
-    // cross-file extensions so a same-project `ClassName >> selector`
-    // defined in another file resolves instead of producing a false `Dnu`
-    // hint. Registered *after* the current module's own extensions —
+    // Register project-wide cross-file extensions (ADR 0066 / ADR 0100 Rule
+    // 2 WS1) so a same-project `ClassName >> selector` defined in another
+    // file resolves instead of producing a false `Dnu` hint. Registered
+    // *after* the current module's own extensions —
     // `register_extensions` skips selectors the class already defines, so
     // the current file's definitions win and an index that includes the
     // current file's own entries is harmless.
@@ -635,7 +633,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // Must happen after the class hierarchy is fully built (for namespace collision
     // checks) and before type checking (so protocol names resolve in type annotations).
     //
-    // BT-2006: Seed the registry with pre-loaded protocols (e.g. BUnit fixture
+    // Seed the registry with pre-loaded protocols (e.g. BUnit fixture
     // protocols) *before* registering the current module's protocols so that
     // fixture protocol names are visible to `extending:` resolution and the
     // unresolved-class validator. Skip pre-loaded entries whose names also
@@ -662,15 +660,14 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         result.diagnostics.extend(proto_diags);
     }
 
-    // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2/5/8,
-    // BT-2895/BT-2898/BT-2902)
+    // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2/5/8)
     // Must happen after both the class hierarchy and protocol registry are
     // fully built for the current module — aliases share the class/protocol
     // namespace, and this ordering (classes → protocols → aliases) is what
     // gives `AliasRegistry::register_module` bidirectional collision
     // detection within a single batch compile (see its doc comment).
     //
-    // BT-2898: Seed the registry with pre-loaded aliases (e.g. other files in
+    // Seed the registry with pre-loaded aliases (e.g. other files in
     // the same package, or a dependency's exported aliases) *before*
     // registering the current module's own aliases — mirrors the protocol
     // seeding immediately above. Skip pre-loaded entries whose names also
@@ -681,17 +678,16 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // multi-file package) is still seeded, since ADR 0108 scopes `internal`
     // aliases to the whole declaring *package*, not just the declaring file.
     //
-    // ADR 0108 Phase 8 (BT-2902): the same field/call also carries aliases
-    // declared in earlier turns of the same REPL session — filtering out any
-    // name the current module/turn itself redeclares (current turn wins,
-    // same as above) keeps a live `type Foo = ...` redefinition from
-    // tripping `register_module`'s duplicate-name check (ADR 0108 Semantics:
-    // a live session can legally redefine an alias). `referenced_aliases`
-    // (ADR 0108 hot-reload re-check trigger, BT-2899, below) is what lets
-    // the Erlang side re-check dependent annotation sites once this
-    // redefinition installs. A REPL session has no `current_package`, so
-    // the seeding-boundary exclusion above never filters a carried-over
-    // `internal` alias out.
+    // ADR 0108 Phase 8: the same field/call also carries aliases declared in
+    // earlier turns of the same REPL session — filtering out any name the
+    // current module/turn itself redeclares (current turn wins, same as
+    // above) keeps a live `type Foo = ...` redefinition from tripping
+    // `register_module`'s duplicate-name check (ADR 0108 Semantics: a live
+    // session can legally redefine an alias). `referenced_aliases` (the ADR
+    // 0108 hot-reload re-check trigger, below) is what lets the Erlang side
+    // re-check dependent annotation sites once this redefinition installs. A
+    // REPL session has no `current_package`, so the seeding-boundary
+    // exclusion above never filters a carried-over `internal` alias out.
     if !pre_loaded_aliases.is_empty() {
         let current_alias_names: std::collections::HashSet<&EcoString> =
             module.type_aliases.iter().map(|a| &a.name.name).collect();
@@ -730,7 +726,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     let scope = name_resolver.into_scope();
 
     // Phase 2: Type Checking (ADR 0025 Phase 1 — zero-syntax inference)
-    // ADR 0071 Phase 3 (BT-1702): Create type checker with package context for
+    // ADR 0071 Phase 3: Create type checker with package context for
     // internal method visibility enforcement (E0403).
     let mut type_checker = if let Some(pkg) = current_package {
         TypeChecker::with_package(pkg)
@@ -748,20 +744,20 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.alias_registry,
     );
     result.diagnostics.extend(type_checker.take_diagnostics());
-    // ADR 0108 hot-reload re-check trigger (BT-2899): sorted, deduplicated
-    // snapshot of every alias name this compile's annotations transitively
-    // depended on — see the field's own doc.
+    // ADR 0108 hot-reload re-check trigger: sorted, deduplicated snapshot of
+    // every alias name this compile's annotations transitively depended on —
+    // see the field's own doc.
     let mut referenced_aliases: Vec<EcoString> =
         type_checker.take_referenced_aliases().into_iter().collect();
     referenced_aliases.sort();
     result.referenced_aliases = referenced_aliases;
-    // BT-3123: capture the method-return-type inferences this same
+    // Capture the method-return-type inferences this same
     // `TypeChecker` pass already computed, so codegen's return-type
     // writeback pass can consume them instead of re-running inference.
     result.method_return_types = type_checker.take_method_return_types();
     let type_map = type_checker.take_type_map();
 
-    // BT-2140: Lint redundant local-variable type annotations using the
+    // Lint redundant local-variable type annotations using the
     // populated TypeMap. Must run before the Analyser consumes `type_map`.
     validators::check_redundant_local_type_annotation(module, &type_map, &mut result.diagnostics);
 
@@ -770,7 +766,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     let mut analyser = Analyser::with_scope(scope, type_map);
 
     analyser.analyse_module(module);
-    // ADR 0103 Phase 2 (BT-2756): block-capture sendability. Runs here where
+    // ADR 0103 Phase 2: block-capture sendability. Runs here where
     // both the type_map (owned by the analyser) and the computed block captures
     // are live.
     validators::check_block_capture_sendability(
@@ -781,7 +777,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         Some(&result.alias_registry),
         &mut result.diagnostics,
     );
-    // BT-3217 (ADR 0115 Phase 2): recover the `TypeMap` by destructuring
+    // ADR 0115 Phase 2: recover the `TypeMap` by destructuring
     // `analyser` here — a consuming accessor mid-pass isn't viable since
     // `analyser.result` is still read/moved-from below (`diagnostics`, then
     // `block_info`), per the ADR 0115 Phase 1 spike's §1d plumbing note.
@@ -794,21 +790,21 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     result.block_info = analyser_result.block_info;
     result.type_map = analyser_type_map;
 
-    // Phase 4: Abstract instantiation check (BT-105)
+    // Phase 4: Abstract instantiation check
     validators::check_abstract_instantiation(
         module,
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
 
-    // Phase 5: Class-aware diagnostics (BT-563, BT-1540)
+    // Phase 5: Class-aware diagnostics
     validators::check_actor_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
     validators::check_object_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
     validators::check_new_field_names(module, &result.class_hierarchy, &mut result.diagnostics);
-    // BT-2718: Reject user names that collide with the reserved internal `__`
+    // Reject user names that collide with the reserved internal `__`
     // state-key namespace (`__local__…`, `__methods__`, `__class_mod__`).
     validators::check_reserved_internal_names(module, &mut result.diagnostics);
-    // BT-2997: Reject method declarations for the equality operators codegen
+    // Reject method declarations for the equality operators codegen
     // lowers straight to Erlang BIFs (`=:=`, `=/=`, `==`, `/=`, ADR 0002) —
     // they never dispatch, so such a method is silently dead code.
     validators::check_non_overridable_operator_methods(module, &mut result.diagnostics);
@@ -823,7 +819,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
-    // BT-3391: Warn when a TestCase subclass's `setUp` mutates a field via
+    // Warn when a TestCase subclass's `setUp` mutates a field via
     // `self.field := value` but its last statement doesn't return the
     // updated self — the mutation is silently dropped for the test method.
     validators::check_testcase_setup_drops_field_assignments(
@@ -846,27 +842,27 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             &mut result.diagnostics,
         );
     }
-    // BT-919: Reject cast (!) on value types
+    // Reject cast (!) on value types
     validators::check_cast_on_value_type(module, &result.class_hierarchy, &mut result.diagnostics);
-    // BT-1793: Reject actor state mutation inside non-state-threading block closures
+    // Reject actor state mutation inside non-state-threading block closures
     validators::check_actor_field_mutation_in_closure(
         module,
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
-    // BT-950: Warn on redundant assignment (x := x)
+    // Warn on redundant assignment (x := x)
     validators::check_redundant_assignment(module, &mut result.diagnostics);
-    // BT-955: Warn on literal boolean conditions (always true / always false)
+    // Warn on literal boolean conditions (always true / always false)
     validators::check_literal_boolean_condition(module, &mut result.diagnostics);
-    // BT-1955: Warn on redundant `super initialize` in Actor initialize methods (ADR 0078 Phase 2)
+    // Warn on redundant `super initialize` in Actor initialize methods (ADR 0078 Phase 2)
     validators::check_redundant_super_initialize(
         module,
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
-    // BT-1052: Error on -> Nil return type on Value instance methods
+    // Error on -> Nil return type on Value instance methods
     validators::check_value_nil_return(module, &result.class_hierarchy, &mut result.diagnostics);
-    // BT-1218: Validate supervisionPolicy overrides + warn for children without explicit policy
+    // Validate supervisionPolicy overrides + warn for children without explicit policy
     validators::check_supervision_policy_override(module, &mut result.diagnostics);
     validators::check_children_supervision_policy(
         module,
@@ -874,28 +870,28 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &mut result.diagnostics,
     );
 
-    // BT-1207: Native actor validation (ADR 0056)
+    // Native actor validation (ADR 0056)
     validators::check_native_state_fields(module, &result.class_hierarchy, &mut result.diagnostics);
     validators::check_native_delegate_return_type(
         module,
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
-    // BT-2720: Reserved-word backing-function check for native Objects (ADR 0101)
+    // Reserved-word backing-function check for native Objects (ADR 0101)
     validators::check_native_delegate_reserved_word(
         module,
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
 
-    // BT-1535: Error on data keyword / class-kind mismatch (ADR 0067 Phase 4)
+    // Error on data keyword / class-kind mismatch (ADR 0067 Phase 4)
     validators::check_data_keyword_class_kind(
         module,
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
 
-    // BT-2830: Error on Value subclass slots that collide on the auto-generated
+    // Error on Value subclass slots that collide on the auto-generated
     // `with*:` setter selector (case-insensitive first-letter collision).
     validators::check_value_slot_case_collision(
         module,
@@ -903,14 +899,14 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &mut result.diagnostics,
     );
 
-    // BT-1299: Error on non-exhaustive match: for sealed types (e.g. Result missing error: arm)
+    // Error on non-exhaustive match: for sealed types (e.g. Result missing error: arm)
     validators::check_match_exhaustiveness(module, &mut result.diagnostics);
 
     // Warn on local variable assignments inside match arm bodies (footgun — the
     // assignment has no effect because Core Erlang case arms don't leak bindings).
     validators::warn_assignment_in_match_arms(module, &mut result.diagnostics);
 
-    // BT-951/BT-979: Lint on effect-free statements (suppressed during normal compile).
+    // Lint on effect-free statements (suppressed during normal compile).
     // Module-level expressions are checked by default; set skip_module_expression_lint
     // to opt out (bootstrap-test compilation uses this).
     validators::check_effect_free_statements(
@@ -919,7 +915,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         skip_module_expression_lint,
     );
 
-    // Phase 5b: Structural validation (BT-1726)
+    // Phase 5b: Structural validation
     // Only check unresolved classes when cross-file metadata has been loaded
     // (pre_loaded_classes non-empty). Without it, any class reference might
     // be a cross-file dependency that we simply don't know about yet.
@@ -932,7 +928,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             &mut result.diagnostics,
         );
     }
-    // BT-2897 / ADR 0108: warn when a type annotation closely resembles a
+    // ADR 0108: warn when a type annotation closely resembles a
     // registered alias name but doesn't resolve to one. Gated on
     // `has_cross_file_classes` for the same open-world reason as the
     // unresolved-class check above: without cross-file metadata, a name
@@ -948,7 +944,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             &mut result.diagnostics,
         );
     }
-    // BT-2854 / ADR 0107 Phase A: validate `Pattern::Type` class names in
+    // ADR 0107 Phase A: validate `Pattern::Type` class names in
     // `match:` arms (unknown class, non-leaf class, `Character` exclusion).
     // The unknown-class branch is internally gated on `has_cross_file_classes`,
     // same open-world policy as `check_unresolved_classes` above; the
@@ -959,7 +955,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         has_cross_file_classes,
         &mut result.diagnostics,
     );
-    // BT-1759: Warn when a workspace binding shadows a class name.
+    // Warn when a workspace binding shadows a class name.
     // This check works against the full class hierarchy (including locally
     // defined classes), so it does not require cross-file metadata.
     validators::check_workspace_shadows(
@@ -971,10 +967,10 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     validators::check_unresolved_ffi_modules(module, &mut result.diagnostics);
     // Warn on Erlang FFI calls with wrong arity for known functions.
     validators::check_ffi_arity(module, &mut result.diagnostics);
-    // BT-1846/BT-1847: `declare native:` is only valid in stubs/.
+    // `declare native:` is only valid in stubs/.
     validators::check_native_declaration_location(module, is_stub_file, &mut result.diagnostics);
 
-    // Phase 6: Module-level validation (BT-349, BT-1666)
+    // Phase 6: Module-level validation
     let module_diags = module_validator::validate_single_definition(module);
     result.diagnostics.extend(module_diags);
 
@@ -984,8 +980,8 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     }
 
     // Phase 8: Visibility enforcement (ADR 0071)
-    // E0401: cross-package internal class references (BT-1701)
-    // E0402: leaked visibility — internal class/alias in public signature (BT-1701/BT-2898)
+    // E0401: cross-package internal class references
+    // E0402: leaked visibility — internal class/alias in public signature
     validators::check_class_visibility(
         module,
         &result.class_hierarchy,
@@ -993,7 +989,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         current_package,
         &mut result.diagnostics,
     );
-    // E0402: internal method satisfying a public protocol requirement (BT-1702)
+    // E0402: internal method satisfying a public protocol requirement
     validators::check_leaked_method_visibility(
         module,
         &result.class_hierarchy,
@@ -1001,7 +997,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         current_package,
         &mut result.diagnostics,
     );
-    // E0402 (BT-2898, ADR 0108 Semantics): a public alias whose expansion
+    // E0402 (ADR 0108 Semantics): a public alias whose expansion
     // transitively reaches an internal class/alias leaks it, even when the
     // internal name never appears directly in any signature.
     validators::check_alias_leaked_visibility(
@@ -1011,7 +1007,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         current_package,
         &mut result.diagnostics,
     );
-    // W0401: subclass method shadowing an internal superclass method (BT-1702)
+    // W0401: subclass method shadowing an internal superclass method
     // Only meaningful in a package context — skip for REPL/scripts
     if current_package.is_some() {
         validators::check_internal_method_shadow(

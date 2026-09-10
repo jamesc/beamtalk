@@ -1,8 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Beamtalk expression synthesis shared by the MCP and LSP tooling surfaces
-//! (BT-3193).
+//! Beamtalk expression synthesis shared by the MCP and LSP tooling surfaces.
 //!
 //! **DDD Context:** Language Service — Tooling Surface Parity
 //!
@@ -11,26 +10,22 @@
 //! (`CMD_SAVE_CLASS`, `CMD_PRECHECK_METHOD`, `CMD_FLUSH*`, `CMD_REMOVE_METHOD`)
 //! each compile client-supplied parameters into a Beamtalk expression string
 //! submitted through the workspace's existing `evaluate` REPL op (ADR 0082
-//! "Rationale: why no new REPL ops"). Both surfaces used to hand-roll the
-//! same `format!()` shape independently, documented only in prose as
-//! "mirroring" the other surface — nothing enforced it, so the two could
-//! silently drift (found in BT-3188 review).
+//! "Rationale: why no new REPL ops").
 //!
 //! Per `docs/development/architecture-principles.md` § Duplication & the
 //! Shared-Leaf-Module Pattern, and its § Consistency-Test Disposition Rule:
 //! `beamtalk-mcp` and `beamtalk-lsp` are two Rust crates in the same
 //! workspace, not a permanent cross-language/cross-process boundary, and
-//! both already depend on `beamtalk-core` — so this is a *deletable*
-//! duplication. The fix is to give the expression-building logic a single
-//! home here, below both crates, rather than adding a test that just checks
-//! two copies still agree. MCP and LSP can no longer drift from each other,
-//! since both now call the same definition; the unit tests below are the
-//! conformance test BT-3193 asks for.
+//! both already depend on `beamtalk-core` — so the expression-building logic
+//! has a single home here, below both crates, rather than two independent
+//! copies checked only by a test that they still agree. MCP and LSP cannot
+//! drift from each other because both call the same definition; the unit
+//! tests below are this module's conformance suite.
 //!
 //! The REPL-CLI surface (`beamtalk-cli`'s `:remove-method`/`:flush <sel>`
 //! meta-commands) still hand-rolls its own copy of the `removeSelector:` and
-//! `flush:` shapes rather than calling into this module — that pre-existing
-//! duplication is tracked separately by BT-3196, not fixed here.
+//! `flush:` shapes rather than calling into this module — that duplication
+//! is tracked separately, not fixed here.
 //!
 //! # Caller responsibility: `class`/`selector`/`kind` are not validated here
 //!
@@ -60,7 +55,7 @@ pub fn save_class_expr(source: &str, path: &str) -> String {
 
 /// Build the Beamtalk expression for the `precheck_method` MCP tool / LSP
 /// `beamtalk.precheckMethod` command — the pre-save advisory precheck (ADR
-/// 0105 Phase 3, BT-2782). Selector is the bare form (no leading `#`).
+/// 0105 Phase 3). Selector is the bare form (no leading `#`).
 /// Nothing installs; `Behaviour>>precheckCompile:source:` is read-only.
 ///
 /// `class` and `selector` are interpolated unescaped — see the module docs'
@@ -75,8 +70,8 @@ pub fn precheck_method_expr(class: &str, selector: &str, body: &str) -> String {
 }
 
 /// Build the Beamtalk expression for the `remove_method` MCP tool / LSP
-/// `beamtalk.removeMethod` command — the no-fallback path (ADR 0112 Phase 4,
-/// BT-3188). Selector is the bare form (no leading `#`). Raises
+/// `beamtalk.removeMethod` command — the no-fallback path (ADR 0112 Phase 4).
+/// Selector is the bare form (no leading `#`). Raises
 /// `selector_not_found` if the selector is not defined locally or as an
 /// extension.
 ///
@@ -88,7 +83,7 @@ pub fn remove_method_expr(class: &str, selector: &str) -> String {
 
 /// Build the Beamtalk expression for the `remove_method` MCP tool's /
 /// LSP `beamtalk.removeMethod` command's `if_absent`/`ifAbsent` fallback
-/// path (ADR 0112 Phase 4, BT-3188). Unlike `precheck_method_expr`'s `body`,
+/// path (ADR 0112 Phase 4). Unlike `precheck_method_expr`'s `body`,
 /// `if_absent` is raw Beamtalk expression code, not a String value: it
 /// becomes the body of the `ifAbsent:` fallback block literal, which the
 /// runtime evaluates as code on an absent selector — it is never passed
@@ -135,8 +130,7 @@ pub fn flush_expr(filter: FlushFilter<'_>) -> String {
 }
 
 /// Build the Beamtalk expression for the `flush` MCP tool's / LSP
-/// `beamtalk.flush*` command's Tier-2 (destructive) gate (ADR 0113 "Surface",
-/// BT-3207/BT-3210/BT-3209).
+/// `beamtalk.flush*` command's Tier-2 (destructive) gate (ADR 0113 "Surface").
 ///
 /// `confirm_destructive: false` is textually identical to [`flush_expr`] —
 /// Tier 1 only, unchanged. `confirm_destructive: true` reaches Tier 2:
@@ -168,13 +162,12 @@ pub fn flush_expr_with_confirm_destructive(
 }
 
 /// Build the Beamtalk expression for the `remove_class` MCP tool (ADR 0113
-/// Phase 4, BT-3210) — wraps `Behaviour>>removeFromSystem` (BT-785; gains its
-/// own `kind: #'remove-class'` ChangeLog-logging fix in ADR 0113 Phase 1,
-/// BT-3206).
+/// Phase 4) — wraps `Behaviour>>removeFromSystem` (gains its
+/// own `kind: #'remove-class'` ChangeLog-logging fix in ADR 0113 Phase 1).
 ///
 /// Two statements, period-separated (`docs/learning/07-blocks.md`'s
 /// statement-separator convention, not block-scoped here): the first removes
-/// the class from memory (refusing stdlib/subclassed classes, per BT-785,
+/// the class from memory (refusing stdlib/subclassed classes,
 /// unchanged by ADR 0113); the second looks up and returns the resulting
 /// `remove-class` `ChangeEntry` the removal just appended, so the tool's
 /// response reports the entry's `flushable` state directly rather than the
@@ -196,8 +189,7 @@ pub fn remove_class_expr(class: &str) -> String {
 }
 
 /// Build the Beamtalk expression for the `rename_class` MCP tool (ADR 0114
-/// Phase 5, BT-3276) — wraps `Behaviour>>renameTo:` (ADR 0114 Phase 2,
-/// BT-3278).
+/// Phase 5) — wraps `Behaviour>>renameTo:` (ADR 0114 Phase 2).
 ///
 /// Unlike [`remove_class_expr`], no follow-up `ChangeLog` lookup is chained
 /// on: `renameTo:` (return type `Behaviour`) already returns the renamed
@@ -212,8 +204,8 @@ pub fn rename_class_expr(class: &str, new_name: &str) -> String {
 }
 
 /// Build the Beamtalk expression for the `rename_method` MCP tool (ADR 0114
-/// Phase 5, BT-3276) — wraps `Behaviour>>renameSelector:to:` (ADR 0114 Phase
-/// 3, BT-3279). Instance-side only — sent to a bare class name, this always
+/// Phase 5) — wraps `Behaviour>>renameSelector:to:` (ADR 0114 Phase
+/// 3). Instance-side only — sent to a bare class name, this always
 /// touches the instance-side method table; a class-side rename needs a
 /// direct `Counter class renameSelector: ... to: ...` eval, the same
 /// chokepoint limitation `remove_method_expr` has (`docs/development/
@@ -230,7 +222,7 @@ pub fn rename_method_expr(class: &str, selector: &str, new_selector: &str) -> St
 mod tests {
     use super::*;
 
-    // These golden tests are the BT-3193 conformance suite: both
+    // These golden tests are this module's conformance suite: both
     // `beamtalk-mcp` and `beamtalk-lsp` call these functions directly, so a
     // single passing suite here is enough to guarantee those two surfaces
     // agree with each other.
@@ -276,7 +268,7 @@ mod tests {
         );
     }
 
-    // --- ADR 0112 Phase 4 (BT-3188): remove_method / beamtalk.removeMethod ---
+    // --- ADR 0112 Phase 4: remove_method / beamtalk.removeMethod ---
 
     #[test]
     fn remove_method_expr_compiles_remove_selector() {
@@ -347,7 +339,7 @@ mod tests {
         );
     }
 
-    // --- ADR 0113 Phase 4 (BT-3210/BT-3209): destructive-tier flush +
+    // --- ADR 0113 Phase 4: destructive-tier flush +
     // remove_class / beamtalk.removeClass ---
 
     #[test]
@@ -409,7 +401,7 @@ mod tests {
         );
     }
 
-    // --- ADR 0114 Phase 5 (BT-3276): rename_class / rename_method ---
+    // --- ADR 0114 Phase 5: rename_class / rename_method ---
 
     #[test]
     fn rename_class_expr_compiles_rename_to_send() {

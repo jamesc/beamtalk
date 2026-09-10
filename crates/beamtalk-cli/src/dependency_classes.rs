@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Best-effort, offline resolution of a project's dependency classes (BT-2823).
+//! Best-effort, offline resolution of a project's dependency classes.
 //!
 //! **DDD Context:** Build System
 //!
@@ -19,7 +19,7 @@
 //! local path for path dependencies — exactly the state left behind by a
 //! prior `beamtalk build`. Dependencies that have never been fetched/built
 //! are silently skipped, matching the existing best-effort philosophy of
-//! `beamtalk lint`'s own dependency resolution (and BT-2134's native type
+//! `beamtalk lint`'s own dependency resolution (and the native type
 //! registry, which likewise falls back to "no data" when its build artifact
 //! is missing).
 //!
@@ -28,7 +28,7 @@
 //! dependency, because [`beamtalk_project::package`] only walks the
 //! package's own `src/`/`test/` directories.
 //!
-//! **Transitive dependencies (BT-2836):** [`resolve_dependency_class_infos`]
+//! **Transitive dependencies:** [`resolve_dependency_class_infos`]
 //! walks the full transitive dependency graph — not just the project's own
 //! direct `[dependencies]` table — by recursively reading each discovered
 //! dependency's own `beamtalk.toml` (when its checkout is already present on
@@ -44,7 +44,7 @@
 //! `_build/deps/<name>/`) is silently skipped rather than fetched — no
 //! network I/O.
 //!
-//! **Caching (BT-2837):** the MCP server's `lint`/`diagnostic_summary` tools
+//! **Caching:** the MCP server's `lint`/`diagnostic_summary` tools
 //! call [`resolve_dependency_class_infos`] on *every* request. Without
 //! caching, a project with several sizeable dependencies re-lexes and
 //! re-parses every dependency `.bt` file on every call — cost that scales
@@ -73,7 +73,7 @@ use tracing::warn;
 ///
 /// Returns `(has_package_dependencies, class_infos)`:
 /// - `has_package_dependencies` mirrors `beamtalk lint`'s `run_lint`-computed
-///   flag (BT-2794): read from the manifest's
+///   flag: read from the manifest's
 ///   `[dependencies]` table regardless of whether any individual dependency
 ///   could actually be resolved on disk, so a dependency that hasn't been
 ///   fetched yet doesn't flip diagnostic behaviour between runs.
@@ -114,7 +114,7 @@ pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<Cla
     let layout = BuildLayout::new(project_root);
     let mut class_infos = Vec::new();
 
-    // BFS over the transitive dependency graph (BT-2836), matching
+    // BFS over the transitive dependency graph, matching
     // `discover_all_dep_roots`'s reachability: a queue of
     // `(declaring_root, deps_to_visit)` pairs, seeded with the project's own
     // direct `[dependencies]` table. `visited` dedups by name only (not
@@ -149,7 +149,7 @@ pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<Cla
                 }
                 // A registry dependency is fetched into the same checkout
                 // directory as a git dependency once resolved, so the offline
-                // walk treats the two identically (BT-2978).
+                // walk treats the two identically.
                 DependencySource::Git { .. } | DependencySource::Registry { .. } => {
                     layout.dep_checkout_dir(&name)
                 }
@@ -179,7 +179,7 @@ pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<Cla
     (has_package_dependencies, class_infos)
 }
 
-/// Cheap staleness signal for a dependency's source tree (BT-2837): the
+/// Cheap staleness signal for a dependency's source tree: the
 /// number of `.bt` files under it plus the latest modification time across
 /// them, both far cheaper to compute than reading, lexing, and parsing every
 /// file — so checking this on every call is worth it even though a cache
@@ -211,7 +211,7 @@ impl DepFingerprint {
 type CachedDepClassInfos = (DepFingerprint, Vec<ClassInfo>);
 
 /// Process-lifetime cache of [`collect_dep_class_infos`] results, keyed by
-/// dependency checkout path (BT-2837). See the module docs for why this
+/// dependency checkout path. See the module docs for why this
 /// exists. Not persisted to disk — cleared automatically when the process
 /// (e.g. the `beamtalk-mcp` server) restarts.
 static CLASS_INFO_CACHE: OnceLock<Mutex<HashMap<Utf8PathBuf, CachedDepClassInfos>>> =
@@ -226,7 +226,7 @@ static PARSE_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUs
 
 /// Parse every `.bt` file under a dependency's `src/` directory (falling
 /// back to its root if there is no `src/`) and append its class metadata to
-/// `class_infos`, reusing a cached result (BT-2837) when the dependency's
+/// `class_infos`, reusing a cached result when the dependency's
 /// [`DepFingerprint`] hasn't changed since the last call.
 fn collect_dep_class_infos(dep_root: &Utf8Path, dep_name: &str, class_infos: &mut Vec<ClassInfo>) {
     let src_dir = dep_root.join("src");
@@ -279,7 +279,7 @@ fn collect_dep_class_infos(dep_root: &Utf8Path, dep_name: &str, class_infos: &mu
     }
 
     class_infos.extend(resolved.iter().cloned());
-    // Only cache a result derived from every file being read successfully (BT-2837 review) —
+    // Only cache a result derived from every file being read successfully —
     // caching a partial result under this fingerprint would make a transient read failure
     // (e.g. a lock from a concurrent `beamtalk build`) sticky until the fingerprint changes.
     if all_read {
@@ -303,7 +303,7 @@ mod tests {
         fs::write(path, contents).unwrap();
     }
 
-    // BT-2837: `resolve_dependency_class_infos` now reads/writes a
+    // `resolve_dependency_class_infos` reads/writes a
     // process-wide `CLASS_INFO_CACHE` (and, in test builds, the
     // `PARSE_CALLS` counter used to observe cache hits/misses). Every test
     // in this module is serialized under the same key so they can't race on
@@ -358,7 +358,7 @@ mod tests {
         );
     }
 
-    /// BT-2978: a registry dependency lands in the same `_build/deps/<name>/`
+    /// A registry dependency lands in the same `_build/deps/<name>/`
     /// checkout as a git dependency, so the offline walk must find its classes
     /// the same way.
     #[test]
@@ -449,7 +449,7 @@ mod tests {
             "Object subclass: HTTPServer\n",
         );
 
-        // Reset to a known baseline (BT-2870 review follow-up): a prior
+        // Reset to a known baseline: a prior
         // test panicking mid-run under `#[serial]` would otherwise leave
         // this process-wide counter at an arbitrary value, making a
         // spurious failure here harder to diagnose than "expected 0, got N".
@@ -561,7 +561,7 @@ mod tests {
         );
     }
 
-    // BT-2836: transitive dependency walk regression tests.
+    // Transitive dependency walk regression tests.
 
     #[test]
     #[serial_test::serial(dependency_class_cache)]

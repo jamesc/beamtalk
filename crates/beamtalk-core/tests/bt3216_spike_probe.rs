@@ -1,6 +1,6 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
-//! BT-3216 / ADR 0115 Phase 1 spike instrumentation.
+//! ADR 0115 Phase 1 spike instrumentation.
 //!
 //! Measures how many message-send *receiver* expressions across `stdlib/src`
 //! have an entry in the type checker's [`TypeMap`], and which `InferredType`

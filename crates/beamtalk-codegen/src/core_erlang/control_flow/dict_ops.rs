@@ -95,7 +95,7 @@ impl CoreErlangGenerator {
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
             let result_doc = if self.loop_mode.in_direct_params_loop {
-                // BT-1329/BT-3053: see the identical branch in
+                // see the identical branch in
                 // `control_flow/list_ops/basic_ops.rs`'s `do:` — same shape here for a
                 // dictionary iteration: multiple rebound accumulator vars, no single
                 // "result" value, so signal open-with-no-value rather than naming one.
@@ -154,7 +154,7 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(pack_doc);
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, StateAcc}
         // tuple, unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -304,7 +304,7 @@ impl CoreErlangGenerator {
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
             let result_doc = if self.loop_mode.in_direct_params_loop {
-                // BT-1329/BT-3053: see the identical branch in
+                // see the identical branch in
                 // `control_flow/list_ops/basic_ops.rs`'s `do:` — same shape here for a
                 // dictionary iteration: multiple rebound accumulator vars, no single
                 // "result" value, so signal open-with-no-value rather than naming one.
@@ -363,7 +363,7 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(pack_doc);
-        // BT-3169: when this class-method body threads ClassVars, the fold
+        // when this class-method body threads ClassVars, the fold
         // fun's own accumulator parameter is a raw {ClassVars, StateAcc}
         // tuple, unwrapped by `cv_prelude` immediately below — see
         // `ThreadingPlan::class_var_fun_param`'s doc comment.
@@ -461,7 +461,7 @@ mod tests {
     #[test]
     fn test_dict_do_with_local_mutation_uses_tuple_acc() {
         // Map-literal do: with only a local variable mutation uses the tuple-accumulator
-        // path (BT-1276): the threaded local is packed into a flat tuple {Total} as the
+        // path: the threaded local is packed into a flat tuple {Total} as the
         // foldl accumulator instead of a StateAcc map, so element/2 reads it inside the
         // lambda. One maps:get appears outside the loop for the final extraction.
         let src = concat!(
@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn test_dict_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
-        // BT-3053: same shape as
+        // same shape as
         // control_flow::list_ops::tests::test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return,
         // but for the dictionary `do:` producer (dict_ops.rs:104) rather than
         // list `do:` (basic_ops.rs:104) — both set the identical

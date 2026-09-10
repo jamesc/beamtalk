@@ -48,7 +48,7 @@ pub(crate) fn generate_integer_bif(selector: &str, params: &[String]) -> Option<
             ])
         }
         "bitNot" => Some(Document::Str("call 'erlang':'bnot'(Self)")),
-        // Character predicates — integers are Unicode codepoints (BT-339)
+        // Character predicates — integers are Unicode codepoints
         "isLetter" => Some(Document::Str("call 'beamtalk_character':'is_letter'(Self)")),
         "isDigit" => Some(Document::Str("call 'beamtalk_character':'is_digit'(Self)")),
         "isUppercase" => Some(Document::Str(
@@ -284,7 +284,7 @@ mod tests {
         assert_eq!(doc_to_string(generate_integer_bif("bitShift:", &[])), None);
     }
 
-    // Character predicates (BT-339)
+    // Character predicates
 
     #[test]
     fn test_is_letter() {

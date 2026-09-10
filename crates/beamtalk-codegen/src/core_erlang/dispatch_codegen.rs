@@ -18,8 +18,8 @@
 //!    class/nil testing). These are structural requirements, not type-specific dispatch.
 //!
 //! 2. **Runtime dispatch**: All other messages go through the unified entry point
-//!    `beamtalk_message_dispatch:send/3` (BT-430), which routes to:
-//!    - **Actors** (`beamtalk_object` records): Sync via `beamtalk_actor:sync_send/3` (BT-918 / ADR 0043)
+//!    `beamtalk_message_dispatch:send/3`, which routes to:
+//!    - **Actors** (`beamtalk_object` records): Sync via `beamtalk_actor:sync_send/3` (ADR 0043)
 //!    - **Class objects**: Sync via `beamtalk_object_class:class_send/3`
 //!    - **Primitives** (everything else): Sync via `beamtalk_primitive:send/3`
 //!
@@ -57,7 +57,7 @@ type SendHandler = fn(
     &[Expression],
 ) -> Result<Option<Document<'static>>>;
 
-/// BT-3474: `generate_message_send`'s dispatch priority as data, replacing
+/// `generate_message_send`'s dispatch priority as data, replacing
 /// what were 15 source-ordered `if let Some(doc) = self.try_*()?` calls (two
 /// of them a duplicated `is_character_typed_receiver` check — see
 /// [`CoreErlangGenerator::try_handle_character_typed_message`]'s doc, now
@@ -108,7 +108,7 @@ const HANDLERS: &[(&str, SendHandler)] = &[
 ];
 
 impl CoreErlangGenerator {
-    /// BT-2816: Generates the `<{'error', ..., _}>` case clauses shared by all
+    /// Generates the `<{'error',..., _}>` case clauses shared by all
     /// self-dispatch call sites (`safe_dispatch`/`dispatch` error branches).
     ///
     /// The dispatched call's error branch has two distinct shapes, mirroring the
@@ -120,7 +120,7 @@ impl CoreErlangGenerator {
     ///    `{'error', ..., State}` return (see `generate_safe_dispatch`). Passing
     ///    that whole triple straight to `beamtalk_error:'raise'/1` — which only
     ///    accepts a raw `#beamtalk_error{}` record — crashes with
-    ///    `function_clause` instead of propagating the real error (BT-2816).
+    ///    `function_clause` instead of propagating the real error.
     ///    Destructuring the triple and routing it through
     ///    `beamtalk_exception_handler:'reraise'/4` mirrors the cross-actor call
     ///    boundary (`beamtalk_actor:sync_send_remote/3`), which correctly
@@ -133,14 +133,14 @@ impl CoreErlangGenerator {
     ///    must stay, or a self-send that resolves to DNU crashes with
     ///    `case_clause` instead of raising the DNU error.
     ///
-    /// BT-2822: Passes a `selector`/`class` breadcrumb `Context` map to
+    /// Passes a `selector`/`class` breadcrumb `Context` map to
     /// `reraise/4` — mirroring `sync_send_remote/3`'s
     /// `#{selector => Selector, class => Class}` construction — so a raw
     /// Erlang error escaping a self-send forwarding hop gets the same
     /// `ClassName>>selector: ...` location prefix (via `wrap_raw/2` /
     /// `located/3`) as the cross-actor equivalent.
     ///
-    /// BT-2833: `class` is resolved via a *runtime* `beamtalk_actor:lookup_class/1`
+    /// `class` is resolved via a *runtime* `beamtalk_actor:lookup_class/1`
     /// call on `self()`, not a compile-time literal atom. For a self-send inside
     /// a method a subclass inherits without overriding, the inherited method's
     /// code lives in the superclass module, so a literal `class_name()` atom
@@ -180,7 +180,7 @@ impl CoreErlangGenerator {
     /// <NoMatch> when 'true' -> call 'erlang':'error'({'case_clause', NoMatch})
     /// ```
     ///
-    /// BT-3161: the trailing wildcard clause is not reachable at runtime
+    /// the trailing wildcard clause is not reachable at runtime
     /// (`safe_dispatch/3` only ever returns `{'reply', _, _}` or one of the
     /// two `{'error', _, _}` shapes matched above) but is required to make
     /// the `case` *statically* exhaustive — see `case_clause_fallback`'s
@@ -227,7 +227,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-412/BT-2007: Wrap a class-method call that may return either a
+    /// Wrap a class-method call that may return either a
     /// plain value or a `{'class_var_result', Result, NewClassVars}` tuple,
     /// threading the new class-var binding and exposing the unwrapped result.
     ///
@@ -245,13 +245,13 @@ impl CoreErlangGenerator {
     ///                  end in
     /// ```
     ///
-    /// ADR 0118 phase 5a/5b (BT-3421/BT-3422): returns a [`ThreadedValue`]
+    /// ADR 0118 phase 5a/5b: returns a [`ThreadedValue`]
     /// whose prelude carries the real `ClassVars` `Bind` this call rebinds —
     /// `_Unwrapped` is the value, with no consuming body of its own. Callers
     /// splice the prelude into their own frame, or close it
     /// ([`Self::close_threaded_value_doc`]) so `ClassVarsN` stays visible to
     /// the continuation. Shared by the local-class-method branch (branch 1)
-    /// and the BT-2007 inherited-dispatch branch in
+    /// and the inherited-dispatch branch in
     /// [`generate_class_method_self_send`](Self::generate_class_method_self_send).
     pub(super) fn emit_class_var_result_unwrap(
         &mut self,
@@ -260,7 +260,7 @@ impl CoreErlangGenerator {
     ) -> ThreadedValue {
         let call_result = self.fresh_temp_var("CMR");
         let cv = self.current_class_var();
-        // BT-3148: the version numbers driving both verify() and the real
+        // the version numbers driving both verify() and the real
         // Bind rendered below — captured before minting, matching the old
         // `cv`/`new_cv` name-capture ordering exactly (fresh_temp_var call
         // order for CV/MR/PCV below is unaffected: `class_var_version`
@@ -294,7 +294,7 @@ impl CoreErlangGenerator {
         self.next_class_var();
         let target_version = self.class_var_version();
 
-        // BT-3135 (ADR 0111 Phase D) / BT-3148: construct, verify, and
+        // ADR 0111 Phase D: construct, verify, and
         // render this Bind through the real `threaded_ir` pipeline — no
         // second, hand-rolled `Document` reconstructs it. This site never
         // itself needs the ADR 0110 shadow write — it rebinds `ClassVarsN`
@@ -310,7 +310,7 @@ impl CoreErlangGenerator {
         // of its own regardless of block_depth (ADR 0111 Addendum 9,
         // Question 2).
         //
-        // BT-3169 (ADR 0111 Addendum 9, Questions 2/5): `frame` is
+        // ADR 0111 Addendum 9, Questions 2/5: `frame` is
         // `FrameId::ROOT` at a class method's own top level, but this same
         // function is also reached from INSIDE a `do:`/`collect:`/`select:`/
         // `inject:into:` fold body's closure (a same-class self-send used or
@@ -392,7 +392,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-3168 (ADR 0111 Addendum 9, Questions 2/3): rebinds `ClassVarsN`
+    /// ADR 0111 Addendum 9, Questions 2/3: rebinds `ClassVarsN`
     /// from an already-produced value Document — a Letrec loop construct's
     /// own returned tuple slot carrying the `ClassVars` mutations threaded
     /// through its recursive tail call (`while_loops.rs`/`counted_loops.rs`
@@ -430,7 +430,7 @@ impl CoreErlangGenerator {
         super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
     }
 
-    /// BT-3484: the value-type `Self` mirror of
+    /// the value-type `Self` mirror of
     /// [`Self::rebind_class_vars_from_doc`] — rebinds `Self{N}` from an
     /// already-produced value `Document`: a construct's own returned trailing
     /// tuple slot, carrying the `self.field := ...` mutations threaded out of
@@ -484,19 +484,19 @@ impl CoreErlangGenerator {
     ///
     /// This is the **main entry point** for message compilation. It dispatches
     /// to specialized handlers for different message patterns, and falls back
-    /// to runtime dispatch via `beamtalk_message_dispatch:send/3` (BT-430)
+    /// to runtime dispatch via `beamtalk_message_dispatch:send/3`
     /// which handles actors, class objects, and primitives uniformly.
     ///
     /// # Message Dispatch Strategy (ADR 0007 Phase 4)
     ///
     /// 1. **Super sends** → `generate_super_send`
     /// 2. **Binary operators** → `generate_binary_op` (synchronous Erlang ops)
-    /// 3. **`HANDLERS`** (BT-3474) → priority-ordered table; see its doc for
+    /// 3. **`HANDLERS`** → priority-ordered table; see its doc for
     ///    the full breakdown (Character-typed dispatch, `ProtoObject`/Object
     ///    messages, Block/Dictionary/List messages, Boolean conditionals,
     ///    spawn/await, Erlang interop, Logger intrinsics, class references,
     ///    class-method and actor self-sends)
-    /// 4. **Default** → Runtime dispatch (BT-223: actor vs primitive check)
+    /// 4. **Default** → Runtime dispatch (actor vs primitive check)
     pub(super) fn generate_message_send(
         &mut self,
         receiver: &Expression,
@@ -519,8 +519,8 @@ impl CoreErlangGenerator {
 
         // For binary operators, use Erlang's built-in operators (these are synchronous)
         if let MessageSelector::Binary(op) = selector {
-            // BT-101: Method lookup via `>>` operator (e.g., Counter >> #increment)
-            // BT-323: Support `>>` on any expression, not just class literals
+            // Method lookup via `>>` operator (e.g., Counter >> #increment)
+            // Support `>>` on any expression, not just class literals
             if op.as_str() == ">>" {
                 if let Expression::ClassReference { name, .. } = receiver {
                     return self.generate_method_lookup(&name.name, arguments);
@@ -533,7 +533,7 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
-        // BT-3474: dispatch priority for every remaining message shape is
+        // dispatch priority for every remaining message shape is
         // `HANDLERS` — see its doc for why `character_typed` leads the list.
         for (_, handler) in HANDLERS {
             if let Some(doc) = handler(self, receiver, selector, arguments)? {
@@ -541,11 +541,11 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
+        // Unified dispatch via beamtalk_message_dispatch:send/3
         self.generate_runtime_dispatch(receiver, selector, arguments)
     }
 
-    /// BT-2095 / BT-3214 / BT-3474: Character-typed-receiver dispatch —
+    /// Character-typed-receiver dispatch —
     /// `HANDLERS`' first (and only) entry that ever fires on
     /// `is_character_typed_receiver` (a Character literal, or a `Character
     /// value:` factory call). Collapses what used to be two separate
@@ -582,7 +582,7 @@ impl CoreErlangGenerator {
 
         match selector.well_known() {
             Some(WellKnownSelector::Class) => {
-                // BT-1937: Hoist any side effects in the receiver expression
+                // Hoist any side effects in the receiver expression
                 // (none for a literal, but capture preserves the contract).
                 let (preamble, _) = self.thread_subexprs(&[receiver], "CharCls")?;
                 // Resolve to the Character class object so equality with
@@ -627,7 +627,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-2095 / BT-3214: at the BEAM level a Character value is a plain
+        // at the BEAM level a Character value is a plain
         // integer, so the generic fallback (`generate_runtime_dispatch`,
         // keyed on runtime `class_of/1`) would route it to
         // `bt@stdlib@integer:dispatch/3`. Reach the Character module's
@@ -638,7 +638,7 @@ impl CoreErlangGenerator {
         )?))
     }
 
-    /// BT-2095 / BT-3214: Routes a non-binary message to the Character module's
+    /// Routes a non-binary message to the Character module's
     /// `dispatch/3`, for any receiver `is_character_typed_receiver` recognizes
     /// (a Character literal or a `Character value:` factory call).
     ///
@@ -679,7 +679,7 @@ impl CoreErlangGenerator {
         Ok(seq.close(self, call_doc, "CharDispRes"))
     }
 
-    /// Generates a cast (fire-and-forget) message send (BT-920).
+    /// Generates a cast (fire-and-forget) message send.
     ///
     /// Called when the AST `MessageSend` node has `is_cast: true` (the `!` suffix).
     ///
@@ -700,7 +700,7 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         // Self-sends with ! in actor context: direct dispatch, discard result.
-        // BT-1475: Only use direct safe_dispatch when NOT inside a block (block_depth == 0).
+        // Only use direct safe_dispatch when NOT inside a block (block_depth == 0).
         // Blocks may execute in a different process (Timer callbacks, cross-actor callbacks),
         // so self-cast sends inside blocks must route through the actor mailbox via
         // beamtalk_message_dispatch:cast/3 to reach the actor's gen_server process.
@@ -717,7 +717,7 @@ impl CoreErlangGenerator {
         self.generate_runtime_cast(receiver, selector, arguments)
     }
 
-    /// Generates a self-cast send in actor context (BT-920).
+    /// Generates a self-cast send in actor context.
     ///
     /// Calls `safe_dispatch` synchronously but discards the result (and any state
     /// mutation from the callee). Returns `'ok'` as the expression value.
@@ -749,7 +749,7 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Generates unified runtime cast via `beamtalk_message_dispatch:cast/3` (BT-920).
+    /// Generates unified runtime cast via `beamtalk_message_dispatch:cast/3`.
     ///
     /// Fire-and-forget path: routes to the actor's message queue via
     /// `beamtalk_actor:cast_send/3`. Non-actor receivers are silently ignored.
@@ -761,7 +761,7 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         let selector_atom = selector.name().to_string();
-        // BT-1937: Capture receiver + args as one ordered sub-expression
+        // Capture receiver + args as one ordered sub-expression
         // sequence so left-to-right evaluation order is preserved when ANY
         // sub-expression has an open scope from a class method self-send.
         // capture_subexpr_sequence force-hoists every sub-expression in that
@@ -788,12 +788,12 @@ impl CoreErlangGenerator {
         Ok(seq.close(self, call_doc, "CastRes"))
     }
 
-    /// Generates unified runtime dispatch via `beamtalk_message_dispatch:send/3` (BT-430).
+    /// Generates unified runtime dispatch via `beamtalk_message_dispatch:send/3`.
     ///
     /// This is the fallback path for messages that don't match any compiler intrinsic.
     /// Routes through the unified entry point which handles actors (sync via `gen_server:call`),
     /// class objects (sync), and primitives (sync). Returns a value directly — no Future
-    /// wrapping (BT-918 / ADR 0043).
+    /// wrapping (ADR 0043).
     fn generate_runtime_dispatch(
         &mut self,
         receiver: &Expression,
@@ -807,7 +807,7 @@ impl CoreErlangGenerator {
             )));
         }
 
-        // BT-1343: Emit dynamic dispatch fallback diagnostic.
+        // Emit dynamic dispatch fallback diagnostic.
         if self.codegen_diagnostics_enabled {
             let span = receiver.span();
             let line_info = self
@@ -821,7 +821,7 @@ impl CoreErlangGenerator {
             );
         }
 
-        // BT-1937: Capture receiver + args as one ordered sub-expression
+        // Capture receiver + args as one ordered sub-expression
         // sequence so left-to-right evaluation order is preserved.
         let mut all_exprs: Vec<&Expression> = Vec::with_capacity(arguments.len() + 1);
         all_exprs.push(receiver);
@@ -857,7 +857,7 @@ impl CoreErlangGenerator {
     ) -> Result<Option<Document<'static>>> {
         // Unary spawn/await messages
         if let MessageSelector::Unary(name) = selector {
-            // BT-246: Only match ClassReference, not Identifier.
+            // Only match ClassReference, not Identifier.
             if name == "spawn" && arguments.is_empty() {
                 if let Expression::ClassReference { name, package, .. } = receiver {
                     let pkg = package.as_ref().map(|p| p.name.as_str());
@@ -881,7 +881,7 @@ impl CoreErlangGenerator {
                 let doc = self.generate_await_with_timeout(receiver, &arguments[0])?;
                 return Ok(Some(doc));
             }
-            // BT-246: Only match ClassReference, not Identifier.
+            // Only match ClassReference, not Identifier.
             if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
                 if let Expression::ClassReference { name, package, .. } = receiver {
                     let pkg = package.as_ref().map(|p| p.name.as_str());
@@ -895,11 +895,11 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
-    /// BT-677 / ADR 0028: Handles `Erlang` class reference for BEAM interop.
+    /// ADR 0028: Handles `Erlang` class reference for BEAM interop.
     ///
     /// Two cases are handled:
     ///
-    /// 1. **Direct call optimization (BT-682, ADR 0028 Phase 4):** When the
+    /// 1. **Direct call optimization (ADR 0028 Phase 4):** When the
     ///    receiver is `MessageSend(ClassReference("Erlang"), Unary(module))` and
     ///    the outer selector is a function call, emits a direct BEAM call:
     ///    ```erlang
@@ -907,7 +907,7 @@ impl CoreErlangGenerator {
     ///    ```
     ///    This eliminates proxy map allocation entirely.
     ///
-    /// 2. **Proxy construction (BT-677):** When the receiver is
+    /// 2. **Proxy construction:** When the receiver is
     ///    `ClassReference("Erlang")` and the message is a unary module name,
     ///    generates an inline `ErlangModule` proxy map:
     ///    ```erlang
@@ -919,7 +919,7 @@ impl CoreErlangGenerator {
     /// fall through to normal class dispatch so that `Erlang class` returns the
     /// metaclass rather than a proxy for module `'class'`.
     ///
-    /// BT-3079: FFI receiver recognition (the class-protocol filter, the
+    /// FFI receiver recognition (the class-protocol filter, the
     /// package-qualification check, and parenthesized-receiver peeling) is
     /// centralized in [`beamtalk_core::ffi_receiver`] — this is the only place those
     /// rules are implemented.
@@ -929,7 +929,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        // BT-682: Direct call optimization — `Erlang lists reverse: xs` (and the
+        // Direct call optimization — `Erlang lists reverse: xs` (and the
         // parenthesized `(Erlang lists) reverse: xs`) → `call 'lists':'reverse'(Xs)`
         // with no proxy map allocation. Only when the module name is a
         // compile-time literal (ClassReference path).
@@ -938,7 +938,7 @@ impl CoreErlangGenerator {
             return self.generate_direct_erlang_call(module_name, selector, arguments);
         }
 
-        // BT-677: Proxy construction — `Erlang lists` → inline proxy map
+        // Proxy construction — `Erlang lists` → inline proxy map
         if let Expression::ClassReference { name, package, .. } = receiver {
             if package.is_some() || name.name != "Erlang" {
                 return Ok(None);
@@ -965,7 +965,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-682: Generates a proxy-routed call for Erlang interop (BT-1127).
+    /// Generates a proxy-routed call for Erlang interop.
     ///
     /// Converts Beamtalk selectors to Erlang function names and routes through
     /// `beamtalk_erlang_proxy:direct_call/3` for automatic binary→charlist coercion:
@@ -978,7 +978,7 @@ impl CoreErlangGenerator {
     /// so the proxy's inherited protocol methods are called, not a non-existent
     /// Erlang function.
     ///
-    /// BT-855: Block arguments are automatically wrapped via
+    /// Block arguments are automatically wrapped via
     /// [`generate_erlang_interop_wrapper`] to strip the Tier 2 `StateAcc` protocol.
     /// A diagnostic warning is emitted when a stateful block (one with captured
     /// mutations) crosses the Erlang boundary, since mutations will be dropped.
@@ -1000,7 +1000,7 @@ impl CoreErlangGenerator {
                 if OBJECT_PROTOCOL_SELECTORS.contains(&function_name.as_str()) {
                     return Ok(None);
                 }
-                // BT-1127: Route zero-arg calls through proxy (consistent with keyword sends).
+                // Route zero-arg calls through proxy (consistent with keyword sends).
                 // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])`
                 let doc = docvec![
                     "call 'beamtalk_erlang_proxy':'direct_call'(",
@@ -1015,7 +1015,7 @@ impl CoreErlangGenerator {
                 // Extract function name from first keyword (before the colon)
                 let function_name = parts[0].keyword.trim_end_matches(':');
 
-                // BT-855: Process arguments individually so Block arguments can be
+                // Process arguments individually so Block arguments can be
                 // wrapped via generate_erlang_interop_wrapper before crossing the
                 // Erlang boundary. Non-block arguments pass through unchanged.
                 let mut preamble_docs: Vec<Document<'static>> = Vec::new();
@@ -1026,7 +1026,7 @@ impl CoreErlangGenerator {
                         arg_parts.push(Document::Str(", "));
                     }
                     if let Some(block) = Self::extract_block_literal(arg) {
-                        // BT-3151 review follow-up: a block crossing the Erlang
+                        // A block crossing the Erlang
                         // interop boundary here goes through
                         // `generate_erlang_interop_wrapper` → `generate_block`,
                         // the same same-process, in-process closure mechanism as
@@ -1058,7 +1058,7 @@ impl CoreErlangGenerator {
                     }
                 }
 
-                // BT-1127: Route through beamtalk_erlang_proxy:direct_call/3 to
+                // Route through beamtalk_erlang_proxy:direct_call/3 to
                 // enable binary→charlist coercion for functions like os:cmd/1.
                 // Args are wrapped in a list: call 'proxy':'direct_call'('M','F',[args])
                 let call_doc = docvec![
@@ -1086,7 +1086,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-3018 / ADR 0109: lower `File open:do:` / `File open:mode:do:` to a
+    /// ADR 0109: lower `File open:do:` / `File open:mode:do:` to a
     /// direct call rather than a class send, so the block runs in the caller.
     ///
     /// A class send is a `gen_server:call` into the singleton class process, so
@@ -1111,7 +1111,7 @@ impl CoreErlangGenerator {
     /// Scoped to the unqualified stdlib `File`: a package-qualified receiver
     /// (`mylib@File open: p do: blk`) is some other class that happens to share
     /// the name, and must keep its own implementation. Same reasoning as the
-    /// `pkg.is_none()` guard on BT-773's self-send case below.
+    /// `pkg.is_none()` guard on the self-send case below.
     fn try_generate_block_scoped_open(
         &mut self,
         class_name: &str,
@@ -1170,7 +1170,7 @@ impl CoreErlangGenerator {
     ) -> Result<Option<Document<'static>>> {
         if let Expression::ClassReference { name, package, .. } = receiver {
             let pkg = package.as_ref().map(|p| p.name.as_str());
-            // BT-3018 / ADR 0109: block-scoped `File open:…do:` must not reach
+            // ADR 0109: block-scoped `File open:…do:` must not reach
             // the File class gen_server, or the user's block runs there. Checked
             // ahead of every class-send path below, because the deadlock, the
             // serialization and the 60s class-call ceiling apply to all of them.
@@ -1179,12 +1179,12 @@ impl CoreErlangGenerator {
             {
                 return Ok(Some(doc));
             }
-            // BT-773: When inside a class method and the explicit class name matches
+            // When inside a class method and the explicit class name matches
             // the current class, use direct dispatch (same as `self` sends) to avoid
             // deadlock. The class actor is already processing the outer call, so
             // routing through class_send would deadlock on gen_server:call.
             if self.in_class_method() && name.name == self.class_name() && pkg.is_none() {
-                // ADR 0118 phase 5b (BT-3422): reached through ordinary
+                // ADR 0118 phase 5b: reached through ordinary
                 // `generate_expression`/`generate_message_send` (not
                 // `threaded_expression`'s own producer recognition), so the
                 // producer's prelude is closed inline into a self-contained
@@ -1214,11 +1214,11 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
-    /// Handles self-sends inside actor methods (BT-330).
+    /// Handles self-sends inside actor methods.
     ///
     /// Returns `Some(())` if the receiver is `self` in an Actor context, `None` otherwise.
     ///
-    /// ADR 0118 phase 2b (BT-3418): every position that threads a
+    /// ADR 0118 phase 2b: every position that threads a
     /// dispatching self-send's `NewState` now compiles it through
     /// [`Self::generate_self_dispatch`]'s producer directly (via
     /// `threaded_expression`/`thread_ahead`), substituting the already-
@@ -1243,7 +1243,7 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
-    /// BT-412: Handles self-sends in class method context.
+    /// Handles self-sends in class method context.
     ///
     /// When a class method sends a message to `self` (the class object),
     /// we call the module function directly (not through `gen_server`) to avoid
@@ -1262,7 +1262,7 @@ impl CoreErlangGenerator {
         }
         if let Expression::Identifier(id) = receiver {
             if id.name == "self" {
-                // ADR 0118 phase 5b (BT-3422): reached through ordinary
+                // ADR 0118 phase 5b: reached through ordinary
                 // `generate_expression`, not `threaded_expression`'s own
                 // producer recognition — close the prelude inline.
                 let tv = self.generate_class_method_self_send(selector, arguments)?;
@@ -1274,11 +1274,11 @@ impl CoreErlangGenerator {
 
     /// Core logic for direct dispatch of class method calls.
     ///
-    /// Used by both `self` sends and explicit class name sends (BT-773) within
+    /// Used by both `self` sends and explicit class name sends within
     /// class methods. Generates direct module function calls to avoid deadlock
     /// since class methods execute inside a `gen_server:call` handler.
     ///
-    /// ADR 0118 phase 5b (BT-3422): returns a [`ThreadedValue`] whose
+    /// ADR 0118 phase 5b: returns a [`ThreadedValue`] whose
     /// prelude is real `ThreadedStmt`s throughout — every branch threads
     /// its arguments via [`Self::thread_args`] and either folds the
     /// resulting prelude into its own class-var `Bind`
@@ -1287,7 +1287,7 @@ impl CoreErlangGenerator {
     /// primitives, auto-exports, the slot constructor), closes the
     /// argument prelude into a self-contained call `Document`
     /// ([`Self::close_prelude`]) and wraps it as a pure `ThreadedValue`.
-    #[allow(clippy::too_many_lines)] // Multiple dispatch branches (BT-773/BT-893/BT-996/BT-2003/BT-2007) share args-capture scaffolding.
+    #[allow(clippy::too_many_lines)] // Multiple dispatch branches share args-capture scaffolding.
     pub(super) fn generate_class_method_self_send(
         &mut self,
         selector: &MessageSelector,
@@ -1295,7 +1295,7 @@ impl CoreErlangGenerator {
     ) -> Result<ThreadedValue> {
         let selector_atom = selector.name().to_string();
 
-        // ADR 0084 / BT-2267: inside a programmatic ClassBuilder class-method fun
+        // ADR 0084: inside a programmatic ClassBuilder class-method fun
         // there is no `class_<sel>` module export to call, so self-sends route
         // through the runtime dispatch helper (own runtime fun first, then the
         // super/inherited chain), threading ClassVars via the standard
@@ -1327,7 +1327,7 @@ impl CoreErlangGenerator {
         if self.class_method_selectors().contains(&selector_atom) {
             // Route to class_<selector>(ClassSelf, ClassVars, ...)
             let module = self.module_name.clone();
-            // BT-1937: Hoist any open let-chains from sub-expression class
+            // Hoist any open let-chains from sub-expression class
             // method self-sends in the args. The preamble must be emitted
             // before our own `let _CMR = ...` so the ClassVarsN bindings it
             // produces stay in scope at the outer level. capture_args_with_preamble
@@ -1338,7 +1338,7 @@ impl CoreErlangGenerator {
             let cv = self.current_class_var();
             let comma = if arguments.is_empty() { "" } else { ", " };
 
-            // BT-1408 follow-up: apply the same atom-length guard used by the
+            // Apply the same atom-length guard used by the
             // keyword-constructor path below — long selectors must be hashed to
             // stay within Erlang's 255-char atom limit.
             let safe_fn = super::selector_mangler::safe_class_method_fn_name(&selector_atom);
@@ -1356,7 +1356,7 @@ impl CoreErlangGenerator {
             // NOTE: prelude is OPEN — caller splices or open-scope-converts it.
             return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
         }
-        // BT-996: Auto-generated keyword constructor for Value subclass: classes.
+        // Auto-generated keyword constructor for Value subclass: classes.
         // `ClassName slot: value` inside a class method routes here when the selector
         // matches the auto-generated slot keyword constructor (e.g. `symName:` → `class_symName:/3`).
         // The constructor returns a plain map (not a `class_var_result` tuple), so no
@@ -1367,13 +1367,13 @@ impl CoreErlangGenerator {
             .is_some_and(|kw| kw == selector_atom)
         {
             let module = self.module_name.clone();
-            // BT-1937: Hoist preambles from sub-expression class var mutations
+            // Hoist preambles from sub-expression class var mutations
             // in the args. cv is read AFTER capture_args_with_preamble so it
             // reflects the post-args ClassVars version.
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
             let comma = if arguments.is_empty() { "" } else { ", " };
-            // BT-1408: Hash long keyword constructor atoms to stay within
+            // Hash long keyword constructor atoms to stay within
             // Erlang's 255-char atom limit.
             let safe_fn = super::selector_mangler::safe_class_method_fn_name(&selector_atom);
             let call_doc = docvec![
@@ -1393,9 +1393,9 @@ impl CoreErlangGenerator {
                 value: ValueRef::Doc(doc),
             });
         }
-        // BT-893: Instantiation selectors (new, new:, spawn, spawnWith:) must bypass
+        // Instantiation selectors (new, new:, spawn, spawnWith:) must bypass
         // gen_server to avoid deadlock — route through class_self_new/class_self_spawn
-        // (and BT-2004's class_self_spawn_as/class_self_spawn_with for the named-
+        // (and class_self_spawn_as/class_self_spawn_with for the named-
         // registration variants).
         if let Some(doc) = self.try_instantiation_intrinsic(&selector_atom, arguments)? {
             return Ok(ThreadedValue {
@@ -1404,7 +1404,7 @@ impl CoreErlangGenerator {
             });
         }
 
-        // BT-3057: Behaviour-protocol reflective primitives (`superclass`,
+        // Behaviour-protocol reflective primitives (`superclass`,
         // `includesSelector:`, ...) are not compiled class exports — they are
         // `@primitive`-backed methods inherited from `Behaviour`/`Class` and
         // normally resolved via `try_class_chain_fallthrough`'s
@@ -1417,7 +1417,7 @@ impl CoreErlangGenerator {
         // deadlock-safe specifically because its implementation resolves the
         // class module via `beamtalk_object_class:module_name_safe/1` (which
         // has a `ClassPid =:= self()` fast path reading the process
-        // dictionary, BT-3054) and looks up class metadata from
+        // dictionary) and looks up class metadata from
         // `__beamtalk_meta/0` / ETS rather than calling back into this
         // process's own gen_server. `class_self_send_reflective_primitive`
         // must stay in sync with that safety property — do not add a
@@ -1445,7 +1445,7 @@ impl CoreErlangGenerator {
             });
         }
 
-        // BT-2007: Inherited class method — walk the hierarchy at runtime and
+        // Inherited class method — walk the hierarchy at runtime and
         // apply the defining module's class_<sel>(ClassSelf, ClassVars, Args...).
         // The one remaining auto-generated 0-arity export reachable via plain
         // self-send (`class_name/0`) stays on the direct-call path because the
@@ -1463,7 +1463,7 @@ impl CoreErlangGenerator {
         // class_self_dispatch/4, which raises a structured does_not_understand
         // error for genuine DNU.
         if is_class_auto_export_selector(&selector_atom, arguments.len()) {
-            // BT-1937: Hoist preambles from sub-expression class var mutations.
+            // Hoist preambles from sub-expression class var mutations.
             let module = self.module_name.clone();
             let fun_name = selector_atom.replace(':', "");
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
@@ -1486,7 +1486,7 @@ impl CoreErlangGenerator {
 
         let (args_preamble, args_doc) = self.thread_args(arguments)?;
         let cv = self.current_class_var();
-        // BT-3047 / ADR 0109 amendment: derive the target class from `ClassSelf`
+        // ADR 0109 amendment: derive the target class from `ClassSelf`
         // (closure-captured, so correct even when this self-send executes inside a
         // block running in a foreign class's process) instead of
         // `erlang:get('beamtalk_class_name')` (the *executing process's* identity,
@@ -1510,7 +1510,7 @@ impl CoreErlangGenerator {
         Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc))
     }
 
-    /// BT-3047 / ADR 0109 amendment: the class-name expression derived from
+    /// ADR 0109 amendment: the class-name expression derived from
     /// `ClassSelf` (closure-captured, so correct even inside a block executing in
     /// a foreign class's process), for inlining at instantiation-intrinsic call
     /// sites. Deliberately inlined rather than let-bound: `close_prelude`
@@ -1533,7 +1533,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-3047 / ADR 0109 amendment: the calling class's own compiled module,
+    /// ADR 0109 amendment: the calling class's own compiled module,
     /// resolved by name via `beamtalk_class_metadata:lookup_module/1` — **not**
     /// `element(3, ClassSelf)` (`class_mod`). That field is not reliably "the
     /// calling class's own module": at the inherited-class-method dispatch site
@@ -1559,13 +1559,13 @@ impl CoreErlangGenerator {
     /// direct calls on `beamtalk_class_instantiation`, bypassing the class
     /// `gen_server` to avoid deadlock from within a class method.
     ///
-    /// BT-908: ClassName/Module create an instance of the CALLING class (the
+    /// ClassName/Module create an instance of the CALLING class (the
     /// running class `gen_server` process) for inherited factory methods.
     ///
-    /// BT-3047 / ADR 0109 amendment: ClassName/Module/IsAbstract are derived from
+    /// ADR 0109 amendment: ClassName/Module/IsAbstract are derived from
     /// `ClassSelf` (closure-captured) rather than read from the process
     /// dictionary, so a block invoked from a *different* class's process still
-    /// resolves against the block's own lexical class — preserving BT-908's intent
+    /// resolves against the block's own lexical class — preserving that intent
     /// rather than overriding it (`ClassSelf` already carries the same value the
     /// process dictionary did in every non-block case).
     fn try_instantiation_intrinsic(
@@ -1575,7 +1575,7 @@ impl CoreErlangGenerator {
     ) -> Result<Option<Document<'static>>> {
         match selector_atom {
             "new" | "new:" => {
-                // BT-1937: Hoist preambles from sub-expression class var mutations.
+                // Hoist preambles from sub-expression class var mutations.
                 let (args_preamble, args_doc) = self.thread_args(arguments)?;
                 let call_doc = docvec![
                     "call 'beamtalk_class_instantiation':'class_self_new'(",
@@ -1609,7 +1609,7 @@ impl CoreErlangGenerator {
                     "SpawnRes",
                 )))
             }
-            // BT-2004: Named-registration spawn variants inherited from Actor.
+            // Named-registration spawn variants inherited from Actor.
             // Without these arms, the fallthrough in the caller emits
             // `call 'CURRENT_MODULE':'spawnAs' / 'spawnWithas'` — neither function
             // exists, so calls crash at runtime with `undef`.
@@ -1629,10 +1629,10 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2004: Shared emitter for `self spawnAs:` and `self spawnWith:as:` in
+    /// Shared emitter for `self spawnAs:` and `self spawnWith:as:` in
     /// class-method context. Emits a call to `beamtalk_class_instantiation`'s
     /// Result-returning helper with ClassName/Module/IsAbstract derived from
-    /// `ClassSelf` (BT-3047 / ADR 0109 amendment — see `try_instantiation_intrinsic`),
+    /// `ClassSelf` (ADR 0109 amendment — see `try_instantiation_intrinsic`),
     /// followed by the Beamtalk-level arguments.
     fn generate_class_self_named_spawn(
         &mut self,
@@ -1660,16 +1660,16 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&args_preamble, call_doc, result_prefix))
     }
 
-    /// Generates synchronous self-dispatch for actor self-sends (BT-330).
+    /// Generates synchronous self-dispatch for actor self-sends.
     ///
     /// When an actor method sends a message to `self`, we bypass the async
     /// `gen_server:cast` path and call `safe_dispatch/3` directly. This ensures
     /// the result is a value (not a Future), enabling recursive algorithms like
     /// factorial and fibonacci to work correctly.
     ///
-    /// # Sealed Class Optimization (BT-403)
+    /// # Sealed Class Optimization
     ///
-    /// ADR 0118 §Decision 2 (BT-3415): the state-effecting *producer* for
+    /// ADR 0118 §Decision 2: the state-effecting *producer* for
     /// an Actor self-send — the one place a dispatching self-send is
     /// compiled in a state-threading context. Returns a [`ThreadedValue`]
     /// whose prelude is
@@ -1683,7 +1683,7 @@ impl CoreErlangGenerator {
     /// `Statement` + real `Bind` pair `dispatch_self_send_as_bind`
     /// (`control_flow/conditionals.rs`) built for the planner, now owned
     /// here; that function is a thin adapter over
-    /// [`Self::generate_self_dispatch_parts`] since BT-3415.
+    /// [`Self::generate_self_dispatch_parts`].
     ///
     /// `arguments` are compiled by
     /// [`Self::generate_self_dispatch_call_doc_for`] exactly as before; a
@@ -1783,7 +1783,7 @@ impl CoreErlangGenerator {
     /// end
     /// ```
     ///
-    /// ADR 0118 (BT-3415): this is the *discarding* form — the `NewState`
+    /// ADR 0118: this is the *discarding* form — the `NewState`
     /// the dispatch returns is dropped. It is reached only from
     /// [`Self::try_handle_self_dispatch`]'s fallback, i.e. for a self-send
     /// in a position no consumer has yet migrated to
@@ -1803,7 +1803,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        // BT-403: Sealed class optimization — skip safe_dispatch try/catch
+        // Sealed class optimization — skip safe_dispatch try/catch
         if self.is_class_sealed() {
             return self.generate_sealed_self_dispatch(selector, arguments);
         }
@@ -1835,7 +1835,7 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// BT-245: Generates self-dispatch with state threading (open binding pattern).
+    /// Generates self-dispatch with state threading (open binding pattern).
     ///
     /// Like `generate_self_dispatch`, but captures the new state from the dispatch
     /// result and advances the state version. The let binding is left open so
@@ -1873,7 +1873,7 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// BT-3382: selector/arguments-based counterpart of
+    /// selector/arguments-based counterpart of
     /// [`Self::generate_self_dispatch_open`], for callers that only have the
     /// decomposed selector/arguments of a self-send, not the owning
     /// `Expression::MessageSend` node itself — e.g.
@@ -1899,7 +1899,7 @@ impl CoreErlangGenerator {
         Ok((doc, dispatch_var))
     }
 
-    /// ADR 0111 Addendum 5 (BT-3165, shape E2): the dispatch-call/
+    /// ADR 0111 Addendum 5 (shape E2): the dispatch-call/
     /// case-clause portion of [`Self::generate_self_dispatch_open`],
     /// WITHOUT the trailing state-extraction `let` — factored out so
     /// `exception_handling.rs`'s per-arm `ThreadedIr` lowering can model the
@@ -1933,9 +1933,9 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// BT-3382: selector/arguments-based core of
+    /// selector/arguments-based core of
     /// [`Self::generate_self_dispatch_call_doc`] — see that function's doc
-    /// comment (ADR 0111 Addendum 5 / BT-3165) for the shape this builds and
+    /// comment (ADR 0111 Addendum 5) for the shape this builds and
     /// why the state-version bump (`next_state_var()`) mints exactly where it
     /// does. Factored out so [`Self::generate_self_dispatch_open_for`] (used
     /// by `compile_conditional_receiver`, which only has the decomposed
@@ -1951,7 +1951,7 @@ impl CoreErlangGenerator {
     ) -> Result<(Document<'static>, String)> {
         {
             let selector_atom = selector.name().to_string();
-            // BT-2822: `selector_atom` is moved into `call_doc` below (some
+            // `selector_atom` is moved into `call_doc` below (some
             // branches consume it via `leaf::atom`), so clone the value
             // needed for the error-clause breadcrumb before that happens.
             let selector_atom_for_error = selector_atom.clone();
@@ -2028,7 +2028,7 @@ impl CoreErlangGenerator {
                 ]
             };
 
-            // Result/error clauses. BT-3165: the state-version bump
+            // Result/error clauses. The state-version bump
             // (`next_state_var()`) stays exactly here — mint-order fidelity
             // — but its returned name is no longer consumed for rendering;
             // `generate_self_dispatch_open` re-reads it via
@@ -2057,7 +2057,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-403: Sealed-class self-dispatch (value-discarding — see
+    /// Sealed-class self-dispatch (value-discarding — see
     /// `generate_self_dispatch`'s call site).
     ///
     /// Two levels of optimization:
@@ -2117,7 +2117,7 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Generates a direct call to a sealed method's standalone function (BT-403).
+    /// Generates a direct call to a sealed method's standalone function.
     ///
     /// This is the most optimized self-dispatch path: calls `__sealed_{selector}`
     /// directly, bypassing `safe_dispatch`, dispatch, and case selector matching.
@@ -2134,7 +2134,7 @@ impl CoreErlangGenerator {
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
         let comma = if arguments.is_empty() { "" } else { ", " };
-        // BT-2822: `selector_atom` (from `MessageSelector::name`) is
+        // `selector_atom` (from `MessageSelector::name`) is
         // the breadcrumb value — kept independent of `selector_name` (used
         // below for `sealed_fn_name` mangling) so a future change to either
         // mangling scheme can't silently desync the breadcrumb from the
@@ -2171,7 +2171,7 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// BT-2797: Generates the RHS `Document` for a `self.field := value`
+    /// Generates the RHS `Document` for a `self.field := value`
     /// assignment, special-casing a block literal with field writes (and no
     /// captured-local mutations): it's generated via `generate_block_stateful`
     /// directly, bypassing `generate_block`'s "unsupported block" rejection.
@@ -2186,7 +2186,7 @@ impl CoreErlangGenerator {
     /// — is the same pre-existing class of gap as any other block value
     /// flowing through an untracked opaque channel.
     ///
-    /// BT-2797 (PR #2899 review fix): a block that *also* captures and
+    /// A block that *also* captures and
     /// mutates an outer local (in addition to writing a field) is NOT safe
     /// here and must fall through to `expression_doc` → `generate_block` →
     /// `validate_stored_closure`/the block-analyzer diagnostic instead.
@@ -2229,7 +2229,7 @@ impl CoreErlangGenerator {
     /// The caller is responsible for closing the expression (generating the body
     /// that uses the new state).
     ///
-    /// BT-3466: the plain `Actor`/`ValueType` tail (the `else` fallthrough
+    /// the plain `Actor`/`ValueType` tail (the `else` fallthrough
     /// below) is now a thin `Closure::Open` call into
     /// [`Self::lower_field_write`] — the single lowering core this,
     /// `expressions.rs`'s `generate_field_assignment` (`Closure::Closed`),
@@ -2247,7 +2247,7 @@ impl CoreErlangGenerator {
     ) -> Result<(Document<'static>, String)> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::FieldAccess { field, .. } = target.as_ref() {
-                // BT-3168 (ADR 0111 Addendum 9, Questions 2/3): a class-var
+                // ADR 0111 Addendum 9, Questions 2/3: a class-var
                 // write directly inside a Letrec loop body that threads
                 // `ClassVars` through the loop's own recursive tail call —
                 // threaded via the SAME shared helper the method's own
@@ -2272,7 +2272,7 @@ impl CoreErlangGenerator {
                     );
                 }
                 self.reject_class_var_field_assignment(expr, field)?;
-                // BT-1342: Full-extract mode — rebind field param instead of maps:put.
+                // Full-extract mode — rebind field param instead of maps:put.
                 // When the field is in hybrid_mutated_fields, the field has been extracted
                 // to a direct fun parameter. We rebind it to a fresh variable and update
                 // the readonly params map so subsequent reads use the new variable.
@@ -2311,13 +2311,13 @@ impl CoreErlangGenerator {
                     ));
                 }
 
-                // BT-3466: `ValueType` gains the `Self`-threading arm it
+                // `ValueType` gains the `Self`-threading arm it
                 // lacked before this issue (see this function's own doc
                 // comment) — `FieldWriteSite::for_context` is the same
                 // dispatch `generate_field_assignment`'s (the `Closed`
                 // sibling's) plain-write default uses.
                 let site = FieldWriteSite::for_context(self.context);
-                // BT-884: `lower_field_write` returns the val var so callers
+                // `lower_field_write` returns the val var so callers
                 // (e.g. cascade codegen) can reference the assigned value
                 // after hoisting the binding.
                 return self.lower_field_write(
@@ -2334,7 +2334,7 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// BT-1324: Generates the opening part of a `self fieldAt: name put: value` with state threading.
+    /// Generates the opening part of a `self fieldAt: name put: value` with state threading.
     ///
     /// Similar to `generate_field_assignment_open` but with a dynamic field name.
     /// Generates:
@@ -2415,7 +2415,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let selector_atom = selector.name().to_string();
 
-        // ADR 0084 / BT-2267: `super` inside a builder class-method fun resolves
+        // ADR 0084: `super` inside a builder class-method fun resolves
         // up the metaclass chain via the runtime helper, keyed on the builder
         // class name — `class_self_dispatch/4` begins the walk at that class's
         // superclass, which is exactly super semantics. The fun has no module
@@ -2435,7 +2435,7 @@ impl CoreErlangGenerator {
                 args_doc,
                 "])"
             ];
-            // ADR 0118 phase 5b (BT-3422): reached through ordinary
+            // ADR 0118 phase 5b: reached through ordinary
             // `generate_expression` — close the producer's prelude inline.
             let tv = self.emit_class_var_result_unwrap(args_preamble, call_doc);
             return Ok(self.close_threaded_value_doc(tv));
@@ -2444,7 +2444,7 @@ impl CoreErlangGenerator {
         let class_name = self.class_name();
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
-        // BT-2252: value/primitive-context funs (`fun(Args, Self) -> Result`)
+        // value/primitive-context funs (`fun(Args, Self) -> Result`)
         // have no `State` binding, so `super` must not reference one. Route to
         // `super_value/4`, which walks the same chain and returns a plain value.
         if self.context == CodeGenContext::ValueType {
@@ -2559,7 +2559,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Generates a method lookup via `>>` operator (BT-101).
+    /// Generates a method lookup via `>>` operator.
     ///
     /// `Counter >> #increment` compiles to:
     /// ```erlang
@@ -2589,7 +2589,7 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Generates a runtime method resolution via `>>` for non-class-literal receivers (BT-323).
+    /// Generates a runtime method resolution via `>>` for non-class-literal receivers.
     ///
     /// `cls >> #increment` (where cls holds a class object) compiles to:
     /// ```erlang
@@ -2608,7 +2608,7 @@ impl CoreErlangGenerator {
                 arguments.len()
             )));
         }
-        // BT-1937: Capture receiver + arg as one ordered sequence so
+        // Capture receiver + arg as one ordered sequence so
         // left-to-right evaluation order is preserved.
         let exprs: [&Expression; 2] = [receiver, &arguments[0]];
         let (preamble, mut docs) = self.thread_subexprs(&exprs, "Lookup")?;
@@ -2630,7 +2630,7 @@ impl CoreErlangGenerator {
     /// In workspace mode, checks REPL bindings first for convenience names.
     /// If the name is found in bindings, it's an instance (e.g., Transcript is a
     /// `TranscriptStream` actor), so dispatch via `beamtalk_message_dispatch:send/3`.
-    /// If not found, fall back to direct call (BT-1639) or `class_send`.
+    /// If not found, fall back to direct call or `class_send`.
     ///
     /// ```erlang
     /// case call 'maps':'find'('Name', State) of
@@ -2645,7 +2645,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        // BT-1408: The binding branch dispatches to instances via
+        // The binding branch dispatches to instances via
         // beamtalk_message_dispatch:send — use the raw selector (only hashed
         // if the selector itself exceeds the atom limit) so instance method
         // lookup works normally.  The class_send fallback uses the class-method
@@ -2657,7 +2657,7 @@ impl CoreErlangGenerator {
         let state_var = self.current_state_var();
         let lookup_var = self.fresh_temp_var("Lookup");
 
-        // BT-1942: Preserve the "receiver first, then args" evaluation order
+        // Preserve the "receiver first, then args" evaluation order
         // expected by Smalltalk/Beamtalk message-send semantics. The receiver
         // here is the class-binding lookup (`maps:find(ClassName, State)`),
         // which we bind to a temp BEFORE the arg preamble runs so a dispatch
@@ -2669,7 +2669,7 @@ impl CoreErlangGenerator {
         let (arg_prelude, arg_refs) = self.thread_args_bound(arguments, "BindArg")?;
         let args_doc = Self::join_docs_with_commas(arg_refs);
 
-        // BT-1639: Build the class-side fallback: direct call or gen_server
+        // Build the class-side fallback: direct call or gen_server
         let class_fallback: Document<'static> =
             if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw) {
                 let safe_fn = super::selector_mangler::safe_class_method_fn_name(&raw);
@@ -2683,7 +2683,7 @@ impl CoreErlangGenerator {
                 self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
             };
 
-        // BT-2365 (ADR 0081 Phase 1): resolve the receiver — session locals first,
+        // ADR 0081 Phase 1: resolve the receiver — session locals first,
         // then lazy singleton resolution — BEFORE the arg preamble runs, so the
         // receiver is fully determined ahead of any argument side effects (the
         // "receiver first, then args" evaluation order). Singletons
@@ -2758,7 +2758,7 @@ impl CoreErlangGenerator {
 
     /// Generates workspace-mode class send for actor/value-type methods.
     ///
-    /// BT-1639: For sealed classes eligible for direct call, generates a direct
+    /// For sealed classes eligible for direct call, generates a direct
     /// function call instead of `gen_server` dispatch. Otherwise tries `class_send`
     /// first (for real class names like `Counter`), returns nil for unresolved names.
     /// ADR 0019 Phase 4: No `persistent_term` fallback — convenience names resolve
@@ -2771,16 +2771,16 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let raw_selector = selector.name().to_string();
 
-        // BT-1639: Direct call optimization for sealed class methods
+        // Direct call optimization for sealed class methods
         if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw_selector) {
             return self.generate_direct_class_method_call(&module_name, &raw_selector, arguments);
         }
 
-        // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
+        // Hash long selector atoms to stay within Erlang's 255-char atom limit.
         let selector_atom = super::selector_mangler::safe_class_method_selector(&raw_selector);
         let class_pid_var = self.fresh_var("ClassPid");
         let lookup_var = self.fresh_temp_var("WsLookup");
-        // BT-1942: Bind the class registry lookup to a temp BEFORE evaluating
+        // Bind the class registry lookup to a temp BEFORE evaluating
         // args, preserving "receiver first, then args" message-send semantics.
         // Then bind args to temp vars so they are evaluated once and their open
         // let-chains propagate upward.
@@ -2816,16 +2816,16 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&prelude, case_doc, "WsClassRes"))
     }
 
-    /// Generates a class-level method call (BT-215).
+    /// Generates a class-level method call.
     ///
-    /// For sealed classes with no class variables (BT-1639), generates a direct
+    /// For sealed classes with no class variables, generates a direct
     /// function call to `module:class_<selector>(nil, #{}, Args...)`, bypassing
     /// the `gen_server` round-trip. This is safe because the methods are pure functions.
     ///
     /// For all other classes (or unrecognized selectors), falls back to the
     /// `gen_server` dispatch path via `beamtalk_object_class:class_send/3`.
     ///
-    /// # Generated Code (direct call, BT-1639)
+    /// # Generated Code (direct call)
     ///
     /// ```erlang
     /// call 'bt@stdlib@tracing':'class_setContext:'('nil', ~{}~, Ctx)
@@ -2845,15 +2845,15 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let raw_selector = selector.name().to_string();
 
-        // BT-1639: Check if this class method is eligible for direct call optimization.
+        // Check if this class method is eligible for direct call optimization.
         if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw_selector) {
             return self.generate_direct_class_method_call(&module_name, &raw_selector, arguments);
         }
 
         // Fallback: gen_server dispatch via class_send
-        // BT-1408: Hash long selector atoms (e.g. keyword constructors with many
+        // Hash long selector atoms (e.g. keyword constructors with many
         // fields) to stay within Erlang's 255-char atom limit.
-        // BT-1937: Hoist preambles from sub-expression class var mutations.
+        // Hoist preambles from sub-expression class var mutations.
         let selector_atom = super::selector_mangler::safe_class_method_selector(&raw_selector);
         let class_pid_var = self.fresh_var("ClassPid");
         let (args_preamble, args_doc) = self.thread_args(arguments)?;
@@ -2870,7 +2870,7 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&args_preamble, call_doc, "ClassCall"))
     }
 
-    /// BT-1639: Generates a direct function call to a sealed class method.
+    /// Generates a direct function call to a sealed class method.
     ///
     /// Passes `nil` for `ClassSelf` and `#{}` for `ClassVars` since sealed classes
     /// with no class variables never reference these parameters.
@@ -2884,8 +2884,8 @@ impl CoreErlangGenerator {
         selector: &str,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
-        // BT-1937: Hoist preambles from sub-expression class var mutations.
+        // Hash long selector atoms to stay within Erlang's 255-char atom limit.
+        // Hoist preambles from sub-expression class var mutations.
         let safe_fn = super::selector_mangler::safe_class_method_fn_name(selector);
         let (args_preamble, args_doc) = self.thread_args(arguments)?;
         let call_doc = Self::direct_class_method_call_doc(
@@ -2922,7 +2922,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-1639: Generates the `gen_server` `class_send` fallback for binding-aware dispatch.
+    /// Generates the `gen_server` `class_send` fallback for binding-aware dispatch.
     ///
     /// Used when a class method is not eligible for direct call optimization.
     fn generate_class_send_fallback(
@@ -2978,7 +2978,7 @@ impl CoreErlangGenerator {
         })
     }
 
-    /// BT-851: Pre-scans a class for self-sends that pass Tier 2 (stateful) block arguments.
+    /// Pre-scans a class for self-sends that pass Tier 2 (stateful) block arguments.
     ///
     /// Walks all method bodies looking for `self <selector>: args` where an argument
     /// is a literal block with captured mutations (`captured_reads ∩ local_writes` non-empty).
@@ -2999,7 +2999,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-851: Recursively scans an expression for Tier 2 block arguments in self-sends.
+    /// Recursively scans an expression for Tier 2 block arguments in self-sends.
     fn scan_expr_for_tier2(
         &mut self,
         expr: &Expression,
@@ -3026,7 +3026,7 @@ impl CoreErlangGenerator {
                                     .intersection(&analysis.captured_reads)
                                     .next()
                                     .is_some();
-                                // BT-1140: Also promote blocks with field writes to Tier 2.
+                                // Also promote blocks with field writes to Tier 2.
                                 let has_field_writes = !analysis.field_writes.is_empty();
                                 if has_captured_mutations || has_field_writes {
                                     self.tier2_method_info
@@ -3075,7 +3075,7 @@ impl CoreErlangGenerator {
                                         .intersection(&analysis.captured_reads)
                                         .next()
                                         .is_some();
-                                    // BT-1140: Also promote blocks with field writes to Tier 2.
+                                    // Also promote blocks with field writes to Tier 2.
                                     let has_field_writes = !analysis.field_writes.is_empty();
                                     if has_captured_mutations || has_field_writes {
                                         self.tier2_method_info
@@ -3109,12 +3109,12 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-851: Checks if an expression is a self-send with Tier 2 block arguments.
+    /// Checks if an expression is a self-send with Tier 2 block arguments.
     ///
     /// Returns the captured-mutated variable names for each Tier 2 block argument
     /// if this is a Tier 2 self-send, or `None` if it's a regular self-send.
     ///
-    /// BT-870: Also promotes literal Tier 1 blocks at call sites where the target
+    /// Also promotes literal Tier 1 blocks at call sites where the target
     /// method is a known Tier 2 HOM (present in `tier2_method_info`). A promoted
     /// block is compiled with the Tier 2 signature (`fun(Args, StateAcc) -> {Result, StateAcc}`)
     /// even though it has no captured mutations, ensuring the callee's arity expectation is met.
@@ -3134,7 +3134,7 @@ impl CoreErlangGenerator {
             if let Expression::Identifier(id) = receiver.as_ref() {
                 if id.name == "self" {
                     let sel_name = selector.name().to_string();
-                    // BT-870: Collect positions the scanner identified as Tier 2 for this selector.
+                    // Collect positions the scanner identified as Tier 2 for this selector.
                     let hom_positions: std::collections::HashSet<usize> = self
                         .tier2_method_info
                         .get(&sel_name)
@@ -3155,19 +3155,19 @@ impl CoreErlangGenerator {
                             if !captured_mutations.is_empty() {
                                 tier2_args.push((i, captured_mutations));
                             } else if !analysis.field_writes.is_empty() {
-                                // BT-1140: Field-write block — promote to Tier 2 with no local
+                                // Field-write block — promote to Tier 2 with no local
                                 // vars. The actor State IS the StateAcc; field reads/writes
                                 // are threaded through it automatically inside the block body.
                                 tier2_args.push((i, vec![]));
                             } else if hom_positions.contains(&i) {
-                                // BT-870: Block has no mutations but this position is a known
+                                // Block has no mutations but this position is a known
                                 // Tier 2 HOM param. Promote to Tier 2 with empty captured vars
                                 // so it gets `fun(Args, StateAcc) -> {Result, StateAcc}` signature
                                 // (StateAcc passthrough), matching the callee's arity expectation.
                                 tier2_args.push((i, vec![]));
                             }
                         } else if let Expression::Identifier(arg_id) = arg {
-                            // BT-912: If the argument is an identifier that is a known Tier 2
+                            // If the argument is an identifier that is a known Tier 2
                             // block parameter of the current method, treat it as a Tier 2 HOM
                             // argument with no captured mutations. This handles nested HOMs where
                             // one method delegates a Tier 2 block to another (e.g.
@@ -3188,7 +3188,7 @@ impl CoreErlangGenerator {
         None
     }
 
-    /// BT-851: Generates a self-dispatch with Tier 2 block arguments and state threading.
+    /// Generates a self-dispatch with Tier 2 block arguments and state threading.
     ///
     /// Before the self-send:
     /// 1. Packs captured-mutated locals into State
@@ -3317,7 +3317,7 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// BT-851: Builds argument list for a Tier 2 self-send, using stateful block
+    /// Builds argument list for a Tier 2 self-send, using stateful block
     /// generation for marked positions.
     fn generate_tier2_args(
         &mut self,
@@ -3348,7 +3348,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(arg_parts))
     }
 
-    /// BT-851: Generates the dispatch call for a Tier 2 self-send.
+    /// Generates the dispatch call for a Tier 2 self-send.
     ///
     /// Handles sealed (direct/dispatch) and non-sealed (`safe_dispatch`) paths.
     #[allow(clippy::too_many_arguments)]
@@ -3423,7 +3423,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-920/BT-403: builds the shared `call Module:'safe_dispatch'(Selector,
+    /// builds the shared `call Module:'safe_dispatch'(Selector,
     /// [Args], State)` fragment used by every non-sealed self-dispatch call
     /// site (self-cast, discarding self-dispatch, open self-dispatch, and the
     /// Tier 2 dispatch call above).
@@ -3448,11 +3448,11 @@ impl CoreErlangGenerator {
 }
 
 // NOTE: class_method_module_name and related helpers (is_primitive_stdlib_class,
-// is_bt_stdlib_class, is_erlang_stdlib_module) were removed in BT-411.
+// is_bt_stdlib_class, is_erlang_stdlib_module) have been removed.
 // Class dispatch now goes through runtime class_send/3 instead of
 // compile-time module name resolution.
 
-/// BT-2007 / BT-3057: Class-module auto-exports reachable via `self <sel>`
+/// Class-module auto-exports reachable via `self <sel>`
 /// from inside a class method.
 ///
 /// Every compiled class module carries a small set of 0-arity functions
@@ -3461,7 +3461,7 @@ impl CoreErlangGenerator {
 /// does not index them (it reads only user-defined `class_methods` on each
 /// ancestor `gen_server`).
 ///
-/// BT-3057: `superclass` moved off this path — its raw export returns the
+/// `superclass` moved off this path — its raw export returns the
 /// bare class-name atom, not the `#beamtalk_object{}` a Beamtalk-level
 /// `self superclass` must produce, and callers comparing it against a real
 /// class object got a silent `equals:`/`==` mismatch. It is now handled by
@@ -3486,13 +3486,13 @@ impl CoreErlangGenerator {
 /// `class_self_send_reflective_primitive` (if it must produce the same
 /// value the non-self-send Behaviour-protocol dispatch would). Unknown
 /// selectors take the inherited-dispatch path, which raises structured DNU
-/// on miss — strictly better than the pre-BT-2007 fallthrough (direct call
+/// on miss — strictly better than the old fallthrough (direct call
 /// → runtime `undef`).
 pub(super) fn is_class_auto_export_selector(selector_atom: &str, arity: usize) -> bool {
     arity == 0 && selector_atom == "class_name"
 }
 
-/// BT-3057: Behaviour-protocol reflective primitives that are safe to
+/// Behaviour-protocol reflective primitives that are safe to
 /// dispatch directly from a class-method self-send.
 ///
 /// Unlike `is_class_auto_export_selector`'s raw module exports, these
@@ -3505,7 +3505,7 @@ pub(super) fn is_class_auto_export_selector(selector_atom: &str, arity: usize) -
 /// is deadlock-safe to call directly with `ClassSelf` because its
 /// `beamtalk_behaviour_intrinsics` implementation resolves everything it
 /// needs (module, metadata) through `beamtalk_object_class:module_name_safe/1`
-/// (which has a `ClassPid =:= self()` fast path, BT-3054) and
+/// (which has a `ClassPid =:= self()` fast path) and
 /// `__beamtalk_meta/0`/ETS lookups rather than an unconditional
 /// `gen_server:call(ClassPid, ...)`.
 ///

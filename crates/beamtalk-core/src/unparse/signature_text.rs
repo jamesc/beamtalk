@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared single-line signature-text composer (BT-3097).
+//! Shared single-line signature-text composer.
 //!
 //! **DDD Context:** Language Service — Formatting / Unparse
 //!
-//! Six independent implementations of "render a method/function signature as
-//! text" had drifted across the codebase: the `bt fmt` unparser, the hover
+//! Six call sites need to "render a method/function signature as
+//! text": the `bt fmt` unparser, the hover
 //! provider (twice — a signature renderer and a separate type-annotation
 //! renderer), the `beamtalk doc` extractor, generated `.bt` stubs, and
 //! signature help. They legitimately want different *levels of detail*
@@ -22,11 +22,11 @@
 //! `TypeAnnotation` via [`super::unparse_type_annotation_display`] for
 //! AST-based consumers, pre-stringified `ClassHierarchy::MethodInfo` fields,
 //! or `InferredType` from the native type registry
-//! (`beamtalk_cli::commands::generate::stubs::format_type`) — and pass the
+//! (`InferredType::display_annotation`) — and pass the
 //! already-rendered text in as `&str`. That text-in/text-out contract is
 //! what lets one composer serve every consumer without an AST adapter for
-//! the structurally different native-type input (see BT-3097's discussion of
-//! why `generate::stubs` can't just be merged into an AST-shaped renderer).
+//! the structurally different native-type input — `generate::stubs`' native
+//! `InferredType` values have no AST representation to adapt through.
 //!
 //! The `bt fmt` unparser itself ([`super::unparse_method_signature`] et al.)
 //! does *not* go through this module — it must stay on the `Document` API
@@ -93,7 +93,7 @@ pub enum SignatureSelector<'a> {
 
 /// The optional pieces around a rendered signature — the legitimate
 /// per-consumer differences identified while unifying the diverged
-/// signature renderers (BT-3097).
+/// signature renderers.
 ///
 /// No `prefix`/`suffix` fields: every current consumer needs neither (method
 /// declarations' `sealed `/`internal ` prefixes are handled by the `bt fmt`
@@ -114,7 +114,7 @@ impl SignatureRenderOptions {
     };
 
     /// Names/keywords only, no return type — the `beamtalk doc` extractor's
-    /// listing style, which intentionally omits types (BT-3097).
+    /// listing style, which intentionally omits types.
     pub const NAMES_ONLY: Self = Self {
         show_return_type: false,
     };
@@ -122,8 +122,7 @@ impl SignatureRenderOptions {
 
 /// Renders a signature from its selector shape, optional pre-rendered
 /// return-type text, and [`SignatureRenderOptions`] — the shared core for
-/// every single-line (non-`bt fmt`) signature display in the codebase
-/// (BT-3097).
+/// every single-line (non-`bt fmt`) signature display in the codebase.
 #[must_use]
 pub fn render_signature_text(
     selector: SignatureSelector<'_>,
@@ -273,7 +272,7 @@ mod tests {
 
     // --- Family-B (no parameter names): hover's resolved-call display and
     // signature help both consume `ClassHierarchy::MethodInfo`, which only
-    // has types, not names (BT-3097).
+    // has types, not names.
 
     #[test]
     fn no_param_names_renders_keyword_type_pairs() {

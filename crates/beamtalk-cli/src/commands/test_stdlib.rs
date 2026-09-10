@@ -27,7 +27,7 @@ use crate::commands::util::Expected;
 
 /// A single test assertion: expression + expected result.
 ///
-/// `pub(crate)`: reused by `test_metamorphic` (BT-3117), which parses the
+/// `pub(crate)`: reused by `test_metamorphic`, which parses the
 /// same `.btscript` `// =>` units and generates transformed variants of
 /// each `expression` rather than duplicating this parser.
 #[derive(Debug)]
@@ -229,7 +229,7 @@ pub(crate) fn expected_to_binary_literal(expected: &str) -> String {
             other => escaped.push(other),
         }
     }
-    // Use /utf8 type to correctly encode multi-byte Unicode characters (BT-388).
+    // Use /utf8 type to correctly encode multi-byte Unicode characters.
     // Without /utf8, Erlang truncates codepoints > 255 to a single byte.
     format!("<<\"{escaped}\"/utf8>>")
 }
@@ -264,7 +264,7 @@ pub(crate) fn extract_assignment_var(expression: &str) -> Option<String> {
 /// Format an Erlang atom literal for use in generated assertion specs.
 ///
 /// Wraps the name in single quotes for Erlang atom safety. Escaping goes
-/// through beamtalk-core's canonical `escape_atom_chars` funnel (BT-3089)
+/// through beamtalk-core's canonical `escape_atom_chars` funnel
 /// rather than a hand-rolled/no-op rule of its own — every caller here
 /// currently only ever passes compiler-generated module names or
 /// already-validated identifier-like variable names, but routing through
@@ -325,7 +325,7 @@ pub(crate) fn generate_eunit_wrapper_for(
     );
 
     // Test generator — thin wrapper that delegates to beamtalk_stdlib_test.
-    // Uses {timeout, 60, Fun} to avoid EUnit's 5s default (BT-729).
+    // Uses {timeout, 60, Fun} to avoid EUnit's 5s default.
     let _ = writeln!(
         erl,
         "{test_fn_name}() ->\n\
@@ -371,7 +371,7 @@ pub(crate) fn generate_eunit_wrapper_for(
                 );
             }
             Expected::Value(v) if has_wildcard_underscore(v) => {
-                // Pattern with wildcards (BT-502)
+                // Pattern with wildcards
                 let expected_bin = expected_to_binary_literal(v);
                 let _ = writeln!(
                     erl,
@@ -450,7 +450,7 @@ fn generate_eunit_wrapper(
 /// Returns the BEAM module name (e.g. `bt@counter`) so callers do not have
 /// to recompute it from the path stem.
 ///
-/// `pub(crate)`: reused by `test_metamorphic` (BT-3117) for `.btscript`
+/// `pub(crate)`: reused by `test_metamorphic` for `.btscript`
 /// files that reference fixtures via `@load`.
 pub(crate) fn compile_fixture(
     fixture_path: &Utf8Path,
@@ -471,7 +471,7 @@ pub(crate) fn compile_fixture(
         allow_primitives: false,
         workspace_mode: false,
         suppress_warnings,
-        // BT-979: Bootstrap-test fixtures use top-level expressions as test assertions
+        // Bootstrap-test fixtures use top-level expressions as test assertions
         // paired with `// =>` comments. Skip the module-expression lint to avoid
         // false positives on intentional assertion expressions.
         skip_module_expression_lint: true,
@@ -713,7 +713,7 @@ pub(crate) fn compile_single_test_file(
 
     let parsed = parse_test_file(&content);
 
-    // Treat warnings as errors (BT-249)
+    // Treat warnings as errors
     if !parsed.warnings.is_empty() {
         for warning in &parsed.warnings {
             eprintln!("⚠️  {test_file}: {warning}");
@@ -1071,9 +1071,9 @@ mod tests {
         assert_eq!(erlang_atom("beamtalk_eval_0"), "'beamtalk_eval_0'");
     }
 
-    /// BT-3089: `erlang_atom` used to do zero escaping (`format!("'{name}'")`)
-    /// — a latent bug if it ever received an atom needing escape. It now
-    /// routes through beamtalk-core's canonical `escape_atom_chars` funnel.
+    /// `erlang_atom` routes through beamtalk-core's canonical
+    /// `escape_atom_chars` funnel rather than a hand-rolled `format!("'{name}'")`
+    /// rule, guarding against a latent bug if it ever receives an atom needing escape.
     #[test]
     fn test_erlang_atom_escapes_special_characters() {
         assert_eq!(erlang_atom("it's"), "'it\\'s'");
@@ -1146,7 +1146,7 @@ mod tests {
             expected_to_binary_literal("hello world"),
             "<<\"hello world\"/utf8>>"
         );
-        // BT-388: Unicode characters must be encoded correctly
+        // Unicode characters must be encoded correctly
         assert_eq!(expected_to_binary_literal("世界"), "<<\"世界\"/utf8>>");
         assert_eq!(
             expected_to_binary_literal("Hello 🌍"),
@@ -1178,10 +1178,10 @@ mod tests {
         assert!(wrapper.contains("-module('arith_tests')."));
         assert!(wrapper.contains("beamtalk_stdlib_test:run_and_assert"));
         assert!(wrapper.contains("'test_arith_0'"));
-        // Verify timeout wrapper is generated (BT-729)
+        // Verify timeout wrapper is generated
         assert!(wrapper.contains("_test_()"));
         assert!(wrapper.contains("timeout, 60"));
-        // Verify Beamtalk source location in assertion spec (BT-729)
+        // Verify Beamtalk source location in assertion spec
         assert!(wrapper.contains("test/arith.bt:1 `1 + 2`"));
         // Value assertion spec tuple
         assert!(wrapper.contains("{value,"));
@@ -1290,7 +1290,7 @@ mod tests {
         assert!(wrapper.contains("{error,"));
         assert!(wrapper.contains("'test_err_0'"));
         assert!(wrapper.contains("does_not_understand"));
-        // Verify Beamtalk source location in assertion spec (BT-729)
+        // Verify Beamtalk source location in assertion spec
         assert!(wrapper.contains("test/err.bt:1 `42 foo`"));
         // Error handling is in beamtalk_stdlib_test.erl, not inline
         assert!(wrapper.contains("beamtalk_stdlib_test:run_and_assert"));

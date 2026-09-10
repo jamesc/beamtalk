@@ -46,7 +46,7 @@ use beamtalk_core::source_analysis::Span;
 /// * `position` - The cursor position
 /// * `hierarchy` - The class hierarchy for type context
 /// * `native_types` - Native (Erlang FFI) type registry, for typed FFI hover
-/// * `alias_registry` - Type alias registry (ADR 0108, BT-2897), so hover on
+/// * `alias_registry` - Type alias registry (ADR 0108), so hover on
 ///   an alias-typed value or annotation resolves and displays
 ///   `AliasName (expansion)` instead of an unresolved nominal class. `None`
 ///   when the caller has no project-wide alias table available yet (see
@@ -89,9 +89,9 @@ pub fn compute_hover(
     let class_context = find_hover_class_context(module, offset_val);
 
     // Enrich hierarchy with inferred return types and get the type map in a single
-    // TypeChecker pass (BT-1014, BT-1047). This enables chain-resolved hover for methods
+    // TypeChecker pass. This enables chain-resolved hover for methods
     // whose return type is not explicitly annotated but can be inferred from the method
-    // body (BT-1005). BT-2897: also alias-aware (see `alias_registry`'s doc above).
+    // body. Also alias-aware (see `alias_registry`'s doc above).
     let enriched_hierarchy;
     let (hierarchy, type_map) = {
         let (enriched, type_map) = enrich_hierarchy_with_inferred_returns_and_aliases(
@@ -252,11 +252,11 @@ fn find_hover_in_declarations(
         }
     }
 
-    // ADR 0108 Phase 8 (BT-2901): hover on the alias name in its own `type
+    // ADR 0108 Phase 8: hover on the alias name in its own `type
     // Name = ...` declaration shows the (immediate, as-written) expansion —
     // the reference-site case (hovering a value/annotation typed *through*
     // an alias) is already handled by `compute_hover`'s `alias_registry`
-    // threading (BT-2897); this covers the declaration site itself, which
+    // threading; this covers the declaration site itself, which
     // that threading doesn't reach (there's no inferred/annotation type at
     // the declaration token to look up).
     for alias in &module.type_aliases {
@@ -269,7 +269,7 @@ fn find_hover_in_declarations(
 }
 
 /// Builds hover info for the alias name token in a `type Name = ...` (or
-/// `internal type Name = ...`) declaration (ADR 0108 Phase 8, BT-2901).
+/// `internal type Name = ...`) declaration (ADR 0108 Phase 8).
 /// Shows the RHS as written (mirrors [`state_declaration_hover_info`]'s
 /// shape) plus the doc comment, if any.
 fn alias_definition_hover_info(alias: &beamtalk_core::ast::TypeAliasDefinition) -> HoverInfo {
@@ -398,7 +398,7 @@ fn method_declaration_selector_hover_info(
     if method.is_sealed {
         meta.push_str(", sealed");
     }
-    // Show visibility annotation for internal methods (ADR 0071, BT-1703)
+    // Show visibility annotation for internal methods (ADR 0071)
     if method.is_internal {
         meta.push_str(", internal");
     }
@@ -434,13 +434,13 @@ fn state_declaration_hover_info(state: &StateDeclaration) -> HoverInfo {
     hover
 }
 
-/// Renders a method declaration's display signature (BT-3097): builds
+/// Renders a method declaration's display signature: builds
 /// [`beamtalk_core::unparse::SignatureParam`]s from the AST (type text rendered via
 /// [`beamtalk_core::unparse::unparse_type_annotation_display`], the same renderer
 /// `bt fmt` and the doc extractor use) and composes them with the shared
 /// [`beamtalk_core::unparse::render_signature_text`] core. Hover shows no
 /// `sealed`/`internal` prefix and no trailing ` =>` — just the plain
-/// declaration shape, matching this function's pre-BT-3097 output.
+/// declaration shape.
 fn method_signature(method: &MethodDefinition) -> String {
     use beamtalk_core::unparse::{
         SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
@@ -736,7 +736,7 @@ fn find_hover_in_expr(
                 // ADR 0103: annotate reference/handle-typed values with their
                 // sendability tier (the tier's sole v1 consumer).
                 //
-                // `alias_registry` (BT-2936, ADR 0108 follow-up to BT-2928)
+                // `alias_registry` (ADR 0108 follow-up)
                 // is threaded through from `compute_hover` so an alias-typed
                 // `Value` field's hover tier composes through the alias's
                 // expansion instead of falling back to `Tier::Unknown` for
@@ -785,7 +785,7 @@ fn find_hover_in_expr(
         Expression::Literal(lit, span) => {
             if offset >= span.start() && offset < span.end() {
                 // Render the literal via `unparse_literal_display` — the single
-                // source of truth for literal-to-source rendering (BT-3088) —
+                // source of truth for literal-to-source rendering —
                 // so hover text agrees with Beamtalk quoting/escaping rules.
                 let rendered = beamtalk_core::unparse::unparse_literal_display(lit);
                 let info = match lit {
@@ -950,11 +950,11 @@ fn find_hover_in_expr(
             if offset >= field.span.start() && offset < field.span.end() {
                 // Show declared state type if available from the class hierarchy.
                 //
-                // BT-2911: `state_field_type` returns a bare `EcoString` from
+                // `state_field_type` returns a bare `EcoString` from
                 // `ClassHierarchy`, not a resolved `InferredType`, so it
                 // never carries a `TypeProvenance::Aliased` tag the way
                 // `type_map`'s `InferredType`s do for a local/parameter
-                // value (BT-2897). Re-resolve through
+                // value. Re-resolve through
                 // `AliasRegistry::resolve_display_name` when the declared
                 // type names a registered alias so hovering a state field
                 // *access* (`self someField`) shows `AliasName (expansion)`
@@ -1307,7 +1307,7 @@ fn resolved_selector_hover_info(
     if method.is_sealed {
         meta.push_str(", sealed");
     }
-    // Show visibility annotation for internal methods (ADR 0071, BT-1703)
+    // Show visibility annotation for internal methods (ADR 0071)
     if method.is_internal {
         meta.push_str(", internal");
     }
@@ -1412,10 +1412,10 @@ fn extract_erlang_module_name(receiver: &Expression, type_map: &TypeMap) -> Opti
 
 /// Formats a `MethodInfo` from the hierarchy as a typed signature string.
 ///
-/// Uses `param_types` and `return_type` from the hierarchy (populated by BT-669).
+/// Uses `param_types` and `return_type` from the hierarchy.
 /// Example output: `deposit: amount: Integer -> Integer`
-/// Renders a resolved-call signature from a `ClassHierarchy::MethodInfo`
-/// (BT-3097). Unlike [`method_signature`], `MethodInfo` carries only
+/// Renders a resolved-call signature from a `ClassHierarchy::MethodInfo`.
+/// Unlike [`method_signature`], `MethodInfo` carries only
 /// resolved *types* per parameter, no parameter names (the hierarchy
 /// doesn't retain them) — so each parameter renders as `keyword: Type`
 /// (no ` :: `) rather than the declaration's `keyword name :: Type`. This
@@ -1430,7 +1430,7 @@ fn method_info_signature(
     };
 
     let selector = method.selector.as_str();
-    // BT-3076: `MethodInfo` types are structured `DeclaredType`s — render
+    // `MethodInfo` types are structured `DeclaredType`s — render
     // once here (`Display` matches `TypeAnnotation::type_name` verbatim)
     // and hand the composer the text it contracts for.
     let return_type_text = method.return_type.as_ref().map(ToString::to_string);
@@ -1569,7 +1569,7 @@ fn self_hover_info(span: Span, context: &HoverClassContext<'_>) -> HoverInfo {
 /// Creates hover info for a class reference with hierarchy information.
 ///
 /// When `package` is `Some`, the class is from a dependency package and the
-/// hover shows "from package {name}" provenance (ADR 0070 Phase 5, BT-1658).
+/// hover shows "from package {name}" provenance (ADR 0070 Phase 5).
 fn class_reference_hover_info(
     class_name: &ecow::EcoString,
     package: Option<&ecow::EcoString>,
@@ -1580,7 +1580,7 @@ fn class_reference_hover_info(
 
     let mut info = format!("Class: `{class_name}`");
 
-    // Show visibility annotation for internal classes (ADR 0071, BT-1703)
+    // Show visibility annotation for internal classes (ADR 0071)
     if let Some(class_info) = hierarchy.get_class(class_name.as_str()) {
         if class_info.is_internal {
             let _ = write!(info, " (internal)");
@@ -1727,7 +1727,7 @@ mod tests {
         assert!(hover.is_none());
     }
 
-    // --- ADR 0103: sendability tier hover (BT-2758) ---
+    // --- ADR 0103: sendability tier hover ---
 
     #[test]
     fn hover_shows_sendableref_for_pid() {
@@ -1758,7 +1758,7 @@ mod tests {
         );
     }
 
-    /// BT-2936: an alias-typed field (`type PortAlias = Port`) composes its
+    /// An alias-typed field (`type PortAlias = Port`) composes its
     /// sendability tier through the alias's expansion when `compute_hover`'s
     /// `alias_registry` is threaded all the way through to `hover_tier_label`,
     /// instead of silently omitting the tier line for the opaque alias name.
@@ -1797,8 +1797,8 @@ mod tests {
         );
 
         // Without the registry, the alias name stays opaque and the tier
-        // silently falls back to Unknown (no tier line) — the pre-BT-2936
-        // fallback this test guards against regressing back to.
+        // silently falls back to Unknown (no tier line) — the fallback
+        // this test guards against regressing back to.
         let hover_no_registry =
             compute_hover(&module, src, Position::new(6, 4), &hierarchy, None, None)
                 .expect("hover");
@@ -1896,7 +1896,7 @@ mod tests {
 
     #[test]
     fn hover_on_package_qualified_class_reference() {
-        // BT-1658: package-qualified class references show provenance
+        // Package-qualified class references show provenance
         let source = "json@Parser new";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
@@ -1921,7 +1921,7 @@ mod tests {
 
     #[test]
     fn hover_on_unqualified_class_reference_no_package() {
-        // BT-1658: unqualified class references should NOT show package provenance
+        // Unqualified class references should NOT show package provenance
         let hover = hover_at("Counter spawn", Position::new(0, 0));
         assert!(hover.is_some());
         let hover = hover.unwrap();
@@ -2161,7 +2161,7 @@ mod tests {
 
     #[test]
     fn hover_on_singleton_eq_false_branch_shows_negation() {
-        // BT-2746 / ADR 0102 §1/§4 ("REPL session"): the false branch of a
+        // ADR 0102 §1/§4 ("REPL session"): the false branch of a
         // singleton-eq test narrows via `difference` to a `Negation` — hover
         // must render it as `Symbol \ #foo`, not fall back to the bare
         // `Symbol` declared type.
@@ -2436,11 +2436,11 @@ mod tests {
         );
     }
 
-    // --- Chain resolution hover tests (BT-1014) ---
+    // --- Chain resolution hover tests ---
     //
     // Verify that hovering over a message selector shows the resolved return type
-    // when the receiver class is known (stdlib annotations from BT-1003,
-    // user-defined method annotations, or inferred types from BT-1005).
+    // when the receiver class is known (stdlib annotations,
+    // user-defined method annotations, or inferred types).
 
     #[test]
     fn hover_on_stdlib_selector_shows_return_type() {
@@ -2499,7 +2499,7 @@ mod tests {
 
     #[test]
     fn hover_on_user_defined_inferred_selector_shows_return_type() {
-        // A user-defined method whose return type is inferred from the body (BT-1005)
+        // A user-defined method whose return type is inferred from the body
         let source = "Object subclass: Box\n  value => 42\n\nb := Box new\nb value";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
@@ -2648,7 +2648,7 @@ mod tests {
         );
     }
 
-    // --- ADR 0071 / BT-1703: Visibility annotations in hover ---
+    // --- ADR 0071: Visibility annotations in hover ---
 
     #[test]
     fn hover_on_internal_class_shows_visibility_annotation() {
@@ -2748,13 +2748,13 @@ mod tests {
         );
     }
 
-    /// BT-2867: hovering an expression *downstream* of a well-specced FFI
+    /// Hovering an expression *downstream* of a well-specced FFI
     /// call (not the FFI call site itself) must show the propagated
-    /// concrete type, not `Dynamic`. Before the fix, `compute_hover`'s
-    /// `enrich_hierarchy_with_inferred_returns` call never received the
-    /// caller's `native_types` registry, so only the FFI call site itself
-    /// (handled by a separate, special-cased lookup) resolved correctly —
-    /// everything built from its result stayed `Dynamic(UntypedFfi)`.
+    /// concrete type, not `Dynamic`. `compute_hover`'s
+    /// `enrich_hierarchy_with_inferred_returns` call must receive the
+    /// caller's `native_types` registry, or only the FFI call site itself
+    /// (handled by a separate, special-cased lookup) resolves correctly —
+    /// everything built from its result stays `Dynamic(UntypedFfi)`.
     #[test]
     fn ffi_hover_on_downstream_expression_shows_propagated_type() {
         use beamtalk_core::semantic_analysis::type_checker::TypeProvenance;
@@ -2861,7 +2861,7 @@ mod tests {
         );
     }
 
-    // ── BT-2897 / ADR 0108: display-name provenance for hover ──────────────
+    // ── ADR 0108: display-name provenance for hover ──────────────
 
     /// Builds an `AliasRegistry` registered against `module`/`hierarchy`,
     /// mirroring the batch registration order (classes → protocols →
@@ -2913,7 +2913,7 @@ mod tests {
         // Sanity check for the `alias_registry: None` default (real LSP
         // callers today — see `language_service::mod::hover`'s doc): without
         // a registry, `RestartStrategy` resolves as an ordinary (unresolved)
-        // nominal class name, exactly like pre-BT-2897 behaviour — it must
+        // nominal class name, and it must
         // never show the `AliasName (expansion)` format by accident.
         let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
                        Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n";
@@ -2973,7 +2973,7 @@ mod tests {
         );
     }
 
-    // ---- ADR 0108 Phase 8 (BT-2901): hover on the alias declaration itself ----
+    // ---- ADR 0108 Phase 8: hover on the alias declaration itself ----
 
     #[test]
     fn hover_on_alias_declaration_name_shows_expansion() {
@@ -3023,15 +3023,15 @@ mod tests {
         );
     }
 
-    // ── BT-2911: state field *access* hover (the `Expression::FieldAccess`
-    // gap BT-2897 left, since `state_field_type` reads a bare `EcoString`
+    // ── State field *access* hover (the `Expression::FieldAccess`
+    // gap left, since `state_field_type` reads a bare `EcoString`
     // from `ClassHierarchy` with no alias provenance) ─────────────────────
 
     #[test]
     fn hover_on_alias_typed_state_field_access_shows_alias_name_and_expansion() {
         // Hovering `self.policy` (a state field *access*) must show
         // `AliasName (expansion)` too, matching what hovering an
-        // alias-typed parameter/local already shows (BT-2897's
+        // alias-typed parameter/local already shows (see
         // `hover_on_alias_typed_param_shows_alias_name_and_expansion`).
         let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
                        Actor subclass: Supervisor\n  state: policy :: RestartStrategy = #temporary\n\n  \
@@ -3067,7 +3067,7 @@ mod tests {
     fn hover_on_alias_typed_state_field_access_without_alias_registry_shows_raw_name() {
         // Sanity check mirroring `hover_without_alias_registry_does_not_resolve_alias`:
         // without a registry, the field access falls back to the raw
-        // (unresolved) declared type text — pre-BT-2911 behaviour, and the
+        // (unresolved) declared type text, matching the
         // real-LSP-caller default when no project-wide alias table is
         // available yet.
         let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\

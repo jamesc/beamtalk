@@ -29,7 +29,7 @@ impl CoreErlangGenerator {
     }
 
     /// Returns `true` if REPL mode is active.
-    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` queries/sets this
+    // widened from `pub(crate)` — `beamtalk-repl` queries/sets this
     // around its own generation calls.
     pub fn is_repl_mode(&self) -> bool {
         self.repl_context
@@ -55,7 +55,7 @@ impl CoreErlangGenerator {
     }
 
     /// Returns `true` if workspace mode is active.
-    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` queries/sets this
+    // widened from `pub(crate)` — `beamtalk-repl` queries/sets this
     // around its own generation calls.
     pub fn workspace_mode(&self) -> bool {
         self.repl_context
@@ -122,7 +122,7 @@ impl CoreErlangGenerator {
         &mut self.class_context_mut().class_method_selectors
     }
 
-    /// BT-3151: Returns a reference to the class-var-mutating selectors set.
+    /// Returns a reference to the class-var-mutating selectors set.
     pub(in crate::core_erlang) fn class_var_mutating_selectors(
         &self,
     ) -> &std::collections::HashSet<String> {
@@ -133,7 +133,7 @@ impl CoreErlangGenerator {
             .map_or(&*EMPTY, |ctx| &ctx.class_var_mutating_selectors)
     }
 
-    /// BT-3151: Returns a mutable reference to the class-var-mutating selectors set.
+    /// Returns a mutable reference to the class-var-mutating selectors set.
     pub(in crate::core_erlang) fn class_var_mutating_selectors_mut(
         &mut self,
     ) -> &mut std::collections::HashSet<String> {
@@ -167,7 +167,7 @@ impl CoreErlangGenerator {
     }
 
     /// Derives this generation unit's own [`PackageId`] from `self.module_name`
-    /// (ADR 0119 / BT-3436): `bt@stdlib@...` is [`PackageId::Stdlib`],
+    /// (ADR 0119): `bt@stdlib@...` is [`PackageId::Stdlib`],
     /// `bt@{pkg}@...` is [`PackageId::Package`], anything else (a bare
     /// `bt@{snake}` or an unprefixed test-fixture name) is
     /// [`PackageId::SingleFile`]. Used both to key registry entries in
@@ -194,7 +194,7 @@ impl CoreErlangGenerator {
     }
 
     /// Returns a reference to the class → compiled module resolution
-    /// registry for this generation unit (ADR 0119 / BT-3436).
+    /// registry for this generation unit (ADR 0119).
     pub(in crate::core_erlang) fn class_module_registry(
         &self,
     ) -> &beamtalk_core::semantic_analysis::ClassModuleRegistry {
@@ -229,7 +229,7 @@ impl CoreErlangGenerator {
     ///
     /// [`ClassModuleRegistry`]: beamtalk_core::semantic_analysis::ClassModuleRegistry
     /// [`PackageId`]: beamtalk_core::semantic_analysis::PackageId
-    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` sets this before
+    // widened from `pub(crate)` — `beamtalk-repl` sets this before
     // generating a REPL module so cross-class self-sends resolve.
     pub fn set_class_module_index(&mut self, index: std::collections::HashMap<String, String>) {
         use beamtalk_core::semantic_analysis::{ClassModuleRegistry, ModuleName};
@@ -286,7 +286,7 @@ impl CoreErlangGenerator {
         self.class_context_mut().in_class_method = value;
     }
 
-    /// ADR 0084 / BT-2267: the builder class name when lowering a programmatic
+    /// ADR 0084: the builder class name when lowering a programmatic
     /// `ClassBuilder` class-method block into an anonymous fun, else `None`.
     pub(in crate::core_erlang) fn builder_class_method_class(&self) -> Option<String> {
         self.class_context
@@ -299,7 +299,7 @@ impl CoreErlangGenerator {
         self.class_context_mut().builder_class_method_class = value;
     }
 
-    /// BT-2709: Clears per-method parameter-type tracking. Call alongside
+    /// Clears per-method parameter-type tracking. Call alongside
     /// `current_method_params.clear()` at every method-body entry so a prior
     /// method's `:: Number` annotations never leak into the next and cause a
     /// spurious bare-BIF fast path.
@@ -307,7 +307,7 @@ impl CoreErlangGenerator {
         self.current_method_param_types.clear();
     }
 
-    /// BT-2709: Records a method parameter's declared type for the arithmetic
+    /// Records a method parameter's declared type for the arithmetic
     /// fast-path classifier (keyed by **source** name → simple type name).
     /// Only `Simple` annotations are recorded; anything else is left absent so
     /// the classifier falls back to the runtime `is_number` guard, which is
@@ -323,7 +323,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2709: Whether `name` refers to a `:: Integer/Float/Number`-annotated
+    /// Whether `name` refers to a `:: Integer/Float/Number`-annotated
     /// parameter of the current method.
     pub(in crate::core_erlang) fn param_is_numeric(&self, name: &str) -> bool {
         self.current_method_param_types
@@ -331,7 +331,7 @@ impl CoreErlangGenerator {
             .is_some_and(|ty| matches!(ty.as_str(), "Integer" | "Float" | "Number"))
     }
 
-    /// BT-2710: Whether `name` refers to a parameter declared with a builtin
+    /// Whether `name` refers to a parameter declared with a builtin
     /// comparable type. A superset of [`Self::param_is_numeric`]: bare
     /// comparison BIFs are correct for `Character`/`String` too (both define
     /// `< <=` as `@primitive`), so a `:: Character`/`:: String` param stays on
@@ -345,7 +345,7 @@ impl CoreErlangGenerator {
         })
     }
 
-    /// BT-2710 follow-up: Records each instance field's declared `Simple` type
+    /// Records each instance field's declared `Simple` type
     /// from a class's state declarations, for the operator fast-path
     /// classifiers. Replaces any previously-recorded set (call once per class at
     /// codegen entry). Only `Simple` annotations are recorded; untyped fields
@@ -365,7 +365,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2728: Populates instance-field type tracking for an **extension**
+    /// Populates instance-field type tracking for an **extension**
     /// method from the *target* class's declared state types, resolved via the
     /// class hierarchy. The target class is foreign (declared in another
     /// module), so its AST `state` is unavailable at extension-codegen time, but
@@ -406,7 +406,7 @@ impl CoreErlangGenerator {
     /// So extension-method field typing matches the in-class path (which
     /// records only `TypeAnnotation::Simple` fields, see
     /// [`Self::set_class_field_types`]). `Self` needs no explicit exclusion
-    /// here: unlike the pre-BT-3076 string-rendered check, `Self` is
+    /// here: unlike a string-rendered check, `Self` is
     /// [`DeclaredType::SelfType`], never `Simple("Self")`, so it already
     /// falls through to `false`.
     ///
@@ -420,7 +420,7 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// BT-2710 follow-up: Whether `self.<name>` is known to hold a value with a
+    /// Whether `self.<name>` is known to hold a value with a
     /// builtin total order / numeric type, so the comparison/arithmetic fast
     /// path may stay bare. True when the field is **untyped** (no info — keep
     /// the status quo) or its declared type is in `primitive_set`; false only
@@ -433,13 +433,13 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2710 follow-up: `self.<field>` is comparison-bare when untyped or a
+    /// `self.<field>` is comparison-bare when untyped or a
     /// primitive-ordered type (numeric, `Character`, or `String`).
     pub(in crate::core_erlang) fn field_is_comparable(&self, name: &str) -> bool {
         self.field_is_bare(name, &["Integer", "Float", "Number", "Character", "String"])
     }
 
-    /// BT-2709 / BT-2710 follow-up: `self.<field>` is arithmetic-bare when
+    /// `self.<field>` is arithmetic-bare when
     /// untyped or a numeric type.
     pub(in crate::core_erlang) fn field_is_numeric(&self, name: &str) -> bool {
         self.field_is_bare(name, &["Integer", "Float", "Number"])
@@ -469,7 +469,7 @@ impl CoreErlangGenerator {
     }
 
     /// Pushes a new scope for variable bindings.
-    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` pushes/pops its
+    // widened from `pub(crate)` — `beamtalk-repl` pushes/pops its
     // own scopes around REPL binding generation.
     pub fn push_scope(&mut self) {
         self.var_context.push_scope();
@@ -486,20 +486,20 @@ impl CoreErlangGenerator {
     }
 
     /// Binds an identifier to a Core Erlang variable name in the current scope.
-    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` binds
+    // widened from `pub(crate)` — `beamtalk-repl` binds
     // `__bindings__`/workspace variable names before generating a REPL body.
     pub fn bind_var(&mut self, name: &str, core_var: &str) {
         self.var_context.bind(name, core_var);
     }
 
-    /// BT-855: Records a structured diagnostic warning for the current module.
+    /// Records a structured diagnostic warning for the current module.
     ///
     /// Warnings are returned to callers via [`generate_module_with_warnings`].
     pub(in crate::core_erlang) fn add_codegen_warning(&mut self, diag: Diagnostic) {
         self.codegen_warnings.push(diag);
     }
 
-    /// BT-1343: Emits a codegen diagnostic (gated by `BEAMTALK_CODEGEN_DIAGNOSTICS=1`).
+    /// Emits a codegen diagnostic (gated by `BEAMTALK_CODEGEN_DIAGNOSTICS=1`).
     ///
     /// These are informational diagnostics about codegen decisions (calling conventions,
     /// dynamic dispatch, NLR throw/catch, etc.). Emitted as `Diagnostic::hint` by default.
@@ -511,7 +511,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-1343: Emits a `StateAcc` fallback diagnostic, gated by `BEAMTALK_CODEGEN_DIAGNOSTICS=1`.
+    /// Emits a `StateAcc` fallback diagnostic, gated by `BEAMTALK_CODEGEN_DIAGNOSTICS=1`.
     ///
     /// Promoted to `Diagnostic::warning` when `BEAMTALK_WARN_STATEACC=1` is also set.
     pub(in crate::core_erlang) fn emit_stateacc_fallback_diagnostic(
@@ -536,7 +536,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-855: Emits the standard warning for a stateful block at an Erlang call boundary.
+    /// Emits the standard warning for a stateful block at an Erlang call boundary.
     ///
     /// Both `generate_simple_list_op` and `generate_direct_erlang_call` call this helper
     /// to ensure consistent warning messages across all Erlang interop sites.
@@ -563,7 +563,7 @@ impl CoreErlangGenerator {
         );
     }
 
-    /// BT-909: Emits a warning for a non-literal callable at an Erlang call boundary.
+    /// Emits a warning for a non-literal callable at an Erlang call boundary.
     pub(in crate::core_erlang) fn warn_non_literal_callable_at_erlang_boundary(
         &mut self,
         erlang_target: &str,
@@ -583,7 +583,7 @@ impl CoreErlangGenerator {
         );
     }
 
-    /// BT-940: Converts a byte-offset `Span` to a 1-based line number.
+    /// Converts a byte-offset `Span` to a 1-based line number.
     ///
     /// Uses `self.source_text` to count newlines before the span's start offset.
     /// Returns `None` if source text is unavailable or the span is out of range.
@@ -595,10 +595,10 @@ impl CoreErlangGenerator {
         Some(span.line_number(source))
     }
 
-    /// BT-940/BT-3127: Wraps a Document with a Core Erlang line annotation.
+    /// Wraps a Document with a Core Erlang line annotation.
     ///
     /// Delegates to [`leaf::annotated`] for the `[Line, {'file', Path}]` shape
-    /// (BT-3119 spike), which the BEAM compiler preserves into the Line chunk.
+    /// which the BEAM compiler preserves into the Line chunk.
     /// The VM surfaces this as `[{file, "path.bt"}, {line, N}]` in stacktrace
     /// frames. Falls back to a bare `[Line]` annotation when no source path is
     /// known (e.g. compiling from a string with no backing file).

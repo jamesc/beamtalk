@@ -34,7 +34,7 @@ pub struct ClassModifiers {
     pub is_internal: bool,
 }
 
-/// The kind of supervisor based on ancestry (BT-1218, ADR 0059 Phase 1).
+/// The kind of supervisor based on ancestry (ADR 0059 Phase 1).
 ///
 /// Set by semantic analysis when a class is found to inherit from
 /// `Supervisor` or `DynamicSupervisor` (which are themselves `Object`
@@ -65,7 +65,7 @@ pub enum ClassKind {
 
 impl ClassKind {
     /// Derive a **pre-analysis placeholder** class kind from the direct superclass
-    /// name used in a `subclass:` declaration (BT-3086).
+    /// name used in a `subclass:` declaration.
     ///
     /// This only inspects the literal direct-superclass identifier written in
     /// source, so e.g. `TestCase subclass: MyTest` gets `ClassKind::Object`
@@ -158,7 +158,7 @@ pub struct ClassDefinition {
     pub is_typed: bool,
     /// Whether this class is internal (package-scoped visibility, ADR 0071).
     pub is_internal: bool,
-    /// Supervisor kind, set by semantic analysis (BT-1218, ADR 0059 Phase 1).
+    /// Supervisor kind, set by semantic analysis (ADR 0059 Phase 1).
     ///
     /// `Some(Static)` if this class inherits from `Supervisor`,
     /// `Some(Dynamic)` if it inherits from `DynamicSupervisor`,
@@ -346,7 +346,7 @@ pub struct ProtocolDefinition {
     pub extending: Option<Identifier>,
     /// Required instance method signatures.
     pub method_signatures: Vec<ProtocolMethodSignature>,
-    /// Required class method signatures (BT-1611).
+    /// Required class method signatures.
     ///
     /// Defined with the `class` prefix, e.g., `class fromString: aString :: String -> Self`.
     /// Conforming classes must respond to these selectors on the class side.
@@ -391,7 +391,7 @@ pub struct ProtocolMethodSignature {
 /// are transparent (structural, not nominal) — resolution expands the name
 /// back to the annotation it was declared with. This node captures only the
 /// declaration's surface syntax; alias-table registration and expansion are
-/// semantic-analysis concerns (BT-2895).
+/// semantic-analysis concerns.
 ///
 /// Example:
 /// ```text
@@ -405,8 +405,8 @@ pub struct ProtocolMethodSignature {
 /// = ...`) are rejected at parse time — reserved for ADR 0068's implicit
 /// method-local type parameters.
 ///
-/// An optional leading `internal` modifier (ADR 0071, ADR 0108 Phase 5,
-/// BT-2898) marks the alias package-private: `internal type Foo = ...`.
+/// An optional leading `internal` modifier (ADR 0071, ADR 0108 Phase 5)
+/// marks the alias package-private: `internal type Foo = ...`.
 /// An internal alias is usable only in `internal` signatures within its
 /// declaring package and is never seeded into a consumer's alias table.
 #[derive(Debug, Clone, PartialEq)]
@@ -438,7 +438,7 @@ pub struct TypeAliasDefinition {
 ///
 /// Not a class: never registered in `ClassHierarchy`, never loaded into
 /// the workspace, never produces codegen output. Exists solely to
-/// populate `NativeTypeRegistry` (BT-1847).
+/// populate `NativeTypeRegistry`.
 ///
 /// Example:
 /// ```text
@@ -508,10 +508,10 @@ pub struct StateDeclaration {
     pub default_value: Option<Expression>,
     /// Which keyword was used in source (`state:` or `field:`).
     pub declared_keyword: DeclaredKeyword,
-    /// Optional `@expect` directive attached to this declaration (BT-1856, BT-1918).
+    /// Optional `@expect` directive attached to this declaration.
     ///
     /// When present, diagnostics matching any of these categories that fire
-    /// on the declaration are suppressed (BT-3387: a single directive may
+    /// on the declaration are suppressed (a single directive may
     /// list more than one category, e.g. `@expect unresolved_ffi, type`). If
     /// none of the categories match a diagnostic, a "stale @expect" warning
     /// is emitted. The span is the source location of the `@expect category`
