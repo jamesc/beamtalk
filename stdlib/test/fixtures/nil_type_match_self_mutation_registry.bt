@@ -182,9 +182,7 @@ Actor subclass: NilTypeMatchSelfMutationRegistry
   // iteration.
   bumpWrappedInLoopReadAfterLoop: n -> Integer =>
     r := 0
-    1
-      to: n
-      do: [:i | r := (self.count := self.count + i)]
+    1 to: n do: [:i | r := (self.count := self.count + i)]
     r
 
   bumpWrappedMatch: v -> Integer =>
@@ -208,9 +206,7 @@ Actor subclass: NilTypeMatchSelfMutationRegistry
   // silently read back the seeded `0`.
   bumpWrappedIfTrueReadAfterMerge: flag -> Integer =>
     r := 0
-    flag
-      ifTrue: [r := (self.count := self.count + 10)]
-      ifFalse: [r := 5]
+    flag ifTrue: [r := (self.count := self.count + 10)] ifFalse: [r := 5]
     r + 1
 
   // `r` is bound INSIDE the `ifTrue:` branch, then read by a NESTED loop in
