@@ -11,7 +11,9 @@
 //!
 //! **DDD Context:** Semantic Analysis
 //!
-//! **References:** BT-2064, BT-2016 (`Nil` vs `UndefinedObject` drift)
+//! `Nil` and `UndefinedObject` are kept as distinct variants below because
+//! some code paths and BEAM metadata produce `"Nil"` instead of the
+//! canonical `"UndefinedObject"`; both must be treated as the nil type.
 
 /// A class name that the type checker recognises and dispatches on.
 ///
@@ -25,7 +27,7 @@
 pub(crate) enum WellKnownClass {
     /// The canonical nil class — `UndefinedObject`.
     UndefinedObject,
-    /// Legacy alias for nil (BT-2016). Some code paths and BEAM metadata
+    /// Legacy alias for nil. Some code paths and BEAM metadata
     /// produce `"Nil"` instead of `"UndefinedObject"`; both must be treated
     /// as the nil type.
     Nil,
@@ -92,7 +94,7 @@ impl WellKnownClass {
 
     /// Returns `true` if this class represents the nil type.
     ///
-    /// Both `UndefinedObject` (canonical) and `Nil` (legacy alias, BT-2016)
+    /// Both `UndefinedObject` (canonical) and `Nil` (legacy alias)
     /// are considered nil classes. This replaces the fragile pattern:
     /// ```text
     /// class_name.as_str() == "UndefinedObject" || class_name.as_str() == "Nil"

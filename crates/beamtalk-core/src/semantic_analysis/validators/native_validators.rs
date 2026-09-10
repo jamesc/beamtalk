@@ -6,17 +6,17 @@
 //! **DDD Context:** Semantic Analysis
 //!
 //! Validators for `native:` classes:
-//! - State field rejection for native actors (BT-1207)
-//! - Delegate return type warnings (BT-1207)
-//! - Reserved-word backing-function check for native Objects (BT-2720)
+//! - State field rejection for native actors
+//! - Delegate return type warnings
+//! - Reserved-word backing-function check for native Objects
 
 use crate::ast::{MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
-// ── BT-1207: Native actor validation (ADR 0056) ──────────────────────────────
+// ── Native actor validation (ADR 0056) ───────────────────────────────────────
 
-/// The complete set of Erlang reserved words (BT-2720, ADR 0101).
+/// The complete set of Erlang reserved words (ADR 0101).
 ///
 /// A `native:` Object's `self delegate` method lowers to a direct Erlang
 /// function call `BackingModule:fn(...)`, where `fn` is the first keyword of the
@@ -29,14 +29,14 @@ const ERLANG_RESERVED_WORDS: &[&str] = &[
     "rem", "try", "when", "xor",
 ];
 
-/// BT-1207: Error if a `native:` *actor* declares `state:` fields.
+/// Error if a `native:` *actor* declares `state:` fields.
 ///
 /// Native actors delegate to a backing Erlang `gen_server` — state is owned by
 /// that Erlang module, not by the Beamtalk class. Declaring `state:` fields
 /// would create an impossible situation where the actor has Beamtalk-managed
 /// state alongside Erlang-managed state.
 ///
-/// ADR 0101 / BT-2720: this rule is actor-only. A `native:` *Object* is a
+/// ADR 0101: this rule is actor-only. A `native:` *Object* is a
 /// stateless value whose representation is the backing Erlang term, so the
 /// state-field rule does not apply to it.
 pub(crate) fn check_native_state_fields(
@@ -73,7 +73,7 @@ pub(crate) fn check_native_state_fields(
     }
 }
 
-/// BT-1207: Warn if a `self delegate` method has no return type annotation.
+/// Warn if a `self delegate` method has no return type annotation.
 ///
 /// `self delegate` methods forward to Erlang — the compiler cannot infer the
 /// return type. Without an annotation, callers have no type information and
@@ -118,7 +118,7 @@ pub(crate) fn check_native_delegate_return_type(
     }
 }
 
-/// BT-2720 (ADR 0101): Error if a `native:` Object's `self delegate` method
+/// ADR 0101: Error if a `native:` Object's `self delegate` method
 /// would lower to a backing function whose name is an Erlang reserved word.
 ///
 /// Instance- and class-side `self delegate` on a `native:` Object lower to a
@@ -218,7 +218,7 @@ mod tests {
     use crate::source_analysis::lex_with_eof;
     use crate::source_analysis::parse;
 
-    // ── BT-1207: Native actor validation tests ────────────────────────────────
+    // ── Native actor validation tests ──────────────────────────────────────────
 
     /// Native actor with state: field → compile error.
     #[test]
@@ -402,7 +402,7 @@ mod tests {
         );
     }
 
-    // ── BT-2720: native: Object validation (ADR 0101) ─────────────────────────
+    // ── native: Object validation (ADR 0101) ──────────────────────────────────
 
     /// ADR 0101: a `native:` *Object* with a `state:` field is NOT an error —
     /// the state-field rule is actor-only.
@@ -421,7 +421,7 @@ mod tests {
         );
     }
 
-    /// ADR 0101 / BT-2720: a `self delegate` method on a `native:` Object whose
+    /// ADR 0101: a `self delegate` method on a `native:` Object whose
     /// first keyword is an Erlang reserved word → compile error.
     #[test]
     fn native_object_reserved_word_first_keyword_is_error() {

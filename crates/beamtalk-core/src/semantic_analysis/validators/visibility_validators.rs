@@ -16,7 +16,7 @@
 //!   class in its public signature (parameter types, return types, state type
 //!   annotations). Internal-on-internal is fine.
 //!
-//! BT-2898 (ADR 0108 Phase 5) extends E0402 to `internal type` aliases in two
+//! ADR 0108 Phase 5 extends E0402 to `internal type` aliases in two
 //! ways: a public class/protocol signature directly naming an internal alias
 //! is a leak (mirrors the internal-class rule exactly), and a *public* alias
 //! whose expansion transitively reaches an internal class or alias is a leak
@@ -419,7 +419,7 @@ fn check_leaked_visibility_class(
 ///
 /// An internal class from the *same* package appearing in the public signature
 /// of a public class is a leaked-visibility error.
-#[allow(clippy::too_many_lines)] // ADR 0102/BT-2743 added an `Intersection` recursion arm
+#[allow(clippy::too_many_lines)] // ADR 0102 added an `Intersection` recursion arm
 fn check_type_annotation_leaked(
     ty: &TypeAnnotation,
     class_name: &ecow::EcoString,
@@ -554,7 +554,7 @@ fn check_type_annotation_leaked(
 /// Checks if a type name in a public signature references an internal class
 /// or internal type alias, which is a leaked-visibility error (E0402).
 ///
-/// BT-2898: an internal *alias* reference is always a leak when found here —
+/// An internal *alias* reference is always a leak when found here —
 /// unlike internal classes, an internal alias is never seeded across a
 /// package boundary at all ([`AliasRegistry::add_pre_loaded`]'s
 /// seeding-boundary exclusion), so a name that resolves via `alias_registry`
@@ -564,7 +564,7 @@ fn check_type_annotation_leaked(
 /// current_pkg` since internal classes *are* passed across the boundary via
 /// `pre_loaded_classes`/`add_from_beam_meta`, with E0401 handling the
 /// cross-package case separately).
-#[allow(clippy::too_many_arguments)] // BT-2898 added `alias_registry`; each param is load-bearing context, not bundleable without obscuring the leaf check
+#[allow(clippy::too_many_arguments)] // `alias_registry` plus the rest; each param is load-bearing context, not bundleable without obscuring the leaf check
 fn check_leaked_ref(
     type_name: &ecow::EcoString,
     span: Span,
@@ -631,7 +631,7 @@ fn check_leaked_ref(
     );
 }
 
-/// E0402 (BT-2898, ADR 0108 Semantics): a *public* type alias whose expanded
+/// E0402 (ADR 0108 Semantics): a *public* type alias whose expanded
 /// annotation transitively reaches an internal class or internal alias is a
 /// leaked-visibility error — even though the internal name never appears
 /// directly in any *consumer's* signature, `Pub`'s exported expansion still
@@ -811,8 +811,8 @@ fn check_type_annotation_alias_leak(
 /// alias `alias_name` leaks it. If `type_name` resolves to a (public) alias,
 /// recurses into its own expansion — `visited` guards against a reference
 /// cycle slipping through (full cycle *detection* at declaration time is
-/// BT-2896, out of scope here; this guard only prevents this checker from
-/// hanging on one).
+/// a separate concern, out of scope here; this guard only prevents this
+/// checker from hanging on one).
 ///
 /// Unlike [`check_leaked_ref`], this does **not** compare `info.package` to
 /// a "current package" — there is no such thing here: a *public* alias's
@@ -897,7 +897,7 @@ fn check_alias_leak_ref(
     // Protocols have no `is_internal` flag yet — nothing to check.
 }
 
-/// E0402 (BT-1702): Emit error when an internal method satisfies a public protocol.
+/// E0402: Emit error when an internal method satisfies a public protocol.
 ///
 /// If a class implements a selector required by a public protocol but declares
 /// the method `internal`, that's a leaked visibility error — the protocol
@@ -996,7 +996,7 @@ pub fn check_leaked_method_visibility(
     }
 }
 
-/// W0401 (BT-1702): Warn when a subclass defines a selector that shadows an
+/// W0401: Warn when a subclass defines a selector that shadows an
 /// internal method on the superclass.
 ///
 /// This is a potential footgun — the subclass author may not know the superclass
@@ -1516,7 +1516,7 @@ mod tests {
         );
     }
 
-    // --- BT-2898 (ADR 0108 Phase 5): internal type alias leakage ---
+    // --- ADR 0108 Phase 5: internal type alias leakage ---
 
     /// Builds a `ClassHierarchy` and `AliasRegistry` from the module's own
     /// declarations, package-stamped for `pkg` — the same-package
@@ -1796,7 +1796,7 @@ mod tests {
         );
     }
 
-    // BT-1702 additional test imports
+    // Additional test imports
     use crate::ast::{
         ClassDefinition, ClassModifiers, CommentAttachment, ExpressionStatement, Identifier,
         MessageSelector, MethodDefinition, MethodKind,

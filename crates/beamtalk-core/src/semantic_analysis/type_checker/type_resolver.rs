@@ -9,16 +9,13 @@
 //! [`TypeAnnotation`] (from the AST) into an [`InferredType`] while preserving
 //! any generic type arguments end-to-end.
 //!
-//! Previously several sites in `inference.rs` and `validation.rs` flattened
-//! annotations to an `EcoString` base name via ad-hoc `.find('(')` slicing (or
-//! even dropped `type_args` entirely). That was the shared root cause of the
-//! six type_args-preservation bugs tracked under BT-2024 (BT-2018..BT-2023,
-//! BT-2016 partial). This module lays down the shared framework once; the
-//! follow-up PRs then reduce to "add a failing test, swap the call site".
+//! A per-site flattening of annotations to an `EcoString` base name via
+//! ad-hoc `.find('(')` slicing (or dropping `type_args` entirely) would be
+//! a shared root cause of type_args-preservation bugs. This module lays
+//! down the shared framework once, so a new call site never needs to
+//! reinvent that flattening.
 //!
 //! **References:**
-//! - Parent epic: BT-2024
-//! - This change: BT-2025
 //! - ADRs: 0025 (gradual typing), 0068 (parametric types and protocols)
 
 use std::collections::HashMap;
@@ -49,10 +46,9 @@ pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, Infer
 /// Merge a class-level and a method-local substitution map into the single
 /// [`SubstitutionMap`] [`resolve_declared_type`] takes, with method-local
 /// bindings winning on key collision — the same two-map priority order the
-/// deleted `TypeChecker::resolve_type_string` (BT-3075) used to check
-/// separately (BT-3080: that function's three-parameter shape — class subst,
+/// What would otherwise be a three-parameter shape — class subst,
 /// method subst, `self_type` — collapses to this single map plus the
-/// resolver's existing `subst.get("Self")` convention below).
+/// resolver's existing `subst.get("Self")` convention below.
 ///
 /// When `self_type` is `Some`, additionally binds the reserved `"Self"` key
 /// to it. Both spellings of a self type route through this binding:
@@ -88,7 +84,7 @@ pub(in crate::semantic_analysis) fn merge_substitutions(
 ///   keyword `Never` becomes [`InferredType::Never`]. If the name appears in
 ///   `subst`, the substituted value wins (method-local / class-level type
 ///   parameters resolve to their concrete bindings). Otherwise, if the name
-///   is registered in `alias_registry` (ADR 0108, BT-2895), the reference
+///   is registered in `alias_registry` (ADR 0108), the reference
 ///   expands *eagerly* to the alias's declared annotation, recursively
 ///   resolved through this same function — so a `RestartStrategy` annotation
 ///   resolves to the exact `InferredType::Union` its expansion would. This
@@ -107,12 +103,12 @@ pub(in crate::semantic_analysis) fn merge_substitutions(
 ///   [`InferredType::difference`] (ADR 0102 §1) with `hierarchy = None` (this
 ///   resolver never consults the class hierarchy — see below), so only the
 ///   singleton flavour (`Symbol \ #foo`) and structurally-reducible cases
-///   normalise; the nominal-class flavour (ADR 0102 §5, BT-2744, `Object \
+///   normalise; the nominal-class flavour (ADR 0102 §5, `Object \
 ///   Number`) requires a hierarchy and is only produced by narrowing
 ///   (`refine_class_narrowing` in `inference.rs`), not by annotation
 ///   resolution.
 /// * [`TypeAnnotation::Intersection`] — `left & right`, resolved through
-///   [`InferredType::intersect`] (ADR 0102 §1/§3, BT-2743) with `hierarchy =
+///   [`InferredType::intersect`] (ADR 0102 §1/§3) with `hierarchy =
 ///   None` (this resolver does not consult the class hierarchy — see below)
 ///   and the `protocol_registry` parameter passed through unchanged. Class ∩
 ///   protocol resolves correctly whenever a registry is supplied (protocol
@@ -125,11 +121,11 @@ pub(in crate::semantic_analysis) fn merge_substitutions(
 ///   is resolved at the *call site* where the static receiver class is known;
 ///   the annotation-resolution pass does not have that context.
 /// * [`TypeAnnotation::SelfClass`] — returns `Dynamic(Unknown)`. `Self class`
-///   is a metatype that historically resolves to Dynamic here (see BT-1952) so
+///   is a metatype that resolves to Dynamic here so
 ///   that existing patterns like `x class = Foo` keep working; the call-site
 ///   metatype wrapping lives in the caller.
 /// * [`TypeAnnotation::ClassOf`] — returns `Dynamic(Unknown)`. The
-///   `<ClassName> class` metatype (BT-2034) names the metaclass of a specific
+///   `<ClassName> class` metatype names the metaclass of a specific
 ///   class hierarchy; like `Self class` it resolves to Dynamic so that
 ///   class-side methods on the named class (e.g. `Actor class >> isSupervisor`)
 ///   flow through without false DNU warnings.
@@ -140,14 +136,14 @@ pub(in crate::semantic_analysis) fn merge_substitutions(
 /// "does this class exist?" is a call-site decision that happens *after* the
 /// annotation resolves, not during.
 ///
-/// `protocol_registry` (ADR 0102 §1/§3, BT-2743) is threaded through purely
+/// `protocol_registry` (ADR 0102 §1/§3) is threaded through purely
 /// for [`TypeAnnotation::Intersection`] resolution — every other variant
 /// ignores it. Pass `None` when no registry is available (the annotation
 /// still resolves; `&`-typed protocol intersections just won't recognise a
 /// protocol name and will conservatively fall to `Never`, matching
 /// [`InferredType::intersect`]'s documented `None` behaviour).
 ///
-/// `alias_registry` (ADR 0108, BT-2895) is consulted only by
+/// `alias_registry` (ADR 0108) is consulted only by
 /// [`TypeAnnotation::Simple`] — see that variant's doc above. Pass `None`
 /// when no registry is available (a `Simple` name that would otherwise be an
 /// alias reference just resolves as an ordinary nominal class, matching
@@ -170,7 +166,7 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
 
 /// [`resolve_type_annotation`], additionally returning the full transitive
 /// set of alias names touched while resolving `ann` (ADR 0108 hot-reload
-/// re-check trigger, BT-2899).
+/// re-check trigger).
 ///
 /// `memo` (see [`resolve_type_annotation_inner`]'s doc) already accumulates
 /// exactly one entry per alias name *fully* resolved during this one
@@ -210,7 +206,7 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation_with_alias_deps(
 /// [`resolve_declared_type`] additionally returning the full transitive set
 /// of alias names touched while resolving `dt` — the [`DeclaredType`]
 /// counterpart of [`resolve_type_annotation_with_alias_deps`] (ADR 0108
-/// hot-reload re-check trigger, BT-2899). See that function's doc for the
+/// hot-reload re-check trigger). See that function's doc for the
 /// full rationale; identical here, just walking `DeclaredType` instead of
 /// `TypeAnnotation`.
 pub(in crate::semantic_analysis) fn resolve_declared_type_with_alias_deps(
@@ -292,8 +288,8 @@ impl<'a> ResolutionContext<'a> {
 }
 
 /// Resolve a [`DeclaredType`] into a fully-parameterised [`InferredType`]
-/// (BT-3076) — the canonical, span-free recursion that
-/// [`resolve_type_annotation`] now delegates to (via `DeclaredType::from`)
+/// — the canonical, span-free recursion that
+/// [`resolve_type_annotation`] delegates to (via `DeclaredType::from`)
 /// and that a future caller may drive directly from a stored
 /// `MethodInfo::return_type` / `param_types` string (via
 /// [`DeclaredType::parse`](crate::semantic_analysis::class_hierarchy::DeclaredType::parse))
@@ -303,12 +299,10 @@ impl<'a> ResolutionContext<'a> {
 /// variant — see [`resolve_type_annotation`]'s doc for the full per-variant
 /// rundown (`Simple`, `Generic`, `Union`, `FalseOr`, `Difference`,
 /// `Intersection`, `SelfType`, `SelfClass`, `ClassOf`, `Singleton`) — plus
-/// the [`TypeStringContext`] provenance rules the now-deleted
-/// `TypeChecker::resolve_type_string` established (BT-3075, removed by
-/// BT-3076 stage 3c once every call site resolved a `DeclaredType`
-/// directly): in [`TypeStringContext::Substitution`], an
+/// the [`TypeStringContext`] provenance rules: in
+/// [`TypeStringContext::Substitution`], an
 /// unresolved bare single-letter type-param name collapses to `Dynamic`
-/// (BT-1834, checked only for a bare `Simple` node — a `Generic` base is
+/// (checked only for a bare `Simple` node — a `Generic` base is
 /// never a type param) and constructed types are stamped `Substituted`
 /// provenance instead of `Declared`.
 ///
@@ -354,7 +348,7 @@ pub(in crate::semantic_analysis) fn resolve_declared_type(
 /// [`AliasRegistry::register_module`](crate::semantic_analysis::alias_registry::AliasRegistry::register_module)
 /// and
 /// [`AliasRegistry::redefine_alias`](crate::semantic_analysis::alias_registry::AliasRegistry::redefine_alias)
-/// (BT-2896). But eager expansion means a cycle that slips past
+/// But eager expansion means a cycle that slips past
 /// declaration-time checking (a live redefinition landing outside the
 /// `redefine_alias` path, or any other gap) would otherwise recurse forever
 /// the first time it's *referenced* — this guard is the "expansion itself
@@ -381,12 +375,10 @@ pub(in crate::semantic_analysis) fn resolve_declared_type(
 /// Alias expansion threads `subst`, `protocol_registry`, `alias_registry`,
 /// and `ctx` through unchanged into the recursive call on the alias's own
 /// (converted) declared body — the same threading
-/// `resolve_type_annotation_inner` used. The now-deleted
-/// `TypeChecker::resolve_type_string`'s alias branch used to diverge from
-/// this (it reset to an empty `SubstitutionMap`, dropped `protocol_registry`,
-/// and always resolved through the `Declared`-context AST path); that
-/// divergence no longer exists now that every call site resolves through
-/// this one recursion (BT-3076 stage 3c / BT-3080).
+/// `resolve_type_annotation_inner` uses, so no call site can diverge
+/// (e.g. resetting to an empty `SubstitutionMap`, dropping
+/// `protocol_registry`, or always resolving through the `Declared`-context
+/// AST path) — every call site resolves through this one recursion.
 #[allow(clippy::too_many_lines)] // one match arm per DeclaredType variant — see resolve_declared_type's doc
 fn resolve_declared_type_inner(
     dt: &DeclaredType,
@@ -402,7 +394,7 @@ fn resolve_declared_type_inner(
             if WellKnownClass::from_str(name) == Some(WellKnownClass::Never) {
                 return InferredType::Never;
             }
-            // BT-2865: `Dynamic` must resolve to the real `InferredType::
+            // `Dynamic` must resolve to the real `InferredType::
             // Dynamic` variant, not a `Known{class_name: "Dynamic"}` pseudo-
             // class — otherwise every check written against the `Dynamic`
             // variant (dead-code analysis like `isKindOf:`'s "can never be
@@ -415,7 +407,7 @@ fn resolve_declared_type_inner(
             // which is why the bug was invisible until a param was partially
             // parameterized.
             //
-            // BT-3080: an FFI spec's `any()`/`term()` return type ("Dynamic"
+            // An FFI spec's `any()`/`term()` return type ("Dynamic"
             // in the wire vocabulary) is not the same *reason* as a
             // user-written `:: Dynamic` — `DynamicSpec` "loses" to a concrete
             // binding observed elsewhere during merge, where `ExplicitDynamic`
@@ -438,16 +430,16 @@ fn resolve_declared_type_inner(
             if let Some(resolved) = subst.get(name) {
                 return resolved.clone();
             }
-            // BT-1834 / BT-3075: an unresolved bare type param (single
+            // An unresolved bare type param (single
             // uppercase letter) collapses to Dynamic in substitution contexts
             // only, so downstream sends don't get false DNU warnings. The
             // `Declared`-context callers (`resolve_type_annotation`'s
             // wrapper) never hit this — an unmapped bare param there passes
-            // through as a nominal class name, matching pre-BT-3076 behaviour.
+            // through as a nominal class name.
             if ctx == TypeStringContext::Substitution && is_generic_type_param(name) {
                 return InferredType::Dynamic(DynamicReason::Unknown);
             }
-            // ADR 0108 / BT-2895: alias table comes next in the resolution
+            // ADR 0108: alias table comes next in the resolution
             // order (`subst` → alias table → nominal class). A reference to
             // an alias name expands eagerly to its declared annotation,
             // recursively resolved through this same function so a chain of
@@ -481,7 +473,7 @@ fn resolve_declared_type_inner(
                         memo,
                     );
                     expanding.pop();
-                    // BT-2897 / ADR 0108: tag the *exact* value just produced
+                    // ADR 0108: tag the *exact* value just produced
                     // with the alias name for display — see `InferredType::
                     // tag_alias_expansion`'s doc. This is the single
                     // construction point for `TypeProvenance::Aliased`, so
@@ -566,7 +558,7 @@ fn resolve_declared_type_inner(
         }
         DeclaredType::Difference { base, excluded } => {
             // ADR 0102 §1: `base \ excluded` resolves through the shared
-            // `difference` set operation (BT-2739). Reducible cases normalise —
+            // `difference` set operation. Reducible cases normalise —
             // e.g. an excluded member that drops a union member, or `T \ T`
             // collapsing to `Never`.
             let base_ty = resolve_declared_type_inner(
@@ -590,7 +582,7 @@ fn resolve_declared_type_inner(
             InferredType::difference(&base_ty, &excluded_ty, declared_type_provenance(ctx), None)
         }
         DeclaredType::Intersection { left, right } => {
-            // ADR 0102 §1/§3, BT-2743: `left & right` resolves through the
+            // ADR 0102 §1/§3: `left & right` resolves through the
             // shared `intersect` set operation. `hierarchy` is `None` (this
             // resolver never consults it); `protocol_registry` is passed
             // through so class ∩ protocol resolves to the stored
@@ -637,7 +629,7 @@ fn resolve_declared_type_inner(
             // That class isn't known to the free-function resolver, so callers
             // that have the receiver class thread it through `subst` under the
             // reserved `Self` key (see `build_self_subst`). Without it, fall
-            // back to `Dynamic` so existing patterns keep working (BT-1952).
+            // back to `Dynamic` so existing patterns keep working.
             if let Some(InferredType::Known { class_name, .. }) = subst.get("Self") {
                 return InferredType::Meta {
                     class_name: class_name.clone(),
@@ -649,14 +641,14 @@ fn resolve_declared_type_inner(
         DeclaredType::SelfType => {
             // `Self` needs the static receiver class. A caller that knows it
             // threads it under the reserved `Self` subst key — mirroring
-            // `SelfClass` above (BT-3076) — so a *nested* `Self` inside a
-            // generic/union return type (`Result(Self, Error)`, BT-1986 /
-            // BT-1992) resolves to the full receiver type (with type args)
+            // `SelfClass` above — so a *nested* `Self` inside a
+            // generic/union return type (`Result(Self, Error)`)
+            // resolves to the full receiver type (with type args)
             // instead of losing it. A bare top-level `Self` is still handled
             // at the call site directly (see `resolve_type_annotation`'s
             // doc), so this fallback only matters for the nested case.
             // Without a threaded binding, falls back to `Dynamic` — the
-            // pre-BT-3076 behaviour for every caller that never threads one.
+            // behaviour for every caller that never threads one.
             //
             // Provenance: unlike the `SelfClass` arm above (which constructs
             // a fresh `Meta` and stamps `declared_type_provenance(ctx)`),
@@ -680,8 +672,8 @@ fn resolve_declared_type_inner(
 
 /// `Declared`, `Substituted`, or `Extracted` provenance, chosen by `ctx` — the
 /// `DeclaredType` recursion's single construction point for "this was a
-/// constructed nominal / generic / metatype / set-op result" (BT-3075,
-/// extended BT-3080 with the `Extracted` arm for the folded-in FFI path).
+/// constructed nominal / generic / metatype / set-op result", including the
+/// `Extracted` arm for the folded-in FFI path.
 fn declared_type_provenance(ctx: TypeStringContext) -> TypeProvenance {
     match ctx {
         TypeStringContext::Substitution => TypeProvenance::Substituted(Span::default()),
@@ -729,8 +721,6 @@ fn stamp_substituted_provenance(mut ty: InferredType) -> InferredType {
 /// `T` / `E` bindings flow correctly through [`build_substitution_map`] when a
 /// method on a generic class calls another method on the same receiver.
 ///
-/// **References:** BT-2025 acceptance criteria for generic receiver handling.
-///
 /// [`build_substitution_map`]: super::TypeChecker::build_substitution_map
 pub(in crate::semantic_analysis) fn receiver_type_for_class(
     class_name: &EcoString,
@@ -776,17 +766,15 @@ pub(in crate::semantic_analysis) fn receiver_type_for_class(
 /// annotation), falls back to [`receiver_type_for_class`] which emits the
 /// parent's symbolic type-param placeholders.
 ///
-/// **References:** BT-2021 sub-bug B — `super` sends used to lose receiver
-/// `type_args` in generic classes.
-///
 /// [`SuperclassTypeArg::ParamRef`]: crate::semantic_analysis::class_hierarchy::SuperclassTypeArg::ParamRef
 /// [`SuperclassTypeArg::Concrete`]: crate::semantic_analysis::class_hierarchy::SuperclassTypeArg::Concrete
 ///
-/// `alias_registry` (BT-2936, ADR 0108 follow-up to BT-2928) is threaded
+/// `alias_registry` (ADR 0108 follow-up) is threaded
 /// through to the `Concrete` arm below so an alias-typed `extends
 /// Base(SomeAlias)` type argument expands to its declared type instead of
 /// staying an opaque nominal class. Pass `None` when no registry is
-/// available, matching this function's pre-BT-2936 behaviour.
+/// available, in which case such a type argument stays an opaque nominal
+/// class.
 pub(in crate::semantic_analysis) fn super_receiver_type(
     child_class: &EcoString,
     child_type_args: &[InferredType],
@@ -842,7 +830,7 @@ pub(in crate::semantic_analysis) fn super_receiver_type(
 ///
 /// Both lowercase (`nil`) and capitalised (`Nil`) spellings map to
 /// `UndefinedObject` so that `Integer | Nil` type annotations narrow
-/// consistently under `isNil` guards (BT-2016).
+/// consistently under `isNil` guards.
 fn resolve_type_keyword(name: &EcoString) -> EcoString {
     match name.as_str() {
         "nil" | "Nil" => WellKnownClass::UndefinedObject.as_str().into(),
@@ -869,10 +857,8 @@ fn resolve_type_keyword(name: &EcoString) -> EcoString {
 ///
 /// Re-exported from [`string_utils`](crate::semantic_analysis::string_utils)
 /// — the shared implementation, below both `type_checker` and
-/// `class_hierarchy` (BT-3089) — so existing call sites that spell this as
+/// `class_hierarchy` — so existing call sites that spell this as
 /// `type_resolver::split_generic_base` keep working unchanged.
-///
-/// **References:** BT-2025, BT-3089.
 pub(in crate::semantic_analysis) use crate::semantic_analysis::string_utils::split_generic_base;
 
 /// Extract the base class-name portion of a stored-string type name.
@@ -939,7 +925,7 @@ mod tests {
 
     #[test]
     fn simple_capital_nil_keyword_resolves_to_undefined_object() {
-        // `Integer | Nil` annotations (BT-2016) — the capital-N spelling must
+        // `Integer | Nil` annotations — the capital-N spelling must
         // canonicalize to the same class as lowercase `nil` so narrowing under
         // `isNil` works regardless of which the user typed.
         let ann = TypeAnnotation::Simple(ident("Nil"));
@@ -1323,8 +1309,8 @@ mod tests {
 
     #[test]
     fn grouped_mixed_intersection_then_difference_resolves_transparently() {
-        // `(Symbol & Symbol) \ #foo` — writable since grouping parens in
-        // type-annotation position (BT-2760). Grouping is transparent in the
+        // `(Symbol & Symbol) \ #foo` — writable via grouping parens in
+        // type-annotation position. Grouping is transparent in the
         // AST, so the resolver just sees Difference { base: Intersection },
         // no new `InferredType`: the intersection reduces (identity) to
         // `Symbol`, then the difference produces the usual `Negation`.
@@ -1381,7 +1367,7 @@ mod tests {
     #[test]
     fn class_of_resolves_to_metatype() {
         // ADR 0083: `<Name> class` resolves to the metatype of the named class
-        // (was Dynamic pre-0083, BT-2034). The metatype subtypes into the
+        // The metatype subtypes into the
         // tower so class-side sends route through `find_class_method`.
         let ann = TypeAnnotation::ClassOf {
             class_name: ident("Actor"),
@@ -1403,7 +1389,7 @@ mod tests {
         assert_eq!(result, InferredType::known("#ok"));
     }
 
-    // ---- resolve_type_annotation: type alias expansion (ADR 0108, BT-2895) ----
+    // ---- resolve_type_annotation: type alias expansion (ADR 0108) ----
 
     /// Builds an `AliasRegistry` containing a single alias `name = annotation`.
     fn alias_registry_with(name: &str, annotation: TypeAnnotation) -> AliasRegistry {
@@ -1549,7 +1535,7 @@ mod tests {
     }
 
     // ---- resolve_type_annotation_with_alias_deps (ADR 0108 hot-reload
-    // re-check trigger, BT-2899) ----
+    // re-check trigger) ----
 
     #[test]
     fn alias_deps_records_both_levels_of_a_chained_alias() {
@@ -1649,8 +1635,8 @@ mod tests {
         // `A | A` — the second reference hits `resolve_type_annotation_inner`'s
         // per-call `memo` cache (keyed by alias name), reusing the *first*
         // reference's already-tagged value rather than re-expanding. This
-        // pins that the reused value still displays correctly (adversarial
-        // review, BT-2897): both members carry the same `Aliased("A", …)`
+        // pins that the reused value still displays correctly: both members
+        // carry the same `Aliased("A", …)`
         // tag, so the union simplifies to the single tagged member, not two
         // untagged copies.
         let registry = alias_registry_with("A", TypeAnnotation::Simple(ident("Integer")));
@@ -1694,7 +1680,7 @@ mod tests {
     #[test]
     fn cyclic_alias_reference_resolves_to_dynamic_instead_of_hanging() {
         // ADR 0108 "No recursion": real declaration-time cycle *detection*
-        // (BT-2896) lives in `AliasRegistry::register_module` /
+        // lives in `AliasRegistry::register_module` /
         // `redefine_alias`, which this test bypasses via the test-only
         // `register_test_alias` — so this exercises the defensive
         // `expanding` guard in isolation, standing in for a cycle that
@@ -1917,7 +1903,7 @@ mod tests {
 
     // ---- super_receiver_type ----
     //
-    // The tests below exercise BT-2021 sub-bug B's fix path: `super` sends
+    // The tests below exercise `super`'s type-arg-forwarding path: `super` sends
     // must thread the *child's* type-arg bindings into the parent's
     // type-param positions via `superclass_type_args` (`ParamRef` for
     // forwarded type params, `Concrete` for fixed types).
@@ -1978,7 +1964,7 @@ mod tests {
         assert_eq!(type_args, vec![InferredType::known("Integer")]);
     }
 
-    /// BT-2936: `IntBase extends Base(SomeAlias)` where `type SomeAlias =
+    /// `IntBase extends Base(SomeAlias)` where `type SomeAlias =
     /// Integer` — the `Concrete` superclass type arg expands the alias
     /// through the threaded `alias_registry` instead of staying an opaque
     /// nominal class named `SomeAlias`.
@@ -2007,7 +1993,7 @@ mod tests {
         assert_eq!(type_args, vec![InferredType::known("Integer")]);
 
         // Without the registry, the alias name stays opaque — the
-        // pre-BT-2936 fallback this test guards against regressing back to.
+        // fallback this test guards against regressing back to.
         let unresolved =
             super_receiver_type(&"IntBase".into(), &[], &"Base".into(), &hierarchy, None);
         let InferredType::Known { type_args, .. } = unresolved else {
@@ -2045,7 +2031,7 @@ mod tests {
     // ---- base_name_of_string ----
     //
     // `split_generic_base` itself is tested once, at its definition site in
-    // `string_utils` (BT-3089) — no need to re-test it by proxy here.
+    // `string_utils` — no need to re-test it by proxy here.
 
     #[test]
     fn base_name_of_string_discards_args() {
@@ -2053,7 +2039,7 @@ mod tests {
         assert_eq!(base_name_of_string("Integer"), "Integer");
     }
 
-    // ---- resolve_declared_type (BT-3076 stage 2) ----
+    // ---- resolve_declared_type ----
     //
     // `resolve_type_annotation` is now a thin `DeclaredType::from` + this
     // function wrapper (always `TypeStringContext::Declared`), so every test
@@ -2123,7 +2109,7 @@ mod tests {
 
     #[test]
     fn declared_type_substitution_context_collapses_bare_type_param_to_dynamic() {
-        // BT-1834: an unmapped bare single-letter param collapses to Dynamic
+        // An unmapped bare single-letter param collapses to Dynamic
         // only in `Substitution` context — `Declared` context (what
         // `resolve_type_annotation` always uses) passes it through unchanged
         // as a nominal class name.
@@ -2229,8 +2215,8 @@ mod tests {
 
     #[test]
     fn declared_type_union_in_substitution_context_stamps_substituted_provenance() {
-        // Mirrors the deleted `resolve_type_string`'s own `Substitution`-
-        // context re-stamping (BT-3075): a substituted `V | Nil` reads as
+        // The `Substitution`-
+        // context re-stamping: a substituted `V | Nil` reads as
         // `Substituted`, not `Inferred`, so `check_impossible_class_comparison`'s
         // provenance gate stays silent for it.
         let dt = DeclaredType::Union(vec![

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Compile-time structural validation (BT-1726).
+//! Compile-time structural validation.
 //!
 //! **DDD Context:** Semantic Analysis
 //!
@@ -25,7 +25,7 @@ use ecow::EcoString;
 
 // ── Unresolved class references ──────────────────────────────────────────────
 
-/// BT-1726: Warn on class references that don't exist in the hierarchy.
+/// Warn on class references that don't exist in the hierarchy.
 ///
 /// Walks all expressions looking for `ClassReference` nodes whose name is
 /// not found in the `ClassHierarchy` or `ProtocolRegistry`. Skips built-in
@@ -127,7 +127,7 @@ fn visit_unresolved_class(
         // Skip builtins, type parameters, known REPL bindings, classes, and protocols.
         // Known vars covers REPL workspace bindings like `Workspace` and `Transcript`
         // which are capitalized variables, not class references.
-        // Protocols are first-class objects (BT-1928) and valid class references.
+        // Protocols are first-class objects and valid class references.
         if BUILTIN_CLASS_NAMES.contains(&class_name)
             || type_param_names.contains(&class_name)
             || known_vars.contains(&class_name)
@@ -151,9 +151,9 @@ fn visit_unresolved_class(
     }
 }
 
-// ── Unresolved type-alias references (ADR 0108, BT-2897) ───────────────────
+// ── Unresolved type-alias references (ADR 0108) ────────────────────────────
 
-/// BT-2897 / ADR 0108: warn when a type annotation names something that
+/// ADR 0108: warn when a type annotation names something that
 /// isn't a class, protocol, alias, or (single-letter) type parameter, but
 /// closely resembles a *registered* alias name — the "unknown alias"
 /// diagnostic ADR 0108's Error examples call for
@@ -377,7 +377,7 @@ fn closest_alias_name(target: &str, alias_registry: &AliasRegistry) -> Option<Ec
 
 // ── Workspace binding shadows class ─────────────────────────────────────────
 
-/// BT-1759: Warn when a workspace binding (REPL variable) shadows a class name.
+/// Warn when a workspace binding (REPL variable) shadows a class name.
 ///
 /// In the REPL, workspace bindings like `Workspace` and `Transcript` are
 /// injected as known variables. If a class with the same name also exists in
@@ -466,7 +466,7 @@ const KNOWN_OTP_MODULES: &[&str] = &[
     "zlib",
 ];
 
-/// BT-1726: Warn on unresolved Erlang FFI module references.
+/// Warn on unresolved Erlang FFI module references.
 ///
 /// Detects the `Erlang <module> <selector>` FFI call pattern where
 /// `<module>` is used as a unary message to `Erlang`.
@@ -630,7 +630,7 @@ const KNOWN_ARITIES: &[(&str, &str, usize)] = &[
     ("json", "decode", 1),
 ];
 
-/// BT-1726: Warn when a known Erlang function is called with the wrong arity.
+/// Warn when a known Erlang function is called with the wrong arity.
 ///
 /// Only checks functions in the `KNOWN_ARITIES` table — unknown functions
 /// are silently accepted (the unresolved-FFI check handles unknown modules).
@@ -645,7 +645,7 @@ pub(crate) fn check_ffi_arity(module: &Module, diagnostics: &mut Vec<Diagnostic>
 /// Matches `Erlang <module>` or `(Erlang <module>)` — a `MessageSend`
 /// whose receiver is `ClassReference("Erlang")` with a `Unary` selector.
 ///
-/// BT-3079: delegates to the single shared recognizer in
+/// Delegates to the single shared recognizer in
 /// [`crate::ffi_receiver`].
 fn extract_erlang_module(expr: &Expression) -> Option<&str> {
     crate::ffi_receiver::erlang_module_of_receiver(expr)
@@ -657,10 +657,10 @@ fn extract_erlang_module(expr: &Expression) -> Option<&str> {
 /// Unary selectors use the name directly. Binary selectors don't map to
 /// Erlang functions (they're Beamtalk operators).
 ///
-/// BT-3361: widened from `pub(crate)` to `pub` — `queries::ffi_sites_query`
+/// `pub`, not `pub(crate)`: `queries::ffi_sites_query`
 /// (Language Service) reaches this from the standalone
-/// `beamtalk-language-service` crate now, so `pub(crate)` visibility is no
-/// longer reachable.
+/// `beamtalk-language-service` crate, so `pub(crate)` visibility is not
+/// reachable.
 pub fn erlang_function_name(selector: &MessageSelector) -> Option<String> {
     match selector {
         MessageSelector::Unary(name) => Some(name.to_string()),
@@ -677,7 +677,7 @@ pub fn erlang_function_name(selector: &MessageSelector) -> Option<String> {
 /// for keyword messages (e.g. `seq: 1 to: 10` has arity 2), and 0 for unary
 /// messages (they lower to zero-argument Erlang function calls).
 ///
-/// BT-3361: widened from `pub(crate)` to `pub` — same rationale as
+/// `pub`, not `pub(crate)` — same rationale as
 /// [`erlang_function_name`] above.
 pub fn erlang_arity(selector: &MessageSelector, argument_count: usize) -> usize {
     match selector {
@@ -735,7 +735,7 @@ fn visit_ffi_arity(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-/// BT-1846/BT-1847: `declare native:` is only valid in a `stubs/` directory.
+/// `declare native:` is only valid in a `stubs/` directory.
 ///
 /// The parser accepts `declare native:` anywhere (it has no notion of file
 /// paths — see [`crate::ast::NativeDeclaration`]'s doc comment), so the build
@@ -903,7 +903,7 @@ mod tests {
 
     #[test]
     fn test_unresolved_class_skips_protocols() {
-        // Protocol names like Printable are first-class class objects (BT-1928)
+        // Protocol names like Printable are first-class class objects
         // and should not trigger unresolved class warnings.
         let module = empty_module_with_exprs(vec![class_ref("Printable")]);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
@@ -928,7 +928,7 @@ mod tests {
         );
     }
 
-    // ── Unresolved type-alias tests (ADR 0108, BT-2897) ─────────────────────
+    // ── Unresolved type-alias tests (ADR 0108) ───────────────────────────────
     //
     // Called directly (like the unresolved-class tests above), not through
     // `analyse_full` — `check_unresolved_type_aliases` has no internal
@@ -1095,7 +1095,7 @@ mod tests {
         assert_eq!(diags[0].category, Some(DiagnosticCategory::UnresolvedFfi));
     }
 
-    /// BT-3388: `public_key` ships in every standard OTP install and is the
+    /// `public_key` ships in every standard OTP install and is the
     /// natural companion to `ssl`/`crypto` for certificate/CA-trust work —
     /// it must not trigger `unresolved_ffi`.
     #[test]
@@ -1247,7 +1247,7 @@ mod tests {
 
     #[test]
     fn test_ffi_package_qualified_erlang_not_warned() {
-        // BT-3079 regression: `json@Erlang typo_mod` names a package-scoped
+        // `json@Erlang typo_mod` names a package-scoped
         // `Erlang` class, not the compiler's built-in FFI bridge — it must
         // NOT be treated as an unresolved FFI module lookup, even though
         // `typo_mod` is not a known OTP module name.
@@ -1495,7 +1495,7 @@ mod tests {
         assert_eq!(diags.len(), 2, "Should warn for Object and Integer only");
     }
 
-    // ── Native declaration location tests (BT-1846/BT-1847) ─────────────────
+    // ── Native declaration location tests ────────────────────────────────────
 
     fn native_decl(module_name: &str) -> crate::ast::NativeDeclaration {
         crate::ast::NativeDeclaration {
@@ -1520,7 +1520,7 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].severity, Severity::Error);
         assert!(diags[0].message.contains("only valid in stubs/ directory"));
-        // BT-3404: must carry a category, or `beamtalk lint`'s and MCP's
+        // Must carry a category, or `beamtalk lint`'s and MCP's
         // `.filter(|d| d.category.is_some())` silently drop it.
         assert_eq!(
             diags[0].category,

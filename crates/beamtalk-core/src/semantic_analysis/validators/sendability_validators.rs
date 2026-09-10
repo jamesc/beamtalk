@@ -7,7 +7,7 @@
 //! sendability checks (it has the inferred argument types in hand). This module
 //! holds the checks that need data the type checker does not carry:
 //!
-//! * **Block-capture check (Phase 2, BT-2756):** a Phase 3 validator that joins
+//! * **Block-capture check (Phase 2):** a Phase 3 validator that joins
 //!   the semantic-analysis `CapturedVar` set (name-only, computed after type
 //!   checking) with the type checker's `type_map` to recover each captured
 //!   variable's inferred type, then applies the shared [`sendability::tier_of`]
@@ -41,7 +41,7 @@ use crate::state_threading_selectors::is_state_threading_keyword_selector;
 /// positions (`do:`, `collect:`, `ifTrue:`, `whileTrue:`, self-sends) stay
 /// silent. `#node`-scoped and `Dynamic` captures are silent in v1.
 ///
-/// `alias_registry` (BT-2936, ADR 0108 follow-up to BT-2928) lets a captured
+/// `alias_registry` (ADR 0108 follow-up) lets a captured
 /// alias-typed field's tier compose through the alias's expansion instead of
 /// falling back to `Tier::Unknown` for the opaque alias name.
 pub(crate) fn check_block_capture_sendability(
