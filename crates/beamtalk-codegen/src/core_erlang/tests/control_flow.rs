@@ -3581,3 +3581,248 @@ fn test_actor_ensure_keeps_two_element_result_tuple() {
     );
     assert_compiles_through_erlc("bt@actorensurenoselfslot", &code);
 }
+
+// ── BT-3489: `self.field := ...` as a bare `match:` arm body ────────────────
+
+#[test]
+fn test_actor_field_write_in_match_arm_threads_state() {
+    // BT-3489: before the fix, nothing classified a bare `self.field := ...`
+    // arm body as needing threading, so `generate_match` left `base_state` as
+    // `None`, each arm's `State{N}` binding stayed scoped to its own `case`
+    // clause, and the trailing `self.total` read referenced it anyway —
+    // `erlc: unbound variable 'State1' in dispatch/4`. The arm now routes
+    // through the same `generate_conditional_branch_inline` branch merge an
+    // `ifTrue:` branch's field write uses.
+    let src = concat!(
+        "Actor subclass: ActorMatchArmSelfWrite\n",
+        "  state: total = 0\n\n",
+        "  computeIt: v =>\n",
+        "    v match: [\n",
+        "      1 -> self.total := self.total + 10;\n",
+        "      _ -> self.total := self.total + 1\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@actormatcharmselfwrite").with_workspace_mode(true),
+    )
+    .expect("an actor field write in a match: arm must compile");
+    assert!(
+        code.contains("let StateAcc = "),
+        "each arm must be lowered as a threaded branch seeded from the pre-match state. \
+         Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@actormatcharmselfwrite", &code);
+}
+
+#[test]
+fn test_value_type_field_write_in_match_arm_is_compile_error() {
+    // BT-3489's accepted scope limit, mirroring
+    // `test_value_type_field_write_in_last_position_conditional_still_rejected`
+    // above: a value type's field writes merge through
+    // `generate_vt_conditional_open`'s trailing-slot tuple, which is wired for
+    // exactly the two arms of `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`. A
+    // `match:`'s N pattern arms have no equivalent, so the arm's `Self{N}`
+    // binding never escapes its own `case` clause (`erlc: unbound variable
+    // 'Self1'`). Rejected cleanly rather than left to crash.
+    let src = concat!(
+        "TestCase subclass: VtMatchArmSelfWrite\n",
+        "  field: total = 0\n\n",
+        "  computeIt: v =>\n",
+        "    v match: [\n",
+        "      1 -> self.total := self.total + 10;\n",
+        "      _ -> self.total := self.total + 1\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtmatcharmselfwrite").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm { field, .. }) => {
+            assert_eq!(field, "total");
+        }
+        other => panic!(
+            "Expected ValueSelfFieldAssignmentInMatchArm for a value-type field write in a \
+             match: arm. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_value_type_class_method_class_var_write_in_match_arm_is_compile_error() {
+    // BT-3489 audit: inside a VALUE-TYPE class method `self.x :=` is a CLASS-var write
+    // with its own ADR 0110 threading, which a `match:` arm cannot carry
+    // either. It reaches `lower_field_assignment_bind`'s shared
+    // `reject_class_var_field_assignment` gate, so it produces the same clean
+    // `ClassVarAssignmentInThreadedBody` diagnostic every other threaded body
+    // does — never a crash, and never routed through this issue's `Self` slot.
+    let src = concat!(
+        "Value subclass: ClassVarMatchArmWrite\n",
+        "  classState: total = 0\n\n",
+        "  class computeIt: v =>\n",
+        "    v match: [\n",
+        "      1 -> self.total := self.total + 10;\n",
+        "      _ -> self.total := self.total + 1\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@classvarmatcharmwrite").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassVarAssignmentInThreadedBody { field, .. }) => {
+            assert_eq!(field, "total");
+        }
+        other => panic!(
+            "Expected ClassVarAssignmentInThreadedBody for a class-var write in a match: arm. \
+             Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_actor_class_method_class_var_write_in_match_arm_is_compile_error() {
+    // BT-3489 audit, the fourth context: an ACTOR class method. `self.x :=`
+    // there is a class-var write (ADR 0110's `ClassVars` chain), not the
+    // instance-`State` write the instance-method form threads, and a `match:`
+    // arm cannot carry it either. Threading now routes the arm through
+    // `lower_field_assignment_bind`'s shared `reject_class_var_field_assignment`
+    // gate, so it lands on the same clean diagnostic the value-type class
+    // method above produces — never the `unbound variable 'ClassVars1'` an
+    // unthreaded `expression_doc` compile of the same arm used to emit.
+    let src = concat!(
+        "Actor subclass: ActorClassVarMatchArmWrite\n",
+        "  classState: total = 0\n\n",
+        "  class computeIt: v =>\n",
+        "    v match: [\n",
+        "      1 -> self.total := self.total + 10;\n",
+        "      _ -> self.total := self.total + 1\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@actorclassvarmatcharmwrite").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassVarAssignmentInThreadedBody { field, .. }) => {
+            assert_eq!(field, "total");
+        }
+        other => panic!(
+            "Expected ClassVarAssignmentInThreadedBody for an actor class-var write in a \
+             match: arm. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_actor_field_write_in_match_chain_arm_threads_state() {
+    // BT-3489, second lowering path: a `Pattern::Type` arm (`x :: Integer`)
+    // forces `generate_match_chain`'s chain-of-nested-`case`s instead of the
+    // all-native single-`case` fast path
+    // `test_actor_field_write_in_match_arm_threads_state` above covers. Both
+    // funnel every arm through `generate_match_arm_body` with the same
+    // `base_state`, so a bare `self.field := ...` arm must thread identically
+    // here — pinned so a future change to only one of the two paths can't
+    // reintroduce the `unbound variable 'State1'` crash in the other.
+    let src = concat!(
+        "Actor subclass: ActorMatchChainSelfWrite\n",
+        "  state: total = 0\n\n",
+        "  computeIt: v =>\n",
+        "    v match: [\n",
+        "      x :: Integer -> self.total := self.total + x;\n",
+        "      _ -> self.total := self.total + 1\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@actormatchchainselfwrite").with_workspace_mode(true),
+    )
+    .expect("an actor field write in a chain-lowered match: arm must compile");
+    assert!(
+        code.contains("let StateAcc = "),
+        "each chain arm must be lowered as a threaded branch seeded from the pre-match state. \
+         Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@actormatchchainselfwrite", &code);
+}
+
+#[test]
+fn test_actor_parenthesized_field_write_in_match_arm_threads_state() {
+    // BT-3489: parentheses around the arm body are pure grouping, but the
+    // detector originally matched `Expression::Assignment` directly, so
+    // `1 -> (self.total := ...)` fell through to `expression_doc` and produced
+    // the identical `erlc: unbound variable 'State1'` the unparenthesized form
+    // did. Both the threading decision and the arm lowering now strip parens
+    // first (and lower the stripped expression, so the ADR 0111 statement
+    // classifier sees a plain `Assignment` rather than a `Parenthesized`).
+    let src = concat!(
+        "Actor subclass: ActorParenMatchArmSelfWrite\n",
+        "  state: total = 0\n\n",
+        "  computeIt: v =>\n",
+        "    v match: [\n",
+        "      1 -> (self.total := self.total + 10);\n",
+        "      _ -> (self.total := self.total + 1)\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@actorparenmatcharmselfwrite").with_workspace_mode(true),
+    )
+    .expect("a parenthesized actor field write in a match: arm must compile");
+    assert!(
+        code.contains("let StateAcc = "),
+        "a parenthesized field-write arm must still be lowered as a threaded branch. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@actorparenmatcharmselfwrite", &code);
+}
+
+#[test]
+fn test_value_type_parenthesized_field_write_in_match_arm_is_compile_error() {
+    // BT-3489: the value-type half of the same paren-stripping fix — the
+    // rejection must not be dodgeable by wrapping the write in parentheses,
+    // which would drop straight back to the `unbound variable 'Self1'` crash.
+    let src = concat!(
+        "TestCase subclass: VtParenMatchArmSelfWrite\n",
+        "  field: total = 0\n\n",
+        "  computeIt: v =>\n",
+        "    v match: [\n",
+        "      1 -> (self.total := self.total + 10);\n",
+        "      _ -> (self.total := self.total + 1)\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtparenmatcharmselfwrite").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm { field, .. }) => {
+            assert_eq!(field, "total");
+        }
+        other => panic!(
+            "Expected ValueSelfFieldAssignmentInMatchArm for a parenthesized value-type field \
+             write in a match: arm. Got: {other:?}"
+        ),
+    }
+}

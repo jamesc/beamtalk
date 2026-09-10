@@ -273,12 +273,9 @@ impl CoreErlangGenerator {
         let Some(field) = found else {
             return Ok(());
         };
-        let location = self.span_to_line(expr.span()).map_or_else(
-            || format!("offset {}", expr.span().start()),
-            |line| format!("line {line}"),
-        );
         Err(CodeGenError::field_assignment_in_unsupported_block(
-            &field, location,
+            &field,
+            self.location_label(expr.span()),
         ))
     }
 
