@@ -7298,7 +7298,7 @@ fn bt3415_binary_operand_self_send_after_raising_operand_is_sequenced_in_method_
     // `let _Tmp = <at:> in <dispatch> in let State1 = element(2, _SD) in
     // _Tmp + element(1, _SD)` — `at:` raises first (it is bound before the
     // dispatch runs), and when it does not raise `bump`'s state is
-    // threaded into the reply. The BT-3399 "Dropped" case is not
+    // threaded into the reply. The "Dropped" case is not
     // reachable from method-body position any more.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = #(10, 20, 30)\n\n  pick: idx =>\n    (self.items at: idx) + (self bump)\n\n  internal bump =>\n    self.count := self.count + 1\n    self.count\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -7434,17 +7434,17 @@ fn bt3415_early_return_reply_state_follows_the_prelude_when_there_is_one() {
 
 #[test]
 fn bt3416_thread_ahead_no_longer_warns_once_the_interpolation_segment_threads() {
-    // ADR 0118 phase 1b superseded the BT-3415-era pin below
+    // ADR 0118 phase 1b supersedes the pin below
     // (`bt3415_thread_ahead_keeps_the_bt3399_warning_for_a_dropped_only_plan`):
     // a `thread_ahead` consumer (here `FieldAssignment`) whose RHS is a
     // `StringInterpolation` with an order-unsafe self-send in a LATER
-    // segment — `"{self.items size}-{self bump}"` — used to run the
-    // planner, which could not safely hoist `bump` ahead of the first
-    // segment's `displayString` dispatch and so dropped the mutation with
-    // a warning. `threaded_string_interpolation` now moves
+    // segment — `"{self.items size}-{self bump}"` — needs the planner to
+    // safely hoist `bump` ahead of the first segment's `displayString`
+    // dispatch; without that, the mutation is dropped with a warning.
+    // `threaded_string_interpolation` moves
     // BOTH segments' `let`-chains into the RHS's prelude, in order, so
     // `bump` dispatches (after the first segment's `displayString` call,
-    // preserving evaluation order) and the warning is gone — the same fix
+    // preserving evaluation order) and no warning fires — the same fix
     // as the BUnit matrix's `interpolationBinaryOpSelfSend` row, exercised
     // here from a `FieldAssignment` RHS instead of a bare statement.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = #(1)\n  state: label = \"\"\n\n  go =>\n    self.label := \"{self.items size}-{self bump}\"\n    self.count\n\n  internal bump =>\n    self.count := self.count + 1\n    self.count\n";

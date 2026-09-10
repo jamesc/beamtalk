@@ -13,12 +13,12 @@
 //!
 //! ADR 0011 Phase 2 (extended).
 //!
-//! BT-3344 (ADR 0117 Decision step 4): the REPL-specific properties that
-//! used to live here (`generate_repl_expression` never panics / produces
-//! non-empty output) moved to
-//! `beamtalk-repl/tests/codegen_property_tests.rs` — they exercised only
+//! ADR 0117 Decision step 4: the REPL-specific properties
+//! (`generate_repl_expression` never panics / produces
+//! non-empty output) live in
+//! `beamtalk-repl/tests/codegen_property_tests.rs` — they exercise only
 //! `beamtalk-repl::codegen`'s public API, the last remaining edge from
-//! `codegen`'s test tree into `repl` (test-only; see BT-3340, ADR 0117
+//! `codegen`'s test tree into `repl` (test-only; see ADR 0117
 //! Decision step 2, for the production-code split). What's left here needs
 //! no such cross-crate care: it exercises only `beamtalk-core`'s own
 //! `generate_module`, so this could be a plain unit test, but it stays a
@@ -27,7 +27,7 @@
 //! The near-valid-input generator and proptest config (below, via
 //! `test_helpers::test_support`) are shared with that sibling file rather
 //! than duplicated — see `test_support::near_valid_beamtalk`'s own doc
-//! comment for why (code review on BT-3344's PR).
+//! comment for why.
 
 use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::ast::Module;

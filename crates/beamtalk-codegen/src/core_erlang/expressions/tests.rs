@@ -91,7 +91,7 @@ fn test_generate_identifier_reserved_words() {
     assert_eq!(n.to_pretty_string(), "'nil'");
 }
 
-// ─── BT-3466: generate_field_assignment (Closure::Closed) × FieldWriteSite ─
+// ─── generate_field_assignment (Closure::Closed) × FieldWriteSite ─
 
 #[test]
 fn test_field_assignment_closed_actor_threads_state() {
@@ -109,10 +109,10 @@ fn test_field_assignment_closed_actor_threads_state() {
 
 #[test]
 fn test_field_assignment_closed_value_type_threads_self() {
-    // BT-833: a value-type field write threads `Self{N}`, never `State{N}` —
-    // this is the shape `generate_field_assignment_open`'s pre-BT-3466
-    // Actor-only fallback silently got wrong for the "open" sibling of this
-    // exact write (see the `_open_value_type_...` tests below).
+    // A value-type field write threads `Self{N}`, never `State{N}` — the
+    // `_open_value_type_...` tests below pin the same invariant for
+    // `generate_field_assignment_open`'s "open" sibling of this exact
+    // write.
     let mut generator = CoreErlangGenerator::new("test");
     generator.context = crate::core_erlang::CodeGenContext::ValueType;
     let value = Expression::Literal(Literal::Integer(42), s());
@@ -132,7 +132,7 @@ fn test_field_assignment_closed_value_type_threads_self() {
 
 #[test]
 fn test_field_assignment_closed_class_var_threads_class_vars_with_shadow_write() {
-    // BT-412/ADR 0110: a class-method field write threads `ClassVars{N}` and
+    // ADR 0110: a class-method field write threads `ClassVars{N}` and
     // carries the shadow write (`erlang:put/2` under `$bt_class_vars_shadow`)
     // that lets a foreign NLR relay observe the mutation.
     let mut generator = CoreErlangGenerator::new("test");

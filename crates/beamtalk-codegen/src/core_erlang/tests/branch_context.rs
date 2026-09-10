@@ -141,8 +141,8 @@ fn with_branch_context_nests_independently() {
 }
 
 /// `with_branch_context`'s restore runs even when `f` returns an `Err` — the
-/// same "unconditional restore" guarantee the pre-BT-3131 manual
-/// save/restore documented, now provided by `BranchContextGuard`'s `Drop`.
+/// same "unconditional restore" guarantee the earlier manual
+/// save/restore documented, provided here by `BranchContextGuard`'s `Drop`.
 #[test]
 fn with_branch_context_restores_even_when_f_returns_err() {
     let mut generator = CoreErlangGenerator::new("test");
