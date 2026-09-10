@@ -87,8 +87,9 @@ enum VtBodyExprKind {
     BlockWithCapturedMutations(Vec<String>),
     /// Non-last `whileTrue:` / `whileFalse:` with local mutations.
     WhileWithLocalThreading,
-    /// Non-last `on:do:`/`ensure:` with local mutations.
-    ExceptionConstructWithLocalThreading,
+    /// Non-last `on:do:`/`ensure:` with local mutations and/or a
+    /// value-type `self.field := ...` write.
+    ExceptionConstructWithThreading,
     /// Regular expression with no special Self-threading needs.
     Pure,
 }
@@ -929,8 +930,15 @@ impl CoreErlangGenerator {
         if self.is_conditional_with_vt_self_field_threading(expr) {
             return VtBodyExprKind::ConditionalWithSelfFieldThreading;
         }
-        if self.is_exception_construct_with_vt_local_threading(expr) {
-            return VtBodyExprKind::ExceptionConstructWithLocalThreading;
+        // BT-3486: an `on:do:`/`ensure:` whose ONLY mutation is a value-type
+        // `self.field := ...` write has no threaded outer local, so the
+        // BT-3177 predicate alone says `false` and the construct falls through
+        // to `Pure` — sequenced away as `let _seqN = <construct> in`, which
+        // discards the trailing `Self` slot and silently loses the mutation.
+        if self.is_exception_construct_with_vt_local_threading(expr)
+            || self.is_exception_construct_with_vt_self_field_threading(expr)
+        {
+            return VtBodyExprKind::ExceptionConstructWithThreading;
         }
         if let Some(mutations) = Self::inline_block_captured_mutations(expr) {
             return VtBodyExprKind::BlockWithCapturedMutations(mutations);
@@ -1318,13 +1326,14 @@ impl CoreErlangGenerator {
                     body_parts.push(doc);
                 }
             }
-            VtBodyExprKind::ExceptionConstructWithLocalThreading => {
+            VtBodyExprKind::ExceptionConstructWithThreading => {
                 // Non-last on:do:/ensure: with captured local
-                // mutations. Last position is not yet wired through the
-                // shared `ThreadedExpr` emitter (`emit_threaded_last` has no
-                // on:do:/ensure: case) — tracked as a follow-up; today's
-                // fixtures/tests only exercise this in non-last position,
-                // same as this issue's two repro shapes.
+                // mutations, and/or the value-type `self.field := ...`
+                // case on the same non-last path. Last position is not yet
+                // wired through the shared `ThreadedExpr` emitter
+                // (`emit_threaded_last` has no on:do:/ensure: case) — tracked
+                // as a follow-up; today's fixtures/tests only exercise this in
+                // non-last position, same as this issue's repro shapes.
                 if is_last {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
@@ -2565,7 +2574,14 @@ impl CoreErlangGenerator {
     /// `Self{N}` binding this arm's return tuple can actually name. A write
     /// buried in a sub-expression keeps its own nested-`let` scoping,
     /// untouched by this issue.
-    fn block_writes_vt_self_field(&self, block: &beamtalk_core::ast::Block) -> bool {
+    /// BT-3486 also calls this, via
+    /// [`CoreErlangGenerator::exception_blocks_thread_value_self`], for an
+    /// `on:do:`/`ensure:`'s protected and handler/cleanup blocks — the same
+    /// rule, the same top-level-only reason.
+    pub(in crate::core_erlang) fn block_writes_vt_self_field(
+        &self,
+        block: &beamtalk_core::ast::Block,
+    ) -> bool {
         super::util::collect_body_exprs(&block.body)
             .into_iter()
             .any(|e| self.is_vt_self_field_assignment(e))
@@ -2971,6 +2987,72 @@ impl CoreErlangGenerator {
             && self.get_control_flow_threaded_vars(expr).is_some()
     }
 
+    /// the protected block and the handler/cleanup block of an
+    /// `on:do:`/`ensure:` send — precisely the two blocks
+    /// `exception_handling.rs`'s `generate_on_do_with_mutations` /
+    /// `generate_ensure_with_mutations` inline with state threading.
+    ///
+    /// `None` for any other selector, and for a supported one whose receiver
+    /// or block argument is not actually a literal block (those never reach
+    /// the mutation-threading emitters at all — `generate_on_do` /
+    /// `generate_ensure` fall back to the closure-based path).
+    ///
+    /// Both halves of "which send is this, and which argument holds its
+    /// handler/cleanup block" come from `beamtalk_core`'s shared
+    /// `state_threading_selectors` leaf module — `is_exception_selector` for
+    /// the first and `state_threaded_block_arg_indices` for the second
+    /// (`ensure:` → arg 0, `on:do:` → arg 1) — rather than being restated
+    /// here, so this predicate can never drift from the table the rest of
+    /// state-threading already reads.
+    fn exception_construct_blocks(expr: &Expression) -> Option<[&beamtalk_core::ast::Block; 2]> {
+        use beamtalk_core::state_threading_selectors::{
+            is_exception_selector, state_threaded_block_arg_indices,
+        };
+
+        let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr.unwrap_parens()
+        else {
+            return None;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        if !is_exception_selector(&sel) {
+            return None;
+        }
+        // Both exception selectors have exactly one state-threaded block
+        // argument; anything else would be a new shape this predicate has
+        // not been taught, so bail rather than guess.
+        let &[handler_index] = state_threaded_block_arg_indices(&sel) else {
+            return None;
+        };
+        let other = arguments.get(handler_index)?;
+        let (Expression::Block(protected), Expression::Block(other)) = (receiver.as_ref(), other)
+        else {
+            return None;
+        };
+        Some([protected, other])
+    }
+
+    /// `true` if `expr` is an `on:do:`/`ensure:` whose protected or
+    /// handler/cleanup block contains a value-type `self.field := ...` write,
+    /// so its result tuple carries the trailing `Self` slot that
+    /// [`Self::generate_vt_exception_construct_open`] extracts.
+    ///
+    /// Deliberately shares
+    /// [`CoreErlangGenerator::exception_blocks_thread_value_self`] with the
+    /// emitter rather than restating the rule, so the tuple shape written and
+    /// the shape read back cannot drift.
+    pub(in crate::core_erlang) fn is_exception_construct_with_vt_self_field_threading(
+        &self,
+        expr: &Expression,
+    ) -> bool {
+        Self::exception_construct_blocks(expr)
+            .is_some_and(|blocks| self.exception_blocks_thread_value_self(&[blocks[0], blocks[1]]))
+    }
+
     /// emits a non-last `on:do:`/`ensure:` that mutates captured
     /// outer locals, in value-type or class-method context, as an open let
     /// chain — binds the construct's own `{Result, StateAcc}` tuple, then
@@ -2979,10 +3061,22 @@ impl CoreErlangGenerator {
     /// `BodyExprKind::ControlFlowWithMutations` non-last handling (the same
     /// extraction, minus that path's `ThreadedStmt::Bind`/`next_state_var`
     /// step — there is no ambient `gen_server` `State` to thread into here).
+    ///
+    /// BT-3486: when the construct also threads a value-type `Self`
+    /// ([`Self::is_exception_construct_with_vt_self_field_threading`]), ALSO
+    /// extracts the trailing element 3 and rebinds it via
+    /// [`CoreErlangGenerator::rebind_value_self_from_doc`] — the same trailing
+    /// slot, in the same position, and the same rebind that BT-3484's
+    /// [`Self::emit_vt_loop_open_extraction`] gives a Letrec loop. Without it
+    /// the construct's own `Self{N}` stays scoped inside the Core Erlang
+    /// `try` and every later `self.field` read in the method silently sees the
+    /// pre-`try` snapshot.
     pub(in crate::core_erlang) fn generate_vt_exception_construct_open(
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        let threads_value_self = self.is_exception_construct_with_vt_self_field_threading(expr);
+        let span = expr.span();
         let tuple_var = self.fresh_temp_var("ExTuple");
         let expr_doc = self.expression_doc(expr)?;
         let mut docs: Vec<Document<'static>> = vec![docvec![
@@ -2998,7 +3092,7 @@ impl CoreErlangGenerator {
                 "let ",
                 leaf::var(state_var.clone()),
                 " = call 'erlang':'element'(2, ",
-                leaf::var(tuple_var),
+                leaf::var(tuple_var.clone()),
                 ") in ",
             ]);
             for var in &threaded_vars {
@@ -3015,6 +3109,11 @@ impl CoreErlangGenerator {
                     ") in ",
                 ]);
             }
+        }
+        if threads_value_self {
+            let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
+            let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
+            docs.push(rebind_doc);
         }
         Ok(Document::Vec(docs))
     }

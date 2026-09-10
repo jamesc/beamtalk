@@ -432,12 +432,15 @@ impl CoreErlangGenerator {
 
     /// the value-type `Self` mirror of
     /// [`Self::rebind_class_vars_from_doc`] — rebinds `Self{N}` from an
-    /// already-produced value `Document` (a Letrec loop construct's own
-    /// returned trailing tuple slot, carrying the `self.field := ...`
-    /// mutations threaded through its recursive tail call). This is what
-    /// makes the loop's final `Self` the method's new LIVE `Self` for every
-    /// statement that follows — the direct counterpart of Actor's `let
-    /// State1 = element(2, _CF10) in`.
+    /// already-produced value `Document`: a construct's own returned trailing
+    /// tuple slot, carrying the `self.field := ...` mutations threaded out of
+    /// its inlined body. This is what makes the construct's final `Self` the
+    /// method's new LIVE `Self` for every statement that follows — the direct
+    /// counterpart of Actor's `let State1 = element(2, _CF10) in`.
+    ///
+    /// Two callers, one shape: BT-3484's Letrec loop (threaded through its
+    /// recursive tail call) and BT-3486's `on:do:`/`ensure:` (threaded through
+    /// the `try`'s result tuple).
     ///
     /// Simpler than the class-var sibling: `SelfVt` carries none of ADR
     /// 0110's shadow-write obligation, so this verifies through the same
@@ -455,7 +458,7 @@ impl CoreErlangGenerator {
             super::threaded_ir::VersionPrefix::SelfVt,
             source_version,
             target_version,
-            "value-type Self rebind from a loop construct's threaded result",
+            "value-type Self rebind from a threading construct's result",
             span,
         );
         let bind = ThreadedStmt::Bind {

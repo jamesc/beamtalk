@@ -354,6 +354,71 @@ Actor subclass: MutationCorpusActor
       ]
     self.total
 
+  // BT-3486: the same axis-4 shape in the third construct family —
+  // `on:do:`/`ensure:`. These are the reference cells the TestCase-context
+  // (value-type) analogues in value_type_mutation_matrix_test.bt are compared
+  // against: for an actor, `state.field :=` and the construct's own `StateAcc`
+  // are the SAME map, so the mutation threads out for free and these have
+  // always been correct — it was value-type's separate `Self`/`SelfN` chain
+  // that had no trailing slot to ride out on.
+  stateFieldEnsureTryNonLastReadWrite =>
+    seen := 0
+    [
+      self.total := self.total + 1
+      seen := seen + 1
+    ] ensure: [nil]
+    self.total
+
+  stateFieldEnsureCleanupNonLastReadWrite =>
+    seen := 0
+    [
+      seen := seen + 1
+      nil
+    ]
+      ensure: [
+        self.total := self.total + 7
+        nil
+      ]
+    self.total
+
+  // Try body AND cleanup both write: on the success path the cleanup must see
+  // the try body's write, so the ground truth is 11, not 10.
+  stateFieldEnsureBothNonLastReadWrite =>
+    seen := 0
+    [
+      self.total := self.total + 1
+      seen := seen + 1
+    ]
+      ensure: [
+        self.total := self.total + 10
+        nil
+      ]
+    self.total
+
+  stateFieldOnDoTryNonLastReadWrite =>
+    seen := 0
+    [
+      self.total := self.total + 3
+      seen := seen + 1
+    ] on: Error do: [:e | nil]
+    self.total
+
+  // The handler runs from the state live BEFORE the try body, so the try
+  // body's own `+ 1` is discarded by the raise and the ground truth is 5.
+  stateFieldOnDoHandlerNonLastReadWrite =>
+    seen := 0
+    [
+      self.total := self.total + 1
+      seen := seen + 1
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:e |
+        self.total := self.total + 5
+        nil
+      ]
+    self.total
+
   // ── self-send POSITION axis (BT-3414, ADR 0118 phase 0) ─────────────────
   // `bump`'s own mutation to `self.total`, nested at one SYNTACTIC POSITION
   // per fragment — the same axis

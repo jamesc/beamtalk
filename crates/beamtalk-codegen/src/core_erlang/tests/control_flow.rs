@@ -3278,6 +3278,310 @@ fn test_value_type_multiple_top_level_field_writes_in_loop_still_thread() {
 // which together pin that the root-node skip is per-statement rather than
 // per-body.
 
+// ─── BT-3486: value-type `Self` threading through `on:do:`/`ensure:` ────────
+//
+// The third construct family in ADR 0120's gap list, and the only one that
+// failed SILENTLY: the construct compiled cleanly, dropped the mutation, and
+// left every later `self.field` read looking at the pre-`try` snapshot. Same
+// `TestCase subclass:` framing as the BT-3484 block above (see its header for
+// why that is the only shape that can reach `CodeGenContext::ValueType` with a
+// field write). Runtime ground truths for these shapes are pinned in
+// `stdlib/test/value_type_mutation_matrix_test.bt`'s axis-4 `on:do:`/`ensure:`
+// cells, each paired with the Actor cell for the identical fragment body.
+
+#[test]
+fn test_value_type_field_write_in_ensure_try_body_threads_self_out() {
+    // BT-3486's headline repro. Before the fix the try body's own
+    // `let Self1 = maps:put('total', _Val, Self) in` was computed and then
+    // never referenced again — the construct returned a two-element
+    // `{Result, StateAcc}` tuple with nowhere to put it — so the method's
+    // trailing read was `maps:get('total', Self)`, the ORIGINAL parameter.
+    let src = concat!(
+        "TestCase subclass: VtEnsureSelfThread\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    seen := 0\n",
+        "    [\n",
+        "      self.total := self.total + 1\n",
+        "      seen := seen + 1\n",
+        "    ] ensure: [nil]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtensureselfthread").with_workspace_mode(true),
+    )
+    .expect("value-type field write inside an ensure: try body must compile");
+
+    assert!(
+        code.contains(", StateAcc1, Self1}"),
+        "the try body's return tuple must grow a trailing slot carrying its own \
+         mutated Self1. Got:\n{code}"
+    );
+    assert!(
+        code.contains("let Self1 = call 'erlang':'element'(3,"),
+        "the post-construct rebind must extract the threaded Self from tuple slot 3. \
+         Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'get'('total', Self1)"),
+        "the method's trailing field read must see the threaded Self1, not the \
+         original Self parameter. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@vtensureselfthread", &code);
+}
+
+#[test]
+fn test_value_type_field_write_only_ensure_is_not_sequenced_away() {
+    // The issue's own minimal repro: with no outer local in either block, the
+    // BT-3177 outer-local predicate reports "nothing to thread", so before
+    // BT-3486 the whole construct was classified `Pure` and emitted as a bare
+    // `let _seqN = <construct> in` — discarding the result tuple, and with it
+    // the mutation.
+    let src = concat!(
+        "TestCase subclass: VtEnsureSelfOnly\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    [\n",
+        "      self.total := self.total + 1\n",
+        "      nil\n",
+        "    ] ensure: [nil]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtensureselfonly").with_workspace_mode(true),
+    )
+    .expect("a field-write-only value-type ensure: must compile");
+
+    assert!(
+        code.contains("let _ExTuple"),
+        "the construct must be bound as a threading construct, not sequenced away \
+         as a discarded `let _seqN`. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'get'('total', Self1)"),
+        "the trailing field read must see the threaded Self1. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@vtensureselfonly", &code);
+}
+
+#[test]
+fn test_value_type_ensure_cleanup_chains_from_try_bodys_self() {
+    // On the success path the cleanup runs AFTER the try body, so it must see
+    // the try body's write — but an Erlang binding made inside `try` is not in
+    // scope in the `of` arm, so the cleanup re-seeds the unversioned `Self`
+    // from the tuple's own trailing slot, exactly as it already re-seeds
+    // `StateAcc` from slot 2. Ground truth for this shape is 11, not 10.
+    let src = concat!(
+        "TestCase subclass: VtEnsureBothSelf\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    [\n",
+        "      self.total := self.total + 1\n",
+        "      nil\n",
+        "    ] ensure: [\n",
+        "      self.total := self.total + 10\n",
+        "      nil\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtensurebothself").with_workspace_mode(true),
+    )
+    .expect("field writes in both an ensure: try body and its cleanup must compile");
+
+    assert!(
+        code.contains("let Self = call 'erlang':'element'(3,"),
+        "the success arm must re-seed the version-0 `Self` from the try tuple's \
+         trailing slot before running the cleanup. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'get'('total', Self1)"),
+        "the trailing field read must see the cleanup's own threaded Self1. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@vtensurebothself", &code);
+}
+
+#[test]
+fn test_value_type_field_write_in_on_do_handler_threads_self_out() {
+    // The handler is a SIBLING arm of the try body: only one of the two ever
+    // runs, so both must return the same tuple shape. The arm that does not
+    // itself write carries the construct's pre-`try` `Self` in the slot.
+    let src = concat!(
+        "TestCase subclass: VtOnDoSelfThread\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    seen := 0\n",
+        "    [\n",
+        "      seen := seen + 1\n",
+        "      nil\n",
+        "    ] on: Error do: [:e |\n",
+        "      self.total := self.total + 5\n",
+        "      nil\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtondoselfthread").with_workspace_mode(true),
+    )
+    .expect("value-type field write inside an on:do: handler must compile");
+
+    assert!(
+        code.contains(", Self}"),
+        "the non-writing try arm must carry the pre-try Self in the same slot. \
+         Got:\n{code}"
+    );
+    assert!(
+        code.contains(", Self1}"),
+        "the writing handler arm must carry its own mutated Self1. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'get'('total', Self1)"),
+        "the trailing field read must see the threaded Self1. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@vtondoselfthread", &code);
+}
+
+#[test]
+fn test_value_type_chained_ensure_constructs_seed_each_arm_from_live_self() {
+    // Two such constructs back to back. The second one's arms open with
+    // `let Self = Self1 in` — the version-0 shadow that both makes the second
+    // construct read the first's threaded value AND gives each arm's own
+    // ThreadedIr frame the version-0 entry parameter `verify` requires (a
+    // frame never produces a version it was merely handed).
+    let src = concat!(
+        "TestCase subclass: VtEnsureChainSelf\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    [\n",
+        "      self.total := self.total + 1\n",
+        "      nil\n",
+        "    ] ensure: [nil]\n",
+        "    [\n",
+        "      self.total := self.total + 2\n",
+        "      nil\n",
+        "    ] ensure: [nil]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtensurechainself").with_workspace_mode(true),
+    )
+    .expect("two chained value-type field-writing ensure: constructs must compile");
+
+    assert!(
+        code.contains("try let Self = Self1 in"),
+        "the second construct's try arm must seed its version-0 Self from the \
+         first construct's threaded Self1. Got:\n{code}"
+    );
+    assert!(
+        code.contains("let Self2 = call 'erlang':'element'(3,"),
+        "the second construct's own rebind must advance to Self2. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'get'('total', Self2)"),
+        "the trailing field read must see the SECOND construct's Self2. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@vtensurechainself", &code);
+}
+
+#[test]
+fn test_value_type_on_do_both_arms_writing_mint_sibling_self_versions() {
+    // The `SelfVt` counterpart of BT-3165's sibling-arm hazard (which the two
+    // `..._do_not_trip_nonlinear_version` tests pin for `StateAcc`): the try
+    // body and the handler are alternatives, so both restart from the same
+    // pre-`try` baseline and both mint `Self1`. Two sibling `ThreadedIr`
+    // frames reaching the SAME version must not read as a non-linear version
+    // step, and the two `Self1` bindings must stay in their own Core Erlang
+    // scopes (try body vs catch clause) rather than colliding.
+    let src = concat!(
+        "TestCase subclass: VtOnDoBothSelf\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    [\n",
+        "      self.total := self.total + 1\n",
+        "      Error signal: \"boom\"\n",
+        "    ]\n",
+        "      on: Error\n",
+        "      do: [:e |\n",
+        "        self.total := self.total + 5\n",
+        "        nil\n",
+        "      ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtondobothself").with_workspace_mode(true),
+    )
+    .expect("field writes in BOTH on:do: arms must compile");
+
+    // Both arms carry their own mutated Self1 in the trailing slot — the
+    // handler's raise discards the try body's, which is why the runtime
+    // ground truth for this shape is 5 and not 6 (pinned in
+    // value_type_mutation_matrix_test.bt's
+    // `testStateFieldOnDoHandlerNonLastReadWrite*` pair).
+    assert_eq!(
+        code.matches(", Self1} ").count(),
+        2,
+        "each of the two sibling arms must close its own three-element tuple \
+         with its own Self1. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'get'('total', Self1)"),
+        "the trailing field read must see whichever arm's threaded Self1 ran. \
+         Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@vtondobothself", &code);
+}
+
+#[test]
+fn test_actor_ensure_keeps_two_element_result_tuple() {
+    // The trailing slot is value-type-only. For an actor, `state.field :=` and
+    // the construct's own `StateAcc` are the SAME map, so the mutation already
+    // threads out through slot 2 and adding a third would be dead weight —
+    // `exception_blocks_thread_value_self` is gated on
+    // `CodeGenContext::ValueType`, and this pins that gate.
+    let src = concat!(
+        "Actor subclass: ActorEnsureNoSelfSlot\n",
+        "  state: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    seen := 0\n",
+        "    [\n",
+        "      self.total := self.total + 1\n",
+        "      seen := seen + 1\n",
+        "    ] ensure: [nil]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@actorensurenoselfslot").with_workspace_mode(true),
+    )
+    .expect("an actor ensure: with a state-field write must compile");
+
+    assert!(
+        !code.contains(", Self}") && !code.contains(", Self1}"),
+        "an actor construct must not grow a value-type Self slot. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@actorensurenoselfslot", &code);
+}
+
 // ── BT-3489: `self.field := ...` as a bare `match:` arm body ────────────────
 
 #[test]
