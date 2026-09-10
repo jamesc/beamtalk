@@ -758,9 +758,19 @@ describe("classNameToStdlibFilename", () => {
 });
 
 // BT-3496: the `beamtalk-alias://` virtual URI scheme for a type alias's
-// read-only source view — round-tripped through plain strings (no `vscode`
-// dependency) so `extension.ts`'s `aliasSourceUri`/`AliasContentProvider`
-// only need to wrap these in `vscode.Uri.parse`/read `.path`.
+// read-only source view. `aliasSourceUriString` builds a percent-encoded URI
+// string with no `vscode` dependency; `extension.ts`'s `aliasSourceUri` wraps
+// it in `vscode.Uri.parse`. `parseAliasSourceUriPath` is the inverse — but it
+// must NOT decode again, since a real `vscode.Uri`'s `.path` getter already
+// returns the decoded string (VS Code decodes exactly once when parsing).
+// `simulatedUriPath` below stands in for that real, already-decoded `.path`
+// — decoding the built string exactly once, the same way `vscode.Uri.parse`
+// would — so these round-trip tests exercise the same encode-once/decode-once
+// contract production code relies on, rather than bypassing it.
+function simulatedUriPath(uriString: string): string {
+  return decodeURIComponent(uriString.replace(/^beamtalk-alias:\/\//, ""));
+}
+
 describe("aliasSourceUriString / parseAliasSourceUriPath", () => {
   it("builds a URI string embedding both package and name as path segments", () => {
     expect(aliasSourceUriString("Timeout", "my_app")).toBe("beamtalk-alias:///my_app/Timeout.bt");
@@ -779,10 +789,9 @@ describe("aliasSourceUriString / parseAliasSourceUriPath", () => {
     expect(uri).toBe("beamtalk-alias:///my%20pkg/My%20Alias.bt");
   });
 
-  it("round-trips name and package through build → parse", () => {
+  it("round-trips name and package through build → (simulated) Uri.path → parse", () => {
     const uri = aliasSourceUriString("RestartStrategy", "beamtalk_stdlib");
-    const path = uri.replace(/^beamtalk-alias:\/\//, "");
-    expect(parseAliasSourceUriPath(path)).toEqual({
+    expect(parseAliasSourceUriPath(simulatedUriPath(uri))).toEqual({
       name: "RestartStrategy",
       pkg: "beamtalk_stdlib",
     });
@@ -790,14 +799,33 @@ describe("aliasSourceUriString / parseAliasSourceUriPath", () => {
 
   it("round-trips an unknown package back to undefined", () => {
     const uri = aliasSourceUriString("Timeout", undefined);
-    const path = uri.replace(/^beamtalk-alias:\/\//, "");
-    expect(parseAliasSourceUriPath(path)).toEqual({ name: "Timeout", pkg: undefined });
+    expect(parseAliasSourceUriPath(simulatedUriPath(uri))).toEqual({
+      name: "Timeout",
+      pkg: undefined,
+    });
   });
 
-  it("round-trips percent-encoded characters back to their original form", () => {
+  it("round-trips percent-encoded characters (space) back to their original form", () => {
     const uri = aliasSourceUriString("My Alias", "my pkg");
-    const path = uri.replace(/^beamtalk-alias:\/\//, "");
-    expect(parseAliasSourceUriPath(path)).toEqual({ name: "My Alias", pkg: "my pkg" });
+    expect(parseAliasSourceUriPath(simulatedUriPath(uri))).toEqual({
+      name: "My Alias",
+      pkg: "my pkg",
+    });
+  });
+
+  // Regression test: parseAliasSourceUriPath previously called
+  // decodeURIComponent a second time on top of the real vscode.Uri's
+  // already-decoded `.path`, throwing `URIError: URI malformed` for any
+  // name/package containing a literal `%` and silently downgrading "Go to
+  // Definition" to a false "Source not available" even though real content
+  // existed.
+  it("round-trips a literal '%' in the name/package without throwing (double-decode regression)", () => {
+    const uri = aliasSourceUriString("50% Done", "100% Coverage");
+    expect(() => parseAliasSourceUriPath(simulatedUriPath(uri))).not.toThrow();
+    expect(parseAliasSourceUriPath(simulatedUriPath(uri))).toEqual({
+      name: "50% Done",
+      pkg: "100% Coverage",
+    });
   });
 });
 

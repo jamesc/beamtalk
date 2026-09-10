@@ -336,6 +336,13 @@ class AliasContentProvider implements vscode.TextDocumentContentProvider {
  *
  * Returns undefined when there's nothing to show — callers fall back to
  * their normal "source not available" handling.
+ *
+ * This existence check and `openTextDocument`'s resulting
+ * `AliasContentProvider.provideTextDocumentContent` call each fetch the
+ * alias's content once — a harmless duplicate round trip on every click,
+ * the same tradeoff `openStdlibDocumentForClass`'s own upfront
+ * `fetchContent` call already makes ahead of `StdlibContentProvider`'s.
+ * Worth it for a clean early failure instead of a friendly-placeholder tab.
  */
 async function openAliasSourceDocument(
   info: TypeAliasInfo
