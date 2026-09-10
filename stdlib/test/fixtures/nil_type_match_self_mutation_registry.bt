@@ -176,6 +176,17 @@ Actor subclass: NilTypeMatchSelfMutationRegistry
       ]
     self.count
 
+  // `r` is declared BEFORE the loop (seeded/threaded across iterations —
+  // same StateAcc `Put` concern `bumpWrappedIfTrueReadAfterMerge:` pins for
+  // conditionals) and re-read AFTER the loop finishes, not merely within an
+  // iteration.
+  bumpWrappedInLoopReadAfterLoop: n -> Integer =>
+    r := 0
+    1
+      to: n
+      do: [:i | r := (self.count := self.count + i)]
+    r
+
   bumpWrappedMatch: v -> Integer =>
     v match: [
       1 -> [
@@ -187,6 +198,20 @@ Actor subclass: NilTypeMatchSelfMutationRegistry
         r
       ] value
     ]
+
+  // Claude Review follow-up on this PR: `r` is declared BEFORE the
+  // conditional (so it's SEEDED into both arms' `StateAcc` — see
+  // `seed_conditional_locals`) and reassigned via the wrapped shape inside
+  // ONLY the taken arm; the read AFTER the conditional merges must see the
+  // field-written value, not the stale pre-conditional seed. A wrong
+  // `StateAcc` `Put` here (or a missing one) would not crash — it would
+  // silently read back the seeded `0`.
+  bumpWrappedIfTrueReadAfterMerge: flag -> Integer =>
+    r := 0
+    flag
+      ifTrue: [r := (self.count := self.count + 10)]
+      ifFalse: [r := 5]
+    r + 1
 
   // `r` is bound INSIDE the `ifTrue:` branch, then read by a NESTED loop in
   // the SAME branch — every other local assignment this branch-arm lowering

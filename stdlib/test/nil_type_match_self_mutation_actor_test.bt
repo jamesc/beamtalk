@@ -140,6 +140,20 @@ TestCase subclass: NilTypeMatchSelfMutationActorTest
     self assert: result equals: 22
     self assert: a currentCount equals: 22
 
+  testBumpWrappedIfTrueReadAfterMergeSeesFieldWrittenValue =>
+    // Claude Review follow-up: `r` is seeded (declared before the
+    // conditional) and reassigned via the wrapped shape only in the taken
+    // arm — the post-merge read must see 10 + 1 = 11, not the stale seeded
+    // 0 + 1 = 1 a missing StateAcc `Put` in the C2z fast path would produce.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedIfTrueReadAfterMerge: true) equals: 11
+    self assert: a currentCount equals: 10
+
+  testBumpWrappedIfTrueReadAfterMergeNonTakenBranchUnaffected =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedIfTrueReadAfterMerge: false) equals: 6
+    self assert: a currentCount equals: 0
+
   testBumpWrappedInLoopAccumulatesOnePerIteration =>
     // 1+2+3+4 = 10, written and re-read through the wrapped local each
     // iteration.
@@ -151,6 +165,13 @@ TestCase subclass: NilTypeMatchSelfMutationActorTest
     a := NilTypeMatchSelfMutationRegistry spawn
     self assert: (a bumpWrappedInLoop: 0) equals: 0
     self assert: a currentCount equals: 0
+
+  testBumpWrappedInLoopReadAfterLoopSeesLastIterationValue =>
+    // i=1: count 0->1. i=2: count 1->3. i=3: count 3->6. r == 6 after the
+    // loop, read from outside every iteration's own frame.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedInLoopReadAfterLoop: 3) equals: 6
+    self assert: a currentCount equals: 6
 
   testBumpWrappedMatchThreadsMatchingArmMutation =>
     a := NilTypeMatchSelfMutationRegistry spawn
