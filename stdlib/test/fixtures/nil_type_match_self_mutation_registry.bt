@@ -68,6 +68,82 @@ Actor subclass: NilTypeMatchSelfMutationRegistry
       ] value
     ]
 
+  // BT-3489: the *bare* shape — a match: arm body that is a plain
+  // `self.field := ...` write, with no `[...] value` wrapper and no nested
+  // `ifTrue:` around it. Before BT-3489 nothing classified this as needing
+  // state threading, so each arm's `State{N}` binding stayed scoped to its
+  // own `case` clause while the post-match read referenced it anyway —
+  // `erlc: unbound variable 'State1' in dispatch/4`, despite an (also
+  // wrong) "has no effect" warning promising a silent no-op.
+  bumpBare: v -> Integer =>
+    v match: [
+      1 -> self.count := self.count + 10;
+      _ -> self.count := self.count + 1
+    ]
+    self.count
+
+  // BT-3489: two arms writing DIFFERENT fields, bare. Same alternatives-not-a-
+  // sequence invariant `bumpEitherOf:` pins for the `[...] value` shape.
+  bumpBareEitherOf: choice -> Integer =>
+    choice match: [
+      1 -> self.count := self.count + 1;
+      _ -> self.otherCount := self.otherCount + 1
+    ]
+    self.count + self.otherCount
+
+  // BT-3489: the match: value itself is used after a bare field-writing arm —
+  // the arm's assigned value must be the match's value, and the mutated
+  // state must still be visible to the read that follows.
+  bumpBareUsingResult: v -> Integer =>
+    r := v match: [
+      1 -> self.count := self.count + 10;
+      _ -> self.count := self.count + 1
+    ]
+    r + self.count
+
+  // BT-3489: the same bare shape through the OTHER lowering path — a
+  // `Pattern::Type` arm (`x :: Integer`) forces `generate_match_chain`'s
+  // chain-of-nested-`case`s instead of the all-native single-`case` fast
+  // path the `bumpBare*` methods above take. Both must thread a bare arm
+  // field write identically.
+  bumpBareTyped: v -> Integer =>
+    v match: [
+      x :: Integer -> self.count := self.count + x;
+      _ -> self.count := self.count + 1
+    ]
+    self.count
+
+  // BT-3489: a bare field-writing arm inside a LOOP body — the match's own
+  // arm threading has to compose with the loop's `StateAcc` threading, one
+  // write per iteration. A wrong `base_state` here would not crash; it would
+  // silently accumulate the wrong total, so the ground truth below is the
+  // only thing that pins it.
+  bumpBareInLoop: n -> Integer =>
+    1
+      to: n
+      do: [:i |
+        i match: [
+          1 -> self.count := self.count + 10;
+          _ -> self.count := self.count + 1
+        ]
+      ]
+    self.count
+
+  // BT-3489: a bare field-writing arm inside a NESTED match: arm. The outer
+  // match sees its arm body is itself a threading match: (the mutual
+  // recursion between `control_flow_has_mutations` and
+  // `match_needs_mutation_threading`), so both levels must root at the same
+  // pre-match state.
+  bumpBareNested: v -> Integer =>
+    v match: [
+      1 -> v match: [
+        1 -> self.count := self.count + 5;
+        _ -> 0
+      ];
+      _ -> 0
+    ]
+    self.count
+
   currentCount => self.count
 
   currentOtherCount => self.otherCount

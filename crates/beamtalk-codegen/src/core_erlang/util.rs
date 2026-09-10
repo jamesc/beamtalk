@@ -1209,10 +1209,7 @@ impl CoreErlangGenerator {
         field: &Identifier,
     ) -> Result<()> {
         if self.is_class_var_assignment(expr) {
-            let location = self.span_to_line(expr.span()).map_or_else(
-                || format!("offset {}", expr.span().start()),
-                |line| format!("line {line}"),
-            );
+            let location = self.location_label(expr.span());
             return Err(CodeGenError::ClassVarAssignmentInThreadedBody {
                 field: field.name.to_string(),
                 location,

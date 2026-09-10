@@ -53,6 +53,44 @@ impl CoreErlangGenerator {
             });
         }
 
+        // BT-3489: a value-type instance-method `self.field := ...` arm body
+        // has no `Self`-version merge to thread through (only
+        // `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` have one — see
+        // `generate_vt_conditional_open`), so it must be rejected here rather
+        // than compiled into a `Self{N}` reference that never escapes its own
+        // `case` clause. The Actor form of the same shape IS supported, via
+        // `generate_match_arm_body`'s branch-merge route below.
+        //
+        // Runs before `match_needs_mutation_threading` decides `base_state`
+        // below, so a value-type instance method never reaches the threading
+        // path at all — see that function's own context-gating note.
+        //
+        // Scoped to a value-type INSTANCE method: inside a value-type CLASS
+        // method `self.x :=` is a class-var write on the `ClassVars` chain,
+        // which threads (and is rejected on its own terms by
+        // `reject_class_var_field_assignment`) rather than needing this.
+        if matches!(self.context, super::super::CodeGenContext::ValueType)
+            && !self.in_class_method()
+        {
+            for arm in arms {
+                // Paren-stripped so `1 -> (self.x := 1)` is rejected too — it
+                // crashed `erlc` identically. `is_field_assignment` then
+                // establishes the shape (`Assignment` whose target is a
+                // `self.<field>` `FieldAccess`), so the destructuring below is
+                // total.
+                let bare = arm.body.unwrap_parens();
+                if Self::is_field_assignment(bare)
+                    && let Expression::Assignment { target, span, .. } = bare
+                    && let Expression::FieldAccess { field, .. } = target.as_ref()
+                {
+                    return Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm {
+                        field: field.name.to_string(),
+                        location: self.location_label(*span),
+                    });
+                }
+            }
+        }
+
         let match_var = self.fresh_temp_var("Match");
         let value_doc = self.expression_doc(value)?;
 
@@ -246,10 +284,38 @@ impl CoreErlangGenerator {
         // statement classification (field/local assignment, a nested
         // self-send anywhere `thread_ahead` reaches) applies here too,
         // rather than re-deriving a narrower hoist by hand.
-        if self.conditional_receiver_needs_threading(body) {
+        // BT-3489: an arm body that writes `self.field := ...` on its own
+        // evaluation path takes the same route, and for the same reason —
+        // `expression_doc` would emit the field write's `State1`/`Self1`
+        // binding scoped inside this one `case` arm, leaving every reference
+        // after the `match:` unbound (`erlc: unbound variable 'State1'`).
+        // `generate_conditional_branch_inline` classifies it as ADR 0111
+        // Addendum 5 §C1 and merges the mutated state into this arm's
+        // `{Value, State}` tuple, exactly as an `ifTrue:` branch's own field
+        // write already does.
+        //
+        // Matched on the paren-stripped body, and the synthetic block is built
+        // from that same stripped expression, so `1 -> (self.total := 1)` takes
+        // this route too — parentheses are pure grouping, but without the strip
+        // the arm fell through to `expression_doc` and crashed `erlc` exactly
+        // like the unparenthesized form did. (`subexpr_needs_prelude` already
+        // strips parens internally, so the first disjunct is unaffected.)
+        //
+        // Deliberately matches only a field write that IS the arm body, not one
+        // nested inside a local assignment (`1 -> r := (self.total := 1)`).
+        // That wrapped shape is a separate, pre-existing gap in the shared
+        // ADR 0111 Addendum 5 statement classifier — it fails the SAME
+        // `ThreadedIr` verify (`UnboundVersion State1`) inside a plain
+        // `ifTrue:` branch and a loop body, with no `match:` involved — so
+        // widening the detector here would only convert this arm's `erlc`
+        // crash into a verifier panic without fixing anything. Tracked as
+        // BT-3493, which fixes it in the classifier (covering all three
+        // constructs at once) and can then widen this condition.
+        let bare_body = body.unwrap_parens();
+        if self.conditional_receiver_needs_threading(body) || Self::is_field_assignment(bare_body) {
             let synthetic_block = Block::new(
                 Vec::new(),
-                vec![ExpressionStatement::bare(body.clone())],
+                vec![ExpressionStatement::bare(bare_body.clone())],
                 body.span(),
             );
             let (branch_doc, _branch_final) = self.with_branch_context(|this| {

@@ -292,10 +292,7 @@ impl CoreErlangGenerator {
             // whose own body threads a `ClassVars` mutation must be rejected
             // here too, ahead of every dispatch branch below.
             if let Some(mutation) = self.nested_loop_lost_class_var_mutation(expr) {
-                let location = self.span_to_line(expr.span()).map_or_else(
-                    || format!("offset {}", expr.span().start()),
-                    |line| format!("line {line}"),
-                );
+                let location = self.location_label(expr.span());
                 return Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop {
                     mutation,
                     location,
@@ -310,10 +307,7 @@ impl CoreErlangGenerator {
             // BT-3484 bug class this issue fixes at one level). See
             // `nested_loop_lost_value_self_mutation`'s doc comment.
             if let Some(mutation) = self.nested_loop_lost_value_self_mutation(expr) {
-                let location = self.span_to_line(expr.span()).map_or_else(
-                    || format!("offset {}", expr.span().start()),
-                    |line| format!("line {line}"),
-                );
+                let location = self.location_label(expr.span());
                 return Err(CodeGenError::ValueSelfMutationLostAcrossNestedLoop {
                     mutation,
                     location,
@@ -348,10 +342,7 @@ impl CoreErlangGenerator {
                     } else {
                         unreachable!("is_class_method_self_send only matches MessageSend")
                     };
-                    let location = self.span_to_line(expr.span()).map_or_else(
-                        || format!("offset {}", expr.span().start()),
-                        |line| format!("line {line}"),
-                    );
+                    let location = self.location_label(expr.span());
                     return Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody {
                         selector,
                         location,
@@ -646,10 +637,7 @@ impl CoreErlangGenerator {
             // malformed — see `CodeGenError::ClassVarMutationLostAcrossNestedLoop`'s
             // doc comment.
             if let Some(mutation) = self.nested_loop_lost_class_var_mutation(expr) {
-                let location = self.span_to_line(expr.span()).map_or_else(
-                    || format!("offset {}", expr.span().start()),
-                    |line| format!("line {line}"),
-                );
+                let location = self.location_label(expr.span());
                 return Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop {
                     mutation,
                     location,
@@ -664,10 +652,7 @@ impl CoreErlangGenerator {
             // BT-3484 bug class this issue fixes at one level). See
             // `nested_loop_lost_value_self_mutation`'s doc comment.
             if let Some(mutation) = self.nested_loop_lost_value_self_mutation(expr) {
-                let location = self.span_to_line(expr.span()).map_or_else(
-                    || format!("offset {}", expr.span().start()),
-                    |line| format!("line {line}"),
-                );
+                let location = self.location_label(expr.span());
                 return Err(CodeGenError::ValueSelfMutationLostAcrossNestedLoop {
                     mutation,
                     location,

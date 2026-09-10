@@ -221,6 +221,43 @@ pub enum CodeGenError {
         location: String,
     },
 
+    /// BT-3489: a `self.field := ...` write as a `match:` arm body in
+    /// value-type context (reachable only through the `TestCase` immutability
+    /// exemption — a genuine `Value subclass:` can never write `self.field :=`
+    /// at all, per ADR 0042).
+    ///
+    /// The Actor form of this shape threads correctly — `generate_match_arm_body`
+    /// routes it through the same `generate_conditional_branch_inline` branch-merge
+    /// an `ifTrue:` branch's field write uses. The value type's `Self`/`SelfN`
+    /// version chain (`VersionPrefix::SelfVt`) has its own, separate merge
+    /// machinery (`generate_vt_conditional_open`'s `VtCondSlots` trailing-slot
+    /// tuple), wired for exactly the two arms of `ifTrue:`/`ifFalse:`/
+    /// `ifTrue:ifFalse:` — a `match:`'s N pattern arms have no equivalent yet, so
+    /// the arm's `Self{N}` binding never escapes its own `case` clause and `erlc`
+    /// rejects the module (`unbound variable 'Self1'`). Rejected here rather than
+    /// left to crash, mirroring how every other unsupported value-type field-write
+    /// position produces a clean diagnostic.
+    #[error(
+        "Cannot assign to field 'self.{field}' inside a match: arm at {location}.\n\n\
+             A value type's field writes thread through a separate `Self` version chain that \
+             only ifTrue:/ifFalse:/ifTrue:ifFalse: can merge back today — a match: arm's write \
+             never escapes its own case clause. (The same code in an `Actor subclass:` method \
+             threads correctly.)\n\n\
+             Fix: capture the match: result and assign the field once afterwards:\n\
+             \x20 // Instead of:\n\
+             \x20 v match: [1 -> self.{field} := self.{field} + 10; _ -> self.{field} := self.{field} + 1].\n\
+             \x20 \n\
+             \x20 // Write:\n\
+             \x20 delta := v match: [1 -> 10; _ -> 1].\n\
+             \x20 self.{field} := self.{field} + delta."
+    )]
+    ValueSelfFieldAssignmentInMatchArm {
+        /// The field being assigned.
+        field: String,
+        /// Source location.
+        location: String,
+    },
+
     /// Field assignment in a block that can't thread state back — whether the block is
     /// assigned to a variable, passed as an argument, or returned.
     #[error(
