@@ -26,7 +26,7 @@ use crate::semantic_analysis::type_checker::{
 use crate::source_analysis::Span;
 
 impl TypeChecker {
-    /// BT-2045: Infer argument types for `on:do:` with exception class propagation.
+    /// Infer argument types for `on:do:` with exception class propagation.
     ///
     /// When the first argument is a class reference (e.g., `Exception`, `Error`),
     /// the handler block's parameter is typed as that class instead of
@@ -96,7 +96,7 @@ impl TypeChecker {
         vec![ex_class_ty, handler_ty]
     }
 
-    /// BT-2046: Infer argument types for `ifNotNil:` / `ifNil:ifNotNil:` /
+    /// Infer argument types for `ifNotNil:` / `ifNil:ifNotNil:` /
     /// `ifNotNil:ifNil:` with non-nil narrowing of the receiver propagated to
     /// the not-nil block's parameter.
     ///
@@ -107,7 +107,7 @@ impl TypeChecker {
     /// prior behaviour, which also produced `Dynamic`).
     ///
     /// Nil-branch blocks (`ifNil:`) and blocks with no declared parameter get
-    /// the default inference path — solo `ifNil:` (BT-2824) also lands here
+    /// the default inference path — solo `ifNil:` also lands here
     /// (`not_nil_index` is `None` for it) purely to reuse that default path,
     /// which preserves the block's `Block(..., R)` return type.
     pub(in crate::semantic_analysis::type_checker) fn infer_args_for_if_not_nil(
@@ -121,7 +121,7 @@ impl TypeChecker {
     ) -> Vec<InferredType> {
         // Compute the non-nil branch type once. `non_nil_type` strips
         // `UndefinedObject` / `Nil` from a union and returns other types
-        // unchanged (matches the `isNil ifFalse:` narrowing — BT-2048).
+        // unchanged (matches the `isNil ifFalse:` narrowing).
         let non_nil_ty = Self::non_nil_type(receiver_ty);
 
         // Positions of the `ifNotNil:` block in the argument list per selector.
@@ -192,7 +192,7 @@ impl TypeChecker {
         // Zero-arity `ifNotNil: [ ... ]` — still call the typed-param helper
         // with an empty param list so the returned `Block(..., R)` type
         // carries the body's return type (consistent with
-        // `infer_block_with_narrowing`; relevant for BT-2047).
+        // `infer_block_with_narrowing`).
         let param_types: Vec<InferredType> = if block.parameters.is_empty() {
             vec![]
         } else {
@@ -228,7 +228,7 @@ impl TypeChecker {
         )
     }
 
-    /// BT-2047: Compute the return type of `ifNil:ifNotNil:` /
+    /// Compute the return type of `ifNil:ifNotNil:` /
     /// `ifNotNil:ifNil:` as the union of both branch bodies' return types.
     ///
     /// `arg_types` must be the pair of `Block(..., R)` types produced by
@@ -276,7 +276,7 @@ impl TypeChecker {
         Some(InferredType::union_of(&[a, b]))
     }
 
-    /// BT-2824: Compute the return type of a solo `ifNil:` / `ifNotNil:` send
+    /// Compute the return type of a solo `ifNil:` / `ifNotNil:` send
     /// on a `T | Nil` union receiver as the union of the "self" branch
     /// (executed when the nil-check condition doesn't hold) and the block
     /// branch's inferred return type `R`.
@@ -382,7 +382,7 @@ impl TypeChecker {
         Some(InferredType::union_of(&[self_branch, block_ret]))
     }
 
-    /// BT-2868: Compute the return type of a solo `ifTrue:` / `ifFalse:` send
+    /// Compute the return type of a solo `ifTrue:` / `ifFalse:` send
     /// on a receiver whose type is exactly `Boolean` as the union of the
     /// "self" branch (the sibling `True`/`False` case that does not invoke
     /// the block, and thus statically returns `self` typed as `Boolean`) and
@@ -418,8 +418,8 @@ impl TypeChecker {
     /// `Boolean`" reasoning above valid — if a third subclass existed and
     /// overrode `ifTrue:`/`ifFalse:` to return something outside `True |
     /// False | R`, the inferred union here would be unsound for it. This is
-    /// enforced by `Boolean` being declared `sealed` in `stdlib/src/boolean.bt`
-    /// (BT-2886), which closes it to exactly its two existing `sealed`
+    /// enforced by `Boolean` being declared `sealed` in `stdlib/src/boolean.bt`,
+    /// which closes it to exactly its two existing `sealed`
     /// subclasses, `True` and `False`. Unlike the `ifNil:`/`ifNotNil:`
     /// self-branch check above, there's no `hierarchy.find_method(...)` guard
     /// for this half of the assumption — it relies on the parser/semantic
@@ -521,9 +521,9 @@ impl TypeChecker {
                 // Single argument: narrow in the false branch (complement)
                 if let Some(arg) = arguments.first() {
                     if let Some(ref false_ty) = info.false_type {
-                        // Explicit false type (e.g., Result isOk/isError — BT-1859;
-                        // singleton (in)equality complement — BT-2617; or
-                        // class = / isKindOf: nominal-class complement — BT-2744)
+                        // Explicit false type (e.g., Result isOk/isError;
+                        // singleton (in)equality complement; or
+                        // class = / isKindOf: nominal-class complement)
                         let ty = self.infer_block_with_narrowing(
                             arg,
                             &info.variable,
@@ -553,12 +553,12 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else {
                         // respondsTo: ifFalse: → no useful narrowing. (isKindOf:
-                        // now populates `false_type` above — BT-2744; class =:=
+                        // populates `false_type` above; class =:=
                         // still leaves it None, since its false branch can't be
                         // narrowed via subtree exclusion.)
                         //
-                        // BT-2868: still preserve the block's own return type
-                        // as `Block(..., R)` (mirrors BT-2020's rationale for
+                        // Still preserve the block's own return type
+                        // as `Block(..., R)` (mirrors the rationale for
                         // the narrowed branches above) — without this, a solo
                         // `respondsTo: ifFalse: [...]` on `Boolean` lost `R`
                         // entirely and `if_true_false_solo_boolean_ret_ty`
@@ -594,9 +594,9 @@ impl TypeChecker {
                 }
                 if let Some(false_arg) = arguments.get(1) {
                     if let Some(ref false_ty) = info.false_type {
-                        // Explicit false type (e.g., Result isOk/isError — BT-1859;
-                        // singleton (in)equality complement — BT-2617; or
-                        // class = / isKindOf: nominal-class complement — BT-2744)
+                        // Explicit false type (e.g., Result isOk/isError;
+                        // singleton (in)equality complement; or
+                        // class = / isKindOf: nominal-class complement)
                         let ty = self.infer_block_with_narrowing(
                             false_arg,
                             &info.variable,
@@ -626,8 +626,8 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else {
                         // respondsTo: ifTrue: [...] ifFalse: [...] — no useful
-                        // narrowing for false block. (isKindOf: now populates
-                        // `false_type` above — BT-2744; class =:= still leaves
+                        // narrowing for false block. (isKindOf: populates
+                        // `false_type` above; class =:= still leaves
                         // it None, since its false branch can't be narrowed via
                         // subtree exclusion.)
                         let ty = self.infer_expr(false_arg, hierarchy, env, in_abstract_method);
@@ -653,7 +653,7 @@ impl TypeChecker {
     /// Type-check a block expression (or any expression) with a variable narrowed
     /// to a specific type in a child environment.
     ///
-    /// BT-2020: Preserves the block body's inferred return type as a `type_arg`
+    /// Preserves the block body's inferred return type as a `type_arg`
     /// on the returned `Block(..., R)` type. Without this, `ifTrue:ifFalse:`
     /// return types collapsed to `Dynamic` because `infer_method_local_params`
     /// requires the Block argument to carry its return type before it can unify
@@ -669,7 +669,7 @@ impl TypeChecker {
     ) -> InferredType {
         if let Expression::Block(block) = arg {
             let mut block_env = env.child();
-            // BT-2050: narrowing uses the unified refinement API; the layer
+            // Narrowing uses the unified refinement API; the layer
             // is block-scoped because the child env is dropped on return.
             block_env.push_refinement(RefinementLayer::block_scope(
                 var_key.clone(),
@@ -707,7 +707,7 @@ impl TypeChecker {
         }
     }
 
-    /// Finds the `Block(...)` arm of a declared type (BT-2864), returning its
+    /// Finds the `Block(...)` arm of a declared type, returning its
     /// type parameters (the block's own param types plus trailing return
     /// type — e.g. `[A, B, Boolean]` for `Block(A, B, Boolean)`).
     ///
@@ -724,11 +724,11 @@ impl TypeChecker {
     /// conservatively falls back to the pre-fix Dynamic behaviour rather than
     /// guessing).
     ///
-    /// BT-3076: matches structurally on [`DeclaredType`] rather than
+    /// Matches structurally on [`DeclaredType`] rather than
     /// re-parsing a rendered string — a `Union`'s members are already the
     /// flattened top-level arms (mirroring `TypeAnnotation::Union`), so no
     /// depth-aware string split is needed to avoid a nested-Union
-    /// mis-detection the way the pre-BT-3076 string version required.
+    /// mis-detection a string-based version would require.
     ///
     /// `pub(super)` so `type_checker::tests` can unit-test this directly
     /// rather than only indirectly through diagnostics (a Dynamic receiver
@@ -764,7 +764,7 @@ impl TypeChecker {
     /// With E=String (from receiver type args), block params get typed as String
     /// instead of `Dynamic(UnannotatedParam)`.
     ///
-    /// **BT-2042:** When the receiver is Dynamic (or the method can't be resolved),
+    /// **Dynamic-receiver block params:** When the receiver is Dynamic (or the method can't be resolved),
     /// block arguments still need their parameters typed — otherwise each unannotated
     /// block param defaults to `Dynamic(UnannotatedParam)`, which fires the
     /// "expression inferred as Dynamic in typed class" warning at every use of the
@@ -774,7 +774,7 @@ impl TypeChecker {
     /// `Dynamic(DynamicReceiver)` into block params in the fallback paths so
     /// downstream uses propagate that reason (which is filtered from the warning),
     /// matching how the send result itself is already classified.
-    #[allow(clippy::too_many_arguments)] // class-side flag (BT-2158) added to existing 7 args
+    #[allow(clippy::too_many_arguments)] // class-side flag added to existing 7 args
     #[allow(clippy::too_many_lines)] // two-phase block-arg inference adds necessary branches
     pub(in crate::semantic_analysis::type_checker) fn infer_args_with_block_context(
         &mut self,
@@ -798,7 +798,7 @@ impl TypeChecker {
             receiver_ty
         };
 
-        // BT-2868: a `Union`-typed receiver sending a solo `ifTrue:` /
+        // A `Union`-typed receiver sending a solo `ifTrue:` /
         // `ifFalse:` still needs its (zero-arity) block argument's own
         // return type preserved as `Block(..., R)`, even though there's no
         // single declared method signature to resolve block *param* types
@@ -833,13 +833,13 @@ impl TypeChecker {
             }
         }
 
-        // BT-3463: a `Union`-typed receiver (e.g. the `V | T` widened result of
-        // `Dictionary>>at:ifAbsent:`, BT-3408) still has a resolvable method
+        // A `Union`-typed receiver (e.g. the `V | T` widened result of
+        // `Dictionary>>at:ifAbsent:`) still has a resolvable method
         // signature on each of its members — resolve declared `Block(...)`
         // param types per member and merge them, instead of falling through
         // to the `Dynamic`-receiver fallback below (which types every block
-        // param `Dynamic(UnannotatedParam)`, a reason the BT-1914 lint does
-        // not filter). Handles every argument (block and non-block alike),
+        // param `Dynamic(UnannotatedParam)`, a reason the "Dynamic in typed
+        // class" lint does not filter). Handles every argument (block and non-block alike),
         // so it always returns rather than conditionally falling through —
         // falling through here would re-run `infer_expr` on non-block
         // arguments already inferred inside it, double-emitting diagnostics.
@@ -859,7 +859,7 @@ impl TypeChecker {
         // For non-Known receivers (Dynamic, Never, etc.), we can't resolve block
         // param types from the signature — but we can still propagate a reason-
         // preserving type into the block params so their uses don't re-fire the
-        // "Dynamic in typed class" warning (BT-2042).
+        // "Dynamic in typed class" warning.
         let InferredType::Known {
             class_name,
             type_args,
@@ -877,7 +877,7 @@ impl TypeChecker {
 
         // Look up the method to get param types. For class-side sends
         // (`ClassName foo:` or `self foo:` inside a class method), look up the
-        // class-side method; otherwise the instance method. BT-2158: without
+        // class-side method; otherwise the instance method. Without
         // this split, class-side block parameters never get their declared
         // types propagated to the call-site block params.
         let method_lookup = if is_class_side_send {
@@ -896,7 +896,7 @@ impl TypeChecker {
         };
 
         // Check if any param type is a Block(...) type, or a Union containing
-        // one (BT-2864: e.g. `Block(A, B) | Handler | Router`).
+        // one (e.g. `Block(A, B) | Handler | Router`).
         let has_block_param = method.param_types.iter().any(|pt| {
             pt.as_ref()
                 .is_some_and(|t| Self::find_block_arm(t).is_some())
@@ -965,7 +965,7 @@ impl TypeChecker {
                             in_abstract_method,
                         );
                     } else {
-                        // BT-2020: Block(R) — zero-arity block with a return type param.
+                        // Block(R) — zero-arity block with a return type param.
                         // Use `infer_block_with_typed_params` with no param types so the
                         // returned Block type_args preserve the body's return type (R).
                         // Without this, the bare `Block` returned by `infer_expr` gives
@@ -990,7 +990,7 @@ impl TypeChecker {
         arg_types
     }
 
-    /// BT-3463: resolve declared block-parameter types for each block-typed
+    /// Resolve declared block-parameter types for each block-typed
     /// argument in a message sent to a `Union`-typed receiver, mirroring the
     /// `Known`-receiver push-down above but merged across the union's members.
     ///
@@ -1059,14 +1059,14 @@ impl TypeChecker {
             else {
                 continue; // Dynamic / other non-Known member: no method to resolve.
             };
-            // BT-2624: a singleton member (`#foo`) resolves through `Symbol`,
+            // A singleton member (`#foo`) resolves through `Symbol`,
             // mirroring `infer_union_message_send`'s member resolution.
             let resolve_name: &str = if member_name.starts_with('#') {
                 "Symbol"
             } else {
                 member_name.as_str()
             };
-            // BT-1857: Nil is expected to be guarded by isNil/notNil checks;
+            // Nil is expected to be guarded by isNil/notNil checks;
             // it never contributes a block-param resolution here either.
             if WellKnownClass::from_str(resolve_name).is_some_and(WellKnownClass::is_nil_class) {
                 continue;
@@ -1074,7 +1074,7 @@ impl TypeChecker {
             if !hierarchy.has_class(resolve_name) {
                 continue;
             }
-            // BT-3463 review: branch the DNU-override check on class-side vs
+            // Branch the DNU-override check on class-side vs
             // instance-side, mirroring the `find_class_method`/`find_method`
             // branch immediately below — a class-side-only or
             // instance-side-only override must only skip the matching send
@@ -1129,7 +1129,7 @@ impl TypeChecker {
                         })
                         .collect()
                 } else {
-                    // BT-2020: Block(R) — zero-arity block, no params to resolve.
+                    // Block(R) — zero-arity block, no params to resolve.
                     Vec::new()
                 };
                 per_position[i].push(block_param_types);
@@ -1171,7 +1171,7 @@ impl TypeChecker {
     /// members disagree on arity (can't merge positionally). Otherwise
     /// `Some(merged)`, one entry per parameter slot: the single concrete type
     /// every contributing member agrees on — a `Dynamic` contribution (e.g.
-    /// from BT-3408's `at:ifAbsent: [#()]` widening, whose empty-literal
+    /// from an `at:ifAbsent: [#()]` widening, whose empty-literal
     /// fallback member resolves to `Dynamic`) never blocks agreement, since
     /// it carries no positive information; only two *concrete* types
     /// disagreeing does. Falls back to `Dynamic(UnannotatedParam)` when no
@@ -1216,10 +1216,10 @@ impl TypeChecker {
     /// Walks each argument via `infer_expr`, **except** for block literals: those
     /// are walked with their parameters pre-bound to `Dynamic(DynamicReceiver)`
     /// so that usages inside the block body inherit a "propagated Dynamic" reason
-    /// (which is filtered out of the BT-1914 "Dynamic in typed class" warning).
+    /// (which is filtered out of the "Dynamic in typed class" warning).
     /// Without this step, each block param would default to
     /// `Dynamic(UnannotatedParam)`, re-firing the warning at every use of the
-    /// block param inside a `typed` class — see BT-2042.
+    /// block param inside a `typed` class.
     ///
     /// The chosen reason follows the send's result classification at line
     /// `infer_message_send_with_receiver_ty` fallback (see `Dynamic(DynamicReceiver)`
@@ -1288,7 +1288,7 @@ impl TypeChecker {
             );
         }
         let body_ty = self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
-        // BT-2866: a block whose body ends in a top-level non-local return
+        // A block whose body ends in a top-level non-local return
         // (`^expr`) never produces a *local* value — it diverges out of the
         // enclosing method entirely, and `^expr`'s type naturally matches
         // whatever the enclosing method itself declares as its return type
@@ -1329,7 +1329,7 @@ impl TypeChecker {
     /// Check whether a type is *only* the nil type (`UndefinedObject` or
     /// its legacy `Nil` alias). Returns `true` for the bare nil type itself,
     /// or a union whose members are all nil. Used by the `ifNotNil:` block-
-    /// param narrowing (BT-2046) to avoid typing the param as `UndefinedObject`
+    /// param narrowing to avoid typing the param as `UndefinedObject`
     /// when the non-nil branch is dead code.
     pub(in crate::semantic_analysis::type_checker) fn is_nil_only(ty: &InferredType) -> bool {
         match ty {

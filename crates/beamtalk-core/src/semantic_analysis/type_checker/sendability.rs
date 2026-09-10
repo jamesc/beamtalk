@@ -25,7 +25,7 @@
 //! structured so that later phases slot in without touching the boundary
 //! checks:
 //!
-//! * **Phase 1 (BT-2755):** `Value` structural composition (weakest field
+//! * **Phase 1:** `Value` structural composition (weakest field
 //!   tier), generic `type_args` (`List(Port)` → `HandleScoped`), and user
 //!   `handleScope:` declarations.
 
@@ -199,11 +199,12 @@ const MAX_COMPOSE_DEPTH: u8 = 12;
 /// Derive the sendability tier of an inferred type. **The single source of
 /// truth** — every boundary check calls this.
 ///
-/// `alias_registry` (BT-2936, ADR 0108 follow-up to BT-2928) is threaded
+/// `alias_registry` (ADR 0108 follow-up) is threaded
 /// through to the `Value` structural composition below so an alias-typed
 /// field expands to its declared type's tier instead of falling back to
 /// `Tier::Unknown` for the opaque alias name. Pass `None` when no registry
-/// is available, matching this function's pre-BT-2936 behaviour.
+/// is available, in which case an alias-typed field falls back to
+/// `Tier::Unknown` for the opaque alias name.
 #[must_use]
 pub(crate) fn tier_of(
     ty: &InferredType,
@@ -283,8 +284,8 @@ fn tier_of_known(
     }
 
     // Base tier from the class kind, then compose structurally. A user
-    // `handleScope:` declaration classifies an otherwise-`Unknown` Object
-    // (BT-2754); it is a no-op on Value/Actor kinds (see
+    // `handleScope:` declaration classifies an otherwise-`Unknown` Object;
+    // it is a no-op on Value/Actor kinds (see
     // `check_handle_scope_on_object`), which keep their structural tier — so
     // the scope is consulted only inside the `Object` arm, and an `Actor` with
     // a stray `handleScope:` stays `SendableRef`, not `HandleScoped`.
@@ -319,8 +320,8 @@ fn tier_of_known(
                 // annotation would be treated as the class name,
                 // `resolve_class_kind` would find no such class, and a
                 // generic field would silently drop to `Unknown` instead of
-                // composing its element tier (BT-2770).
-                // BT-2936: `alias_registry` (threaded from the top-level
+                // composing its element tier.
+                // `alias_registry` (threaded from the top-level
                 // `tier_of` call) additionally expands an alias-typed field
                 // to its declared type before tiering, instead of treating
                 // the alias name as an unresolved nominal class.
@@ -353,10 +354,10 @@ fn tier_of_known(
 /// silent tiers are deliberately not shown: `Sendable` is the unremarkable
 /// default (rendering it on every `Integer` would be noise) and `Unknown`
 /// means the checker has nothing to say.
-/// BT-3361: widened from `pub(crate)` to `pub` — `queries::hover_provider`
+/// `pub`, not `pub(crate)`: `queries::hover_provider`
 /// (Language Service) reaches this from the standalone
-/// `beamtalk-language-service` crate now, so `pub(crate)` visibility is no
-/// longer reachable.
+/// `beamtalk-language-service` crate, so `pub(crate)` visibility is not
+/// reachable.
 #[must_use]
 pub fn hover_tier_label(
     ty: &InferredType,
@@ -539,9 +540,9 @@ mod tests {
 
     #[test]
     fn value_composition_inherits_generic_field_element_tier() {
-        // BT-2770: a Value with a `List(Port)` field must compose to
+        // A Value with a `List(Port)` field must compose to
         // HandleScoped(#process), matching the bare-`Port` field case. The
-        // stored field type is the string "List(Port)"; the fix parses it back
+        // stored field type is the string "List(Port)"; it must parse back
         // into `Known("List", [Known("Port")])` so the element tier survives.
         let tokens = crate::source_analysis::lex_with_eof(
             "typed Value subclass: Wrapper\n  field: ports :: List(Port) = nil",
@@ -581,11 +582,10 @@ mod tests {
         );
     }
 
-    /// BT-2936: a `Value`'s alias-typed field composes the tier of the
+    /// A `Value`'s alias-typed field composes the tier of the
     /// alias's *expansion* (here, `Port` → `HandleScoped(#process)`) when a
     /// registry is threaded through, instead of falling back to
-    /// `Tier::Unknown` for the opaque alias name — the deferred half of
-    /// BT-2928's string-resolver alias fix for sendability tiering.
+    /// `Tier::Unknown` for the opaque alias name.
     #[test]
     fn value_composition_inherits_alias_typed_field_tier() {
         use crate::semantic_analysis::alias_registry::AliasRegistry;
@@ -607,7 +607,7 @@ mod tests {
             Tier::HandleScoped(HandleScope::Process)
         );
         // Without the registry, the alias name stays opaque — the
-        // pre-BT-2936 fallback this test guards against regressing back to.
+        // fallback this test guards against regressing back to.
         assert_eq!(tier_of(&known("Wrapper"), &h, None), Tier::Unknown);
     }
 

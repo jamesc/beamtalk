@@ -32,16 +32,16 @@ mod literals;
 mod send;
 
 /// How [`type_resolver::resolve_declared_type`] treats constructs that
-/// only make sense in a particular resolution setting (BT-3075, BT-3080).
+/// only make sense in a particular resolution setting.
 ///
 /// `Substitution` collapses an unresolved bare type param (`T`) to `Dynamic`
-/// (BT-1834) and stamps `Substituted` provenance on parsed generics.
+/// and stamps `Substituted` provenance on parsed generics.
 /// `Declared` keeps a bare single-letter name as a nominal class — its
 /// callers guard with `is_generic_type_param` themselves — and stamps
 /// `Declared` provenance. `Extracted` is `Declared`'s sibling for types that
 /// came from an Erlang `-spec` rather than Beamtalk source text — same
 /// keyword/alias/generic handling, but stamps `Extracted` provenance instead
-/// (BT-3080: folds `native_types::map_type_name`'s parsing into this same
+/// (folds `native_types::map_type_name`'s parsing into this same
 /// resolver rather than reimplementing it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TypeStringContext {
@@ -58,11 +58,11 @@ impl TypeChecker {
     /// Checks types in a module using the class hierarchy for method resolution.
     ///
     /// Method bodies are processed first so that inferred return types are
-    /// available when type-checking top-level expressions (BT-1047). This
+    /// available when type-checking top-level expressions. This
     /// enables single-pass chain resolution: the `TypeChecker` consults its own
     /// `method_return_types` map when the hierarchy has no explicit annotation.
     pub fn check_module(&mut self, module: &Module, hierarchy: &ClassHierarchy) {
-        // BT-3123 test-only instrumentation — see `CHECK_MODULE_CALL_COUNT`'s doc.
+        // Test-only instrumentation — see `CHECK_MODULE_CALL_COUNT`'s doc.
         #[cfg(any(test, feature = "test"))]
         super::CHECK_MODULE_CALL_COUNT.with(|c| c.set(c.get() + 1));
 
@@ -79,7 +79,7 @@ impl TypeChecker {
             if is_typed {
                 self.check_typed_state_annotations(&class.state, &class.name.name);
                 self.check_typed_state_annotations(&class.class_variables, &class.name.name);
-                // Enable Dynamic inference warnings for typed classes (BT-1914)
+                // Enable Dynamic inference warnings for typed classes
                 self.typed_class_context = Some(class.name.name.clone());
             }
 
@@ -111,7 +111,7 @@ impl TypeChecker {
             // Check state default values match declared types
             self.check_state_defaults(class, hierarchy);
 
-            // BT-1947: Uninitialized state warning removed — type annotation
+            // Uninitialized state is not warned about — a type annotation
             // replaces the need for a default value.
 
             // Clear typed class context after processing all methods
@@ -212,7 +212,7 @@ impl TypeChecker {
         if is_typed && check_typed_annotations {
             self.check_typed_method_annotations(method, class_name);
         }
-        // BT-2022: Cache the full InferredType (including type_args)
+        // Cache the full InferredType (including type_args)
         // so callers see e.g. List(String) instead of bare List.
         if method.return_type.is_none()
             && !method
@@ -245,15 +245,15 @@ impl TypeChecker {
     /// state-field fallback in `infer_expr` from mis-inferring an untyped param
     /// as `self.<field>` when the parameter name shadows a state field name.
     ///
-    /// `protocol_registry` (ADR 0102 §1/§3, BT-2743) is passed straight
+    /// `protocol_registry` (ADR 0102 §1/§3) is passed straight
     /// through to the resolver so a parameter typed `:: P1 & P2` resolves
     /// class ∩ protocol correctly; pass `None` when no registry is available.
     ///
-    /// `alias_registry` (ADR 0108, BT-2895) is likewise passed straight
+    /// `alias_registry` (ADR 0108) is likewise passed straight
     /// through so a parameter typed `:: RestartStrategy` expands to its
     /// declared union; pass `None` when no registry is available.
     ///
-    /// `referenced_aliases` (ADR 0108 hot-reload re-check trigger, BT-2899)
+    /// `referenced_aliases` (ADR 0108 hot-reload re-check trigger)
     /// accumulates every alias name touched while resolving each typed
     /// parameter's annotation — see
     /// [`type_resolver::resolve_type_annotation_with_alias_deps`]'s
@@ -283,23 +283,23 @@ impl TypeChecker {
     /// Thin wrapper around
     /// [`type_resolver::resolve_type_annotation`] that supplies an
     /// empty substitution map and no protocol registry or alias registry
-    /// (ADR 0108, BT-2895). Test-only: every production call site needs at
+    /// (ADR 0108). Test-only: every production call site needs at
     /// least one of method-local / class-level type-parameter substitution,
     /// correct resolution of `&`-typed protocol intersections (ADR 0102
-    /// §1/§3, BT-2743), or type-alias expansion, so they all call the
+    /// §1/§3), or type-alias expansion, so they all call the
     /// resolver function directly with a populated
     /// [`type_resolver::SubstitutionMap`] / protocol registry / alias
     /// registry instead. Kept as a convenience for tests that only care
     /// about the "no registries" resolution path.
     ///
-    /// **References:** BT-2025 — centralised parametric type resolution.
+    /// **References:** centralised parametric type resolution.
     #[cfg(test)]
     pub(super) fn resolve_type_annotation(ann: &TypeAnnotation) -> InferredType {
         let subst = type_resolver::SubstitutionMap::new();
         type_resolver::resolve_type_annotation(ann, &subst, None, None)
     }
 
-    /// BT-2862: When a method body is exactly `self delegate` (the ADR 0056 /
+    /// When a method body is exactly `self delegate` (the ADR 0056 /
     /// ADR 0101 native-facade marker pattern) and the enclosing method
     /// declares an explicit return-type annotation, trust that annotation for
     /// the expression's inferred type instead of the `Dynamic` that `delegate`'s
@@ -327,7 +327,7 @@ impl TypeChecker {
     /// intersection (`A & B`) or difference (`A \ B`) return-type annotation
     /// on a `self delegate` body won't resolve precisely. This is a narrow
     /// case with no known `self delegate` use today. Alias resolution (ADR
-    /// 0108, BT-2895) *is* threaded through via `self.alias_registry`, so a
+    /// 0108) *is* threaded through via `self.alias_registry`, so a
     /// `self delegate` method declaring `-> RestartStrategy` resolves
     /// correctly.
     pub(super) fn resolve_self_delegate_return_type(
@@ -408,7 +408,7 @@ impl TypeChecker {
                             if let Some(InferredType::Known { class_name, .. }) =
                                 env.get_local("self")
                             {
-                                // BT-2048 / BT-2062: Check the synthetic `self.<field>`
+                                // Check the synthetic `self.<field>`
                                 // key first so the bare and explicit spellings narrow
                                 // consistently.
                                 if let Some(narrowed) = env.get(&EnvKey::self_field(name)) {
@@ -434,7 +434,7 @@ impl TypeChecker {
                 }
             }
             // A bare class literal `Foo` is the class *object*, whose type is the
-            // metatype `Meta{Foo}` (ADR 0083 / BT-2260) — *not* an instance of
+            // metatype `Meta{Foo}` (ADR 0083) — *not* an instance of
             // `Foo`. Typing it `Meta{C}` makes a class value route class-side
             // wherever it flows (through a variable, collection, or FFI return),
             // not just when used syntactically as a direct receiver (`Foo new`).
@@ -448,14 +448,14 @@ impl TypeChecker {
             // unaffected by this inference change.
             Expression::ClassReference { name, .. } => InferredType::meta(name.name.clone()),
             // Field access — infer type from declared state type for self.field
-            // BT-2048: Check env first for narrowed type (e.g. inside isNil ifFalse: block)
+            // Check env first for narrowed type (e.g. inside isNil ifFalse: block)
             Expression::FieldAccess {
                 receiver, field, ..
             } => {
                 let mut result = InferredType::Dynamic(DynamicReason::Unknown);
                 if let Expression::Identifier(recv_id) = receiver.as_ref() {
                     if recv_id.name == "self" {
-                        // BT-2048 / BT-2062: Check for a narrowed type in the env
+                        // Check for a narrowed type in the env
                         // first. Inside `self.field isNil ifFalse: [...]`, the
                         // block env will have `SelfField("field")` → narrowed
                         // non-nil type. Assign to `result` (rather than returning
@@ -491,7 +491,7 @@ impl TypeChecker {
             // fire-and-forget: it enqueues the message and evaluates to `nil`
             // rather than the (asynchronous) reply. Type it as `Nil`
             // (`UndefinedObject`) so a bare cast statement is `Nil`-valued
-            // (ADR 0104 Phase 1, BT-2749).
+            // (ADR 0104 Phase 1).
             Expression::MessageSend { is_cast: true, .. } => {
                 InferredType::known(WellKnownClass::UndefinedObject.as_str())
             }
@@ -596,7 +596,7 @@ impl TypeChecker {
             }
             // Super — resolve to parent class type for method validation.
             //
-            // BT-2025 / BT-2021: Uses `super_receiver_type` so the parent
+            // Uses `super_receiver_type` so the parent
             // receiver threads the *child's* type-arg bindings into the
             // parent's type-param positions, mapped via the child's
             // `superclass_type_args` (`ParamRef` for `Sub(R) extends Base(R)`,
@@ -642,9 +642,9 @@ impl TypeChecker {
     }
 
     /// Shared tail of [`Self::infer_expr`] — record the inferred type in the
-    /// LSP type map and emit the BT-1914 "Dynamic in typed class" warning.
+    /// LSP type map and emit the "Dynamic in typed class" warning.
     ///
-    /// Factored out so the cascade fast-path (BT-2035) can apply the same
+    /// Factored out so the cascade fast-path can apply the same
     /// post-processing to the first-send `MessageSend` node, which it resolves
     /// via `infer_message_send_with_receiver_ty` instead of routing through
     /// `infer_expr`.
@@ -655,13 +655,13 @@ impl TypeChecker {
     ) {
         // Record inferred type for the expression's full span for LSP queries.
         // Dynamic types with a known reason (e.g., UnannotatedParam) are included
-        // so that hover can display "Dynamic (reason)" — see BT-1912.
+        // so that hover can display "Dynamic (reason)".
         // Only Dynamic(Unknown) is skipped since it carries no useful provenance.
         if !matches!(ty, InferredType::Dynamic(DynamicReason::Unknown)) {
             self.type_map.insert(expr.span(), ty.clone());
         }
 
-        // BT-1914 / BT-3469: detecting whether this Dynamic warrants the
+        // Detecting whether this Dynamic warrants the
         // "Dynamic in typed class" warning is pure data (see
         // `detect_dynamic_in_typed_class`); rendering it as a diagnostic is
         // `validation.rs`'s job.
@@ -672,7 +672,7 @@ impl TypeChecker {
         }
     }
 
-    /// Detect the BT-1914 "Dynamic in typed class" fact for `ty` (an
+    /// Detect the "Dynamic in typed class" fact for `ty` (an
     /// expression's freshly-inferred type) under `typed_class_context` (the
     /// enclosing `typed` class's name, if any) — pure data, no diagnostic
     /// construction; see `validation.rs::emit_dynamic_in_typed_class` for
@@ -681,7 +681,7 @@ impl TypeChecker {
     /// Only warns for root-cause Dynamic reasons: not `DynamicReceiver`
     /// (propagated from a receiver that already produced its own warning),
     /// not `Unknown` (no actionable message), and not `ExplicitDynamic`
-    /// (BT-2865 — the author already wrote `Dynamic` in a type annotation,
+    /// (the author already wrote `Dynamic` in a type annotation,
     /// so "add a type annotation" would be nonsensical advice for something
     /// that already has one).
     fn detect_dynamic_in_typed_class(
@@ -737,7 +737,7 @@ impl TypeChecker {
 
             body_type = self.infer_expr(expr, hierarchy, env, in_abstract_method);
 
-            // Early-return narrowing (ADR 0068 Phase 1g, extended in BT-2049):
+            // Early-return narrowing (ADR 0068 Phase 1g):
             // After `x isNil ifTrue: [<diverge>]`, narrow x to non-nil for the
             // rest.  Divergence covers both `^` returns and calls to
             // `-> Never` methods like `self error: "..."`.

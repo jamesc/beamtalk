@@ -48,7 +48,7 @@ impl TypeChecker {
     }
 
     /// Check whether a block's execution cannot fall through to the enclosing
-    /// method's next statement (BT-2049, extended in BT-2051).
+    /// method's next statement.
     ///
     /// A block "diverges" when any of the following hold:
     /// - It contains a non-local return `^expr` (already handled by
@@ -60,7 +60,7 @@ impl TypeChecker {
     ///   an expression of inferred type `Never`. This covers both
     ///   `[self error: "…". ^nil]` (trailing `^nil` unreachable) and
     ///   `[logger info: (self error: "…")]` (the diverging call is buried
-    ///   in a method-send argument). BT-2051 walks descendants via
+    ///   in a method-send argument). This walks descendants via
     ///   [`Self::expr_contains_never`], symmetric with the `^`-walker
     ///   [`Self::expr_contains_return`].
     ///
@@ -99,12 +99,12 @@ impl TypeChecker {
     }
 
     /// Recursively check whether `expr` — or any sub-expression — has
-    /// inferred type [`InferredType::Never`] in the type map (BT-2051).
+    /// inferred type [`InferredType::Never`] in the type map.
     ///
     /// This is the `Never`-typed companion to
     /// [`crate::semantic_analysis::type_checker::narrowing::visitors::expr_contains_return`]: both share the
     /// exhaustive [`crate::ast::visitor`] walker so every sub-expression
-    /// variant gets covered (BT-2063). A diverging call such as
+    /// variant gets covered. A diverging call such as
     /// `self error: "…"` is detected whether it appears as the whole
     /// statement (`[self error: "…"]`), as a receiver, buried in a message
     /// send argument (`[logger info: (self error: "…")]`), inside a
@@ -136,7 +136,7 @@ impl TypeChecker {
                 }
                 walk_expr(self, e);
             }
-            // `visit_block` default (opaque) preserves the BT-2051 rule:
+            // `visit_block` default (opaque) preserves the rule that
             // inert block literals must NOT count toward divergence.
         }
 
@@ -154,7 +154,7 @@ impl TypeChecker {
     /// ADR 0102 §2: for a union receiver this routes through the set-theoretic
     /// `difference` operator with `P = UndefinedObject` (nil's type). `"Nil"` is
     /// subtracted alongside the canonical `UndefinedObject` as a defensive alias
-    /// (BT-2016) — `resolve_type_keyword` should canonicalize to
+    /// — `resolve_type_keyword` should canonicalize to
     /// `"UndefinedObject"`, but downstream callers may encounter `"Nil"` from
     /// BEAM metadata or return-type strings.
     ///
@@ -173,7 +173,7 @@ impl TypeChecker {
                 let provenance = crate::semantic_analysis::type_checker::TypeProvenance::Inferred(
                     Span::default(),
                 );
-                // `P = UndefinedObject | Nil` (both nil spellings, BT-2016).
+                // `P = UndefinedObject | Nil` (both nil spellings).
                 let nil = InferredType::simple_union(&["nil", "Nil"]);
                 // `nil`/`Nil` are matched by exact equality, not subclassing,
                 // so no hierarchy is needed here.
@@ -194,11 +194,11 @@ impl TypeChecker {
     /// Resolve the current type of a narrowing variable from the environment.
     ///
     /// For locals, this is a simple env lookup. For
-    /// [`EnvKey::SelfField`] (BT-2048 / BT-2062) we prefer a previously
+    /// [`EnvKey::SelfField`] we prefer a previously
     /// pushed narrowing, falling back to the declared state type resolved
     /// through the class hierarchy when none is present.
     ///
-    /// `alias_registry` (BT-2936, ADR 0108 follow-up to BT-2928) is threaded
+    /// `alias_registry` (ADR 0108) is threaded
     /// through so a `self.field isNil ifFalse: [...]` narrowing check on a
     /// cross-file alias-typed field expands the alias instead of falling
     /// back to an opaque nominal class.
@@ -212,7 +212,7 @@ impl TypeChecker {
         if let Some(ty) = env.get(var_key) {
             return ty;
         }
-        // BT-2048 / BT-2062: for `self.<field>` keys, resolve via the class
+        // For `self.<field>` keys, resolve via the class
         // hierarchy using the `self` binding in the env.
         if let EnvKey::SelfField(field_name) = var_key {
             if let Some(InferredType::Known { class_name, .. }) = env.get_local("self") {
@@ -232,14 +232,14 @@ impl TypeChecker {
 
     /// Apply early-return narrowing to the environment after a statement.
     ///
-    /// Detects `x isNil ifTrue: [<diverge>]` and, since BT-2825, `x isKindOf:
+    /// Detects `x isNil ifTrue: [<diverge>]` and `x isKindOf:
     /// C ifTrue: [<diverge>]` / `ifFalse: [<diverge>]` / `ifTrue: [<diverge>]
     /// ifFalse: [...]` — if the branch whose test is *not* the one we fall
     /// through cannot fall through (either a non-local return `^` or a
     /// diverging call such as `self error: "..."` whose inferred type is
     /// `Never`), the variable is narrowed for subsequent statements. Covers
     /// both local variables and synthetic `self.field` keys via
-    /// [`Self::resolve_narrowing_variable_type`] (BT-2049).
+    /// [`Self::resolve_narrowing_variable_type`].
     pub(in crate::semantic_analysis::type_checker) fn apply_early_return_narrowing(
         &mut self,
         expr: &Expression,
@@ -247,7 +247,7 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
     ) {
         // Match: `<receiver> ifTrue: [diverging]`, `<receiver> ifFalse:
-        // [diverging]` (BT-2825), or `<receiver> ifTrue: [diverging]
+        // [diverging]`, or `<receiver> ifTrue: [diverging]
         // ifFalse: [...]` — whichever block diverges, any execution reaching
         // the next statement came through the *other* path, narrowing the
         // variable accordingly.
@@ -277,7 +277,7 @@ impl TypeChecker {
             return;
         }
         if info.class_test.is_some() {
-            // BT-2825: resolve `true_type`/`false_type` the same way the
+            // Resolve `true_type`/`false_type` the same way the
             // primary `ifTrue:`/`ifFalse:` dispatch does
             // (`refine_class_narrowing`), but through the diagnostic-free
             // `compute_class_narrowing` — `expr` (this exact guard) was
@@ -297,7 +297,7 @@ impl TypeChecker {
             );
         }
         if info.singleton_eq.is_some() {
-            // BT-3369: resolve `true_type`/`false_type` the same way the
+            // Resolve `true_type`/`false_type` the same way the
             // primary `ifTrue:`/`ifFalse:` dispatch does, via the existing
             // (diagnostic-free) `refine_singleton_narrowing` — the "comparison
             // can never be true" hint for this guard already fired once
@@ -310,7 +310,7 @@ impl TypeChecker {
             );
         }
         if info.responded_selector.is_some() {
-            // BT-3369: resolve `true_type` (upgrading `Dynamic` to a concrete
+            // Resolve `true_type` (upgrading `Dynamic` to a concrete
             // `Protocol` type when exactly one protocol requires the tested
             // selector) via the existing `refine_responds_to_narrowing`.
             // `false_type` stays `None` — there is no sound type for "doesn't
@@ -347,7 +347,7 @@ impl TypeChecker {
             ) else {
                 return;
             };
-            // BT-2050: after this statement, the variable is narrowed.
+            // After this statement, the variable is narrowed.
             // Use method-remainder scope: the refinement outlives the
             // guard send and applies to the rest of the enclosing method
             // body (unlike the block-scoped narrowings pushed inside
@@ -357,7 +357,7 @@ impl TypeChecker {
                 narrowed,
             ));
         } else if is_if_false {
-            // BT-2825: `<receiver> ifFalse: [diverging]` — the sole
+            // `<receiver> ifFalse: [diverging]` — the sole
             // argument is the false block. If it diverges, execution
             // reaching the next statement proves the guard's test held,
             // so the variable narrows to the *true*-branch type.
@@ -383,7 +383,7 @@ impl TypeChecker {
 
     /// The type the tested variable takes in the "complementary" (false)
     /// branch of a narrowing, mirroring `infer_args_with_narrowing`'s
-    /// `ifFalse:` arm (BT-2825): an explicit `false_type` (class test /
+    /// `ifFalse:` arm: an explicit `false_type` (class test /
     /// Result / singleton) if set, else non-nil for `isNil` checks, else
     /// `None` (no useful narrowing — e.g. `class =:=`'s false branch, which
     /// deliberately stays unnarrowed per `ClassTestKind`).
@@ -414,7 +414,7 @@ impl TypeChecker {
     ///
     /// `Never`-typed arms are eliminated from the union. A `nil` arm and an
     /// unguarded `binding :: ClassName` arm each narrow the scrutinee's
-    /// residual type for subsequent arms (ADR 0107 Phase A, BT-2854/BT-2855).
+    /// residual type for subsequent arms (ADR 0107 Phase A).
     #[allow(clippy::too_many_arguments)] // split from infer_expr's dispatch, mirrors its arity
     pub(in crate::semantic_analysis::type_checker) fn infer_match(
         &mut self,
@@ -427,9 +427,9 @@ impl TypeChecker {
         in_abstract_method: bool,
     ) -> InferredType {
         let scrutinee_ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
-        // BT-2745 / ADR 0102 §4 (advisory `Warning`) vs. BT-2763 /
+        // ADR 0102 §4 (advisory `Warning`) vs.
         // ADR 0106 (opt-in asserted `Error`, `matchExhaustive:`).
-        // Distinct from (and does not replace) BT-1299's
+        // Distinct from (and does not replace) the
         // pattern-based sealed-constructor check, which still runs
         // separately in `validators::match_validators`.
         if exhaustive {
@@ -438,7 +438,7 @@ impl TypeChecker {
             self.check_singleton_match_exhaustiveness(&scrutinee_ty, arms, span, hierarchy);
         }
 
-        // BT-2854 / ADR 0107 Phase A: a `nil` arm narrows the
+        // ADR 0107 Phase A: a `nil` arm narrows the
         // scrutinee to `UndefinedObject` inside its own body (mirrors
         // `x isNil ifTrue:`), and — when unguarded — removes `Nil`
         // from what subsequent arms see (mirrors `x isNil ifFalse:`'s
@@ -459,7 +459,7 @@ impl TypeChecker {
                 let mut arm_env = env.child();
                 Self::bind_pattern_vars(&arm.pattern, &mut arm_env);
 
-                // BT-2855 / ADR 0107 Phase A: a `binding :: ClassName`
+                // ADR 0107 Phase A: a `binding :: ClassName`
                 // arm narrows `binding` to `ClassName`, computed the
                 // same way `isKindOf:`'s true branch does
                 // (`intersect_with_class`, shared with

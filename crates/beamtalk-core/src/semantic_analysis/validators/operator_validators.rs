@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Non-overridable operator declaration checks (BT-2997).
+//! Non-overridable operator declaration checks.
 //!
 //! **DDD Context:** Semantic Analysis
 //!
@@ -9,8 +9,8 @@
 //! `/=` — are *not* message sends. Codegen lowers each one straight to the
 //! corresponding Erlang BIF (`operators.rs`, `generate_binary_op`) with no
 //! class lookup and no runtime dispatch guard, unlike the arithmetic
-//! (`+ - * /`) and ordering (`< > <= >=`) operators, which BT-2709/BT-2710
-//! made dispatchable so value types can overload them.
+//! (`+ - * /`) and ordering (`< > <= >=`) operators, which are
+//! dispatchable so value types can overload them.
 //!
 //! The consequence is that a class-level `=:=` method **never runs**. It parses,
 //! typechecks, appears in method listings, and is compiled into the class
@@ -44,7 +44,7 @@
 use crate::ast::{Expression, MessageSelector, MethodDefinition, Module};
 use crate::source_analysis::{Diagnostic, Span, is_equality_operator};
 
-/// BT-2997: Reject method declarations for operators that codegen never
+/// Reject method declarations for operators that codegen never
 /// dispatches, so they cannot be written as silently-dead code.
 ///
 /// Covers instance- and class-side methods on every class in the module, plus
@@ -67,11 +67,11 @@ pub(crate) fn check_non_overridable_operator_methods(
 /// Emits a diagnostic if `method` declares a non-dispatchable operator with a
 /// real (non-pragma) body.
 ///
-/// BT-3462: "non-dispatchable operator" and "equality/identity comparison
+/// "non-dispatchable operator" and "equality/identity comparison
 /// operator" (ADR 0002) are the same four-operator set — `=:=`, `=/=`, `==`,
 /// `/=` — so this reuses [`is_equality_operator`] rather than a second
 /// hardcoded copy. Deliberately excludes `+ - * /` and `< > <= >=`: those
-/// *are* dispatchable (BT-2709/BT-2710), which is why value types like
+/// *are* dispatchable, which is why value types like
 /// `Duration` and `DateTime` can and do override them.
 fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
     let MessageSelector::Binary(op) = &method.selector else {
@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn allows_dispatchable_operators() {
-        // `+ - * /` and `< > <= >=` are message-dispatched (BT-2709/2710), so
+        // `+ - * /` and `< > <= >=` are message-dispatched, so
         // overriding them is the supported way to write a value type.
         let diagnostics = diagnostics_for(
             "Value subclass: Money\n  \

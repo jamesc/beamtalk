@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `x class =:= ClassName` narrowing (BT-1573 Phase 1g).
+//! `x class =:= ClassName` narrowing.
 //!
 //! Also handles `(x class) =:= ClassName` via a parenthesized-unwrap.
 
@@ -24,10 +24,10 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
     else {
         return None;
     };
-    // BT-3462: deliberately narrower than the shared four-operator equality
+    // Deliberately narrower than the shared four-operator equality
     // set (`crate::source_analysis::is_equality_operator`) — class identity
     // narrowing only recognises strict `=:=`, not the loose `==` spelling
-    // `singleton_eq.rs` also accepts (BT-3369), so this stays a literal
+    // `singleton_eq.rs` also accepts, so this stays a literal
     // comparison rather than routing through that broader predicate.
     if op.as_str() != "=:=" {
         return None;
@@ -65,7 +65,7 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
         responded_selector: None,
         singleton_eq: None,
         // Exact runtime-class equality — the false branch cannot be narrowed
-        // via nominal-class `difference` (see `ClassTestKind`, BT-2744).
+        // via nominal-class `difference` (see `ClassTestKind`).
         class_test: Some(ClassTestInfo {
             class_name: name.name.clone(),
             kind: ClassTestKind::Exact,

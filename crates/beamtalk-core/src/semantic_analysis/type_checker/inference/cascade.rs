@@ -35,7 +35,7 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
-        // BT-2035: to avoid walking the inner receiver subtree twice
+        // To avoid walking the inner receiver subtree twice
         // (which would double-emit any DNU / type diagnostics it
         // produces), we infer the inner type once and thread it into
         // the first send's inference via `infer_message_send_with_receiver_ty`.
@@ -62,7 +62,7 @@ impl TypeChecker {
             // The cascade's first-send node (the outer `MessageSend`
             // that is `receiver`) bypasses `infer_expr`, so its tail —
             // recording the type in the LSP type map and running the
-            // BT-1914 Dynamic warning — is invoked directly here via the
+            // Dynamic warning — is invoked directly here via the
             // same shared helper `infer_expr` itself calls.
             self.post_process_expr_type(receiver, &send_ty);
             (send_ty, inner.as_ref(), inner_ty)
@@ -76,7 +76,7 @@ impl TypeChecker {
         // `dispatch_ty` is passed to `infer_message_send_with_receiver_ty`
         // as-is (Negation and all) for every continuation message below —
         // that function already resolves a `Negation`-typed receiver
-        // through `base` itself (ADR 0102 §5 / BT-2744) at its own entry,
+        // through `base` itself (ADR 0102 §5) at its own entry,
         // so there is nothing to unwrap here.
         //
         // Every continuation message dispatches against the same

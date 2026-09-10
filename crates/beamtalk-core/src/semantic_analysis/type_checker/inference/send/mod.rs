@@ -44,13 +44,13 @@ impl TypeChecker {
         )
     }
 
-    /// Infer argument types via the generic block-context path (BT-2158
-    /// class-side detection + [`Self::infer_args_with_block_context`]).
+    /// Infer argument types via the generic block-context path (class-side
+    /// detection + [`Self::infer_args_with_block_context`]).
     ///
     /// This is the fallback used by [`Self::infer_message_send_with_receiver_ty`]
     /// for any selector that doesn't get bespoke narrowing/block-parameter
     /// treatment above it (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`, `on:do:`,
-    /// `ifNil:`/`ifNotNil:` variants, and `notNil and:` — BT-2872). Factored
+    /// `ifNil:`/`ifNotNil:` variants, and `notNil and:`). Factored
     /// out so both the plain "no special case matched" branch and the
     /// `notNil and:` branch's own fallback (when the narrowing match
     /// unexpectedly has no argument to narrow) share one implementation.
@@ -65,7 +65,7 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> Vec<InferredType> {
-        // BT-2158: detect class-side sends so block-param propagation
+        // Detect class-side sends so block-param propagation
         // uses `find_class_method` instead of `find_method`. Shares the
         // helper with the downstream `is_class_side_receiver` check below.
         // ADR 0083: a metatype-typed receiver (`Meta{C}`) is also class-side
@@ -91,7 +91,7 @@ impl TypeChecker {
     /// Returns true if `expr` resolves to a class-side receiver — either a
     /// direct `ClassReference` or `self` inside a class method. Unwraps
     /// parentheses so `(HTTPRouter) foo:` and `(self) foo:` are treated
-    /// identically to the un-parenthesised forms (BT-2158).
+    /// identically to the un-parenthesised forms.
     pub(in crate::semantic_analysis::type_checker) fn is_class_side_receiver(
         expr: &Expression,
         env: &TypeEnv,
@@ -104,9 +104,9 @@ impl TypeChecker {
 /// Class-protocol selectors that must NOT be intercepted as FFI module lookups.
 ///
 /// These are handled by `beamtalk_object_class:class_send/3` at runtime.
-/// BT-3079: delegates to the single shared recognizer in
+/// Delegates to the single shared recognizer in
 /// [`crate::ffi_receiver`], which codegen and the semantic-analysis validators
-/// also use, to keep this behaviour consistent everywhere (BT-1880).
+/// also use, to keep this behaviour consistent everywhere.
 pub(in crate::semantic_analysis::type_checker) fn is_class_protocol_selector(
     selector: &str,
 ) -> bool {

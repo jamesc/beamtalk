@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Narrowing subsystem (BT-2050).
+//! Narrowing subsystem.
 //!
 //! Type-test expressions like `x isNil`, `x class = Foo`, `x isKindOf: Bar`,
 //! and Result-shape checks produce a [`NarrowingInfo`] describing how the
@@ -10,14 +10,14 @@
 //! [`rules`]; the shared detection entry point is [`detect`].
 //!
 //! Refinement scope is described by [`refinement::Scope`] — block-local
-//! (today's default) or method-remainder (BT-2049 post-guard narrowing).
+//! (today's default) or method-remainder (post-guard narrowing).
 //!
 //! AST visitors used by the narrowing machinery (divergence checks,
 //! reassignment scans) live in [`visitors`]. Variable-name extraction
 //! (including `self.field` synthetic keys) lives in [`extract`].
 //!
 //! Refinement — resolving a detected shape against the current `TypeEnv`
-//! to compute concrete branch types — lives in [`refine`] (BT-3461).
+//! to compute concrete branch types — lives in [`refine`].
 
 pub(crate) mod extract;
 pub(crate) mod info;

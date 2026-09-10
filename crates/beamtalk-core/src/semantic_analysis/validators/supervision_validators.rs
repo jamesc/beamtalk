@@ -6,14 +6,14 @@
 //! **DDD Context:** Semantic Analysis
 //!
 //! Validators for OTP supervision policies:
-//! - Supervision policy override validation (BT-1218)
-//! - Children supervision policy warnings (BT-1218)
+//! - Supervision policy override validation
+//! - Children supervision policy warnings
 
 use crate::ast::{Expression, MethodDefinition, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
-/// BT-1218: Validate that `class supervisionPolicy` override returns a valid symbol.
+/// Validate that `class supervisionPolicy` override returns a valid symbol.
 ///
 /// When a class defines `class supervisionPolicy -> Symbol => #value`, checks that
 /// `#value` is one of `#permanent`, `#transient`, or `#temporary`. Only validates
@@ -66,7 +66,7 @@ pub(crate) fn check_supervision_policy_override(
     }
 }
 
-/// BT-1218: Warn when an Actor subclass in a static `children` list/array literal
+/// Warn when an Actor subclass in a static `children` list/array literal
 /// has no explicit `supervisionPolicy` override.
 ///
 /// The default policy is `#temporary` (not restarted on crash). Developers often
@@ -169,7 +169,7 @@ mod tests {
     use crate::source_analysis::lex_with_eof;
     use crate::source_analysis::parse;
 
-    // ── BT-1218: supervisionPolicy override validation ────────────────────────
+    // ── supervisionPolicy override validation ──────────────────────────────────
 
     /// Valid `#permanent` override — no diagnostics.
     #[test]
@@ -254,7 +254,7 @@ mod tests {
         );
     }
 
-    // ── BT-1218: children supervision policy warning ──────────────────────────
+    // ── children supervision policy warning ────────────────────────────────────
 
     /// Actor subclass in children array with no policy override → warning.
     #[test]

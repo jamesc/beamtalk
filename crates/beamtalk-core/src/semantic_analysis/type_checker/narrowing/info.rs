@@ -6,7 +6,7 @@
 //! Describes control-flow narrowings detected from type-test expressions,
 //! plus the scope over which a refinement applies.
 //!
-//! Extracted from `inference.rs` under BT-2050.
+//! Extracted from `inference.rs`.
 
 use std::fmt;
 
@@ -23,11 +23,11 @@ use crate::semantic_analysis::type_checker::{EnvKey, InferredType};
 /// The `respondsTo:` variant (ADR 0068 Phase 2e) initially narrows to `Dynamic`,
 /// then `refine_responds_to_narrowing` consults the protocol registry: if exactly
 /// one protocol requires the tested selector, the type is refined to that
-/// protocol (BT-1833). Multiple or zero matches fall back to `Dynamic`.
+/// protocol. Multiple or zero matches fall back to `Dynamic`.
 #[derive(Debug, Clone)]
 pub(crate) struct NarrowingInfo {
     /// The env key being narrowed (local variable or synthetic
-    /// `self.<field>` binding, BT-2048 / BT-2062).
+    /// `self.<field>` binding).
     pub(crate) variable: EnvKey,
     /// The type the variable is narrowed to in the *true* branch.
     pub(crate) true_type: InferredType,
@@ -40,14 +40,14 @@ pub(crate) struct NarrowingInfo {
     /// Whether this is a nil-check (`isNil`). If so, the *false* branch
     /// narrows to non-nil and early-return narrowing applies.
     pub(crate) is_nil_check: bool,
-    /// Whether this is a Result `isOk` / `ok` check (BT-1859).
+    /// Whether this is a Result `isOk` / `ok` check.
     ///
     /// When true, the true branch knows `value` is safe (ok variant) and the
     /// false branch knows `error` is safe (error variant).  The actual type
     /// of the variable stays `Result(T, E)` in both branches — the generic
     /// substitution already resolves `value -> T` and `error -> E`.
     pub(crate) is_result_ok_check: bool,
-    /// Whether this is a Result `isError` check (BT-1859).
+    /// Whether this is a Result `isError` check.
     ///
     /// Inverse of `is_result_ok_check`: true branch is the error variant,
     /// false branch is the ok variant.
@@ -57,10 +57,10 @@ pub(crate) struct NarrowingInfo {
     /// When set, the narrowing was detected from `x respondsTo: #selector`.
     /// Used by `refine_responds_to_narrowing` to look up the matching
     /// protocol in the registry and narrow to that protocol type instead
-    /// of `Dynamic` (BT-1833).
+    /// of `Dynamic`.
     pub(crate) responded_selector: Option<EcoString>,
     /// The singleton (in)equality tested in a `x = #foo` / `#foo = x`
-    /// narrowing (BT-2617).
+    /// narrowing.
     ///
     /// When set, the narrowing was detected from an (in)equality test against
     /// a singleton symbol literal.  `detect` cannot know the variable's current
@@ -70,8 +70,7 @@ pub(crate) struct NarrowingInfo {
     /// singleton from the union for the complementary branch.
     pub(crate) singleton_eq: Option<SingletonEqInfo>,
     /// The class name (and which idiom tested it) in a `x class = ClassName`
-    /// / `x isKindOf: ClassName` narrowing (ADR 0102 §2 group 2, §5,
-    /// BT-2741, BT-2744).
+    /// / `x isKindOf: ClassName` narrowing (ADR 0102 §2 group 2, §5).
     ///
     /// When set, `detect` cannot know the variable's current type, so
     /// `true_type` is left provisional (`Dynamic`) and
@@ -87,7 +86,7 @@ pub(crate) struct NarrowingInfo {
 }
 
 /// Details of a `x class = ClassName` / `x isKindOf: ClassName` narrowing
-/// (ADR 0102 §2 group 2, §5, BT-2741, BT-2744).
+/// (ADR 0102 §2 group 2, §5).
 #[derive(Debug, Clone)]
 pub(crate) struct ClassTestInfo {
     /// The tested class name.
@@ -102,7 +101,7 @@ pub(crate) struct ClassTestInfo {
 /// populate [`NarrowingInfo::class_test`].
 ///
 /// **Only `KindOf`'s false branch can be narrowed** via nominal-class
-/// `difference` (ADR 0102 §5, BT-2744): `Negation{base, excluded}` always
+/// `difference` (ADR 0102 §5): `Negation{base, excluded}` always
 /// excludes `excluded`'s *entire* subtree (§5 Q1 — membership admits `C <:
 /// base` that is *not* `<: excluded`), which matches `isKindOf:`'s negation
 /// ("not `C` and not any subclass of `C`") but **not** `class =:=`'s ("not
@@ -114,8 +113,7 @@ pub(crate) struct ClassTestInfo {
 /// therefore wrongly exclude a live possibility and could produce a false
 /// "comparison can never be true" hint on a subsequent, perfectly satisfiable
 /// `isKindOf: Integer` test. `Exact`'s false branch is left unnarrowed
-/// (`None`), exactly as before BT-2744; only its (already-shipped, BT-2741)
-/// true branch is affected by set-theoretic narrowing.
+/// (`None`); only its true branch is affected by set-theoretic narrowing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClassTestKind {
     /// `x isKindOf: ClassName` — subclass-inclusive.
@@ -124,7 +122,7 @@ pub(crate) enum ClassTestKind {
     Exact,
 }
 
-/// Details of a singleton (in)equality narrowing (`x = #foo`, BT-2617).
+/// Details of a singleton (in)equality narrowing (`x = #foo`).
 #[derive(Debug, Clone)]
 pub(crate) struct SingletonEqInfo {
     /// The singleton type name tested against (e.g. `#infinity`).
@@ -136,7 +134,7 @@ pub(crate) struct SingletonEqInfo {
 }
 
 /// A bare-symbol singleton type name (`#foo`) — the leading `#` is guaranteed
-/// **by construction** (BT-2764).
+/// **by construction**.
 ///
 /// The narrowing paths (`refine_singleton_narrowing`,
 /// `check_impossible_singleton_comparison` → `type_admits_singleton`) rely on

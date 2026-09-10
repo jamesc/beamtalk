@@ -35,13 +35,13 @@ use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 /// expected simple type, via [`TypeChecker::classify_union_members`] +
 /// [`TypeChecker::is_type_compatible`].
 ///
-/// BT-3462: shared by [`TypeChecker::check_argument_types`] and
-/// [`TypeChecker::check_ffi_argument_types`] (`inference.rs`) — before this,
-/// both independently re-derived the same "skip if unclassifiable, skip if
-/// every member is compatible, otherwise report the incompatible members"
-/// decision from a raw `classify_union_members` call, with a "mirrors
-/// `check_argument_types`'s Union handling" comment standing in for a shared
-/// implementation (CLAUDE.md § No duplicate implementations). Diagnostic
+/// Shared by [`TypeChecker::check_argument_types`] and
+/// [`TypeChecker::check_ffi_argument_types`] (`inference.rs`), which both
+/// need the same "skip if unclassifiable, skip if every member is
+/// compatible, otherwise report the incompatible members" decision from a
+/// raw `classify_union_members` call, kept as one implementation rather
+/// than two independently re-derived copies (CLAUDE.md § No duplicate
+/// implementations). Diagnostic
 /// *message* text still differs per call site (an FFI signature vs. a
 /// declared Beamtalk method), so only the classification — not the
 /// diagnostic construction — is shared here.
@@ -68,11 +68,10 @@ impl TypeChecker {
     /// Otherwise returns the count of members that satisfy `pred` and the total,
     /// plus the rendered names of the members that did *not* satisfy it.
     ///
-    /// BT-2623: the predicate receives each member's *full* type string
+    /// The predicate receives each member's *full* type string
     /// (via [`InferredType::display_annotation`], e.g. `"Array(Integer)"`), not the bare
-    /// `as_known()` class name. Before collection literals carried element types
-    /// a union like `Array(Integer) | Array(String)` could not arise (both
-    /// branches deduplicated to bare `Array`); now it can, and dropping the type
+    /// `as_known()` class name: collection literals carry element types, so a
+    /// union like `Array(Integer) | Array(String)` can arise, and dropping the type
     /// args would let `Array(String)` silently pass a check against a declared
     /// `Array(Integer)`. The `as_known()` guard is still used solely to skip the
     /// whole union when any member is `Dynamic`/`Union`/`Meta`/`Never`.
@@ -163,13 +162,13 @@ impl TypeChecker {
             return InferredType::Dynamic(DynamicReason::Unknown);
         }
 
-        // ADR 0071 Phase 3 (BT-1702): E0403 — cross-package send to internal class method
+        // ADR 0071 Phase 3: E0403 — cross-package send to internal class method
         self.check_internal_method_access(class_name, selector, span, hierarchy, true);
 
         // Check if class-side method exists (skip warning for DNU override classes)
         let has_class_method = hierarchy.find_class_method(class_name, selector).is_some();
 
-        // BT-1763: Sealed value types (like Erlang) dispatch class-side messages
+        // Sealed value types (like Erlang) dispatch class-side messages
         // through instance dispatch. Instance-side DNU suppresses class-side
         // warnings only for sealed classes — not all classes with instance DNU,
         // which would hide valid diagnostics on normal classes. This carve-out
@@ -180,8 +179,8 @@ impl TypeChecker {
                 .get_class(class_name)
                 .is_some_and(|info| info.is_sealed);
 
-        // ADR 0100 Rule 1 (BT-2793): the completeness-ladder classifier folds
-        // in the class-side DNU override and BT-1736 cross-file-parent
+        // ADR 0100 Rule 1: the completeness-ladder classifier folds
+        // in the class-side DNU override and cross-file-parent
         // suppression — only a `ClosedComplete` receiver's absent class-side
         // method is diagnosable.
         if !has_class_method
@@ -193,9 +192,9 @@ impl TypeChecker {
             // At runtime, class objects dispatch through this chain (ADR 0032 Phase 0
             // fallthrough), so the type checker must model the same path.
             //
-            // BT-1548: spawn/spawnWith: are still instance methods on Actor but routed
+            // spawn/spawnWith: are still instance methods on Actor but routed
             // class-side by beamtalk_class_dispatch.erl — they need the bypass.
-            // new/new: are now proper class methods on Value (BT-1548) and found
+            // new/new: are proper class methods on Value and found
             // via find_class_method through the hierarchy, so no bypass needed.
             let is_factory_selector = matches!(selector, "spawn" | "spawnWith:");
             // ADR 0083: `new` / `new:` / `basicNew` are implicitly available on
@@ -212,7 +211,7 @@ impl TypeChecker {
             //  * Actor subclasses — they are spawned (`spawn` / `spawnWith:`),
             //    not `new`'d. In the common case this exclusion is now moot for
             //    `new`/`new:` specifically: actor.bt declares real `class sealed
-            //    new` / `new:` (BT-3071), so `has_class_method` above is already
+            //    new` / `new:`, so `has_class_method` above is already
             //    `true` and this whole block is skipped before reaching here. It
             //    stays as defense-in-depth for a partially-unresolved hierarchy
             //    (e.g. a cross-package actor whose ancestor chain
@@ -259,12 +258,12 @@ impl TypeChecker {
                                 class_name, hierarchy, selector, arg_types,
                             );
                         }
-                        // BT-1836 / BT-2018: Parse parameterised return types like
+                        // Parse parameterised return types like
                         // `Result(List(String), Error)` into a fully-nested
                         // `Known { class_name, type_args }` so that downstream
                         // sends on the bound local resolve correctly.
                         //
-                        // BT-1986: `Self` appearing as a (nested) type argument —
+                        // `Self` appearing as a (nested) type argument —
                         // e.g. `class named: -> Result(Self, Error)` on Actor —
                         // resolves to the static receiver class. This powers
                         // ADR 0079's typed-lookup API where `Counter named: #c`
@@ -308,7 +307,7 @@ impl TypeChecker {
                                 ),
                             }
                         };
-                        // BT-3076: thread `self_type` under the reserved
+                        // Thread `self_type` under the reserved
                         // `Self` subst key (see `resolve_declared_type`'s
                         // `SelfType` arm) so nested `Self` in the return type
                         // resolves the same way the old `self_type` parameter
@@ -326,13 +325,13 @@ impl TypeChecker {
                         );
                     }
                 }
-                // BT-1047: Fall back to return types inferred earlier in this pass.
-                // BT-2022: Return the full InferredType (including type_args).
+                // Fall back to return types inferred earlier in this pass.
+                // Return the full InferredType (including type_args).
                 let key = (class_name.clone(), EcoString::from(selector), true);
                 if let Some(ret_ty) = self.method_return_types.get(&key) {
                     return ret_ty.clone();
                 }
-                // BT-2037: When no class-side method exists, the runtime
+                // When no class-side method exists, the runtime
                 // dispatches the message through the class object's instance
                 // chain (Class → Behaviour → Object → ProtoObject; ADR 0032
                 // Phase 0 fallthrough). Mirror that here for divergent
@@ -371,7 +370,7 @@ impl TypeChecker {
     /// For non-generic classes (or classes with no class-method type
     /// substitution to do), the returned map is empty.
     ///
-    /// **ADR 0083 Slice 2 (BT-2256): nested element-type composition.** A
+    /// **ADR 0083 Slice 2: nested element-type composition.** A
     /// class-side constructor whose parameter mentions a class type param
     /// *nested* inside a generic — e.g. `class withAll: list :: List(E) -> Self`
     /// on `Set(E)` — recovers `E` from the matching-base argument:
@@ -384,8 +383,8 @@ impl TypeChecker {
     /// helper's merge guard refuses to overwrite a `Known`/`Union` binding an
     /// exact match already set.
     ///
-    /// **References:** BT-2018 (preserve generic return types on class-method
-    /// assignments), ADR 0068 Phase 1c, BT-2256 (Slice 2 nested composition).
+    /// **References:** preserve generic return types on class-method
+    /// assignments, ADR 0068 Phase 1c, ADR 0083 Slice 2 (nested composition).
     fn class_method_substitution(
         class_name: &EcoString,
         hierarchy: &ClassHierarchy,
@@ -416,8 +415,8 @@ impl TypeChecker {
             // `E -> Integer`). Only fills params not already bound by an exact
             // match, so a direct `T` parameter still wins.
             //
-            // `unify_nested_class_params` is a string-level helper (BT-3076
-            // out of scope) — render once at this boundary.
+            // `unify_nested_class_params` is a string-level helper — render
+            // once at this boundary.
             let param_ty_str = param_ty.to_string();
             Self::unify_nested_class_params(&param_ty_str, arg_ty, class_info, &mut subst);
         }
@@ -425,7 +424,7 @@ impl TypeChecker {
     }
 
     /// Recover class-level type-param bindings nested inside a generic parameter
-    /// shape (ADR 0083 Slice 2 / BT-2256).
+    /// shape (ADR 0083 Slice 2).
     ///
     /// Given a declared parameter type like `List(E)` and an argument type like
     /// `List(Integer)`, binds `E -> Integer` when `E` is a class type param and
@@ -445,7 +444,7 @@ impl TypeChecker {
             return;
         };
         // Strip a nilable union (`List(String) | Nil`) to its non-nil member so
-        // the optional-collection shape still composes (mirrors BT-2023(A)).
+        // the optional-collection shape still composes.
         let stripped;
         let effective_arg = if matches!(arg_ty, InferredType::Union { .. }) {
             stripped = super::TypeChecker::non_nil_type(arg_ty);
@@ -553,14 +552,14 @@ impl TypeChecker {
         span: Span,
         hierarchy: &ClassHierarchy,
     ) {
-        // BT-2647: a singleton type (`#text`) is a subtype of `Symbol` but is not
+        // A singleton type (`#text`) is a subtype of `Symbol` but is not
         // itself a class in the hierarchy. Resolve its selectors through
         // `Symbol`'s protocol so DNU validation still applies — narrowing a getter
         // from `Symbol` to a singleton (e.g. `#text | #json`, then a single
         // member) would otherwise silently drop the selector checking it had.
-        // Mirrors the singleton-union inference handling from BT-2624.
+        // Mirrors the singleton-union inference handling.
         //
-        // BT-2679: `effective_class` is what we resolve selectors/suggestions
+        // `effective_class` is what we resolve selectors/suggestions
         // against (`Symbol` for a singleton); `class_name` stays the type the user
         // wrote so DNU messages name the singleton (e.g. `#infinity`) rather than
         // `Symbol`.
@@ -573,7 +572,7 @@ impl TypeChecker {
                 class_name
             };
         if !hierarchy.has_class(effective_class) {
-            // BT-1833: If the type is a protocol (from respondsTo: narrowing),
+            // If the type is a protocol (from respondsTo: narrowing),
             // validate the selector against the protocol's required methods.
             if let Some(ref registry) = self.protocol_registry {
                 if let Some(proto_info) = registry.get(effective_class) {
@@ -596,10 +595,10 @@ impl TypeChecker {
             return;
         }
 
-        // ADR 0071 Phase 3 (BT-1702): E0403 — cross-package send to internal method
+        // ADR 0071 Phase 3: E0403 — cross-package send to internal method
         self.check_internal_method_access(effective_class, selector, span, hierarchy, false);
 
-        // ADR 0100 Rule 1 (BT-2793): suppress unless the checker's knowledge
+        // ADR 0100 Rule 1: suppress unless the checker's knowledge
         // of the receiver's method surface is closed and complete (folds in
         // the instance-side DNU override and cross-file-parent checks).
         if !receiver_knowledge::classify_receiver(effective_class, hierarchy, false)
@@ -623,7 +622,7 @@ impl TypeChecker {
         }
     }
 
-    /// ADR 0071 Phase 3 (BT-1702): E0403 — cross-package send to internal method.
+    /// ADR 0071 Phase 3: E0403 — cross-package send to internal method.
     ///
     /// When the receiver type is known and the target method is `internal` to
     /// another package, emit a hard error. Skipped when no current package is
@@ -767,7 +766,7 @@ impl TypeChecker {
         expected: &EcoString,
         hierarchy: &ClassHierarchy,
     ) -> bool {
-        // BT-1877: Resolve `Nil` to `UndefinedObject` so hierarchy lookups succeed.
+        // Resolve `Nil` to `UndefinedObject` so hierarchy lookups succeed.
         let actual_resolved = Self::resolve_type_alias(actual);
         let expected_resolved = Self::resolve_type_alias(expected);
         let actual = actual_resolved.as_ref().unwrap_or(actual);
@@ -785,7 +784,7 @@ impl TypeChecker {
         if WellKnownClass::from_str(expected) == Some(WellKnownClass::Never) {
             return false;
         }
-        // BT-1835: Union syntax in expected type (e.g., "Integer | Symbol" from builtins).
+        // Union syntax in expected type (e.g., "Integer | Symbol" from builtins).
         // If expected contains `|`, split into members and check if actual matches any.
         if expected.contains(" | ") {
             return expected.split(" | ").any(|member| {
@@ -797,18 +796,18 @@ impl TypeChecker {
         // Symbol is NOT compatible with a singleton like #ok.
         // Generic type params (K, V, T, etc.) are always compatible (conservative).
         //
-        // BT-2949: `actual == "Dynamic"` is also always compatible here, same
+        // `actual == "Dynamic"` is also always compatible here, same
         // as it already is everywhere else `is_type_compatible` reasons about
         // an unresolved argument — every other branch in this function falls
         // through to the "unknown declared/actual class -> conservatively
         // compatible" escape hatch below, since `Dynamic` is never a
         // registered hierarchy class, but this singleton branch returns
-        // before ever reaching it. Surfaced by BT-2949's class-type-param
+        // before ever reaching it. This matters for class-type-param
         // substitution: a method-local type param the substitution can't
         // resolve (e.g. `andThen:`'s `R` in `Block(T, Result(R, E))`, not
         // bound by the receiver's own type args) becomes literal `Dynamic`,
         // and comparing it against a substituted singleton E (e.g. `#x`)
-        // previously — wrongly — failed.
+        // must not fail just because it's unresolved.
         if expected.starts_with('#') && !expected.contains('|') {
             return actual == expected
                 || super::is_generic_type_param(actual)
@@ -823,14 +822,14 @@ impl TypeChecker {
             let symbol: EcoString = "Symbol".into();
             return Self::is_type_compatible(&symbol, expected, hierarchy);
         }
-        // BT-1877: `Class` is a meta-type — any class reference is an instance of
+        // `Class` is a meta-type — any class reference is an instance of
         // Class.  Since class references are currently inferred as their concrete
         // class name (e.g. `Supervisor`), we treat `Class` as compatible with any
         // known class to avoid false positives on `Class | Nil` parameters.
         if expected.as_str() == "Class" && hierarchy.has_class(actual) {
             return true;
         }
-        // BT-2002: Strip type arguments before the hierarchy lookup so generic
+        // Strip type arguments before the hierarchy lookup so generic
         // annotations like `Block(T, R)` or `Array(Integer)` resolve to their
         // base class. Without stripping, `hierarchy.has_class("Block(T, R)")`
         // is false and the conservative "unknown → compatible" escape hatch
@@ -846,7 +845,7 @@ impl TypeChecker {
             .map_or(expected.as_str(), |(base, _)| base);
 
         if actual_base == expected_base {
-            // BT-2623: when *both* sides carry type arguments and the bases match
+            // When *both* sides carry type arguments and the bases match
             // (e.g. `Array(Integer)` vs `Array(String)`), don't blindly pass on
             // the base alone — compare the type args invariantly so a union
             // member like `Array(String)` is rejected against a declared
@@ -865,7 +864,7 @@ impl TypeChecker {
             .any(|ancestor| ancestor.as_str() == expected_base)
     }
 
-    /// BT-2623: Compare the *type arguments* of two same-base generic type
+    /// Compare the *type arguments* of two same-base generic type
     /// strings (e.g. `"Array(Integer)"` vs `"Array(String)"`).
     ///
     /// Returns `true` (compatible) unless both sides are parameterized with the
@@ -896,27 +895,27 @@ impl TypeChecker {
         })
     }
 
-    /// BT-2022: Recursive structural compatibility for one type-arg slot.
+    /// Recursive structural compatibility for one type-arg slot.
     ///
     /// Used when comparing a declared generic return type's inner args against
     /// the body's inferred inner args. Recurses into nested `Known` so that
     /// shapes like `Result(Array(Integer), Error)` vs `Result(Array(String),
     /// Error)` are detected as mismatches at the inner level.
     ///
-    /// BT-2847: a nested `Union` on the `actual` (body-inferred) side is no
-    /// longer an automatic pass — every member must be compatible with
+    /// A nested `Union` on the `actual` (body-inferred) side is not an
+    /// automatic pass — every member must be compatible with
     /// `expected`, recursing through this same function (mirroring the
-    /// `classify_union_members`-style check used at the top level, BT-1832).
+    /// `classify_union_members`-style check used at the top level).
     /// So a declared `List(String)` against a body inferring `List(String |
-    /// Nil)` now warns, since `Nil` isn't assignable to `String`. Like
+    /// Nil)` warns, since `Nil` isn't assignable to `String`. Like
     /// `classify_union_members`, the whole union is skipped (permissive) if
     /// any member is itself non-`Known` (nested `Dynamic`/`Union`/`Never`/
     /// etc.) — we can't reason about those precisely enough to warn without
     /// risking a false positive.
     ///
     /// Nested `Dynamic`/`Never` on either side (outside of a `Union`) still
-    /// short-circuit to `true` — that stays permissive per the BT-2847 spec
-    /// decision: `Dynamic` is the checker's universal escape hatch and
+    /// short-circuit to `true` — that stays permissive by design:
+    /// `Dynamic` is the checker's universal escape hatch and
     /// Beamtalk generics are erased at runtime, so there's no runtime-safety
     /// payoff to warning on nested `Dynamic` the way there is for a concrete
     /// incompatible `Union` member like `Nil`. Generic type-param
@@ -1095,8 +1094,8 @@ impl TypeChecker {
     }
 
     /// Check argument types against declared parameter types for a message send.
-    #[allow(clippy::too_many_arguments)] // BT-1588: arg_exprs + env needed for origin tracing
-    #[allow(clippy::too_many_lines)] // BT-2038 adds class-literal subtyping arm
+    #[allow(clippy::too_many_arguments)] // arg_exprs + env needed for origin tracing
+    #[allow(clippy::too_many_lines)] // includes the class-literal subtyping arm
     pub(super) fn check_argument_types(
         &mut self,
         class_name: &EcoString,
@@ -1134,7 +1133,7 @@ impl TypeChecker {
             return;
         }
 
-        // BT-2038: A class literal (e.g. `TestCase`) is a class value whose
+        // A class literal (e.g. `TestCase`) is a class value whose
         // runtime type flows through the metaclass tower
         // (Metaclass → Class → Behaviour → Object → ProtoObject). When the
         // instance-side chain fails, re-check via `Metaclass` so parameters
@@ -1143,7 +1142,7 @@ impl TypeChecker {
         // constant across all arguments.
         let metaclass_name: EcoString = "Metaclass".into();
 
-        // BT-2949: substitution map from `class_name`'s (or its declaring
+        // Substitution map from `class_name`'s (or its declaring
         // superclass's, if `method` is inherited) generic type-param names
         // to the receiver's concrete `receiver_type_args` — e.g. `Dictionary
         // (Symbol, JsonValue)` gives `{K -> Symbol, V -> JsonValue}`. Empty
@@ -1183,7 +1182,7 @@ impl TypeChecker {
             let Some(expected_declared) = expected else {
                 continue;
             };
-            // BT-2949: resolve a declared parameter type that names one of
+            // Resolve a declared parameter type that names one of
             // the receiver's own generic type params — bare (`V`) or nested
             // (`List(E)`, `Dictionary(K, V)`) — to its concrete substituted
             // type before any of the compatibility checks below. Without
@@ -1203,8 +1202,8 @@ impl TypeChecker {
             // `resolve_type_param` an unrelated string it would otherwise
             // resolve to `Dynamic`.
             // `type_string_references_class_param` and the compatibility
-            // checks below are string-level helpers (BT-3076 out of scope)
-            // — render the structured type once at this boundary (byte-
+            // checks below are string-level helpers — render the structured
+            // type once at this boundary (byte-
             // identical to the old stored string); `resolve_type_param`
             // itself takes the structured `DeclaredType` directly.
             let expected_declared_str: EcoString = expected_declared.to_string().into();
@@ -1223,9 +1222,9 @@ impl TypeChecker {
             } else {
                 &expected_declared_str
             };
-            // BT-2784: a protocol-typed parameter is registered as a synthetic
-            // sealed-abstract class entry by `register_protocol_classes`
-            // (BT-1933), so `hierarchy.has_class` sees it and the nominal
+            // A protocol-typed parameter is registered as a synthetic
+            // sealed-abstract class entry by `register_protocol_classes`,
+            // so `hierarchy.has_class` sees it and the nominal
             // walk below no longer takes the "unknown type → compatible"
             // escape hatch. Nominal subtyping doesn't apply to protocols —
             // conformance is structural — so defer entirely to
@@ -1239,16 +1238,16 @@ impl TypeChecker {
             if hierarchy.is_protocol_class(type_resolver::base_name_of_string(expected_ty)) {
                 continue;
             }
-            // BT-2911: `method.param_types` predates ADR 0108 and stores a
+            // `method.param_types` predates ADR 0108 and stores a
             // bare `EcoString` with no alias provenance — unlike an
-            // `InferredType`, which BT-2897 already tags via
+            // `InferredType`, which tags via
             // `TypeProvenance::Aliased` when resolved through
             // `resolve_type_annotation`. Re-resolve `expected_ty` through
             // `AliasRegistry::resolve_display_name` when it names a
             // registered alias so this diagnostic renders `AliasName
             // (expansion)` just like a mismatched alias-typed local/return
             // type already does; fall back to the existing `UndefinedObject`
-            // -> `Nil` display (BT-2066) otherwise. Computed once here
+            // -> `Nil` display otherwise. Computed once here
             // (after the protocol-type early-continue above, which never
             // needs it) and reused by every `arg_ty` arm below.
             let expected_display = self
@@ -1256,8 +1255,8 @@ impl TypeChecker {
                 .as_ref()
                 .and_then(|registry| registry.resolve_display_name(expected_ty))
                 .unwrap_or_else(|| InferredType::class_name_for_diagnostic(expected_ty.as_str()));
-            // BT-2953: `expected_display` above only fixed the diagnostic
-            // text (BT-2911's "display-only" scope). `is_type_compatible`
+            // `expected_display` above only fixes the diagnostic
+            // text (display-only scope). `is_type_compatible`
             // below still has an "unknown declared class → conservatively
             // compatible" escape hatch that fires on the unresolved bare
             // alias name, making argument-type checking against an
@@ -1269,8 +1268,8 @@ impl TypeChecker {
             let is_class_ref_arg = arg_exprs
                 .and_then(|exprs| exprs.get(i))
                 .is_some_and(|e| matches!(e, Expression::ClassReference { .. }));
-            // BT-2939: complementary to the `expected_structural` resolution
-            // above (BT-2953, which only resolves the *declared/expected*
+            // Complementary to the `expected_structural` resolution
+            // above (which only resolves the *declared/expected*
             // side) — `arg_ty` itself can be a bare `InferredType::Known`
             // naming a registered alias on the *actual* side, e.g. a message
             // send whose callee's `MethodInfo::return_type` is the raw alias
@@ -1318,21 +1317,20 @@ impl TypeChecker {
                     // instance-side check fails. Keeps the hot path at one
                     // `is_type_compatible` call per argument.
                     //
-                    // CodeRabbit on PR #2071: `is_type_compatible` has a
-                    // pre-existing BT-1877 shortcut where `expected == "Class"`
-                    // accepts any known class name unconditionally. That was a
-                    // workaround for exactly the BT-2038 problem; with the
-                    // metaclass-tower check now handling class literals
-                    // properly, the shortcut must be scoped to class-literal
-                    // arguments here so a plain `TestCase` instance does not
-                    // satisfy a `:: Class` parameter.
+                    // `is_type_compatible` has a shortcut where
+                    // `expected == "Class"` accepts any known class name
+                    // unconditionally. With the metaclass-tower check
+                    // handling class literals properly, that shortcut must be
+                    // scoped to class-literal arguments here so a plain
+                    // `TestCase` instance does not satisfy a `:: Class`
+                    // parameter.
                     //
-                    // Claude review on PR #3082 (BT-2953): this guard must
+                    // This guard must
                     // check `expected_structural`, not the bare `expected_ty`
                     // — otherwise `type MyAlias = Class` would resolve to
                     // `expected_structural == "Class"` while `expected_ty`
                     // still names the alias, silently skipping the guard and
-                    // letting `is_type_compatible`'s BT-1877 shortcut accept
+                    // letting `is_type_compatible`'s shortcut accept
                     // any known class instance against a `:: MyAlias` param.
                     let class_shortcut_applies =
                         expected_structural.as_str() == "Class" && !is_class_ref_arg;
@@ -1348,9 +1346,9 @@ impl TypeChecker {
                         );
                     if !instance_compat && !class_literal_compat {
                         let param_pos = i + 1;
-                        // BT-1588: Use hint severity for generic type params (likely false positive)
+                        // Use hint severity for generic type params (likely false positive)
                         let is_generic = super::is_generic_type_param(actual_ty);
-                        // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                        // Render `UndefinedObject` as `Nil` in user-facing messages.
                         let actual_display =
                             InferredType::class_name_for_diagnostic(actual_ty.as_str());
                         let expected_display = expected_display.clone();
@@ -1374,7 +1372,7 @@ impl TypeChecker {
                             )
                             .with_hint(format!("Expected {expected_display} (or a subclass), got {actual_display}"))
                         };
-                        // BT-1588: Attach origin note if available
+                        // Attach origin note if available
                         if let (Some(exprs), Some(e)) = (arg_exprs, env) {
                             if let Some(Expression::Identifier(ident)) = exprs.get(i) {
                                 if let Some(origin) = e.get_local_origin(&ident.name) {
@@ -1421,7 +1419,7 @@ impl TypeChecker {
                     }
                 }
                 InferredType::Union { members, .. } => {
-                    // BT-1832 / BT-3462: check every union member against the
+                    // Check every union member against the
                     // expected type via the shared classification.
                     let (compat, incompatible) = match Self::classify_union_arg_compat(
                         members,
@@ -1471,7 +1469,7 @@ impl TypeChecker {
                 }
                 // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip
                 // conservatively like `Dynamic`/`Never` (ADR 0102). An
-                // `Intersection` (`P1 & P2`, ADR 0102/BT-2743) as the
+                // `Intersection` (`P1 & P2`, ADR 0102) as the
                 // *argument's own* inferred type is likewise skipped — see
                 // `check_protocol_argument_conformance` for the flagship
                 // "parameter declared `P1 & P2`" conformance check.
@@ -1484,7 +1482,7 @@ impl TypeChecker {
     }
 
     /// Check that a method body's inferred return type matches its declared return type.
-    #[allow(clippy::too_many_lines)] // BT-2022 added type_args comparison arm
+    #[allow(clippy::too_many_lines)] // includes the type_args comparison arm
     pub(super) fn check_return_type(
         &mut self,
         method: &crate::ast::MethodDefinition,
@@ -1506,15 +1504,15 @@ impl TypeChecker {
         };
 
         // Resolve the declared return type up front — every `body_type` arm
-        // below (`Known`, `Union` [BT-2829 Part A], `Dynamic` [BT-2829 Part
+        // below (`Known`, `Union` [Part A], `Dynamic` [Part
         // B]) needs it. The `-> Self` case needs the static receiver class
         // (which the plain annotation resolver does not thread), so handle it
         // specially via `receiver_type_for_class`. `-> Self class` returns a
         // class object — existing body-type comparison cannot meaningfully
-        // validate this, so skip (BT-1952).
+        // validate this, so skip.
         //
-        // BT-2025: All other arms — including `Generic` — go through the
-        // central `resolve_type_annotation` resolver. ADR 0108 (BT-2895):
+        // All other arms — including `Generic` — go through the
+        // central `resolve_type_annotation` resolver. ADR 0108:
         // thread the alias registry (but not the protocol registry — this
         // mirrors `Self::resolve_type_annotation`'s existing, unchanged
         // scope) so a declared `-> RestartStrategy` return type expands to
@@ -1525,7 +1523,7 @@ impl TypeChecker {
             }
             TypeAnnotation::SelfClass { .. } | TypeAnnotation::ClassOf { .. } => return,
             _ => {
-                // ADR 0108 hot-reload re-check trigger (BT-2899): a declared
+                // ADR 0108 hot-reload re-check trigger: a declared
                 // `-> RestartStrategy` return type is an annotation site too
                 // — record its (transitive) alias deps the same as every
                 // other resolved annotation.
@@ -1546,10 +1544,10 @@ impl TypeChecker {
             ..
         } = body_type
         else {
-            // BT-2829: `Union` and `Dynamic` bodies used to bail out of return-type
+            // `Union` and `Dynamic` bodies must not bail out of return-type
             // checking entirely here, even against a concrete declared return
-            // type — the exact mechanism that let BT-2824's bug go unnoticed for
-            // so long. Route those through dedicated checks (Parts A and B);
+            // type — silently skipping them would hide real return-type
+            // mismatches. Route those through dedicated checks (Parts A and B);
             // `Never`/`Meta`/`Negation`/`Intersection` bodies still can't be
             // reliably compared against `expected` here, so they keep bailing
             // silently as before.
@@ -1576,19 +1574,19 @@ impl TypeChecker {
             return;
         };
 
-        // BT-2022: The resolver now preserves type_args, and the comparison
-        // below checks them when both sides carry generic arguments. This
-        // closes the bug where `-> Result(Integer, Error)` with body
-        // `Result(String, Error)` produced no warning.
+        // The resolver preserves type_args, and the comparison
+        // below checks them when both sides carry generic arguments, so
+        // `-> Result(Integer, Error)` with body `Result(String, Error)`
+        // produces a warning.
         match &expected {
             InferredType::Known {
                 class_name: expected_ty,
                 type_args: expected_args,
                 ..
             } => {
-                // Check base class compatibility, then inner type args (BT-2022).
+                // Check base class compatibility, then inner type args.
                 let base_mismatch = !Self::is_type_compatible(actual_ty, expected_ty, hierarchy);
-                // BT-2022: When the base class matches, also verify inner type args
+                // When the base class matches, also verify inner type args
                 // match. Recurse into nested generics so mismatches like
                 // `Result(Array(Integer), Error)` vs `Result(Array(String), Error)`
                 // are caught (Copilot review on PR #2059).
@@ -1624,7 +1622,7 @@ impl TypeChecker {
             }
             InferredType::Union { members, .. } => {
                 // Body type must be compatible with at least one union member.
-                // BT-2840: delegates to `known_type_compatible_with_union_member`,
+                // Delegates to `known_type_compatible_with_union_member`,
                 // which also compares generic type args — otherwise a body like
                 // `Result(Integer, Error)` is wrongly treated as compatible with
                 // a declared `Result(String, Error) | Nil` just because the
@@ -1657,7 +1655,7 @@ impl TypeChecker {
                 }
             }
             InferredType::Never => {
-                // BT-2033: Declared `-> Never` means the method is divergent
+                // Declared `-> Never` means the method is divergent
                 // (never returns normally). The body must also be Never for the
                 // declaration to be honest. Any `Known` body reaching this arm
                 // means the method *does* return a value — warn.
@@ -1689,7 +1687,7 @@ impl TypeChecker {
             // to stay safe should a future annotation resolve to a metatype.
             // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip like
             // `Meta`/`Dynamic` (ADR 0102). An `Intersection` (`P1 & P2`, ADR
-            // 0102/BT-2743) declared return type has no single `Known` body
+            // 0102) declared return type has no single `Known` body
             // shape to compare against here; skip conservatively too.
             InferredType::Meta { .. }
             | InferredType::Dynamic(_)
@@ -1699,13 +1697,13 @@ impl TypeChecker {
     }
 
     /// Returns whether a `Known` type — either a method body's whole inferred
-    /// type or one member of a `Union` body (BT-2829 Part A) — is compatible
+    /// type or one member of a `Union` body (Part A) — is compatible
     /// with an `expected` (resolved declared) return type.
     ///
     /// Mirrors the comparison rules `check_return_type`'s `Known` body arm
     /// applies against `expected`: base-class compatibility via
     /// [`Self::is_type_compatible`], plus a recursive type-args check
-    /// (BT-2022) when both sides carry generic arguments and the arities
+    /// when both sides carry generic arguments and the arities
     /// match. `expected == Never` is always a mismatch for a concrete `Known`
     /// value (a divergent declaration requires a divergent body). `Meta` /
     /// `Dynamic` / `Negation` / `Intersection` expected types have no
@@ -1740,7 +1738,7 @@ impl TypeChecker {
                         Self::type_args_compatible(exp_arg, act_arg, hierarchy)
                     })
             }
-            // BT-2840: delegate to `known_type_compatible_with_union_member`,
+            // Delegate to `known_type_compatible_with_union_member`,
             // which also compares generic type args instead of stopping at
             // base-class compatibility — otherwise a union body member like
             // `Result(Integer, Error)` is wrongly treated as compatible with
@@ -1762,24 +1760,24 @@ impl TypeChecker {
         }
     }
 
-    /// BT-2840: compare a body's `Known` type against one member of a
+    /// Compare a body's `Known` type against one member of a
     /// `Union` expected/declared return type.
     ///
     /// Shared by both `Union`-arm sites in this file — `check_return_type`'s
     /// own dispatch (declared type is directly a `Union`) and
     /// [`Self::known_type_compatible_with_expected`] (declared type is a
     /// `Union` reached via `check_union_body_return_type`'s per-member
-    /// check) — so the fix for BT-2840's false negative lives in one place.
+    /// check) — so this comparison lives in one place.
     ///
     /// Mirrors the `Known`-vs-`Known` comparison in
     /// [`Self::known_type_compatible_with_expected`]: base-class
     /// compatibility via [`Self::is_type_compatible`], plus a recursive
     /// type-args check via [`Self::type_args_compatible`] when both the
     /// actual type and the member carry generic arguments of matching
-    /// arity. Previously this only checked the base class (via
-    /// `member.as_known()`), so a body like `Result(Integer, Error)` was
+    /// arity — not just the base class (via `member.as_known()`), so a
+    /// body like `Result(Integer, Error)` is not
     /// wrongly treated as compatible with a declared `Result(String,
-    /// Error) | Nil` merely because the `Result` base class matched.
+    /// Error) | Nil` merely because the `Result` base class matches.
     ///
     /// Stays conservative (returns `true`) for any non-`Known` member
     /// (`Dynamic`/`Union`/`Meta`/`Never`) — those can't be reasoned about
@@ -1811,31 +1809,31 @@ impl TypeChecker {
                     }))
     }
 
-    /// BT-2829 Part A: validate a `Union` method body against the declared
+    /// Part A: validate a `Union` method body against the declared
     /// return type.
     ///
-    /// Before this, `check_return_type` bailed out of validation entirely for
+    /// `check_return_type` must not bail out of validation entirely for
     /// `Union` bodies — so `foo -> String => self bar ifTrue: ["yes"]
-    /// ifFalse: [42]` (body infers `Union(String, Integer)`) compiled with
+    /// ifFalse: [42]` (body infers `Union(String, Integer)`) must not compile with
     /// zero diagnostics despite `Integer` never satisfying `-> String`.
     ///
-    /// Every member is now checked with
+    /// Every member is checked with
     /// [`Self::known_type_compatible_with_expected`] — the same rules the
     /// `Known` body arm applies — and a single incompatible member raises the
     /// same `DiagnosticCategory::Type` mismatch diagnostic the `Known` arm
     /// produces (same severity: this is a real bug, not a new lint class). A
     /// union whose members are all compatible with `expected` — including
-    /// BT-2047's legitimate branch-union case, e.g. `ifNil:ifNotNil:`
-    /// producing exactly the declared `T | R` — stays silent, same as today.
+    /// a legitimate branch-union case, e.g. `ifNil:ifNotNil:`
+    /// producing exactly the declared `T | R` — stays silent.
     ///
-    /// Conservative like `classify_union_members` (BT-1832): if any member is
+    /// Conservative like `classify_union_members`: if any member is
     /// itself not `Known` (nested `Dynamic`/`Union`/`Meta`/`Never`/etc.), skip
     /// — we can't reason about those precisely enough to warn without risking
     /// false positives.
     ///
-    /// Scoped to `typed` classes only (per the issue title and AC), matching
+    /// Scoped to `typed` classes only, matching
     /// Part B's gating even though the underlying comparison itself is
-    /// typed-status-agnostic — this keeps both BT-2829 diagnostics equally
+    /// typed-status-agnostic — this keeps both diagnostics equally
     /// narrow and avoids a noise spike in untyped/dynamic classes.
     fn check_union_body_return_type(
         &mut self,
@@ -1888,7 +1886,7 @@ impl TypeChecker {
         );
     }
 
-    /// BT-2829 Part B: hint when a `Dynamic` body swallows type information
+    /// Part B: hint when a `Dynamic` body swallows type information
     /// the checker could plausibly have recovered.
     ///
     /// Fires only when all of the following hold:
@@ -2021,7 +2019,7 @@ impl TypeChecker {
                 continue;
             };
             // `is_type_compatible` is a string-level nominal-chain walker
-            // shared across many call sites (BT-3076 out of scope) — render
+            // shared across many call sites — render
             // the structured types once at this boundary.
             let child_t_str: EcoString = child_t.to_string().into();
             let parent_t_str: EcoString = parent_t.to_string().into();
@@ -2053,7 +2051,7 @@ impl TypeChecker {
     /// combination has no bespoke check here (e.g. `String>>,`, `Integer>>**`,
     /// or any other binary selector outside +-*/ / </>/<=/>= / `++` on
     /// String) — the caller must fall back to the generic
-    /// `check_argument_types` (BT-2843) rather than treat "resolved on the
+    /// `check_argument_types` rather than treat "resolved on the
     /// receiver" as "checked".
     pub(super) fn check_binary_operand_types(
         &mut self,
@@ -2070,11 +2068,11 @@ impl TypeChecker {
         let is_concat = operator == "++"
             && WellKnownClass::from_str(receiver_ty) == Some(WellKnownClass::String);
         let is_generic = super::is_generic_type_param(arg_ty);
-        // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+        // Render `UndefinedObject` as `Nil` in user-facing messages.
         let arg_display = InferredType::class_name_for_diagnostic(arg_ty.as_str());
         let receiver_display = InferredType::class_name_for_diagnostic(receiver_ty.as_str());
 
-        // BT-2843: whether this call has bespoke logic for `operator` on
+        // Whether this call has bespoke logic for `operator` on
         // `receiver_ty` — computed from the same guards each branch below
         // uses, so it stays in lockstep with what's actually checked. If a
         // new operator/receiver shape gets a branch below, its guard must be
@@ -2086,7 +2084,7 @@ impl TypeChecker {
 
         // Arithmetic operators on numeric types require numeric arguments
         if is_arithmetic && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
-            // BT-1588: Use hint severity for generic type params (likely false positive)
+            // Use hint severity for generic type params (likely false positive)
             let mut diag = if is_generic {
                 Diagnostic::hint(
                     format!(
@@ -2118,7 +2116,7 @@ impl TypeChecker {
             && arg_ty.as_str() != "Symbol"
             && !arg_ty.starts_with('#')
         {
-            // BT-1588: Use hint severity for generic type params (likely false positive)
+            // Use hint severity for generic type params (likely false positive)
             let mut diag = if is_generic {
                 Diagnostic::hint(
                     format!("`++` on String expects a String argument, got {arg_display}"),
@@ -2175,7 +2173,7 @@ impl TypeChecker {
     ///
     /// If the field has a type annotation in the class hierarchy and the inferred
     /// value type is known and incompatible, emits a warning.
-    #[allow(clippy::too_many_lines)] // BT-2953 added alias-structural resolution
+    #[allow(clippy::too_many_lines)] // includes alias-structural resolution
     pub(super) fn check_field_assignment(
         &mut self,
         field: &crate::ast::Identifier,
@@ -2190,29 +2188,29 @@ impl TypeChecker {
         let Some(declared_type) = hierarchy.state_field_type(&class_name, &field.name) else {
             return; // No type annotation on this field
         };
-        // BT-3076: `resolve_alias_structural` / `resolve_display_name` below
+        // `resolve_alias_structural` / `resolve_display_name` below
         // key an alias lookup by exact bare name — only a `DeclaredType::
         // Simple` could ever be a registered alias reference to begin with,
-        // matching `state_field_type`'s pre-BT-3076 bare-`EcoString` return —
+        // matching `state_field_type`'s bare-`EcoString` return —
         // so render the structured type once at this boundary.
         let declared_type: EcoString = declared_type.to_string().into();
-        // BT-2911: `ClassHierarchy::state_field_type` predates ADR 0108 and
+        // `ClassHierarchy::state_field_type` predates ADR 0108 and
         // returns a bare `EcoString` with no alias provenance — unlike an
-        // `InferredType`, which BT-2897 already tags via
+        // `InferredType`, which tags via
         // `TypeProvenance::Aliased` when it flows through
         // `resolve_type_annotation`. Re-resolve `declared_type` through
         // `AliasRegistry::resolve_display_name` when it names a registered
         // alias so this diagnostic renders `AliasName (expansion)` just like
         // a mismatched alias-typed parameter already does; fall back to the
-        // existing `UndefinedObject` -> `Nil` display (BT-2066) otherwise.
+        // existing `UndefinedObject` -> `Nil` display otherwise.
         let declared_display = self
             .alias_registry
             .as_ref()
             .and_then(|registry| registry.resolve_display_name(&declared_type))
             .unwrap_or_else(|| InferredType::class_name_for_diagnostic(declared_type.as_str()));
-        // BT-2953: `declared_type` above is still the bare, unresolved name —
-        // `declared_display` only fixed the diagnostic text (BT-2911's
-        // "display-only" scope). Resolve it to its structural expansion
+        // `declared_type` above is still the bare, unresolved name —
+        // `declared_display` only fixes the diagnostic text (display-only
+        // scope). Resolve it to its structural expansion
         // (e.g. `RestartStrategy` -> `#temporary | #transient | #permanent`)
         // before it reaches `is_assignable_to`'s structural comparison below,
         // or an alias-typed field falsely rejects every one of its own union
@@ -2226,7 +2224,7 @@ impl TypeChecker {
                 ..
             } => {
                 if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
-                    // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                    // Render `UndefinedObject` as `Nil` in user-facing messages.
                     let declared_display = declared_display.clone();
                     let value_display =
                         InferredType::class_name_for_diagnostic(value_type.as_str());
@@ -2246,7 +2244,7 @@ impl TypeChecker {
                 }
             }
             InferredType::Union { members, .. } => {
-                // BT-1832: Check all union members against the declared field type.
+                // Check all union members against the declared field type.
                 let Some((compat, total, incompatible)) =
                     Self::classify_union_members(members, |m| {
                         Self::is_assignable_to(m, &declared_type, hierarchy)
@@ -2311,7 +2309,7 @@ impl TypeChecker {
             }
             // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip
             // conservatively like `Dynamic`/`Never` (ADR 0102). Likewise an
-            // `Intersection` (`P1 & P2`, ADR 0102/BT-2743) as the value's own
+            // `Intersection` (`P1 & P2`, ADR 0102) as the value's own
             // inferred type — skip conservatively.
             InferredType::Dynamic(_)
             | InferredType::Never
@@ -2321,7 +2319,7 @@ impl TypeChecker {
     }
 
     /// Shared call-site boundary for `spawnWith:` map-literal inspection
-    /// (ADR 0104 Phase 2, BT-2750).
+    /// (ADR 0104 Phase 2).
     ///
     /// Returns the `MapPair`s of a `C spawnWith: #{...}` send when the argument
     /// is a *literal* map — the only point at which per-key inspection is
@@ -2331,7 +2329,7 @@ impl TypeChecker {
     /// first argument (e.g. a `Dictionary`-typed variable), so callers never
     /// inspect a non-literal map — the key check produces no false positives.
     ///
-    /// This is the reusable walk boundary: ADR 0103's BT-2755 value-sendability
+    /// This is the reusable walk boundary: ADR 0103's value-sendability
     /// check iterates the *same* `(key, value)` pairs at the same call site and
     /// hooks in here.
     pub(super) fn spawn_with_map_pairs<'a>(
@@ -2348,7 +2346,7 @@ impl TypeChecker {
     }
 
     /// Check a `C spawnWith: #{...}` call site's map keys against `C`'s declared
-    /// `state:` slots (ADR 0104 Phase 2, BT-2750).
+    /// `state:` slots (ADR 0104 Phase 2).
     ///
     /// For each symbol key in the literal map:
     ///   * a key matching a declared slot (including inherited slots) passes;
@@ -2394,15 +2392,15 @@ impl TypeChecker {
         }
         for pair in pairs {
             // Keys are symbol literals (`#count`); a non-symbol key is already a
-            // parse error (BT-1240) — skip it here.
+            // parse error — skip it here.
             let Expression::Literal(Literal::Symbol(key_name), key_span) = &pair.key else {
                 continue;
             };
             if slots.iter().any(|s| s.as_str() == key_name.as_str()) {
                 // Known slot — value-check against the declared type when typed.
                 if let Some(declared_ty) = hierarchy.state_field_type(class_name, key_name) {
-                    // `check_spawn_with_value` is a string-level helper
-                    // (BT-3076 out of scope) — render once at this boundary.
+                    // `check_spawn_with_value` is a string-level helper —
+                    // render once at this boundary.
                     let declared_ty: EcoString = declared_ty.to_string().into();
                     self.check_spawn_with_value(
                         class_name,
@@ -2432,7 +2430,7 @@ impl TypeChecker {
     }
 
     /// Check a `spawnWith:` literal value against a declared slot type
-    /// (ADR 0104 Phase 2, BT-2750).
+    /// (ADR 0104 Phase 2).
     ///
     /// The value's inferred type is read back from the type map (populated when
     /// the argument map literal was inferred), so the value expression is not
@@ -2450,7 +2448,7 @@ impl TypeChecker {
         let Some(value_ty) = self.type_map.get(value_expr.span()).cloned() else {
             return; // Dynamic / unknown value type — skip conservatively.
         };
-        // BT-2911: `declared_ty` is a bare `EcoString` pulled from
+        // `declared_ty` is a bare `EcoString` pulled from
         // `ClassHierarchy::state_field_type` — the same pre-ADR-0108
         // storage `check_field_assignment` sits on. Re-resolve through
         // `AliasRegistry::resolve_display_name` when it names a registered
@@ -2460,9 +2458,9 @@ impl TypeChecker {
             .as_ref()
             .and_then(|registry| registry.resolve_display_name(declared_ty))
             .unwrap_or_else(|| InferredType::class_name_for_diagnostic(declared_ty.as_str()));
-        // BT-2953: mirror `check_field_assignment`'s structural resolution —
-        // `declared_display` above only fixed the diagnostic text (BT-2911's
-        // "display-only" scope); `is_assignable_to` below still needs the
+        // Mirror `check_field_assignment`'s structural resolution —
+        // `declared_display` above only fixes the diagnostic text (display-only
+        // scope); `is_assignable_to` below still needs the
         // alias's structural expansion, not the opaque unresolved name, or a
         // valid `spawnWith:` slot value falsely fails the check.
         let (declared_structural, alias_deps) =
@@ -2556,7 +2554,7 @@ impl TypeChecker {
     }
 
     /// Check state default values match declared types at class definition time.
-    #[allow(clippy::too_many_lines)] // ADR 0108 (BT-2895) added alias-aware resolution of the declared type
+    #[allow(clippy::too_many_lines)] // ADR 0108 alias-aware resolution of the declared type
     pub(super) fn check_state_defaults(
         &mut self,
         class: &crate::ast::ClassDefinition,
@@ -2576,7 +2574,7 @@ impl TypeChecker {
             let Some(ref default_value) = decl.default_value else {
                 continue;
             };
-            // ADR 0108 (BT-2895): resolve the declared type through the alias
+            // ADR 0108: resolve the declared type through the alias
             // table before comparing against the default value's inferred
             // type — mirroring `check_method_return_type`'s existing
             // alias-aware resolution — so `field: restart :: RestartStrategy
@@ -2598,7 +2596,7 @@ impl TypeChecker {
             if type_param_names.contains(&declared_type.as_str()) {
                 continue;
             }
-            // BT-2911: `resolved_declared` already carries BT-2897's
+            // `resolved_declared` already carries a
             // `TypeProvenance::Aliased` tag when `type_annotation` names a
             // registered alias (see the doc above) — `display_for_diagnostic`
             // renders it as `AliasName (expansion)` directly. Computed once
@@ -2611,15 +2609,12 @@ impl TypeChecker {
                 .unwrap_or_else(|| EcoString::from("Dynamic"));
             let mut env = TypeEnv::new();
             env.set_local("self", InferredType::known(class.name.name.clone()));
-            // BT-3469 (item 3) documented, without fixing, that this call
-            // makes the module's dependency direction cyclic: `inference/`
+            // This call makes the module's dependency direction cyclic: `inference/`
             // already calls into `validation.rs` (`check_argument_types`,
             // `check_instance_selector`, …), and this is `validation.rs`
             // calling back into `inference/`'s `infer_expr`. Left as-is
-            // here — see BT-3481 for the follow-up that decides whether to
-            // eliminate it (thread the default value's already-inferred
-            // type through from the caller) or document it as a deliberate
-            // exception.
+            // deliberately; eliminating it would mean threading the default
+            // value's already-inferred type through from the caller instead.
             let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
             match &inferred {
                 InferredType::Known {
@@ -2628,7 +2623,7 @@ impl TypeChecker {
                 } => {
                     if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
                         let declared_display = declared_display.clone();
-                        // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                        // Render `UndefinedObject` as `Nil` in user-facing messages.
                         let value_display =
                             InferredType::class_name_for_diagnostic(value_type.as_str());
                         self.diagnostics.push(
@@ -2647,9 +2642,8 @@ impl TypeChecker {
                     }
                 }
                 InferredType::Union { members, .. } => {
-                    // BT-2848: Check all union members against the declared field
-                    // type, mirroring `check_field_assignment`'s handling
-                    // (BT-1832).
+                    // Check all union members against the declared field
+                    // type, mirroring `check_field_assignment`'s handling.
                     let Some((compat, total, incompatible)) =
                         Self::classify_union_members(members, |m| {
                             Self::is_assignable_to(m, &declared_type, hierarchy)
@@ -2700,7 +2694,7 @@ impl TypeChecker {
                 // (`C class` as a default value) is left unchecked here too;
                 // `check_field_assignment`'s explicit `Meta` handling (ADR
                 // 0083, metatype-vs-`Class` assignability) is out of scope
-                // for this ticket (BT-2848), which only adds the `Union` arm.
+                // here, which only adds the `Union` arm.
                 _ => {}
             }
         }
@@ -2750,13 +2744,13 @@ impl TypeChecker {
             });
         }
         // For generic declared types like "Result(Integer, Error)", extract
-        // the base type name and compare structurally. BT-2025: go through
+        // the base type name and compare structurally, going through
         // the centralised `base_name_of_string` helper so the grep for
         // ad-hoc `.find('(')` slicing stays clean.
         let declared_base = type_resolver::base_name_of_string(declared_type);
         let value_base = type_resolver::base_name_of_string(value_type);
         if value_base == declared_base {
-            // BT-2623: same base — compare type args so `Array(String)` is not
+            // Same base — compare type args so `Array(String)` is not
             // silently assignable to a declared `Array(Integer)`. Conservative
             // (returns true) when either side is unparameterized.
             return Self::type_args_match(value_type, declared_type, hierarchy);
@@ -2855,7 +2849,7 @@ impl TypeChecker {
     /// Returns `("Result", ["Integer", "Error"])` for `"Result(Integer, Error)"`.
     /// Returns `("Map", ["Result(A, B)", "C"])` for `"Map(Result(A, B), C)"` —
     /// nested multi-parameter generics split at the top level only, matching the
-    /// balanced splitter used elsewhere in the type checker (BT-2025).
+    /// balanced splitter used elsewhere in the type checker.
     /// For non-generic types, returns the full name and an empty vec.
     pub(super) fn parse_generic_type_string(type_str: &str) -> (String, Vec<String>) {
         let (base, args_slice) = type_resolver::split_generic_base(type_str);
@@ -2870,7 +2864,7 @@ impl TypeChecker {
         (base.to_string(), args)
     }
 
-    /// BT-2949: does `type_str` reference one of `params`'s keys — a class's
+    /// Does `type_str` reference one of `params`'s keys — a class's
     /// own generic type-param names — either bare (`"V"`) or nested inside a
     /// generic (`"List(E)"`, `"Dictionary(K, V)"`, recursing through deeper
     /// nesting like `"Pair(K, List(V))"`)?
@@ -2879,8 +2873,8 @@ impl TypeChecker {
     /// left unrecognized (returns `false`) rather than guessing which member
     /// substitution should apply to — no builtin generic collection method
     /// declares a union-shaped parameter naming a class type param today, so
-    /// this only means such a signature would keep the pre-BT-2949
-    /// (unsubstituted) behavior rather than risk a wrong substitution.
+    /// this only means such a signature keeps the
+    /// unsubstituted behavior rather than risking a wrong substitution.
     pub(super) fn type_string_references_class_param(
         type_str: &str,
         params: &HashMap<EcoString, InferredType>,
@@ -2896,7 +2890,7 @@ impl TypeChecker {
             .any(|arg| Self::type_string_references_class_param(arg, params))
     }
 
-    /// BT-2949: widen a singleton (or union-of-singletons) type arg to
+    /// Widen a singleton (or union-of-singletons) type arg to
     /// `Symbol` before using it as a class-type-param substitution target
     /// for argument checking.
     ///
@@ -2943,7 +2937,7 @@ impl TypeChecker {
     /// Same as `resolve_type_keyword` but takes `&str` for use in validation contexts.
     fn resolve_type_keyword_static(name: &str) -> EcoString {
         match name {
-            // BT-2016: Match both `nil` and `Nil`, consistent with resolve_type_keyword.
+            // Match both `nil` and `Nil`, consistent with resolve_type_keyword.
             "nil" | "Nil" => WellKnownClass::UndefinedObject.as_str().into(),
             "false" => "False".into(),
             "true" => "True".into(),
@@ -2955,7 +2949,7 @@ impl TypeChecker {
     /// canonical class names. Returns `Some` with the resolved name if an alias
     /// was applied, `None` if the name is already canonical.
     ///
-    /// BT-1877: `Nil` in type annotations maps to `UndefinedObject` in the
+    /// `Nil` in type annotations maps to `UndefinedObject` in the
     /// hierarchy. Without this resolution, `Nil` is treated as an unknown type
     /// and the conservative fallback disables validation.
     fn resolve_type_alias(name: &EcoString) -> Option<EcoString> {
@@ -2965,7 +2959,7 @@ impl TypeChecker {
         }
     }
 
-    /// BT-2953 (ADR 0108): resolve a declared type name that refers to a
+    /// ADR 0108: resolve a declared type name that refers to a
     /// registered type alias (e.g. `"RestartStrategy"`) to its structural
     /// expansion (e.g. `"#temporary | #transient | #permanent"`), so
     /// [`Self::is_assignable_to`]/[`Self::is_type_compatible`]'s nominal
@@ -2975,14 +2969,14 @@ impl TypeChecker {
     /// `ClassHierarchy::state_field_type`/`MethodInfo::param_types` store an
     /// alias-typed declaration as the bare alias name —
     /// `TypeAnnotation::type_name()` is purely syntactic and never resolves
-    /// through `AliasRegistry`. BT-2911 re-resolved the *display* string at
-    /// these same call sites (`declared_display`/`expected_display`) but its
-    /// own acceptance criteria left the string handed to the structural
-    /// comparison functions unresolved on purpose ("display-only"). This
-    /// closes that gap: `is_assignable_to` had no "unknown class" escape
-    /// hatch, so an unresolved alias name produced false-positive "Type
+    /// through `AliasRegistry`. Re-resolving the *display* string at
+    /// these same call sites (`declared_display`/`expected_display`) is not enough
+    /// on its own — the string handed to the structural
+    /// comparison functions must also be resolved, not left as the bare alias
+    /// name ("display-only" would leave a gap): `is_assignable_to` has no "unknown class" escape
+    /// hatch, so an unresolved alias name would produce false-positive "Type
     /// mismatch" warnings even for valid union members; `is_type_compatible`
-    /// has one, so an unresolved alias name made argument-type checking a
+    /// has one, so an unresolved alias name would make argument-type checking a
     /// silent no-op instead.
     ///
     /// Reconstructs a `TypeAnnotation::Simple` reference to `name` (mirroring
@@ -2992,8 +2986,8 @@ impl TypeChecker {
     /// plain structural type exactly like every other alias reference in the
     /// checker. The second element of the returned pair is the (possibly
     /// empty) set of alias names touched while resolving — callers fold this
-    /// into `self.referenced_aliases` (ADR 0108 hot-reload re-check trigger,
-    /// BT-2899) the same way every other alias-aware resolution site does.
+    /// into `self.referenced_aliases` (ADR 0108 hot-reload re-check trigger)
+    /// the same way every other alias-aware resolution site does.
     ///
     /// A name that is not a registered alias — an ordinary class name, a
     /// singleton, or an annotation already spelled out as a union (e.g.
@@ -3002,12 +2996,12 @@ impl TypeChecker {
     /// untouched.
     ///
     /// Deliberately not the more general
-    /// [`type_resolver::resolve_declared_type`] (BT-2928, also
+    /// [`type_resolver::resolve_declared_type`] (also
     /// alias-registry-aware): that resolver additionally re-parses keywords
     /// (`nil`/`true`/`false`), generics, and pre-spelled unions, which would
     /// change what a *non-alias* declared type resolves to here (e.g.
     /// `"Nil"` -> `"UndefinedObject"`) — a broader behavior change than this
-    /// ticket's scope, and it doesn't report alias deps for hot-reload
+    /// function's scope, and it doesn't report alias deps for hot-reload
     /// tracking. This function only ever touches a name that
     /// `AliasRegistry::get` recognises, then reuses the same
     /// `resolve_type_annotation_with_alias_deps`/`referenced_aliases`
@@ -3036,7 +3030,7 @@ impl TypeChecker {
         (resolved.display_annotation(), deps)
     }
 
-    // ── BT-3469: renderers for facts `inference/` detects ──────────────
+    // ── Renderers for facts `inference/` detects ──────────────
     //
     // Each of these four takes the plain data record `inference/` built
     // (see `types.rs`'s "diagnostic facts" section) and turns it into the
@@ -3102,7 +3096,7 @@ impl TypeChecker {
         );
     }
 
-    /// Render the BT-2623 improper-cons-tail fact
+    /// Render the improper-cons-tail fact
     /// (`InferredType::improper_cons_tail_display`) detected by
     /// `inference::infer_list_literal`.
     pub(super) fn emit_improper_cons_tail(&mut self, tail_display: &str, span: Span) {
@@ -3120,7 +3114,7 @@ impl TypeChecker {
         );
     }
 
-    /// Render a BT-1914 [`DynamicInTypedClass`] fact detected by
+    /// Render a [`DynamicInTypedClass`] fact detected by
     /// `inference::post_process_expr_type`.
     pub(super) fn emit_dynamic_in_typed_class(&mut self, fact: &DynamicInTypedClass, span: Span) {
         self.diagnostics.push(
@@ -3140,12 +3134,12 @@ impl TypeChecker {
     /// `severity`. `display_name` is the type the user wrote (e.g. a
     /// singleton `#infinity`), used only in the message text. `class_name`
     /// is the type we resolve selectors and "did you mean" suggestions
-    /// against (e.g. `Symbol` for a singleton — BT-2679). They coincide for
+    /// against (e.g. `Symbol` for a singleton). They coincide for
     /// ordinary class receivers.
     ///
     /// `severity` exists because this is also the single-missing-member
     /// case's diagnostic builder for [`TypeChecker::infer_union_message_send`]
-    /// (BT-3469) — a union send the checker can *prove* fails (every member
+    /// — a union send the checker can *prove* fails (every member
     /// closed, none responds) is a `Warning` per ADR 0100 Rule 1's
     /// "provably failing union" row, while every other caller here passes
     /// `Hint`. Reusing this method, rather than a second copy, is what keeps
@@ -3153,7 +3147,7 @@ impl TypeChecker {
     /// bare receiver's DNU and a union's single-culprit DNU.
     ///
     /// `context_suffix`, when `Some`, is appended verbatim after the "does
-    /// not understand '<selector>'" clause — the union call site (BT-3469)
+    /// not understand '<selector>'" clause — the union call site
     /// uses it for `" (in union A | B)"` so a union's single-culprit DNU
     /// keeps the same receiver context every other union DNU carries; every
     /// other caller passes `None`.
@@ -3165,7 +3159,7 @@ impl TypeChecker {
     /// `respondsTo:`/`@expect` hint, and a single-culprit union DNU should
     /// too when it has no nearby selector to suggest. Bare-receiver callers
     /// pass `None` here, keeping their existing no-fallback behavior.
-    #[allow(clippy::too_many_arguments)] // display/lookup name split (BT-2679) + severity/context (BT-3469) + fallback hint
+    #[allow(clippy::too_many_arguments)] // display/lookup name split + severity/context + fallback hint
     pub(super) fn emit_unknown_selector_warning(
         &mut self,
         display_name: &EcoString,
@@ -3236,7 +3230,7 @@ impl TypeChecker {
     /// class, checks structural conformance. Emits a warning if the class does
     /// not conform to the protocol.
     ///
-    /// **Metatype arguments (BT-2761):** a class-object argument `Meta{C}`
+    /// **Metatype arguments:** a class-object argument `Meta{C}`
     /// (ADR 0083) satisfies a protocol-typed parameter `:: P` iff the *class
     /// side* of `C` conforms to `P` — see
     /// [`ProtocolRegistry::check_class_side_conformance`] for the full rule.
@@ -3306,7 +3300,7 @@ impl TypeChecker {
                     protocol_registry,
                 );
             }
-            // ADR 0083 / BT-2761: a class-object argument `Meta{C}` satisfies
+            // ADR 0083: a class-object argument `Meta{C}` satisfies
             // `:: P` iff the *class side* of `C` conforms to `P` (the callee
             // will send `P`'s required selectors to the class object, which
             // dispatch to `C`'s class methods or the metaclass tower — see
@@ -3324,7 +3318,7 @@ impl TypeChecker {
             }
             // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip like
             // `Never` (ADR 0102). An `Intersection` (`P1 & P2`, ADR
-            // 0102/BT-2743) as the *argument's own* inferred type is a rarer,
+            // 0102) as the *argument's own* inferred type is a rarer,
             // deeper case (the value's declared type is itself a stored
             // intersection) — skip conservatively rather than guess which
             // member to check; the flagship "parameter declared `P1 & P2`"
@@ -3341,8 +3335,8 @@ impl TypeChecker {
     /// [`check_protocol_argument_conformance`](Self::check_protocol_argument_conformance).
     ///
     /// All members conforming → pass; none → warning listing missing methods
-    /// across members; some → hint listing the non-conforming members
-    /// (BT-1832). Unions containing `Dynamic` are skipped.
+    /// across members; some → hint listing the non-conforming members.
+    /// Unions containing `Dynamic` are skipped.
     fn check_union_argument_conformance(
         &mut self,
         arg_type: &InferredType,
@@ -3356,7 +3350,7 @@ impl TypeChecker {
             return; // Not a protocol — handled by normal type checking
         }
         let Some((compat, total, non_conforming)) = Self::classify_union_members(members, |m| {
-            // BT-2623: members now carry type args (e.g. `Array(Integer)`);
+            // Members carry type args (e.g. `Array(Integer)`);
             // conformance is a property of the base class, so strip them.
             let base = type_resolver::base_name_of_string(m);
             protocol_registry
@@ -3368,7 +3362,7 @@ impl TypeChecker {
         if compat == total {
             return; // All conform → pass
         }
-        // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+        // Render `UndefinedObject` as `Nil` in user-facing messages.
         let union_display = arg_type
             .display_for_diagnostic()
             .unwrap_or_else(|| EcoString::from("Dynamic"));
@@ -3404,7 +3398,7 @@ impl TypeChecker {
     }
 
     /// Check class-side protocol conformance for a metatype (`Meta{C}`)
-    /// call-site argument (BT-2761) — the `Meta` arm of
+    /// call-site argument — the `Meta` arm of
     /// [`check_protocol_argument_conformance`](Self::check_protocol_argument_conformance).
     ///
     /// Emits a warning naming the *class side* (`C class`) when it does not
@@ -3458,7 +3452,7 @@ impl TypeChecker {
     }
 
     /// Splits a `type_name()`-rendered intersection string (`"P1 & P2 & …"`,
-    /// ADR 0068 §Protocol Composition / ADR 0102 §1/§3, BT-2743) into its
+    /// ADR 0068 §Protocol Composition / ADR 0102 §1/§3) into its
     /// top-level `&`-joined parts.
     ///
     /// Respects parenthesis nesting so a generic type argument's own
@@ -3473,7 +3467,7 @@ impl TypeChecker {
     /// **both** protocol parts, per ADR 0068's protocol-composition use case.
     ///
     /// Thin wrapper over the shared nesting-aware scanner
-    /// (`string_utils::split_top_level`, BT-3089), layering on "no top-level
+    /// (`string_utils::split_top_level`), layering on "no top-level
     /// `&` found ⇒ `None`" — the one behavioural difference this consumer
     /// actually needs (see doc comment above): callers use `None` to detect
     /// "not an intersection annotation at all" and fall back to single-type
@@ -3555,10 +3549,10 @@ impl TypeChecker {
                     }
                 }
                 InferredType::Union { members, .. } => {
-                    // BT-1832: Check all union members against the bound protocol.
+                    // Check all union members against the bound protocol.
                     let Some((compat, total, non_conforming)) =
                         Self::classify_union_members(members, |m| {
-                            // BT-2623: strip type args (`Array(Integer)` → `Array`);
+                            // Strip type args (`Array(Integer)` → `Array`);
                             // conformance is checked on the base class.
                             let base = type_resolver::base_name_of_string(m);
                             protocol_registry
@@ -3572,7 +3566,7 @@ impl TypeChecker {
                         continue; // All conform → pass
                     }
                     let param_name = param_names.get(i).map_or("?", |p| p.as_str());
-                    // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                    // Render `UndefinedObject` as `Nil` in user-facing messages.
                     let union_display = arg
                         .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));
@@ -3608,7 +3602,7 @@ impl TypeChecker {
                 // Dynamic/Never values: can't verify bounds (skip silently).
                 // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip
                 // like `Meta`/`Dynamic`/`Never` (ADR 0102). An `Intersection`
-                // (`P1 & P2`, ADR 0102/BT-2743) as a type argument is likewise
+                // (`P1 & P2`, ADR 0102) as a type argument is likewise
                 // skipped — a bound is a single protocol name, and checking
                 // it against one member of the intersection risks a false
                 // positive when a *different* member is the one that conforms.
