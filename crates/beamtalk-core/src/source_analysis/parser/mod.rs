@@ -182,8 +182,9 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
 /// `narrowing::rules::singleton_eq`), and the non-overridable-operator
 /// validator (`semantic_analysis::validators::operator_validators`, which
 /// documents the same ADR 0002 rationale for why these four bypass message
-/// dispatch). BT-3462 replaced four independent hardcoded copies of this set
-/// with this one function plus [`equality_operator_is_negated`].
+/// dispatch). This function plus [`equality_operator_is_negated`] is the
+/// single definition of this set, rather than four independent hardcoded
+/// copies.
 #[must_use]
 pub fn is_equality_operator(op: &str) -> bool {
     equality_operator_is_negated(op).is_some()
@@ -194,7 +195,7 @@ pub fn is_equality_operator(op: &str) -> bool {
 /// *positive* form (`==`, `=:=`). Returns `None` for any other operator —
 /// callers that only need membership should use [`is_equality_operator`].
 ///
-/// Used by `narrowing::rules::singleton_eq::detect_binary` (BT-2617/BT-3369)
+/// Used by `narrowing::rules::singleton_eq::detect_binary`
 /// to recover whether a detected `x =:= #foo` / `x /= #foo` comparison is a
 /// match or a mismatch test, without re-deriving the operator set itself.
 #[must_use]
@@ -580,51 +581,51 @@ pub enum DiagnosticCategory {
     Type,
     /// Unused-variable warning.
     Unused,
-    /// Empty-method-body error (BT-859).
+    /// Empty-method-body error.
     EmptyBody,
-    /// Style/redundancy lint (BT-959).
+    /// Style/redundancy lint.
     Lint,
-    /// Dead assignment in block closure (BT-1476).
+    /// Dead assignment in block closure.
     DeadAssignment,
-    /// Duplicate extension method conflict (BT-1516).
+    /// Duplicate extension method conflict.
     ExtensionConflict,
-    /// Deprecation warning (BT-1529) — wrong keyword/class-kind combination.
+    /// Deprecation warning — wrong keyword/class-kind combination.
     ///
     /// Excluded from `--warnings-as-errors` to allow gradual migration.
     Deprecation,
-    /// Actor-new error (BT-1559) — using `new`/`new:` on an Actor subclass.
+    /// Actor-new error — using `new`/`new:` on an Actor subclass.
     ActorNew,
     /// Visibility error/warning (ADR 0071) — cross-package access to internal methods.
     Visibility,
-    /// Unresolved class reference (BT-1726) — class not found in hierarchy.
+    /// Unresolved class reference — class not found in hierarchy.
     UnresolvedClass,
-    /// Unresolved FFI module (BT-1726) — Erlang module not in known OTP set.
+    /// Unresolved FFI module — Erlang module not in known OTP set.
     UnresolvedFfi,
-    /// Arity mismatch (BT-1726) — wrong argument count for known Erlang function.
+    /// Arity mismatch — wrong argument count for known Erlang function.
     ArityMismatch,
-    /// Workspace binding shadows class (BT-1759) — REPL binding hides a class name.
+    /// Workspace binding shadows class — REPL binding hides a class name.
     ShadowedClass,
-    /// Missing type annotation in typed class (BT-1918).
+    /// Missing type annotation in typed class.
     ///
     /// Separate from `Type` so that `@expect type_annotation` suppresses
     /// only missing-annotation warnings without hiding real type mismatches.
     TypeAnnotation,
-    /// Inheritance constraint violation (BT-2087) — subclassing a sealed class
+    /// Inheritance constraint violation — subclassing a sealed class
     /// or overriding a sealed method.
     Inheritance,
     /// Sendability advisory (ADR 0103) — a scoped handle crossing a process
     /// boundary (actor message arg, `spawnWith:`, block capture, Announcement
     /// payload), or an FFI-wrapping class with no declared `handleScope:`.
     Sendability,
-    /// Misplaced `declare native:` block (BT-3404) — an Erlang FFI type
+    /// Misplaced `declare native:` block — an Erlang FFI type
     /// declaration outside a `stubs/` directory.
     NativeDeclarationLocation,
     /// File name doesn't agree with its declared class name under Erlang
-    /// module-name case-folding (BT-3431) — breaks self-dispatch codegen.
+    /// module-name case-folding — breaks self-dispatch codegen.
     FileClassNameMismatch,
 }
 
-/// A secondary note attached to a diagnostic (BT-1588).
+/// A secondary note attached to a diagnostic.
 ///
 /// Notes provide additional context like "variable has type V because it came
 /// from `Dictionary at:ifAbsent:` at line 42". The optional span points to the
@@ -656,7 +657,7 @@ pub struct Diagnostic {
     ///
     /// Each note is a message with an optional source span pointing to the
     /// origin of the relevant type or value. Inspired by Rust's "type
-    /// originated here" secondary labels (BT-1588).
+    /// originated here" secondary labels.
     pub notes: Vec<DiagnosticNote>,
 }
 
@@ -727,7 +728,7 @@ impl Diagnostic {
         self
     }
 
-    /// Attaches a note explaining the diagnostic context (BT-1588).
+    /// Attaches a note explaining the diagnostic context.
     ///
     /// Notes provide secondary information like type origin tracing.
     #[must_use]
@@ -791,11 +792,11 @@ pub(super) struct Parser {
     /// The selector of the method whose body is currently being parsed.
     ///
     /// Set while inside a method body so that a bare `@primitive` (no explicit
-    /// selector string) can infer its selector from the enclosing method
-    /// (BT-2724). `None` outside method bodies.
+    /// selector string) can infer its selector from the enclosing method.
+    /// `None` outside method bodies.
     pub(super) current_method_selector: Option<EcoString>,
     /// Whether the parser is currently inside a class body.
-    /// Used to detect trailing expressions via indentation (BT-903).
+    /// Used to detect trailing expressions via indentation.
     pub(super) in_class_body: bool,
     /// The indentation column of the method definition currently being
     /// parsed's own header token (the selector, or a leading `sealed`/
@@ -808,7 +809,7 @@ pub(super) struct Parser {
     /// (`Object subclass: __SyntheticAllSendsScope\n<bare method text>`)
     /// puts the header at col 0, so its body's own statements sit at col 2 —
     /// indistinguishable from a *canonical* declaration boundary if that
-    /// were hardcoded (BT-3223). Set in `parse_method_definition` from the
+    /// were hardcoded. Set in `parse_method_definition` from the
     /// header's own first token, before any doc-comment/modifier tokens are
     /// consumed, and restored on return so nesting (a class body found
     /// inside a method body's own class definition) can't leak a stale
@@ -839,7 +840,7 @@ pub(super) struct Parser {
     /// — always called immediately after, on the same token (see its own
     /// doc comment) — consults this to tell "already captured as the doc
     /// comment" apart from "an earlier orphaned block that must round-trip
-    /// as a plain comment instead" (BT-2924).
+    /// as a plain comment instead".
     ///
     /// `None`, or a stale entry for a different token index, means
     /// `collect_doc_comment()` was not just called for the current token
@@ -919,7 +920,7 @@ impl Parser {
     /// Uses [`Token::take_kind`] to move the kind out without cloning trivia
     /// vecs. The token remaining in the vec retains its span and trivia for
     /// post-advance lookups (e.g., `collect_trailing_comment`) but its kind
-    /// becomes `Eof` (BT-1680).
+    /// becomes `Eof`.
     pub(super) fn advance(&mut self) -> Token {
         if self.is_at_end() {
             // At end of input — return the current Eof token.
@@ -988,7 +989,7 @@ impl Parser {
     /// [`Self::collect_comment_attachment`] — always called immediately
     /// after, on the same token — can preserve any earlier block as a plain
     /// comment instead of silently dropping it when the source is
-    /// reformatted (BT-2924).
+    /// reformatted.
     ///
     /// A [`Severity::Warning`] diagnostic is emitted only when *this*
     /// declaration itself ends up with no doc comment at all (the returned
@@ -996,7 +997,7 @@ impl Parser {
     /// broken away by a blank line or `//` comment. An earlier, unrelated
     /// block breaking away while this declaration's own adjacent block still
     /// attaches cleanly is not a problem with this declaration's
-    /// documentation, so it does not warn (BT-2924).
+    /// documentation, so it does not warn.
     pub(super) fn collect_doc_comment(&mut self) -> Option<String> {
         // Clone leading trivia to release the shared borrow of `self` so we
         // can push to `self.diagnostics` inside the loop.
@@ -1088,13 +1089,13 @@ impl Parser {
         // Blank line before the *entire* leading block (before any leading
         // comment, or before the node itself when it has none) — distinct
         // from `saw_blank_line` below, which tracks blank lines *between*
-        // consecutive leading comments (BT-2929).
+        // consecutive leading comments.
         let leading_blank_line = self.current_token().has_blank_line_before_first_comment();
         let mut leading = Vec::new();
-        // Tracks blank lines *between* consecutive leading comments (BT-2929)
+        // Tracks blank lines *between* consecutive leading comments
         // as the loop below walks the trivia. Its value when the loop ends
         // additionally doubles as "is there a blank line after the very last
-        // leading comment, before whatever follows" (BT-2945) — see
+        // leading comment, before whatever follows" — see
         // `blank_line_after_comments` below, which reads it in that final
         // state. An already-attached `///` doc-comment trivia item (handled
         // in the `DocComment` arm) does not reset this flag, so a blank line
@@ -1105,7 +1106,7 @@ impl Parser {
         // Positions (within this token's leading trivia) already captured by
         // the immediately-preceding `collect_doc_comment()` call, if any —
         // see `attached_doc_comment_positions` for why this is positional
-        // rather than a single per-token flag (BT-2924).
+        // rather than a single per-token flag.
         let attached_positions = self
             .attached_doc_comment_positions
             .as_ref()
@@ -1152,7 +1153,7 @@ impl Parser {
                 // either because it wasn't consumed at all (e.g. before
                 // module-level expressions) or because it belongs to an
                 // earlier, blank-line-separated block in the same leading
-                // trivia (BT-2924) — preserve it as a `Comment::doc` leading
+                // trivia — preserve it as a `Comment::doc` leading
                 // comment (renders back as `///`, not `//`) so the formatter
                 // doesn't drop or mangle it.
                 super::Trivia::DocComment(text) => {
@@ -1171,7 +1172,7 @@ impl Parser {
                 }
             }
         }
-        // BT-2945: a blank line after the *last* leading comment (before the
+        // A blank line after the *last* leading comment (before the
         // declaration's own doc comment, or the declaration itself when it
         // has none) — meaningless without a leading comment to have a gap
         // after, hence gated on `leading` being non-empty.
@@ -1207,7 +1208,7 @@ impl Parser {
     /// Use this instead of [`Self::collect_trailing_comment`] when one or more
     /// tokens have been consumed *after* the line whose trailing comment you
     /// want to check — e.g. a class header's `handleScope: #symbol` clause
-    /// (BT-2942) can follow the header on its own line, in which case
+    /// can follow the header on its own line, in which case
     /// `current - 1` would point at the `#symbol` token rather than the
     /// header line's last token.
     pub(super) fn collect_trailing_comment_at(&self, token_idx: usize) -> Option<Comment> {
@@ -1281,9 +1282,9 @@ impl Parser {
     /// - Right paren (`)`) - expression end
     /// - Right brace (`}`) - tuple end
     /// - Semicolon (`;`) - cascade separator
-    /// - Newline (when inside method body) - implicit statement separator (BT-360)
+    /// - Newline (when inside method body) - implicit statement separator
     pub(super) fn synchronize(&mut self) {
-        // BT-368: If we're already at a newline boundary in a method body, don't
+        // If we're already at a newline boundary in a method body, don't
         // advance past the first token of the next statement. parse_expression()
         // typically consumes the bad token via advance() in parse_primary, so
         // current may already point to the next statement's first token.
@@ -1320,7 +1321,7 @@ impl Parser {
             return true;
         }
 
-        // BT-368: In method bodies, newlines act as implicit statement separators (BT-360)
+        // In method bodies, newlines act as implicit statement separators
         // so we can recover at newline boundaries
         if self.in_method_body && self.current_token().has_leading_newline() {
             return true;
@@ -1373,8 +1374,8 @@ impl Parser {
                 method_definitions.push(method_def);
             } else {
                 let pos_before = self.current;
-                // BT-987: detect blank lines (2+ newlines) before this statement.
-                // BT-2943: this must also fire for the *first* expression when it
+                // Detect blank lines (2+ newlines) before this statement.
+                // This must also fire for the *first* expression when it
                 // follows a class/protocol/type-alias declaration or a standalone
                 // method — not only when it follows another expression — so the
                 // blank line separating the expressions section from whatever
@@ -1604,7 +1605,7 @@ impl Parser {
             offset += 1;
         }
 
-        // Must have `>>` token (GtGt since BT-663)
+        // Must have `>>` token (GtGt)
         if !matches!(self.peek_at(offset), Some(TokenKind::GtGt)) {
             return false;
         }

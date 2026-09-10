@@ -466,7 +466,7 @@ impl Token {
     /// Takes the kind out of this token, replacing it with `TokenKind::Eof`.
     ///
     /// This allows moving the kind without cloning when the token's span and
-    /// trivia still need to remain accessible in the token vec (BT-1680).
+    /// trivia still need to remain accessible in the token vec.
     pub(crate) fn take_kind(&mut self) -> TokenKind {
         std::mem::replace(&mut self.kind, TokenKind::Eof)
     }
@@ -525,7 +525,7 @@ impl Token {
     /// Only whitespace trivia is considered — newlines split across a comment
     /// boundary (e.g. `\n // comment \n`) do NOT count as a blank line.
     /// Used by the parser to preserve author-placed blank lines between
-    /// statements in method and block bodies (BT-987).
+    /// statements in method and block bodies.
     #[must_use]
     pub fn has_preceding_blank_line(&self) -> bool {
         for trivia in &self.leading_trivia {
@@ -553,8 +553,7 @@ impl Token {
     /// appears *between* two leading comments does **not** count.
     ///
     /// Used by the parser to distinguish a blank line that separates statements
-    /// from a blank line that appears inside a block of assertion comments
-    /// (BT-1016).
+    /// from a blank line that appears inside a block of assertion comments.
     #[must_use]
     pub fn has_blank_line_before_first_comment(&self) -> bool {
         for trivia in &self.leading_trivia {
@@ -577,7 +576,7 @@ impl Token {
     /// Returns the indentation level (number of characters after the last
     /// newline in the leading trivia). Returns `None` if there is no leading newline.
     ///
-    /// Used by the parser to detect class body boundaries (BT-903): when a token
+    /// Used by the parser to detect class body boundaries: when a token
     /// starts at column 0 after a newline, it is outside the class body.
     ///
     /// All trivia (whitespace, comments, etc.) after the newline contributes to
@@ -609,7 +608,7 @@ impl Token {
     /// trivia. Returns `None` if there is no leading newline.
     ///
     /// This is useful for detecting tokens at column 0 (no indentation) to
-    /// distinguish class body members from trailing top-level expressions (BT-885).
+    /// distinguish class body members from trailing top-level expressions.
     #[must_use]
     pub fn leading_indent(&self) -> Option<usize> {
         // Walk characters in reverse across all trivia to find the last newline.

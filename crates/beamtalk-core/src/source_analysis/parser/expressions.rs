@@ -190,7 +190,7 @@ impl Parser {
         }
 
         // Array destructuring: `#[a, b] := expr`
-        // List destructuring: `#(a, b) := expr` (BT-1279)
+        // List destructuring: `#(a, b) := expr`
         let list_syntax = matches!(&expr, Expression::ListLiteral { tail: None, .. });
         if let Expression::ArrayLiteral {
             elements,
@@ -465,7 +465,7 @@ impl Parser {
         if matches!(self.current_kind(), TokenKind::Keyword(_)) {
             let mut keywords = Vec::new();
             let mut arguments = Vec::new();
-            // BT-2811: mirrors parse_keyword_message's own continuation_indent —
+            // Mirrors parse_keyword_message's own continuation_indent —
             // without this, a keyword on a new line that actually starts the next
             // sibling class member (e.g. `nextMethod: x => ...` right after this
             // cascade message) gets silently swallowed as another keyword part of
@@ -538,7 +538,7 @@ impl Parser {
         )
     }
 
-    /// BT-2811/BT-1294: Returns true if the parser should stop consuming further
+    /// Returns true if the parser should stop consuming further
     /// keyword parts of the keyword message currently being parsed, because the
     /// current token — a `Keyword` with a leading newline — actually begins a new
     /// sibling class member (or, outside a class body, a new top-level construct)
@@ -547,10 +547,10 @@ impl Parser {
     /// Shared by `parse_keyword_message`'s own multi-keyword loop and
     /// `parse_cascade_message`'s keyword-message branch — both parse a sequence of
     /// `keyword: arg` parts and must stop at the same class-member boundary.
-    /// `parse_cascade_message` lacking this check was BT-2811: a keyword on a new
-    /// line that was actually the start of the next sibling method (e.g.
-    /// `nextMethod: x => ...` right after a cascade message) got silently
-    /// swallowed as another keyword part of the cascade message instead.
+    /// Without this check, a keyword on a new line that is actually the start
+    /// of the next sibling method (e.g. `nextMethod: x => ...` right after a
+    /// cascade message) would be silently swallowed as another keyword part
+    /// of the cascade message instead.
     ///
     /// `continuation_indent` must be a `&mut Option<usize>` local to the caller's
     /// own keyword-parsing loop (each loop tracks its own establishment of "how
@@ -609,11 +609,11 @@ impl Parser {
         // Check if this is a keyword message.
         // A keyword token can never validly start a new statement on its own
         // (it always requires a receiver), so a keyword on a new line is
-        // unambiguously a continuation of the previous expression (BT-1061).
+        // unambiguously a continuation of the previous expression.
         // The one exception is a keyword that begins a method definition
         // (`keyword: param =>`), which must not be consumed as a continuation.
         //
-        // BT-1294: Inside a class method body `is_at_method_definition()` produces
+        // Inside a class method body `is_at_method_definition()` produces
         // false positives: its lookahead scans all continuation keyword lines plus
         // the next method's `-> Type =>`, making the whole sequence look like a
         // single keyword method definition.  Method definitions cannot nest inside
@@ -632,7 +632,7 @@ impl Parser {
                 // deeper than that.  We rely on this invariant here rather than a
                 // wide-lookahead `is_at_method_definition()` call, which can span
                 // into the next sibling method's `-> Type =>` annotation and produce
-                // false positives (BT-1294).  Non-canonically-indented source (e.g.
+                // false positives. Non-canonically-indented source (e.g.
                 // members at col 4) should be formatted with `beamtalk fmt` first.
                 let col = self
                     .current_token()
@@ -653,7 +653,7 @@ impl Parser {
 
         // Special handling for `match:` / `matchExhaustive:` — both produce
         // Expression::Match; the latter sets `exhaustive: true`
-        // (BT-2763 / ADR 0106: opt-in asserted exhaustiveness).
+        // (ADR 0106: opt-in asserted exhaustiveness).
         if matches!(self.current_kind(), TokenKind::Keyword(k)
             if k.as_str() == "match:" || k.as_str() == "matchExhaustive:")
             && self.peek_at(1) == Some(&TokenKind::LeftBracket)
@@ -665,7 +665,7 @@ impl Parser {
         // Parse keyword message
         let mut keywords = Vec::new();
         let mut arguments = Vec::new();
-        // BT-1294: When inside a class method body, track the indentation of the
+        // When inside a class method body, track the indentation of the
         // first keyword that appears on a new line.  Any subsequent keyword at a
         // *lesser* indentation is at the class-member level (col ≤ 2) and signals
         // the start of a sibling method definition rather than a continuation.
@@ -739,7 +739,7 @@ impl Parser {
             TokenKind::GtGt => Some(">>".into()),
             _ => None,
         } {
-            // BT-285: A binary selector on a new line that looks like a method definition
+            // A binary selector on a new line that looks like a method definition
             // (e.g., `- other =>`) should not be consumed as a binary operator.
             // This mirrors the newline check in parse_unary_message.
             if self.current_token().has_leading_newline() && self.is_at_method_definition() {
@@ -854,7 +854,7 @@ impl Parser {
             // Diagnostic suppression directive: @expect category
             TokenKind::AtExpect => self.parse_expect_directive(),
 
-            // Bare `=` is not a valid operator (BT-2762): equality is `=:=`
+            // Bare `=` is not a valid operator: equality is `=:=`
             // (value) or `==` (reference); give a targeted hint instead of
             // the generic "expected expression" fallback below.
             TokenKind::BinarySelector(s) if s == "=" => {
@@ -1133,7 +1133,7 @@ impl Parser {
         // Optional `:: Type` annotations after each parameter are accepted and
         // consumed so the parser stays on track. Block parameter types are
         // currently inferred by the type checker from the message signature
-        // (BT-2036) rather than from these annotations, so the annotation is
+        // rather than from these annotations, so the annotation is
         // parsed and discarded. Supporting it as a workaround for BT-2042 /
         // BT-2043 avoids cascading parse errors that previously caused false
         // "Unused variable" warnings because the surrounding method body
@@ -1164,11 +1164,11 @@ impl Parser {
             self.expect(&TokenKind::Pipe, "Expected '|' after block parameters");
         }
 
-        // Parse block body — statements separated by periods or newlines (BT-360)
+        // Parse block body — statements separated by periods or newlines
         let mut body = Vec::new();
         while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
             let pos_before = self.current;
-            // BT-987: detect blank lines (2+ newlines) before this statement
+            // Detect blank lines (2+ newlines) before this statement
             let has_blank_line =
                 !body.is_empty() && self.current_token().has_blank_line_before_first_comment();
             let mut comments = self.collect_comment_attachment();
@@ -1193,7 +1193,7 @@ impl Parser {
 
             // Period, bang (!), or newline separates statements
             if self.match_token(&TokenKind::Period) {
-                // Explicit period — check whether it is redundant (BT-948)
+                // Explicit period — check whether it is redundant
                 let period_span = self.tokens[self.current - 1].span();
                 if self.check(&TokenKind::RightBracket) {
                     // Trailing period before ']' — not needed
@@ -1227,7 +1227,7 @@ impl Parser {
                 && !self.check(&TokenKind::RightBracket)
                 && self.current_token().has_leading_newline()
             {
-                // Newline acts as implicit separator (BT-360)
+                // Newline acts as implicit separator
             } else {
                 break;
             }
@@ -1244,7 +1244,7 @@ impl Parser {
 
     /// Parses a match expression: `receiver match: [pattern -> body ...]`
     /// or, when `exhaustive` is set, `receiver matchExhaustive: [pattern -> body ...]`
-    /// (BT-2763 / ADR 0106: opt-in asserted exhaustiveness).
+    /// (ADR 0106: opt-in asserted exhaustiveness).
     ///
     /// The receiver has already been parsed and the `match:`/`matchExhaustive:`
     /// keyword is the current token.
@@ -1387,7 +1387,7 @@ impl Parser {
     /// - integer, float, string, symbol, character — literal
     /// - `{p1, p2, ...}` — tuple
     ///
-    /// Bare `true`/`false` are rejected with a diagnostic (BT-2883) rather
+    /// Bare `true`/`false` are rejected with a diagnostic rather
     /// than parsed as a variable binding — use `x :: True`/`x :: False`/
     /// `x :: Boolean` instead.
     #[allow(clippy::too_many_lines)] // one arm per pattern kind
@@ -1419,7 +1419,7 @@ impl Parser {
             //
             // `nil` never carries a `:: ClassName` type annotation — `nil`
             // already fully determines the match, so an errant `nil ::
-            // String` is rejected with a single targeted diagnostic (BT-2860)
+            // String` is rejected with a single targeted diagnostic
             // rather than the generic pattern-parse-error cascade (an
             // unconsumed `::`/class-name would otherwise surface as a
             // confusing second "Expected '->' after pattern" error).
@@ -1439,7 +1439,7 @@ impl Parser {
                 }
             }
 
-            // Bare `true`/`false` pattern (BT-2883): unlike `nil`, `true` and
+            // Bare `true`/`false` pattern: unlike `nil`, `true` and
             // `false` are *not* reserved pattern keywords — falling through
             // to the generic "Variable binding" branch below would silently
             // parse them as `Pattern::Variable(Identifier{name: "true"})` /
@@ -1495,10 +1495,10 @@ impl Parser {
 
                         // Generic type arguments in a type pattern, e.g.
                         // `items :: List(Printable)`, are rejected with a
-                        // single explicit diagnostic (BT-2860 / ADR 0107
+                        // single explicit diagnostic (ADR 0107
                         // Decision, 2026-07-13) rather than silently checking
                         // only the base class. `Pattern::Type` intentionally
-                        // scopes `class` to a bare identifier (BT-2854), and
+                        // scopes `class` to a bare identifier, and
                         // per ADR 0068 type erasure there is no reified
                         // generic tag to verify at runtime regardless — so
                         // silently discarding `(Printable)` would be the one
@@ -1528,7 +1528,7 @@ impl Parser {
                         ));
                         // Consume the offending token so this single
                         // diagnostic doesn't cascade into a second "Expected
-                        // '->' after pattern in match arm" error (BT-2860) —
+                        // '->' after pattern in match arm" error —
                         // but only when it plausibly stands alone as a
                         // mistyped type name (a literal, e.g. `x :: 5`).
                         // A type pattern can nest inside a tuple/array/map
@@ -1632,7 +1632,7 @@ impl Parser {
     }
 
     /// Consumes the malformed token(s) following an errant `::` in a `nil`
-    /// pattern (BT-2860) or a bare `true`/`false` pattern (BT-2883), for
+    /// pattern or a bare `true`/`false` pattern, for
     /// error-recovery purposes only — the caller is responsible for
     /// emitting a single diagnostic covering the whole annotation. Mirrors
     /// the shape of a real type-pattern annotation
@@ -1697,7 +1697,7 @@ impl Parser {
     /// name in a malformed type-pattern annotation (e.g. the `5` in `x :: 5`
     /// or `nil :: 5`) — a deliberately narrow whitelist of literal-ish
     /// tokens, safe to consume as part of a single error-recovery
-    /// diagnostic (BT-2860) because none of them can legitimately open the
+    /// diagnostic because none of them can legitimately open the
     /// *next* construct in any pattern context. Anything not in this list
     /// (a `,` element separator in an enclosing tuple/array/map pattern, a
     /// closing delimiter, `when:`, the arrow itself, ...) is deliberately
@@ -1719,7 +1719,7 @@ impl Parser {
 
     /// Parses a tuple pattern: `{p1, p2, ...}`
     ///
-    /// Note (BT-2860): each element goes through [`Self::parse_pattern`],
+    /// Note: each element goes through [`Self::parse_pattern`],
     /// whose type-pattern (`x :: ClassName`) error recovery only ever
     /// consumes a token that could not open a `,`-separated element or a
     /// `}` — see [`Self::looks_like_malformed_type_pattern_token`]. If a
@@ -1750,7 +1750,7 @@ impl Parser {
 
     /// Parses an array destructuring pattern: `#[p1, p2, ...rest]`
     ///
-    /// Note (BT-2860): see the same note on [`Self::parse_tuple_pattern`] —
+    /// Note: see the same note on [`Self::parse_tuple_pattern`] —
     /// nested type-pattern error recovery relies on `,`/`]` never being
     /// consumed as a "malformed type name" token.
     fn parse_array_pattern(&mut self) -> Pattern {
@@ -1929,7 +1929,7 @@ impl Parser {
     /// Parses a map destructuring pattern: `#{key => value, ...}`
     ///
     /// Keys must be symbol literals (`#key`) or string literals (`"key"`).
-    /// Bare lowercase identifiers are a compile error (BT-1240); use `#key` instead.
+    /// Bare lowercase identifiers are a compile error; use `#key` instead.
     /// Values may be variable identifiers, `_` wildcards, or literals (for equality
     /// matching in `match:` arms).
     fn parse_map_pattern(&mut self) -> Pattern {
@@ -2043,26 +2043,25 @@ impl Parser {
     /// Parses the binding position of a constructor pattern argument.
     ///
     /// Accepts: wildcard `_`, variable identifier, `nil` (the `Pattern::Nil`
-    /// literal — BT-2884), or a literal (integer, float, string, symbol, or
+    /// literal), or a literal (integer, float, string, symbol, or
     /// negative number like `-1`). Bare `true`/`false` are rejected with a
-    /// diagnostic (BT-2884) rather than parsed as a variable binding — see
+    /// diagnostic rather than parsed as a variable binding — see
     /// the dedicated match arm below for why. A trailing `:: ClassName` on
     /// `nil`, `true`/`false`, or a plain variable binding is consumed and
-    /// rejected with a single diagnostic rather than left to cascade (BT-2885).
+    /// rejected with a single diagnostic rather than left to cascade.
     fn parse_constructor_binding(&mut self) -> Pattern {
         match self.current_kind() {
             TokenKind::Identifier(name) if name.as_str() == "_" => {
                 Pattern::Wildcard(self.advance().span())
             }
-            // `nil` binding (BT-2884): mirrors `parse_pattern`'s top-level
+            // `nil` binding: mirrors `parse_pattern`'s top-level
             // `nil` handling — `nil` is a reserved identifier, not a plain
             // variable name, so `Result ok: nil` must test the wrapped value
             // *is* nil (`Pattern::Nil`), not bind a variable named `nil`
             // that matches unconditionally.
             //
             // A trailing `:: ClassName` (e.g. `nil :: SomeClass`) is
-            // consumed and rejected here too (BT-2885 follow-up, per Claude
-            // review on #2998) — type patterns aren't supported nested
+            // consumed and rejected here too — type patterns aren't supported nested
             // inside a constructor pattern at all (see `generate_pattern`'s
             // `Pattern::Type` codegen restriction), but leaving `::
             // ClassName` unconsumed would desync the constructor-pattern
@@ -2084,8 +2083,7 @@ impl Parser {
                     Pattern::Nil(nil_span)
                 }
             }
-            // Bare `true`/`false` binding (BT-2884, sibling to BT-2883's
-            // top-level fix): falling through to the generic variable-binding
+            // Bare `true`/`false` binding: falling through to the generic variable-binding
             // arm below would silently parse `Result ok: true` as
             // `Pattern::Variable(Identifier{name: "true"})` — an
             // unconditional catch-all that matches *any* wrapped value, not
@@ -2104,7 +2102,7 @@ impl Parser {
             // without relying on that knowledge).
             //
             // A trailing `:: ClassName` (e.g. `true :: Boolean`) is consumed
-            // here too (BT-2885) — otherwise the unconsumed `::`/class-name
+            // here too — otherwise the unconsumed `::`/class-name
             // would surface as a second, spurious "Expected '->' after
             // pattern" diagnostic, exactly the cascade the generic-identifier
             // arm below was fixed to avoid.
@@ -2129,7 +2127,7 @@ impl Parser {
                 ));
                 Pattern::Wildcard(bad_span)
             }
-            // Variable binding (BT-2885): a trailing `:: ClassName` is not
+            // Variable binding: a trailing `:: ClassName` is not
             // supported in constructor-binding position (`Pattern::Type`
             // has no codegen when nested inside a constructor pattern — see
             // `generate_pattern`), but leaving it unconsumed would desync
@@ -2137,8 +2135,7 @@ impl Parser {
             // token) and cascade into a generic "Expected '->' after
             // pattern" error. Consumed and rejected here with a single
             // targeted diagnostic instead, mirroring `parse_pattern`'s
-            // `nil ::`/`true ::`/`false ::` consume-and-reject handling
-            // (BT-2860, BT-2883).
+            // `nil ::`/`true ::`/`false ::` consume-and-reject handling.
             TokenKind::Identifier(_) => {
                 let token = self.advance();
                 let span = token.span();
@@ -2448,7 +2445,7 @@ impl Parser {
         // only consumed when it appears on the *same* line as the directive.
         // A token on a following line is a separate statement (e.g. fallback
         // code), so a bare `@primitive` at end of line infers its selector
-        // from the enclosing method (BT-2724).
+        // from the enclosing method.
         let has_explicit_name = matches!(
             self.current_kind(),
             TokenKind::String(_) | TokenKind::Identifier(_)
@@ -2491,7 +2488,7 @@ impl Parser {
             // Only `@primitive` infers its selector. `@intrinsic` names a
             // structural intrinsic (`blockValue`, `basicNew`, …) that is never
             // the method's own selector, so a bare `@intrinsic` must still error
-            // rather than silently infer the wrong intrinsic (BT-2724).
+            // rather than silently infer the wrong intrinsic.
             .filter(|_| !is_intrinsic)
         {
             // Bare `@primitive` — infer the selector from the enclosing method.
@@ -2521,10 +2518,10 @@ impl Parser {
     /// The `@expect` token has already been identified by `parse_primary`.
     /// This method consumes it and delegates to
     /// [`Parser::parse_expect_tail`] (`declarations.rs`) for the shared
-    /// category-list/reason grammar (BT-3387), which that helper shares with
+    /// category-list/reason grammar, which that helper shares with
     /// the declaration-level `@expect` form. If no valid category was found
     /// (unknown name, or nothing following `@expect` at all), this becomes
-    /// an `Expression::Error` — same as before BT-3387 — rather than an
+    /// an `Expression::Error` rather than an
     /// `ExpectDirective` that would silently suppress every diagnostic on
     /// the next expression.
     fn parse_expect_directive(&mut self) -> Expression {
@@ -2546,14 +2543,14 @@ impl Parser {
     ///
     /// Keys must be symbol literals (`#key`), string literals, integers, or parenthesized
     /// expressions (e.g. `#{(varKey) => v}` for dynamic keys). Bare lowercase identifiers
-    /// are rejected with a diagnostic error suggesting `#key` (BT-1240).
+    /// are rejected with a diagnostic error suggesting `#key`.
     /// Keys are parsed as unary expressions (primaries + unary messages),
     /// which stops at binary operators like `=>` and `,`.
     /// Values are parsed as keyword messages (lowest message precedence), so
     /// `#{#key => Foo new: #{#a => 1}}` parses the nested keyword send correctly.
     /// The `,` and `}` delimiters terminate parsing naturally: `,` has no
     /// binding power (so binary parsing stops) and `}` cannot start a message
-    /// send (BT-1854).
+    /// send.
     fn parse_map_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::MapOpen, "Expected '#{'");
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
@@ -2576,7 +2573,7 @@ impl Parser {
 
             let pair_start = self.current_token().span();
 
-            // BT-1240: Bare identifier keys in map literals are a compile error.
+            // Bare identifier keys in map literals are a compile error.
             // `#{foo => v}` is invalid; write `#{#foo => v}` instead.
             let key = if matches!(self.current_kind(), TokenKind::Identifier(name) if name.chars().next().is_some_and(char::is_lowercase))
                 && matches!(self.peek_kind(), Some(TokenKind::FatArrow))
@@ -2636,7 +2633,7 @@ impl Parser {
             // precedence), so `#{#k => Foo new: #{#a => 1}}` correctly parses
             // the nested keyword send as the map value.  The `,` and `}` delimiters
             // terminate parsing naturally: `,` has no binding power (so binary
-            // parsing stops) and `}` cannot start a message send (BT-1854).
+            // parsing stops) and `}` cannot start a message send.
             let value = self.parse_keyword_message();
 
             let pair_span = pair_start.merge(value.span());
@@ -2994,7 +2991,7 @@ mod tests {
     }
 
     // ========================================================================
-    // BT-1240: Bare-word map key error tests
+    // Bare-word map key error tests
     // ========================================================================
 
     fn parse_source(src: &str) -> (crate::ast::Module, Vec<crate::source_analysis::Diagnostic>) {
@@ -3069,7 +3066,7 @@ mod tests {
         );
     }
 
-    // ── BT-2763 / ADR 0106: `matchExhaustive:` parsing ─────────────────────
+    // ── ADR 0106: `matchExhaustive:` parsing ─────────────────────
 
     #[test]
     fn plain_match_sets_exhaustive_false() {
@@ -3118,12 +3115,12 @@ mod tests {
 
     // `match_exhaustive_unparse_round_trips_keyword` and
     // `plain_match_unparse_does_not_gain_exhaustive_keyword` moved to
-    // `crate::unparse`'s own test tree (BT-3346, ADR 0117 Phase 4) — both
+    // `crate::unparse`'s own test tree (ADR 0117 Phase 4) — both
     // exercise `unparse::format_source`, which `source_analysis`'s test tree
     // no longer references.
 
     // ========================================================================
-    // BT-2767: expect().unwrap() hardening — guard-bypass regression tests
+    // expect().unwrap() hardening — guard-bypass regression tests
     // ========================================================================
     //
     // parse_block, parse_tuple_pattern, and parse_parenthesized each start by
@@ -3187,7 +3184,7 @@ mod tests {
         );
     }
 
-    // ── BT-2854 / ADR 0107 Phase A: `Pattern::Nil` and `Pattern::Type` ──────
+    // ── ADR 0107 Phase A: `Pattern::Nil` and `Pattern::Type` ──────
 
     #[test]
     fn parse_nil_pattern() {
@@ -3241,7 +3238,7 @@ mod tests {
         assert!(matches!(arms[2].pattern, Pattern::Variable(_)));
     }
 
-    // ── BT-2883: bare `true`/`false` pattern rejection ──────────────────────
+    // ── Bare `true`/`false` pattern rejection ──────────────────────
 
     #[test]
     fn parse_bare_true_pattern_rejected_with_single_diagnostic() {
@@ -3366,7 +3363,7 @@ mod tests {
         );
     }
 
-    // ── BT-2884: constructor pattern keyword bindings — nil/true/false ──────
+    // ── Constructor pattern keyword bindings — nil/true/false ──────
 
     #[test]
     fn parse_constructor_binding_nil_is_nil_pattern() {
@@ -3387,7 +3384,7 @@ mod tests {
 
     #[test]
     fn parse_constructor_binding_nil_type_annotation_rejected_with_single_diagnostic() {
-        // BT-2885: the `nil` arm has the
+        // The `nil` arm has the
         // same "trailing `:: ClassName` cascades" bug as the `true`/`false`
         // and generic-identifier arms — `nil :: SomeClass` must consume the
         // tail rather than leaving it to cascade into a second diagnostic.
@@ -3547,7 +3544,7 @@ mod tests {
         );
     }
 
-    // ── BT-2885: constructor binding `x :: ClassName` tail ──────────────────
+    // ── Constructor binding `x :: ClassName` tail ──────────────────
 
     #[test]
     fn parse_constructor_binding_type_annotation_rejected_with_single_diagnostic() {
@@ -3583,7 +3580,7 @@ mod tests {
 
     #[test]
     fn parse_constructor_binding_bare_true_type_annotation_rejected_with_single_diagnostic() {
-        // BT-2885: the `true`/`false` arm
+        // The `true`/`false` arm
         // has the same "trailing `:: ClassName` cascades" bug as the plain
         // identifier arm above — `true :: Boolean` must consume the tail
         // rather than leaving it to cascade into a second diagnostic.
@@ -3617,7 +3614,7 @@ mod tests {
         );
     }
 
-    // ── BT-2860: Pattern::Type parser polish ────────────────────────────────
+    // ── Pattern::Type parser polish ────────────────────────────────
 
     #[test]
     fn parse_type_pattern_generic_args_rejected_with_single_diagnostic() {
@@ -3725,15 +3722,14 @@ mod tests {
 
     #[test]
     fn parse_type_pattern_missing_class_name_nested_in_tuple_does_not_corrupt_recovery() {
-        // BT-2860 regression: a malformed type pattern's error-recovery must
+        // Regression: a malformed type pattern's error-recovery must
         // not consume a token that the *enclosing* pattern parser needs —
         // specifically, when a `::` with no class name sits directly before
         // the `,` element separator of an enclosing tuple pattern, that `,`
         // must be left alone so the tuple (and the rest of the match arm)
-        // still parses. An earlier version of this recovery blacklisted a
-        // few "boundary" tokens (arrow, `]`, `;`, `when:`) and consumed
-        // everything else, which ate the `,` here and cascaded into 7
-        // diagnostics instead of 1.
+        // still parses. A blacklist-based recovery (a few "boundary" tokens —
+        // arrow, `]`, `;`, `when:` — with everything else consumed) would
+        // eat the `,` here and cascade into 7 diagnostics instead of 1.
         let (module, diags) = parse_source("x match: [{y ::, z} -> y; _ -> 1]");
         assert_eq!(
             diags.len(),
@@ -3843,7 +3839,7 @@ mod tests {
 
     #[test]
     fn parse_type_pattern_unterminated_generic_args_does_not_swallow_rest_of_match() {
-        // BT-2860 adversarial-review finding: a single missing `)` in a
+        // Regression: a single missing `)` in a
         // generic-args group must not consume every remaining match arm as
         // "part of the generic args" — `skip_parenthesized_for_recovery`
         // stops at `;`/`]` even with parens still unbalanced, since a real

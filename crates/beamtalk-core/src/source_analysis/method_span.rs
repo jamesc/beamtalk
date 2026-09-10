@@ -33,7 +33,7 @@
 //!   the method's own line (including its indentation). The doc comment and
 //!   indentation are *included* so the span is the verbatim, full-line region a
 //!   user edits and `Workspace flush` rewrites — a method's doc comment is part
-//!   of its definition (BT-2577). For a standalone `Class >> selector` extension
+//!   of its definition. For a standalone `Class >> selector` extension
 //!   the same rule applies, anchored at the class-name line.
 //! - **end**: the byte immediately after the trailing newline that terminates
 //!   the last source line of the body (so the span includes the body and its
@@ -210,8 +210,7 @@ pub(crate) fn resolve_in_module(
 /// `method.span` alone would then silently drop the class-name line (and
 /// any doc comment attached above it) from the resolved definition span.
 /// `resolve_span` is always the WIDER `StandaloneMethodDefinition::span`
-/// (anchored at the class-name token) for that case, matching this
-/// resolver's pre-BT-3279 behavior exactly; for an ordinary class-body
+/// (anchored at the class-name token) for that case; for an ordinary class-body
 /// method there is no such outer wrapper, so `resolve_span` just equals
 /// `method.span`.
 #[derive(Clone, Copy)]
@@ -219,7 +218,7 @@ pub(crate) struct MatchedDefinition<'a> {
     /// The matched method's own AST node — its `selector`/`is_sealed`/
     /// `is_internal`/`is_class_method` fields, used by
     /// [`crate::method_source_walker::find_definition_selector_spans`]
-    /// (BT-3279, ADR 0114) to resolve the DEFINITION's own bare
+    /// (ADR 0114) to resolve the DEFINITION's own bare
     /// selector-token span, which is unaffected by the class-name-vs-
     /// selector line question above (a selector-token walk never needs to
     /// reach back to the class name).
@@ -235,7 +234,7 @@ pub(crate) struct MatchedDefinition<'a> {
 /// all. Shared by [`resolve_in_module`] (which needs each match's
 /// `resolve_span` to compute the doc-comment-inclusive [`definition_span`])
 /// and [`crate::method_source_walker::find_definition_selector_spans`]
-/// (BT-3279, ADR 0114), which needs the matched `method`'s own fields
+/// (ADR 0114), which needs the matched `method`'s own fields
 /// instead — so both resolvers agree, by construction, on exactly which
 /// method counts as "the" match rather than duplicating this traversal.
 pub(crate) fn find_matching_definitions<'a>(
@@ -312,7 +311,7 @@ fn collect_matches<'a>(
 /// The start backs up to the beginning of the method's own line (including its
 /// indentation) and then across any contiguous preceding `///` doc-comment lines
 /// (the method's doc block), so the span includes the doc comment and indentation
-/// (BT-2577). The doc comment lives in `MethodDefinition::doc_comment` without a
+/// The doc comment lives in `MethodDefinition::doc_comment` without a
 /// span, so it is located here from the source text rather than the AST. The end
 /// extends past the trailing newline of the last body line (ADR 0082). The result
 /// is a verbatim, full-line slice: splicing it back is an exact no-op.
@@ -328,7 +327,7 @@ fn definition_span(source: &str, method_span: Span) -> Span {
 ///
 /// `pub(crate)`: also used by [`crate::source_analysis::method_category`] to
 /// locate a `// === Name ===` divider comment's own line when walking
-/// backward from a method's header line (BT-2601) — the same backward-walk
+/// backward from a method's header line — the same backward-walk
 /// shape as [`doc_block_start`] below, just hunting for a different line kind.
 #[expect(
     clippy::cast_possible_truncation,
@@ -348,7 +347,7 @@ pub(crate) fn line_start(source: &str, offset: u32) -> u32 {
 /// the start offset of the earliest such line — i.e. the start of the method's
 /// doc block. Stops at the first line that is not a `///` comment (a blank line,
 /// a regular `//` comment, or another definition), so only the doc comment
-/// directly attached to the method is pulled in (BT-2577).
+/// directly attached to the method is pulled in.
 fn doc_block_start(source: &str, method_line_start: u32) -> u32 {
     let mut start = method_line_start;
     while start > 0 {
@@ -369,7 +368,7 @@ fn doc_block_start(source: &str, method_line_start: u32) -> u32 {
 /// line lacks a trailing newline), returns the source length.
 ///
 /// `pub(crate)`: also used by [`crate::source_analysis::method_category`]
-/// (BT-2601) to compute a divider comment line's own span once
+/// to compute a divider comment line's own span once
 /// [`line_start`] has located its start.
 #[expect(
     clippy::cast_possible_truncation,
@@ -453,7 +452,7 @@ typed Object subclass: AtomicCounter
             .expect("increment should resolve");
         let text = &ATOMIC[span.as_range()];
         // The span is the verbatim full-line slice: indented doc comment first,
-        // then the method, through the trailing newline (BT-2577).
+        // then the method, through the trailing newline.
         assert!(
             text.starts_with("  /// Atomically add 1"),
             "span starts at the indented doc line: {text:?}"
@@ -583,8 +582,8 @@ typed Object subclass: AtomicCounter
     #[test]
     fn doc_comment_is_included_in_span() {
         // A method's leading doc comment is part of its definition span so the
-        // editor and `Workspace flush` operate on the same verbatim region
-        // (BT-2577 — previously excluding it caused flush to duplicate the doc).
+        // editor and `Workspace flush` operate on the same verbatim region —
+        // excluding it would let flush duplicate the doc.
         let span = resolve(ATOMIC, "AtomicCounter", "value", MethodSide::Instance)
             .expect("value resolves");
         let text = &ATOMIC[span.as_range()];
@@ -600,7 +599,7 @@ typed Object subclass: AtomicCounter
     #[test]
     fn span_without_doc_starts_at_indentation() {
         // No leading comment: the span still backs up to the method's own
-        // indentation so the splice carries it (BT-2577).
+        // indentation so the splice carries it.
         let src = "Object subclass: C\n  foo => 1\n";
         let span = resolve(src, "C", "foo", MethodSide::Instance).expect("foo resolves");
         assert_eq!(&src[span.as_range()], "  foo => 1\n");
@@ -608,7 +607,7 @@ typed Object subclass: AtomicCounter
 
     #[test]
     fn standalone_extension_span_is_anchored_at_class_name_not_selector() {
-        // BT-3279 review: a standalone `Class >> selector` extension's class
+        // A standalone `Class >> selector` extension's class
         // name and its `>> selector` can sit on different source lines —
         // nothing in the grammar requires them adjacent. `find_matching_
         // definitions`'s `resolve_span` must anchor `definition_span` from
@@ -626,8 +625,8 @@ typed Object subclass: AtomicCounter
 
     #[test]
     fn replacing_a_doc_commented_method_does_not_duplicate_the_doc() {
-        // The exact corruption from BT-2577: editing a doc-commented method and
-        // flushing duplicated the doc and mangled the next method. With the
+        // Guards against editing a doc-commented method and flushing
+        // duplicating the doc and mangling the next method. With the
         // doc-inclusive span, splicing the edited verbatim slice round-trips.
         let src = "Actor subclass: Counter\n\
                    \x20 /// Decrease by one.\n\
