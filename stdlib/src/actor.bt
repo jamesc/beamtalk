@@ -263,7 +263,8 @@ Object subclass: Actor
   /// ```beamtalk
   /// counter registeredName   // => #counter (or nil)
   /// ```
-  sealed registeredName -> Symbol | Nil => (Erlang beamtalk_actor) registeredName: self
+  sealed registeredName -> Symbol | Nil =>
+    (Erlang beamtalk_actor) registeredName: self
 
   /// Whether this actor currently has a registered name.
   ///
