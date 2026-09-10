@@ -224,6 +224,95 @@ describe("WorkspaceTreeDataProvider — Type Aliases section (ADR 0108 Phase 8, 
     client.dispose();
   });
 
+  // BT-3496: `browse-alias-source` only ever resolves real content for a
+  // project-origin alias (the runtime has no live source tree to resolve a
+  // stdlib/dependency-origin alias's `source_file` against server-side, and
+  // always returns `content: null` for either) — so the navigability badge
+  // must be keyed off `source_origin`, not merely a present `source_file`
+  // (every alias row, from every origin, carries *some* `source_file`).
+  describe("navigability badge is keyed off source_origin (BT-3496)", () => {
+    it("is navigable for a project-origin alias", async () => {
+      const { client, ws } = makeConnectedClient();
+      provider.setClient(client);
+      await respondToInitialFetch(ws, [
+        {
+          name: "Timeout",
+          expansion: "Integer | #infinity",
+          source_file: "src/timeout.bt",
+          package: "my_app",
+          source_origin: "project",
+        },
+      ]);
+
+      const [aliasNode] = await provider.getChildren({ kind: "type-aliases-section" });
+      const item = provider.getTreeItem(aliasNode);
+
+      expect(item.contextValue).toBe("type-alias-item");
+      expect(item.command).toEqual({
+        command: "beamtalk.navigateToTypeAlias",
+        title: "Go to Definition",
+        arguments: [aliasNode],
+      });
+      client.dispose();
+    });
+
+    it("is NOT navigable for a stdlib-origin alias, even though source_file is present", async () => {
+      const { client, ws } = makeConnectedClient();
+      provider.setClient(client);
+      await respondToInitialFetch(ws, [
+        {
+          name: "RestartStrategy",
+          expansion: "#temporary | #transient | #permanent",
+          source_file: "restart_strategy.bt",
+          package: "beamtalk_stdlib",
+          source_origin: "stdlib",
+        },
+      ]);
+
+      const [aliasNode] = await provider.getChildren({ kind: "type-aliases-section" });
+      const item = provider.getTreeItem(aliasNode);
+
+      expect(item.contextValue).toBe("type-alias-item-no-source");
+      expect(item.command).toBeUndefined();
+      client.dispose();
+    });
+
+    it("is NOT navigable for a dependency-origin alias, even though source_file is present", async () => {
+      const { client, ws } = makeConnectedClient();
+      provider.setClient(client);
+      await respondToInitialFetch(ws, [
+        {
+          name: "JsonValue",
+          expansion: "String | Integer | Float | Boolean | Nil",
+          source_file: "src/json_value.bt",
+          package: "beamtalk_json",
+          source_origin: "dependency",
+        },
+      ]);
+
+      const [aliasNode] = await provider.getChildren({ kind: "type-aliases-section" });
+      const item = provider.getTreeItem(aliasNode);
+
+      expect(item.contextValue).toBe("type-alias-item-no-source");
+      expect(item.command).toBeUndefined();
+      client.dispose();
+    });
+
+    it("falls back to the source_file-presence check when source_origin is absent (older server)", async () => {
+      const { client, ws } = makeConnectedClient();
+      provider.setClient(client);
+      await respondToInitialFetch(ws, [
+        { name: "Timeout", expansion: "Integer | #infinity", source_file: "src/timeout.bt" },
+      ]);
+
+      const [aliasNode] = await provider.getChildren({ kind: "type-aliases-section" });
+      const item = provider.getTreeItem(aliasNode);
+
+      expect(item.contextValue).toBe("type-alias-item");
+      client.dispose();
+    });
+  });
+
   it("section is empty (with a '(none)' description) when no aliases are declared", async () => {
     const { client, ws } = makeConnectedClient();
     provider.setClient(client);

@@ -237,6 +237,131 @@ describe("WorkspaceClient.typeAliases()", () => {
     expect(await promise).toEqual([]);
     client.dispose();
   });
+
+  // BT-3496: `package`/`source_origin` (alias_row/3's extension of AliasRow)
+  // must reach the TS client — without them there's no way to apply the
+  // stdlib-fallback exemption to type aliases the way `_hasNavigableSource`
+  // already does for classes/methods/state-vars.
+  it("maps package/source_origin fields (BT-3496)", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.typeAliases();
+    respondTo(ws, {
+      value: [
+        {
+          name: "Timeout",
+          expansion: "Integer | #infinity",
+          source_file: "src/timeout.bt",
+          internal: false,
+          package: "my_app",
+          source_origin: "project",
+        },
+        {
+          name: "RestartStrategy",
+          expansion: "#temporary | #transient | #permanent",
+          source_file: "restart_strategy.bt",
+          internal: false,
+          package: "beamtalk_stdlib",
+          source_origin: "stdlib",
+        },
+      ],
+    });
+
+    const result = await promise;
+    expect(result).toEqual([
+      {
+        name: "Timeout",
+        expansion: "Integer | #infinity",
+        doc: undefined,
+        source_file: "src/timeout.bt",
+        internal: false,
+        package: "my_app",
+        source_origin: "project",
+      },
+      {
+        name: "RestartStrategy",
+        expansion: "#temporary | #transient | #permanent",
+        doc: undefined,
+        source_file: "restart_strategy.bt",
+        internal: false,
+        package: "beamtalk_stdlib",
+        source_origin: "stdlib",
+      },
+    ]);
+    client.dispose();
+  });
+});
+
+// ─── Op: browseAliasSource() ─────────────────────────────────────────────────
+
+describe("WorkspaceClient.browseAliasSource()", () => {
+  // BT-3314/BT-3496: unlike ClassInfo.source_file, TypeAliasInfo.source_file
+  // is a package-relative display path the client can't open directly — this
+  // op resolves it server-side and returns content, keyed by name+package
+  // (browse-type-aliases doesn't dedupe by name across packages).
+  it("sends browse-alias-source op with name and package, returns content", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.browseAliasSource("Timeout", "my_app");
+
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.op).toBe("browse-alias-source");
+    expect(req.name).toBe("Timeout");
+    expect(req.package).toBe("my_app");
+
+    respondTo(ws, {
+      value: {
+        name: "Timeout",
+        package: "my_app",
+        source_file: "src/timeout.bt",
+        source_origin: "project",
+        editable: false,
+        content: "type Timeout = Integer | #infinity\n",
+      },
+    });
+
+    expect(await promise).toEqual({ content: "type Timeout = Integer | #infinity\n" });
+    client.dispose();
+  });
+
+  it("omits the package param entirely when none is given", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.browseAliasSource("Timeout");
+
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.op).toBe("browse-alias-source");
+    expect("package" in req).toBe(false);
+
+    respondTo(ws, { value: { content: null } });
+    await promise;
+    client.dispose();
+  });
+
+  // The runtime degrades a stdlib/dependency-origin alias to `content: null`
+  // rather than an error — no live source tree exists to resolve against
+  // server-side for either origin (see alias_disk_content's doc).
+  it("returns content: null for a stdlib/dependency-origin alias", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.browseAliasSource("RestartStrategy", "beamtalk_stdlib");
+    respondTo(ws, {
+      value: {
+        name: "RestartStrategy",
+        package: "beamtalk_stdlib",
+        source_file: "restart_strategy.bt",
+        source_origin: "stdlib",
+        editable: false,
+        content: null,
+      },
+    });
+    expect(await promise).toEqual({ content: null });
+    client.dispose();
+  });
+
+  it("returns content: null when the value field is absent", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.browseAliasSource("Missing");
+    respondTo(ws, {});
+    expect(await promise).toEqual({ content: null });
+    client.dispose();
+  });
 });
 
 // ─── Op: actors() ────────────────────────────────────────────────────────────

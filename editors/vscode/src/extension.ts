@@ -17,9 +17,13 @@ import { type DocumentMovedParams, planDocumentRetarget } from "./documentMoved"
 import { resolveClassDocument } from "./documentResolution";
 import { InspectorPanel } from "./inspectorPanel";
 import { resolveDeclarationOffset } from "./symbolLookup";
-import { classNameToStdlibFilename } from "./textUtils";
+import {
+  aliasSourceUriString,
+  classNameToStdlibFilename,
+  parseAliasSourceUriPath,
+} from "./textUtils";
 import { TranscriptViewProvider } from "./transcriptView";
-import type { ClassInfo, ClassOrigin, LogEntry } from "./workspaceClient";
+import type { ClassInfo, ClassOrigin, LogEntry, TypeAliasInfo } from "./workspaceClient";
 import { WorkspaceClient } from "./workspaceClient";
 import type {
   ActorItemNode,
@@ -278,6 +282,73 @@ export async function openStdlibDocumentForClass(
   }
   try {
     return await vscode.workspace.openTextDocument(vscode.Uri.parse(uriString));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `beamtalk-alias://` virtual URI for a `type` alias's read-only source view
+ * (BT-3314/BT-3496) — thin `vscode.Uri` wrapper around `aliasSourceUriString`
+ * (kept in `textUtils.ts` so the string-building/parsing logic stays testable
+ * without a `vscode` dependency).
+ */
+function aliasSourceUri(name: string, pkg: string | undefined): vscode.Uri {
+  return vscode.Uri.parse(aliasSourceUriString(name, pkg));
+}
+
+/**
+ * TextDocumentContentProvider for `beamtalk-alias://` virtual URIs — the
+ * read-only source view for a `type` alias declaration (BT-3314/BT-3496).
+ * Unlike `StdlibContentProvider`, this goes through the workspace protocol's
+ * `browse-alias-source` op (`workspaceWsClient`), not the LSP: a `type`
+ * declaration erases entirely at compile time (no BEAM module), so there is
+ * no compiled-module path for the LSP's `beamtalk-lsp/fetchContent` sysroot
+ * discovery to key off of — the runtime resolves `AliasMetadata.source_file`
+ * (a package-relative display path) against its own recorded state instead.
+ */
+class AliasContentProvider implements vscode.TextDocumentContentProvider {
+  async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
+    const { name, pkg } = parseAliasSourceUriPath(uri.path);
+    if (!workspaceWsClient) {
+      return `// ${uri.toString()}\n// Not connected to a Beamtalk workspace.\n`;
+    }
+    try {
+      const { content } = await workspaceWsClient.browseAliasSource(name, pkg);
+      return content ?? `// Source not available for type alias \`${name}\`.\n`;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return `// Failed to load type alias source for \`${name}\`.\n// ${message}\n`;
+    }
+  }
+}
+
+/**
+ * Open a `type` alias's read-only source view via the `beamtalk-alias://`
+ * virtual URI scheme (BT-3314/BT-3496). Calls `browseAliasSource` directly
+ * first (rather than going straight to `openTextDocument`) so a disconnected
+ * workspace or a `content: null` result (always the case for a
+ * stdlib/dependency-origin alias — see `browseAliasSource`'s doc; possibly a
+ * project-origin one whose recorded file no longer exists) is detected as a
+ * clean failure here — `openTextDocument` on a `beamtalk-alias://` URI never
+ * rejects on its own, since `AliasContentProvider` deliberately returns
+ * friendly placeholder comment text instead.
+ *
+ * Returns undefined when there's nothing to show — callers fall back to
+ * their normal "source not available" handling.
+ */
+async function openAliasSourceDocument(
+  info: TypeAliasInfo
+): Promise<vscode.TextDocument | undefined> {
+  if (!workspaceWsClient) return undefined;
+  try {
+    const { content } = await workspaceWsClient.browseAliasSource(info.name, info.package);
+    if (content === null) return undefined;
+  } catch {
+    return undefined;
+  }
+  try {
+    return await vscode.workspace.openTextDocument(aliasSourceUri(info.name, info.package));
   } catch {
     return undefined;
   }
@@ -946,6 +1017,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.registerTextDocumentContentProvider("beamtalk-stdlib", stdlibProvider)
   );
 
+  const aliasProvider = new AliasContentProvider();
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider("beamtalk-alias", aliasProvider)
+  );
+
   context.subscriptions.push(
     vscode.tasks.registerTaskProvider("beamtalk", new BeamtalkTaskProvider())
   );
@@ -1197,23 +1273,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(
       "beamtalk.navigateToTypeAlias",
       async (node?: TypeAliasItemNode) => {
-        const sourceFile = node?.info.source_file;
-        if (!sourceFile || sourceFile === "unknown") {
+        const aliasName = node?.info.name;
+        if (!aliasName) return;
+
+        // BT-3496: `TypeAliasInfo.source_file` is a package-relative display
+        // path, never one `vscode.Uri.file()` can open directly — go through
+        // the `beamtalk-alias://` virtual URI (`browse-alias-source` op)
+        // instead, same as `openStdlibDocumentForClass` does for stdlib
+        // classes via `beamtalk-stdlib://`.
+        const document = await openAliasSourceDocument(node.info);
+        if (!document) {
           await vscode.window.showInformationMessage("Source not available for this type alias.");
           return;
         }
-        const uri = vscode.Uri.file(sourceFile);
-        let document: vscode.TextDocument;
-        try {
-          document = await vscode.workspace.openTextDocument(uri);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          await vscode.window.showErrorMessage(`Could not open source: ${sourceFile}: ${msg}`);
-          return;
-        }
-
-        const aliasName = node?.info.name;
-        if (!aliasName) return;
 
         // Same resolver as openClassSource — no xref line is tracked for
         // aliases (ADR 0108 Phase 8: `TypeAliasInfo` carries no `line`), and

@@ -216,6 +216,40 @@ export function classNameToStdlibFilename(className: string): string {
 }
 
 /**
+ * Build the path+query-free URI *string* for a `type` alias's read-only
+ * source view under the `beamtalk-alias://` virtual URI scheme (BT-3314/
+ * BT-3496), e.g. `beamtalk-alias:///my_pkg/Foo.bt`. `pkg` is embedded as a
+ * path segment (empty when unknown) so `parseAliasSourceUriPath` can recover
+ * it with plain string splitting — `browse-alias-source` needs it to
+ * disambiguate a same-named alias declared by more than one package.
+ *
+ * Returns a plain string, not a `vscode.Uri`, so this (like
+ * `classNameToStdlibFilename`) stays testable with no `vscode` dependency;
+ * `extension.ts`'s `aliasSourceUri` wraps it in `vscode.Uri.parse`.
+ */
+export function aliasSourceUriString(name: string, pkg: string | undefined): string {
+  return `beamtalk-alias:///${encodeURIComponent(pkg ?? "")}/${encodeURIComponent(name)}.bt`;
+}
+
+/**
+ * Inverse of `aliasSourceUriString` — recovers `{ name, pkg }` from a
+ * `beamtalk-alias://` URI's `.path` (e.g. `/my_pkg/Foo.bt` → `{ name: "Foo",
+ * pkg: "my_pkg" }`). `pkg` is undefined when the segment is empty, mirroring
+ * `aliasSourceUriString`'s "unknown package" encoding.
+ */
+export function parseAliasSourceUriPath(uriPath: string): {
+  name: string;
+  pkg: string | undefined;
+} {
+  const [pkgSegment, nameSegment] = uriPath.replace(/^\//, "").split("/");
+  const pkg = decodeURIComponent(pkgSegment ?? "");
+  return {
+    name: decodeURIComponent((nameSegment ?? "").replace(/\.bt$/, "")),
+    pkg: pkg.length > 0 ? pkg : undefined,
+  };
+}
+
+/**
  * Extract `///` doc comment lines immediately preceding a state variable
  * declaration. Mirrors `extractMethodDocComment` for methods — state vars
  * previously had no equivalent, so a `///` comment above a `state:` line

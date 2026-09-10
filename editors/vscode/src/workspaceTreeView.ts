@@ -997,6 +997,29 @@ export class WorkspaceTreeDataProvider
     );
   }
 
+  /**
+   * Whether `beamtalk.navigateToTypeAlias` can find something to open for
+   * this alias. Unlike classes/methods/state-vars, a `type` declaration
+   * erases entirely at compile time — there is no compiled-module path to
+   * recover an absolute file location from, so `browse-alias-source`
+   * (BT-3314/BT-3496) only ever resolves real content for a project-origin
+   * alias (against the workspace's own recorded project root); a
+   * stdlib/dependency-origin alias has no live source tree to resolve
+   * against server-side and always comes back `content: null`. So — unlike
+   * `_hasNavigableSource`, which treats `source_origin === "stdlib"` as
+   * navigable via the `beamtalk-stdlib://` fallback — only `"project"` is
+   * navigable here.
+   *
+   * `source_origin` is optional only for backward compatibility with a
+   * server predating BT-3496 that doesn't send it; falls back to the old
+   * (best-effort, `source_file`-presence) check in that case so an
+   * older-server alias row doesn't lose its badge outright.
+   */
+  private _hasNavigableAliasSource(info: TypeAliasInfo): boolean {
+    if (info.source_origin) return info.source_origin === "project";
+    return !!info.source_file && info.source_file !== "unknown";
+  }
+
   private _classItem(node: ClassItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.info.name, vscode.TreeItemCollapsibleState.Collapsed);
     item.iconPath = new vscode.ThemeIcon("symbol-class");
@@ -1017,7 +1040,7 @@ export class WorkspaceTreeDataProvider
   private _typeAliasItem(node: TypeAliasItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.info.name, vscode.TreeItemCollapsibleState.None);
     item.iconPath = new vscode.ThemeIcon("symbol-interface");
-    const hasSource = !!node.info.source_file && node.info.source_file !== "unknown";
+    const hasSource = this._hasNavigableAliasSource(node.info);
     item.contextValue = hasSource ? "type-alias-item" : "type-alias-item-no-source";
     if (hasSource) {
       item.command = {

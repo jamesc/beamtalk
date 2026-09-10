@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  aliasSourceUriString,
   classNameToStdlibFilename,
   extractMethodDocComment,
   extractStateVarDocComment,
@@ -12,6 +13,7 @@ import {
   findStateVarDeclaration,
   findTypeAliasDeclaration,
   offsetForDeclarationLine,
+  parseAliasSourceUriPath,
 } from "../textUtils";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -752,6 +754,50 @@ describe("classNameToStdlibFilename", () => {
 
   it("handles a name with a digit", () => {
     expect(classNameToStdlibFilename("Uuid")).toBe("uuid.bt");
+  });
+});
+
+// BT-3496: the `beamtalk-alias://` virtual URI scheme for a type alias's
+// read-only source view — round-tripped through plain strings (no `vscode`
+// dependency) so `extension.ts`'s `aliasSourceUri`/`AliasContentProvider`
+// only need to wrap these in `vscode.Uri.parse`/read `.path`.
+describe("aliasSourceUriString / parseAliasSourceUriPath", () => {
+  it("builds a URI string embedding both package and name as path segments", () => {
+    expect(aliasSourceUriString("Timeout", "my_app")).toBe("beamtalk-alias:///my_app/Timeout.bt");
+  });
+
+  it("encodes an unknown package as an empty path segment", () => {
+    // Four slashes: the `///` scheme separator plus the empty-segment `/`
+    // that precedes the name — mirrors how a real URI parser folds an empty
+    // authority-adjacent segment into an extra leading `/` on `.path`
+    // (`new URL("beamtalk-alias:////Timeout.bt").pathname === "//Timeout.bt"`).
+    expect(aliasSourceUriString("Timeout", undefined)).toBe("beamtalk-alias:////Timeout.bt");
+  });
+
+  it("percent-encodes package/name characters that aren't URI-path-safe", () => {
+    const uri = aliasSourceUriString("My Alias", "my pkg");
+    expect(uri).toBe("beamtalk-alias:///my%20pkg/My%20Alias.bt");
+  });
+
+  it("round-trips name and package through build → parse", () => {
+    const uri = aliasSourceUriString("RestartStrategy", "beamtalk_stdlib");
+    const path = uri.replace(/^beamtalk-alias:\/\//, "");
+    expect(parseAliasSourceUriPath(path)).toEqual({
+      name: "RestartStrategy",
+      pkg: "beamtalk_stdlib",
+    });
+  });
+
+  it("round-trips an unknown package back to undefined", () => {
+    const uri = aliasSourceUriString("Timeout", undefined);
+    const path = uri.replace(/^beamtalk-alias:\/\//, "");
+    expect(parseAliasSourceUriPath(path)).toEqual({ name: "Timeout", pkg: undefined });
+  });
+
+  it("round-trips percent-encoded characters back to their original form", () => {
+    const uri = aliasSourceUriString("My Alias", "my pkg");
+    const path = uri.replace(/^beamtalk-alias:\/\//, "");
+    expect(parseAliasSourceUriPath(path)).toEqual({ name: "My Alias", pkg: "my pkg" });
   });
 });
 
