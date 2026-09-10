@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Type alias registry (ADR 0108 Phases 2–3, BT-2895 + BT-2896).
+//! Type alias registry (ADR 0108 Phases 2–3).
 //!
 //! **DDD Context:** Semantic Analysis
 //!
@@ -24,7 +24,7 @@
 //! REPL/hot-reload session can arrive in the opposite order — a `type Foo`
 //! declared in one turn, then a live `class Foo` redefinition in a later
 //! turn — which this module's own registration order cannot see across
-//! turns. BT-2899 closed that gap not with new logic here, but by fixing
+//! turns. That gap is closed not with new logic here, but by
 //! the compiler-port wiring (`beamtalk-compiler-port/src/main.rs`'s
 //! `handle_compile`/`handle_compile_method`) to thread session
 //! carried-over aliases (`known_type_aliases`) into every class/protocol-
@@ -33,9 +33,9 @@
 //! earlier-turn alias, its existing `hierarchy.has_class`/
 //! `protocol_registry.has_protocol` check already catches the collision.
 //!
-//! **Cycle detection + topological sort** (ADR 0108 "No recursion",
-//! BT-2896): [`register_module`](AliasRegistry::register_module),
-//! [`add_pre_loaded`](AliasRegistry::add_pre_loaded) (BT-2954), and
+//! **Cycle detection + topological sort** (ADR 0108 "No recursion"):
+//! [`register_module`](AliasRegistry::register_module),
+//! [`add_pre_loaded`](AliasRegistry::add_pre_loaded), and
 //! [`redefine_alias`](AliasRegistry::redefine_alias) all run a single DFS
 //! ([`find_cycles`]) over the alias dependency graph — edges are RHS
 //! references to other registered alias names — that detects reference
@@ -75,7 +75,7 @@ pub struct AliasInfo {
     /// used for every other annotation).
     pub annotation: TypeAnnotation,
     /// Whether this alias is package-private (ADR 0071 `internal` modifier,
-    /// ADR 0108 Phase 5, BT-2898): `internal type Foo = ...`.
+    /// ADR 0108 Phase 5): `internal type Foo = ...`.
     ///
     /// An internal alias declared in a *different* package than the current
     /// compilation is never seeded into the consumer's alias table at all
@@ -105,7 +105,7 @@ pub struct AliasInfo {
 impl AliasInfo {
     /// Builds an [`AliasInfo`] from a parsed [`TypeAliasDefinition`].
     ///
-    /// `pub` (ADR 0108 Phase 8, BT-2902): the REPL's cross-turn alias
+    /// `pub` (ADR 0108 Phase 8): the REPL's cross-turn alias
     /// persistence re-parses each previously-declared `type Name = ...` line
     /// standalone (the session has no live BEAM artifact to recover an
     /// alias from, unlike a class — see `AliasRegistry::add_pre_loaded`) and
@@ -135,8 +135,8 @@ impl AliasInfo {
 pub struct AliasRegistry {
     aliases: HashMap<EcoString, AliasInfo>,
     /// Canonicalised cycle chains (see [`canonical_cycle_key`]) already
-    /// reported by [`register_module`](Self::register_module) — BT-2896:
-    /// that method re-scans the *whole* accumulated `aliases` map on every
+    /// reported by [`register_module`](Self::register_module) — that method
+    /// re-scans the *whole* accumulated `aliases` map on every
     /// call (see its doc), so a package-wide caller seeding this registry
     /// across several `register_module` calls (one per file) would
     /// otherwise see the same still-unresolved cycle re-reported on every
@@ -232,17 +232,17 @@ impl AliasRegistry {
                 .insert(name.clone(), AliasInfo::from_definition(alias_def));
         }
 
-        // ADR 0108 "No recursion" / BT-2896: cycle detection + topological
+        // ADR 0108 "No recursion": cycle detection + topological
         // sort, package-wide. Runs over the *whole* accumulated `self.aliases`
         // (not just the aliases just registered from this one module) so that
         // calling `register_module` more than once against the same registry
-        // — the shape a future package-wide caller (BT-2898) would use to
+        // — the shape a package-wide caller uses to
         // seed aliases from multiple files — still catches a cycle spanning
         // names declared in different calls. Non-fatal, mirroring the
         // unbound-type-variable check above: a cyclic alias still registers
         // (its `TypeAnnotation` is stored either way), relying on
         // `resolve_type_annotation`'s existing defensive `expanding` guard
-        // (BT-2895) to keep *expansion* safe if something resolves through it
+        // to keep *expansion* safe if something resolves through it
         // anyway — rejecting cyclic aliases outright would just cascade into
         // spurious "unknown type" diagnostics at every reference site instead
         // of the one precise cycle diagnostic here.
@@ -273,7 +273,7 @@ impl AliasRegistry {
     }
 
     /// (Re)defines a single alias in a live/REPL session (ADR 0108 "No
-    /// recursion", BT-2896).
+    /// recursion").
     ///
     /// Unlike [`register_module`](Self::register_module), redefining an
     /// existing name is the whole point here (no "duplicate" check), but
@@ -290,8 +290,8 @@ impl AliasRegistry {
     ///
     /// This is the alias-table-consistency half of ADR 0108's hot-reload
     /// story. It does not, by itself, re-check other code that references
-    /// the redefined name — that dependent-site re-check trigger is BT-2899,
-    /// a separate, later issue building on this one.
+    /// the redefined name — that dependent-site re-check trigger is a
+    /// separate concern building on this one.
     pub fn redefine_alias(
         &mut self,
         alias_def: &TypeAliasDefinition,
@@ -342,7 +342,7 @@ impl AliasRegistry {
     }
 
     /// Builds an alias registry directly from a module's parsed type-alias
-    /// declarations, with no validation (ADR 0108, BT-2909).
+    /// declarations, with no validation (ADR 0108).
     ///
     /// Unlike [`register_module`](Self::register_module), this constructor
     /// does not check for namespace collisions, duplicate definitions,
@@ -374,7 +374,7 @@ impl AliasRegistry {
 
     /// Builds an alias registry from a module's own declarations, extended
     /// with pre-loaded aliases from other modules in the same compilation
-    /// unit (ADR 0108, BT-2932) — the **codegen**-only counterpart of
+    /// unit (ADR 0108) — the **codegen**-only counterpart of
     /// [`Self::add_pre_loaded`].
     ///
     /// Like [`Self::from_module_declarations`], this constructor runs no
@@ -413,7 +413,7 @@ impl AliasRegistry {
 
     /// Extract `AliasInfo` entries from a parsed module without registering them.
     ///
-    /// BT-2898: Mirrors `ProtocolRegistry::extract_protocol_infos` /
+    /// Mirrors `ProtocolRegistry::extract_protocol_infos` /
     /// `ClassHierarchy::extract_class_infos` — used to collect alias metadata
     /// from a package's compiled sources ahead of compiling a downstream
     /// module that references those alias names (ADR 0108 Semantics:
@@ -435,7 +435,7 @@ impl AliasRegistry {
 
     /// Reconstructs a single [`AliasInfo`] from a standalone declaration
     /// string (e.g. `"type RestartStrategy = #temporary | #transient |
-    /// #permanent"` or `"internal type Foo = Integer"`) — BT-2935.
+    /// #permanent"` or `"internal type Foo = Integer"`).
     ///
     /// Lexes and parses `text` as its own tiny module and delegates to
     /// [`Self::extract_alias_infos`], returning the first (and expected only)
@@ -465,7 +465,7 @@ impl AliasRegistry {
     /// Seed the registry with aliases pre-compiled from other source files or
     /// packages, or carried over from earlier turns of the same REPL session.
     ///
-    /// BT-2898: Mirrors `ProtocolRegistry::add_pre_loaded` (BT-2006). Skips
+    /// Mirrors `ProtocolRegistry::add_pre_loaded`. Skips
     /// entries whose names are already registered (current-module
     /// definitions win) and reports diagnostics for namespace collisions —
     /// a pre-loaded alias name that matches a class, protocol, or another
@@ -473,7 +473,7 @@ impl AliasRegistry {
     /// = ...`; ADR 0108 Semantics: "Cross-package collisions ... are
     /// diagnosed at seeding time").
     ///
-    /// Also used for REPL cross-turn continuity (ADR 0108 Phase 8, BT-2902):
+    /// Also used for REPL cross-turn continuity (ADR 0108 Phase 8):
     /// callers pass previously-declared `type Name = ...` lines re-parsed
     /// standalone each turn (aliases erase to nothing at runtime, so unlike
     /// `pre_loaded_classes` there is no live BEAM artifact to recover them
@@ -503,8 +503,8 @@ impl AliasRegistry {
     /// all — mirrors [`crate::semantic_analysis::class_hierarchy::ClassHierarchy::add_from_beam_meta`]'s
     /// unconditional accept in that context).
     ///
-    /// **Cross-batch cycle detection** (ADR 0108 "No recursion", BT-2896,
-    /// BT-2954): like [`Self::register_module`], this method finishes by
+    /// **Cross-batch cycle detection** (ADR 0108 "No recursion"):
+    /// like [`Self::register_module`], this method finishes by
     /// running [`find_cycles`] over the *whole* accumulated `self.aliases`
     /// map (module-local declarations already registered, plus every
     /// pre-loaded batch seeded so far, including this one) and reporting any
@@ -519,7 +519,7 @@ impl AliasRegistry {
     /// `project_index.rs`, `lint.rs`) call `add_pre_loaded` without ever
     /// calling `register_module` on that registry at all. Non-fatal, exactly
     /// like `register_module`'s check: a cyclic alias still seeds into the
-    /// table (`resolve_type_annotation`'s `expanding` guard, BT-2895, keeps
+    /// table (`resolve_type_annotation`'s `expanding` guard keeps
     /// expansion safe either way).
     pub fn add_pre_loaded(
         &mut self,
@@ -582,7 +582,7 @@ impl AliasRegistry {
             }
 
             if let Some(existing) = self.aliases.get(&info.name) {
-                // BT-3043: A pre-loaded batch can legitimately contain the
+                // A pre-loaded batch can legitimately contain the
                 // *same* declaration more than once — e.g. a dependency
                 // reachable via more than one path through the project's
                 // merged class/protocol/alias info lists (callers like
@@ -631,7 +631,7 @@ impl AliasRegistry {
             self.aliases.entry(info.name.clone()).or_insert(info);
         }
 
-        // ADR 0108 "No recursion" / BT-2896 / BT-2954: cycle detection over
+        // ADR 0108 "No recursion": cycle detection over
         // the whole accumulated `self.aliases` map, mirroring
         // `register_module`'s own `find_cycles` call (see its doc) — see
         // this method's doc for why `add_pre_loaded` cannot simply rely on a
@@ -659,8 +659,8 @@ impl AliasRegistry {
     /// Best-effort alias-aware display for a bare type name pulled from
     /// [`ClassHierarchy`]'s pre-ADR-0108 `EcoString` storage (state field
     /// types via `state_field_type`, method parameter types via
-    /// `MethodInfo::param_types`) — BT-2911, closing the gap BT-2897's
-    /// `TypeProvenance::Aliased` left in diagnostic paths that never touch
+    /// `MethodInfo::param_types`) — closes the gap `TypeProvenance::Aliased`
+    /// leaves in diagnostic paths that never touch
     /// `InferredType` at all: `hover_provider.rs`'s `Expression::FieldAccess`
     /// branch, and `type_checker::validation`'s `check_field_assignment` /
     /// `check_argument_types`.
@@ -719,13 +719,13 @@ impl AliasRegistry {
     /// own tests) that need an alias table without constructing a full
     /// `Module` AST.
     ///
-    /// BT-3361: gate widened from `#[cfg(test)]` to `#[cfg(any(test, feature
-    /// = "test"))]` (the same mechanism `test_helpers::test_support` uses) —
-    /// `#[cfg(test)]` alone is per-compilation-unit and doesn't cross the
-    /// crate boundary, so it was invisible to `beamtalk-language-service`'s
-    /// own `#[cfg(test)]` tests (`queries::completion_provider`) once that
-    /// module moved into its own crate and started linking this crate's
-    /// compiled (non-test) rlib.
+    /// The gate is `#[cfg(any(test, feature = "test"))]` (the same
+    /// mechanism `test_helpers::test_support` uses), not plain
+    /// `#[cfg(test)]`: `#[cfg(test)]` alone is per-compilation-unit and
+    /// doesn't cross the crate boundary, so it would be invisible to
+    /// `beamtalk-language-service`'s own `#[cfg(test)]` tests
+    /// (`queries::completion_provider`), which link this crate's compiled
+    /// (non-test) rlib from its own crate.
     #[cfg(any(test, feature = "test"))]
     pub fn register_test_alias(&mut self, info: AliasInfo) {
         self.aliases.insert(info.name.clone(), info);
@@ -1252,8 +1252,8 @@ mod tests {
         assert!(!registry.has_alias("Foo"));
     }
 
-    // ---- Live-session namespace-collision ordering (BT-2899, consolidated
-    // BT-2912): class/protocol vs. an already-registered alias ----
+    // ---- Live-session namespace-collision ordering: class/protocol
+    // vs. an already-registered alias ----
     //
     // The fix lives at the compiler-port boundary
     // (`beamtalk-compiler-port/src/main.rs`'s `handle_compile`/
@@ -1409,7 +1409,7 @@ mod tests {
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
     }
 
-    // ---- Cycle detection + topological sort (ADR 0108 "No recursion", BT-2896) ----
+    // ---- Cycle detection + topological sort (ADR 0108 "No recursion") ----
 
     #[test]
     fn self_reference_alias_is_a_cycle() {
@@ -1609,7 +1609,7 @@ mod tests {
 
     #[test]
     fn repeated_register_module_calls_report_the_same_cycle_only_once() {
-        // BT-2896: `register_module` re-scans the *whole* accumulated
+        // `register_module` re-scans the *whole* accumulated
         // registry on every call (see its doc) so a package-wide caller
         // seeding aliases across several files — one `register_module` call
         // per file — still catches a cross-file cycle. But that means a
@@ -1665,7 +1665,7 @@ mod tests {
 
     #[test]
     fn multi_file_forward_reference_resolves_without_cycle() {
-        // ADR 0108 "No recursion" / BT-2896: `type B = A | #z` and `type A =
+        // ADR 0108 "No recursion": `type B = A | #z` and `type A =
         // #x | #y` declared in the same package but *different files* — `B`
         // registered (via its own `register_module` call, simulating file 1)
         // before `A` is even known (file 2's `register_module` call hasn't
@@ -1720,7 +1720,7 @@ mod tests {
         assert_eq!(members.len(), 3, "expected #x | #y | #z, got {members:?}");
     }
 
-    // ---- Live redefinition (ADR 0108 "No recursion", BT-2896) ----
+    // ---- Live redefinition (ADR 0108 "No recursion") ----
 
     #[test]
     fn clean_redefinition_commits() {
@@ -2110,7 +2110,7 @@ mod tests {
 
     #[test]
     fn successful_redefinition_clears_stale_reported_cycles() {
-        // BT-2896 adversarial finding: `register_module` remembers a
+        // `register_module` remembers a
         // reported cycle's canonical key in `self.reported_cycles` so a
         // later `register_module` call doesn't re-report the same
         // still-unresolved cycle (see
@@ -2175,7 +2175,7 @@ mod tests {
         );
     }
 
-    // ---- `internal` modifier parsing (ADR 0071, BT-2898) ----
+    // ---- `internal` modifier parsing (ADR 0071) ----
 
     #[test]
     fn internal_type_alias_definition_parses_as_internal() {
@@ -2200,7 +2200,7 @@ mod tests {
         );
     }
 
-    // ---- BT-2898: extract_alias_infos (pattern to mirror:
+    // ---- extract_alias_infos (pattern to mirror:
     //      ProtocolRegistry::extract_protocol_infos) ----
 
     #[test]
@@ -2227,7 +2227,7 @@ mod tests {
         );
     }
 
-    // ---- BT-2935: from_source_text (build_stdlib.rs's generated-table
+    // ---- from_source_text (build_stdlib.rs's generated-table
     //      read-side reparse) ----
 
     #[test]
@@ -2276,8 +2276,8 @@ mod tests {
         assert!(AliasRegistry::from_source_text("Object subclass: Foo").is_none());
     }
 
-    // ---- BT-2898: add_pre_loaded (pattern to mirror:
-    //      ProtocolRegistry::add_pre_loaded, BT-2006) ----
+    // ---- add_pre_loaded (pattern to mirror:
+    //      ProtocolRegistry::add_pre_loaded) ----
 
     fn alias_info(name: &str, annotation: TypeAnnotation, is_internal: bool) -> AliasInfo {
         alias_info_with_package(name, annotation, is_internal, None)
@@ -2394,7 +2394,7 @@ mod tests {
 
     #[test]
     fn add_pre_loaded_does_not_flag_a_duplicate_seed_of_the_same_declaration_as_a_collision() {
-        // BT-3043: `beamtalk lint`/`beamtalk build` merge same-package and
+        // `beamtalk lint`/`beamtalk build` merge same-package and
         // dependency-exported alias infos via plain concatenation (see
         // `collect_all_alias_infos`'s doc in `build.rs`) with no dedup —
         // callers rely on `add_pre_loaded` itself to tell a namespace
@@ -2430,7 +2430,7 @@ mod tests {
 
     #[test]
     fn add_pre_loaded_detects_cross_file_cycle() {
-        // BT-2954: two separately-compiled files each declare one half of
+        // Two separately-compiled files each declare one half of
         // the ADR 0108 Error-example cycle:
         //   file A: type Ab = Bc | Integer
         //   file B: type Bc = Ab | Symbol
@@ -2499,7 +2499,7 @@ mod tests {
 
     #[test]
     fn add_pre_loaded_cycle_is_not_double_reported_by_a_later_register_module_call() {
-        // BT-2954: `add_pre_loaded` and `register_module` now share
+        // `add_pre_loaded` and `register_module` share
         // `reported_cycles` (see its doc) — a cycle already reported when
         // `add_pre_loaded` seeds the second half must not be re-reported
         // when a later `register_module` call re-scans the same

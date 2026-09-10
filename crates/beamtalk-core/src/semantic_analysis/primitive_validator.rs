@@ -21,19 +21,19 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 /// to runtime dispatch modules.
 ///
 /// `pub`: this is the one authoritative source of the name set — `beamtalk-codegen`
-/// (`primitives::intrinsic_bodies::INTRINSIC_BODIES`, BT-3474) imports it
+/// (`primitives::intrinsic_bodies::INTRINSIC_BODIES`) imports it
 /// directly rather than keeping a second hand-maintained copy in sync, per
 /// `architecture-principles.md` § Duplication.
 pub const STRUCTURAL_INTRINSICS: &[&str] = &[
     // Object lifecycle
     "basicNew",
     "basicNewWith",
-    // BT-3072: `actorSpawn` / `actorSpawnWith` retired — `class sealed spawn`
-    // / `spawnWith:` now have real FFI bodies (`(Erlang beamtalk_actor)
-    // doSpawn: self`) instead of `@intrinsic` markers, so these names are no
-    // longer used anywhere and are intentionally not in this registry.
-    // BT-3074: `actorNewError` / `actorNewWithArgsError` retired the same
-    // way — `class sealed new` / `new:` now send `Exception
+    // `actorSpawn` / `actorSpawnWith` are retired — `class sealed spawn`
+    // / `spawnWith:` have real FFI bodies (`(Erlang beamtalk_actor)
+    // doSpawn: self`) instead of `@intrinsic` markers, so these names are
+    // not used anywhere and are intentionally not in this registry.
+    // `actorNewError` / `actorNewWithArgsError` are retired the same
+    // way — `class sealed new` / `new:` send `Exception
     // signalKind:class:selector:hint:` instead of an `@intrinsic` marker.
     // Reflection
     "classOf",
@@ -63,7 +63,7 @@ pub const STRUCTURAL_INTRINSICS: &[&str] = &[
     "whileFalse",
     "repeat",
     // Iteration
-    // Note: timesRepeat/toDo/toByDo are no longer intrinsics (BT-1054)
+    // Note: timesRepeat/toDo/toByDo are not intrinsics
     "listDo",
     "listCollect",
     "listSelect",
@@ -406,10 +406,10 @@ mod tests {
         );
     }
 
-    // BT-3347: the tests below exercise `validate_expr`'s recursive match arms —
-    // previously only the top-level "primitive as the entire statement" shape
-    // was tested, so every arm that *recurses into a subexpression* (rather
-    // than being the primitive itself) was untested. Each `@primitive "+"`
+    // The tests below exercise `validate_expr`'s recursive match arms — every
+    // arm that *recurses into a subexpression* (rather than being the
+    // primitive itself), not just the top-level "primitive as the entire
+    // statement" shape. Each `@primitive "+"`
     // here uses a quoted selector, so it always contributes exactly one
     // "Primitives can only be declared" diagnostic (no intrinsic-name check).
 

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Pre-codegen AST lowering (BT-3125).
+//! Pre-codegen AST lowering.
 //!
 //! **DDD Context:** Semantic Analysis
 //!
@@ -16,10 +16,7 @@
 //! - [`apply_class_kind_writeback`](crate::semantic_analysis::class_kind_writeback::apply_class_kind_writeback)
 //!
 //! Each of those is already a pure application of already-computed data — no
-//! inference or hierarchy construction happens in this module either. What
-//! BT-3125 changes is *who schedules* the trio: previously
-//! `generate_module_with_warnings` called all three itself, on a clone it
-//! made of the caller's module, every single codegen invocation. Now a
+//! inference or hierarchy construction happens in this module either. A
 //! driver that has already run [`analyse_full`](crate::semantic_analysis::analyse_full)
 //! calls [`lower_module_for_codegen`] once, directly on its own
 //! (already-owned, mutable) module, before ever calling `generate_module` —
@@ -62,12 +59,12 @@ pub fn lower_module_for_codegen(
     hierarchy: &ClassHierarchy,
     method_return_types: &HashMap<MethodReturnKey, InferredType>,
 ) {
-    // BT-1005: Writeback inferred return types into the AST so unannotated
+    // Writeback inferred return types into the AST so unannotated
     // methods appear in the emitted `method_return_types` map.
     apply_return_type_writeback_from_map(module, method_return_types);
-    // BT-1218: Writeback supervisor_kind for Supervisor/DynamicSupervisor subclasses.
+    // Writeback supervisor_kind for Supervisor/DynamicSupervisor subclasses.
     apply_supervisor_kind_writeback(module, hierarchy);
-    // BT-1534: Correct class_kind for indirect Value/Actor subclasses.
+    // Correct class_kind for indirect Value/Actor subclasses.
     // E.g. `TestCase subclass: MyTest` gets ClassKind::Object from the parser
     // (TestCase is not literally "Value"/"Actor"), but needs ClassKind::Value
     // so codegen generates auto-slot methods (withX: setters).

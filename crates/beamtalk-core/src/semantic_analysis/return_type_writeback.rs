@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Compile-time return-type writeback pass (BT-1005, ADR 0045 Phase 1b).
+//! Compile-time return-type writeback pass (ADR 0045 Phase 1b).
 //!
 //! **DDD Context:** Semantic Analysis
 //!
@@ -33,12 +33,12 @@ use std::collections::HashMap;
 
 /// Build a `TypeAnnotation` from an `InferredType` for AST writeback.
 ///
-/// `BT-2022` + `CodeRabbit` on PR #2059: returns a `TypeAnnotation::Generic` with
+/// Returns a `TypeAnnotation::Generic` with
 /// recursive parameters when the inferred type carries `type_args`, so an
 /// inferred `List(String)` writes back as `-> List(String)` rather than the
 /// erased `-> List`. Cross-module consumers (codegen, language service) read
 /// `MethodDefinition.return_type`, so dropping `type_args` here would
-/// reintroduce the type-arg loss the cache fix eliminated.
+/// reintroduce a type-arg loss.
 ///
 /// Returns `None` for `Dynamic` and `Union` — those don't have a single
 /// canonical annotation and shouldn't be written back.
@@ -80,10 +80,10 @@ fn writeback_annotation(ty: &InferredType, span: Span) -> Option<TypeAnnotation>
 ///
 /// * `module` - Mutable AST module to update in place.
 /// * `hierarchy` - Class hierarchy used for type inference.
-/// * `native_type_registry` - BT-2887: optional FFI type registry (ADR 0075)
+/// * `native_type_registry` - optional FFI type registry (ADR 0075)
 ///   so methods whose body type is inferred purely via an FFI call (e.g.
 ///   `foo => Erlang lists reverse: x`) get their return type written back too.
-///   `None` preserves the previous registry-blind behaviour.
+///   `None` skips FFI-derived inference.
 pub fn apply_return_type_writeback(
     module: &mut Module,
     hierarchy: &ClassHierarchy,
@@ -96,7 +96,7 @@ pub fn apply_return_type_writeback(
 /// [`apply_return_type_writeback`], given an already-computed inferred-return-types
 /// map instead of running [`infer_method_return_types`] itself.
 ///
-/// BT-3123: used by codegen when a driver hands off an [`AnalysisResult`](crate::semantic_analysis::AnalysisResult)
+/// Used by codegen when a driver hands off an [`AnalysisResult`](crate::semantic_analysis::AnalysisResult)
 /// whose `method_return_types` field was populated by the same [`TypeChecker`](crate::semantic_analysis::type_checker::TypeChecker)
 /// pass that already ran for diagnostics — avoids a second, full type-checking
 /// pass over the module purely to re-derive the same map.
@@ -152,7 +152,7 @@ pub fn apply_return_type_writeback_from_map(
 /// the methods present in `written_by`, resetting their `return_type` back
 /// to `None`.
 ///
-/// BT-3125: codegen's "untrusted hand-off" fallback (`generate_module_with_warnings`)
+/// Codegen's "untrusted hand-off" fallback (`generate_module_with_warnings`)
 /// re-infers return types against a fuller, cross-file-enriched hierarchy when a
 /// driver's own `lower_module_for_codegen` call (against a narrower hierarchy) may be
 /// stale. But by the time that fallback runs, the driver has *already* written the
@@ -199,7 +199,7 @@ pub fn clear_return_type_writeback_for_keys(
 /// `written_by`, i.e. was set by [`apply_return_type_writeback_from_map`]
 /// rather than typed by the user.
 ///
-/// BT-3249: also called directly by codegen's `extract_method_source`
+/// Also called directly by codegen's `extract_method_source`
 /// (`crates/beamtalk-codegen/src/core_erlang/gen_server/methods.rs`) on
 /// a throwaway clone of a single method, so the image-resident `__source__`
 /// text it bakes never carries an inferred `-> Type` annotation the user
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn writeback_with_native_registry_sets_return_type_for_ffi_only_method() {
-        // BT-2887: a method whose body return type is inferred purely via an
+        // A method whose body return type is inferred purely via an
         // FFI call only writes back when a NativeTypeRegistry is supplied.
         use crate::semantic_analysis::type_checker::TypeProvenance;
         use crate::semantic_analysis::type_checker::native_type_registry::{
