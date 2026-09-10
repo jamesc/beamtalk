@@ -111,6 +111,20 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // method-body sequencer rebinds the method's live `Self` from it. Its
   // cells (`testStateFieldEnsure*` / `testStateFieldOnDo*` below) never
   // needed a pending switch — they are added already passing.
+  //
+  // BT-3488 closed the remaining gap that BT-3484's threading did NOT cover,
+  // and closed it by REJECTION rather than by support: a `self.field :=` write
+  // that is not a bare top-level statement of the loop body — nested inside an
+  // `ifTrue:`/`ensure:` branch, or anywhere in a `Foldl*` (`do:`/`collect:`)
+  // body — is now a clean compile error carrying the same "Cannot assign to
+  // field ... inside this block" text the identical class-var shape already
+  // produced, instead of an erlc `unbound variable 'State'` crash or a
+  // silently dropped mutation. That is why no axis-4 fragment below nests its
+  // write inside a conditional: such a fragment would no longer compile, so
+  // the shape is pinned at the Rust level instead (see
+  // `crates/beamtalk-codegen/src/core_erlang/tests/control_flow.rs`,
+  // `test_value_type_field_write_in_conditional_nested_in_loop_is_compile_error`
+  // and its neighbours) where a compile error can actually be asserted.
   bt3484ValueTypeFieldWriteThreadingPending => false
 
   // ── TestCase-context fragments (the test class is itself a value-type) ──────

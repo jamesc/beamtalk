@@ -13,8 +13,8 @@
 //! - Await expressions
 //! - Cascades
 //!
-//! BT-3465: block (closure) compilation moved to [`super::blocks`]; pattern
-//! matching (`match:`) and destructuring extraction moved to
+//! Block (closure) compilation lives in [`super::blocks`]; pattern
+//! matching (`match:`) and destructuring extraction live in
 //! [`super::patterns`]. Message sending is handled by
 //! [`super::dispatch_codegen`].
 
@@ -178,7 +178,7 @@ impl CoreErlangGenerator {
         (prefix, reference)
     }
 
-    /// ADR 0118 phase 1b (BT-3416): [`Self::generate_string_interpolation`],
+    /// ADR 0118 phase 1b: [`Self::generate_string_interpolation`],
     /// through the sequencing rule. Each segment's own `displayString`
     /// dispatch is itself an effect that always runs immediately after
     /// that segment's value (its own per-segment `let`-chain,
@@ -274,20 +274,20 @@ impl CoreErlangGenerator {
             "false" => Ok(Document::Str("'false'")),
             "nil" => Ok(Document::Str("'nil'")),
             "self" => {
-                // BT-411: Check if self is explicitly bound (e.g., in class methods)
+                // Check if self is explicitly bound (e.g., in class methods)
                 if let Some(var_name) = self.lookup_var("self").cloned() {
                     Ok(docvec![leaf::var(var_name)])
                 } else if self.context == super::CodeGenContext::ValueType {
-                    // BT-833: In value type context, self resolves to the latest Self{N}
+                    // In value type context, self resolves to the latest Self{N}
                     // snapshot after any preceding field assignments.
                     Ok(leaf::var(self.current_self_var()))
                 } else if self.context == super::CodeGenContext::Repl {
-                    // BT-2503 (ADR 0095 §1): at the top level of a REPL eval there is
+                    // ADR 0095 §1: at the top level of a REPL eval there is
                     // no enclosing-method receiver, so a bare `Self` would be an
                     // unbound Core Erlang variable. Resolve `self` from the bindings
                     // map instead, so the Inspector's value `evaluate:` can bind
                     // `self` to the inspected value by passing `#{self => Value}`.
-                    // BT-2509: on a miss, raise `undefined_variable` directly rather
+                    // On a miss, raise `undefined_variable` directly rather
                     // than routing through `resolve_name`, whose `bind:as:` tier would
                     // let a user binding named `self` silently shadow the reserved
                     // word. A top-level `self` with no `#{self => _}` binding is
@@ -307,7 +307,7 @@ impl CoreErlangGenerator {
                         "end",
                     ])
                 } else {
-                    Ok(Document::Str("Self")) // self → Self parameter (BT-161)
+                    Ok(Document::Str("Self")) // self → Self parameter
                 }
             }
             "super" => {
@@ -323,7 +323,7 @@ impl CoreErlangGenerator {
                 if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
                     Ok(docvec![leaf::var(var_name)])
                 } else {
-                    // BT-1326: In hybrid mode, check if this is a read-only field
+                    // In hybrid mode, check if this is a read-only field
                     // accessed implicitly (bare name without self. prefix).
                     if self.loop_mode.in_hybrid_loop {
                         if let Some(param_var) = self
@@ -335,15 +335,15 @@ impl CoreErlangGenerator {
                         }
                     }
                     // Field access from state/self
-                    // BT-213: Context determines which variable to use
+                    // Context determines which variable to use
                     let state_var = match self.context {
                         super::CodeGenContext::ValueType => {
-                            // BT-833: Value types use the latest Self{N} snapshot
+                            // Value types use the latest Self{N} snapshot
                             self.current_self_var()
                         }
                         super::CodeGenContext::Actor | super::CodeGenContext::Repl => {
-                            // BT-153: Use StateAcc when inside loop body
-                            // BT-1326: Hybrid loops use State* naming, not StateAcc*
+                            // Use StateAcc when inside loop body
+                            // Hybrid loops use State* naming, not StateAcc*
                             if self.loop_mode.in_hybrid_loop {
                                 self.current_state_var()
                             } else if self.in_loop_body {
@@ -353,7 +353,7 @@ impl CoreErlangGenerator {
                             }
                         }
                     };
-                    // BT-2365 (ADR 0081 Phase 1): in REPL context a free
+                    // ADR 0081 Phase 1: in REPL context a free
                     // identifier is no longer guaranteed to be present in State —
                     // workspace globals (singletons, bind:as:) are resolved lazily
                     // rather than eagerly injected into the session map. So instead
@@ -422,7 +422,7 @@ impl CoreErlangGenerator {
             return Ok(Document::Str("~{}~"));
         }
 
-        // BT-1937: Capture all keys and values as one ordered sequence so
+        // Capture all keys and values as one ordered sequence so
         // capture_subexpr_sequence can force-hoist every sub-expression in
         // left-to-right order when ANY of them produces an open scope.
         // Preserves the source-order semantics: key1, val1, key2, val2, ...
@@ -455,7 +455,7 @@ impl CoreErlangGenerator {
         elements: &[Expression],
         tail: Option<&Expression>,
     ) -> Result<Document<'static>> {
-        // BT-1937: Capture all elements + optional tail as one ordered
+        // Capture all elements + optional tail as one ordered
         // sequence so evaluation order is preserved when sub-expressions have
         // open scopes.
         let mut all_exprs: Vec<&Expression> = Vec::with_capacity(elements.len() + 1);
@@ -494,7 +494,7 @@ impl CoreErlangGenerator {
         &mut self,
         elements: &[Expression],
     ) -> Result<Document<'static>> {
-        // BT-1937: Capture all elements as one ordered sequence so evaluation
+        // Capture all elements as one ordered sequence so evaluation
         // order is preserved when sub-expressions have open scopes.
         let exprs: Vec<&Expression> = elements.iter().collect();
         let (preamble, docs) = self.thread_subexprs(&exprs, "ArrLit")?;
@@ -521,7 +521,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         field: &Identifier,
     ) -> Result<Document<'static>> {
-        // BT-412: Class methods access class variables directly from ClassVars map
+        // Class methods access class variables directly from ClassVars map
         if self.in_class_method() {
             if let Expression::Identifier(recv_id) = receiver {
                 if recv_id.name == "self" && self.class_var_names().contains(field.name.as_str()) {
@@ -548,7 +548,7 @@ impl CoreErlangGenerator {
         // diagnostic in the fall-through below.
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
-                // BT-1326: In hybrid mode, read-only fields are pre-extracted before the letrec.
+                // In hybrid mode, read-only fields are pre-extracted before the letrec.
                 // Use the direct parameter variable instead of generating maps:get every iteration.
                 if self.loop_mode.in_hybrid_loop {
                     if let Some(param_var) = self
@@ -559,7 +559,7 @@ impl CoreErlangGenerator {
                         return Ok(leaf::var(param_var.clone()));
                     }
                 }
-                // BT-213/BT-833: Use appropriate variable based on context
+                // Use appropriate variable based on context
                 let state_var = match self.context {
                     super::CodeGenContext::ValueType => self.current_self_var(),
                     super::CodeGenContext::Actor => self.current_state_var(),
@@ -595,9 +595,9 @@ impl CoreErlangGenerator {
     /// by [`FieldWriteSite`]:
     ///
     /// - **Actor context**: `State{n}` threading via `maps:put`
-    /// - **`ValueType` context** (BT-833): `Self{n}` threading — each assignment produces
+    /// - **`ValueType` context**: `Self{n}` threading — each assignment produces
     ///   a new immutable snapshot; `self` in subsequent expressions resolves to `Self{n}`
-    /// - **Class method** (BT-412): `ClassVars{n}` threading, with ADR 0110's shadow write
+    /// - **Class method**: `ClassVars{n}` threading, with ADR 0110's shadow write
     ///
     /// ```erlang
     /// let _Val = <value> in
@@ -607,20 +607,19 @@ impl CoreErlangGenerator {
     ///
     /// The assignment expression evaluates to the assigned value (Smalltalk semantics).
     ///
-    /// BT-3466: a thin, `Closure::Closed` wrapper around
+    /// A thin, `Closure::Closed` wrapper around
     /// [`Self::lower_field_write`] — the single lowering core this, `dispatch_codegen.rs`'s
     /// `generate_field_assignment_open` (`Closure::Open`), and
     /// `control_flow::conditionals`'s `lower_field_assignment_bind` (the
-    /// un-rendered-`Bind`-push consumption style) all now share, replacing
-    /// what were three independently hand-duplicated `maps:put` emissions —
-    /// the missing abstraction ADR 0110/0111's BT-3140/BT-3159/BT-3172 bug
-    /// family traced back to.
+    /// un-rendered-`Bind`-push consumption style) all share, instead of
+    /// three independently hand-duplicated `maps:put` emissions — the
+    /// missing abstraction the ADR 0110/0111 bug family traced back to.
     pub(super) fn generate_field_assignment(
         &mut self,
         field_name: &str,
         value: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-412: Class methods assign to class variables via ClassVars map
+        // Class methods assign to class variables via ClassVars map
         // threading — reached through ordinary `generate_expression`, not
         // `threaded_expression`'s own producer recognition, so
         // `lower_field_write`'s `Closed` render (equivalent to closing the
@@ -638,27 +637,26 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// BT-412: The class-var branch of [`Self::generate_field_assignment`]
+    /// The class-var branch of [`Self::generate_field_assignment`]
     /// (`self.field := value` inside a class method) — extracted to its own
     /// function so the caller stays under clippy's `too_many_lines` budget
-    /// alongside its two sibling branches (BT-3139 added `ThreadedIr`
-    /// instrumentation to those two, growing the combined function past the
-    /// limit).
+    /// alongside its two sibling branches (`ThreadedIr` instrumentation on
+    /// those two grows the combined function past the limit).
     ///
-    /// ADR 0118 phase 5a (BT-3421): the prelude's trailing `Bind` leaves
+    /// ADR 0118 phase 5a: the prelude's trailing `Bind` leaves
     /// `ClassVarsN` bound with no consuming body of its own — callers
     /// splice the prelude into their own frame (§Decision 4) or close it
     /// ([`Self::close_threaded_value_doc`]) so `ClassVarsN` stays visible to
     /// the continuation.
     ///
-    /// BT-3164: delegates the actual `Bind` construction (mint/
+    /// Delegates the actual `Bind` construction (mint/
     /// version-capture/shadow-write/isolated-verify) to the shared
     /// [`Self::lower_class_var_field_assignment_bind`] — see its own doc
     /// comment for the full ADR 0110 shadow-write rationale — and returns
     /// it as a real, un-rendered [`ThreadedStmt::Bind`] in the prelude;
-    /// unlike `gen_server::methods`'s `lower_class_method_last_class_var_bind`,
-    /// which already promoted its own copy of this exact sequence to a
-    /// real top-level `Bind` before this issue.
+    /// `gen_server::methods`'s `lower_class_method_last_class_var_bind`
+    /// promotes its own copy of this exact sequence to a real top-level
+    /// `Bind` instead.
     pub(super) fn generate_class_var_field_assignment(
         &mut self,
         field_name: &str,
@@ -674,7 +672,7 @@ impl CoreErlangGenerator {
         })
     }
 
-    /// BT-412/BT-3164: shared class-var assignment `Bind` construction —
+    /// Shared class-var assignment `Bind` construction —
     /// the `self.classVar := value` shape's core sequence (mint `Val`,
     /// capture `source_version`/`target_version` around
     /// `expression_doc(value)`/`next_class_var()`, derive the ADR 0110
@@ -684,11 +682,11 @@ impl CoreErlangGenerator {
     /// non-last-position or nested class-var assignment, which still
     /// renders its `Bind` immediately and keeps it inside an opaque
     /// `Statement`) and `gen_server::methods`'s
-    /// `lower_class_method_last_class_var_bind` (BT-3164: the ONE case
+    /// `lower_class_method_last_class_var_bind` (the ONE case
     /// promoted to a real top-level `Bind` node) don't each hand-roll the
     /// same sequence (CLAUDE.md's no-duplicate-implementations rule).
     ///
-    /// ADR 0110 (BT-3032/BT-3037): shadow write-through so a foreign NLR
+    /// ADR 0110: shadow write-through so a foreign NLR
     /// (`^` belonging to another method's frame) relayed out of this class
     /// method does not lose the mutation — `invoke_class_method/7` reads
     /// the shadow back on the `{nlr_relay, ...}` path and erases it in
@@ -697,9 +695,9 @@ impl CoreErlangGenerator {
     /// `gen_server` process (ADR 0109), where an unconditional write would
     /// corrupt that class's vars with this class's map. Top-frame-only
     /// also matches existing semantics — block-interior class-var
-    /// mutations are already discarded on normal return (BT-1550).
+    /// mutations are already discarded on normal return.
     ///
-    /// ADR 0110 amendment (BT-3039): keyed by `element(2, ClassSelf)` —
+    /// ADR 0110 amendment: keyed by `element(2, ClassSelf)` —
     /// this call's dynamic runtime class identity — not a single shared
     /// key. A mutating self-send inside a block invoked from a foreign
     /// class's process (`block_depth` resets to 0 on entering the
@@ -711,7 +709,7 @@ impl CoreErlangGenerator {
     /// tagged with the calling subclass's identity, not the defining
     /// ancestor's.
     ///
-    /// BT-3140: this is NOT the only class-var write site —
+    /// This is NOT the only class-var write site —
     /// `whileTrue:`/`timesRepeat:` loop bodies (and other state-threaded
     /// constructs) never reach it; a class-var write there goes through
     /// `generate_field_assignment_open` (`dispatch_codegen.rs`), which
@@ -719,9 +717,9 @@ impl CoreErlangGenerator {
     /// branch at all, so `block_depth == 0` never even gets consulted for
     /// that shape. That gap is now a compile-time error
     /// (`CodeGenError::ClassVarAssignmentInThreadedBody`) rather than a
-    /// silent runtime no-op — see ADR 0110's BT-3140 amendment.
+    /// silent runtime no-op — see ADR 0110's amendment above.
     ///
-    /// BT-3148 (ADR 0111 Phase D completion): this `Bind` is constructed
+    /// ADR 0111 Phase D completion: this `Bind` is constructed
     /// and isolated-verified through the SAME `threaded_ir::ThreadedStmt::Bind`
     /// a `while_loops.rs`-style caller would — `threaded_ir::render`'s
     /// `BindOp::Put` arm is the only place the ADR 0110 shadow write is
@@ -736,7 +734,7 @@ impl CoreErlangGenerator {
     /// `val_var` is the minted temp variable name (both the `Bind`'s
     /// `Put` value and the expression's own logical result).
     ///
-    /// BT-3168: `frame` is the real [`threaded_ir::FrameId`] this write's
+    /// `frame` is the real [`threaded_ir::FrameId`] this write's
     /// `Bind` is tagged with — `FrameId::ROOT` for the method's own
     /// top-frame write (`generate_class_var_field_assignment`,
     /// `lower_class_method_last_class_var_bind`), or the loop's real,
@@ -764,9 +762,10 @@ impl CoreErlangGenerator {
             });
         }
         let val_var = self.fresh_temp_var("Val");
-        // BT-3148: the version numbers driving both the verify() call and
+        // The version numbers driving both the verify() call and
         // the real Bind rendered below — captured before/after minting,
-        // exactly as `current_cv`/`new_cv`'s names used to be by hand.
+        // rather than reconstructed from `current_cv`/`new_cv`-style names
+        // by hand.
         let source_version = self.class_var_version();
         let val_doc = self.expression_doc(value)?;
         self.next_class_var();
@@ -794,12 +793,12 @@ impl CoreErlangGenerator {
         Ok((preamble_doc, bind, val_var))
     }
 
-    /// BT-3139 (ADR 0111 coverage extension): construct + verify the
+    /// ADR 0111 coverage extension: construct + verify the
     /// just-emitted `Self{N}`/`State{N}` `Bind`'s `ThreadedIr` shape via the
-    /// shared [`super::threaded_ir::verify_simple_bind`] helper — the two
+    /// shared [`super::threaded_ir::verify_simple_bind`] helper — for the two
     /// `generate_field_assignment` sibling branches (value-type `Self` and
-    /// instance-actor `State`) that, unlike the class-var branch above
-    /// (BT-3135), constructed zero `ThreadedIr` fixture before this issue.
+    /// instance-actor `State`) that, unlike the class-var branch above,
+    /// otherwise construct no `ThreadedIr` fixture at all.
     ///
     /// `source_version`/`target_version` are the real `self_version()`/
     /// `state_version()` counter reads taken immediately before and after
@@ -807,11 +806,10 @@ impl CoreErlangGenerator {
     /// re-derived here, so this checks what the generator actually produced,
     /// not a recomputation of it (ADR 0111 §Verifier honesty).
     ///
-    /// `pub(super)` (BT-3180): also reused by `dispatch_codegen.rs`'s
+    /// `pub(super)`: also reused by `dispatch_codegen.rs`'s
     /// `generate_field_assignment_open` plain-`State` branch, the sibling
-    /// "open" (non-last-position) mint site this function's own BT-3139
-    /// scope note left uncovered — same check, same reasoning, no reason to
-    /// hand-roll a second copy (CLAUDE.md's no-duplicate-implementations rule).
+    /// "open" (non-last-position) mint site — same check, same reasoning, no
+    /// reason to hand-roll a second copy (CLAUDE.md's no-duplicate-implementations rule).
     pub(super) fn check_simple_field_bind_invariant(
         &mut self,
         prefix: super::threaded_ir::VersionPrefix,
@@ -905,7 +903,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         messages: &[CascadeMessage],
     ) -> Result<Document<'static>> {
-        // BT-2246 / BT-2270: ClassBuilder construction cascades with literal
+        // ClassBuilder construction cascades with literal
         // block methods get synthesised source setters — methodSource: from
         // methods: (instance side) and classMethodSource: from classMethods:
         // (class side) — so builder-defined classes are indexable by
@@ -959,13 +957,13 @@ impl CoreErlangGenerator {
             (receiver, all)
         };
 
-        // ADR 0084 / BT-2267: A `classBuilder … classMethods: #{…}; register`
+        // ADR 0084: A `classBuilder … classMethods: #{…}; register`
         // cascade gets its `classMethods:` block-literal values lowered as
         // class-method funs (see `generate_class_methods_map_arg`).
         let builder_ctx: Option<(String, Vec<String>)> =
             super::class_builder_source::builder_class_method_context(receiver, messages);
 
-        // BT-3412: snapshot the class-var version *before* generating
+        // Snapshot the class-var version *before* generating
         // anything — the receiver included — so we can tell, once the last
         // message's own arguments have been generated, whether *any* part of
         // this cascade (the receiver or any message's arguments) hoisted a
@@ -978,7 +976,7 @@ impl CoreErlangGenerator {
         let class_var_version_before_cascade = self.class_var_version();
 
         let receiver_var = self.fresh_temp_var("Receiver");
-        // BT-3412 review: thread the receiver's open scope rather than close
+        // Thread the receiver's open scope rather than close
         // it — `underlying_receiver` can itself rebind `ClassVarsN` (e.g. a
         // same-class self-send, or a nested cascade whose own last message
         // hoists a rebind, now that this function can produce one).
@@ -1021,11 +1019,11 @@ impl CoreErlangGenerator {
                 });
             }
 
-            // BT-884: Hoist field-assignment arg bindings BEFORE the `let _ =`
+            // Hoist field-assignment arg bindings BEFORE the `let _ =`
             // wrapper so that StateN remains in scope for subsequent messages.
-            // BT-2267: the `classMethods:` argument of a recognised builder
+            // The `classMethods:` argument of a recognised builder
             // cascade gets its block values lowered as class-method funs.
-            // BT-2269: `addClassMethod: #sel body: [block]` is the incremental
+            // `addClassMethod: #sel body: [block]` is the incremental
             // counterpart — its block (the second argument) is lowered the same
             // way, keeping the selector argument as an ordinary value.
             let arg_docs = match &builder_ctx {
@@ -1059,7 +1057,7 @@ impl CoreErlangGenerator {
                 _ => self.generate_cascade_args(arguments, &mut docs)?,
             };
 
-            // BT-3412 / ADR 0118 phase 5b (BT-3422): once the last message's
+            // ADR 0118 phase 5b: once the last message's
             // own (possibly hoisting) args are generated, `class_var_version`
             // reflects every rebind the whole cascade produced. If it
             // advanced, this last send is bound to a named result
@@ -1111,26 +1109,26 @@ impl CoreErlangGenerator {
 
     /// Generates cascade arguments, hoisting field-assignment bindings to outer scope.
     ///
-    /// BT-884: This is a helper to avoid duplicating the hoisting logic across the
+    /// This is a helper to avoid duplicating the hoisting logic across the
     /// `MessageSend` and fallback branches of `generate_cascade`.
     ///
-    /// BT-3406: a non-field-assignment argument that is itself a same-class
+    /// A non-field-assignment argument that is itself a same-class
     /// class-method call emits an *open* let-chain ending in `... in ` with
     /// no trailing value expression (`ClassVarsN` must stay visible to
     /// subsequent cascade messages — see `emit_class_var_result_unwrap`'s
     /// doc comment), relying on the caller to append the result variable and
-    /// keep the chain's bindings in scope. Each argument doc here used to be
-    /// placed directly into a `send(...)` argument list with no such append,
-    /// so an open-scope arg left dangling produced malformed Core Erlang (a
+    /// keep the chain's bindings in scope. An argument doc placed directly
+    /// into a `send(...)` argument list with no such append would leave an
+    /// open-scope arg dangling, producing malformed Core Erlang (a
     /// `let ... in` immediately followed by the list's closing `]`).
     ///
-    /// BT-3406 review follow-up: hoisting only the argument(s) that need it
+    /// Hoisting only the argument(s) that need it
     /// while a *different*, side-effecting-but-plain argument in the same
     /// message stays inline can reverse their observable left-to-right
-    /// evaluation order — the hoisted one's preamble now runs before the
+    /// evaluation order — the hoisted one's preamble runs before the
     /// whole `send(...)`, while the plain one only evaluates inline at call
     /// time. This is exactly the hazard
-    /// [`Self::capture_subexpr_sequence`] (BT-1937) exists to avoid for
+    /// [`Self::capture_subexpr_sequence`] exists to avoid for
     /// ordinary (non-cascade) argument lists: decide *once*, for the whole
     /// list, whether any argument needs hoisting — if so, hoist every
     /// argument (binding a plain one to a fresh `let` too), never just

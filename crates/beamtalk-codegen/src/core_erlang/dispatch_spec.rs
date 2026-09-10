@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `DispatchSpec` — the shared `has_method/1` emitter for actor and
-//! value-type classes (BT-3467, ADR 0006).
+//! value-type classes (ADR 0006).
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
@@ -44,18 +44,18 @@ use beamtalk_core::ast::{ClassDefinition, Expression};
 /// Value types use `Static`: `beamtalk_primitive:value_type_responds_to/2`
 /// calls a value type's compiled `has_method/1` directly with no dynamic
 /// hierarchy-walk fallback, so `has_method/1` itself must walk statically
-/// (unchanged by BT-3467 — byte-for-byte the prior hand-written output).
+/// (byte-for-byte the prior hand-written output).
 ///
 /// Actors use `Dynamic`: actor message dispatch (`dispatch/4`'s default
 /// case) and `respondsTo:` (`beamtalk_primitive:responds_to/2`) already
 /// delegate to a superclass via the live registry, not a compiled module
 /// reference — a `Static` actor `has_method/1` would answer from the
 /// module compiled at *this* class's compile time even after the named
-/// ancestor is hot-reloaded (BT-845) to a different method set or
+/// ancestor is hot-reloaded to a different method set or
 /// superclass, diverging from what `dispatch/4` (and a fresh `respondsTo:`
 /// walk) would actually resolve — exactly the actor/dispatch mismatch
-/// BT-3467 exists to eliminate, just reintroduced via hot reload instead of
-/// a missing extension/superclass check.
+/// this module exists to eliminate, just reintroduced via hot reload
+/// instead of a missing extension/superclass check.
 pub(in crate::core_erlang) enum SuperclassDelegation<'a> {
     /// A compiled module name (e.g. `bt@stdlib@actor`).
     Static(&'a str),
@@ -85,14 +85,14 @@ pub(in crate::core_erlang) struct DispatchSpec<'a> {
     /// of the hierarchy (no further delegation).
     pub(in crate::core_erlang) superclass: Option<SuperclassDelegation<'a>>,
     /// True when the class defines a catch-all `doesNotUnderstand:args:`
-    /// handler (BT-1763) — such a class accepts every selector, so
+    /// handler — such a class accepts every selector, so
     /// `has_method/1` short-circuits to `true` unconditionally.
     pub(in crate::core_erlang) dnu: bool,
     /// Auto-generated slot getter/`with*:` setter selectors (ADR 0042).
     /// Only ever populated for `Value subclass:` classes — always `None` for
     /// actors and `ClassKind::Object` classes.
     pub(in crate::core_erlang) auto_slots: Option<&'a AutoSlotMethods>,
-    /// BT-3482: also emit a strictly-local `has_method_local/1` alongside
+    /// Also emit a strictly-local `has_method_local/1` alongside
     /// `has_method/1` — same own-methods-or-extension check, but the false
     /// branch always answers `'false'`, regardless of `superclass`, instead
     /// of delegating.
@@ -113,13 +113,12 @@ pub(in crate::core_erlang) struct DispatchSpec<'a> {
     /// the only [`SuperclassDelegation::Dynamic`] call site) — value-type
     /// `has_method/1` uses [`SuperclassDelegation::Static`], a
     /// compile-time-resolved direct module call with no live registry walk,
-    /// so it doesn't compound the same way (BT-3482 scoped the fix to the
-    /// actor regression BT-3467 introduced).
+    /// so it doesn't compound the same way.
     pub(in crate::core_erlang) emit_local_probe: bool,
 }
 
 /// Returns true if `class` defines `doesNotUnderstand:args:` with a
-/// structural (unquoted) intrinsic body (BT-1763).
+/// structural (unquoted) intrinsic body.
 ///
 /// Such a definition acts as a catch-all DNU handler (e.g. `ErlangModule`,
 /// `Erlang`) rather than the error-raising default in `ProtoObject`
@@ -218,7 +217,7 @@ pub(in crate::core_erlang) fn generate_has_method_from_spec(
         return has_method;
     }
 
-    // BT-3482: the local-only variant never delegates on a false membership
+    // The local-only variant never delegates on a false membership
     // check — it always answers `'false'`, so class_chain_step's own walk
     // (not this function's) is what advances to the superclass.
     let local_false_branch = Document::Str("<'false'> when 'true' -> 'false'\n");
@@ -232,7 +231,7 @@ pub(in crate::core_erlang) fn generate_has_method_from_spec(
     docvec![has_method, has_method_local]
 }
 
-/// Shared body renderer for `has_method/1` and `has_method_local/1` (BT-3482)
+/// Shared body renderer for `has_method/1` and `has_method_local/1`
 /// — both check `Selector` against `selectors` then the extension registry;
 /// they differ only in `fn_name` and what happens when neither matches.
 fn render_has_method_fn(

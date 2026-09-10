@@ -10,7 +10,7 @@
 //!    and has balanced parentheses/brackets
 //! 2. **Module name matches** — the module name in output matches `CodegenOptions`
 //! 3. **No format artifacts** — output contains no `{:?}`, `Document::`, or other
-//!    Rust debug/display leaks (guards against BT-875 class of bugs)
+//!    Rust debug/display leaks
 //!
 //! **DDD Context:** Code Generation
 //!
@@ -89,8 +89,8 @@ fn parse_source(source: &str) -> beamtalk_core::ast::Module {
     module
 }
 
-// `has_balanced_delimiters`/`FORMAT_ARTIFACT_PATTERNS` moved to
-// `beamtalk_core::test_helpers::test_support` (BT-3124) so the `compile_pipeline`
+// `has_balanced_delimiters`/`FORMAT_ARTIFACT_PATTERNS` live in
+// `beamtalk_core::test_helpers::test_support` so the `compile_pipeline`
 // fuzz target can share the same structural-validity checks instead of
 // duplicating them.
 use beamtalk_core::test_helpers::test_support::{
@@ -158,7 +158,7 @@ proptest! {
 
     /// Property 3: Successful codegen contains no Rust format/debug artifacts.
     ///
-    /// Guards against the BT-875 class of bugs where `format!()` or `Debug`
+    /// Guards against `format!()` or `Debug`
     /// implementations leak Rust type names into Core Erlang output.
     #[test]
     fn successful_codegen_no_format_artifacts(input in near_valid_beamtalk()) {
@@ -179,7 +179,7 @@ proptest! {
 }
 
 // ============================================================================
-// Grammar-driven program generator properties (BT-3116)
+// Grammar-driven program generator properties
 //
 // `near_valid_beamtalk()` above builds inputs from a small hand-curated
 // FRAGMENTS array plus truncation/concatenation -- useful for "never
@@ -197,8 +197,8 @@ proptest! {
     #![proptest_config(proptest_config())]
 
     /// Round-trip: a generated program renders via `unparse` to source text
-    /// that parses back with zero diagnostics (BT-3116 acceptance
-    /// criterion). Mirrors `unparse::property_tests::
+    /// that parses back with zero diagnostics. Mirrors
+    /// `unparse::property_tests::
     /// unparse_roundtrip_preserves_structure`'s guarantee, specialised to
     /// this generator's shape space.
     #[test]
@@ -221,8 +221,7 @@ proptest! {
     /// Codegen validity: whenever `generate_module` accepts a generated
     /// program, its output passes the same structural-validity checks
     /// (balanced delimiters, `module`/`end` framing, no Rust format-artifact
-    /// leaks) as `successful_codegen_produces_parseable_core_erlang` above
-    /// (BT-3116 acceptance criterion).
+    /// leaks) as `successful_codegen_produces_parseable_core_erlang` above.
     #[test]
     fn program_gen_codegen_validity(module in arb_program("GenCodegenValidity")) {
         let options = CodegenOptions::new("prop_program_gen_test");

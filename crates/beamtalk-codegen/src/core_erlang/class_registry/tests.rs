@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `generate_register_class` coverage (ADR 0038 Phase 3, BT-837).
+//! `generate_register_class` coverage (ADR 0038 Phase 3).
 
 use super::*;
 use beamtalk_core::source_analysis::Span;

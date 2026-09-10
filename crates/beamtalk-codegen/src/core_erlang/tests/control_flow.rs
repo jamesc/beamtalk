@@ -2675,11 +2675,16 @@ fn test_local_var_assignment_with_tier2_block_value_call_inside_conditional_bran
 
 #[test]
 fn test_value_type_field_write_in_to_do_threads_self_through_tail_call() {
-    // The loop's `letrec 'loop'/3 = fun (_loopidx, StateAcc, Self)` carries
-    // the value-type `Self` slot alongside the outer-locals map: the body's
-    // own `let Self1 = maps:put('total', _Val, Self) in` reaches the
-    // recursive `apply`, so each iteration's mutation carries forward and
-    // the method's trailing `self.total` reads the final accumulated Self.
+    // Before BT-3484 the loop's `letrec 'loop'/2 = fun (_loopidx, StateAcc)`
+    // carried only the outer-locals map: the body's own
+    // `let Self1 = maps:put('total', _Val, Self) in` was correct but never
+    // reached the recursive `apply`, so every iteration discarded it and the
+    // method's trailing `self.total` read the ORIGINAL `Self` parameter.
+    // Compiled fine; returned 0 instead of 15.
+    //
+    // Doubles as BT-3488's guard rail: this is the top-level-statement shape
+    // that `reject_unthreadable_value_self_field_write` must let through, so
+    // an over-firing rejection surfaces here as a failed `expect` below.
     let src = concat!(
         "TestCase subclass: VtLoopSelfThread\n",
         "  field: total = 0\n\n",
@@ -2725,11 +2730,15 @@ fn test_value_type_field_write_in_to_do_threads_self_through_tail_call() {
 
 #[test]
 fn test_value_type_field_only_loop_packs_from_fresh_map_not_state() {
-    // A loop whose ONLY mutation is the field write has no threaded locals
-    // at all, so `generate_pack_prefix` must not fall back to the ambient
-    // `initial_state_var` — the actor `State`, which does not exist in a
-    // value-type method — and instead packs its accumulator from a fresh
-    // map.
+    // BT-3484, second manifestation: a loop whose ONLY mutation is the field
+    // write has no threaded locals at all, so `generate_pack_prefix`
+    // short-circuited to the ambient `initial_state_var` — the actor `State`,
+    // which does not exist in a value-type method. `erlc` rejected the result
+    // with "unbound variable 'State'".
+    //
+    // Doubles as BT-3488's second guard-rail fixture: the same top-level
+    // write with NO sibling local to thread, which must likewise survive
+    // `reject_unthreadable_value_self_field_write`'s root-node skip.
     let src = concat!(
         "TestCase subclass: VtLoopSelfOnly\n",
         "  field: total = 0\n\n",
@@ -2900,41 +2909,374 @@ fn test_value_type_field_write_in_last_position_conditional_still_rejected() {
     );
 }
 
+/// BT-3488: compiles `src` and returns the field name from the
+/// `FieldAssignmentInUnsupportedBlock` it must produce.
+///
+/// Both halves of every parity pair below assert through this one helper, so a
+/// test can only pass by producing the SAME error variant — the whole point of
+/// the parity claim (a `ClassVar` and a `ValueType` write of the identical
+/// shape get the identical diagnostic), rather than each half asserting its own
+/// error in its own way.
+///
+/// Also asserts the RENDERED message opens with the exact wording BT-3488's
+/// acceptance criteria name ("Cannot assign to field '…' inside this block"),
+/// so a future edit that keeps the variant but rewrites the text — or that
+/// drops the `field_capitalized` derivation
+/// `CodeGenError::field_assignment_in_unsupported_block` centralises — cannot
+/// pass silently.
+fn field_assignment_rejection_field(src: &str, module_name: &str) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new(module_name).with_workspace_mode(true),
+    );
+    let err = match result {
+        Err(err @ CodeGenError::FieldAssignmentInUnsupportedBlock { .. }) => err,
+        other => {
+            panic!("Expected FieldAssignmentInUnsupportedBlock for {module_name}. Got: {other:?}")
+        }
+    };
+    // Render before destructuring — `to_string()` is `thiserror`'s `Display`
+    // over the whole variant, which is what a user actually sees.
+    let rendered = err.to_string();
+    let CodeGenError::FieldAssignmentInUnsupportedBlock {
+        field,
+        field_capitalized,
+        ..
+    } = err
+    else {
+        unreachable!("the match above admits no other variant")
+    };
+    assert!(
+        rendered.starts_with(&format!(
+            "Cannot assign to field '{field}' inside this block at "
+        )),
+        "{module_name} must produce BT-3488's agreed diagnostic wording. Got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains(&format!("addTo{field_capitalized}:")),
+        "the message's method suggestion must use the capitalized field name. Got:\n{rendered}"
+    );
+    field
+}
+
 #[test]
-fn test_value_type_field_write_in_conditional_nested_in_loop_compiles() {
-    // This construct's other accepted scope limit, inherited verbatim from
-    // the class-var precedent (`class_var_sub_expr_test.bt`'s
-    // `testTickInLoopConditionalCompilesAndRuns`): the field write
-    // is not a TOP-LEVEL statement of the loop body, so
-    // `loop_body_threads_value_self` reports `false` and the loop threads no
-    // `Self` — the conditional's own rebind stays scoped to its nested `let`
-    // and the mutation is lost. Pinned here as compiling cleanly (no erlc
-    // crash, no verifier violation), matching that precedent exactly, rather
-    // than silently regressing into one.
+fn test_class_var_write_in_conditional_nested_in_loop_is_compile_error() {
+    // BT-3488, the reference half of the parity pair: a class-var write
+    // inside an `ifTrue:` inside a `to:do:` has ALWAYS been rejected cleanly.
+    // `needs_mutation_threading`'s `in_class_method()` arm does not count
+    // field writes, so the branch block never reaches the inline
+    // mutation-threading path and falls through to `generate_block`'s
+    // `validate_stored_closure` diagnostic. Pinned here so the value-type
+    // half below is measured against real, executed behaviour rather than a
+    // remembered claim.
+    let field = field_assignment_rejection_field(
+        concat!(
+            "Object subclass: CvCondInLoop\n",
+            "  classState: total = 0\n\n",
+            "  class computeTotal: flag =>\n",
+            "    seen := 0\n",
+            "    1 to: 3 do: [:i |\n",
+            "      flag ifTrue: [self.total := self.total + i]\n",
+            "      seen := seen + 1\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@cvcondinloop",
+    );
+    assert_eq!(field, "total");
+}
+
+#[test]
+fn test_value_type_field_write_in_conditional_nested_in_loop_is_compile_error() {
+    // BT-3488, the half this issue fixes — byte-for-byte the class-var
+    // fragment above, with `classState:`/`class ` swapped for the BT-1533
+    // `TestCase` value-type exemption.
+    //
+    // The write is not a TOP-LEVEL statement of the loop body, so
+    // `loop_body_threads_value_self` (and hence
+    // `ThreadingPlan::threads_value_self`) reports `false` and the loop
+    // threads no `Self`: the conditional's own `Self{N}` rebind stays scoped
+    // to its nested `let`. Before this issue that meant a silently dropped
+    // mutation here, and — with the field write as the loop body's ONLY
+    // mutation, see the sibling test below — an outright `erlc` crash.
+    // `reject_unthreadable_value_self_field_write` now rejects it with the same
+    // diagnostic the class-var half above already got.
+    let field = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtCondInLoopSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal: flag =>\n",
+            "    seen := 0\n",
+            "    1 to: 3 do: [:i |\n",
+            "      flag ifTrue: [self.total := self.total + i]\n",
+            "      seen := seen + 1\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtcondinloopself",
+    );
+    assert_eq!(field, "total");
+}
+
+#[test]
+fn test_value_type_field_write_in_conditional_nested_in_loop_without_sibling_local_is_compile_error()
+ {
+    // BT-3488's headline repro: the same shape with NO sibling local
+    // mutation, so the loop has no threaded locals at all. Before this issue
+    // `generate_pack_prefix` short-circuited to the ambient actor `State` —
+    // a variable a value-type method does not have — and `erlc` rejected the
+    // whole module with "unbound variable 'State'", the crash that made this
+    // shape worse than its silently-dropping sibling above rather than merely
+    // equal to it.
+    let field = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtCondInLoopOnly\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    1 to: 5 do: [:i |\n",
+            "      i > 2 ifTrue: [self.total := self.total + i]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtcondinlooponly",
+    );
+    assert_eq!(field, "total");
+}
+
+#[test]
+fn test_value_type_field_write_in_foldl_body_is_compile_error() {
+    // BT-3488: a `Foldl*` (`do:`/`collect:`/…) accumulator has no trailing
+    // `Self` slot, so `ThreadingPlan::threads_value_self` is never set for a
+    // fold plan and EVERY value-type field write in a fold body is
+    // unthreadable — top-level statement included, unlike the `Letrec` case.
+    // Both shapes crashed `erlc` with "unbound variable 'State'" before this
+    // issue; both are now the same clean diagnostic the class-var equivalents
+    // already produced.
+    let nested = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtFoldlCondSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    #(1, 2, 3) do: [:i |\n",
+            "      i > 2 ifTrue: [self.total := self.total + i]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtfoldlcondself",
+    );
+    assert_eq!(nested, "total");
+
+    let top_level = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtFoldlTopSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    #(1, 2, 3) do: [:i | self.total := self.total + i]\n",
+            "    self.total\n",
+        ),
+        "bt@vtfoldltopself",
+    );
+    assert_eq!(top_level, "total");
+
+    // `collect:` too, so the "EVERY `Foldl*` selector" claim above is backed
+    // by a second member of the family rather than by `do:` alone — the two
+    // share `lower_foldl_body`, and this pins that they also share its
+    // BT-3488 rejection.
+    let collect = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtFoldlCollectSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    #(1, 2, 3) collect: [:i | self.total := self.total + i]\n",
+            "    self.total\n",
+        ),
+        "bt@vtfoldlcollectself",
+    );
+    assert_eq!(collect, "total");
+}
+
+#[test]
+fn test_value_type_field_write_nested_in_other_loop_families_and_constructs_is_compile_error() {
+    // BT-3488: the headline repro is a `to:do:`, but the gap was never
+    // specific to that selector — every loop family that reaches
+    // `lower_letrec_body`/`lower_foldl_body` carried it. Each fixture below
+    // was verified BROKEN on the parent commit (d2bbdc9) before being pinned
+    // here, so none of these is a shape the rejection newly takes away:
+    //
+    // * `whileTrue:` — the worst of the set: it COMPILED and silently
+    //   returned 0 instead of 12, the "silently dropped" half of BT-3484's
+    //   bug class rather than a crash.
+    // * `timesRepeat:`, a loop nested in a loop, and `inject:into:` — all
+    //   three crashed `erlc` with "unbound variable 'State'".
+    let while_true = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtWhileCondSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    i := 0\n",
+            "    [i < 5] whileTrue: [\n",
+            "      i := i + 1\n",
+            "      i > 2 ifTrue: [self.total := self.total + i]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtwhilecondself",
+    );
+    assert_eq!(while_true, "total");
+
+    let times_repeat = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtTimesRepeatCondSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal: flag =>\n",
+            "    3 timesRepeat: [\n",
+            "      flag ifTrue: [self.total := self.total + 1]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vttimesrepeatcondself",
+    );
+    assert_eq!(times_repeat, "total");
+
+    let nested_loop = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtNestedLoopCondSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    1 to: 3 do: [:i |\n",
+            "      1 to: 2 do: [:j |\n",
+            "        j > 1 ifTrue: [self.total := self.total + 1]\n",
+            "      ]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtnestedloopcondself",
+    );
+    assert_eq!(nested_loop, "total");
+
+    let inject_into = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtInjectCondSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    r := #(1, 2, 3) inject: 0 into: [:acc :i |\n",
+            "      i > 1 ifTrue: [self.total := self.total + i]\n",
+            "      acc + i\n",
+            "    ]\n",
+            "    r + self.total\n",
+        ),
+        "bt@vtinjectcondself",
+    );
+    assert_eq!(inject_into, "total");
+
+    // Not a loop family but the same gap on a different axis: the nested
+    // construct hiding the write is an `ensure:` handler rather than a
+    // conditional. It lowers through its own (exception) path, so it would
+    // not be covered by any amount of `ifTrue:` fixtures above — and it too
+    // crashed `erlc` with "unbound variable 'State'" on the parent commit.
+    let ensure_block = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtEnsureInLoopSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    1 to: 3 do: [:i |\n",
+            "      [i] ensure: [self.total := self.total + i]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtensureinloopself",
+    );
+    assert_eq!(ensure_block, "total");
+}
+
+#[test]
+fn test_value_type_nested_field_write_rejected_beside_threadable_top_level_write() {
+    // BT-3488's sharpest case, and the one that pins the rejection's
+    // SELECTIVITY rather than merely its existence: one loop body holding
+    // BOTH a bare top-level write (`total`, which `plan.threads_value_self`
+    // does carry and the root-node skip must let through) AND a write nested
+    // in a conditional (`other`, which nothing carries).
+    //
+    // The asserted field name is the discriminator. A rejection keyed off the
+    // loop body as a whole — or one that forgot the root-node skip — would
+    // name `total` here and still "produce the right error variant"; only a
+    // per-statement walk that skips the threadable root reports `other`.
+    //
+    // On the parent commit this fixture did not merely miscompile: it
+    // panicked the compiler outright (a `Result::expect` unwind out of
+    // `run`), making it the most severe of the shapes this issue closes.
+    let field = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtMixedWriteSelf\n",
+            "  field: total = 0\n",
+            "  field: other = 0\n\n",
+            "  computeTotal: flag =>\n",
+            "    1 to: 3 do: [:i |\n",
+            "      self.total := self.total + i\n",
+            "      flag ifTrue: [self.other := 1]\n",
+            "    ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtmixedwriteself",
+    );
+    assert_eq!(
+        field, "other",
+        "the rejection must name the NESTED write, not the threadable \
+         top-level one beside it"
+    );
+}
+
+#[test]
+fn test_value_type_multiple_top_level_field_writes_in_loop_still_thread() {
+    // BT-3488 guard rail, complementing the two BT-3484 fixtures named in the
+    // comment below: those pin a SINGLE top-level write, so neither would
+    // catch a rejection that fired once a loop body held more than one. Two
+    // top-level writes are still fully threadable (verified running correctly
+    // on the parent commit and unchanged here), so this must keep compiling
+    // with a `Self`-threaded tail call.
     let src = concat!(
-        "TestCase subclass: VtCondInLoopSelf\n",
-        "  field: total = 0\n\n",
-        "  computeTotal: flag =>\n",
-        "    seen := 0\n",
+        "TestCase subclass: VtMultiTopWrite\n",
+        "  field: total = 0\n",
+        "  field: count = 0\n\n",
+        "  computeTotal =>\n",
         "    1 to: 3 do: [:i |\n",
-        "      flag ifTrue: [self.total := self.total + i]\n",
-        "      seen := seen + 1\n",
+        "      self.total := self.total + i\n",
+        "      self.count := self.count + 1\n",
         "    ]\n",
-        "    self.total\n",
+        "    self.total + self.count\n",
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt@vtcondinloopself").with_workspace_mode(true),
+        CodegenOptions::new("bt@vtmultitopwrite").with_workspace_mode(true),
     )
-    .expect("a field write nested inside a conditional inside a loop must still compile");
-    assert!(
-        !code.contains("apply 'loop'/3"),
-        "the loop must NOT grow a Self parameter for a non-top-level write. Got:\n{code}"
-    );
-    assert_compiles_through_erlc("bt@vtcondinloopself", &code);
+    .expect("two bare top-level value-type writes must still compile");
+    assert_compiles_through_erlc("bt@vtmultitopwrite", &code);
 }
+
+// BT-3488's guard rail — that the new rejection stays scoped to writes the
+// loop genuinely cannot carry, and never swallows a BARE, TOP-LEVEL
+// `self.field := ...` statement in a `Letrec` body (the one shape
+// `plan.threads_value_self` does carry, and hence the one shape
+// `reject_unthreadable_value_self_field_write`'s root-node skip lets through)
+// — is `test_value_type_field_write_in_to_do_threads_self_through_tail_call`
+// and `test_value_type_field_only_loop_packs_from_fresh_map_not_state` above.
+// Those two BT-3484 tests already pin exactly the two single-write guard-rail
+// fixtures (with and without a sibling local mutation) and assert the full
+// `Self` threading, not merely that `erlc` accepts the module, so an
+// over-firing rejection turns them red. Deliberately NOT restated as a third,
+// weaker copy here (CLAUDE.md's no-duplicate-implementations rule).
+//
+// The two cases those fixtures leave open — a loop body with MORE THAN ONE
+// top-level write, and one mixing a threadable top-level write with an
+// unthreadable nested one — are covered above by
+// `test_value_type_multiple_top_level_field_writes_in_loop_still_thread` and
+// `test_value_type_nested_field_write_rejected_beside_threadable_top_level_write`,
+// which together pin that the root-node skip is per-statement rather than
+// per-body.
 
 // ─── BT-3486: value-type `Self` threading through `on:do:`/`ensure:` ────────
 //

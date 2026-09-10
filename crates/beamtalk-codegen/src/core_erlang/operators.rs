@@ -12,7 +12,7 @@ use beamtalk_cerl_doc::leaf::{atom, var};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::Span;
 
-/// BT-2709/BT-2710: Which runtime guard a dispatchable binary operator emits
+/// Which runtime guard a dispatchable binary operator emits
 /// for an unknown/generic receiver. The two variants differ only in the guard
 /// predicate and which `case` branch dispatches vs. takes the bare BIF.
 #[derive(Clone, Copy)]
@@ -117,14 +117,14 @@ impl CoreErlangGenerator {
             }
         };
 
-        // BT-2709/BT-2710: Arithmetic (`+ - * /`) and comparison (`< > <= >=`)
+        // Arithmetic (`+ - * /`) and comparison (`< > <= >=`)
         // operators are dispatchable messages so user value-types can overload
         // them. When the receiver is *statically* known to be a builtin (a
         // literal, `self` inside a builtin class, or a suitably-annotated
         // parameter) we keep the bare BIF fast path (zero cost — all stdlib hot
         // paths). Otherwise we emit a runtime guard.
         //
-        // The two guards differ in *predicate* and *branch order* (BT-2710):
+        // The two guards differ in *predicate* and *branch order*:
         //   * Arithmetic — `is_number`: non-numbers `badarith`, so number→BIF,
         //     object→dispatch is the safe discriminator.
         //   * Comparison — `is_object`: Erlang `<` is a total order over every
@@ -141,7 +141,7 @@ impl CoreErlangGenerator {
             None
         };
 
-        // ADR 0116/BT-3263: number-on-the-left coercion. Every arithmetic call
+        // ADR 0116: number-on-the-left coercion. Every arithmetic call
         // site that can reach a bare BIF with the *left* operand numeric (the
         // always-bare path below, and the `is_number`-true branch inside
         // `guarded_op_doc`'s Arithmetic case) must also account for a
@@ -155,7 +155,7 @@ impl CoreErlangGenerator {
         // `try`/`catch` mechanism (`Self::number_coercion_try_catch`).
         let right_is_statically_numeric = self.receiver_is_statically_numeric(&arguments[0]);
 
-        // BT-1937: Capture both operands in evaluation order. When either
+        // Capture both operands in evaluation order. When either
         // operand needs a real prelude (e.g., a class method self-send
         // mutating a class var), `thread_subexprs` force-hoists BOTH
         // operands into that preamble so left-to-right evaluation order is
@@ -176,7 +176,7 @@ impl CoreErlangGenerator {
                 right_is_statically_numeric,
             )
         } else if is_arithmetic && !right_is_statically_numeric {
-            // ADR 0116/BT-3263: left is statically numeric but the right
+            // ADR 0116: left is statically numeric but the right
             // operand's type is genuinely unknown — wrap the bare BIF in the
             // badarith-catching number-on-the-left coercion mechanism instead
             // of emitting it unguarded.
@@ -199,7 +199,7 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&preamble, call_doc, "BinOp"))
     }
 
-    /// BT-2709: Whether `expr` is statically known to evaluate to a number, so
+    /// Whether `expr` is statically known to evaluate to a number, so
     /// the arithmetic fast path can skip the runtime `is_number` guard.
     ///
     /// Mirrors the gradual-typing contract: an annotation (or a syntactic fact)
@@ -222,7 +222,7 @@ impl CoreErlangGenerator {
     /// comparison path the analogous miss is *silently wrong* — see
     /// [`Self::receiver_is_statically_comparable`].)
     ///
-    /// ADR 0116/BT-3263 reuses this same predicate, unmodified, to gate the
+    /// ADR 0116 reuses this same predicate, unmodified, to gate the
     /// number-on-the-left coercion mechanism's *right* operand — per the
     /// ADR's own "Trigger condition, refined" spec, which explicitly folds
     /// "a numeric/untyped field" into "the exact same rule already applied
@@ -232,7 +232,7 @@ impl CoreErlangGenerator {
     /// `self.total + self.extra` is trusted as numeric and never reaches the
     /// new `try`/`catch`, so a non-numeric `extra` still raw-crashes on
     /// `badarith` at runtime instead of dispatching to `plusFromNumber:` —
-    /// tracked as BT-3266, not fixed here.
+    /// not fixed here.
     pub(in crate::core_erlang) fn receiver_is_statically_numeric(&self, expr: &Expression) -> bool {
         use beamtalk_core::ast::Literal;
         match expr {
@@ -256,7 +256,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2710: Whether `expr` is statically known to evaluate to a value with a
+    /// Whether `expr` is statically known to evaluate to a value with a
     /// builtin total order, so the comparison fast path can skip the runtime
     /// `is_object` guard and emit a bare comparison BIF.
     ///
@@ -271,7 +271,7 @@ impl CoreErlangGenerator {
     ///   parameter, and
     /// * a `self.<field>` read whose field is primitive-ordered-typed or untyped.
     ///
-    /// The `self.<field>` case is **type-aware** (BT-2710 follow-up), and the
+    /// The `self.<field>` case is **type-aware**, and the
     /// stakes are higher here than for arithmetic: `erlang:'<'` is a total order
     /// over every term and never raises, so a bare comparison on an object-typed
     /// field would *silently* term-order the tagged map instead of dispatching —
@@ -313,7 +313,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2709/BT-2710: Builds a runtime-guarded operator dispatch for an
+    /// Builds a runtime-guarded operator dispatch for an
     /// unknown/generic receiver, mirroring `generate_concat_op`'s `is_list` arm.
     /// One helper serves both arithmetic and comparison; the [`OperatorGuard`]
     /// selects the predicate and which branch dispatches:
@@ -337,7 +337,7 @@ impl CoreErlangGenerator {
     /// `Document::Str`); the dispatch selector uses `leaf::atom` for the original
     /// Beamtalk operator.
     ///
-    /// ADR 0116/BT-3263: for the `Arithmetic` guard specifically, the
+    /// ADR 0116: for the `Arithmetic` guard specifically, the
     /// `is_number`-true (bare-BIF) branch is itself replaced by the
     /// number-on-the-left `try`/`catch` coercion wrapper
     /// ([`Self::number_coercion_try_catch`]) whenever `right_is_statically_numeric`
@@ -350,10 +350,10 @@ impl CoreErlangGenerator {
     /// approximate. `left_var`/`right_var` are already let-bound above, so
     /// the wrapper reuses them directly rather than re-binding.
     ///
-    /// BT-3163: this `case` matches only `<'true'>`/`<'false'>`, no wildcard —
+    /// This `case` matches only `<'true'>`/`<'false'>`, no wildcard —
     /// the same non-exhaustive-to-the-compiler shape `case_clause_fallback`
     /// exists for (see its doc comment and ADR 0111 Addendum 5, "Production
-    /// bugs found", bug 3 / BT-3161). Confirmed empirically reachable for the
+    /// bugs found", bug 3). Confirmed empirically reachable for the
     /// **comparison** guard (`beamtalk_primitive:is_object/1`, a plain
     /// function the Core Erlang compiler cannot prove exhaustive) as a try
     /// body's last statement, e.g. `[... . a < b] ensure: [...]` with
@@ -390,7 +390,7 @@ impl CoreErlangGenerator {
             var(right_var.clone()),
             ")",
         ];
-        // ADR 0116/BT-3263: see this function's doc comment — the arithmetic
+        // ADR 0116: see this function's doc comment — the arithmetic
         // guard's bare-BIF branch becomes the coercion `try`/`catch` when the
         // right operand's type is genuinely unknown; every other case (the
         // comparison guard, or a statically-numeric right operand) keeps the
@@ -420,7 +420,7 @@ impl CoreErlangGenerator {
         } else {
             (bif_branch, send_branch)
         };
-        // BT-3163: explicit wildcard so this boolean `case` is statically
+        // Explicit wildcard so this boolean `case` is statically
         // exhaustive — see this function's doc comment and
         // `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("BinOpNoMatch");
@@ -449,7 +449,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// ADR 0116/BT-3263: maps an arithmetic operator to its number-on-the-left
+    /// ADR 0116: maps an arithmetic operator to its number-on-the-left
     /// reflected-method selector (`n <op>FromNumber: self`, called on the
     /// *right* operand with the *left* operand as the argument — see the
     /// ADR's § Reflected method protocol for why the operand order is
@@ -466,7 +466,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// ADR 0116/BT-3263: builds the number-on-the-left coercion `try`/`catch`
+    /// ADR 0116: builds the number-on-the-left coercion `try`/`catch`
     /// around a single arithmetic BIF call, for the residual case where the
     /// right operand's type is genuinely unknown at compile time.
     ///
@@ -521,7 +521,7 @@ impl CoreErlangGenerator {
     /// (never `erlang:raise/3`, which expects a pre-built stacktrace term
     /// rather than the raw trace a catch clause binds) — the same shared
     /// helper `on_do_catch_preamble` uses, not a re-implementation of its
-    /// `primop 'raw_raise'` shape. BT-3163's `case_clause_fallback`
+    /// `primop 'raw_raise'` shape. The `case_clause_fallback`
     /// convention (`erlang:error({case_clause, _})`, not `raw_raise`) applies
     /// only to the inner `is_number` boolean case's defensive third arm — an
     /// internal-invariant guard, not a real exception to propagate — matching
@@ -543,7 +543,7 @@ impl CoreErlangGenerator {
         let error_var = self.fresh_temp_var("BinCoerceError");
         let stack_var = self.fresh_temp_var("BinCoerceStack");
         let other_pair_var = self.fresh_temp_var("BinCoerceOther");
-        // BT-3163: explicit wildcard for the inner is_number boolean case —
+        // Explicit wildcard for the inner is_number boolean case —
         // see this function's doc comment and `case_clause_fallback`'s own.
         let inner_no_match = self.case_clause_fallback("BinCoerceNoMatch");
 
@@ -590,7 +590,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// ADR 0116/BT-3263: the always-bare arithmetic path's number-on-the-left
+    /// ADR 0116: the always-bare arithmetic path's number-on-the-left
     /// entry point — used by `generate_binary_op` when the *left* operand is
     /// statically numeric (so no runtime guard is needed for it) but the
     /// *right* operand's type is genuinely unknown. Unlike `guarded_op_doc`
@@ -643,7 +643,7 @@ impl CoreErlangGenerator {
         left: &Expression,
         right: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-1937: Capture both operands preserving evaluation order.
+        // Capture both operands preserving evaluation order.
         let exprs: [&Expression; 2] = [left, right];
         let (preamble, mut docs) = self.thread_subexprs(&exprs, "PowOp")?;
         let right_code = docs.pop().expect("right operand");
@@ -677,7 +677,7 @@ impl CoreErlangGenerator {
         );
         let is_string = matches!(left, Expression::Literal(Literal::String(_), _));
 
-        // BT-1937: Capture both operands preserving evaluation order. When
+        // Capture both operands preserving evaluation order. When
         // either operand has an open scope, BOTH are force-hoisted into the
         // preamble so left-to-right evaluation order is preserved.
         let exprs: [&Expression; 2] = [left, right];

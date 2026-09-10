@@ -9,7 +9,7 @@
 //! split out of `control_flow/mod.rs`, no logic changes.
 
 use super::super::threaded_ir::StateAccFallbackReason;
-use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
+use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use super::plan::ThreadingPlan;
 use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::Span;
@@ -141,13 +141,17 @@ impl CoreErlangGenerator {
     /// notably `1 to: n do: [:i | flag ifTrue: [self.total := ...]]` — is not
     /// a top-level statement, so this returns `false` and the loop threads no
     /// `Self`; the conditional's own `Self{N}` rebind stays scoped to its own
-    /// nested `let` and the mutation is silently lost. That is exactly the
-    /// class-var precedent's own accepted, separately-pinned behavior for the
-    /// identical shape (`class_var_sub_expr_test.bt`'s
-    /// `testTickInLoopConditionalCompilesAndRuns` — see
-    /// [`Self::nested_loop_lost_class_var_mutation`]'s doc comment on why
-    /// widening the predicate instead produced real unbound-variable
-    /// regressions), and is deliberately out of this function's scope.
+    /// nested `let`. Widening the predicate instead produced real
+    /// unbound-variable regressions — see
+    /// [`Self::nested_loop_lost_class_var_mutation`]'s doc comment — so that
+    /// shape remains deliberately unsupported.
+    ///
+    /// BT-3488 changed only what happens to it *after* this returns `false`:
+    /// it used to compile to a silently-dropped mutation (or, with no sibling
+    /// local mutation to thread, an `erlc` `unbound variable 'State'` crash),
+    /// and is now rejected at compile time by
+    /// [`Self::reject_unthreadable_value_self_field_write`] with the same
+    /// diagnostic the identical class-var shape already produced.
     pub(in crate::core_erlang) fn loop_body_threads_value_self(
         &self,
         body: &beamtalk_core::ast::Block,
@@ -175,6 +179,109 @@ impl CoreErlangGenerator {
             .find(|expr| Self::is_field_assignment(expr))
     }
 
+    /// BT-3488: rejects a value-type `self.field := ...` write in loop-body
+    /// statement `expr` that the enclosing loop **cannot** thread out, with
+    /// the SAME
+    /// [`CodeGenError::FieldAssignmentInUnsupportedBlock`](super::super::CodeGenError::FieldAssignmentInUnsupportedBlock)
+    /// the identical class-var shape already produces.
+    ///
+    /// A value-type field write mints its own `Self{N}` version chain
+    /// (`VersionPrefix::SelfVt`). BT-3484 taught a `Letrec` loop to carry that
+    /// chain through its own recursive tail call, but only for a write that is
+    /// a BARE, TOP-LEVEL STATEMENT of the loop body — exactly the shape
+    /// [`Self::loop_body_threads_value_self`] (and hence
+    /// `ThreadingPlan::threads_value_self`, passed in here as
+    /// `threads_value_self`) reports. Every other value-type write reachable
+    /// from a loop body binds a `Self{N}` that dies with the nested scope it
+    /// was minted in:
+    ///
+    /// * a write nested inside a conditional branch (or any other nested
+    ///   block) of a `Letrec` body — the shape this issue is named for;
+    /// * ANY write in a `Foldl*` (`do:`/`collect:`/…) body, top-level
+    ///   included: a fold accumulator has no trailing `Self` slot, so
+    ///   `threads_value_self` is never set for a `Foldl*` plan (see
+    ///   `ThreadingPlan::new_impl`) and this predicate's `threads_value_self`
+    ///   argument is correspondingly always `false` there.
+    ///
+    /// Left un-rejected, those shapes either silently dropped the mutation or
+    /// crashed `erlc` outright (`unbound variable 'State'`, from the pack
+    /// prefix short-circuiting to the ambient actor `State` a value-type
+    /// method does not have — confirmed empirically for the headline repro
+    /// and for both `Foldl*` shapes on the parent commit). The identical
+    /// CLASS-VAR shape has always been rejected cleanly —
+    /// `needs_mutation_threading`'s `in_class_method()` arm does not count
+    /// field writes, so such a branch block never reaches the inline
+    /// mutation-threading path at all and falls through to `generate_block`'s
+    /// [`CoreErlangGenerator::validate_stored_closure`] diagnostic. This
+    /// check closes that value-type gap by producing the same error through
+    /// the shared
+    /// [`CodeGenError::field_assignment_in_unsupported_block`](super::super::CodeGenError::field_assignment_in_unsupported_block)
+    /// constructor.
+    ///
+    /// Ordered AFTER [`Self::nested_loop_lost_value_self_mutation`] at both
+    /// call sites: a nested `Letrec` loop whose own body has a top-level write
+    /// matches both, and that one's more specific
+    /// `ValueSelfMutationLostAcrossNestedLoop` message wins.
+    ///
+    /// Walks with the shared `beamtalk_core::ast_walker::walk_expression`
+    /// (descends into nested block bodies) rather than a second hand-rolled
+    /// `Expression` match, so a future AST variant cannot silently hide a
+    /// write from this check. The walk deliberately depends on neither the
+    /// walker's traversal ORDER (the root is skipped by `std::ptr::eq`, not by
+    /// "visited first") nor on its own copy of the field-write SHAPE (the name
+    /// comes from `field_assignment_name`, the same helper backing
+    /// `is_field_assignment`).
+    ///
+    /// Shaped as a `Result`-returning rejection helper (rather than a
+    /// predicate each call site turns into an error itself) for the same
+    /// reason as [`CoreErlangGenerator::reject_class_var_field_assignment`]:
+    /// it is the single place that turns a positive match into the
+    /// diagnostic, so the `Letrec` and `Foldl*` call sites cannot drift out of
+    /// sync (CLAUDE.md's no-duplicate-implementations rule).
+    pub(super) fn reject_unthreadable_value_self_field_write(
+        &self,
+        expr: &Expression,
+        threads_value_self: bool,
+    ) -> Result<()> {
+        if self.in_class_method() || !matches!(self.context, CodeGenContext::ValueType) {
+            return Ok(());
+        }
+        let mut found: Option<String> = None;
+        beamtalk_core::ast_walker::walk_expression(expr, &mut |e| {
+            if found.is_some() {
+                return;
+            }
+            // The loop's own tail call carries a top-level statement write
+            // (BT-3484) — but nothing deeper, including one buried in this
+            // very statement's own right-hand side.
+            //
+            // The root is identified by POINTER IDENTITY rather than by
+            // "first node visited": `walk_expression` is pre-order today, but
+            // that is a doc-comment promise from another crate, and a switch
+            // to post-order would otherwise move this skip silently onto some
+            // unrelated child — re-admitting the erlc crash this check exists
+            // to prevent. `std::ptr::eq` cannot drift that way.
+            if threads_value_self && std::ptr::eq(e, expr) {
+                return;
+            }
+            // Name comes from the same helper that decides whether this IS a
+            // field write, so the predicate and the diagnostic cannot disagree.
+            if let Some(field) = Self::field_assignment_name(e) {
+                found = Some(field.to_string());
+            }
+        });
+        let Some(field) = found else {
+            return Ok(());
+        };
+        let location = self.span_to_line(expr.span()).map_or_else(
+            || format!("offset {}", expr.span().start()),
+            |line| format!("line {line}"),
+        );
+        Err(CodeGenError::field_assignment_in_unsupported_block(
+            &field, location,
+        ))
+    }
+
     /// the `SelfVt` mirror of
     /// [`Self::nested_loop_lost_class_var_mutation`] — if `expr` is itself a
     /// nested Letrec-shaped loop whose own body would thread a value-type
@@ -192,8 +299,9 @@ impl CoreErlangGenerator {
     /// Only the `Letrec` shape is checked: a `Foldl*` (`do:`/`collect:`/…)
     /// body's value-type field write has no `Self` threading of its own to
     /// lose here — `generate_field_assignment_open` never threads one
-    /// through a fold accumulator — so it is handled (and rejected, where
-    /// unsupported) by the pre-existing paths, unchanged by this issue.
+    /// through a fold accumulator. BT-3488 rejects that shape instead, via
+    /// [`Self::reject_unthreadable_value_self_field_write`], which runs
+    /// immediately after this check at both call sites.
     pub(super) fn nested_loop_lost_value_self_mutation(&self, expr: &Expression) -> Option<String> {
         let (body, shape) = Self::nested_loop_or_fold_body(expr)?;
         if !matches!(shape, NestedLoopShape::Letrec) {

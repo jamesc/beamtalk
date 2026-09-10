@@ -69,26 +69,26 @@
 //!
 //! - [`control_flow`] - Control flow compilation (iteration, loops, mutation analysis)
 //! - [`dispatch_codegen`] - Message sending and dispatch (the core Beamtalk operation)
-//! - [`dispatch_spec`] - BT-3467: `DispatchSpec`, the shared `has_method/1` emitter
+//! - [`dispatch_spec`] - `DispatchSpec`, the shared `has_method/1` emitter
 //!   for both actor (`gen_server`) and value-type classes (ADR 0006)
 //! - [`variable_context`] - Variable binding and scope management aggregate
-//! - [`threaded_ir`] - BT-3131: `VersionCounter`, the single implementation behind
+//! - [`threaded_ir`] - `VersionCounter`, the single implementation behind
 //!   the state/class-var/self-type-threaded version counters (formerly `state_codegen`)
 //!
 //! ## Supporting Modules
 //!
 //! - [`expressions`] - Expression code generation (literals, identifiers, maps, cascades)
-//! - [`blocks`] - BT-3465: block (closure) compilation — Tier 1/Tier 2 codegen,
+//! - [`blocks`] - block (closure) compilation — Tier 1/Tier 2 codegen,
 //!   the Erlang-interop wrapper, and block-body statement sequencing
-//! - [`patterns`] - BT-3465: `match:` compilation, native `Pattern` lowering,
+//! - [`patterns`] - `match:` compilation, native `Pattern` lowering,
 //!   `Pattern::Type` runtime-test strategies, and destructuring extraction
 //! - [`gen_server`] - OTP `gen_server` scaffolding (spawn, init, callbacks)
 //! - [`intrinsics`] - Compiler intrinsics (block evaluation, `ProtoObject`, `Object`)
 //! - [`operators`] - Binary operator compilation (arithmetic, comparison, string concat)
 //! - [`block_analysis`] - Block mutation analysis for control flow
-//! - [`sequencing`] - BT-3457: sub-expression sequencing primitives shared across
+//! - [`sequencing`] - sub-expression sequencing primitives shared across
 //!   dispatch, operator, and expression codegen (ADR 0118)
-//! - [`expr_shape`] - BT-3457: expression-shape predicates (`is_field_assignment`,
+//! - [`expr_shape`] - expression-shape predicates (`is_field_assignment`,
 //!   `is_class_var_assignment`, …) shared across the whole crate
 //! - [`util`] - Utility functions (indentation, name conversions)
 //!
@@ -185,7 +185,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        // ADR 0118 phase 1a (BT-3415): a sub-expression the sequencing rule
+        // ADR 0118 phase 1a: a sub-expression the sequencing rule
         // already compiled ahead of this parent substitutes its value here
         // — see `precompiled_subexprs`.
         if let Some(doc) = self.take_precompiled_subexpr(expr) {
@@ -219,7 +219,7 @@ impl CoreErlangGenerator {
                 } else {
                     self.generate_message_send(receiver, selector, arguments)
                 }?;
-                // BT-940: Annotate message sends with source line for BEAM stacktraces.
+                // Annotate message sends with source line for BEAM stacktraces.
                 // Only annotate CLOSED expressions — see `can_annotate_closed_expression`.
                 if self.can_annotate_closed_expression() {
                     if let Some(line_num) = self.span_to_line(*span) {
@@ -229,7 +229,7 @@ impl CoreErlangGenerator {
                 Ok(doc)
             }
             Expression::Assignment { target, value, .. } => {
-                // BT-2792: Tier 2 only ever supported captured-local mutations, not
+                // Tier 2 only ever supported captured-local mutations, not
                 // field writes — a stored block with `self.field :=` is rejected by
                 // generate_block()'s validate_stored_closure call, not silently
                 // accepted. No validation needed *here* only because that check
@@ -264,11 +264,11 @@ impl CoreErlangGenerator {
                 self.generate_expression(value)
             }
             Expression::Return { value, span, .. } => {
-                // BT-754: If inside a block with NLR infrastructure active, generate a throw
+                // If inside a block with NLR infrastructure active, generate a throw
                 // so the return escapes from the block closure back to the enclosing method.
                 // Otherwise (at method body level, or no NLR), just emit the value.
                 if let Some(nlr_token) = self.current_nlr_token().cloned() {
-                    // BT-1343: Emit diagnostic for NLR throw/catch generation.
+                    // Emit diagnostic for NLR throw/catch generation.
                     self.emit_codegen_diagnostic(
                         {
                             let line_info = self
@@ -281,8 +281,8 @@ impl CoreErlangGenerator {
                         },
                         *span,
                     );
-                    // BT-3374, generalized by ADR 0118 phase 1b (BT-3416)
-                    // and phase 5b (BT-3422): `value` may itself dispatch a
+                    // Generalized by ADR 0118 phase 1b
+                    // and phase 5b: `value` may itself dispatch a
                     // self-send that threads new state (Actor `State` or,
                     // since phase 5b, class-method `ClassVars`) — nested
                     // anywhere inside it (`^ self.items at: (self bump)`),
@@ -293,7 +293,7 @@ impl CoreErlangGenerator {
                     // threads BOTH prefixes correctly for whichever context
                     // this `^` runs in.
                     //
-                    // ADR 0118 phase 2a (BT-3417): when THIS `Return` node
+                    // ADR 0118 phase 2a: when THIS `Return` node
                     // is itself the sole child `threaded_expression`'s own
                     // `single_sequenced_child` branch is sequencing (e.g.
                     // `thread_ahead`'s C12-catch-all reaching `^self.items
@@ -323,9 +323,9 @@ impl CoreErlangGenerator {
                         && !(self.is_class_var_assignment(value.unwrap_parens())
                             || self.is_class_method_self_send(value.unwrap_parens()))
                     {
-                        // ADR 0118 phase 5b (BT-3422): `value` is not ITSELF
+                        // ADR 0118 phase 5b: `value` is not ITSELF
                         // a recognized producer at its own top level (e.g.
-                        // `^self foo` where `foo` is BT-2007 inherited, so
+                        // `^self foo` where `foo` is inherited, so
                         // `is_class_method_self_send`'s `class_method_selectors()`
                         // check excludes it) — `threaded_expression` would
                         // still dispatch it, but through the opaque
@@ -345,7 +345,7 @@ impl CoreErlangGenerator {
                             .unwrap_or(Document::Nil);
                         (refresh, result_doc)
                     } else {
-                        // ADR 0118 phase 2a (BT-3417): `current_frame()` —
+                        // ADR 0118 phase 2a: `current_frame()` —
                         // this generic `Return` handler fires for a `^`
                         // reached from any nesting, not only the flat
                         // method body, now that branch/exception/
@@ -357,11 +357,11 @@ impl CoreErlangGenerator {
                         let result_doc = self.threaded_value_doc(&tv.value);
                         (dispatch_doc, result_doc)
                     };
-                    // BT-761/BT-854: All NLR throws carry state as a 4-tuple.
+                    // All NLR throws carry state as a 4-tuple.
                     // Actor methods use the current gen_server state; value type
                     // methods use the latest Self{N} snapshot so field mutations
                     // accumulated before the ^ are preserved.
-                    // BT-1202: Class methods use the current ClassVars snapshot
+                    // Class methods use the current ClassVars snapshot
                     // — computed after the value above so it reflects any
                     // rebind that value's evaluation just performed.
                     let state = if self.in_class_method() {
@@ -455,7 +455,7 @@ impl CoreErlangGenerator {
         // ADR 0019 Phase 3: Only check bindings in REPL top-level context.
         // Actor methods compiled in workspace mode should NOT check REPL bindings.
         //
-        // BT-2365 (ADR 0081 Phase 1): for an unqualified class reference, check the
+        // ADR 0081 Phase 1: for an unqualified class reference, check the
         // session locals map first so a session local of the same name takes
         // precedence. (A capitalised name parses as a ClassReference, not an
         // assignment target, so it cannot itself be rebound via `:=`; the locals

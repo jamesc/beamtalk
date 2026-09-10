@@ -6,7 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! Re-exports from `semantic_analysis::block_facts`. The analysis logic
-//! now lives in the semantic analysis layer (BT-1288).
+//! lives in the semantic analysis layer.
 
 pub use beamtalk_core::semantic_analysis::block_facts::{
     BlockMutationAnalysis, analyze_block, compute_class_var_mutating_selectors,

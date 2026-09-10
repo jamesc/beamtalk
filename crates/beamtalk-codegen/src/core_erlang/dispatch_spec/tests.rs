@@ -80,7 +80,7 @@ fn dnu_method(body: Vec<ExpressionStatement>) -> MethodDefinition {
 
 #[test]
 fn catch_all_dnu_true_for_unquoted_primitive_body() {
-    // BT-1763 shape: `doesNotUnderstand: selector args: arguments =>
+    // `doesNotUnderstand: selector args: arguments =>
     // @intrinsic someName` — a single, unquoted (bare-identifier) primitive.
     let class = class_with_methods(vec![dnu_method(vec![bare(Expression::Primitive {
         name: "erlangModuleLookup".into(),
@@ -196,7 +196,7 @@ fn subclass_delegates_to_superclass_module_on_false() {
 fn subclass_delegates_dynamically_by_class_name_on_false() {
     // Actors delegate through beamtalk_dispatch:responds_to/2's live
     // class-registry walk instead of a compile-time module reference, so a
-    // hot-reloaded ancestor (BT-845) is seen immediately — see
+    // hot-reloaded ancestor is seen immediately — see
     // SuperclassDelegation's doc comment.
     let doc = generate_has_method_from_spec(
         &["shout".to_string()],
@@ -269,7 +269,7 @@ fn auto_slot_getters_and_setters_are_listed() {
     );
 }
 
-// ── emit_local_probe (BT-3482) ──────────────────────────────────────────
+// ── emit_local_probe ──────────────────────────────────────────
 
 #[test]
 fn local_probe_off_by_default_emits_only_has_method() {
@@ -293,7 +293,7 @@ fn local_probe_off_by_default_emits_only_has_method() {
 
 #[test]
 fn local_probe_emits_has_method_local_that_never_delegates() {
-    // BT-3482: has_method_local/1 checks the same own-methods/extension
+    // has_method_local/1 checks the same own-methods/extension
     // membership as has_method/1, but must never delegate to the superclass
     // (Dynamic or Static) on a false — class_chain_step's own walk is the
     // hierarchy traversal, not this function's.

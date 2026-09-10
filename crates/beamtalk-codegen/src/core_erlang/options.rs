@@ -36,14 +36,14 @@ use ecow::EcoString;
 pub struct CodegenOptions {
     /// The Erlang module name to generate (ref-counted for O(1) clone).
     pub(in crate::core_erlang) module_name: EcoString,
-    /// Original source text for `CompiledMethod` introspection (BT-101).
+    /// Original source text for `CompiledMethod` introspection.
     pub(in crate::core_erlang) source_text: Option<String>,
     /// Primitive binding table from compiled stdlib (ADR 0007).
     pub(in crate::core_erlang) bindings: Option<PrimitiveBindingTable>,
     /// Whether workspace bindings are available (REPL/workspace context).
     pub(in crate::core_erlang) workspace_mode: bool,
     /// Class name → compiled module name index for resolving cross-file class
-    /// references in package mode (BT-794 follow-up).
+    /// references in package mode.
     ///
     /// When populated, `compiled_module_name` checks this map first before
     /// falling back to the heuristic prefix approach. This allows classes in
@@ -51,21 +51,21 @@ pub struct CodegenOptions {
     /// correctly by all files in the package, regardless of where the caller
     /// lives in the directory tree.
     pub(in crate::core_erlang) class_module_index: std::collections::HashMap<String, String>,
-    /// BT-894: Class name → direct superclass name for all classes across all files.
+    /// Class name → direct superclass name for all classes across all files.
     ///
     /// Populated during Pass 1 of package compilation alongside `class_module_index`.
     /// Used to enrich the per-file `ClassHierarchy` with cross-file inheritance
     /// information so that `is_actor_class` can resolve the full superclass chain
     /// even when the parent class is defined in another file.
     pub(in crate::core_erlang) class_superclass_index: std::collections::HashMap<String, String>,
-    /// Source file path to embed as `beamtalk_source` module attribute (BT-845/BT-860).
+    /// Source file path to embed as `beamtalk_source` module attribute.
     ///
     /// When set, the generated Core Erlang module includes:
     ///   `'beamtalk_source' = ["path/to/file.bt"]`
     /// This survives workspace restarts and is the definitive source of truth
     /// for `Behaviour >> sourceFile`. Absent for stdlib and `ClassBuilder` classes.
     pub(in crate::core_erlang) source_path: Option<String>,
-    /// Whether this module is being compiled in stdlib mode (BT-791).
+    /// Whether this module is being compiled in stdlib mode.
     ///
     /// When true, the generated `register_class/0` emits `stdlibMode => true` in
     /// the builder state map, which tells `beamtalk_class_builder:register/1` to
@@ -77,7 +77,7 @@ pub struct CodegenOptions {
     /// classes are visible to `is_actor_class` and related checks.
     pub(in crate::core_erlang) pre_class_hierarchy:
         Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    /// BT-1343: Override for codegen diagnostics flag.
+    /// Override for codegen diagnostics flag.
     /// `None` = read from `BEAMTALK_CODEGEN_DIAGNOSTICS` env var at generator creation.
     /// `Some(true/false)` = override the env var (used by tests).
     pub(in crate::core_erlang) codegen_diagnostics: Option<bool>,
@@ -87,23 +87,23 @@ pub struct CodegenOptions {
     /// ADR 0098 Phase 3: producing compound OTP version (`<release>-<erts>`) to
     /// bake into `__beamtalk_meta`. Set alongside `beamtalk_version`.
     pub(in crate::core_erlang) otp_release: Option<String>,
-    /// BT-2887: optional FFI type registry (ADR 0075) threaded to the
+    /// Optional FFI type registry (ADR 0075) threaded to the
     /// return-type writeback pass so methods whose body type is inferred
     /// purely via an FFI call (e.g. `foo => Erlang lists reverse: x`) get
     /// `List` written back to `method_return_types` before codegen.
     pub(in crate::core_erlang) native_type_registry:
         Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>>,
-    /// BT-2932: type alias declarations (`type Name = ...`) from other
+    /// Type alias declarations (`type Name = ...`) from other
     /// modules in the same compilation unit — the codegen counterpart of
-    /// `AnalysisContext`/`ClassHierarchyContext`'s `pre_loaded_aliases`
-    /// (BT-2928). Merged with this module's own `module.type_aliases` via
+    /// `AnalysisContext`/`ClassHierarchyContext`'s `pre_loaded_aliases`.
+    /// Merged with this module's own `module.type_aliases` via
     /// `AliasRegistry::from_module_declarations_with_pre_loaded` so a
     /// cross-module alias reference resolves to a `user_type` reference in
     /// generated `-spec`/`-type` attributes instead of falling through to
     /// `any()`.
     pub(in crate::core_erlang) pre_loaded_aliases:
         Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
-    /// BT-3123: pre-computed analysis outputs from the driver's own
+    /// Pre-computed analysis outputs from the driver's own
     /// `analyse_full` call. See [`Self::with_analysis`].
     pub(in crate::core_erlang) analysis: Option<beamtalk_core::semantic_analysis::AnalysisResult>,
 }
@@ -141,7 +141,7 @@ impl CodegenOptions {
         self
     }
 
-    /// Sets the source text for `CompiledMethod` introspection (BT-101).
+    /// Sets the source text for `CompiledMethod` introspection.
     #[must_use]
     pub fn with_source(mut self, source: &str) -> Self {
         self.source_text = Some(source.to_string());
@@ -169,7 +169,7 @@ impl CodegenOptions {
         self
     }
 
-    /// BT-1343: Explicitly enable or disable codegen diagnostics, overriding the env var.
+    /// Explicitly enable or disable codegen diagnostics, overriding the env var.
     #[must_use]
     pub fn with_codegen_diagnostics(mut self, enabled: bool) -> Self {
         self.codegen_diagnostics = Some(enabled);
@@ -191,7 +191,7 @@ impl CodegenOptions {
         self
     }
 
-    /// BT-894: Sets the class superclass index for resolving cross-file inheritance.
+    /// Sets the class superclass index for resolving cross-file inheritance.
     ///
     /// Maps Beamtalk class names to their direct superclass names. Used to
     /// enrich the per-file hierarchy so that `is_actor_class` can determine
@@ -216,14 +216,14 @@ impl CodegenOptions {
         self
     }
 
-    /// Sets the source file path from an optional value (BT-845/BT-860).
+    /// Sets the source file path from an optional value.
     #[must_use]
     pub fn with_source_path_opt(mut self, path: Option<&str>) -> Self {
         self.source_path = path.map(String::from);
         self
     }
 
-    /// Enables stdlib mode (BT-791): generated `register_class/0` emits `stdlibMode => true`
+    /// Enables stdlib mode: generated `register_class/0` emits `stdlibMode => true`
     /// so the runtime bypasses the sealed-superclass check for stdlib loading.
     #[must_use]
     pub fn with_stdlib_mode(mut self, enabled: bool) -> Self {
@@ -231,7 +231,7 @@ impl CodegenOptions {
         self
     }
 
-    /// BT-2887: sets the native FFI type registry (ADR 0075) used by the
+    /// Sets the native FFI type registry (ADR 0075) used by the
     /// return-type writeback pass, from an optional value.
     #[must_use]
     pub fn with_native_type_registry(
@@ -244,7 +244,7 @@ impl CodegenOptions {
         self
     }
 
-    /// BT-2932: sets pre-loaded type alias declarations from other modules
+    /// Sets pre-loaded type alias declarations from other modules
     /// in the same compilation unit, so `generate_module` can resolve a
     /// cross-module alias reference to a `user_type` reference in generated
     /// `-spec`/`-type` attributes instead of falling through to `any()`.
@@ -258,11 +258,11 @@ impl CodegenOptions {
         self
     }
 
-    /// BT-3123: threads a driver's already-computed [`AnalysisResult`](beamtalk_core::semantic_analysis::AnalysisResult)
+    /// Threads a driver's already-computed [`AnalysisResult`](beamtalk_core::semantic_analysis::AnalysisResult)
     /// into codegen, so `generate_module`/`generate_module_with_warnings` consume
     /// the same class hierarchy, semantic facts, and inferred method return types
     /// the driver's own `analyse_full` call already produced for diagnostics,
-    /// instead of re-deriving all three from scratch (see ADR 0006, BT-1288, BT-1005).
+    /// instead of re-deriving all three from scratch (see ADR 0006).
     ///
     /// `None` (the default) preserves the previous self-sufficient behaviour —
     /// codegen computes its own analysis internally, including running the
@@ -272,7 +272,7 @@ impl CodegenOptions {
     /// `compile_source_with_bindings`) should always supply it here to avoid
     /// running the type checker twice per compiled module.
     ///
-    /// **BT-3125 contract:** when supplying `Some`, the caller is expected to
+    /// **Hand-off contract:** when supplying `Some`, the caller is expected to
     /// have already called [`beamtalk_core::semantic_analysis::lower_module_for_codegen`]
     /// on its own `module` — using this same `analysis.class_hierarchy` and
     /// `analysis.method_return_types` — *before* passing `module` to
@@ -285,7 +285,7 @@ impl CodegenOptions {
     /// `lower_module_for_codegen` call while still supplying `Some` silently
     /// produces a module missing inferred return types / corrected
     /// `class_kind` / `supervisor_kind` in the common case — see
-    /// `generate_module_with_warnings`'s BT-3125 comment.
+    /// `generate_module_with_warnings`'s hand-off-contract comment.
     #[must_use]
     pub fn with_analysis(
         mut self,
@@ -296,7 +296,7 @@ impl CodegenOptions {
     }
 }
 
-/// BT-855: Result of code generation including diagnostic warnings.
+/// Result of code generation including diagnostic warnings.
 ///
 /// Returned by [`generate_module_with_warnings`]. Callers that need to surface
 /// warnings (e.g., stateful blocks at Erlang boundaries) should use that function.

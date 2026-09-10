@@ -113,7 +113,7 @@ impl ErlangAtom {
 
 impl fmt::Display for ErlangAtom {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // BT-3089: delegate to the one canonical atom-escaping funnel
+        // Delegate to the one canonical atom-escaping funnel
         // (`beamtalk_cerl_doc::escape::escape_atom_chars`, also used by
         // `leaf::atom`) instead of hand-rolling a second escape table here.
         write!(f, "'{}'", escape_atom_chars(&self.name))
