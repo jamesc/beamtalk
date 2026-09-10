@@ -1236,6 +1236,60 @@ impl CoreErlangGenerator {
             Self::local_state_key(&id.name)
         };
 
+        // C2z — BT-3493: the RHS is itself a field write (`r := (self.x
+        // := ...)`, at any parenthesization depth) — the shared ADR 0111
+        // Addendum 5 statement classifier (`classify_body_expr`) sees only
+        // the outer `var := <expr>` shape and hands every RHS here as
+        // `LocalAssignPure`, so this is the "see through the value-carrying
+        // parent" step the field write itself needs: lower it through the
+        // SAME real-`Bind` producer C1 (`lower_field_assignment_bind`) uses
+        // for a bare `self.field := ...` statement — arbitrary-RHS support,
+        // `reject_class_var_field_assignment`'s class-var gate, and
+        // `thread_ahead`-based sequencing all included — then alias this
+        // statement's own local var to the identical assigned value, exactly
+        // as `:=`'s "the whole assignment evaluates to the assigned value"
+        // semantics require. Checked before C3/C3b/C4 below: a field write's
+        // own target is `self.<field>`, which can never itself satisfy
+        // `is_tier2_value_call`/`control_flow_has_mutations`/
+        // `is_dispatching_actor_self_send` (all of which pattern-match a
+        // `MessageSend`, not an `Assignment`), so this check cannot shadow
+        // any of theirs.
+        //
+        // Claude Review follow-up on this PR: the field write's own `Bind`
+        // chain (built by `lower_field_assignment_bind`, above) advances
+        // `State`/`StateAcc` but says nothing about THIS statement's local
+        // var — like every other branch below, `r` must also be `Put` into
+        // the arm's own `StateAcc` under its `__local__` key, mirroring C2's
+        // own `Put` immediately below. Without it, `seed_conditional_locals`'s
+        // documented invariant (every taken branch overwrites the SEEDED key
+        // for any local it mutates) breaks for exactly this shape: a local
+        // declared before the conditional and reassigned via `r := (self.x
+        // := ...)` inside one arm reads back the STALE pre-conditional
+        // value once the branches merge and a later statement re-extracts
+        // `r` via `maps:get` — silently wrong, not a crash, since the local's
+        // in-branch lexical binding (`bind_var`) is real but never escapes
+        // this arm's own `StateAcc`.
+        if let Some(field_write) = Self::local_assign_field_write(value) {
+            let field_val_var =
+                self.lower_field_assignment_bind(field_write, frame, span, stmts)?;
+            let source_version = self.state_version();
+            let _ = self.next_state_var();
+            let target_version = self.state_version();
+            stmts.push(ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                op: BindOp::Put {
+                    field: state_key,
+                    value: ValueRef::Var(field_val_var.clone()),
+                    class_tag: ValueRef::Literal("'nil'"),
+                },
+                shadow_write: false,
+                span,
+            });
+            self.bind_var(&id.name, &field_val_var);
+            return Ok(field_val_var);
+        }
+
         // C3 — Tier 2 block-call RHS returns {Result, NewStateAcc};
         // the sanctioned Gensym two-hop (ADR 0111 Addendum 5's "opaque
         // nested-construct state extraction feeding a maps:put" idiom).

@@ -170,6 +170,22 @@ pub(super) fn field_assignment_name(expr: &Expression) -> Option<&str> {
     (recv_id.name == "self").then(|| field.name.as_str())
 }
 
+/// BT-3493: `Some` of the field write nested one level inside a local
+/// assignment's RHS (`r := (self.x := ...)`, at any parenthesization depth)
+/// when `rhs` — a `var := rhs` local assignment's own value — is itself
+/// `self.field := ...`; `None` otherwise. The shared "see through the
+/// value-carrying local-assign wrapper" rule every loop-body/branch-arm
+/// local-var-assignment lowering needs identically:
+/// `lower_local_var_assignment_bind`/`lower_direct_var_update_in_loop_bind`
+/// (the field write must thread through the SAME real-`Bind` producer a
+/// bare `self.field := ...` statement uses) and
+/// `try_generate_block_local_plain_let`'s own bail-out to them (a plain,
+/// unthreaded `let` has no way to fold the field's mutation in).
+pub(super) fn local_assign_field_write(rhs: &Expression) -> Option<&Expression> {
+    let inner = rhs.unwrap_parens();
+    is_field_assignment(inner).then_some(inner)
+}
+
 /// Checks if an expression is a self-field access (`self.field`).
 ///
 /// Used to scope the runtime Tier 1/Tier 2 discrimination for block value
@@ -477,6 +493,11 @@ impl CoreErlangGenerator {
     /// See [`field_assignment_name`].
     pub(super) fn field_assignment_name(expr: &Expression) -> Option<&str> {
         field_assignment_name(expr)
+    }
+
+    /// See [`local_assign_field_write`].
+    pub(super) fn local_assign_field_write(rhs: &Expression) -> Option<&Expression> {
+        local_assign_field_write(rhs)
     }
 
     /// See [`is_self_field_access`].

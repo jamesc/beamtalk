@@ -144,6 +144,116 @@ Actor subclass: NilTypeMatchSelfMutationRegistry
     ]
     self.count
 
+  // ── BT-3493: a `self.field := ...` write wrapped in a local assignment
+  // (`r := (self.x := ...)`) — unlike the BT-3489 fixtures above, none of
+  // these has a `match:` anywhere; the bug reproduces identically in a
+  // plain `ifTrue:`/`ifTrue:ifFalse:` branch body and a counted loop body,
+  // since all three share the ADR 0111 Addendum 5 statement classifier.
+  // `bumpWrappedMatch:` below covers the third construct (a `match:` arm's
+  // `[...] value` block body).
+
+  // The `ifTrue:` arm captures the field write's own assigned value in `r`,
+  // then writes it again (offset by 1) to prove `r` really does hold the
+  // freshly-written value, not a stale or dropped one.
+  bumpWrappedIfTrue: flag -> Integer =>
+    flag
+      ifTrue: [
+        r := (self.count := self.count + 10)
+        self.count := r + 1
+      ]
+      ifFalse: [self.count := self.count - 1]
+    self.count
+
+  // Each iteration writes `self.count` via the wrapped shape, then reads
+  // the local `r` it was just bound to back into the field — a wrong base
+  // state here would accumulate the wrong total silently, not crash.
+  bumpWrappedInLoop: n -> Integer =>
+    1
+      to: n
+      do: [:i |
+        r := (self.count := self.count + i)
+        self.count := r
+      ]
+    self.count
+
+  // `r` is declared BEFORE the loop (seeded/threaded across iterations —
+  // same StateAcc `Put` concern `bumpWrappedIfTrueReadAfterMerge:` pins for
+  // conditionals) and re-read AFTER the loop finishes, not merely within an
+  // iteration.
+  bumpWrappedInLoopReadAfterLoop: n -> Integer =>
+    r := 0
+    1 to: n do: [:i | r := (self.count := self.count + i)]
+    r
+
+  bumpWrappedMatch: v -> Integer =>
+    v match: [
+      1 -> [
+        r := (self.count := self.count + 10)
+        r
+      ] value;
+      _ -> [
+        r := (self.count := self.count + 1)
+        r
+      ] value
+    ]
+
+  // Claude Review follow-up on this PR: `r` is declared BEFORE the
+  // conditional (so it's SEEDED into both arms' `StateAcc` — see
+  // `seed_conditional_locals`) and reassigned via the wrapped shape inside
+  // ONLY the taken arm; the read AFTER the conditional merges must see the
+  // field-written value, not the stale pre-conditional seed. A wrong
+  // `StateAcc` `Put` here (or a missing one) would not crash — it would
+  // silently read back the seeded `0`.
+  bumpWrappedIfTrueReadAfterMerge: flag -> Integer =>
+    r := 0
+    flag ifTrue: [r := (self.count := self.count + 10)] ifFalse: [r := 5]
+    r + 1
+
+  // `r` is bound INSIDE the `ifTrue:` branch, then read by a NESTED loop in
+  // the SAME branch — every other local assignment this branch-arm lowering
+  // handles threads its local through StateAcc precisely so a later nested
+  // construct in the same frame can `maps:get` it back; this pins that the
+  // wrapped-field-write shape's local gets that same visibility, not just a
+  // same-frame lexical binding that a nested closure wouldn't see.
+  bumpWrappedIfTrueNestedLoopReadsCapturedLocal: flag -> Integer =>
+    flag
+      ifTrue: [
+        r := (self.count := self.count + 10)
+        1 to: 2 do: [:i | self.count := self.count + r]
+      ]
+    self.count
+
+  // A loop-local accumulator (`sum`) declared OUTSIDE the loop and mutated
+  // INSIDE it, alongside the wrapped field write — `sum` being a genuine
+  // cross-iteration "threaded local" is what can route this loop through
+  // hybrid-params mode (direct field params, ADR 0111 Addendum 15) instead
+  // of the plain `StateAcc` fallback `bumpWrappedInLoop:` above exercises,
+  // reaching a DIFFERENT lowering function
+  // (`lower_direct_var_update_in_loop_bind`) for the wrapped assignment.
+  bumpWrappedInHybridLoop: n -> Integer =>
+    sum := 0
+    1
+      to: n
+      do: [:i |
+        r := (self.count := self.count + i)
+        sum := sum + r
+      ]
+    sum
+
+  // The `Foldl*` list-op family (`do:`/`collect:`/etc.) shares
+  // `try_generate_block_local_plain_let`/`lower_direct_var_update_in_loop_bind`/
+  // `lower_local_var_assignment_bind` with the `Letrec` family above
+  // (`bumpWrappedInLoop:`) — a field write present anywhere in the body
+  // (including wrapped) disqualifies `use_tuple_acc`, forcing the same
+  // `StateAcc` fallback this pins here for `do:` specifically.
+  bumpWrappedInDo: items -> Integer =>
+    items
+      do: [:x |
+        r := (self.count := self.count + x)
+        self.count := r
+      ]
+    self.count
+
   currentCount => self.count
 
   currentOtherCount => self.otherCount
