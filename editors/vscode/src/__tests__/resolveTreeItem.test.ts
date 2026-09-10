@@ -16,7 +16,7 @@ const { executeCommandMock, openTextDocumentMock } = vi.hoisted(() => ({
 
 vi.mock("vscode", () => buildVscodeModule({ executeCommandMock, openTextDocumentMock }));
 
-import type { ClassItemNode, MethodItemNode } from "../workspaceTreeView";
+import type { ClassItemNode, MethodItemNode, StateVarItemNode } from "../workspaceTreeView";
 import { WorkspaceTreeDataProvider } from "../workspaceTreeView";
 
 /** A blank TreeItem, as `getTreeItem` produces before `resolveTreeItem` fills in the tooltip. */
@@ -26,9 +26,22 @@ function blankItem(): vscode.TreeItem {
 
 const noToken = {} as unknown as vscode.CancellationToken;
 
-/** A fake TextDocument backed by a plain string, matching what the fast path needs. */
-function makeDoc(text: string) {
+/**
+ * A fake TextDocument backed by a plain string, matching what the fast path
+ * needs. `uri` mirrors what real `openTextDocument` returns (a document
+ * carries the URI it was opened from) — `_resolveClassDocument` reads it off
+ * the resolved document rather than recomputing it from `source_file`.
+ */
+function makeDoc(
+  text: string,
+  uri: unknown = {
+    fsPath: "/proj/account.bt",
+    path: "/proj/account.bt",
+    toString: () => "/proj/account.bt",
+  }
+) {
   return {
+    uri,
     getText: () => text,
     positionAt: (offset: number) => {
       const before = text.slice(0, offset);
@@ -333,6 +346,91 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
       expect(tooltip).toContain("no source available");
       expect(openTextDocumentMock).not.toHaveBeenCalled();
       expect(executeCommandMock).not.toHaveBeenCalled();
+    });
+  });
+
+  // Reproduces the reported bug: a class/method/state-var whose defining
+  // class is stdlib-origin has no real `source_file` (the runtime never
+  // tracks one for compiled-in stdlib classes) — every hover path used to
+  // check only `source_file`/"unknown" and bail straight to the hardcoded
+  // fallback tooltip, so a stdlib-defined method never showed its doc
+  // comment. Hit hardest for *inherited* methods, since most ancestors
+  // (Object, Actor, Collection, ...) are stdlib. `_resolveClassDocument`
+  // now falls back to the injected stdlib virtual-URI opener, the same one
+  // `beamtalk.navigateToMethod`/`openClassSource` already use.
+  describe("stdlib-origin classes (no real source_file)", () => {
+    const stdlibClassInfo = { name: "Actor", source_origin: "stdlib" as const };
+    const stdlibDocOpener = vi.fn();
+
+    beforeEach(() => {
+      provider.setStdlibDocumentOpener(stdlibDocOpener);
+      stdlibDocOpener.mockReset();
+    });
+
+    it("reads a method's doc comment via the stdlib opener when no real source_file exists", async () => {
+      const source = [
+        "class Actor",
+        "",
+        "  /// Spawns a new linked child process.",
+        "  spawn =>",
+        "    ^nil",
+        "",
+      ].join("\n");
+      stdlibDocOpener.mockResolvedValue(makeDoc(source, { fsPath: "Actor.bt", path: "Actor.bt" }));
+      executeCommandMock.mockImplementation(() => Promise.resolve(undefined)); // no LSP hover available
+
+      const node: MethodItemNode = {
+        kind: "method-item",
+        method: { name: "spawn", selector: "spawn", side: "instance" },
+        classInfo: stdlibClassInfo,
+        definingClass: "Actor",
+      };
+      const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
+      const tooltip = (resolved?.tooltip as { value: string }).value;
+
+      expect(stdlibDocOpener).toHaveBeenCalledWith(stdlibClassInfo);
+      expect(openTextDocumentMock).not.toHaveBeenCalled();
+      expect(tooltip).toContain("Spawns a new linked child process.");
+      expect(tooltip).toContain("_Inherited from Actor_");
+    });
+
+    it("reads a state variable's doc comment via the stdlib opener when no real source_file exists", async () => {
+      const source = [
+        "class Actor",
+        "  /// The process id backing this actor.",
+        "  state: pid = nil",
+        "",
+      ].join("\n");
+      stdlibDocOpener.mockResolvedValue(makeDoc(source, { fsPath: "Actor.bt", path: "Actor.bt" }));
+
+      const node: StateVarItemNode = {
+        kind: "state-item",
+        stateVar: { name: "pid" },
+        classInfo: stdlibClassInfo,
+      };
+      const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
+      const tooltip = (resolved?.tooltip as { value: string }).value;
+
+      expect(stdlibDocOpener).toHaveBeenCalledWith(stdlibClassInfo);
+      expect(tooltip).toContain("The process id backing this actor.");
+    });
+
+    it("falls back to the plain tooltip (never a file read) when no stdlib opener is injected", async () => {
+      provider.setStdlibDocumentOpener(null);
+      executeCommandMock.mockImplementation(() => Promise.resolve(undefined));
+
+      const node: MethodItemNode = {
+        kind: "method-item",
+        method: { name: "spawn", selector: "spawn", side: "instance" },
+        classInfo: stdlibClassInfo,
+        definingClass: "Actor",
+      };
+      const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
+      const tooltip = (resolved?.tooltip as { value: string }).value;
+
+      expect(openTextDocumentMock).not.toHaveBeenCalled();
+      expect(tooltip).toContain("spawn");
+      expect(tooltip).toContain("_Inherited from Actor_");
     });
   });
 });
