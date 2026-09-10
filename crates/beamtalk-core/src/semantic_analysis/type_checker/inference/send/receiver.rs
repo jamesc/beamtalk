@@ -10,7 +10,7 @@
 //! send's result type. Covers every receiver shape — a syntactic
 //! `ClassReference`, a type-driven `Meta{C}` (ADR 0083), a concrete `Known`
 //! receiver's instance-side method lookup, and a `Union`-typed receiver's
-//! per-member resolution (BT-1857).
+//! per-member resolution.
 
 use crate::ast::{Expression, MessageSelector, WellKnownSelector};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
@@ -27,7 +27,7 @@ impl TypeChecker {
     /// Variant of [`Self::infer_message_send`] that takes a pre-computed receiver
     /// type, avoiding a second walk of the receiver subtree.
     ///
-    /// Used by the `Expression::Cascade` arm (BT-2035): the cascade's first send
+    /// Used by the `Expression::Cascade` arm: the cascade's first send
     /// is itself a `MessageSend`, whose inner receiver type is needed both to
     /// resolve the first send and to dispatch the cascaded messages. Re-inferring
     /// the inner subtree via `infer_expr` would re-emit any DNU / type warnings
@@ -46,7 +46,7 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
-        // ADR 0102 §5 (BT-2744): a `Negation{base, excluded}`-typed receiver's
+        // ADR 0102 §5: a `Negation{base, excluded}`-typed receiver's
         // method lookup / conformance resolves through `base` — "identically
         // to a bare `base`-typed receiver" (every class admitted by the
         // negation is, by construction, a subclass of `base`, so it declares
@@ -114,7 +114,7 @@ impl TypeChecker {
                 in_abstract_method,
             )
         } else if selector.well_known() == Some(WellKnownSelector::OnDo) {
-            // BT-2045: Exception handler block parameter inference.
+            // Exception handler block parameter inference.
             // `[...] on: SomeException do: [:e | ...]` — infer `e` as `SomeException`
             // when the first argument is a class reference.
             self.infer_args_for_on_do(arguments, hierarchy, env, in_abstract_method)
@@ -127,10 +127,10 @@ impl TypeChecker {
                     | WellKnownSelector::IfNotNilIfNil
             )
         ) {
-            // BT-2046: Narrow block parameter of `ifNotNil: [:x | ...]` to the
+            // Narrow block parameter of `ifNotNil: [:x | ...]` to the
             // non-nil branch of the receiver's type. Dual of the receiver-side
-            // `isNil ifFalse:` narrowing (BT-2048).
-            // BT-2824: Solo `ifNil:` is routed through here too, purely so its
+            // `isNil ifFalse:` narrowing.
+            // Solo `ifNil:` is routed through here too, purely so its
             // niladic block's `Block(..., R)` return type is preserved — the
             // generic `infer_args_with_block_context` path requires a `Known`
             // receiver to resolve block param types from a method signature,
@@ -144,7 +144,7 @@ impl TypeChecker {
                 in_abstract_method,
             )
         } else if let (true, Some(var_key), Some(arg)) = (
-            // BT-3462: `and:` stays a string comparison rather than a
+            // `and:` stays a string comparison rather than a
             // `WellKnownSelector` variant, matching `state_threading_selectors`'s
             // module doc — `and:`/`or:` are ordinary self-hosted `Boolean`
             // methods (`boolean.bt`), not selectors the type checker or
@@ -154,7 +154,7 @@ impl TypeChecker {
             Self::detect_not_nil_and_narrowing(receiver),
             arguments.first(),
         ) {
-            // BT-2872: `X notNil and: [...]` narrows `X` to non-nil inside the
+            // `X notNil and: [...]` narrows `X` to non-nil inside the
             // block argument. Unlike the `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
             // narrowing table (which narrows to a statically known branch
             // type), the non-nil type here depends on `X`'s current type in
@@ -195,7 +195,7 @@ impl TypeChecker {
         // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
         // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
         //
-        // BT-3462: stays a string comparison rather than a `WellKnownSelector`
+        // Stays a string comparison rather than a `WellKnownSelector`
         // variant — `beamtalk-codegen`'s `expr_shape::selector_dispatches_via_self`
         // already documents `asType:` (alongside `yourself`) as a
         // "class-specific or compile-time-only construct that does not
@@ -207,9 +207,9 @@ impl TypeChecker {
             return receiver_ty;
         }
 
-        // BT-2047: `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return the union of
+        // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return the union of
         // both branch bodies' return types. `infer_args_for_if_not_nil`
-        // (BT-2046) already inferred both branches as `Block(..., R)` with
+        // already inferred both branches as `Block(..., R)` with
         // narrowed params, so we read back R from each arg and union them.
         // Blocks with a non-local return (`^`) exit the enclosing method —
         // their branch contributes `Never`, and `union_of` skips Never, so
@@ -233,7 +233,7 @@ impl TypeChecker {
                 selector.well_known(),
                 Some(WellKnownSelector::IfNil | WellKnownSelector::IfNotNil)
             ) {
-                // BT-2824: Solo `ifNil:` / `ifNotNil:` on a `T | Nil` union
+                // Solo `ifNil:` / `ifNotNil:` on a `T | Nil` union
                 // receiver infer as `T | R` / `R | Nil` — the union of the
                 // "self" branch (executed when the nil-check doesn't match)
                 // and the block branch's inferred return type.
@@ -253,7 +253,7 @@ impl TypeChecker {
         // Only check if the receiver type actually defines the operator (avoids
         // duplicate warnings when the selector is already unknown).
         //
-        // BT-2843: `binary_operand_check_ran` tracks whether
+        // `binary_operand_check_ran` tracks whether
         // `check_binary_operand_types` actually validated this argument —
         // not merely whether it was called. `check_binary_operand_types`
         // returns `false` for Known/Known shapes it has no bespoke logic for
@@ -275,7 +275,7 @@ impl TypeChecker {
             ) = (&receiver_ty, arg_types.first())
             {
                 if hierarchy.resolves_selector(recv_ty, &selector_name) {
-                    // BT-1588: Collect origin info for the argument expression
+                    // Collect origin info for the argument expression
                     let arg_origin = arguments.first().and_then(|arg_expr| {
                         if let Expression::Identifier(ident) = arg_expr {
                             env.get_local_origin(&ident.name)
@@ -297,16 +297,16 @@ impl TypeChecker {
         }
 
         // If receiver is a class reference, check class-side methods.
-        // BT-2158: unwrap parens so `(HTTPRouter) foo:` dispatches class-side
+        // Unwrap parens so `(HTTPRouter) foo:` dispatches class-side
         // — matches the block-param inference normalisation above.
         if let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() {
             let class_name = &name.name;
 
             // ADR 0075: `Erlang <module>` — return ErlangModule<module_name> type
             // to enable FFI call type inference on the outer message send.
-            // BT-1880: Class protocol selectors (class, new, superclass, etc.)
+            // Class protocol selectors (class, new, superclass, etc.)
             // must NOT be intercepted as module lookups — they are handled by
-            // normal class-side dispatch. BT-3079: package-qualified references
+            // normal class-side dispatch. Package-qualified references
             // (`json@Erlang lists`) are excluded too — they name a package-scoped
             // class, not the compiler's built-in FFI bridge. Both rules are
             // centralized in `crate::ffi_receiver` (mirrored here via
@@ -348,7 +348,7 @@ impl TypeChecker {
                 Some(env),
                 &[],
             );
-            // ADR 0104 Phase 2 (BT-2750): `C spawnWith: #{...}` literal-map key check.
+            // ADR 0104 Phase 2: `C spawnWith: #{...}` literal-map key check.
             self.check_spawn_with_map_keys(class_name, &selector_name, arguments, hierarchy);
             return self.check_class_side_send(
                 class_name,
@@ -390,7 +390,7 @@ impl TypeChecker {
             }
             // `aClass class` is the metaclass of the class object. The static
             // hierarchy doesn't track per-class metaclasses precisely, so fall
-            // back to the `Metaclass` tower class (BT-1952 parity).
+            // back to the `Metaclass` tower class.
             if selector.well_known() == Some(WellKnownSelector::Class) {
                 return InferredType::known("Metaclass");
             }
@@ -405,7 +405,7 @@ impl TypeChecker {
                 Some(env),
                 &[],
             );
-            // ADR 0104 Phase 2 (BT-2750): type-driven `cls spawnWith: #{...}`
+            // ADR 0104 Phase 2: type-driven `cls spawnWith: #{...}`
             // (receiver typed `Meta{C}`) literal-map key check.
             self.check_spawn_with_map_keys(meta_class, &selector_name, arguments, hierarchy);
             let class_side =
@@ -430,7 +430,7 @@ impl TypeChecker {
             return class_side;
         }
 
-        // BT-2868: set when a `Known`-receiver's solo `ifTrue:`/`ifFalse:`
+        // Set when a `Known`-receiver's solo `ifTrue:`/`ifFalse:`
         // resolves to a method with no declared return type by design (e.g.
         // `Boolean>>ifTrue:` — see `stdlib/src/boolean.bt`). Distinguishes
         // the terminal Dynamic fallback below from a genuinely
@@ -447,7 +447,7 @@ impl TypeChecker {
         } = receiver_ty
         {
             // In class methods, self sends should check class-side methods.
-            // BT-2158: unwrap parens so `(self) foo:` dispatches class-side.
+            // Unwrap parens so `(self) foo:` dispatches class-side.
             if env.in_class_method && Self::is_self_receiver(receiver.unwrap_parens()) {
                 if !in_abstract_method {
                     self.check_argument_types(
@@ -461,11 +461,11 @@ impl TypeChecker {
                         Some(env),
                         &[],
                     );
-                    // ADR 0104 Phase 2 (BT-2750): `self spawnWith: #{...}`
+                    // ADR 0104 Phase 2: `self spawnWith: #{...}`
                     // literal-map key check — the class-reference and
                     // Meta-typed-receiver branches above already run this;
-                    // BT-3469 unified the cascade continuation loop onto
-                    // this shared path, which surfaced that this branch was
+                    // unifying the cascade continuation loop onto
+                    // this shared path surfaced that this branch was
                     // the one class-side shape missing it.
                     self.check_spawn_with_map_keys(
                         class_name,
@@ -488,7 +488,7 @@ impl TypeChecker {
             // When the receiver is typed as ErlangModule with a known module name
             // (from `Erlang lists` or a variable assigned from one), extract the
             // Erlang function name and arity, then look up in NativeTypeRegistry.
-            // BT-1880: Class protocol selectors (class, new, printString, etc.)
+            // Class protocol selectors (class, new, printString, etc.)
             // and binary selectors (==, etc.) on ErlangModule instances must use
             // normal dispatch, not FFI lookup.
             if WellKnownClass::from_str(class_name) == Some(WellKnownClass::ErlangModule)
@@ -499,7 +499,7 @@ impl TypeChecker {
                     .infer_ffi_call(type_args, selector, arguments, &arg_types, span, hierarchy);
             }
 
-            // BT-2254 (ADR 0075 amendment): literal-index tuple access.
+            // ADR 0075 amendment: literal-index tuple access.
             // `aTuple at: <literal int>` on a `Tuple(T1, …, Tn)` with known
             // positional element types infers the element type at that 1-based
             // index. A non-literal index, an out-of-range literal, or a bare
@@ -514,23 +514,23 @@ impl TypeChecker {
 
             // Validation routes ALL singleton receivers (including binary sends)
             // through `Symbol` — that is fine: `Symbol` understands `=:=`/`=`, so
-            // no spurious DNU, and the BT-2631 impossible-comparison hint fires
+            // no spurious DNU, and the impossible-comparison hint fires
             // via the Dynamic fall-through below, not via validation. Only the
             // *inference* redirect (`resolve_class`) excludes binary sends.
             self.check_instance_selector(class_name, &selector_name, span, hierarchy);
-            // BT-2647: a non-union singleton receiver (`#text`) is a subtype of
+            // A non-union singleton receiver (`#text`) is a subtype of
             // `Symbol` but not itself in the hierarchy, so method lookup and
             // argument/return-type inference would otherwise fall through to
             // Dynamic — losing the inference it had when typed `Symbol`. Resolve
             // its protocol through `Symbol`, mirroring the singleton-union member
-            // handling from BT-2624. `class_name` (`#text`) is still used for
+            // handling. `class_name` (`#text`) is still used for
             // `Self` returns and user-facing messages.
             //
             // `!contains('|')` keeps this symmetric with `check_instance_selector`
             // (a `Known` is never a union today, but a future `Known { "#a | #b" }`
             // must not silently route here while validation leaves it untouched).
             // Binary sends are excluded: an equality op on a singleton receiver
-            // (`#west =:= unionVar`) must fall through to the BT-2631
+            // (`#west =:= unionVar`) must fall through to the
             // statically-decidable-comparison hint below rather than
             // short-circuiting on `Symbol`'s `=:=`.
             let resolve_class: EcoString = if class_name.starts_with('#')
@@ -544,7 +544,7 @@ impl TypeChecker {
             // Skip argument type check for binary messages only when
             // `check_binary_operand_types` already ran above (the Known/Known
             // case) — it provides more specific warnings for
-            // arithmetic/comparison/concat. BT-2843: when the argument's
+            // arithmetic/comparison/concat. When the argument's
             // inferred type didn't match that Known/Known pattern (e.g. a
             // `Union` like `String | Nil`), fall back to the generic
             // `check_argument_types` so the argument still gets *some*
@@ -566,7 +566,7 @@ impl TypeChecker {
             // Infer return type from method info
             if let Some(method) = hierarchy.find_method(&resolve_class, &selector_name) {
                 if let Some(ref ret_ty) = method.return_type {
-                    // BT-2751 (ADR 0104 Phase 3): `withTimeout:` return-type
+                    // ADR 0104 Phase 3: `withTimeout:` return-type
                     // transparency. The generated-builtins table records the
                     // static return type `TimeoutProxy`, but the proxy is
                     // transparent — it forwards every message to the wrapped
@@ -611,30 +611,29 @@ impl TypeChecker {
                     // class object. Resolve to the metatype of the static
                     // receiver class so that downstream class-side sends
                     // (`obj class new`, `self species withAll:`) route through
-                    // `find_class_method`. Pre-0083 this returned `Dynamic`
-                    // (BT-1952).
+                    // `find_class_method`. Pre-0083 this returned `Dynamic`.
                     if matches!(ret_ty, DeclaredType::SelfClass) {
-                        // BT-2647: for a singleton receiver, `resolve_class` is
+                        // For a singleton receiver, `resolve_class` is
                         // `Symbol` so `#text class` is `Symbol class` (`#text` is a
                         // Symbol at runtime), not a phantom `Meta("#text")`.
                         return InferredType::meta(resolve_class.clone());
                     }
                     // ADR 0083: `X class` — the method returns the metatype of a
-                    // specific named class (BT-2034 annotation `X class`).
+                    // specific named class (`X class` annotation).
                     if let DeclaredType::ClassOf(meta_class) = ret_ty {
                         if hierarchy.has_class(meta_class) {
                             return InferredType::meta(meta_class.clone());
                         }
                     }
 
-                    // BT-1945: `Never` resolves to the bottom type (divergent methods)
+                    // `Never` resolves to the bottom type (divergent methods)
                     if matches!(ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
                     {
                         return InferredType::Never;
                     }
 
                     // Build substitution map, composing through inheritance chain
-                    // if the method is inherited (ADR 0068 Phase 1b, BT-1577)
+                    // if the method is inherited (ADR 0068 Phase 1b)
                     let subst = Self::build_inherited_substitution_map(
                         hierarchy,
                         &resolve_class,
@@ -654,15 +653,15 @@ impl TypeChecker {
 
                     // Apply generic substitution if we have type args, method-local
                     // params, or the return type mentions `Self` nested inside a
-                    // generic/union (BT-1986). For the last case, even if no
+                    // generic/union. For the last case, even if no
                     // param substitutions apply, we still need to rewrite `Self`
                     // to the receiver class so callers see the narrowed type.
                     let has_nested_self = Self::declared_type_contains_self(ret_ty);
                     if !subst.is_empty() || !method_subst.is_empty() || has_nested_self {
-                        // BT-1992: Thread the full receiver type (with type args)
+                        // Thread the full receiver type (with type args)
                         // under the reserved `Self` subst key so nested `Self` in
                         // generics like `Result(Self, Error)` resolves to e.g.
-                        // `Box(Integer)` not bare `Box` (BT-3076: the shared
+                        // `Box(Integer)` not bare `Box` (the shared
                         // `resolve_declared_type` resolver's `SelfType` arm reads
                         // this same key — see its doc).
                         return type_resolver::resolve_declared_type(
@@ -678,7 +677,7 @@ impl TypeChecker {
                         );
                     }
 
-                    // BT-1834: If the return type is an unresolved type param
+                    // If the return type is an unresolved type param
                     // (single uppercase letter like E, T, V), fall back to Dynamic
                     // so downstream sends don't get false DNU warnings.
                     if let DeclaredType::Simple(n) = ret_ty {
@@ -689,20 +688,20 @@ impl TypeChecker {
                         }
                     }
 
-                    // BT-2019: Resolve the return type through the centralised
+                    // Resolve the return type through the centralised
                     // structured resolver, which preserves the full
                     // parameterised type — `List(String)` becomes
-                    // `Known("List", [Known("String")])` rather than the
-                    // pre-fix bare `Known("List", [])` that silently dropped
+                    // `Known("List", [Known("String")])` rather than a
+                    // bare `Known("List", [])` that would silently drop
                     // the element type.
                     //
                     // Also handles:
-                    //  * BT-2017: union return types like `Integer | Nil`
+                    //  * union return types like `Integer | Nil`
                     //    resolve into `InferredType::Union`, enabling narrowing.
                     //  * Plain class names — pass through to `Known(name, [])`.
                     //  * Nested generics — `Result(List(String), Error)`
                     //    keeps both layers.
-                    //  * BT-2928: a cross-file alias name expands to its
+                    //  * a cross-file alias name expands to its
                     //    declared union/structural type instead of staying
                     //    an opaque nominal class.
                     return type_resolver::resolve_declared_type(
@@ -714,7 +713,7 @@ impl TypeChecker {
                     );
                 }
 
-                // BT-2868: `ret_ty` is None — the method exists but declares
+                // `ret_ty` is None — the method exists but declares
                 // no return type. For `Boolean>>ifTrue:`/`ifFalse:` this is
                 // by design (see `boolean.bt`): a solo `ifTrue:`/`ifFalse:`
                 // on an unnarrowed `Boolean` receiver can't soundly promise
@@ -722,8 +721,8 @@ impl TypeChecker {
                 // `self` without invoking the block), but collapsing all the
                 // way to `Dynamic` is more conservative than necessary: the
                 // sound type is the union of that `Boolean` self-branch and
-                // the block's own return type. Mirrors BT-2824's
-                // `if_nil_solo_union_ret_ty` fix for `ifNil:`/`ifNotNil:`.
+                // the block's own return type. Mirrors
+                // `if_nil_solo_union_ret_ty`'s fix for `ifNil:`/`ifNotNil:`.
                 if let Some(ty) = Self::if_true_false_solo_boolean_ret_ty(
                     &selector_name,
                     &resolve_class,
@@ -739,8 +738,8 @@ impl TypeChecker {
                 // deliberately-unannotated methods (e.g. `Block>>on:do:`,
                 // whose return type is a separate, unresolved soundness gap
                 // predating this fix) keep the pre-existing `DynamicReceiver`
-                // reason so they don't newly start firing the BT-1914
-                // warning as a side effect of this narrower fix.
+                // reason so they don't newly start firing the "Dynamic in
+                // typed class" warning as a side effect of this narrower fix.
                 if matches!(
                     selector.well_known(),
                     Some(WellKnownSelector::IfTrue | WellKnownSelector::IfFalse)
@@ -749,7 +748,7 @@ impl TypeChecker {
                 }
             }
 
-            // BT-1834: Block value/value:/value:value: — return the last type arg.
+            // Block value/value:/value:value: — return the last type arg.
             // Block is variadic: Block(R), Block(A, R), Block(A, B, R), etc.
             // The convention is that the last type arg is always the return type.
             if WellKnownClass::from_str(class_name) == Some(WellKnownClass::Block)
@@ -767,10 +766,10 @@ impl TypeChecker {
                 return type_args.last().unwrap().clone();
             }
 
-            // BT-1047: Fall back to return types inferred earlier in this same pass.
+            // Fall back to return types inferred earlier in this same pass.
             // Method bodies are processed before top-level expressions, so inferred
             // return types are available for chain resolution without a second pass.
-            // BT-2022: Return the full InferredType from the cache, preserving
+            // Return the full InferredType from the cache, preserving
             // type_args so callers see e.g. List(String) instead of bare List.
             let key = (class_name.clone(), selector_name.clone(), false);
             if let Some(ret_ty) = self.method_return_types.get(&key) {
@@ -778,7 +777,7 @@ impl TypeChecker {
             }
         }
 
-        // BT-2631: a standalone singleton (in)equality send (`flag := unionVar
+        // A standalone singleton (in)equality send (`flag := unionVar
         // =:= #west`) is statically decidable when `#west` can never be a member
         // of the union — but `infer_union_message_send` short-circuits equality
         // ops to `Boolean` before any membership check. Emit the same hint as the
@@ -820,7 +819,7 @@ impl TypeChecker {
             );
         }
 
-        // BT-2868: honest reason for the terminal Dynamic fallback — a solo
+        // Honest reason for the terminal Dynamic fallback — a solo
         // `ifTrue:`/`ifFalse:` on a `Known` receiver whose method exists but
         // declares no return type by design reports `UnannotatedReturn`, not
         // `DynamicReceiver` (the receiver here is perfectly well-typed).
@@ -851,7 +850,7 @@ impl TypeChecker {
     /// the identity method `Object>>yourself -> Self` — the receiver *is* the
     /// class object, so the result stays `Meta{C}` (this keeps
     /// `aClass yourself new` resolving class-side rather than collapsing to
-    /// Dynamic, BT-2255).
+    /// Dynamic).
     pub(in crate::semantic_analysis::type_checker) fn class_object_tower_return(
         selector: &str,
         hierarchy: &ClassHierarchy,
@@ -879,9 +878,9 @@ impl TypeChecker {
         }
         // No alias registry threaded here: `ret_ty` comes from the built-in
         // Metaclass/Class/Behaviour/Object/ProtoObject tower, which never
-        // declares an alias-typed return. BT-2936 (the general follow-up
-        // that threaded `alias_registry` through the other deferred call
-        // sites) revisited this one specifically and confirmed it stays
+        // declares an alias-typed return. A general follow-up that threaded
+        // `alias_registry` through the other deferred call sites revisited
+        // this one specifically and confirmed it stays
         // out of scope: the tower's method table is fixed, built-in, and
         // has no alias-typed entries to expand, so there is nothing for a
         // registry to do here.
@@ -894,7 +893,7 @@ impl TypeChecker {
         ))
     }
 
-    /// Resolve a message send on a union-typed receiver (BT-1857).
+    /// Resolve a message send on a union-typed receiver.
     ///
     /// For each member type in the union:
     /// - **Nil (`UndefinedObject`)**: skipped for method resolution. The common
@@ -942,7 +941,7 @@ impl TypeChecker {
             return InferredType::Dynamic(DynamicReason::DynamicReceiver);
         }
 
-        // BT-2624: The equality / identity comparison operators (`==`,
+        // The equality / identity comparison operators (`==`,
         // `=:=`, `/=`, `=/=`) are universal value/identity comparisons every
         // object supports at runtime via the `Object`/`ProtoObject` protocol,
         // but they are not modelled as per-class hierarchy methods. The
@@ -951,7 +950,7 @@ impl TypeChecker {
         // spuriously report that a concrete member (e.g. `Integer does not
         // understand '=:='`) or a singleton member fails to understand the
         // operator. This also keeps the idiomatic `unionVar =:= #singleton`
-        // narrowing guard (BT-2617) warning-free. These selectors always
+        // narrowing guard warning-free. These selectors always
         // return `Boolean`.
         if is_equality_operator(selector) {
             return InferredType::known("Boolean");
@@ -965,13 +964,13 @@ impl TypeChecker {
                 return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
                 continue;
             };
-            // BT-1857: Skip Nil (UndefinedObject) for method resolution.
+            // Skip Nil (UndefinedObject) for method resolution.
             // Nil is expected to be guarded by `isNil` checks; emitting a DNU
             // warning for every `T | Nil` union is noisy and unhelpful.
             if WellKnownClass::from_str(member_name).is_some_and(WellKnownClass::is_nil_class) {
                 continue;
             }
-            // BT-2624: A singleton member (`#foo`) is a subtype of `Symbol` (see
+            // A singleton member (`#foo`) is a subtype of `Symbol` (see
             // the singleton-as-Symbol convention in `type_resolver`). Resolve its
             // method set through `Symbol` so inherited methods (`asString`,
             // `printString`, `=:=`, …) are visible. Without this, `#foo` looks
@@ -986,7 +985,7 @@ impl TypeChecker {
             } else {
                 member_name.as_str()
             };
-            // ADR 0100 Rule 1 (BT-3469): route this member's completeness
+            // ADR 0100 Rule 1: route this member's completeness
             // classification through the shared classifier instead of
             // re-deriving it — the two checks this replaced (unknown class,
             // instance-side DNU override) are a strict subset of what
@@ -1010,17 +1009,17 @@ impl TypeChecker {
                             return_types.push(member.clone());
                         } else if matches!(ret_ty, DeclaredType::SelfClass) {
                             // ADR 0083: `Self class` resolves to the metatype of
-                            // the concrete union member (was Dynamic pre-0083,
-                            // BT-1952). Use `resolve_name` so a singleton member
+                            // the concrete union member (was Dynamic pre-0083).
+                            // Use `resolve_name` so a singleton member
                             // yields `Symbol class` (`#foo class` is `Symbol` at
-                            // runtime), not a phantom `Meta("#foo")` (BT-2624).
+                            // runtime), not a phantom `Meta("#foo")`.
                             return_types.push(InferredType::meta(EcoString::from(resolve_name)));
                         } else if let DeclaredType::ClassOf(meta_class) = ret_ty
                             && hierarchy.has_class(meta_class)
                         {
                             // ADR 0083: an explicit `X class` return on a union
                             // member resolves to `Meta{X}` — mirrors the
-                            // non-union path (BT-2034). Without this branch the
+                            // non-union path. Without this branch the
                             // ` class` suffix leaked through as
                             // `Known("X class")`. An unregistered `X` falls
                             // through to the arms below (like the non-union
@@ -1029,10 +1028,10 @@ impl TypeChecker {
                             return_types.push(InferredType::meta(meta_class.clone()));
                         } else if matches!(ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
                         {
-                            // BT-1945: Bottom type for divergent methods
+                            // Bottom type for divergent methods
                             return_types.push(InferredType::Never);
                         } else {
-                            // BT-1857: Apply generic substitution for parameterised
+                            // Apply generic substitution for parameterised
                             // union members (e.g. Array(Integer) in a union).
                             let InferredType::Known { type_args, .. } = member else {
                                 unreachable!()
@@ -1043,14 +1042,14 @@ impl TypeChecker {
                                 type_args,
                                 &method.defined_in,
                             );
-                            // BT-1986 / BT-1992: also substitute nested `Self`
+                            // Also substitute nested `Self`
                             // (inside a generic) to the concrete member type
                             // (with type args), even when the substitution map
                             // is empty.
                             let has_nested_self = Self::declared_type_contains_self(ret_ty);
                             if !subst.is_empty() || has_nested_self {
-                                // BT-1992: thread the concrete member type under
-                                // the `Self` subst key (BT-3076, see
+                                // Thread the concrete member type under
+                                // the `Self` subst key (see
                                 // `resolve_declared_type`'s `SelfType` arm).
                                 return_types.push(type_resolver::resolve_declared_type(
                                     ret_ty,
@@ -1067,7 +1066,7 @@ impl TypeChecker {
                             {
                                 return_types.push(InferredType::Dynamic(DynamicReason::Unknown));
                             } else {
-                                // BT-2019 / BT-2017: Resolve through the
+                                // Resolve through the
                                 // centralised structured resolver to preserve
                                 // parametric type args (`List(String)` keeps
                                 // its element type) and resolve union return
@@ -1088,7 +1087,7 @@ impl TypeChecker {
                         arg_types,
                         hierarchy,
                     ) {
-                        // BT-2868: a `Boolean` union member responding to a
+                        // A `Boolean` union member responding to a
                         // solo `ifTrue:`/`ifFalse:` with no declared return
                         // type (by design) contributes `Boolean | R` instead
                         // of poisoning the whole union to `Dynamic` — mirrors
@@ -1102,13 +1101,13 @@ impl TypeChecker {
                 }
             } else {
                 missing_names.push(member_name.clone());
-                // BT-1871: Do NOT push Dynamic here — a non-responding member
+                // Do NOT push Dynamic here — a non-responding member
                 // should not widen the return type.  If *no* members respond,
                 // `union_of(&[])` returns Dynamic as a fallback.
             }
         }
 
-        // BT-1857 / BT-2017: If nil was in the union and at least one
+        // If nil was in the union and at least one
         // non-nil member responds, include nil's contribution to the return
         // type union.  If UndefinedObject responds to the selector (e.g.,
         // notNil, isNil, class), use its actual return type — this avoids
@@ -1152,10 +1151,10 @@ impl TypeChecker {
             // If UndefinedObject doesn't respond: no return-type widening.
         }
 
-        // BT-1857: Suppress DNU warnings when Dynamic is in the union —
+        // Suppress DNU warnings when Dynamic is in the union —
         // Dynamic accepts any message, so we can't know the full method set.
         if !missing_names.is_empty() && !has_dynamic {
-            // ADR 0100 Rule 1 (BT-3469): severity falls straight out of the
+            // ADR 0100 Rule 1: severity falls straight out of the
             // classify_receiver-derived counts above — "every non-nil member
             // is ClosedComplete and none responds" is the ADR's "provably
             // failing union" row (`Warning`); anything else (some member
@@ -1171,7 +1170,7 @@ impl TypeChecker {
                 Severity::Hint
             };
 
-            // BT-2066: render `UndefinedObject` as `Nil` for the union
+            // Render `UndefinedObject` as `Nil` for the union
             // display, shared by both branches below — every union DNU,
             // single- or multi-culprit, names the full union it was sent
             // to, not just the non-responding member(s).
@@ -1182,7 +1181,7 @@ impl TypeChecker {
             let union_display = member_names.join(" | ");
 
             if let [only_missing] = missing_names.as_slice() {
-                // BT-3469: the common one-culprit shape reuses the same
+                // The common one-culprit shape reuses the same
                 // diagnostic builder a bare receiver's DNU uses
                 // (`emit_unknown_selector_warning`) — identical message
                 // shape (plus the `(in union ...)` suffix every union DNU
@@ -1219,7 +1218,7 @@ impl TypeChecker {
                 // has no multi-subject mode — a per-member "did you mean"
                 // can't compose into that diagnostic's single hint field —
                 // so this stays its own combined-message construction.
-                // BT-2066: map the missing list through the same diagnostic
+                // Map the missing list through the same diagnostic
                 // rewriter as the union display above.
                 let missing_display: Vec<EcoString> = missing_names
                     .iter()
@@ -1243,7 +1242,7 @@ impl TypeChecker {
             }
         }
 
-        // BT-1857: If the union had Nil but all non-Nil members responded,
+        // If the union had Nil but all non-Nil members responded,
         // the return type is just the union of the non-Nil return types
         // (Nil was skipped, so it's not in return_types).
         InferredType::union_of(&return_types)

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Narrowing refinement (BT-3461).
+//! Narrowing refinement.
 //!
 //! Detection of a control-flow narrowing shape (`x isNil`, `x class = Foo`,
 //! …) lives in [`super::rules`] via [`super::detect`] — pure AST pattern
@@ -12,7 +12,7 @@
 //! hierarchy-and-protocol-aware set algebra (`intersect`/`difference`) for
 //! class tests.
 //!
-//! Split out of `inference.rs` (BT-3461, ADR 0106/0107): these methods are
+//! Split out of `inference.rs` (ADR 0106/0107): these methods are
 //! narrowing-specific refinement, not general expression type inference.
 
 use crate::ast::Expression;
@@ -29,7 +29,7 @@ use super::{ClassTestInfo, ClassTestKind, NarrowingInfo};
 impl TypeChecker {
     /// Detect control-flow narrowing from the receiver of `ifTrue:`/`ifFalse:`.
     ///
-    /// Dispatches through the [`super::rules::RULES`] table (BT-2050).
+    /// Dispatches through the [`super::rules::RULES`] table.
     /// Kept as a thin wrapper so existing test helpers that call
     /// `TypeChecker::detect_narrowing` stay working without import churn.
     pub(in crate::semantic_analysis::type_checker) fn detect_narrowing(
@@ -38,7 +38,7 @@ impl TypeChecker {
         super::detect(receiver)
     }
 
-    /// Detect `X notNil` as the receiver of `and:` (BT-2872).
+    /// Detect `X notNil` as the receiver of `and:`.
     ///
     /// Deliberately separate from the [`super::rules::RULES`] table:
     /// that table only fires for `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` and
@@ -72,7 +72,7 @@ impl TypeChecker {
 
     /// Refines a `respondsTo:` narrowing from `Dynamic` to a protocol type
     /// when the protocol registry is available and exactly one protocol
-    /// requires the tested selector (ADR 0068 Phase 2e, BT-1833).
+    /// requires the tested selector (ADR 0068 Phase 2e).
     ///
     /// If no protocol registry is set, or zero/multiple protocols match the
     /// selector, the narrowing is returned unchanged (stays `Dynamic`).
@@ -97,7 +97,7 @@ impl TypeChecker {
         info
     }
 
-    /// Refines a Result `isOk` / `ok` / `isError` narrowing (BT-1859).
+    /// Refines a Result `isOk` / `ok` / `isError` narrowing.
     ///
     /// When the variable has type `Result(T, E)`, both true and false branches
     /// keep the full `Result(T, E)` type — generic substitution already resolves
@@ -141,8 +141,7 @@ impl TypeChecker {
         info
     }
 
-    /// Refines a singleton (in)equality narrowing `x = #foo` / `#foo = x`
-    /// (BT-2617).
+    /// Refines a singleton (in)equality narrowing `x = #foo` / `#foo = x`.
     ///
     /// `detect` only sees the AST, so it leaves the branch types provisional
     /// and records the tested singleton in `singleton_eq`. Here we resolve the
@@ -152,7 +151,7 @@ impl TypeChecker {
     /// `#infinity` ⇒ `Integer`). For an inequality (`/=`, `=/=`) the two
     /// branches are swapped.
     ///
-    /// BT-2624 (item 1) / BT-2631: the "comparison can never be true / always
+    /// The "comparison can never be true / always
     /// true" hint for a statically decidable singleton test is *not* emitted
     /// here. A guarded comparison (`unionVar = #foo ifTrue: …`) has its receiver
     /// — the `=` send — inferred through `infer_message_send_with_receiver_ty`,
@@ -181,7 +180,7 @@ impl TypeChecker {
         // yields `intersect = Never` for the unreachable branch — the diagnostic
         // for that case is emitted separately by
         // `check_impossible_singleton_comparison`.
-        // Out of scope for narrowing (ADR 0102 §2 group 3 / BT-2743): singleton
+        // Out of scope for narrowing (ADR 0102 §2 group 3): singleton
         // narrowing never intersects with a protocol name, so `None` here.
         let holds = InferredType::intersect(
             &current_ty,
@@ -206,12 +205,12 @@ impl TypeChecker {
     }
 
     /// Refines a `class = C` / `isKindOf: C` narrowing (ADR 0102 §2 group 2,
-    /// §5, BT-2741, BT-2744).
+    /// §5).
     ///
     /// `detect` only sees the AST, so it records the tested class name in
     /// `class_test` and leaves `true_type` provisional. Here we resolve the
     /// variable's current type and delegate to the diagnostic-free
-    /// [`Self::compute_class_narrowing`] (BT-2825 factored this out so
+    /// [`Self::compute_class_narrowing`] (factored out so
     /// `Self::apply_early_return_narrowing` can reuse the same math without
     /// re-emitting the "comparison can never be true" hint below for a guard
     /// that was already fully type-checked), then reports that hint using
@@ -248,7 +247,7 @@ impl TypeChecker {
     }
 
     /// Pure narrowing math for a `class = C` / `isKindOf: C` test — no
-    /// diagnostics (BT-2825). Shared by [`Self::refine_class_narrowing`] (the
+    /// diagnostics. Shared by [`Self::refine_class_narrowing`] (the
     /// primary `ifTrue:`/`ifFalse:` dispatch site, which additionally emits
     /// the "comparison can never be true" hint) and
     /// `Self::apply_early_return_narrowing` (the guard-and-early-return
@@ -267,7 +266,7 @@ impl TypeChecker {
     /// hierarchy-unrelated class types the (unreachable) true branch `Never`
     /// (reported by the caller via `check_impossible_class_comparison`).
     ///
-    /// **Protocol collapse (BT-2825):** when `current` is a protocol (or a
+    /// **Protocol collapse:** when `current` is a protocol (or a
     /// union containing one) and `C` is an unrelated concrete class,
     /// `intersect` conservatively returns the irreducible `current & C`
     /// (ADR 0102 §1/§3) — sound for a *declared* `P1 & P2` annotation, but
@@ -285,8 +284,7 @@ impl TypeChecker {
     /// design, §5): `x :: Number; x isKindOf: Integer` false branch narrows
     /// to `Number \ Integer` (previously untouched — `false_type` stayed
     /// `None`, and `ifFalse:`/the else-arm of `ifTrue:ifFalse:` fell back to
-    /// no narrowing). `class =:=`'s false branch stays `None`, exactly as
-    /// before BT-2744.
+    /// no narrowing). `class =:=`'s false branch stays `None`.
     pub(in crate::semantic_analysis::type_checker) fn compute_class_narrowing(
         mut info: NarrowingInfo,
         current_ty: &InferredType,
@@ -299,7 +297,7 @@ impl TypeChecker {
         let pattern = InferredType::known(class_name.clone());
         info.true_type =
             Self::intersect_with_class(current_ty, &class_name, hierarchy, protocol_registry);
-        // BT-2744: only `isKindOf:`'s false branch can be narrowed via
+        // Only `isKindOf:`'s false branch can be narrowed via
         // nominal-class `difference` — `Negation{base, excluded}` always
         // excludes `excluded`'s *entire* subtree, which matches `isKindOf:`'s
         // negation ("not C and not any subclass of C") but not `class =:=`'s
@@ -319,9 +317,9 @@ impl TypeChecker {
     }
 
     /// `intersect(current, Known(class_name))`, collapsing a compound
-    /// `Intersection` result down to the bare nominal `class_name` (BT-2825)
+    /// `Intersection` result down to the bare nominal `class_name`
     /// — shared by `isKindOf:`/`class =` guard narrowing (above) and
-    /// `Pattern::Type` match-arm binding narrowing (BT-2855, ADR 0107), both
+    /// `Pattern::Type` match-arm binding narrowing (ADR 0107), both
     /// of which need the same "this value literally is `class_name`"
     /// true-branch collapse so downstream `is_assignable_to`/DNU checks see
     /// a plain nominal type rather than an `Intersection` they don't

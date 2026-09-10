@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `x isKindOf: ClassName` narrowing (BT-1573 Phase 1g).
+//! `x isKindOf: ClassName` narrowing.
 
 use crate::ast::{Expression, WellKnownSelector};
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType};
@@ -42,7 +42,7 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
         responded_selector: None,
         singleton_eq: None,
         // Subclass-inclusive — the false branch narrows via nominal-class
-        // `difference` (see `ClassTestKind`, BT-2744).
+        // `difference` (see `ClassTestKind`).
         class_test: Some(ClassTestInfo {
             class_name: name.name.clone(),
             kind: ClassTestKind::KindOf,

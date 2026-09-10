@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `x =:= #foo` / `#foo =:= x` singleton (in)equality narrowing (BT-2617),
-//! also accepting the loose-equality spellings `==`/`/=` (BT-3369).
+//! `x =:= #foo` / `#foo =:= x` singleton (in)equality narrowing,
+//! also accepting the loose-equality spellings `==`/`/=`.
 //!
 //! Detects an (in)equality test of a variable against a singleton symbol
 //! literal (`#foo`). `detect` only sees the AST, so it records the tested
@@ -51,7 +51,7 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
 }
 
 /// A singleton (in)equality test recovered from a binary send: the tested
-/// variable plus the recorded singleton/negation (BT-2617, BT-2631).
+/// variable plus the recorded singleton/negation.
 pub(crate) struct SingletonEqDetection {
     pub(crate) variable: EnvKey,
     pub(crate) info: SingletonEqInfo,
@@ -60,7 +60,7 @@ pub(crate) struct SingletonEqDetection {
 /// Recognises a singleton (in)equality test from the deconstructed binary send
 /// `lhs <op> rhs` (where `rhs` is `arguments.first()`). Reused by both the
 /// narrowing-guard path (via [`detect`]) and the standalone-send path
-/// (`infer_union_message_send`, BT-2631) so the operand-matching rule — accept
+/// (`infer_union_message_send`) so the operand-matching rule — accept
 /// `x =:= #foo` or `#foo =:= x`, reject `#a =:= #b` and non-singleton tests —
 /// lives in one place.
 pub(crate) fn detect_binary(
@@ -68,14 +68,14 @@ pub(crate) fn detect_binary(
     op: &EcoString,
     arguments: &[Expression],
 ) -> Option<SingletonEqDetection> {
-    // BT-3369: `==` (loose eq) is accepted alongside `=:=` (strict eq). For a
+    // `==` (loose eq) is accepted alongside `=:=` (strict eq). For a
     // symbol/atom literal operand, loose and strict equality are provably
     // equivalent in Erlang — they only diverge on numeric cross-type coercion
     // (`1 == 1.0`), which never applies to atoms — so treating them the same
     // here is sound, and matches `/=` (loose ineq) already being accepted
     // below.
     //
-    // BT-3462: `equality_operator_is_negated` is the single source for this
+    // `equality_operator_is_negated` is the single source for this
     // eq/ineq split, shared with the parser's own precedence table and the
     // type checker's universal equality-operator handling in `inference.rs`.
     let negated = equality_operator_is_negated(op.as_str())?;

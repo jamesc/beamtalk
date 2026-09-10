@@ -25,11 +25,11 @@ impl TypeChecker {
     /// substitution maps. Returns the resolved type, or `Dynamic` if
     /// the parameter cannot be resolved.
     ///
-    /// BT-2023(B): Handles nested generics (e.g., `List(E)`) by delegating to
+    /// Handles nested generics (e.g., `List(E)`) by delegating to
     /// [`type_resolver::resolve_declared_type`], which recursively
     /// resolves inner type params.
     ///
-    /// BT-3076: `param` is a structured [`DeclaredType`] rather than a raw
+    /// `param` is a structured [`DeclaredType`] rather than a raw
     /// string — the bare-name fast path (`method_subst` → `class_subst` →
     /// known-class → Dynamic) only ever matched a whole-string key anyway
     /// (a `Generic`'s rendered form like `"List(E)"` never appears as a
@@ -57,7 +57,7 @@ impl TypeChecker {
             // Unresolved type param — stay Dynamic
             return InferredType::Dynamic(DynamicReason::UnannotatedParam);
         }
-        // BT-2023(B): nested generics (e.g., `List(E)`) and every other
+        // Nested generics (e.g., `List(E)`) and every other
         // non-bare shape delegate to the shared substitution-context
         // resolver, which recursively resolves inner type params. Merge
         // `method_subst` over `class_subst` (method-local wins) to match
@@ -112,7 +112,7 @@ impl TypeChecker {
     /// Falls back to `build_substitution_map(receiver_class, type_args)` when
     /// `method_class == receiver_class` (no inheritance to compose through).
     ///
-    /// **References:** ADR 0068 Challenge 4 (BT-1577)
+    /// **References:** ADR 0068 Challenge 4
     pub(in crate::semantic_analysis::type_checker) fn build_inherited_substitution_map(
         hierarchy: &ClassHierarchy,
         receiver_class: &str,
@@ -201,7 +201,7 @@ impl TypeChecker {
                             // matching the current class's own subst keys —
                             // e.g. a param propagated through an edge case
                             // that didn't classify it as `ParamRef` at
-                            // construction time. Preserves the pre-BT-3076
+                            // construction time. Preserves
                             // lookup-by-whole-name behaviour exactly.
                             if let Some(resolved) = current_subst.get(name) {
                                 super_args.push(resolved.clone());
@@ -239,20 +239,20 @@ impl TypeChecker {
     /// `"GenResult(A, B), E"` → `["GenResult(A, B)", "E"]`
     ///
     /// Thin wrapper over the shared nesting-aware scanner
-    /// (`string_utils::split_top_level`, BT-3089) — kept as a method so the
+    /// (`string_utils::split_top_level`) — kept as a method so the
     /// many `Self::split_type_params` call sites in this module don't need
     /// to change.
     pub(in crate::semantic_analysis::type_checker) fn split_type_params(s: &str) -> Vec<&str> {
         crate::semantic_analysis::string_utils::split_top_level(s, ',')
     }
 
-    /// BT-1986: Does the declared type mention `Self` / `Self class`
+    /// Does the declared type mention `Self` / `Self class`
     /// *anywhere* in its tree (including, harmlessly, at the top level —
     /// callers reach this check only after already special-casing and
     /// returning on a bare top-level `Self`/`Self class`, so in practice
     /// this only ever fires for the *nested* case)?
     ///
-    /// BT-3076: walks the structured [`DeclaredType`] directly rather than
+    /// Walks the structured [`DeclaredType`] directly rather than
     /// substring-searching its rendered form.
     pub(in crate::semantic_analysis::type_checker) fn declared_type_contains_self(
         dt: &DeclaredType,
@@ -305,7 +305,7 @@ impl TypeChecker {
             let Some(param_type) = param_type_opt else {
                 continue;
             };
-            // BT-3076: this function's generic-param matching below is a
+            // This function's generic-param matching below is a
             // string-level split (`is_generic_type_param` / `split_generic_base`
             // over `&str`), not a `resolve_type_string` recursion — render the
             // structured `DeclaredType` once at the boundary (byte-identical to
@@ -317,7 +317,7 @@ impl TypeChecker {
                 continue;
             };
 
-            // BT-1834: Handle plain (non-parametric) type param parameters.
+            // Handle plain (non-parametric) type param parameters.
             // e.g., `inject: initial :: A` — if A is method-local, map it to the arg type.
             //
             // For a bare `A` parameter, `A` represents the *whole* argument type
@@ -340,13 +340,13 @@ impl TypeChecker {
             }
 
             // Handle any parametric type: TypeName(A, B, ...) parameter types.
-            // BT-2025: Parenthesis-aware split via the centralised helper.
+            // Parenthesis-aware split via the centralised helper.
             let (declared_base, declared_args_slice) =
                 type_resolver::split_generic_base(param_type);
             if let Some(inner) = declared_args_slice {
                 let declared_params = Self::split_type_params(inner);
 
-                // BT-2023(A): Normalise the arg type — if it's a nullable union
+                // Normalise the arg type — if it's a nullable union
                 // (e.g. `List(String) | Nil`), strip nil and try to unify with
                 // the non-nil member. This is the common "optional collection"
                 // shape that previously fell through to Dynamic.
@@ -393,10 +393,10 @@ impl TypeChecker {
     }
 
     /// Merge a new binding for a method-local type parameter, preferring Known
-    /// types over Dynamic (BT-2039) — except an *explicitly declared*
-    /// `Dynamic` binding (BT-2865), which is authoritative and always wins.
+    /// types over Dynamic — except an *explicitly declared*
+    /// `Dynamic` binding, which is authoritative and always wins.
     ///
-    /// BT-2039: When the same type parameter appears in multiple argument
+    /// When the same type parameter appears in multiple argument
     /// positions (e.g. `Block(R) Block(R) -> R` in `ifTrue:ifFalse:`), a
     /// last-wins `insert` could collapse a Known return type to
     /// `Dynamic(UntypedFfi)` whenever one branch was an untyped FFI call.
@@ -410,7 +410,7 @@ impl TypeChecker {
     /// `Dynamic` bindings observed in real code are `UnannotatedParam`,
     /// `Unknown`, etc., not specifically `UntypedFfi`/`DynamicSpec`).
     ///
-    /// BT-2865: `DynamicReason::ExplicitDynamic` means the *opposite* — the
+    /// `DynamicReason::ExplicitDynamic` means the *opposite* — the
     /// author wrote `Dynamic` in a type annotation (e.g. `T` in `Result(
     /// Dynamic, Error)`), so `okBlock :: Block(T, R)`'s inferred return is
     /// genuinely, deliberately `Dynamic`. That must survive being unified
