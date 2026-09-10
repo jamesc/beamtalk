@@ -546,19 +546,10 @@ impl CoreErlangGenerator {
             let mut fields: Vec<&String> = analysis.field_writes.iter().collect();
             fields.sort_unstable();
             let field = fields[0];
-            let field_capitalized = {
-                let mut chars = field.chars();
-                chars
-                    .next()
-                    .map(|c| c.to_uppercase().to_string())
-                    .unwrap_or_default()
-                    + chars.as_str()
-            };
-            return Err(CodeGenError::FieldAssignmentInUnsupportedBlock {
-                field: field.clone(),
-                field_capitalized,
-                location: location(),
-            });
+            return Err(CodeGenError::field_assignment_in_unsupported_block(
+                field,
+                location(),
+            ));
         }
 
         // WARNING: Local mutations in stored closures won't work as expected

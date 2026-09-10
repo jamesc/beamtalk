@@ -302,6 +302,29 @@ pub enum CodeGenError {
 }
 
 impl CodeGenError {
+    /// BT-3488: builds a [`CodeGenError::FieldAssignmentInUnsupportedBlock`]
+    /// from just the field name and location, deriving `field_capitalized`
+    /// (the `addTo{Field}:` method suggestion in the message) here.
+    ///
+    /// The single place that capitalization happens, shared by both producers
+    /// of this error — `validate_stored_closure` (the generic stored/opaque
+    /// block path, BT-2792) and `reject_unthreadable_value_self_field_write` (the
+    /// value-type-write-inside-a-loop-body path) — so the two can't drift
+    /// (CLAUDE.md's no-duplicate-implementations rule).
+    pub(super) fn field_assignment_in_unsupported_block(field: &str, location: String) -> Self {
+        let mut chars = field.chars();
+        let field_capitalized = chars
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_default()
+            + chars.as_str();
+        CodeGenError::FieldAssignmentInUnsupportedBlock {
+            field: field.to_string(),
+            field_capitalized,
+            location,
+        }
+    }
+
     /// Returns the source span associated with this error, if any.
     ///
     /// Consumers with source text can use this for rich error formatting:

@@ -103,6 +103,20 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // threading) and through a conditional's branch-merge tuple (mirroring
   // BT-3159's `ClassVars` slot) — so both cells run their ground-truth
   // asserts. Kept as a switch for documentation/bisection.
+  //
+  // BT-3488 closed the remaining gap that BT-3484's threading did NOT cover,
+  // and closed it by REJECTION rather than by support: a `self.field :=` write
+  // that is not a bare top-level statement of the loop body — nested inside an
+  // `ifTrue:`/`ensure:` branch, or anywhere in a `Foldl*` (`do:`/`collect:`)
+  // body — is now a clean compile error carrying the same "Cannot assign to
+  // field ... inside this block" text the identical class-var shape already
+  // produced, instead of an erlc `unbound variable 'State'` crash or a
+  // silently dropped mutation. That is why no axis-4 fragment below nests its
+  // write inside a conditional: such a fragment would no longer compile, so
+  // the shape is pinned at the Rust level instead (see
+  // `crates/beamtalk-codegen/src/core_erlang/tests/control_flow.rs`,
+  // `test_value_type_field_write_in_conditional_nested_in_loop_is_compile_error`
+  // and its neighbours) where a compile error can actually be asserted.
   bt3484ValueTypeFieldWriteThreadingPending => false
 
   // Pending switch for BT-3486: on:do:/ensure: is a third construct family
