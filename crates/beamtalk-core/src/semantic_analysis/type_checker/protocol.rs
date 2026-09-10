@@ -553,7 +553,7 @@ impl TypeChecker {
                 self.alias_registry.as_ref(),
             );
         self.referenced_aliases.extend(alias_deps);
-        let declared_type = Self::inferred_type_to_string(&resolved_declared);
+        let declared_type = resolved_declared.display_annotation();
         let mut env = TypeEnv::new();
         env.set_local("self", InferredType::known(class.name.name.clone()));
         // BT-3469 (item 3): documented, without fixing, as the same
@@ -571,7 +571,7 @@ impl TypeChecker {
         };
 
         // Build a full type string for the value type to compare with declared
-        let value_type_str = Self::inferred_type_to_string(&inferred);
+        let value_type_str = inferred.display_annotation();
         if !Self::is_assignable_to_with_variance(
             &value_type_str,
             &declared_type,
@@ -594,68 +594,6 @@ impl TypeChecker {
                     "Default value type {value_display} is not compatible with {declared_display}"
                 )),
             );
-        }
-    }
-
-    /// Convert an `InferredType` to its string representation for variance checking.
-    pub(super) fn inferred_type_to_string(ty: &InferredType) -> EcoString {
-        match ty {
-            InferredType::Known {
-                class_name,
-                type_args,
-                ..
-            } => {
-                if type_args.is_empty() {
-                    class_name.clone()
-                } else {
-                    let args: Vec<String> = type_args
-                        .iter()
-                        .map(|a| Self::inferred_type_to_string(a).to_string())
-                        .collect();
-                    EcoString::from(format!("{}({})", class_name, args.join(", ")))
-                }
-            }
-            // Metatype renders as the source spelling `C class` (ADR 0083),
-            // matching `InferredType::display_*`.
-            InferredType::Meta { class_name, .. } => EcoString::from(format!("{class_name} class")),
-            InferredType::Dynamic(_) => EcoString::from("Dynamic"),
-            InferredType::Never => EcoString::from("Never"),
-            InferredType::Union { members, .. } => EcoString::from(
-                members
-                    .iter()
-                    .map(|m| Self::inferred_type_to_string(m).to_string())
-                    .collect::<Vec<_>>()
-                    .join(" | "),
-            ),
-            // Negation renders as `base \ excluded` (ADR 0102), matching
-            // `InferredType::display_*`. Parenthesise a union excluded so
-            // `\` vs `|` precedence is unambiguous (`Symbol \ (#a | #b)`).
-            InferredType::Negation { base, excluded, .. } => {
-                let base_str = Self::inferred_type_to_string(base);
-                let excl_str = Self::inferred_type_to_string(excluded);
-                if matches!(excluded.as_ref(), InferredType::Union { .. }) {
-                    EcoString::from(format!("{base_str} \\ ({excl_str})"))
-                } else {
-                    EcoString::from(format!("{base_str} \\ {excl_str}"))
-                }
-            }
-            // Intersection renders as `A & B & …` (ADR 0102/BT-2743), matching
-            // `InferredType::display_*`. A union member is only reachable via
-            // explicit grouping; parenthesise to preserve meaning.
-            InferredType::Intersection { members, .. } => EcoString::from(
-                members
-                    .iter()
-                    .map(|m| {
-                        let rendered = Self::inferred_type_to_string(m);
-                        if matches!(m, InferredType::Union { .. }) {
-                            format!("({rendered})")
-                        } else {
-                            rendered.to_string()
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" & "),
-            ),
         }
     }
 
@@ -760,9 +698,7 @@ impl TypeChecker {
                                             if let InferredType::Known { type_args, .. } = arg_type
                                             {
                                                 if !type_args.is_empty() {
-                                                    let arg_str = Self::inferred_type_to_string(
-                                                        &arg_type.clone(),
-                                                    );
+                                                    let arg_str = arg_type.display_annotation();
                                                     if !Self::is_assignable_to_with_variance(
                                                         &arg_str,
                                                         expected_ty,
