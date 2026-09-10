@@ -943,10 +943,25 @@ export class WorkspaceTreeDataProvider
     return item;
   }
 
+  /**
+   * Whether `beamtalk.openClassSource`/`navigateToMethod`/`navigateToStateVar`
+   * can find something to open for this class. The runtime never reports a
+   * real `source_file` for compiled-in stdlib classes, but those commands
+   * fall back to the LSP's `beamtalk-stdlib://` virtual URI scheme
+   * (`openStdlibDocumentForClass` in extension.ts) whenever `source_origin`
+   * is `"stdlib"` — so a plain `source_file` check alone under-reports
+   * navigability and leaves stdlib rows (direct or inherited) inert.
+   */
+  private _hasNavigableSource(info: ClassInfo): boolean {
+    return (
+      (!!info.source_file && info.source_file !== "unknown") || info.source_origin === "stdlib"
+    );
+  }
+
   private _classItem(node: ClassItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.info.name, vscode.TreeItemCollapsibleState.Collapsed);
     item.iconPath = new vscode.ThemeIcon("symbol-class");
-    const hasSource = !!node.info.source_file && node.info.source_file !== "unknown";
+    const hasSource = this._hasNavigableSource(node.info);
     item.contextValue = hasSource ? "class-item" : "class-item-no-source";
     if (node.info.actor_count !== undefined && node.info.actor_count > 0) {
       item.description = `${node.info.actor_count} instance${node.info.actor_count !== 1 ? "s" : ""}`;
@@ -1051,7 +1066,7 @@ export class WorkspaceTreeDataProvider
       return item;
     }
     item.iconPath = new vscode.ThemeIcon("symbol-method");
-    const hasSource = !!node.classInfo.source_file && node.classInfo.source_file !== "unknown";
+    const hasSource = this._hasNavigableSource(node.classInfo);
     item.contextValue = hasSource ? "method-item" : "method-item-no-source";
     if (node.definingClass) {
       item.description = node.definingClass;
@@ -1080,7 +1095,7 @@ export class WorkspaceTreeDataProvider
   private _stateVarItem(node: StateVarItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.stateVar.name, vscode.TreeItemCollapsibleState.None);
     item.iconPath = new vscode.ThemeIcon("symbol-field");
-    const hasSource = !!node.classInfo.source_file && node.classInfo.source_file !== "unknown";
+    const hasSource = this._hasNavigableSource(node.classInfo);
     item.contextValue = hasSource ? "state-item" : "state-item-no-source";
     if (hasSource) {
       item.command = {
