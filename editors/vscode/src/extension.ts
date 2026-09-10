@@ -263,7 +263,7 @@ class StdlibContentProvider implements vscode.TextDocumentContentProvider {
  * possible, or the guessed file doesn't exist — callers should fall back to
  * their normal "source not available" handling.
  */
-async function openStdlibDocumentForClass(
+export async function openStdlibDocumentForClass(
   classInfo: ClassInfo
 ): Promise<vscode.TextDocument | undefined> {
   if (classInfo.source_origin !== "stdlib" || !client) return undefined;
@@ -1027,6 +1027,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   workspaceTreeProvider = new WorkspaceTreeDataProvider();
   context.subscriptions.push(workspaceTreeProvider);
+  // Lets sidebar hover tooltips (resolveTreeItem) read source for stdlib
+  // classes too, via the same beamtalk-stdlib:// virtual URI fallback
+  // navigation already uses — without it, a stdlib-defined class or a method/
+  // state var inherited from one never has a real source_file to read a doc
+  // comment from, and the hover always falls back to hardcoded metadata.
+  workspaceTreeProvider.setStdlibDocumentOpener(openStdlibDocumentForClass);
 
   // Restore the "Classes" filter from the last session in this workspace, if any.
   const persistedClassFilter = context.workspaceState.get<ClassOrigin[]>(CLASS_FILTER_STATE_KEY);

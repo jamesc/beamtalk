@@ -201,6 +201,18 @@ export class WorkspaceTreeDataProvider
     this._onDidChangeTreeData.event;
 
   private client: WorkspaceClient | null = null;
+  /**
+   * Opens a stdlib class's source via the LSP's `beamtalk-stdlib://` virtual
+   * URI scheme (`openStdlibDocumentForClass` in extension.ts), injected at
+   * activation since it needs the `LanguageClient`, not the workspace
+   * protocol `client` above. Without this, every hover/doc-comment lookup
+   * for a class whose `source_file` the runtime never tracks (all
+   * compiled-in stdlib classes) has nothing to read and falls straight to
+   * the hardcoded fallback tooltip — see `_resolveClassDocument`.
+   */
+  private stdlibDocumentOpener:
+    | ((classInfo: ClassInfo) => Promise<vscode.TextDocument | undefined>)
+    | null = null;
   private connectionState: ConnectionState = "disconnected";
   private bindings: BindingsMap = {};
   private actors: ActorInfo[] = [];
@@ -266,6 +278,18 @@ export class WorkspaceTreeDataProvider
    * the session's variables rather than the extension's own (empty) session.
    * Pass null to clear (e.g. when the session terminal is closed).
    */
+  /**
+   * Inject the stdlib virtual-URI document opener (see `stdlibDocumentOpener`
+   * above). Pass null to clear. Independent of `setClient`/the workspace
+   * protocol connection — it only needs the LSP `LanguageClient`, which
+   * extension.ts wires up once at activation.
+   */
+  setStdlibDocumentOpener(
+    opener: ((classInfo: ClassInfo) => Promise<vscode.TextDocument | undefined>) | null
+  ): void {
+    this.stdlibDocumentOpener = opener;
+  }
+
   setSessionId(id: string | null): void {
     const wasAttached = this.sessionId !== null;
     this.sessionId = id;
@@ -584,7 +608,7 @@ export class WorkspaceTreeDataProvider
   ): Promise<vscode.TreeItem | undefined> {
     if (element.kind === "class-item") {
       item.tooltip =
-        (await this._lspHoverTooltip(element.info.source_file, element.info.name, "class")) ??
+        (await this._lspHoverTooltip(element.info, element.info.name, "class")) ??
         this._classTooltipFallback(element.info);
       return item;
     }
@@ -608,7 +632,7 @@ export class WorkspaceTreeDataProvider
       }
       item.tooltip = this._appendDefiningClass(
         (await this._lspHoverTooltip(
-          element.classInfo.source_file,
+          element.classInfo,
           element.method.selector,
           element.method.side === "class" ? "class-method" : "method",
           { side: element.method.side, declaredLine: element.method.line }
@@ -626,16 +650,47 @@ export class WorkspaceTreeDataProvider
     return undefined;
   }
 
+  /**
+   * Open the document a class's source lives in, for hover/doc-comment
+   * lookups. Tries the real `source_file` first; falls back to the injected
+   * `stdlibDocumentOpener` (the `beamtalk-stdlib://` virtual URI scheme) for
+   * compiled-in stdlib classes, which the runtime never records a real
+   * `source_file` for — the same fallback `_hasNavigableSource`/
+   * `beamtalk.openClassSource` already use for navigation. Every hover path
+   * below (`_lspHoverTooltip`, `_methodDocCommentTooltip`, `_stateVarTooltip`)
+   * goes through this, so a stdlib-defined class or a method/state var
+   * inherited from one gets the same doc-comment treatment as a local one —
+   * previously they fell straight to the hardcoded fallback tooltip.
+   */
+  private async _resolveClassDocument(
+    classInfo: ClassInfo
+  ): Promise<vscode.TextDocument | undefined> {
+    const sourceFile = classInfo.source_file;
+    if (sourceFile && sourceFile !== "unknown") {
+      try {
+        return await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
+      } catch {
+        return undefined;
+      }
+    }
+    if (!this.stdlibDocumentOpener) return undefined;
+    try {
+      return await this.stdlibDocumentOpener(classInfo);
+    } catch {
+      return undefined;
+    }
+  }
+
   private async _lspHoverTooltip(
-    sourceFile: string | undefined,
+    classInfo: ClassInfo,
     symbol: string,
     kind: "class" | "method" | "class-method",
     decl?: { side?: "instance" | "class"; declaredLine?: number }
   ): Promise<vscode.MarkdownString | undefined> {
-    if (!sourceFile || sourceFile === "unknown") return undefined;
     try {
-      const uri = vscode.Uri.file(sourceFile);
-      const doc = await vscode.workspace.openTextDocument(uri);
+      const doc = await this._resolveClassDocument(classInfo);
+      if (!doc) return undefined;
+      const uri = doc.uri;
 
       // Fast path: locate the declaration the same way `navigateToMethod` /
       // `navigateToStateVar` already do (BT-3439's real-line-first, then
@@ -772,10 +827,9 @@ export class WorkspaceTreeDataProvider
   private async _methodDocCommentTooltip(
     element: MethodItemNode
   ): Promise<vscode.MarkdownString | undefined> {
-    const sourceFile = element.classInfo.source_file;
-    if (!sourceFile || sourceFile === "unknown") return undefined;
     try {
-      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
+      const doc = await this._resolveClassDocument(element.classInfo);
+      if (!doc) return undefined;
       const comment = extractMethodDocComment(
         doc.getText(),
         element.method.selector,
@@ -796,10 +850,9 @@ export class WorkspaceTreeDataProvider
   private async _stateVarTooltip(element: StateVarItemNode): Promise<vscode.MarkdownString> {
     const { classInfo, stateVar } = element;
     const fallback = new vscode.MarkdownString(`**${stateVar.name}**\n\n_state variable_`);
-    if (!classInfo.source_file || classInfo.source_file === "unknown") return fallback;
     try {
-      const uri = vscode.Uri.file(classInfo.source_file);
-      const doc = await vscode.workspace.openTextDocument(uri);
+      const doc = await this._resolveClassDocument(classInfo);
+      if (!doc) return fallback;
       const text = doc.getText();
       const info = extractStateVarInfo(text, stateVar.name);
       const docComment = extractStateVarDocComment(text, stateVar.name);
