@@ -29,17 +29,17 @@ use std::sync::Arc;
 
 #[cfg(any(test, feature = "test"))]
 thread_local! {
-    /// BT-3123 test-only instrumentation: counts calls to
-    /// [`TypeChecker::check_module`] — the actual full type-checking pass (the
-    /// costly operation the issue's "runs twice per file" complaint is about).
-    /// Used by a codegen test to verify that a driver threading an
+    /// Test-only instrumentation: counts calls to
+    /// [`TypeChecker::check_module`] — the actual full type-checking pass (a
+    /// costly operation to run twice per file). Used by a codegen test to
+    /// verify that a driver threading an
     /// `AnalysisResult` into codegen via `CodegenOptions::with_analysis` doesn't
     /// trigger a second pass. `#[cfg(any(test, feature = "test"))]` — compiled
     /// out of plain release/production builds, so it has no runtime cost or
-    /// behavioural effect there. BT-3362 (ADR 0117 Decision step 5): widened
-    /// from `#[cfg(test)]` — the codegen test that reads this now lives in the
-    /// standalone `beamtalk-codegen` crate, whose own tests need the
-    /// `feature = "test"` half to see it (`#[cfg(test)]` alone only applies to
+    /// behavioural effect there (ADR 0117 Decision step 5): the
+    /// `feature = "test"` half exists because the codegen test that reads
+    /// this lives in the standalone `beamtalk-codegen` crate, whose own
+    /// tests need it to see this (`#[cfg(test)]` alone only applies to
     /// this crate's own `--cfg test` build).
     ///
     /// Thread-local (not a shared global counter): `cargo test` runs many tests
@@ -60,9 +60,9 @@ mod narrowing;
 pub mod native_type_registry;
 pub mod native_types;
 mod protocol;
-// BT-3361 (ADR 0117 Decision step 5): widened from `pub(crate)` —
+// `pub`, not `pub(crate)` (ADR 0117 Decision step 5) —
 // `hover_tier_label` is reached by `beamtalk-language-service`'s
-// `queries::hover_provider` from the standalone crate now.
+// `queries::hover_provider` from the standalone crate.
 pub mod sendability;
 #[cfg(test)]
 mod tests;
@@ -302,7 +302,7 @@ impl CoverageReport {
 /// This is the main entry point for LSP providers that need type information
 /// at specific positions (hover, completions).
 ///
-/// BT-2867: `native_type_registry` (ADR 0075), when `Some`, lets `(Erlang m)
+/// `native_type_registry` (ADR 0075), when `Some`, lets `(Erlang m)
 /// f:` calls resolve to their typed return instead of `Dynamic(UntypedFfi)`,
 /// and lets everything downstream of such a call (e.g. `x := (Erlang m) f:.
 /// x bar`) see `x`'s real type too — not just the FFI call site itself.
@@ -324,7 +324,7 @@ pub fn infer_types(
 
 /// Key for method return type map: (`ClassName`, Selector, `IsClassMethod`)
 ///
-/// Used by the return-type writeback pass (BT-1005) to track inferred return
+/// Used by the return-type writeback pass to track inferred return
 /// types for each method before writing them back into the AST.
 pub type MethodReturnKey = (EcoString, EcoString, bool);
 
@@ -334,14 +334,14 @@ pub type MethodReturnKey = (EcoString, EcoString, bool);
 /// `Dynamic` types are omitted from the map (absence = dynamic, no annotation
 /// written back).
 ///
-/// This is used by the return-type writeback pass (BT-1005, ADR 0045 Phase 1b)
+/// This is used by the return-type writeback pass (ADR 0045 Phase 1b)
 /// before codegen so that unannotated user-defined methods appear in the emitted
 /// `method_return_types` map, enabling REPL expression completion.
 ///
-/// BT-2022: The map now stores [`InferredType`] instead of bare `EcoString` so
+/// The map stores [`InferredType`] rather than bare `EcoString` so
 /// that generic type arguments (e.g., `List(String)`) are preserved through
 /// the inference cache and available to callers for full type comparison.
-/// BT-2867: see [`infer_types`]'s doc comment for `native_type_registry`.
+/// See [`infer_types`]'s doc comment for `native_type_registry`.
 #[must_use]
 pub fn infer_method_return_types(
     module: &Module,
@@ -363,7 +363,7 @@ pub fn infer_method_return_types(
 /// [`TypeMap`] (for hover/completion position types) and method return types
 /// (for hierarchy enrichment). Using this avoids the double-pass previously
 /// required by calling [`infer_method_return_types`] followed by [`infer_types`].
-/// BT-2867: see [`infer_types`]'s doc comment for `native_type_registry`.
+/// See [`infer_types`]'s doc comment for `native_type_registry`.
 #[must_use]
 pub fn infer_types_and_returns(
     module: &Module,
@@ -379,7 +379,7 @@ pub fn infer_types_and_returns(
 }
 
 /// [`infer_types_and_returns`], additionally threading a type alias registry
-/// (ADR 0108, BT-2897) so a `Simple` annotation naming a registered alias
+/// (ADR 0108) so a `Simple` annotation naming a registered alias
 /// (e.g. `policy :: RestartStrategy`) resolves to its structural expansion —
 /// tagged with the alias's display name (see [`TypeProvenance::Aliased`]) —
 /// instead of an unresolved nominal class.
@@ -435,7 +435,7 @@ pub struct TypeChecker {
     /// requires the tested selector. Set by `check_module_with_protocols`
     /// before running the main type checking pass.
     pub(super) protocol_registry: Option<ProtocolRegistry>,
-    /// Type alias registry (ADR 0108 Phase 2, BT-2895).
+    /// Type alias registry (ADR 0108 Phase 2).
     ///
     /// When set, [`super::type_resolver::resolve_type_annotation`] expands a
     /// `Simple` annotation naming a registered alias to its declared
@@ -446,7 +446,7 @@ pub struct TypeChecker {
     /// nominal class, matching pre-ADR-0108 behaviour.
     pub(super) alias_registry: Option<AliasRegistry>,
     /// Every alias name touched while resolving an annotation during this
-    /// check (ADR 0108 hot-reload re-check trigger, BT-2899).
+    /// check (ADR 0108 hot-reload re-check trigger).
     ///
     /// Populated by every production call site that resolves a
     /// [`super::type_resolver::resolve_type_annotation`]-shaped annotation
@@ -466,7 +466,7 @@ pub struct TypeChecker {
     /// abstract code at build time.
     pub(super) native_type_registry: Option<Arc<NativeTypeRegistry>>,
     /// When set, the type checker is processing a `typed` class and should
-    /// emit warnings for expressions that infer as Dynamic (ADR 0077, BT-1914).
+    /// emit warnings for expressions that infer as Dynamic (ADR 0077).
     ///
     /// The value is the class name, used in the diagnostic message.
     pub(super) typed_class_context: Option<EcoString>,
@@ -536,7 +536,7 @@ impl TypeChecker {
         self.native_type_registry = Some(registry.into());
     }
 
-    /// Sets the type alias registry (ADR 0108, BT-2897) for the *base*
+    /// Sets the type alias registry (ADR 0108) for the *base*
     /// [`Self::check_module`] pass — a lighter-weight alternative to
     /// [`Self::check_module_with_protocols_and_aliases`] for callers (e.g.
     /// hover) that only need alias-aware `resolve_type_annotation` (so
@@ -586,7 +586,7 @@ impl TypeChecker {
     }
 
     /// Takes ownership of the alias names referenced during this check (ADR
-    /// 0108 hot-reload re-check trigger, BT-2899), leaving an empty set — see
+    /// 0108 hot-reload re-check trigger), leaving an empty set — see
     /// the `referenced_aliases` field's own doc for what "referenced" means
     /// here (the full transitive expansion walk, not just outermost written
     /// names).
@@ -620,7 +620,7 @@ impl TypeChecker {
     }
 
     /// [`Self::check_module_with_protocols`], additionally threading a type
-    /// alias registry (ADR 0108 Phase 2, BT-2895) so annotations referencing
+    /// alias registry (ADR 0108 Phase 2) so annotations referencing
     /// a `type Name = ...` declaration resolve to their structural expansion
     /// everywhere `resolve_type_annotation` is consulted during the main
     /// type-checking pass (parameter types, return types, typed local
@@ -634,10 +634,10 @@ impl TypeChecker {
         protocol_registry: &ProtocolRegistry,
         alias_registry: &AliasRegistry,
     ) {
-        // Store protocol registry for respondsTo: narrowing (BT-1833).
+        // Store protocol registry for respondsTo: narrowing.
         // This allows detect_narrowing to refine Dynamic → protocol type.
         self.protocol_registry = Some(protocol_registry.clone());
-        // ADR 0108 / BT-2895: store the alias table for the duration of this
+        // ADR 0108: store the alias table for the duration of this
         // whole method (unlike `protocol_registry`, which the Phase 2b/2d/2f
         // passes below take as a direct parameter and so don't need it on
         // `self`) — `check_type_param_bounds_in_module` reads
@@ -654,8 +654,8 @@ impl TypeChecker {
         // the `protocol_registry` parameter directly, not `self`.
         self.protocol_registry = None;
 
-        // Phase 2a (ADR 0108 hot-reload re-check trigger, BT-2899 / BT-2917
-        // follow-up): record every alias name a protocol's own declared
+        // Phase 2a (ADR 0108 hot-reload re-check trigger): record every
+        // alias name a protocol's own declared
         // method signatures transitively depend on. Protocol method
         // signatures have no body, so the main `check_module` pass above —
         // which normally records `referenced_aliases` while resolving a
@@ -682,7 +682,7 @@ impl TypeChecker {
         // (e.g., `Array(Integer)`), check covariance for sealed Value classes.
         self.check_generic_variance_in_module(module, hierarchy, protocol_registry);
 
-        // ADR 0108 / BT-2895: clear the alias table now that every phase
+        // ADR 0108: clear the alias table now that every phase
         // that consults it has run.
         self.alias_registry = None;
     }
@@ -694,7 +694,7 @@ impl Default for TypeChecker {
     }
 }
 
-/// Describes where a variable got its type (BT-1588).
+/// Describes where a variable got its type.
 ///
 /// Used to generate "variable has type X because ..." notes in diagnostics.
 #[derive(Debug, Clone)]
@@ -708,14 +708,14 @@ struct TypeOrigin {
 
 /// Type environment for tracking variable → type mappings.
 ///
-/// Keyed by [`EnvKey`] (BT-2062) so that `self.field` bindings used by
+/// Keyed by [`EnvKey`] so that `self.field` bindings used by
 /// narrowing are distinguishable from locals at the type level — no string
 /// convention, no prefix-stripping at call sites. Supports nested scopes via
 /// `child()` which clones the parent env.
 #[derive(Debug, Clone)]
 struct TypeEnv {
     bindings: HashMap<EnvKey, InferredType>,
-    /// Where each variable got its type (BT-1588).
+    /// Where each variable got its type.
     origins: HashMap<EnvKey, TypeOrigin>,
     /// Whether we're inside a class method body (self refers to class-side).
     in_class_method: bool,
@@ -759,7 +759,7 @@ impl TypeEnv {
         self.origins.remove(key);
     }
 
-    /// Set a variable's type with origin tracking (BT-1588).
+    /// Set a variable's type with origin tracking.
     fn set_with_origin(
         &mut self,
         key: EnvKey,
@@ -782,7 +782,7 @@ impl TypeEnv {
         self.clone()
     }
 
-    /// Push a narrowing refinement into this environment (BT-2050).
+    /// Push a narrowing refinement into this environment.
     ///
     /// Semantically this writes the refined type to the variable binding. The
     /// [`Scope`](narrowing::refinement::Scope) on the layer describes how

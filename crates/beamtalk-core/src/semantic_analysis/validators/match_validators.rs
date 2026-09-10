@@ -5,16 +5,16 @@
 //!
 //! **DDD Context:** Semantic Analysis
 //!
-//! Validates pattern match exhaustiveness for sealed types (BT-1299).
+//! Validates pattern match exhaustiveness for sealed types.
 
 use crate::ast::{Expression, Identifier, Module, Pattern};
 use crate::ast_walker::walk_module;
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
-// ── BT-1299: Match exhaustiveness for sealed types ────────────────────────────
+// ── Match exhaustiveness for sealed types ─────────────────────────────────────
 
-/// BT-1299: Error when a `match:` on a sealed type omits a known constructor
+/// Error when a `match:` on a sealed type omits a known constructor
 /// variant and has no wildcard arm.
 ///
 /// Only applies to stdlib sealed types with a known complete variant set
@@ -49,7 +49,7 @@ fn sealed_type_all_constructors(class: &str) -> Option<&'static [&'static str]> 
     }
 }
 
-/// Visitor for match exhaustiveness (BT-1299).
+/// Visitor for match exhaustiveness.
 fn visit_match_exhaustiveness(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     let Expression::Match { arms, span, .. } = expr else {
         return;
@@ -181,11 +181,11 @@ fn visit_assignment_in_match_arm(expr: &Expression, diagnostics: &mut Vec<Diagno
     }
 }
 
-// ── BT-2854 / ADR 0107 Phase A: `Pattern::Type` class validation ───────────
+// ── ADR 0107 Phase A: `Pattern::Type` class validation ──────────────────────
 
 /// Stdlib primitives ADR 0107 Phase A explicitly names as supported
 /// `Pattern::Type` classes (Decision §Phase A scope), each with its own
-/// dedicated BIF-test codegen strategy once BT-2855 lands.
+/// dedicated BIF-test codegen strategy once bindings/narrowing codegen lands.
 ///
 /// These are exempted from the general hierarchy-based leaf check below:
 /// several of them are *nominally* non-leaf in `ClassHierarchy` for reasons
@@ -210,7 +210,7 @@ const PHASE_A_PRIMITIVE_CLASSES: &[&str] = &[
     "Symbol",
 ];
 
-/// BT-2856 / ADR 0107 Phase A: is `class_name` a concrete, exhaustively
+/// ADR 0107 Phase A: is `class_name` a concrete, exhaustively
 /// enumerable leaf class in the exact sense `Pattern::Type` patterns already
 /// require — the identical leaf check `validate_type_pattern_class`'s
 /// "has subclasses" compile error enforces below, factored out so the
@@ -242,14 +242,14 @@ pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarch
     hierarchy.direct_subclasses(class_name).is_empty()
 }
 
-/// BT-2854 / ADR 0107 Phase A: validate the class name in every
+/// ADR 0107 Phase A: validate the class name in every
 /// `Pattern::Type` (`binding :: ClassName`) arm of a `match:` expression,
 /// including type patterns nested inside container patterns (`Tuple`,
 /// `Array`, `List`, `Map`, `Constructor` keywords) — a `Pattern::Type` can
 /// appear anywhere a sub-pattern can, not just as an arm's top-level pattern.
 ///
 /// This is purely a semantic-analysis-stage check — `Pattern::Type` has no
-/// codegen yet (that lands with bindings/narrowing in BT-2855), so there is
+/// codegen yet (that lands with bindings/narrowing codegen), so there is
 /// nothing to gate at codegen time. Three checks, in order:
 ///
 /// - **`Character`** is never accepted, known or not: it shares `Integer`'s
@@ -400,12 +400,12 @@ fn validate_type_pattern_class(
         return;
     }
 
-    // `Nil` is a legacy alias for the nil class (`UndefinedObject`, BT-2016)
+    // `Nil` is a legacy alias for the nil class (`UndefinedObject`)
     // recognised in annotation position (`structural_validators`'s
     // `BUILTIN_CLASS_NAMES`), but — unlike `UndefinedObject` itself — it has
     // no entry in `ClassHierarchy` to resolve against, so it would
     // otherwise trip the unresolved-class check below despite being a
-    // codegen-supported (BT-2855, `generate_type_pattern`'s exact-atom-match
+    // codegen-supported (`generate_type_pattern`'s exact-atom-match
     // branch), always-valid type-pattern class name.
     if class_name == "Nil" {
         return;
@@ -430,21 +430,20 @@ fn validate_type_pattern_class(
         return;
     }
 
-    // BT-2870: `Supervisor`/`DynamicSupervisor` subclasses reference a
+    // `Supervisor`/`DynamicSupervisor` subclasses reference a
     // supervisor process, tagged `{'beamtalk_supervisor' |
     // 'beamtalk_supervisor_new', ClassName, Module, Pid}` at runtime
     // (`beamtalk_supervisor.erl`) — a third shape distinct from both the
     // tagged-map (`Value`/`Object`) and actor-tuple (`'beamtalk_object'`)
     // strategies. `generate_type_pattern`'s `wrap_supervisor_class_tag_test`
-    // now handles this shape directly (accepting either reserved tag), so
-    // — unlike the earlier BT-2855 rejection this replaced — concrete
-    // subclasses fall through to the ordinary leaf-class check below rather
-    // than being rejected outright. The abstract bases themselves
+    // handles this shape directly (accepting either reserved tag), so
+    // concrete subclasses fall through to the ordinary leaf-class check
+    // below rather than being rejected outright. The abstract bases themselves
     // (`Supervisor`, `DynamicSupervisor`) are still rejected below: no live
     // instance ever carries the abstract class's own tag.
 
     // Abstract class — no live instance is ever tagged with an abstract
-    // class's own name (BT-2870 review follow-up), so this must be rejected
+    // class's own name, so this must be rejected
     // unconditionally rather than relying on the non-leaf check below: an
     // abstract class with zero subclasses *visible in this compilation
     // unit* (e.g. stdlib's own `Supervisor`/`DynamicSupervisor`, which have
@@ -491,7 +490,7 @@ mod tests {
     use crate::source_analysis::lex_with_eof;
     use crate::source_analysis::parse;
 
-    // ── BT-1299: Match exhaustiveness for sealed types ────────────────────────
+    // ── Match exhaustiveness for sealed types ─────────────────────────────────
 
     /// Missing `error:` arm without wildcard → compile error.
     #[test]
@@ -777,7 +776,7 @@ mod tests {
     /// Regression test: referencing a `Pattern::Type` binding in its own arm
     /// body must not raise a spurious "Undefined variable" error. The
     /// binding is registered in `pattern_bindings.rs` even though narrowing
-    /// its type to `class` is deferred to BT-2855.
+    /// its type to `class` is a separate, later concern.
     #[test]
     fn type_pattern_binding_is_not_undefined_variable() {
         let src = "Object subclass: Foo\n  test: x =>\n    x match: [path :: String -> path; _ -> \"\"]\n";
@@ -795,7 +794,7 @@ mod tests {
         );
     }
 
-    // ── BT-2854 / ADR 0107 Phase A: `Pattern::Type` class validation ────────
+    // ── ADR 0107 Phase A: `Pattern::Type` class validation ───────────────────
 
     fn hierarchy_for(src: &str) -> (crate::ast::Module, ClassHierarchy) {
         let tokens = lex_with_eof(src);
@@ -914,9 +913,8 @@ mod tests {
         );
     }
 
-    /// BT-2870: a leaf `Supervisor subclass:` is now a valid type-pattern
-    /// class — replaces the earlier BT-2855 rejection now that
-    /// `generate_type_pattern` has real codegen support
+    /// A leaf `Supervisor subclass:` is a valid type-pattern
+    /// class, since `generate_type_pattern` has real codegen support
     /// (`wrap_supervisor_class_tag_test`).
     #[test]
     fn type_pattern_supervisor_subclass_no_diagnostics() {
@@ -931,7 +929,7 @@ mod tests {
         );
     }
 
-    /// BT-2870: same as above, for `DynamicSupervisor(C)` subclasses.
+    /// Same as above, for `DynamicSupervisor(C)` subclasses.
     #[test]
     fn type_pattern_dynamic_supervisor_subclass_no_diagnostics() {
         let (module, hierarchy) = hierarchy_for(
@@ -945,7 +943,7 @@ mod tests {
         );
     }
 
-    /// BT-2870 review follow-up: matching directly on the abstract
+    /// Matching directly on the abstract
     /// `Supervisor` base (no concrete subclass in this compilation unit, so
     /// the non-leaf check alone would see zero subclasses and pass it) must
     /// still be rejected — no live supervisor reference is ever tagged
@@ -965,7 +963,7 @@ mod tests {
         assert!(diagnostics[0].message.contains("abstract"));
     }
 
-    /// BT-2870 review follow-up: same as above, for the abstract
+    /// Same as above, for the abstract
     /// `DynamicSupervisor` base.
     #[test]
     fn type_pattern_abstract_dynamic_supervisor_base_is_error() {

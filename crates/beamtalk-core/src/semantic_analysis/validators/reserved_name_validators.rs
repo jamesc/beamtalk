@@ -1,13 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Reserved internal-namespace name validation (BT-2718).
+//! Reserved internal-namespace name validation.
 //!
 //! **DDD Context:** Semantic Analysis
 //!
 //! Beamtalk's codegen reserves a `__`-prefixed map-key namespace inside
 //! actor/object state: `__methods__` and `__class_mod__` (dispatch metadata),
-//! and `__local__<name>` control-flow threading temporaries (BT-2717). The
+//! and `__local__<name>` control-flow threading temporaries. The
 //! runtime's `beamtalk_actor:strip_local_temps/1` deletes every
 //! `__local__`-prefixed key from committed state on each dispatch, and
 //! `changed_state_keys/2` excludes the same prefix from watch notifications.
@@ -40,7 +40,7 @@ fn is_reserved_internal_name(name: &str) -> bool {
     name.starts_with(RESERVED_PREFIX)
 }
 
-/// BT-2718: Reject user-chosen names that collide with the compiler's reserved
+/// Reject user-chosen names that collide with the compiler's reserved
 /// internal state-key namespace (the `__` prefix).
 ///
 /// Covers every site where a user names a binding that could be packed into

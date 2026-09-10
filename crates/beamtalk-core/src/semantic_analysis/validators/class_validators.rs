@@ -6,17 +6,17 @@
 //! **DDD Context:** Semantic Analysis
 //!
 //! Validators that require the `ClassHierarchy` to validate class relationships:
-//! - Abstract class instantiation (BT-105)
-//! - Actor `new` vs `spawn` usage (BT-563)
-//! - Field name validation in `new:` maps (BT-563)
-//! - Class variable access (BT-563)
-//! - Stdlib name shadowing (BT-738)
-//! - Value type slot assignment (BT-914)
-//! - Cast on value types (BT-919)
-//! - Value type `-> Nil` return annotations (BT-1052)
-//! - Data keyword / class-kind mismatch errors (BT-1529, BT-1535)
-//! - Object-kind `new`/`new:` usage errors (BT-1540)
-//! - Opaque `native:` `new`/`new:` usage errors (BT-2998)
+//! - Abstract class instantiation
+//! - Actor `new` vs `spawn` usage
+//! - Field name validation in `new:` maps
+//! - Class variable access
+//! - Stdlib name shadowing
+//! - Value type slot assignment
+//! - Cast on value types
+//! - Value type `-> Nil` return annotations
+//! - Data keyword / class-kind mismatch errors
+//! - Object-kind `new`/`new:` usage errors
+//! - Opaque `native:` `new`/`new:` usage errors
 
 use crate::ast::{
     ClassKind, DeclaredKeyword, Expression, Identifier, MessageSelector, MethodDefinition, Module,
@@ -26,7 +26,7 @@ use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
-/// BT-105: Check for attempts to instantiate abstract classes.
+/// Check for attempts to instantiate abstract classes.
 ///
 /// Walks all expressions looking for `MessageSend` where the receiver is an
 /// identifier matching an abstract class and the selector is an instantiation
@@ -56,7 +56,7 @@ fn abstract_class_error(class_name: &str, span: Span) -> Diagnostic {
     .with_category(DiagnosticCategory::Type)
 }
 
-/// Visitor for abstract class instantiation checks (BT-105).
+/// Visitor for abstract class instantiation checks.
 ///
 /// Called by `walk_expression` on each expression node; the walker handles
 /// recursive traversal, so this function only inspects the current node.
@@ -95,7 +95,7 @@ fn visit_abstract_instantiation(
     }
 }
 
-// ── BT-563: Class-aware diagnostics ──────────────────────────────────────────
+// ── Class-aware diagnostics ───────────────────────────────────────────────────
 
 /// Extracts a class name from a receiver expression (`Identifier` or `ClassReference`).
 fn receiver_class_name(receiver: &Expression) -> Option<&str> {
@@ -120,9 +120,9 @@ fn walk_module_with_hierarchy(
     walk_module(module, &mut |expr| visitor(expr, hierarchy, diagnostics));
 }
 
-/// BT-563 / BT-1524: Error when Actor subclasses use `new` or `new:` instead of `spawn`.
+/// Error when Actor subclasses use `new` or `new:` instead of `spawn`.
 ///
-/// Promoted from warning to error in BT-1524: actors are process-based and must
+/// Actors are process-based and must
 /// use `spawn`/`spawnWith:` for instantiation. Using `new`/`new:` on an actor
 /// class is always a bug.
 pub(crate) fn check_actor_new_usage(
@@ -143,7 +143,7 @@ fn actor_must_spawn_error(class_name: &str, selector: &str, span: Span) -> Diagn
     .with_category(DiagnosticCategory::ActorNew)
 }
 
-/// Creates a diagnostic for using `new`/`new:` on an Object-kind class (BT-1540).
+/// Creates a diagnostic for using `new`/`new:` on an Object-kind class.
 fn object_kind_new_error(class_name: &str, selector: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         format!("Object-kind class `{class_name}` cannot be instantiated with `{selector}`"),
@@ -153,7 +153,7 @@ fn object_kind_new_error(class_name: &str, selector: &str, span: Span) -> Diagno
     .with_category(DiagnosticCategory::Type)
 }
 
-/// Creates a diagnostic for using `new`/`new:` on an opaque `native:` class (BT-2998).
+/// Creates a diagnostic for using `new`/`new:` on an opaque `native:` class.
 fn opaque_native_new_error(
     class_name: &str,
     selector: &str,
@@ -184,7 +184,7 @@ fn opaque_native_new_error(
     .with_category(DiagnosticCategory::Type)
 }
 
-/// BT-2998: the class-side selectors that produce an instance of `class_name`,
+/// The class-side selectors that produce an instance of `class_name`,
 /// for the hint on the refusal of `rejected`.
 ///
 /// A class method counts when its declared return type mentions the class,
@@ -275,7 +275,7 @@ fn visit_actor_new(
     }
 }
 
-/// BT-1540 / BT-2998: Error when a class that cannot build an instance from
+/// Error when a class that cannot build an instance from
 /// field defaults is nonetheless sent `new` or `new:`.
 ///
 /// Object-kind classes are class-method namespaces and should not be
@@ -296,9 +296,9 @@ pub(crate) fn check_object_new_usage(
 /// Why `ClassName new`/`new:` cannot work for a given receiver.
 #[derive(Clone, Copy)]
 enum UninstantiableNew {
-    /// BT-1540: an Object-kind class — a class-method namespace.
+    /// An Object-kind class — a class-method namespace.
     ObjectKind,
-    /// BT-2998: a `native:` class whose instances only its backing module builds.
+    /// A `native:` class whose instances only its backing module builds.
     OpaqueNative,
 }
 
@@ -311,7 +311,7 @@ enum UninstantiableNew {
 /// table, but *not* from `__beamtalk_meta` — the compiled metadata carries no
 /// native flag. A `native:` class reached across a package boundary therefore
 /// degrades to `None` here and is caught by the raising `new/0` codegen emits
-/// instead (BT-2998), which is the same guard the REPL and `perform:` rely on.
+/// instead, which is the same guard the REPL and `perform:` rely on.
 fn uninstantiable_new(
     class_name: &str,
     selector: &str,
@@ -334,7 +334,7 @@ fn uninstantiable_new(
         ClassKind::Actor => return None,
         ClassKind::Value => {}
     }
-    // BT-2998: `native:` with no fields of its own. A native class that *does*
+    // `native:` with no fields of its own. A native class that *does*
     // declare fields (`Package`, `SupervisionNode`) has a real default instance.
     let has_own_fields = hierarchy
         .get_class(class_name)
@@ -400,7 +400,7 @@ fn visit_uninstantiable_new(
     }
 }
 
-/// BT-563: Validate field names in `ClassName new: #{field => value}`.
+/// Validate field names in `ClassName new: #{field => value}`.
 pub(crate) fn check_new_field_names(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -483,7 +483,7 @@ fn validate_map_field_names(
     }
 }
 
-/// BT-563: Warn on access to undeclared class variables.
+/// Warn on access to undeclared class variables.
 pub(crate) fn check_class_variable_access(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -578,7 +578,7 @@ fn visit_classvar_access(
     }
 }
 
-/// BT-738: Warn when a user-defined class name matches a stdlib built-in class name.
+/// Warn when a user-defined class name matches a stdlib built-in class name.
 ///
 /// Stdlib class names are protected at runtime (via `update_class` in the runtime).
 /// This compile-time warning surfaces the conflict earlier, before the BEAM module
@@ -586,7 +586,7 @@ fn visit_classvar_access(
 /// only generated stdlib classes (from `lib/*.bt`) that have the `bt@stdlib@`
 /// module prefix and are actually protected at runtime.
 ///
-/// Since BT-813, `Future` and `FileHandle` are also stdlib classes with
+/// `Future` and `FileHandle` are also stdlib classes with
 /// `bt@stdlib@` prefixed modules, so they trigger shadowing warnings too.
 ///
 /// This must NOT be called during stdlib compilation (`stdlib_mode = true`).
@@ -608,7 +608,7 @@ pub fn check_stdlib_name_shadowing(module: &Module, diagnostics: &mut Vec<Diagno
                 )),
             );
         }
-        // BT-1041: `Self` is reserved as a return type keyword
+        // `Self` is reserved as a return type keyword
         if name == "Self" {
             diagnostics.push(
                 Diagnostic::error(
@@ -659,9 +659,9 @@ pub fn check_handle_scope_on_object(
     }
 }
 
-// ── BT-914: Value type slot assignment validation ──────────────────────────────
+// ── Value type slot assignment validation ───────────────────────────────────────
 
-/// BT-914: Reject `self.slot :=` in Value type methods; warn when it bypasses
+/// Reject `self.slot :=` in Value type methods; warn when it bypasses
 /// an overridden `withSlot:` method in Actor methods.
 ///
 /// Value types (ADR 0042) are immutable — direct slot assignment is a compile
@@ -669,7 +669,7 @@ pub fn check_handle_scope_on_object(
 /// method exists in the hierarchy and would be bypassed.
 ///
 /// `TestCase` is a deliberate, permanent exception to the Value immutability
-/// rule (BT-1533) — see `is_testcase_subclass` below. It is not a migration
+/// rule — see `is_testcase_subclass` below. It is not a migration
 /// in progress: sequential `self.field := value` mutation is the ergonomic,
 /// idiomatic way to write test fixtures (setUp, then read/write across
 /// assertions), the same way every other xUnit-family framework does it, and
@@ -685,7 +685,7 @@ pub(crate) fn check_value_slot_assignment(
         let class_name = class.name.name.as_str();
         let is_value = hierarchy.is_value_subclass(class_name);
 
-        // BT-1533: TestCase subclasses are permanently exempt from slot
+        // TestCase subclasses are permanently exempt from slot
         // assignment checks (see this function's own doc comment) — not a
         // migration in progress.
         if hierarchy.is_testcase_subclass(class_name) {
@@ -719,7 +719,7 @@ pub(crate) fn check_value_slot_assignment(
         let class_name = standalone.class_name.name.as_str();
         let is_value = hierarchy.is_value_subclass(class_name);
 
-        // BT-1533: TestCase subclasses exempt (see above).
+        // TestCase subclasses exempt (see above).
         if hierarchy.is_testcase_subclass(class_name) {
             continue;
         }
@@ -833,7 +833,7 @@ fn check_slot_assignment_at(
     }
 }
 
-/// BT-919: Error when `!` (cast) is used on a statically-known value type.
+/// Error when `!` (cast) is used on a statically-known value type.
 ///
 /// Value types are not actors — they do not have a mailbox and cannot receive
 /// asynchronous messages. Using `!` on a value type receiver is always wrong.
@@ -877,9 +877,9 @@ fn visit_cast_on_value_type(
     }
 }
 
-// ── BT-1052: Value type `-> Nil` return annotation ────────────────────────────
+// ── Value type `-> Nil` return annotation ─────────────────────────────────────
 
-/// BT-1052: Error when an instance method on a Value type has an explicit `-> Nil`
+/// Error when an instance method on a Value type has an explicit `-> Nil`
 /// return type annotation.
 ///
 /// Value types (ADR 0042) are immutable transformations — methods should return
@@ -897,7 +897,7 @@ pub(crate) fn check_value_nil_return(
         if !hierarchy.is_value_subclass(class_name) {
             continue;
         }
-        // BT-1533: TestCase is a Value subclass whose assertion methods
+        // TestCase is a Value subclass whose assertion methods
         // intentionally return Nil (side-effecting by design). Exempt
         // TestCase and its subclasses from the `-> Nil` lint.
         if hierarchy.is_testcase_subclass(class_name) {
@@ -917,7 +917,7 @@ pub(crate) fn check_value_nil_return(
         if !hierarchy.is_value_subclass(class_name) {
             continue;
         }
-        // BT-1533: Exempt TestCase and its subclasses (see above).
+        // Exempt TestCase and its subclasses (see above).
         if hierarchy.is_testcase_subclass(class_name) {
             continue;
         }
@@ -1001,17 +1001,14 @@ fn check_method_nil_return(
     );
 }
 
-/// BT-1529/BT-1535: Enforce data declaration keywords matching the class kind.
+/// Enforce data declaration keywords matching the class kind.
 ///
 /// Checks each class's `state:` / `field:` declarations against the resolved
-/// `ClassKind` (via hierarchy propagation from BT-1528) and emits errors:
+/// `ClassKind` (via hierarchy propagation) and emits hard errors:
 ///
 /// - `state:` on a Value subclass → "use 'field:' instead"
 /// - `field:` on an Actor subclass → "use 'state:' instead"
 /// - `state:` or `field:` on an Object subclass → "Object cannot have instance data"
-///
-/// Originally warnings (Phase 2, BT-1529), promoted to hard errors in Phase 4
-/// (BT-1535) after all stdlib/test/example migrations were completed.
 pub(crate) fn check_data_keyword_class_kind(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -1114,9 +1111,9 @@ fn check_keyword_for_kind(
     }
 }
 
-// ── BT-2830: Value subclass slot with*: selector collisions ────────────────
+// ── Value subclass slot with*: selector collisions ──────────────────────────
 
-/// BT-2830: Error when two `Value subclass:` slots collide on the auto-generated
+/// Error when two `Value subclass:` slots collide on the auto-generated
 /// `with*:` setter selector.
 ///
 /// `AutoSlotMethods::with_star_selector` (mirrored by
@@ -1186,9 +1183,9 @@ pub(crate) fn check_value_slot_case_collision(
     }
 }
 
-// ── BT-1793: Actor field mutation inside block closures ─────────────────────
+// ── Actor field mutation inside block closures ───────────────────────────────
 
-/// BT-1793: Error when an Actor method contains `self.field := expr` inside a
+/// Error when an Actor method contains `self.field := expr` inside a
 /// block closure that is NOT compiled with state threading.
 ///
 /// State-threading selectors (`do:`, `collect:`, `whileTrue:`, etc.) and inline
@@ -1279,7 +1276,7 @@ fn emit_unsafe_field_mutation_diagnostic(
 /// compiles the block as a plain closure where `State0`/`State1` are unbound.
 ///
 /// **Nested blocks:** `analyze_block` propagates `field_writes` from nested
-/// blocks into the outer analysis (see BT-478). This means nested patterns like
+/// blocks into the outer analysis. This means nested patterns like
 /// `result andThen: [:r | r map: [:x | self.val := x]]` will produce a
 /// diagnostic for *both* the outer `andThen:` block and the inner `map:` block.
 /// This is intentional — each unsafe closure boundary is flagged independently.
@@ -1482,7 +1479,7 @@ mod tests {
     use crate::source_analysis::lex_with_eof;
     use crate::source_analysis::parse;
 
-    /// Future is a runtime-only built-in class (BT-1057 removed the stub).
+    /// Future is a runtime-only built-in class, with no `.bt` source stub.
     /// User-defined `Future` classes should trigger a stdlib shadowing warning.
     #[test]
     fn future_class_triggers_shadowing_warning() {
@@ -1498,7 +1495,7 @@ mod tests {
         );
     }
 
-    /// BT-738: A class named `Integer` (generated stdlib) SHOULD trigger the warning.
+    /// A class named `Integer` (generated stdlib) SHOULD trigger the warning.
     #[test]
     fn stdlib_class_triggers_shadowing_warning() {
         let tokens = lex_with_eof("Object subclass: Integer\n  value => 1");
@@ -1511,7 +1508,7 @@ mod tests {
         assert!(diagnostics[0].message.contains("Integer"));
     }
 
-    /// BT-1041: A class named `Self` should be rejected.
+    /// A class named `Self` should be rejected.
     #[test]
     fn self_as_class_name_is_error() {
         let tokens = lex_with_eof("Object subclass: Self\n  value => 1");
@@ -1527,7 +1524,7 @@ mod tests {
         assert!(diagnostics[0].message.contains("reserved"));
     }
 
-    // ── BT-914: Value type slot assignment tests ──────────────────────────────
+    // ── Value type slot assignment tests ───────────────────────────────────────
 
     /// `self.slot :=` inside a Value subclass method is a compile error.
     #[test]
@@ -1686,7 +1683,7 @@ mod tests {
         assert_eq!(diagnostics[0].severity, Severity::Error);
     }
 
-    // BT-919: Cast (!) on value type tests
+    // Cast (!) on value type tests
 
     #[test]
     fn cast_on_value_type_is_error() {
@@ -1897,7 +1894,7 @@ mod tests {
         );
     }
 
-    // --- BT-1535: Data keyword / class-kind mismatch errors (promoted from warnings) ---
+    // --- Data keyword / class-kind mismatch errors ---
 
     #[test]
     fn state_on_value_errors() {
@@ -2050,7 +2047,7 @@ mod tests {
 
     #[test]
     fn testcase_subclass_state_errors() {
-        // BT-1535: TestCase subclasses are no longer exempt (migration complete)
+        // TestCase subclasses are not exempt from this check
         let src = "Value subclass: TestCase\n  field: name = \"\"\n\nTestCase subclass: MyTest\n  state: counter = nil";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
@@ -2068,7 +2065,7 @@ mod tests {
         assert!(diagnostics[0].message.contains("field:"));
     }
 
-    // ── BT-1793: Actor field mutation in closure tests ──────────────────────
+    // ── Actor field mutation in closure tests ──────────────────────────────────
 
     #[test]
     fn actor_field_mutation_in_map_block_errors() {
@@ -2287,7 +2284,7 @@ Actor subclass: HomActor
         );
     }
 
-    // ── BT-2830: Value subclass slot with*: selector collision tests ────────
+    // ── Value subclass slot with*: selector collision tests ──────────────────
 
     /// Two slots differing only by the case of their first letter (`x`/`X`) both
     /// produce the `withX:` setter selector — this must be a compile error.

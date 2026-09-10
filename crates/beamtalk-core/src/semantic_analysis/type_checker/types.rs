@@ -33,7 +33,7 @@ pub enum DynamicReason {
     /// Distinguished from `UntypedFfi` because the spec EXISTS — the function
     /// simply has a broad return type.  Not actionable in typed classes.
     DynamicSpec,
-    /// The type annotation literally is the `Dynamic` keyword (BT-2865) —
+    /// The type annotation literally is the `Dynamic` keyword —
     /// e.g. `Result(Dynamic, Error)`'s first type-arg, or a field/param
     /// explicitly declared `:: Dynamic`.
     ///
@@ -44,7 +44,7 @@ pub enum DynamicReason {
     /// it must survive being unified with any other binding, including a
     /// concrete one from a sibling argument position — where every other
     /// `DynamicReason` instead loses to a concrete binding observed
-    /// elsewhere (BT-2039).
+    /// elsewhere.
     ExplicitDynamic,
     /// Fallback — no specific reason available.
     Unknown,
@@ -73,9 +73,9 @@ impl DynamicReason {
 ///
 /// **References:** ADR 0068 Challenge 3
 ///
-/// Not `Copy` (BT-2897 added an `EcoString` payload to [`Aliased`](Self::Aliased))
-/// — call sites that previously relied on an implicit copy now need an
-/// explicit `.clone()`. Cloning is cheap (`EcoString` is reference-counted).
+/// Not `Copy` — [`Aliased`](Self::Aliased) carries an `EcoString` payload, so
+/// call sites need an explicit `.clone()`. Cloning is cheap (`EcoString` is
+/// reference-counted).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeProvenance {
     /// User wrote `:: Type` at this location.
@@ -90,8 +90,8 @@ pub enum TypeProvenance {
     /// build time. The span is always `Span::default()` (no source location in
     /// the Beamtalk codebase) — diagnostics show "from <module>.beam -spec".
     Extracted,
-    /// The type is the eager expansion of a named alias reference (ADR 0108,
-    /// BT-2897) — attached *only* at the exact point of expansion in
+    /// The type is the eager expansion of a named alias reference (ADR 0108)
+    /// — attached *only* at the exact point of expansion in
     /// [`resolve_type_annotation`](super::resolve_type_annotation), so the
     /// tagged value is by construction structurally identical to alias
     /// `name`'s expansion (the ADR's "display through normalisation, scoped
@@ -105,7 +105,7 @@ pub enum TypeProvenance {
     /// alone, so a second reference to the same alias in one annotation
     /// (`A | A`, `Result(A, A)`) reuses the *first* reference's cached,
     /// already-tagged value — including its `span` — rather than expanding
-    /// fresh. A future consumer (e.g. find-references, BT-2901) needing a
+    /// fresh. A future consumer (e.g. find-references) needing a
     /// precise per-site span will need to record it at the `memo.get` hit
     /// path too, not just at first expansion.
     ///
@@ -254,7 +254,7 @@ pub enum InferredType {
     /// - **Singleton-excluded** — canonically `Symbol \ #foo` (all symbols
     ///   except `#foo`); `base` is always exactly `Symbol` (see
     ///   [`is_symbol_base`](Self::is_symbol_base)).
-    /// - **Nominal-excluded** (ADR 0102 §5, BT-2744) — e.g. `Object \ Number`;
+    /// - **Nominal-excluded** (ADR 0102 §5) — e.g. `Object \ Number`;
     ///   `base` is any nominal class and `excluded` a single strict nominal
     ///   subclass of it (generalising `excluded` to a union of classes is out
     ///   of scope — see §5's scope note).
@@ -458,7 +458,7 @@ impl InferredType {
     /// Returns the [`TypeProvenance`] attached to this type, or `None` for the
     /// provenance-free variants ([`Dynamic`](Self::Dynamic) and
     /// [`Never`](Self::Never), which carry no source location).
-    // Consumed by the narrowing rules landing later in ADR 0102's epic (BT-2738).
+    // Consumed by the narrowing rules in ADR 0102's epic.
     #[allow(dead_code)]
     #[must_use]
     pub(crate) fn provenance(&self) -> Option<TypeProvenance> {
@@ -473,7 +473,7 @@ impl InferredType {
     }
 
     /// Returns the alias display name if this type's top-level provenance is
-    /// [`TypeProvenance::Aliased`] (ADR 0108, BT-2897) — i.e. this exact value
+    /// [`TypeProvenance::Aliased`] (ADR 0108) — i.e. this exact value
     /// is the eager expansion of a named alias reference, structurally
     /// identical to that alias's declared expansion by construction (see
     /// `Aliased`'s doc).
@@ -517,7 +517,7 @@ impl InferredType {
     }
 
     /// Rewrites this type's top-level provenance to
-    /// [`TypeProvenance::Aliased`] (ADR 0108, BT-2897) — the single
+    /// [`TypeProvenance::Aliased`] (ADR 0108) — the single
     /// construction path for that provenance variant, called exactly once,
     /// at the point [`resolve_type_annotation`](super::resolve_type_annotation)
     /// finishes eagerly expanding a `Simple` annotation that names a
@@ -617,7 +617,6 @@ impl InferredType {
     /// be either a bare class name or a full annotation string rather than a
     /// structured [`InferredType`].
     ///
-    /// **References:** BT-2066
     #[must_use]
     pub fn class_name_for_diagnostic(name: &str) -> EcoString {
         const TARGET: &str = "UndefinedObject";
@@ -657,15 +656,14 @@ impl InferredType {
     /// Identical to [`display_name`](Self::display_name) except that
     /// `Known("UndefinedObject")` renders as `"Nil"`. Users write `:: Foo | Nil`
     /// in source and never see the canonical `UndefinedObject` spelling
-    /// anywhere else, so diagnostics echoing `UndefinedObject` back at them
-    /// were jarring and triggered BT-2066.
+    /// anywhere else, so diagnostics must never echo `UndefinedObject` back at them.
     ///
     /// Use this for any user-facing string: diagnostic messages, hover
     /// contents, signature help labels, and code-action inserts. Keep
     /// [`display_name`](Self::display_name) for internal bookkeeping where the
     /// canonical name is required (e.g., `is_assignable_to` lookups).
     ///
-    /// **BT-2897 / ADR 0108:** when this type's top-level provenance is
+    /// **ADR 0108:** when this type's top-level provenance is
     /// [`TypeProvenance::Aliased`], the rendered string is prefixed with the
     /// alias name — `RestartStrategy (#temporary | #transient | #permanent)`
     /// rather than just the bare expansion — because this value *is* (by
@@ -675,7 +673,7 @@ impl InferredType {
     /// they render the plain structural form with no alias breadcrumb, which
     /// is the ADR's intentional v1 scoping, not a gap.
     ///
-    /// **References:** BT-2066, ADR 0108 (BT-2897)
+    /// **References:** ADR 0108
     #[must_use]
     pub fn display_for_diagnostic(&self) -> Option<EcoString> {
         let structural = self.display_with_options(DisplayOptions::SOURCE_FRIENDLY);
@@ -780,7 +778,7 @@ impl InferredType {
     /// Provenance is derived from the first input that carries a non-default
     /// provenance (Declared or Substituted win over Inferred).
     ///
-    /// **BT-2897:** a member's [`TypeProvenance::Aliased`] tag never wins this
+    /// A member's [`TypeProvenance::Aliased`] tag never wins this
     /// selection (see [`provenance_wins_union_default`](Self::provenance_wins_union_default)) —
     /// a freshly-built union is a *different* type from any one member's
     /// alias expansion, so it must never silently claim that member's alias
@@ -791,14 +789,14 @@ impl InferredType {
     /// fails its `matches!(.., Inferred(_))` guard today, so an aliased
     /// singleton member is already never overwritten.
     ///
-    /// **Pre-existing, order-dependent edge case (not new to BT-2897):**
+    /// **Order-dependent edge case:**
     /// when two *structurally-equal* members disagree only in provenance
     /// (e.g. `union_of([Port_aliased, Integer_plain])` where `type Port =
     /// Integer`), dedup (`flat.contains`, which is provenance-blind) keeps
     /// whichever operand was pushed first and drops the other — so the
-    /// surviving member's display depends on input order. This already held
-    /// for `Declared` vs. `Inferred` before this change; `Aliased` inherits
-    /// the same characteristic rather than introducing a new one.
+    /// surviving member's display depends on input order. This holds
+    /// for `Declared` vs. `Inferred` too; `Aliased` carries
+    /// the same characteristic, not a new one.
     pub(crate) fn union_of(members: &[Self]) -> Self {
         let mut flat: Vec<InferredType> = Vec::new();
         let mut best_provenance = TypeProvenance::Inferred(Span::default());
@@ -851,7 +849,7 @@ impl InferredType {
         // drop singletons subsumed by a `Symbol`-based negation, and collapse
         // bare singletons under a bare `Symbol` (`#a | Symbol ⇒ Symbol` — this
         // fires with or without a negation present, keeping one normal form
-        // per set so `intersect` stays commutative; BT-2741).
+        // per set so `intersect` stays commutative).
         Self::absorb_negations(&mut flat);
         match flat.len() {
             0 if members.iter().all(|m| matches!(m, Self::Never)) && !members.is_empty() => {
@@ -885,7 +883,7 @@ impl InferredType {
     /// union's own "best provenance" (see [`union_of`](Self::union_of)).
     ///
     /// `Inferred` never wins (it's the no-information default). `Aliased`
-    /// (BT-2897, ADR 0108) never wins either, even though it's informative —
+    /// (ADR 0108) never wins either, even though it's informative —
     /// letting it win would mean a union like `A | Integer` (where alias `A`
     /// resolves to some `InferredType` tagged `Aliased("A", _)`) could
     /// silently render as `A (...)`, even though `A | Integer` is not
@@ -911,7 +909,7 @@ impl InferredType {
     /// singleton subtraction and absorption are sound.
     ///
     /// Distinct from the **nominal-excluded** `Negation` flavour (ADR 0102 §5,
-    /// BT-2744, e.g. `Object \ Number`), whose base is any nominal class — see
+    /// e.g. `Object \ Number`), whose base is any nominal class — see
     /// the nominal-class arm of [`difference`](Self::difference). The two
     /// flavours are distinguished structurally by whether `excluded` is a
     /// singleton/union-of-singletons or a nominal class name; this predicate
@@ -924,7 +922,7 @@ impl InferredType {
 
     /// Returns `true` if every symbol singleton (`#foo`) is a member of `ty`'s
     /// value set — i.e. `ty` is `Symbol` itself, or (with a hierarchy) a
-    /// nominal *supertype* of `Symbol` such as `ProtoObject` (BT-2764).
+    /// nominal *supertype* of `Symbol` such as `ProtoObject`.
     ///
     /// Used by the symbol-singleton arms of [`intersect`](Self::intersect) so
     /// `ProtoObject ∩ #foo` reduces to `#foo` instead of falling through to
@@ -942,7 +940,7 @@ impl InferredType {
     /// `difference(ProtoObject, #foo)` stays a no-op rather than fabricating a
     /// `ProtoObject \ #foo` complement — `ProtoObject` is not itself a
     /// hierarchy entry above which singleton subtraction was specified. This
-    /// is unrelated to the *nominal-excluded* flavour (ADR 0102 §5, BT-2744),
+    /// is unrelated to the *nominal-excluded* flavour (ADR 0102 §5),
     /// which admits any nominal class as `base` when the excluded value is
     /// itself a nominal class, not a singleton.
     ///
@@ -1023,7 +1021,7 @@ impl InferredType {
     ///   the singleton is a subtype of `Symbol`, so the collapsed form admits
     ///   exactly the same values. Gating it on negation presence gave the same
     ///   set two normal forms depending on evaluation order, breaking
-    ///   `intersect` commutativity (BT-2741 Windows CI counterexample:
+    ///   `intersect` commutativity (a Windows CI counterexample surfaced this:
     ///   `intersect(#a | Symbol, (Symbol \ #a) | Object)` vs the swapped
     ///   order).
     /// - **Full / partial singleton absorption:** a bare singleton `#s` is
@@ -1152,10 +1150,10 @@ impl InferredType {
     /// reduces correctly.
     ///
     /// The `protocol_registry` argument is likewise **optional**
-    /// (ADR 0102 §1/§3, BT-2743): supplying it lets `intersect` recognise a
+    /// (ADR 0102 §1/§3): supplying it lets `intersect` recognise a
     /// protocol name and route class ∩ protocol / protocol ∩ protocol to the
     /// stored [`Intersection`](Self::Intersection) instead of falling through
-    /// to the disjoint default. `None` preserves the pre-BT-2743 structural
+    /// to the disjoint default. `None` preserves the plain structural
     /// behaviour (two distinct-named `Known` types with no proven relation
     /// are `Never`).
     ///
@@ -1244,7 +1242,7 @@ impl InferredType {
             }
             // Intersect through an existing stored Intersection (both
             // orders) — flatten rather than falling through to the disjoint
-            // default (ADR 0102 §1/§3, BT-2743). Needed so a 3+-way `&`
+            // default (ADR 0102 §1/§3). Needed so a 3+-way `&`
             // chain (`A & B & C`, parsed left-associatively as `(A & B) &
             // C`) reduces through repeated pairwise `intersect` calls to a
             // single flat, deduplicated `Intersection` instead of silently
@@ -1287,8 +1285,8 @@ impl InferredType {
             // nominal case because singletons are not entries in the hierarchy
             // — the nominal arm's `is_nominal_subtype(h, "#foo", …)` would
             // always answer `false`. With a hierarchy, the same rule extends
-            // to every nominal *supertype* of `Symbol` (e.g. `ProtoObject`,
-            // BT-2764): `ProtoObject ∩ #foo = #foo`, matching the
+            // to every nominal *supertype* of `Symbol` (e.g. `ProtoObject`):
+            // `ProtoObject ∩ #foo = #foo`, matching the
             // pre-ADR-0102 hierarchy walk. (`Object` never reaches here — the
             // top-identity arms above already handled it.)
             (Self::Known { .. }, Self::Known { class_name: s, .. })
@@ -1303,7 +1301,7 @@ impl InferredType {
             }
             // `T ∩ T = T` (exact structural equality, generics included).
             _ if a == b => a.clone(),
-            // Class ∩ protocol / protocol ∩ protocol (ADR 0102 §1/§3, BT-2743):
+            // Class ∩ protocol / protocol ∩ protocol (ADR 0102 §1/§3):
             // the irreducible intersection. Must be checked before the nominal
             // arm below — a protocol name is never a hierarchy entry, so
             // without this arm it would silently fall through to `Never`.
@@ -1417,7 +1415,7 @@ impl InferredType {
     /// - **Same-base flattening:** `difference(Negation{Symbol, E}, #bar) =
     ///   Negation{Symbol, union_of(E, #bar)}` — nested negation never escapes
     ///   normal form.
-    /// - **Nominal-class base case** (ADR 0102 §5, BT-2744, `hierarchy = Some`):
+    /// - **Nominal-class base case** (ADR 0102 §5, `hierarchy = Some`):
     ///   for two distinct-named, non-singleton nominal classes, `difference(A,
     ///   B)` ⇒ `Negation{A, B}` when `B` is a strict subclass of `A` (the
     ///   class-hierarchy analogue of `Symbol \ #foo`); ⇒ `Never` when `A <: B`
@@ -1483,7 +1481,7 @@ impl InferredType {
             }
             // `T \ T = Never` (exact structural equality, generics included).
             _ if a == b => Self::Never,
-            // Nominal-class base case (ADR 0102 §5, BT-2744): with a hierarchy,
+            // Nominal-class base case (ADR 0102 §5): with a hierarchy,
             // two distinct-named, non-singleton nominal classes relate via
             // subtyping — a proper subclass subtraction is irreducible
             // (`Negation{A, B}`), a supertype/self subtraction removes
@@ -1530,14 +1528,13 @@ impl InferredType {
 /// Generic type parameters are single uppercase letters that come from class
 /// type parameter lists. When a generic method like `Dictionary at:ifAbsent:`
 /// returns `V`, the type checker reports `V` as the variable's type. This
-/// helper identifies such types so diagnostics can provide better context
-/// (BT-1588).
+/// helper identifies such types so diagnostics can provide better context.
 pub(in crate::semantic_analysis) fn is_generic_type_param(name: &str) -> bool {
     let bytes = name.as_bytes();
     bytes.len() == 1 && bytes[0].is_ascii_uppercase()
 }
 
-// ── BT-3469: diagnostic facts ────────────────────────────────────────────
+// ── Diagnostic facts ──────────────────────────────────────────────────────
 //
 // A shared leaf between `inference/` and `validation.rs` (this module is a
 // dependency of both already, via `InferredType`/`DynamicReason`): each
@@ -1546,7 +1543,7 @@ pub(in crate::semantic_analysis) fn is_generic_type_param(name: &str) -> bool {
 // `inference/` constructs one and hands it to the matching `validation.rs`
 // `emit_*` method, which does the actual rendering (message text, hint,
 // category, severity) and pushes it. Splitting detection from rendering
-// this way is what item 3 of BT-3469 asked for — inference no longer
+// this way means inference never
 // constructs `Diagnostic`s itself for these four sites. (The cons-tail site
 // already had this split, via `InferredType::improper_cons_tail_display`'s
 // existing `Option<EcoString>` — that one carries no new struct here, only
@@ -1570,7 +1567,7 @@ pub(in crate::semantic_analysis::type_checker) struct CrossObjectFieldMutation {
     pub(in crate::semantic_analysis::type_checker) field_name: EcoString,
 }
 
-/// BT-1914: an expression inside a `typed` class's method body inferred as
+/// An expression inside a `typed` class's method body inferred as
 /// `Dynamic` for a root-cause reason (not a propagated `DynamicReceiver`, an
 /// inert `Unknown`, or an author-acknowledged `ExplicitDynamic`). Detected
 /// in `inference/mod.rs`, rendered by
@@ -1582,7 +1579,7 @@ pub(in crate::semantic_analysis::type_checker) struct DynamicInTypedClass {
 
 #[cfg(test)]
 mod display_tests {
-    //! BT-2066: `display_name` uses the canonical `UndefinedObject`
+    //! `display_name` uses the canonical `UndefinedObject`
     //! class-hierarchy spelling; `display_for_diagnostic` substitutes the
     //! source-sympathetic `Nil` spelling for user-facing messages.
 
@@ -1688,7 +1685,7 @@ mod display_tests {
         );
     }
 
-    // ── BT-2897 / ADR 0108: alias display-name provenance ──────────────────
+    // ── ADR 0108: alias display-name provenance ───────────────────────────────
 
     #[test]
     fn tag_alias_expansion_prefixes_display_for_diagnostic() {
@@ -1728,7 +1725,7 @@ mod display_tests {
 
     #[test]
     fn tag_alias_expansion_prefixes_meta_negation_and_intersection() {
-        // Adversarial review (BT-2897): the hover/diagnostic tests only
+        // The hover/diagnostic tests only
         // exercised `Union`/`Known` end-to-end. This pins the other three
         // provenance-bearing variants `tag_alias_expansion` also supports —
         // an alias RHS can legally be any `TypeAnnotation` (ADR 0108
@@ -1778,7 +1775,7 @@ mod display_tests {
 
     #[test]
     fn union_of_never_inherits_a_members_alias_tag() {
-        // BT-2897: `A | Integer` (a *fresh* union built from an alias-tagged
+        // `A | Integer` (a *fresh* union built from an alias-tagged
         // member `A` and an unrelated `Integer`) must render structurally —
         // it is not the same type as `A`'s own expansion, so it must never
         // silently claim `A`'s alias identity as its own display name (see
@@ -1822,7 +1819,7 @@ mod display_tests {
     fn difference_strips_alias_tag_from_the_residual_negation_arm() {
         // Same as `difference_strips_alias_tag_from_the_residual`, but for
         // the same-base-flattening Negation arm rather than the Union arm —
-        // regression test for a review finding on BT-2897: `type PublicTag =
+        // regression test: `type PublicTag =
         // Symbol \ #internal`, then narrowing further (`Symbol \ #internal \
         // #other`) produced a residual that still displayed as `"PublicTag
         // (...)"` even though it's structurally different from the alias's

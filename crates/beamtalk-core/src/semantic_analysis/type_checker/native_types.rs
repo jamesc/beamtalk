@@ -51,11 +51,11 @@ const SPECS_MODULE_PREFIX: &str = "beamtalk-specs-module:";
 /// grammar every other stored type-name string in the checker parses
 /// through) and resolves it via [`type_resolver::resolve_declared_type`] with
 /// [`super::TypeStringContext::Extracted`] — the same canonical resolver
-/// `resolve_type_annotation` and (pre-BT-3080) `TypeChecker::resolve_type_string`
-/// use, rather than a hand-rolled parallel implementation (BT-3080).
+/// `resolve_type_annotation` uses, rather than a hand-rolled parallel
+/// implementation.
 ///
-/// Folding onto the canonical resolver means this now also gets, for free:
-/// - **BT-2016 keyword normalisation**: `"Nil"` resolves to `UndefinedObject`
+/// Folding onto the canonical resolver means this also gets, for free:
+/// - **Keyword normalisation**: `"Nil"` resolves to `UndefinedObject`
 ///   (not a `Known("Nil")` pseudo-class), so `isNil`/`ifNil:` narrowing —
 ///   which keys on `UndefinedObject` — recognises FFI-typed values too.
 /// - Alias expansion and type-param substitution, if a future caller threads
@@ -69,11 +69,11 @@ const SPECS_MODULE_PREFIX: &str = "beamtalk-specs-module:";
 ///   with `Extracted` provenance.
 /// - `"Dynamic"` produces `InferredType::Dynamic(DynamicReason::DynamicSpec)`
 ///   — not `ExplicitDynamic`; see `resolve_declared_type_inner`'s `Extracted`
-///   arm (BT-3080) for why the two `Dynamic` reasons must stay distinct here.
+///   arm for why the two `Dynamic` reasons must stay distinct here.
 /// - Union types (e.g., `"Integer | String"`) are split and produce `Union` types.
 /// - Parametric types (e.g., `"List(Integer)"`, `"Tuple(Symbol, Integer)"`,
 ///   `"Result(String, Symbol)"`) parse their element types into `type_args`
-///   (ADR 0075 amendment, BT-2254). Parenthesis-aware splitting ensures unions
+///   (ADR 0075 amendment). Parenthesis-aware splitting ensures unions
 ///   nested inside arguments (`"List(String | Binary)"`) are not split at the
 ///   top level.
 ///
@@ -99,7 +99,7 @@ pub fn map_type_name(type_name: &str) -> InferredType {
 }
 
 /// Converts one file's `declare native:` stub declarations (ADR 0075 Phase
-/// 2, BT-1847) into [`NativeTypeRegistry`] entries and merges them into
+/// 2) into [`NativeTypeRegistry`] entries and merges them into
 /// `registry` via [`NativeTypeRegistry::upsert_functions`].
 ///
 /// Call once per parsed stub file, threading the same `registry` across
@@ -528,10 +528,9 @@ mod tests {
 
     #[test]
     fn map_type_name_nil() {
-        // BT-3080: `beamtalk_spec_reader.erl` emits `"Nil"` for the `nil`
-        // atom type. Before this fix, `map_type_name` returned a bare
-        // `Known("Nil")` pseudo-class — this test pinned that wrong
-        // behaviour (BT-2016). Folding onto the canonical resolver's
+        // `beamtalk_spec_reader.erl` emits `"Nil"` for the `nil`
+        // atom type. `map_type_name` must not return a bare
+        // `Known("Nil")` pseudo-class. Folding onto the canonical resolver's
         // `resolve_type_keyword` normalisation resolves it to the real nil
         // class, `UndefinedObject`, so `isNil`/`ifNil:` narrowing recognises
         // FFI-typed `Nil` members exactly like a source-written `Integer |
@@ -547,7 +546,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // BT-2254: parametric collection element types
+    // Parametric collection element types
     // -----------------------------------------------------------------------
 
     #[test]
@@ -652,7 +651,7 @@ mod tests {
 
     #[test]
     fn map_type_name_singleton_union() {
-        // BT-2632: a narrow atom-union spec is emitted by the spec reader as a
+        // A narrow atom-union spec is emitted by the spec reader as a
         // singleton union string (`#text | #json`). It must parse into a union
         // of `Known("#text")` / `Known("#json")` — the same representation the
         // source annotation `-> #text | #json` resolves to.
@@ -955,7 +954,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // BT-3080: conformance with `beamtalk_spec_reader.erl`'s `map_type/1`
+    // Conformance with `beamtalk_spec_reader.erl`'s `map_type/1`
     // vocabulary — every string shape that function can emit
     // (runtime/apps/beamtalk_compiler/src/beamtalk_spec_reader.erl:849-948)
     // must parse *structurally*, not degrade to an opaque nominal class
@@ -999,7 +998,7 @@ mod tests {
             ("Dictionary", |t| *t == InferredType::known("Dictionary")),
             ("True", |t| *t == InferredType::known("True")),
             ("False", |t| *t == InferredType::known("False")),
-            // BT-2016 / BT-3080: the whole point — `Nil` must resolve to the
+            // The whole point — `Nil` must resolve to the
             // canonical nil class, not stay a `Known("Nil")` pseudo-class.
             ("Nil", |t| *t == InferredType::known("UndefinedObject")),
             ("Dynamic", |t| matches!(t, InferredType::Dynamic(_))),
@@ -1022,8 +1021,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // BT-3080: FFI Nil narrows correctly under `ifNil:`/`ifNotNil:` — the
-    // fix demonstration for the acceptance criterion. Full checker-level
+    // FFI Nil narrows correctly under `ifNil:`/`ifNotNil:`. Full checker-level
     // narrowing coverage (`ifNil:`, `isNil`) lives in `tests/ffi.rs`
     // (`bt3080_ffi_nil_union_narrows_under_if_nil_if_not_nil`); this is the
     // registry-level guarantee that test depends on: an FFI spec's `Integer |
@@ -1048,7 +1046,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // load_native_declarations tests (ADR 0075 Phase 2, BT-1847)
+    // load_native_declarations tests (ADR 0075 Phase 2)
     // -----------------------------------------------------------------------
 
     fn parse_native_decls(source: &str) -> Vec<NativeDeclaration> {

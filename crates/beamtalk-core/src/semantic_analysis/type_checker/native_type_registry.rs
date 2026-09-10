@@ -26,11 +26,11 @@
 //!
 //! This registry handles all five layers: [`NativeTypeRegistry::apply_overrides`]
 //! implements the function/arity-level stub-over-auto-extract merge shared by
-//! layers 1–3 (BT-1847); layer 1 (project-local `stubs/`) is populated by
+//! layers 1–3; layer 1 (project-local `stubs/`) is populated by
 //! `beamtalk build` via [`super::native_types::load_native_declarations`].
 //! Layers 2–3 (package-bundled and compiler-distribution stubs) are not yet
-//! wired into the build — see BT-1848 and the follow-up filed alongside
-//! BT-1847 for package-bundled stub discovery.
+//! wired into the build — package-bundled stub discovery is a separate,
+//! later concern.
 
 #[cfg(test)]
 use super::types::DynamicReason;
@@ -124,13 +124,13 @@ pub struct ParamType {
 /// Keyed by module name → list of function type signatures. Provides
 /// lookup by (module, function, arity) for the type checker and LSP.
 ///
-/// BT-2867: `modules` is `Arc`-wrapped so `Clone` is a cheap refcount bump.
+/// `modules` is `Arc`-wrapped so `Clone` is a cheap refcount bump.
 /// `infer_types`/`infer_types_and_returns`/`infer_method_return_types` and
 /// every LSP query provider that owns only a borrowed
 /// `Option<&NativeTypeRegistry>` clone the registry to hand `TypeChecker` an
 /// owned copy (`impl Into<Arc<NativeTypeRegistry>>`) — on the hover/
-/// completion/signature-help hot path, that used to deep-copy the whole
-/// `module → signatures` map on every call.
+/// completion/signature-help hot path, a deep clone of the whole
+/// `module → signatures` map on every call would be wasteful.
 #[derive(Debug, Clone, Default)]
 pub struct NativeTypeRegistry {
     /// Module name → list of function type signatures.
@@ -171,7 +171,7 @@ impl NativeTypeRegistry {
 
     /// Adds or replaces `functions` in `module_name`'s signature list,
     /// matched by `(name, arity)` — every other function already registered
-    /// for that module is left untouched (ADR 0075 Phase 2, BT-1847).
+    /// for that module is left untouched (ADR 0075 Phase 2).
     ///
     /// Unlike [`Self::register_module`] (whole-module replace) and
     /// [`Self::merge`] (whole-module keep-on-collision), this is the
@@ -194,8 +194,8 @@ impl NativeTypeRegistry {
     }
 
     /// Applies every function in `overrides` as a function/arity-level
-    /// override onto `self` via [`Self::upsert_functions`] (ADR 0075 Phase 2,
-    /// BT-1847) — the stub-over-auto-extract merge direction: `overrides`
+    /// override onto `self` via [`Self::upsert_functions`] (ADR 0075 Phase 2)
+    /// — the stub-over-auto-extract merge direction: `overrides`
     /// (higher-precedence stubs) wins per function/arity, everything else
     /// `self` already has (auto-extracted) is preserved.
     pub fn apply_overrides(&mut self, overrides: NativeTypeRegistry) {
@@ -243,7 +243,7 @@ impl NativeTypeRegistry {
         self.modules.keys().map(String::as_str)
     }
 
-    /// Version drift detection (ADR 0075 Phase 2, BT-1847): compares `stubs`
+    /// Version drift detection (ADR 0075 Phase 2): compares `stubs`
     /// against `self` — the auto-extracted registry, treated as ground truth
     /// for what a `.beam` module actually exports — and returns every stub
     /// function/arity that doesn't exist there, paired with its owning
@@ -569,7 +569,7 @@ mod tests {
         assert_eq!(sig.provenance, TypeProvenance::Extracted);
     }
 
-    // ── upsert_functions / apply_overrides (BT-1847) ────────────────────────
+    // ── upsert_functions / apply_overrides ───────────────────────────────────
 
     fn declared_sig(name: &str, arity: u8, return_type: InferredType) -> FunctionSignature {
         FunctionSignature {
@@ -698,7 +698,7 @@ mod tests {
         );
     }
 
-    // ── detect_stub_drift (BT-1847) ──────────────────────────────────────────
+    // ── detect_stub_drift ─────────────────────────────────────────────────────
 
     #[test]
     fn detect_stub_drift_flags_function_missing_from_known_module() {

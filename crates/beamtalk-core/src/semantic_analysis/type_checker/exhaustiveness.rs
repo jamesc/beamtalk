@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Match exhaustiveness and impossible-comparison diagnostics (BT-3461).
+//! Match exhaustiveness and impossible-comparison diagnostics.
 //!
 //! Pure validation per ADR 0106/0107: these methods consult an already
 //! *inferred* type (never perform inference themselves) and emit
@@ -10,7 +10,7 @@
 //! or when a `match:`/`matchExhaustive:` over a closed union leaves a
 //! residual uncovered.
 //!
-//! Split out of `inference.rs` (BT-3461): narrowing *refinement* (computing
+//! Split out of `inference.rs`: narrowing *refinement* (computing
 //! branch types once a shape is detected) stays in
 //! [`super::narrowing::refine`] — this module is the diagnostic-only half.
 
@@ -25,7 +25,7 @@ use super::well_known::WellKnownClass;
 use super::{InferredType, TypeChecker, narrowing};
 
 impl TypeChecker {
-    /// ADR 0102 §2 group 2 / BT-2741: emits the "comparison can never be
+    /// ADR 0102 §2 group 2: emits the "comparison can never be
     /// true" hint when a `class = C` / `isKindOf: C` test is statically
     /// decidable impossible — `C` is hierarchy-unrelated to `current_ty`, so
     /// `intersect(current_ty, C)` is `Never`.
@@ -76,7 +76,7 @@ impl TypeChecker {
         );
     }
 
-    /// BT-2624 / BT-2631: emits the "comparison can never be true" / "always
+    /// Emits the "comparison can never be true" / "always
     /// true" hint when a singleton (in)equality test (`var =:= #foo`) is
     /// statically decidable — the singleton can never be a value of `current_ty`.
     ///
@@ -101,7 +101,7 @@ impl TypeChecker {
         {
             return;
         }
-        // BT-2897 / ADR 0108: `display_for_diagnostic` already prefixes an
+        // ADR 0108: `display_for_diagnostic` already prefixes an
         // alias name here when `current_ty` is the eager expansion of a
         // registered alias (`TypeProvenance::Aliased`) — see that method's
         // doc — so this membership diagnostic names the alias with no
@@ -166,7 +166,7 @@ impl TypeChecker {
         best.map(|(name, _)| name)
     }
 
-    /// BT-2624 / ADR 0102 §2: whether the singleton `singleton` (`#foo`) could
+    /// ADR 0102 §2: whether the singleton `singleton` (`#foo`) could
     /// be a runtime value of `ty` — defined as
     /// `intersect(ty, #foo, hierarchy) != Never`.
     ///
@@ -177,13 +177,13 @@ impl TypeChecker {
     /// conservative when the type is unknown.
     ///
     /// The [`narrowing::SingletonName`] parameter guarantees at the type level
-    /// (BT-2764) that the pattern is a bare `#foo` singleton, never a nominal
+    /// that the pattern is a bare `#foo` singleton, never a nominal
     /// class name — singletons are not hierarchy entries, so a nominal name
     /// here would silently mis-answer membership.
     ///
     /// The hierarchy is threaded through so *supertypes* of `Symbol` other
     /// than `Object` (e.g. an abstract `ProtoObject`-typed receiver) also
-    /// admit singletons (BT-2764): `intersect`'s symbol-singleton arms consult
+    /// admit singletons: `intersect`'s symbol-singleton arms consult
     /// the hierarchy to reduce `ProtoObject ∩ #foo` to `#foo` rather than
     /// falling through to `Never`, matching the pre-ADR-0102 hierarchy walk.
     fn type_admits_singleton(
@@ -201,7 +201,7 @@ impl TypeChecker {
         )
     }
 
-    /// BT-2745 / ADR 0102 §4: `true` when `ty` is a *known-closed* singleton
+    /// ADR 0102 §4: `true` when `ty` is a *known-closed* singleton
     /// union — an `InferredType::Union` whose every member is a bare
     /// `#symbol` singleton (`Known` with a `#`-prefixed name and no type
     /// args).
@@ -229,7 +229,7 @@ impl TypeChecker {
         )))
     }
 
-    /// BT-2856 / ADR 0107 Phase A: `true` when `ty` is a closed union eligible
+    /// ADR 0107 Phase A: `true` when `ty` is a closed union eligible
     /// for `Nil`/`Type`-pattern exhaustiveness — a closed `Known | Nil` union,
     /// or (more generally) a small closed union whose every member is either
     /// the `nil` class (`UndefinedObject`) or a concrete leaf class in the
@@ -254,7 +254,7 @@ impl TypeChecker {
         )))
     }
 
-    /// BT-2856 / ADR 0107 Phase A: `true` when at least one arm is an
+    /// ADR 0107 Phase A: `true` when at least one arm is an
     /// (guarded or unguarded) `nil` or `Type` pattern.
     ///
     /// This is the second half of the gate alongside
@@ -268,7 +268,7 @@ impl TypeChecker {
     /// [#north -> ...]` would flip from silent (nothing here has ever been
     /// closed-union-checkable) to "non-exhaustive: `Integer`, `String` are
     /// not handled" — technically true, but out of this feature's scope
-    /// (BT-2745/ADR-0106's existing symbol-union/`Result` behaviour must stay
+    /// (ADR-0106's existing symbol-union/`Result` behaviour must stay
     /// unaffected) and not something the programmer asked this `match:` to
     /// prove.
     ///
@@ -288,10 +288,10 @@ impl TypeChecker {
             .any(|arm| matches!(arm.pattern, Pattern::Nil(_) | Pattern::Type { .. }))
     }
 
-    /// BT-2745 / ADR 0102 §4: advisory `match:` exhaustiveness for
+    /// ADR 0102 §4: advisory `match:` exhaustiveness for
     /// singleton-union scrutinees.
     ///
-    /// **Distinct from BT-1299.** `validators::match_validators::check_match_exhaustiveness`
+    /// **Distinct from the sealed-constructor-pattern check.** `validators::match_validators::check_match_exhaustiveness`
     /// is *pattern-based* — it keys on `Result ok:`/`Result error:` constructor
     /// patterns in the arms and emits a hard `Diagnostic::error()`, because
     /// (per its own doc comment) "there is no resolved scrutinee type available
@@ -355,7 +355,7 @@ impl TypeChecker {
         );
     }
 
-    /// BT-2763 / ADR 0106: `matchExhaustive:` — an opt-in **assertion** that a
+    /// ADR 0106: `matchExhaustive:` — an opt-in **assertion** that a
     /// `match:` is provably exhaustive, at asserted `Error` severity (the user
     /// opted in by writing `matchExhaustive:` instead of `match:`, so ADR
     /// 0100's "escalation to a build-failing error is always opt-in" rule is
@@ -363,7 +363,7 @@ impl TypeChecker {
     ///
     /// **Distinct from, and does not replace,**
     /// [`check_singleton_match_exhaustiveness`](Self::check_singleton_match_exhaustiveness)
-    /// (BT-2745's advisory `Warning` path for plain `match:`), which is
+    /// (the advisory `Warning` path for plain `match:`), which is
     /// unchanged and still runs whenever `exhaustive` is `false` — see the
     /// call site in `infer_expr`'s `Expression::Match` arm.
     ///
@@ -374,8 +374,8 @@ impl TypeChecker {
     ///   (`Dynamic`, an open/bare `Symbol`, a `Negation` co-finite set, a
     ///   union with any non-singleton member, or an ordinary nominal type) —
     ///   the assertion cannot be verified, so it fails loudly rather than
-    ///   silently downgrading to advisory. This is the behaviour BT-2745 /
-    ///   ADR 0102 §4 left as a "known discoverability cliff": once the
+    ///   silently downgrading to advisory. This is the behaviour
+    ///   ADR 0102 §4 leaves as a "known discoverability cliff": once the
     ///   scrutinee widens, `matchExhaustive:` stops being provable and must
     ///   say so, not go quiet.
     pub(super) fn check_asserted_match_exhaustiveness(
@@ -438,8 +438,8 @@ impl TypeChecker {
         );
     }
 
-    /// Shared residual computation for both the advisory (BT-2745) and
-    /// asserted (BT-2763) singleton-union `match:` exhaustiveness checks.
+    /// Shared residual computation for both the advisory and
+    /// asserted singleton-union `match:` exhaustiveness checks.
     ///
     /// Callers must already have checked
     /// [`is_closed_singleton_union`](Self::is_closed_singleton_union) —
@@ -453,8 +453,8 @@ impl TypeChecker {
         scrutinee_ty: &InferredType,
         arms: &[MatchArm],
     ) -> Option<(EcoString, Vec<EcoString>)> {
-        // An unguarded wildcard arm is full coverage — mirrors BT-1299's
-        // suppression rule. An unguarded variable-binding arm (`x -> ...`)
+        // An unguarded wildcard arm is full coverage — mirrors the
+        // sealed-constructor-pattern check's suppression rule. An unguarded variable-binding arm (`x -> ...`)
         // always matches too, so it counts the same. A *guarded* catch-all
         // (`_ when: [cond] -> ...`) does NOT guarantee coverage of the
         // remaining cases.
@@ -467,8 +467,8 @@ impl TypeChecker {
 
         // Collect covered singletons from unguarded symbol-literal arms only —
         // a guarded arm (`#north when: [cond] -> ...`) does not guarantee
-        // coverage of that variant, same rule as BT-1299's constructor-arm
-        // coverage.
+        // coverage of that variant, same rule as the sealed-constructor
+        // check's constructor-arm coverage.
         let mut covered: Vec<InferredType> = Vec::new();
         for arm in arms {
             if arm.guard.is_some() {
@@ -493,7 +493,7 @@ impl TypeChecker {
         Some(Self::residual_missing(&residual))
     }
 
-    /// BT-2856 / ADR 0107 Phase A: shared residual computation for `nil`/
+    /// ADR 0107 Phase A: shared residual computation for `nil`/
     /// `Type`-pattern coverage over a closed `Known | Nil` union or a small
     /// closed union of concrete leaf classes (see
     /// [`is_closed_leaf_type_union`](Self::is_closed_leaf_type_union), which

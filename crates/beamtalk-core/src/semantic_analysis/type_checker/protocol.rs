@@ -64,7 +64,7 @@ impl TypeChecker {
 
     /// Recursively check protocol conformance in expressions.
     ///
-    /// **Receiver resolution (BT-2761):** the target method whose parameter
+    /// **Receiver resolution:** the target method whose parameter
     /// annotations drive the check is resolved from the receiver's inferred
     /// type:
     /// - `Known{C}` (instance-side receiver) → `C`'s *instance* methods;
@@ -93,8 +93,7 @@ impl TypeChecker {
             } => {
                 // Check if the receiver's method has protocol-typed params.
                 // Instance-side receivers resolve against instance methods;
-                // Meta (class object) receivers against class-side methods
-                // (BT-2761).
+                // Meta (class object) receivers against class-side methods.
                 let sel_name = selector.name();
                 let method = match self.type_map.get(receiver.span()) {
                     Some(InferredType::Known { class_name, .. }) => {
@@ -121,7 +120,7 @@ impl TypeChecker {
                             // representation swap, not a behaviour change.
                             //
                             // ADR 0068 §Protocol Composition / ADR 0102
-                            // §1/§3 (BT-2743): a parameter declared
+                            // §1/§3: a parameter declared
                             // `:: P1 & P2` requires conformance to
                             // *every* protocol part. The rendered form is
                             // `"P1 & P2"`; split it and check each protocol
@@ -250,8 +249,7 @@ impl TypeChecker {
 
     /// Records every alias name a protocol's declared method signatures
     /// (instance- and class-side) transitively depend on, into
-    /// `self.referenced_aliases` (ADR 0108 hot-reload re-check trigger,
-    /// BT-2899 / BT-2917 follow-up).
+    /// `self.referenced_aliases` (ADR 0108 hot-reload re-check trigger).
     ///
     /// Protocol method signatures ([`crate::ast::ProtocolMethodSignature`])
     /// have no body — unlike a class method, there is nothing for the main
@@ -374,16 +372,16 @@ impl TypeChecker {
                 parameters,
                 span,
             } => {
-                // Resolve the type args to InferredTypes. ADR 0108 (BT-2895):
-                // thread the alias registry (unlike the thin
-                // `Self::resolve_type_annotation` wrapper this replaced) so
+                // Resolve the type args to InferredTypes. ADR 0108: thread
+                // the alias registry (unlike the thin
+                // `Self::resolve_type_annotation` wrapper) so
                 // a type argument that is itself an alias name — e.g.
                 // `Logger(Small)` where `type Small = Integer` — resolves to
                 // its structural expansion before being checked against the
                 // class's declared bound, instead of an opaque unknown
                 // class that would silently skip the bound check.
                 //
-                // ADR 0108 hot-reload re-check trigger (BT-2899): a plain
+                // ADR 0108 hot-reload re-check trigger: a plain
                 // `for` loop (not `.map()`) so each iteration's dependency
                 // set can be folded into `self.referenced_aliases` directly
                 // — a closure capturing both `self.alias_registry` (read)
@@ -402,7 +400,7 @@ impl TypeChecker {
                     type_args.push(ty);
                 }
 
-                // BT-1861: Warn when type args are provided for a class with no type params.
+                // Warn when type args are provided for a class with no type params.
                 // Block is exempt — parameterized Block annotations (e.g., Block(E, Boolean))
                 // are a documentation convention for describing closure signatures.
                 let has_type_params =
@@ -534,10 +532,10 @@ impl TypeChecker {
             return;
         };
 
-        // BT-2928: resolve the declared type through the alias table before
+        // Resolve the declared type through the alias table before
         // comparing against the default value's inferred type — mirroring
         // `check_state_defaults`'s alias-aware resolution (its same-file
-        // sibling, fixed in BT-2923/ADR 0108). This method is only reached
+        // sibling, ADR 0108). This method is only reached
         // for `TypeAnnotation::Generic` fields (see
         // `check_generic_variance_in_module`'s caller-side gate), so the
         // alias in question is typically a type *argument* — e.g. `field:
@@ -556,10 +554,9 @@ impl TypeChecker {
         let declared_type = resolved_declared.display_annotation();
         let mut env = TypeEnv::new();
         env.set_local("self", InferredType::known(class.name.name.clone()));
-        // BT-3469 (item 3): documented, without fixing, as the same
-        // validation-calls-back-into-inference cyclic dependency as
-        // `validation.rs::check_state_defaults` — see the comment there,
-        // and BT-3481 for the follow-up.
+        // This is the same validation-calls-back-into-inference cyclic
+        // dependency as `validation.rs::check_state_defaults` — see the
+        // comment there.
         let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
 
         let InferredType::Known {
@@ -578,7 +575,7 @@ impl TypeChecker {
             hierarchy,
             protocol_registry,
         ) {
-            // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+            // Render `UndefinedObject` as `Nil` in user-facing messages.
             let declared_display = InferredType::class_name_for_diagnostic(declared_type.as_str());
             let value_display = InferredType::class_name_for_diagnostic(value_type.as_str());
             self.diagnostics.push(
@@ -598,7 +595,7 @@ impl TypeChecker {
     }
 
     /// Recursively check variance in expressions (for message send arguments).
-    #[allow(clippy::too_many_lines)] // BT-2949 adds class-type-param substitution
+    #[allow(clippy::too_many_lines)] // class-type-param substitution adds length
     fn check_variance_in_expr(
         &mut self,
         expr: &crate::ast::Expression,
@@ -626,7 +623,7 @@ impl TypeChecker {
                         let sel_name = selector.name();
                         let method = hierarchy.find_method(&class_name, &sel_name);
                         if let Some(method) = method {
-                            // BT-2949: substitution map from the receiver's own
+                            // Substitution map from the receiver's own
                             // class-level generic type-param names (e.g. `E` in
                             // `List(E)`) to its concrete `receiver_type_args`
                             // (e.g. `List(Integer)` gives `{E -> Integer}`).
@@ -638,7 +635,7 @@ impl TypeChecker {
                             // name, which — like a bare `E`/`V`/`K` anywhere
                             // else in the checker — is treated as a wildcard
                             // and always passes.
-                            // BT-2949: widen singleton (or union-of-singleton)
+                            // Widen singleton (or union-of-singleton)
                             // substitution values to `Symbol` — see the
                             // identical widening and its doc in
                             // `validation.rs`'s `check_argument_types`
@@ -666,8 +663,8 @@ impl TypeChecker {
                                 if let Some(Some(expected_declared)) = method.param_types.get(i) {
                                     // `type_string_references_class_param` /
                                     // `is_assignable_to_with_variance` below are
-                                    // string-level helpers (BT-3076 out of
-                                    // scope) — render the structured type once
+                                    // string-level helpers (`DeclaredType`
+                                    // is out of scope here) — render the structured type once
                                     // at this boundary (byte-identical to the
                                     // old stored string) and keep them
                                     // unchanged; `resolve_type_param` itself
@@ -706,7 +703,7 @@ impl TypeChecker {
                                                         protocol_registry,
                                                     ) {
                                                         let param_pos = i + 1;
-                                                        // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                                                        // Render `UndefinedObject` as `Nil` in user-facing messages.
                                                         let expected_display =
                                                             InferredType::class_name_for_diagnostic(
                                                                 expected_ty.as_str(),

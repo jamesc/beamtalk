@@ -6,10 +6,10 @@
 //! **DDD Context:** Semantic Analysis
 //!
 //! Validators that check for code quality issues:
-//! - Redundant assignment `x := x` (BT-950)
-//! - Literal boolean conditions (BT-955)
-//! - Empty method bodies (BT-859)
-//! - Effect-free statements (BT-951)
+//! - Redundant assignment `x := x`
+//! - Literal boolean conditions
+//! - Empty method bodies
+//! - Effect-free statements
 
 use crate::ast::{
     Expression, Identifier, MessageSelector, Module, TypeAnnotation, WellKnownSelector,
@@ -20,9 +20,9 @@ use crate::semantic_analysis::type_checker::{InferredType, TypeMap};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use std::collections::HashMap;
 
-// ── BT-950: Redundant assignment ─────────────────────────────────────────────
+// ── Redundant assignment ──────────────────────────────────────────────────────
 
-/// BT-950: Warn when the RHS of an assignment is the same identifier as the LHS.
+/// Warn when the RHS of an assignment is the same identifier as the LHS.
 ///
 /// Detects `x := x` where both sides are the same plain identifier binding.
 /// This has no effect at runtime and usually indicates a copy-paste error or
@@ -56,9 +56,9 @@ pub(crate) fn check_redundant_assignment(module: &Module, diagnostics: &mut Vec<
     });
 }
 
-// ── BT-955: Literal boolean condition ────────────────────────────────────────
+// ── Literal boolean condition ─────────────────────────────────────────────────
 
-/// BT-955: Warn when a boolean conditional message is sent to a literal boolean receiver.
+/// Warn when a boolean conditional message is sent to a literal boolean receiver.
 ///
 /// When `ifTrue:`, `ifFalse:`, or `ifTrue:ifFalse:` is sent to a literal `true`
 /// or `false`, one branch is statically unreachable or the conditional is
@@ -163,7 +163,7 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
     }
 }
 
-/// BT-859: Error on empty method bodies.
+/// Error on empty method bodies.
 ///
 /// Methods declared with `=>` but no body expressions are a compile error.
 /// Use `self notImplemented` for work-in-progress stubs, or
@@ -186,7 +186,7 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
     }
 }
 
-// ── BT-951: Effect-free statement detection ───────────────────────────────────
+// ── Effect-free statement detection ───────────────────────────────────────────
 
 /// Returns `true` if the expression is pure (no observable side effects).
 ///
@@ -366,7 +366,7 @@ fn check_seq_for_effect_free(
     }
 }
 
-/// BT-951: Warn (as a lint) when a statement is an effect-free expression
+/// Warn (as a lint) when a statement is an effect-free expression
 /// whose value is silently discarded.
 ///
 /// Checks method bodies, standalone method bodies, and (by default)
@@ -380,14 +380,14 @@ fn check_seq_for_effect_free(
 ///
 /// Uses `Severity::Lint` so the warning is suppressed during normal compilation
 /// and only surfaces when running `beamtalk lint` or in the REPL.
-// BT-3340: widened from `pub(crate)` — the standalone `beamtalk-lint`
+// `pub`, not `pub(crate)`: the standalone `beamtalk-lint`
 // crate's `effect_free_statement` pass calls this directly.
 pub fn check_effect_free_statements(
     module: &Module,
     diagnostics: &mut Vec<Diagnostic>,
     skip_module_expression_lint: bool,
 ) {
-    // BT-979: Check module-level expressions unless the caller opts out.
+    // Check module-level expressions unless the caller opts out.
     if !skip_module_expression_lint {
         check_seq_for_effect_free(&module.expressions, diagnostics);
     }
@@ -401,16 +401,17 @@ pub fn check_effect_free_statements(
     }
 }
 
-// BT-1476 validator removed: all control-flow selectors and Tier 2 blocks
-// now have state threading. The dead_block_assignment lint (lint/) remains
+// All control-flow selectors and Tier 2 blocks
+// have state threading, so there is no dedicated validator here for
+// dead block assignments. The dead_block_assignment lint (lint/) remains
 // for `beamtalk lint` usage with @expect dead_assignment suppression.
 
-// ── BT-1955: Redundant `super initialize` in Actor initialize methods ─────────
+// ── Redundant `super initialize` in Actor initialize methods ──────────────────
 
-/// BT-1955: Warn when an `initialize` method on an Actor subclass contains
+/// Warn when an `initialize` method on an Actor subclass contains
 /// an explicit `super initialize` send.
 ///
-/// ADR 0078 Phase 2: with auto-chained `initialize` (BT-1951), parent
+/// ADR 0078 Phase 2: with auto-chained `initialize`, parent
 /// `initialize` methods run automatically before the child's. An explicit
 /// `super initialize` in the body causes the parent's `initialize` to run
 /// twice — once from the auto-chain, once from the explicit send.
@@ -503,7 +504,7 @@ fn check_method_body_for_super_initialize(
     }
 }
 
-/// Builds the BT-1955 diagnostic for a redundant `super initialize` send.
+/// Builds the diagnostic for a redundant `super initialize` send.
 fn redundant_super_initialize_diagnostic(span: Span) -> Diagnostic {
     Diagnostic::warning(
         "explicit `super initialize` is unnecessary — \
@@ -515,18 +516,18 @@ fn redundant_super_initialize_diagnostic(span: Span) -> Diagnostic {
     .with_category(DiagnosticCategory::Lint)
 }
 
-// ── BT-3391/BT-3395: setUp drops field mutations unless it ends in self ──────
+// ── setUp drops field mutations unless it ends in self ───────────────────────
 
-/// BT-3391/BT-3395: Warn when a `TestCase` subclass's `setUp` method mutates
+/// Warn when a `TestCase` subclass's `setUp` method mutates
 /// a field — via `self.field := value` or a `with<Field>:` send — but its
 /// last statement isn't itself self-producing.
 ///
-/// `TestCase` is a `Value subclass:` (BT-1533 exempts `self.field :=` there
-/// from the general value-immutability error, pending the `with*:` migration
-/// tracked by BT-1534). Value-type method bodies return the value of their
+/// `TestCase` is a `Value subclass:` (this exempts `self.field :=` there
+/// from the general value-immutability error, pending a `with*:` migration).
+/// Value-type method bodies return the value of their
 /// *last* expression, with two special cases: a `self.field := value`
 /// assignment in last position evaluates to the updated `self` rather than
-/// the assigned value (BT-833/BT-900), and a `with<Field>:` send — the
+/// the assigned value, and a `with<Field>:` send — the
 /// auto-generated copy-setter naming convention for every `Value` field
 /// (`crate::synthetic_selectors::with_star_selector`) — always returns a new,
 /// fully updated self by construction. Either shape only carries the
@@ -727,7 +728,7 @@ fn cascade_value_is_self_producing(expr: &Expression) -> bool {
 /// [`is_self_producing`], minus the bare-`self` case, which mutates
 /// nothing). Each of these shapes returns the fully updated `self`; when the
 /// containing `setUp` doesn't return that value as its very last statement,
-/// the mutation is silently dropped (BT-3391, BT-3395).
+/// the mutation is silently dropped.
 fn contains_self_reconstructing_send(expr: &Expression) -> bool {
     let mut found = false;
     walk_expression(expr, &mut |e| {
@@ -764,7 +765,7 @@ fn check_setup_body_returns_self(
     diagnostics.push(setup_drops_field_assignments_diagnostic(last_expr.span()));
 }
 
-/// Builds the BT-3391 diagnostic for a `setUp` whose trailing statement
+/// Builds the diagnostic for a `setUp` whose trailing statement
 /// drops earlier `self.field :=` mutations.
 fn setup_drops_field_assignments_diagnostic(span: Span) -> Diagnostic {
     Diagnostic::warning(
@@ -784,9 +785,9 @@ fn setup_drops_field_assignments_diagnostic(span: Span) -> Diagnostic {
     .with_category(DiagnosticCategory::Lint)
 }
 
-// ── BT-2140: Redundant local-variable type annotation ────────────────────────
+// ── Redundant local-variable type annotation ──────────────────────────────────
 
-/// BT-2140: Lint when a local-variable assignment carries a `:: T` annotation
+/// Lint when a local-variable assignment carries a `:: T` annotation
 /// whose resolved type exactly matches the inferred type of the right-hand
 /// side.
 ///
@@ -856,7 +857,7 @@ pub(crate) fn check_redundant_local_type_annotation(
             return;
         };
 
-        // ADR 0108 (BT-2895): no alias registry threaded here — this lint
+        // ADR 0108: no alias registry threaded here — this lint
         // only fires on an exact `Known` match between annotation and RHS,
         // so an alias-typed local (e.g. `heading :: Direction := ...`)
         // simply resolves as an opaque unknown class, never spuriously
@@ -915,7 +916,7 @@ mod tests {
     use crate::source_analysis::lex_with_eof;
     use crate::source_analysis::parse;
 
-    // ── BT-951: Effect-free statement tests ──────────────────────────────────
+    // ── Effect-free statement tests ────────────────────────────────────────────
 
     /// A lone literal in a method body is its return value — no lint warning.
     #[test]
@@ -1045,7 +1046,7 @@ mod tests {
         );
     }
 
-    /// BT-979: Module-level expressions ARE linted by default.
+    /// Module-level expressions ARE linted by default.
     #[test]
     fn module_level_effect_free_linted_by_default() {
         let src = "42.\nself doSomething";
@@ -1062,7 +1063,7 @@ mod tests {
         assert_eq!(diagnostics[0].severity, Severity::Lint);
     }
 
-    /// BT-979: Module-level expressions NOT linted when opt-out flag is set.
+    /// Module-level expressions NOT linted when opt-out flag is set.
     #[test]
     fn module_level_effect_free_skipped_with_flag() {
         let src = "42.\nself doSomething";
@@ -1098,7 +1099,7 @@ mod tests {
         );
     }
 
-    // ── BT-950: Redundant assignment tests ───────────────────────────────────
+    // ── Redundant assignment tests ─────────────────────────────────────────────
 
     /// `x := x` at the top level emits a warning.
     #[test]
@@ -1177,7 +1178,7 @@ mod tests {
     }
 
     /// `self.x := self.x` (field access, not plain identifiers) does NOT trigger
-    /// the redundant-assignment check (that's a separate BT-914 concern).
+    /// the redundant-assignment check (that's a separate concern).
     #[test]
     fn field_access_assignment_not_flagged_as_redundant() {
         let src = "Object subclass: Foo\n  state: x = 0\n  noOp => self.x := self.x";
@@ -1209,7 +1210,7 @@ mod tests {
         assert_eq!(diagnostics[0].severity, Severity::Warning);
     }
 
-    // ── BT-955: Literal boolean condition tests ───────────────────────────────
+    // ── Literal boolean condition tests ────────────────────────────────────────
 
     /// `true ifTrue: [42]` — condition always true, branch always taken.
     #[test]
@@ -1447,9 +1448,9 @@ mod tests {
         );
     }
 
-    // ── BT-1955: Redundant `super initialize` tests ───────────────────────────
+    // ── Redundant `super initialize` tests ─────────────────────────────────────
 
-    /// Helper: build module + class hierarchy from source for BT-1955 tests.
+    /// Helper: build module + class hierarchy from source for these tests.
     fn build_module_and_hierarchy(src: &str) -> (crate::ast::Module, ClassHierarchy) {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
@@ -1594,11 +1595,11 @@ mod tests {
         );
     }
 
-    // ── BT-3391: setUp drops field assignments tests ──────────────────────────
+    // ── setUp drops field assignments tests ────────────────────────────────────
 
     /// A single `self.field := value` statement, with nothing after it — the
-    /// documented-as-working idiom (BT-833/BT-900 special-cases the last
-    /// position). No warning.
+    /// documented-as-working idiom (the last position is special-cased).
+    /// No warning.
     #[test]
     fn setup_single_field_assignment_no_warn() {
         let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
@@ -1612,7 +1613,7 @@ mod tests {
         );
     }
 
-    /// The exact BT-3391 repro: a field assignment followed by an unrelated
+    /// The exact repro: a field assignment followed by an unrelated
     /// trailing statement — warns.
     #[test]
     fn setup_field_assignment_then_unrelated_statement_warns() {
@@ -1635,7 +1636,7 @@ mod tests {
     }
 
     /// A trailing `super setUp` call after a field assignment also warns —
-    /// explicitly called out as a breaking case in BT-3391.
+    /// a breaking case worth calling out explicitly.
     #[test]
     fn setup_field_assignment_then_super_setup_warns() {
         let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
@@ -1696,10 +1697,10 @@ mod tests {
         );
     }
 
-    // ── BT-3395: with*: chain variant of the same trap ────────────────────────
+    // ── with*: chain variant of the same trap ──────────────────────────────────
 
     /// A single `with<Field>:` send followed by an unrelated trailing
-    /// statement — the exact BT-3395 repro. Warns, same as the
+    /// statement — the exact repro. Warns, same as the
     /// `self.field :=` form.
     #[test]
     fn setup_with_field_send_then_unrelated_statement_warns() {
@@ -1831,7 +1832,7 @@ mod tests {
 
     /// A chained `with*:` send — `(self withA: x) withB: y` — where the
     /// outer send's receiver is itself a `with<Field>:` send rather than
-    /// literal `self`. The CI regression (BT-3395 fix-forward): the chain's
+    /// literal `self`. The chain's
     /// overall value is still the fully updated self (each `with*:` send
     /// returns self with its own field set), so this must NOT warn as
     /// `setUp`'s trailing statement.
@@ -1977,7 +1978,7 @@ mod tests {
         );
     }
 
-    // ── BT-2140: Redundant local-variable type annotation tests ───────────────
+    // ── Redundant local-variable type annotation tests ─────────────────────────
 
     /// Helper: parse, type-check, and run the redundant-annotation lint.
     fn redundant_local_type_lints(src: &str) -> Vec<Diagnostic> {
