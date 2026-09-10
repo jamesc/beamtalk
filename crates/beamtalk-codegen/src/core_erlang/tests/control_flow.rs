@@ -3098,6 +3098,101 @@ fn test_value_type_field_write_in_foldl_body_is_compile_error() {
 }
 
 #[test]
+fn test_value_type_field_write_in_remaining_foldl_selectors_is_compile_error() {
+    // BT-3487: the headline repro (`do:`) and `collect:` are pinned above;
+    // this test rounds out the rest of the `Foldl*` family the Linear issue
+    // names — `select:`/`reject:`/`inject:into:`/`detect:ifNone:`/`count:`,
+    // plus a `Range`'s own `do:` (`(1 to: n) do: [...]`, which reaches the
+    // exact same `generate_list_do_with_mutations` path as a list receiver's
+    // `do:` — the dispatch is keyed on the `do:` selector and block body,
+    // never on the receiver's type). All six share `lower_foldl_body` with
+    // `do:`/`collect:`, so — per `reject_unthreadable_value_self_field_write`'s
+    // doc comment — `threads_value_self` is `false` for every one of them and
+    // the same clean `FieldAssignmentInUnsupportedBlock` diagnostic BT-3488
+    // already produces for `do:`/`collect:` fires here too, rather than the
+    // `erlc` "unbound variable 'State'" crash the pre-BT-3488 parent commit
+    // produced for this whole family.
+    let select = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtFoldlSelectSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    #(1, 2, 3) select: [:i | self.total := self.total + i. i > 1]\n",
+            "    self.total\n",
+        ),
+        "bt@vtfoldlselectself",
+    );
+    assert_eq!(select, "total");
+
+    let reject = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtFoldlRejectSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    #(1, 2, 3) reject: [:i | self.total := self.total + i. i > 1]\n",
+            "    self.total\n",
+        ),
+        "bt@vtfoldlrejectself",
+    );
+    assert_eq!(reject, "total");
+
+    let inject_into = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtFoldlInjectSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    #(1, 2, 3)\n",
+            "      inject: 0\n",
+            "      into: [:acc :i |\n",
+            "        self.total := self.total + i\n",
+            "        acc + i\n",
+            "      ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtfoldlinjectself",
+    );
+    assert_eq!(inject_into, "total");
+
+    let detect_if_none = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtFoldlDetectSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    #(1, 2, 3)\n",
+            "      detect: [:i | self.total := self.total + i. i > 10]\n",
+            "      ifNone: [-1]\n",
+            "    self.total\n",
+        ),
+        "bt@vtfoldldetectself",
+    );
+    assert_eq!(detect_if_none, "total");
+
+    let count = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtFoldlCountSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    #(1, 2, 3) count: [:i | self.total := self.total + i. i > 1]\n",
+            "    self.total\n",
+        ),
+        "bt@vtfoldlcountself",
+    );
+    assert_eq!(count, "total");
+
+    let range_do = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtFoldlRangeDoSelf\n",
+            "  field: total = 0\n\n",
+            "  computeTotal =>\n",
+            "    (1 to: 3) do: [:i | self.total := self.total + i]\n",
+            "    self.total\n",
+        ),
+        "bt@vtfoldlrangedoself",
+    );
+    assert_eq!(range_do, "total");
+}
+
+#[test]
 fn test_value_type_field_write_nested_in_other_loop_families_and_constructs_is_compile_error() {
     // BT-3488: the headline repro is a `to:do:`, but the gap was never
     // specific to that selector — every loop family that reaches

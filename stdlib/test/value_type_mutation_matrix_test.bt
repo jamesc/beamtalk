@@ -229,11 +229,20 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // detect:ifNone:/count:, and a Range's own do:) are a DIFFERENT construct
   // family BT-3484 explicitly left out of scope (their accumulator has no
   // matching Self slot — pre-existing BT-3169 tech debt shared with
-  // ClassVars) and are NOT represented here at all: `self.total :=` inside
-  // one of their blocks fails erlc outright (`unbound variable 'State'`),
-  // which would break compilation of this whole file if checked in as a
-  // fixture — tracked in BT-3487 instead, same reasoning that kept the
-  // ifTrue: conditional fragment out until BT-3484 fixed it for real.
+  // ClassVars) and are STILL not represented here at all — but not because
+  // of an outstanding crash. BT-3487 confirmed empirically that BT-3488's
+  // rejection (`reject_unthreadable_value_self_field_write`, shared by the
+  // Letrec and Foldl body-lowering call sites) already covers this whole
+  // family: since `ThreadingPlan::threads_value_self` is never set for a
+  // Foldl plan, EVERY value-type `self.field :=` write in one of their
+  // blocks — top-level statement included — is now a clean compile-time
+  // `FieldAssignmentInUnsupportedBlock` rejection rather than the erlc
+  // "unbound variable 'State'" crash this comment used to describe. A
+  // rejected construct can't be a live fixture in a file that must compile,
+  // so the regression coverage for this shape is pinned at the Rust level
+  // instead: `test_value_type_field_write_in_foldl_body_is_compile_error`
+  // and `test_value_type_field_write_in_remaining_foldl_selectors_is_compile_error`
+  // in `crates/beamtalk-codegen/src/core_erlang/tests/control_flow.rs`.
   fragStateFieldToByDoNonLastReadWrite =>
     seen := 0
     1
@@ -931,16 +940,20 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testStateFieldIfTrueIfFalseNonLastReadWriteFalseTestCase =>
     self assert: (self fragStateFieldIfTrueIfFalseNonLastReadWrite: false) equals: 100
 
-  // BT-3487/BT-3488: no live fixtures for these — both fail erlc outright
-  // (unbound variable 'State'), which would break compilation of this whole
-  // file if checked in. BT-3487: self.field := inside a Foldl-shaped list-op
-  // (do:/collect:/select:/reject:/inject:into:/detect:ifNone:/count:, and a
-  // Range's own do:). BT-3488: self.field := inside a conditional nested
-  // inside a loop (not itself a top-level loop statement) — inconsistent
-  // with the identical ClassVar shape, which gets a clean "Cannot assign to
-  // field... inside this block" compile-time rejection instead of crashing;
-  // BT-3488 is really about closing that inconsistency, not necessarily
-  // adding full support.
+  // BT-3487/BT-3488: no live fixtures for these — both shapes are now clean
+  // compile-time rejections (`FieldAssignmentInUnsupportedBlock`), which
+  // still can't be live fixtures in a file that must compile. BT-3487:
+  // self.field := inside a Foldl-shaped list-op (do:/collect:/select:/
+  // reject:/inject:into:/detect:ifNone:/count:, and a Range's own do:) —
+  // pinned at the Rust level in control_flow.rs's
+  // `test_value_type_field_write_in_foldl_body_is_compile_error` and
+  // `test_value_type_field_write_in_remaining_foldl_selectors_is_compile_error`.
+  // BT-3488: self.field := inside a conditional nested inside a loop (not
+  // itself a top-level loop statement) — inconsistent with the identical
+  // ClassVar shape, which gets a clean "Cannot assign to field... inside
+  // this block" compile-time rejection instead of crashing; BT-3488 closed
+  // that inconsistency by giving the value-type shape the same clean
+  // rejection rather than by adding full threading support.
   testClassVarIfTrueNonLastReadWriteTrueClassMethod =>
     self assert: (MutationCorpusClassMethod classVarIfTrueNonLastReadWrite: true) equals: 7
 
