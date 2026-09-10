@@ -86,7 +86,7 @@ fn test_valid_selector_no_warning() {
 #[test]
 fn test_instance_side_dnu_suppresses_class_side_warning() {
     // Erlang erlang  ← Erlang has instance-side doesNotUnderstand:args:
-    // BT-1763: Erlang is a sealed singleton that dispatches class-side
+    // Erlang is a sealed singleton that dispatches class-side
     // messages through instance dispatch, so instance-side DNU also
     // suppresses class-side warnings.
     // Should NOT produce "does not understand" warning
@@ -111,7 +111,7 @@ fn test_instance_side_dnu_suppresses_class_side_warning() {
 
 #[test]
 fn test_method_lookup_operator_no_warning() {
-    // BT-1735: Integer >> #+  — >> is defined on Behaviour, inherited via Class chain
+    // Integer >> #+  — >> is defined on Behaviour, inherited via Class chain
     let module = make_module(vec![msg_send(
         class_ref("Integer"),
         MessageSelector::Binary(">>".into()),
@@ -133,7 +133,7 @@ fn test_method_lookup_operator_no_warning() {
 
 #[test]
 fn test_character_literal_integer_method_no_warning() {
-    // BT-778: $A + 1 — Character inherits Integer's +, no DNU warning
+    // $A + 1 — Character inherits Integer's +, no DNU warning
     let module = make_module(vec![msg_send(
         char_lit('A'),
         MessageSelector::Binary("+".into()),
@@ -155,7 +155,7 @@ fn test_character_literal_integer_method_no_warning() {
 
 #[test]
 fn test_character_literal_own_method_no_warning() {
-    // BT-778: $A isLetter — Character's own method, no DNU warning
+    // $A isLetter — Character's own method, no DNU warning
     let module = make_module(vec![msg_send(
         char_lit('A'),
         MessageSelector::Unary("isLetter".into()),
@@ -173,7 +173,7 @@ fn test_character_literal_own_method_no_warning() {
 
 #[test]
 fn test_character_literal_bogus_method_warning() {
-    // BT-778: $A bogusMethod — should still produce DNU warning
+    // $A bogusMethod — should still produce DNU warning
     let module = make_module(vec![msg_send(
         char_lit('A'),
         MessageSelector::Unary("bogusMethod".into()),
@@ -196,7 +196,7 @@ fn test_character_literal_bogus_method_warning() {
 
 #[test]
 fn test_character_literal_non_numeric_operand_warns() {
-    // BT-778: $A + 'hello' — Character inherits Integer's +, but 'hello' is not numeric.
+    // $A + 'hello' — Character inherits Integer's +, but 'hello' is not numeric.
     // The type checker should warn that + expects a numeric argument, not a String.
     let module = make_module(vec![msg_send(
         char_lit('A'),
@@ -344,11 +344,11 @@ fn test_cascade_invalid_selector() {
 
 #[test]
 fn test_cascade_complex_receiver_diagnostic_emitted_once() {
-    // BT-2035 regression: a cascade whose inner receiver subtree is itself
-    // a message send with a DNU must emit the DNU diagnostic exactly once.
-    // Previously the Cascade arm called `infer_expr` twice on the inner
-    // receiver — once via the outer MessageSend, once directly to extract
-    // the dispatch type — doubling any diagnostics produced by the subtree.
+    // A cascade whose inner receiver subtree is itself
+    // a message send with a DNU must emit the DNU diagnostic exactly once —
+    // not twice, from the Cascade arm calling `infer_expr` on the inner
+    // receiver both via the outer MessageSend and directly to extract
+    // the dispatch type, which would double any diagnostics the subtree produces.
     //
     // AST for `(42 bogus) negated; abs`:
     //   Cascade {
@@ -429,7 +429,7 @@ fn test_map_literal_infers_dictionary() {
     };
 
     let ty = checker.infer_expr(&map_expr, &hierarchy, &mut env, false);
-    // BT-2620: empty map literal → Dictionary(Dynamic, Dynamic).
+    // empty map literal → Dictionary(Dynamic, Dynamic).
     assert_eq!(
         ty,
         InferredType::known_with_args(
@@ -455,7 +455,7 @@ fn test_list_literal_infers_list() {
     };
 
     let ty = checker.infer_expr(&list_expr, &hierarchy, &mut env, false);
-    // BT-2620: homogeneous Integer elements → List(Integer).
+    // homogeneous Integer elements → List(Integer).
     assert_eq!(
         ty,
         InferredType::known_with_args("List", vec![InferredType::known("Integer")])
@@ -783,7 +783,7 @@ fn infer_types_convenience_function() {
     );
 }
 
-// BT-614: Class method self-send tests
+// Class method self-send tests
 
 fn make_class_with_class_methods(
     name: &str,

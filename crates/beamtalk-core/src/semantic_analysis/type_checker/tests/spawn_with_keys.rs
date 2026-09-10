@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `spawnWith:` map-literal call-site key checking (ADR 0104 Phase 2, BT-2750).
+//! `spawnWith:` map-literal call-site key checking (ADR 0104 Phase 2).
 //!
 //! `C spawnWith: #{...}` checks the literal map's keys against `C`'s declared
 //! `state:` slots and warns (with a typo suggestion) on an unknown key. When a

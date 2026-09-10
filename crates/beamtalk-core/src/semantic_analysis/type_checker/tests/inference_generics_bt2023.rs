@@ -1,13 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2023 generic-argument inference: nullable-union unification, nested-generic
+//! Generic-argument inference: nullable-union unification, nested-generic
 //! block params, and FFI polymorphic return-type substitution.
 
 use super::super::*;
 use super::common::*;
 
-// ---- BT-2023(A): Nullable-union arguments unify with generic params ----
+// ---- Nullable-union arguments unify with generic params ----
 
 #[test]
 fn infer_method_local_params_nullable_list_union() {
@@ -175,7 +175,7 @@ fn infer_method_local_params_plain_type_param_nullable_union() {
     );
 }
 
-// ---- BT-2023(B): Nested-generic block params resolve ----
+// ---- Nested-generic block params resolve ----
 
 #[test]
 fn resolve_type_param_nested_list_e() {
@@ -270,7 +270,7 @@ fn resolve_type_param_known_class_unchanged() {
     assert_eq!(result, InferredType::known("Integer"));
 }
 
-// ---- BT-2023(C): FFI polymorphic return type substitution ----
+// ---- FFI polymorphic return type substitution ----
 
 #[test]
 fn substitute_ffi_return_type_list_propagation() {

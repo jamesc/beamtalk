@@ -1,30 +1,28 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2849: a selector-kind x `InferredType`-shape coverage matrix for
+//! a selector-kind x `InferredType`-shape coverage matrix for
 //! argument-type checking.
 //!
-//! [BT-2843], [BT-2845], [BT-2846], [BT-2847], [BT-2848], and [BT-2871] were
-//! six independent instances of the same bug shape: a specific validation
+//! Six independent bugs shared the same shape: a specific validation
 //! path (binary sends, cascades, FFI calls, nested generic args, class-body
 //! defaults) assumed a "broader"/"more specific" check elsewhere covered
 //! `Union`/`Dynamic` argument shapes, when in fact that other check only
 //! handled `InferredType::Known`. Each fix landed with its own narrow
 //! regression test (see `bt2843_binary_arg_union_check.rs`,
 //! `bt2871_cascade_binary_arg_check.rs`, `bt2847_nested_union_type_args.rs`,
-//! the BT-2845 tests in `arg_return_checking.rs`, and the BT-2846 tests in
-//! `ffi.rs`), but nothing forced the *same* coverage matrix onto every
-//! message-send shape uniformly — which is exactly why these gaps went
+//! the continuation-message tests in `arg_return_checking.rs`, and the Union
+//! tests in `ffi.rs`), but nothing forced the *same* coverage matrix onto
+//! every message-send shape uniformly — which is exactly why these gaps went
 //! unnoticed for as long as they did.
 //!
 //! This module is that matrix. It parameterizes over:
 //!
 //! - **Send shape**: `Unary`, `Binary`, `Keyword`, `Cascade-first`,
 //!   `Cascade-continuation` (keyword and binary selectors on an instance
-//!   receiver — BT-2871 showed these are genuinely different code paths —
-//!   plus class-ref and self-in-class-method receivers — BT-2877 showed the
-//!   continuation loop's three dispatch branches are independent too), and
-//!   `FFI call`.
+//!   receiver are genuinely different code paths from the class-ref and
+//!   self-in-class-method receivers, since the continuation loop's three
+//!   dispatch branches are independent), and `FFI call`.
 //! - **Argument inferred-type shape**: `Known-compatible`,
 //!   `Known-incompatible`, `Union-all-compatible`,
 //!   `Union-with-one-incompatible-member`, and `Dynamic`.
@@ -36,21 +34,13 @@
 //! "compatible"/`Dynamic` cell must produce none. This is additive coverage;
 //! the existing narrower regression tests are left in place.
 //!
-//! Verified with an empirical revert-and-check: temporarily undoing BT-2871's
+//! Verified with an empirical revert-and-check: temporarily undoing the
 //! cascade-continuation-binary fix in `inference.rs` made exactly the two
 //! cells that claim to cover it fail, confirming this matrix has teeth rather
 //! than just re-asserting the status quo. The cascade-continuation loop's
 //! three dispatch branches (class-ref, self-in-class-method, and
 //! instance/binary "else" — `inference.rs`'s `for msg in messages` loop,
-//! ~lines 716-818) are each covered by their own row of cells, per [BT-2877].
-//!
-//! [BT-2843]: https://linear.app/beamtalk/issue/BT-2843
-//! [BT-2845]: https://linear.app/beamtalk/issue/BT-2845
-//! [BT-2846]: https://linear.app/beamtalk/issue/BT-2846
-//! [BT-2847]: https://linear.app/beamtalk/issue/BT-2847
-//! [BT-2848]: https://linear.app/beamtalk/issue/BT-2848
-//! [BT-2871]: https://linear.app/beamtalk/issue/BT-2871
-//! [BT-2877]: https://linear.app/beamtalk/issue/BT-2877
+//! ~lines 716-818) are each covered by their own row of cells.
 
 use super::common::*;
 
@@ -66,8 +56,8 @@ use super::common::*;
 /// the cascade continuation loop) can be exercised independently.
 ///
 /// `classTakeStr:` / `classTakeObj:` / `classSecond:` / `classSecondObj:`
-/// mirror the four instance-side methods above but are declared `class`-side
-/// (BT-2877), for the cascade-continuation-class-ref and
+/// mirror the four instance-side methods above but are declared `class`-side,
+/// for the cascade-continuation-class-ref and
 /// cascade-continuation-self-in-class-method cells — the two dispatch
 /// branches in the continuation loop (`inference.rs`'s `for msg in messages`,
 /// ~lines 735-754 and ~755-775) the instance-receiver cells above never
@@ -200,7 +190,7 @@ fn matrix_unary_dynamic() {
 }
 
 // ---------------------------------------------------------------------------
-// Binary — `c ++ <arg>` / `c + <arg>` (non-cascade). BT-2843's fix.
+// Binary — `c ++ <arg>` / `c + <arg>` (non-cascade).
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -240,7 +230,7 @@ fn matrix_binary_dynamic() {
 /// through a custom `Thing`-defined `++`/`+`, so `check_binary_operand_types`
 /// never has bespoke logic for them (`binary_operand_check_ran` stays
 /// `false`) and every cell exercises only the generic `check_argument_types`
-/// fallback. BT-2843's actual crux was the *interaction* between the two
+/// fallback. The crux of the shared `check_argument_types` fallback is the *interaction* between the two
 /// checks on a receiver `check_binary_operand_types` DOES have bespoke logic
 /// for (`String`'s `++`) — the fallback must not fire a *duplicate*
 /// diagnostic alongside the bespoke one. Exercise that directly here so the
@@ -262,7 +252,7 @@ fn matrix_binary_builtin_receiver_known_incompatible_no_duplicate() {
 }
 
 // ---------------------------------------------------------------------------
-// Keyword — `c takeStr: <arg>` / `c takeObj: <arg>` (non-cascade). BT-1832's
+// Keyword — `c takeStr: <arg>` / `c takeObj: <arg>` (non-cascade). This is the
 // original coverage (the baseline every other shape is measured against).
 // ---------------------------------------------------------------------------
 
@@ -350,9 +340,9 @@ fn matrix_cascade_first_dynamic() {
 
 // ---------------------------------------------------------------------------
 // Cascade-continuation (keyword) — a well-typed first message (`takeStr:
-// "seed"`) followed by the `second:` continuation under test. BT-2845's fix
-// (the cascade loop's `for msg in messages` never ran `check_argument_types`
-// for continuation messages at all).
+// "seed"`) followed by the `second:` continuation under test — the cascade
+// loop's `for msg in messages` runs `check_argument_types` for continuation
+// messages too, not just the first message.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -406,11 +396,11 @@ fn matrix_cascade_continuation_keyword_dynamic() {
 
 // ---------------------------------------------------------------------------
 // Cascade-continuation (binary) — same shape as above, but the continuation
-// message is a *binary* selector (`++` / `+`). BT-2871's fix specifically:
-// `check_binary_operand_types` is only ever invoked from
-// `infer_message_send_with_receiver_ty` (the first-message path), never from
-// the cascade continuation loop, so a binary continuation's argument had
-// *zero* fallback coverage even after BT-2845 fixed keyword continuations.
+// message is a *binary* selector (`++` / `+`). `check_binary_operand_types` is
+// only ever invoked from `infer_message_send_with_receiver_ty` (the
+// first-message path), never from the cascade continuation loop, so a binary
+// continuation's argument needs its own fallback coverage distinct from the
+// keyword-continuation coverage above.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -460,7 +450,7 @@ fn matrix_cascade_continuation_binary_dynamic() {
 }
 
 // ---------------------------------------------------------------------------
-// Cascade-continuation (class-ref) — BT-2877: `Thing classTakeStr: ...;
+// Cascade-continuation (class-ref) — `Thing classTakeStr: ...;
 // classSecond: ...`, where the cascade *target* itself parses as an
 // `Expression::ClassReference` (any capitalized identifier — see
 // `parse_identifier_or_field_access`). This exercises the `is_class_ref`
@@ -524,7 +514,7 @@ fn matrix_cascade_continuation_class_ref_dynamic() {
 }
 
 // ---------------------------------------------------------------------------
-// Cascade-continuation (self-in-class-method) — BT-2877: `self classTakeStr:
+// Cascade-continuation (self-in-class-method) — `self classTakeStr:
 // ...; classSecond: ...`, sent from inside `Thing`'s own `class run` method.
 // `self` there is bound to `InferredType::Known { class_name: "Thing", .. }`
 // (see `receiver_type_for_class`, set for `class.class_methods` bodies)
@@ -588,7 +578,7 @@ fn matrix_cascade_continuation_self_class_method_dynamic() {
 }
 
 // ---------------------------------------------------------------------------
-// FFI call — `check_ffi_argument_types` directly, mirroring the BT-2846
+// FFI call — `check_ffi_argument_types` directly, mirroring the Union
 // tests in `ffi.rs`. A `String`-typed param covers `Known-compatible`,
 // `Known-incompatible`, `Union-with-one-incompatible-member`, and `Dynamic`.
 //
@@ -602,7 +592,7 @@ fn matrix_cascade_continuation_self_class_method_dynamic() {
 // call. A `Number`-typed param with an `Integer | Float` union routes
 // through the real classification path (both members share `Number` as a
 // direct superclass, per `generated_builtins.rs`), so this cell actually
-// regresses BT-2846's FFI Union handling instead of vacuously passing.
+// exercises the FFI Union handling instead of vacuously passing.
 // ---------------------------------------------------------------------------
 
 fn ffi_sig(param_type: InferredType) -> FunctionSignature {

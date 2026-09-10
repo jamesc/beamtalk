@@ -1,17 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2879: the cascade continuation loop (`Expression::Cascade`'s
-//! `for msg in messages` loop) had no `InferredType::Meta` branch at all —
-//! neither for `check_argument_types` nor for `check_spawn_with_map_keys` —
-//! even though the non-cascade path (`infer_message_send_with_receiver_ty`)
-//! has handled a `Meta`-typed receiver (ADR 0083 / BT-2255) since before
-//! BT-2850. [BT-2850] fixed the cascade loop's `ClassReference` and
-//! `self`-in-class-method branches; this is the loop's third, independent
-//! gap — a `someVar :: SomeClass class`-typed cascade target silently skipped
+//! The cascade continuation loop (`Expression::Cascade`'s
+//! `for msg in messages` loop) needs an `InferredType::Meta` branch —
+//! for both `check_argument_types` and `check_spawn_with_map_keys` —
+//! matching the non-cascade path (`infer_message_send_with_receiver_ty`),
+//! which has handled a `Meta`-typed receiver since ADR 0083. The cascade
+//! loop's `ClassReference` and `self`-in-class-method branches are handled
+//! elsewhere; this is the loop's third, independent case — a
+//! `someVar :: SomeClass class`-typed cascade target must not silently skip
 //! both checks on every continuation message.
-//!
-//! [BT-2850]: https://linear.app/beamtalk/issue/BT-2850
 
 use super::common::*;
 
@@ -83,7 +81,7 @@ typed Object subclass: Runner
 /// AC: a `Meta`-typed cascade target's continuation message with an
 /// incompatible `Known` argument type produces a `Type` diagnostic, matching
 /// `check_argument_types` behavior for the class-reference and
-/// self-in-class-method cascade branches (BT-2850/BT-2877).
+/// self-in-class-method cascade branches.
 #[test]
 fn bt2879_cascade_meta_receiver_continuation_incompatible_arg_warns() {
     let source = "\
@@ -141,7 +139,7 @@ typed Object subclass: Runner
 ///
 /// Asserts against the type map directly rather than diagnostics: when the
 /// block param falls back to Dynamic, it does so as `Dynamic(DynamicReceiver)`
-/// (BT-2042), which is deliberately excluded from the "Dynamic in typed
+/// (a receiver-derived Dynamic reason), which is deliberately excluded from the "Dynamic in typed
 /// class" warning — so a diagnostics-only assertion here would pass whether
 /// or not the params were actually typed, giving false confidence.
 #[test]

@@ -1,18 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ifNil:ifNotNil: branch-union return types (BT-2047).
+//! ifNil:ifNotNil: branch-union return types.
 
 use super::common::*;
 
-// ── BT-2047: `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return-type unification ──
+// ── `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return-type unification ──
 //
 // The whole `receiver ifNil: [a] ifNotNil: [:x | b]` expression should type as
-// `typeof(a) | typeof(b)` (deduplicated) instead of `Dynamic`. BT-2046 already
-// inferred both branches as `Block(..., R)` with narrowed params — this test
+// `typeof(a) | typeof(b)` (deduplicated) instead of `Dynamic`. Both branches
+// infer as `Block(..., R)` with narrowed params — this test
 // family locks in that the outer send's return type is the branch union.
 
-/// Minimal repro from the BT-2047 issue: `self.snapshot ifNil: [42] ifNotNil:
+/// Minimal repro: `self.snapshot ifNil: [42] ifNotNil:
 /// [:snap | "got one"]` should type as `Integer | String`, not Dynamic.
 #[test]
 fn bt2047_if_nil_if_not_nil_returns_branch_union() {
@@ -200,16 +200,16 @@ typed Object subclass: Repro
     );
 }
 
-// ── BT-2824: solo `ifNil:` / `ifNotNil:` branch-union return types ──
+// ── solo `ifNil:` / `ifNotNil:` branch-union return types ──
 //
 // Solo `recv ifNil: [block]` / `recv ifNotNil: [:v | block]` on a `T | Nil`
 // receiver previously fell through to the generic union-send dispatch, which
 // has no way to read the block's actual return type from a bare `Block`
 // stdlib signature — the whole expression collapsed to `Dynamic`. These
 // tests lock in that solo sends now infer `T | R` / `R | Nil` the same way
-// the two-arm combinators already do (BT-2047).
+// the two-arm combinators already do.
 
-/// Regression test from the BT-2824 issue: a `typed` method with a declared
+/// Regression test: a `typed` method with a declared
 /// concrete return type (`-> String`) whose body is `x ifNil: ["default"]`
 /// on a `String | Nil` field should type-check with the inferred type as
 /// `String`, not `Dynamic`.
@@ -514,8 +514,8 @@ typed Object subclass: Repro
 /// `Known("String")` correctly here: since the receiver is `Known` (not a
 /// `Union`), it resolves `UndefinedObject>>ifNil:`'s `Block(R) -> R` param
 /// signature and substitutes `R` from the block's actual argument type — the
-/// BT-2824 fix (which targets the `T | Nil` union case) doesn't touch or
-/// regress this already-correct path.
+/// `T | Nil` union-case narrowing must not touch or regress this already-
+/// correct path.
 #[test]
 fn bt2824_literal_nil_receiver_if_nil_falls_back_to_generic_dispatch() {
     let source = r#"

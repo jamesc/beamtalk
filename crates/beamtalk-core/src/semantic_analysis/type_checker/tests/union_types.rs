@@ -6,7 +6,7 @@
 use super::super::*;
 use super::common::*;
 
-// ── Union type tests (BT-1572) ──────────────────────────────────────────
+// ── Union type tests ──────────────────────────────────────────
 
 #[test]
 fn union_of_simplifies_single_type() {
@@ -187,7 +187,7 @@ fn resolve_type_string_union() {
     );
 }
 
-/// BT-1572 + BT-1857: Message send on union receiver warns if non-Nil member lacks the selector.
+/// Message send on union receiver warns if non-Nil member lacks the selector.
 #[test]
 fn union_receiver_warns_when_non_nil_member_lacks_selector() {
     // String understands `trim` but Integer does not.
@@ -229,7 +229,7 @@ fn union_receiver_warns_when_non_nil_member_lacks_selector() {
     );
 }
 
-/// BT-1857: Nil members in unions are skipped for method resolution.
+/// Nil members in unions are skipped for method resolution.
 /// String | Nil sending `size` should not warn — Nil is skipped.
 #[test]
 fn union_receiver_nil_skipped_no_warning() {
@@ -267,9 +267,9 @@ fn union_receiver_nil_skipped_no_warning() {
         "Should NOT warn when Nil is the only non-responding member (it's skipped)"
     );
 
-    // BT-2017: Return type should be Integer from String.size.
+    // Return type should be Integer from String.size.
     // UndefinedObject does NOT respond to `size`, so no nil widening
-    // (BT-1857 only widens when UndefinedObject responds to the selector).
+    // (nil widening only happens when UndefinedObject responds to the selector).
     assert_eq!(
         ty,
         InferredType::known("Integer"),
@@ -278,7 +278,7 @@ fn union_receiver_nil_skipped_no_warning() {
     );
 }
 
-/// BT-1857: Nullable hint still appears when non-Nil member also lacks selector.
+/// Nullable hint still appears when non-Nil member also lacks selector.
 #[test]
 fn union_receiver_nullable_hint_with_non_nil_missing() {
     // Float | Nil — Float doesn't understand `size`, and union has Nil.
@@ -317,7 +317,7 @@ fn union_receiver_nullable_hint_with_non_nil_missing() {
         dnu_hints[0].message.contains("Float"),
         "Warning should mention Float, not UndefinedObject"
     );
-    // BT-1857: UndefinedObject should NOT appear as a non-responding member.
+    // UndefinedObject should NOT appear as a non-responding member.
     // Extract the subject (text before "does not understand") and verify it
     // does not mention UndefinedObject.
     let subject = dnu_hints[0]
@@ -331,7 +331,7 @@ fn union_receiver_nullable_hint_with_non_nil_missing() {
     );
 }
 
-/// BT-3469: the single-culprit union DNU now reuses
+/// the single-culprit union DNU now reuses
 /// `validation.rs::emit_unknown_selector_warning`, which gives union sends a
 /// "did you mean" suggestion for the first time — previously
 /// `infer_union_message_send` built its own message with only a generic
@@ -448,7 +448,7 @@ fn union_receiver_single_culprit_dnu_falls_back_to_generic_hint_with_no_suggesti
     );
 }
 
-/// BT-1572: No warning when all union members understand the selector.
+/// No warning when all union members understand the selector.
 #[test]
 fn union_receiver_no_warning_when_all_understand() {
     // Both Integer and String understand `asString` (via Object hierarchy).
@@ -484,7 +484,7 @@ fn union_receiver_no_warning_when_all_understand() {
     );
 }
 
-/// BT-1857: Dynamic member in union is handled conservatively (no warning).
+/// Dynamic member in union is handled conservatively (no warning).
 #[test]
 fn union_receiver_dynamic_member_no_warning() {
     // If a union member is Dynamic, we can't know what it responds to.
@@ -536,7 +536,7 @@ fn union_receiver_dynamic_member_no_warning() {
     );
 }
 
-/// BT-3469: a union member whose ancestor chain is cross-file / unresolved
+/// a union member whose ancestor chain is cross-file / unresolved
 /// (`ClassHierarchy::has_cross_file_parent`) is now downgraded to "uncertain"
 /// the same way a bare (non-union) receiver already is — routed through the
 /// shared `receiver_knowledge::classify_receiver` (ADR 0100 Rule 1) instead
@@ -635,7 +635,7 @@ fn bt3469_union_member_with_cross_file_parent_downgrades_to_open() {
     );
 }
 
-/// BT-1857: Return type is union of return types from all responding members.
+/// Return type is union of return types from all responding members.
 #[test]
 fn union_receiver_return_type_is_union_of_member_returns() {
     // Integer.asString -> String, Array.asString -> String.
@@ -668,7 +668,7 @@ fn union_receiver_return_type_is_union_of_member_returns() {
     );
 }
 
-/// BT-1857: Nil-only union (`UndefinedObject` alone) — no members to check, returns Dynamic.
+/// Nil-only union (`UndefinedObject` alone) — no members to check, returns Dynamic.
 #[test]
 fn union_receiver_nil_only_returns_dynamic() {
     let module = Module::new(
@@ -710,7 +710,7 @@ fn union_receiver_nil_only_returns_dynamic() {
     );
 }
 
-/// BT-1871: Non-responding union members should not widen return type with Dynamic.
+/// Non-responding union members should not widen return type with Dynamic.
 /// `(String | Integer).size` — Integer doesn't understand `size`, but String does
 /// and returns Integer. Result should be Integer, not Integer | Dynamic.
 #[test]
@@ -737,7 +737,7 @@ fn union_receiver_non_responding_member_does_not_widen_return_type() {
     );
 
     // String.size returns Integer. Integer doesn't understand `size`.
-    // BT-1871: The return type should be just Integer, NOT Integer | Dynamic.
+    // The return type should be just Integer, NOT Integer | Dynamic.
     assert!(
         matches!(ty, InferredType::Known { ref class_name, .. } if class_name == "Integer"),
         "Return type should be Integer (not widened with Dynamic), got {ty:?}"
@@ -756,7 +756,7 @@ fn union_receiver_non_responding_member_does_not_widen_return_type() {
     );
 }
 
-/// BT-1871: When NO union members respond, return Dynamic as fallback.
+/// When NO union members respond, return Dynamic as fallback.
 #[test]
 fn union_receiver_no_members_respond_returns_dynamic() {
     let module = Module::new(
@@ -788,7 +788,7 @@ fn union_receiver_no_members_respond_returns_dynamic() {
     );
 }
 
-/// BT-1572: Integer | False (`FalseOr`) parameter resolution.
+/// Integer | False (`FalseOr`) parameter resolution.
 #[test]
 fn false_or_param_resolves_to_union() {
     // A method with parameter `x :: Integer | False` should infer x as Union.
@@ -868,7 +868,7 @@ fn false_or_param_resolves_to_union() {
     );
 }
 
-/// BT-3076 (review follow-up): a union member whose method returns `X class`
+/// A union member whose method returns `X class`
 /// for an `X` not registered in the hierarchy still contributes a type to the
 /// inferred union — it falls through to the structured resolver (yielding
 /// `Meta("X")`, same as the non-union path) instead of being silently
@@ -960,7 +960,7 @@ fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
     );
 }
 
-/// BT-1572: `is_assignable_to` with union declared type (via `type_name` string).
+/// `is_assignable_to` with union declared type (via `type_name` string).
 #[test]
 fn is_assignable_to_union_string() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -976,7 +976,7 @@ fn is_assignable_to_union_string() {
     );
 }
 
-/// BT-1572: `is_assignable_to` with Integer | String union.
+/// `is_assignable_to` with Integer | String union.
 #[test]
 fn is_assignable_to_integer_or_string() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -997,7 +997,7 @@ fn is_assignable_to_integer_or_string() {
     ));
 }
 
-// ── BT-2624: singleton members in unions ────────────────────────────────
+// ── singleton members in unions ────────────────────────────────
 
 /// Infer `x <selector>` (optionally with `arg`) where `x :: Integer | #infinity`,
 /// returning the inferred type and the rendered diagnostics (`"Severity: msg"`).
@@ -1031,7 +1031,7 @@ fn infer_singleton_union_send(
     (ty, diags)
 }
 
-/// BT-2624 (item 2/3): identity comparison `=:=` on a singleton-bearing union
+/// Identity comparison `=:=` on a singleton-bearing union
 /// returns Boolean, not Dynamic — the singleton member no longer poisons it.
 #[test]
 fn bt2624_union_identity_comparison_returns_boolean_not_dynamic() {
@@ -1046,7 +1046,7 @@ fn bt2624_union_identity_comparison_returns_boolean_not_dynamic() {
     assert!(diags.is_empty(), "no diagnostics expected, got: {diags:?}");
 }
 
-/// BT-2624 (item 3): a singleton member resolves its inherited `Symbol` methods,
+/// A singleton member resolves its inherited `Symbol` methods,
 /// so a method every member understands (`asString`) infers a concrete type
 /// rather than `Dynamic`, with no warning.
 #[test]
@@ -1059,7 +1059,7 @@ fn bt2624_union_singleton_resolves_inherited_symbol_method() {
     );
 }
 
-/// BT-2624 (item 3): when NO member understands the selector, the singleton is
+/// When NO member understands the selector, the singleton is
 /// resolved (via Symbol) too, so this is a definite failure — a Warning, not a
 /// downgraded Hint. (Two members → the plural "do not understand" wording.)
 #[test]
@@ -1078,7 +1078,7 @@ fn bt2624_union_singleton_genuine_nonresponder_warns() {
     );
 }
 
-/// BT-2624 (item 3): when only the singleton fails to respond, the singleton is
+/// When only the singleton fails to respond, the singleton is
 /// surfaced by name in a Hint (previously it was silently masked as Dynamic).
 #[test]
 fn bt2624_union_singleton_partial_nonresponder_hints_singleton() {
@@ -1092,7 +1092,7 @@ fn bt2624_union_singleton_partial_nonresponder_hints_singleton() {
     );
 }
 
-/// BT-2624 (review follow-up): `#foo class` on a union resolves through
+/// `#foo class` on a union resolves through
 /// `Symbol`, so a singleton member's `Self class` return is `Symbol class`
 /// (`Meta("Symbol")`) — not a phantom `Meta("#foo")`. A union of singletons
 /// collapses to a single `Meta("Symbol")`.
@@ -1119,7 +1119,7 @@ fn bt2624_union_singleton_class_resolves_to_symbol_metatype() {
     assert_eq!(ty, InferredType::meta("Symbol"), "got: {ty:?}");
 }
 
-// ── BT-2647: non-union singleton receivers resolve against Symbol ─────────
+// ── non-union singleton receivers resolve against Symbol ─────────
 
 /// Infer `x <selector>` where `x :: #infinity` (a *non-union* singleton),
 /// returning the inferred type and rendered diagnostics.
@@ -1153,7 +1153,7 @@ fn infer_singleton_send(
     (ty, diags)
 }
 
-/// BT-2647: a non-union singleton (`#infinity`) is a subtype of `Symbol`, so a
+/// a non-union singleton (`#infinity`) is a subtype of `Symbol`, so a
 /// method `Symbol` understands (`asString`) infers a concrete type — not the
 /// `Dynamic` it fell through to before this fix — with no DNU warning.
 #[test]
@@ -1166,12 +1166,12 @@ fn bt2647_singleton_resolves_inherited_symbol_method() {
     );
 }
 
-/// BT-2647: a selector `Symbol` does not understand on a non-union singleton now
+/// a selector `Symbol` does not understand on a non-union singleton now
 /// produces a DNU diagnostic — previously the send fell through silently to
 /// Dynamic. Instance-selector DNUs are emitted at Hint severity (matching every
 /// other known-class instance send, via `emit_unknown_selector_warning`).
 ///
-/// BT-2679: the message names the singleton the user wrote (`#infinity`), not
+/// the message names the singleton the user wrote (`#infinity`), not
 /// the `Symbol` it resolves selectors against. Resolution still routes through
 /// `Symbol` — the positive path is covered by
 /// `bt2647_singleton_resolves_inherited_symbol_method`.
@@ -1184,7 +1184,7 @@ fn bt2647_singleton_genuine_nonresponder_hints() {
     // mean" suggestion) against `Symbol` — that routing is unchanged and proven
     // by `bt2647_singleton_resolves_inherited_symbol_method` (positive path) and
     // `bt2679_singleton_binary_send_bypasses_symbol_redirect` (the bypass pin).
-    // BT-2679 changed only the *display* name: the message must name `#infinity`,
+    // The *display* name must name `#infinity`,
     // never the `Symbol` it resolved through.
     assert!(
         dnu[0].starts_with("Hint:") && dnu[0].contains("#infinity"),
@@ -1196,7 +1196,7 @@ fn bt2647_singleton_genuine_nonresponder_hints() {
     );
 }
 
-/// BT-2647: `#infinity class` resolves through `Symbol`, so the metatype is
+/// `#infinity class` resolves through `Symbol`, so the metatype is
 /// `Symbol class` (`Meta("Symbol")`), not a phantom `Meta("#infinity")`.
 #[test]
 fn bt2647_singleton_class_resolves_to_symbol_metatype() {
@@ -1204,13 +1204,13 @@ fn bt2647_singleton_class_resolves_to_symbol_metatype() {
     assert_eq!(ty, InferredType::meta("Symbol"), "got: {ty:?}");
 }
 
-/// BT-2679: the `resolve_class` redirect deliberately excludes binary sends
+/// the `resolve_class` redirect deliberately excludes binary sends
 /// (`!matches!(selector, MessageSelector::Binary(_))`), so a singleton receiver
 /// in an (in)equality send is NOT routed through `Symbol`. This is load-bearing:
 /// `Symbol` understands `=:=`/`=`, so routing through it would short-circuit the
-/// result to `Boolean` and swallow the BT-2631 statically-decidable-comparison
-/// hint. Co-located with the BT-2647 redirect it guards (previously covered only
-/// indirectly by `bt2631_standalone_singleton_eq_union_on_right_emits_hint`).
+/// result to `Boolean` and swallow the statically-decidable-comparison
+/// hint. Co-located with the `resolve_class` redirect it guards (covered only
+/// indirectly elsewhere, by `bt2631_standalone_singleton_eq_union_on_right_emits_hint`).
 #[test]
 fn bt2679_singleton_binary_send_bypasses_symbol_redirect() {
     // `#infinity =:= x` where `x :: Integer | String` can never be true — the
@@ -1232,7 +1232,7 @@ fn bt2679_singleton_binary_send_bypasses_symbol_redirect() {
         "binary send on a singleton must bypass the Symbol redirect, got: {ty:?}"
     );
 
-    // The BT-2631 impossible-comparison hint must still fire.
+    // The impossible-comparison hint must still fire.
     let hints: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -1241,7 +1241,7 @@ fn bt2679_singleton_binary_send_bypasses_symbol_redirect() {
     assert_eq!(
         hints.len(),
         1,
-        "expected the BT-2631 hint to fire, got: {:?}",
+        "expected the impossible-comparison hint to fire, got: {:?}",
         checker.diagnostics()
     );
 }

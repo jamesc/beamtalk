@@ -2,23 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! A method declared `-> Never` whose body is a direct class-side send to
-//! another `-> Never`-declared method must type-check without `@expect type`
-//! (BT-3075).
+//! another `-> Never`-declared method must type-check without `@expect type`.
 //!
-//! Root cause: the substitution string-resolver
-//! (`substitute_return_type_with_self`) — through which
+//! `DeclaredType::parse` + `resolve_declared_type` — through which
 //! `check_class_side_send` routes *every* declared class-method return type —
-//! duplicated the union/generic parsing of `resolve_type_name_string` but
-//! none of its leaf handling, so a declared `-> Never` came back as a
-//! `Known{class_name: "Never"}` pseudo-class instead of
-//! `InferredType::Never`. `check_return_type`'s `-> Never` honesty arm then
-//! fired with the self-contradictory "declares return type Never, but body
-//! returns Never". The same gap covered `Dynamic` (BT-2865's fix never
-//! reached this resolver), the `nil`/`true`/`false` keywords, and `Never`
-//! nested in substituted generic/union positions. Fixed by merging the two
-//! string resolvers into one (BT-3075's `resolve_type_string`, itself later
-//! deleted in favour of `DeclaredType::parse` + `resolve_declared_type`,
-//! BT-3080).
+//! must resolve a declared `-> Never` to `InferredType::Never`, not a
+//! `Known{class_name: "Never"}` pseudo-class — otherwise
+//! `check_return_type`'s `-> Never` honesty arm fires with the
+//! self-contradictory "declares return type Never, but body returns Never".
+//! The same resolver also must resolve `Dynamic`, the `nil`/`true`/`false`
+//! keywords, and `Never` nested in substituted generic/union positions, not
+//! just top-level `Never`.
 
 use super::common::*;
 use std::collections::HashMap;
@@ -30,7 +24,7 @@ fn never_mismatch_diags(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
         .collect()
 }
 
-/// The exact BT-3074 shape: a `-> Never` class method whose sole body
+/// A `-> Never` class method whose sole body
 /// expression is `Exception signalKind:class:selector:hint:` (declared
 /// `-> Never` on the builtin `Exception`).
 #[test]
@@ -117,7 +111,7 @@ fn substitute_never_resolves_to_never_variant() {
 }
 
 /// A declared `-> Dynamic` through the substitution path must resolve to the
-/// real `Dynamic` variant (BT-2865's fix, previously missing here).
+/// real `Dynamic` variant.
 #[test]
 fn substitute_dynamic_resolves_to_dynamic_variant() {
     let result = type_resolver::resolve_declared_type(

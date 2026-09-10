@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-2763 / ADR 0106: opt-in **asserted** `matchExhaustive:` exhaustiveness.
+//! ADR 0106: opt-in **asserted** `matchExhaustive:` exhaustiveness.
 //!
 //! Covers the two `Error`-severity failure modes — a non-empty residual on a
 //! closed singleton union, and a non-closed scrutinee (the "cannot verify"
-//! loud failure) — plus the regression pin that BT-2745's advisory `match:`
+//! loud failure) — plus the regression pin that the advisory `match:`
 //! (`Warning`, never `Error`) is completely unaffected by this change.
 //!
 //! Mirrors the fixture/helper shape of `singleton_match_exhaustiveness.rs`
@@ -254,7 +254,7 @@ fn union_of_ordinary_classes_errors_loudly() {
 // ── Regression: advisory `match:` path is completely unchanged ──────────
 
 /// The same scrutinee/arms that make `matchExhaustive:` fail at `Error`
-/// severity still produce only a `Warning` under plain `match:` — BT-2745's
+/// severity still produce only a `Warning` under plain `match:` — its
 /// advisory path is untouched by this feature.
 #[test]
 fn advisory_match_still_warns_not_errors_for_same_gap() {

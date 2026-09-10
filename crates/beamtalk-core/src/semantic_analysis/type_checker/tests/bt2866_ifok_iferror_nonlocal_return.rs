@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `ifOk:ifError:`'s `R` type param no longer gets polluted by a non-local
-//! return (`^`) inside the `ifError:` block (BT-2866).
+//! return (`^`) inside the `ifError:` block.
 //!
 //! `Result(T, E)>>ifOk:ifError:` is declared:
 //!

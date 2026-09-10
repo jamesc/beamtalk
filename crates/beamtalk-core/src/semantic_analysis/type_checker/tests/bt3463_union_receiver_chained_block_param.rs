@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3463: chaining a block-taking send onto a `Union`-typed receiver must
+//! chaining a block-taking send onto a `Union`-typed receiver must
 //! push declared block-param types down from the union's members, not fall
 //! through to `Dynamic(UnannotatedParam)`.
 //!
-//! `Dictionary(K, V)>>at:ifAbsent:` (BT-3408) is typed `Block(T) -> V | T`.
+//! `Dictionary(K, V)>>at:ifAbsent:` is typed `Block(T) -> V | T`.
 //! Whenever the fallback block's inferred type differs from `V` (e.g. an
 //! empty collection literal `#()`, or `List new`), the send's result becomes
 //! a genuine `InferredType::Union { V, T }`. Before this fix, chaining a
@@ -186,10 +186,10 @@ typed Actor subclass: Watcher
     );
 }
 
-/// Regression guard (BT-3408): `dict at: k ifAbsent: [nil]`, used directly
+/// Regression guard: `dict at: k ifAbsent: [nil]`, used directly
 /// (not chained onto a further block-taking send), must still type-check as
-/// `V | Nil` with no false diagnostic — the union-receiver push-down added
-/// by this issue must not disturb the already-correct nil-fallback path.
+/// `V | Nil` with no false diagnostic — the union-receiver push-down must
+/// not disturb the already-correct nil-fallback path.
 #[test]
 fn union_receiver_nil_fallback_unchained_still_typechecks() {
     let source = r"
@@ -234,8 +234,8 @@ typed Actor subclass: Watcher
 /// arguments always fell through to `infer_args_with_dynamic_block_params`,
 /// which re-ran `infer_expr` on every argument already inferred once inside
 /// `resolve_union_block_param_types` — double-emitting any diagnostic that
-/// argument's inference produces (here, BT-1914 on the unannotated `flag`
-/// parameter).
+/// argument's inference produces (here, the "Dynamic in typed class" warning
+/// on the unannotated `flag` parameter).
 #[test]
 fn union_receiver_non_block_send_does_not_double_infer_arguments() {
     let source = r"

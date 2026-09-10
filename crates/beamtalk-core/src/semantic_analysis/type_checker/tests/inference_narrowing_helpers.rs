@@ -171,7 +171,7 @@ fn detect_narrowing_parenthesized_class_eq() {
     assert_eq!(class_test.kind, ClassTestKind::Exact);
 }
 
-// ---- detect_narrowing: isOk / ok / isError (BT-1859) ----
+// ---- detect_narrowing: isOk / ok / isError ----
 
 #[test]
 fn detect_narrowing_is_ok() {
@@ -358,7 +358,7 @@ fn extract_variable_name_from_non_ident() {
 
 #[test]
 fn extract_variable_name_from_self_field() {
-    // BT-2048 / BT-2062: self.supervisor → EnvKey::SelfField("supervisor")
+    // self.supervisor → EnvKey::SelfField("supervisor")
     let expr = Expression::FieldAccess {
         receiver: Box::new(var("self")),
         field: ident("supervisor"),
@@ -381,7 +381,7 @@ fn extract_variable_name_from_non_self_field() {
     assert!(extract_variable_name(&expr).is_none());
 }
 
-// ---- detect_narrowing: self.field isNil (BT-2048) ----
+// ---- detect_narrowing: self.field isNil ----
 
 #[test]
 fn detect_narrowing_self_field_is_nil() {

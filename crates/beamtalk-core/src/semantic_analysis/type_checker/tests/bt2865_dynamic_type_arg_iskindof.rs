@@ -4,7 +4,7 @@
 //! `isKindOf:` (and other dead-code "can never be true" comparison analysis)
 //! must never fire when the receiver's static type is genuinely `Dynamic`,
 //! including when `Dynamic` is nested as one type-arg of an otherwise-
-//! parameterized generic like `Result(Dynamic, Error)` (BT-2865).
+//! parameterized generic like `Result(Dynamic, Error)`.
 //!
 //! Root cause (two compounding bugs, both fixed here):
 //!
@@ -172,7 +172,7 @@ fn merge_method_local_binding_explicit_dynamic_then_known_stays_dynamic() {
     );
 }
 
-/// Regression guard: the broad BT-2039 rule (any non-`ExplicitDynamic`
+/// Regression guard: the broad rule (any non-`ExplicitDynamic`
 /// reason loses to Known) must cover ordinary `UnannotatedParam`, not just
 /// the narrower `UntypedFfi`/`DynamicSpec` — this is the exact shape that
 /// regressed `stdlib/src/system_navigation.bt`'s `inject:into:` block during
@@ -201,7 +201,7 @@ fn merge_method_local_binding_known_then_unannotated_param_dynamic_keeps_known()
     );
 }
 
-/// Regression guard (BT-2039, unchanged): an existing Known binding must
+/// Regression guard: an existing Known binding must
 /// still survive an incoming *uninformative* (untyped-FFI) Dynamic.
 #[test]
 fn merge_method_local_binding_known_then_uninformative_dynamic_keeps_known() {
@@ -228,7 +228,7 @@ fn merge_method_local_binding_known_then_uninformative_dynamic_keeps_known() {
     );
 }
 
-/// Regression guard (BT-2039, unchanged): the reverse order — uninformative
+/// Regression guard: the reverse order — uninformative
 /// Dynamic first, Known second — must also keep the Known binding.
 #[test]
 fn merge_method_local_binding_uninformative_dynamic_then_known_keeps_known() {

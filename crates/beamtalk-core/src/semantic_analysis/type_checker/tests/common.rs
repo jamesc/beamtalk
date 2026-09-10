@@ -210,7 +210,7 @@ pub(super) fn is_nil(var_name: &str) -> Expression {
     )
 }
 
-/// Helper: build `x isError` unary expression (BT-1859)
+/// Helper: build `x isError` unary expression
 pub(super) fn is_error(var_name: &str) -> Expression {
     msg_send(
         var(var_name),
@@ -219,7 +219,7 @@ pub(super) fn is_error(var_name: &str) -> Expression {
     )
 }
 
-/// Helper: build `x isOk` unary expression (BT-1859)
+/// Helper: build `x isOk` unary expression
 pub(super) fn is_ok(var_name: &str) -> Expression {
     msg_send(var(var_name), MessageSelector::Unary("isOk".into()), vec![])
 }

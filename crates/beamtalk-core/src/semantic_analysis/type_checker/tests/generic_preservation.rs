@@ -1,25 +1,25 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Generic return `type_args` preservation on class- and instance-method assignment (BT-2018, BT-2019).
+//! Generic return `type_args` preservation on class- and instance-method assignment.
 
 use super::super::*;
 use super::common::*;
 
-// ---- BT-2018: Generic return type args preserved on class-method assignment ----
+// ---- Generic return type args preserved on class-method assignment ----
 //
 // When a class method declares a parameterised return type like
 // `Result(List(String), Error)`, callers that bind the result to a local
 // must see the full nested type — not a flattened `Known("Result(...)")`.
-// Pre-fix the call site dropped the inner generics, which made downstream
-// `result unwrap` resolve to `Dynamic` and cascaded into block-parameter
-// inference (every `[:f | ...]` after that became Dynamic).
+// A call site that dropped the inner generics would make downstream
+// `result unwrap` resolve to `Dynamic` and cascade into block-parameter
+// inference (every `[:f | ...]` after that becoming Dynamic).
 //
-// These tests cover the three reproducer variants from the issue plus a
-// chained-assignment case and an instance-method case.
+// These tests cover three reproducer variants plus a chained-assignment
+// case and an instance-method case.
 
-/// BT-2018 (a): explicit annotation on the LHS already worked pre-fix —
-/// keep it as a baseline so a regression here is loud.
+/// Explicit annotation on the LHS is the simplest case —
+/// kept as a baseline so a regression here is loud.
 #[test]
 fn class_method_return_with_explicit_annotation_preserves_type_args() {
     let source = "
@@ -59,9 +59,9 @@ typed Object subclass: Driver
     assert_full_result_list_string_error(&r_ty);
 }
 
-/// BT-2018 (b): the bug — RHS is a class-method send returning the same
-/// concrete generic. Pre-fix, `r` lost its inner `type_args` and
-/// `r unwrap` collapsed to `Dynamic`.
+/// RHS is a class-method send returning the same
+/// concrete generic. `r` must keep its inner `type_args` so
+/// `r unwrap` does not collapse to `Dynamic`.
 #[test]
 fn class_method_return_preserves_nested_type_args_on_assignment() {
     let source = "
@@ -104,7 +104,7 @@ typed Object subclass: Driver
     assert_full_result_list_string_error(&r_ty);
 }
 
-/// BT-2018 chained: `a := ClassMethod`, `b := a instanceMethod` — type args
+/// Chained assignment: `a := ClassMethod`, `b := a instanceMethod` — type args
 /// on `a` must flow through to `b` so `b` resolves to the concrete type.
 #[test]
 fn class_method_return_type_args_flow_through_chained_assignment() {
@@ -128,10 +128,9 @@ typed Object subclass: Driver
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
 
-    // Pre-fix: `files` was Dynamic, so `frobnicate` was silently accepted.
-    // Post-fix: `files` is `List(String)` and `List` does not understand
-    // `frobnicate`, so we expect a DNU warning. (We assert *some* DNU
-    // warning naming `frobnicate` rather than pinning the exact wording —
+    // `files` must be `List(String)`, not Dynamic — `List` does not
+    // understand `frobnicate`, so we expect a DNU warning. (We assert *some*
+    // DNU warning naming `frobnicate` rather than pinning the exact wording —
     // the receiver class hint format may evolve.)
     let dnu: Vec<_> = checker
         .diagnostics()
@@ -146,7 +145,7 @@ typed Object subclass: Driver
     );
 }
 
-// BT-2018 instance-method case via chained assignment: the chained-flow
+// Instance-method case via chained assignment: the chained-flow
 // test above (`class_method_return_type_args_flow_through_chained_assignment`)
 // already exercises the instance-method substitution path: after
 // `r := Box wrap: #()` gives `r :: Result(List(String), Error)`, the
@@ -154,8 +153,8 @@ typed Object subclass: Driver
 // substitutes through to `List(String)`. The DNU on `files frobnicate`
 // proves the instance-method substitution preserved the generics.
 // (Pure instance-method *concrete* return-type preservation — e.g.
-// `-> List(String)` on a non-generic receiver — is the sibling BT-2019,
-// not in scope here.)
+// `-> List(String)` on a non-generic receiver — is the sibling case covered
+// below, not in scope here.)
 
 /// Helper: assert the type is the fully-nested
 /// `Known("Result", [Known("List", [Known("String")]), Known("Error")])`.
@@ -213,20 +212,19 @@ fn assert_full_result_list_string_error(ty: &InferredType) {
     );
 }
 
-// ---- BT-2019: Concrete parametric return types preserve type_args on
+// ---- Concrete parametric return types preserve type_args on
 // instance-method sends from non-generic receivers ----
 //
 // When a non-generic class declares an instance or class method returning a
 // concrete parametric type such as `-> List(String)` or `-> List(MyThing)`,
 // the call-site result must preserve the inner type arguments so downstream
-// generic resolution (`first`, `do:`, etc.) sees the element type.
-//
-// Pre-fix the path in `inference.rs` that handled instance-method return
-// types stripped the `(...)` portion off, so callers saw `Known("List", [])`
-// instead of `Known("List", [Known("MyThing")])`. Every downstream send then
-// fell back to Object/Dynamic.
+// generic resolution (`first`, `do:`, etc.) sees the element type — the
+// path in `inference.rs` that handles instance-method return types must not
+// strip the `(...)` portion off, leaving callers with `Known("List", [])`
+// instead of `Known("List", [Known("MyThing")])` and every downstream send
+// falling back to Object/Dynamic.
 
-/// BT-2019 (b): instance method on a non-generic receiver returning a
+/// Instance method on a non-generic receiver returning a
 /// concrete parametric type. The call-site result must preserve the
 /// inner element type so `events first` resolves to `MyThing`, not bare
 /// `Object`/`Dynamic`.
@@ -299,7 +297,7 @@ typed Object subclass: Driver
     );
 }
 
-/// BT-2019: end-to-end DNU check. After the fix, sending a non-existent
+/// end-to-end DNU check. After the fix, sending a non-existent
 /// selector to the element of a `List(MyThing)` returned by an instance
 /// method must produce a "`MyThing` does not understand 'xyzzyNonsense'"
 /// warning. Pre-fix the warning was silently lost (element type was
@@ -345,7 +343,7 @@ typed Object subclass: Driver
     );
 }
 
-/// BT-2019: class-method case. `ExduraSupervisor class >> children -> List(Actor)`
+/// class-method case. `ExduraSupervisor class >> children -> List(Actor)`
 /// — the call-site result of `Sup children` must be `List(Actor)`, not
 /// bare `List`.
 #[test]
@@ -413,7 +411,7 @@ typed Object subclass: Driver
     );
 }
 
-/// BT-2019: Dictionary(K, V) — two type args must be preserved.
+/// Dictionary(K, V) — two type args must be preserved.
 #[test]
 fn instance_method_dictionary_return_preserves_both_type_args() {
     let source = "
@@ -477,7 +475,7 @@ typed Object subclass: Driver
     );
 }
 
-/// BT-2019: Set(T) — single-arg generic, instance-method return.
+/// Set(T) — single-arg generic, instance-method return.
 #[test]
 fn instance_method_set_return_preserves_type_arg() {
     let source = "

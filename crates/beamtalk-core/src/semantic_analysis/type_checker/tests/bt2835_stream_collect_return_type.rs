@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `Stream>>collect:` propagates the transform's return type to the
-//! resulting stream's element type (BT-2835, follow-up to BT-2826).
+//! resulting stream's element type.
 //!
-//! Before this fix, `Stream>>collect:` declared `Block(E, Object) -> Stream`
-//! — the block param inferred correctly (BT-2826), but the transform's
-//! *return* type was erased rather than propagated, leaving the resulting
-//! stream unparameterized. Chaining a further typed operation onto the
-//! result left its block param `Dynamic(UnannotatedParam)`. With
-//! `Block(E, R) -> Stream(R)`, matching the free-type-variable convention
-//! already used by `List>>collect:` and `Stream>>inject:into:`, the
-//! transform's return type `R` now propagates to the resulting stream's
-//! element type.
+//! `Stream>>collect:` is declared `Block(E, R) -> Stream(R)`, matching the
+//! free-type-variable convention already used by `List>>collect:` and
+//! `Stream>>inject:into:`, so the transform's return type `R` propagates to
+//! the resulting stream's element type. A bare `Block(E, Object) -> Stream`
+//! declaration would leave the resulting stream unparameterized — the block
+//! param would still infer correctly, but the transform's *return* type
+//! would be erased rather than propagated, leaving a further typed
+//! operation chained onto the result with its block param
+//! `Dynamic(UnannotatedParam)`.
 
 use super::common::*;
 

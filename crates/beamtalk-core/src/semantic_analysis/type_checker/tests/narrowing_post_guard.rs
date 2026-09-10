@@ -1,15 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Post-guard narrowing of nullable locals/fields after divergent `isNil ifTrue: [^err]` (BT-2049),
-//! extended to `isKindOf:` class-test guards (BT-2825), singleton-equality
-//! (`==`/`=:=`/`/=`) and `respondsTo:` guards (BT-3369).
+//! Post-guard narrowing of nullable locals/fields after divergent `isNil ifTrue: [^err]`,
+//! extended to `isKindOf:` class-test guards, singleton-equality
+//! (`==`/`=:=`/`/=`) and `respondsTo:` guards.
 
 use super::common::*;
 
-// ── BT-2049: Post-guard narrowing for locals and self.field after diverging guards ──
+// ── Post-guard narrowing for locals and self.field after diverging guards ──
 
-/// BT-2049: `x isNil ifTrue: [self error: "..."]` should narrow the local
+/// `x isNil ifTrue: [self error: "..."]` should narrow the local
 /// `x` to non-Nil for subsequent statements, even though the block has no
 /// `^` return — the `error:` call returns `Never` and therefore diverges.
 #[test]
@@ -39,7 +39,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2049: `self.field isNil ifTrue: [^err]` should narrow `self.field`
+/// `self.field isNil ifTrue: [^err]` should narrow `self.field`
 /// to non-Nil for subsequent statements, so passing it to a typed parameter
 /// does not warn.
 #[test]
@@ -70,7 +70,7 @@ typed Actor subclass: Engine
     );
 }
 
-/// BT-2049: `self.field isNil ifTrue: [self error: "..."]` should narrow
+/// `self.field isNil ifTrue: [self error: "..."]` should narrow
 /// `self.field` to non-Nil via the diverging-call path (no `^`).
 #[test]
 fn bt2049_self_field_narrows_after_self_error_guard() {
@@ -100,7 +100,7 @@ typed Actor subclass: Engine
     );
 }
 
-/// BT-2049: A non-diverging `ifTrue:` block (no `^`, last expression is not
+/// A non-diverging `ifTrue:` block (no `^`, last expression is not
 /// `Never`) must NOT narrow the variable — the binding may still be Nil
 /// when control falls through.
 #[test]
@@ -125,7 +125,7 @@ typed Object subclass: Caller
     // diverge. A bare "any Type warning" check could hide regressions where
     // narrowing silently happens but some other Type warning appears.
     //
-    // BT-2066: user-facing messages render the source-sympathetic `Nil`
+    // user-facing messages render the source-sympathetic `Nil`
     // spelling, not the canonical `UndefinedObject` hierarchy name. The
     // assertion below is deliberately strict — if the renderer regresses
     // and leaks `UndefinedObject` back into diagnostics, this test fails.
@@ -148,7 +148,7 @@ typed Object subclass: Caller
             .map(|d| &d.message)
             .collect::<Vec<_>>()
     );
-    // BT-2066: the canonical `UndefinedObject` name must NOT leak into the
+    // the canonical `UndefinedObject` name must NOT leak into the
     // user-facing message. Guard against regressions explicitly.
     for d in &mismatch_warnings {
         assert!(
@@ -159,7 +159,7 @@ typed Object subclass: Caller
     }
 }
 
-/// BT-2049: Bare identifier `eventStore` (sugar for `self.eventStore`) should
+/// Bare identifier `eventStore` (sugar for `self.eventStore`) should
 /// also be narrowed after a `self.eventStore isNil ifTrue: [^nil]` guard,
 /// because both spellings resolve through the same synthetic `self.field` key.
 #[test]
@@ -190,7 +190,7 @@ typed Actor subclass: Engine
     );
 }
 
-/// BT-2049: `block_diverges` must treat a block as diverging when a
+/// `block_diverges` must treat a block as diverging when a
 /// `Never`-typed statement appears anywhere in the body, not only as the
 /// trailing statement. `[self error: "...". 42]` — the trailing `42` looks
 /// reachable but the block actually diverges at `self error:`.
@@ -224,7 +224,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2049: `ifTrue: [diverge] ifFalse: [reassign to nil]` must NOT narrow
+/// `ifTrue: [diverge] ifFalse: [reassign to nil]` must NOT narrow
 /// after the statement — execution reaches the next statement through the
 /// `ifFalse:` branch, and the reassignment makes the variable nil again.
 #[test]
@@ -248,7 +248,7 @@ typed Object subclass: Caller
     // Because the ifFalse: block reassigns `ms` to nil, we must still warn
     // on the `process:` call — otherwise we'd be unsound.
     //
-    // BT-2066: user-facing messages render the source-sympathetic `Nil`
+    // user-facing messages render the source-sympathetic `Nil`
     // spelling, not the canonical `UndefinedObject` hierarchy name.
     let mismatch_warnings: Vec<_> = result
         .diagnostics
@@ -268,7 +268,7 @@ typed Object subclass: Caller
             .map(|d| &d.message)
             .collect::<Vec<_>>()
     );
-    // BT-2066: the canonical `UndefinedObject` name must NOT leak into the
+    // the canonical `UndefinedObject` name must NOT leak into the
     // user-facing message.
     for d in &mismatch_warnings {
         assert!(
@@ -279,9 +279,9 @@ typed Object subclass: Caller
     }
 }
 
-// ── BT-2825: Post-guard narrowing for `isKindOf:` class-test guards ──
+// ── Post-guard narrowing for `isKindOf:` class-test guards ──
 
-/// BT-2825 AC (a): `(x isKindOf: Integer) ifFalse: [^default]` should narrow
+/// `(x isKindOf: Integer) ifFalse: [^default]` should narrow
 /// a union-typed local to `Integer` for the rest of the method — the
 /// concrete guard-and-early-return shape from the issue
 /// (`(coll isKindOf: List) ifFalse: [^""]`), which `apply_early_return_narrowing`
@@ -314,7 +314,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2825 AC (b): a Protocol-typed local narrowed by an `isKindOf:` guard
+/// a Protocol-typed local narrowed by an `isKindOf:` guard
 /// against a concrete class must be assignable to that concrete class
 /// afterward without an `@expect type` escape hatch — the exact
 /// `prompt_renderer.bt` shape from the issue (`coll :: Printable | Nil`,
@@ -352,7 +352,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2825: `(x isKindOf: Integer) ifTrue: [<diverge>]` should narrow `x` to
+/// `(x isKindOf: Integer) ifTrue: [<diverge>]` should narrow `x` to
 /// the *complement* (`String`, via `difference`) for the rest of the
 /// method — the mirror image of the `ifFalse:` guard, extending the
 /// existing `ifTrue: [<diverge>]` machinery (previously `isNil`-only)
@@ -385,7 +385,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2825 review follow-up: the combined `ifTrue: [<diverge>] ifFalse:
+/// the combined `ifTrue: [<diverge>] ifFalse:
 /// [...]` shape (`is_if_true_if_false` in `apply_early_return_narrowing`)
 /// shares its code path with the solo `ifTrue: [<diverge>]` case above, but
 /// had no dedicated `isKindOf:` test — only the solo-`ifTrue:` and
@@ -420,9 +420,9 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2825 AC (c): `isKindOf:` used directly as an `ifTrue:`/`ifFalse:`
+/// `isKindOf:` used directly as an `ifTrue:`/`ifFalse:`
 /// branch condition (not a guard-and-return) already narrows within the
-/// branch (BT-1573/BT-2741/BT-2744) — this locks that behaviour in as an
+/// branch — this locks that behaviour in as an
 /// end-to-end regression alongside the new post-guard cases above.
 #[test]
 fn bt2825_is_kind_of_narrows_inside_if_true_branch() {
@@ -450,7 +450,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2825: A non-diverging `ifFalse:` block (no `^`, last expression is not
+/// A non-diverging `ifFalse:` block (no `^`, last expression is not
 /// `Never`) must NOT narrow the variable — the binding may still fail the
 /// `isKindOf:` test when control falls through.
 #[test]
@@ -488,12 +488,12 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2825 / ADR 0102 §5 (BT-2744): `x class =:= Integer`'s false branch
+/// ADR 0102 §5: `x class =:= Integer`'s false branch
 /// stays unnarrowed (a `Character` subclass could still be "not exactly
 /// Integer" yet satisfy `isKindOf: Integer`) — so the post-guard case must
 /// NOT narrow `x` after `ifTrue: [<diverge>]` either, unlike `isKindOf:`.
 /// This locks in the `ClassTestKind::Exact` vs `KindOf` distinction for the
-/// new post-guard path added by this issue.
+/// post-guard path.
 #[test]
 fn bt2825_class_eq_exact_if_true_diverge_does_not_narrow() {
     let source = r#"
@@ -529,7 +529,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-2825 review follow-up: `apply_early_return_narrowing`'s new
+/// `apply_early_return_narrowing`'s new
 /// `is_if_false` arm is gated on `info.is_nil_check || info.class_test.is_some()`,
 /// so it also fires for plain `isNil` guards, not just `isKindOf:` — `x isNil
 /// ifFalse: [^...]` is the mirror of the already-covered `isNil ifTrue:
@@ -562,9 +562,9 @@ typed Object subclass: Caller
     );
 }
 
-// ── BT-3369: Post-guard narrowing for singleton-equality guards ──
+// ── Post-guard narrowing for singleton-equality guards ──
 
-/// BT-3369: the issue's exact repro shape — `pid == #undefined ifTrue:
+/// the issue's exact repro shape — `pid == #undefined ifTrue:
 /// [^false]` (loose equality, `==`) should narrow `pid` to `Integer` for the
 /// rest of the method, closing the gap without requiring `@expect type`.
 #[test]
@@ -594,7 +594,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-3369 AC: `x =:= #undefined ifTrue: [^...]` (strict equality) also
+/// `x =:= #undefined ifTrue: [^...]` (strict equality) also
 /// narrows post-guard — the post-guard gate was missing for *all*
 /// `singleton_eq` guards, independent of the `==` operator extension.
 #[test]
@@ -624,7 +624,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-3369 AC: `x /= #undefined ifFalse: [^...]` (loose inequality, already
+/// `x /= #undefined ifFalse: [^...]` (loose inequality, already
 /// accepted by the detector before this issue) also narrows post-guard —
 /// the mirror `ifFalse:` guard shape, not just `ifTrue:`.
 #[test]
@@ -654,7 +654,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-3369 AC: narrowing only removes the specific literal member compared —
+/// narrowing only removes the specific literal member compared —
 /// a 3-member union `Integer | #south | #east` checked against `#south`
 /// narrows to `Integer | #east`, not just `Integer` (the other singleton
 /// member must survive).
@@ -686,7 +686,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-3369 AC: chained guards narrow incrementally — checking `#south` then
+/// chained guards narrow incrementally — checking `#south` then
 /// `#east` in sequence on a 3-member union narrows down to the single
 /// remaining member, `Integer`.
 #[test]
@@ -717,7 +717,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-3369 AC: no narrowing attempted for an equality check against a
+/// no narrowing attempted for an equality check against a
 /// non-literal `Symbol`-typed value — `pid == atomName` (both operands
 /// variables, neither a `#foo`-style literal) must not be detected as a
 /// singleton-equality guard at all, since there's no specific literal to
@@ -745,9 +745,9 @@ fn bt3369_equality_against_non_literal_symbol_is_not_detected_as_narrowing() {
     );
 }
 
-// ── BT-3369: Post-guard narrowing for `respondsTo:` guards ──
+// ── Post-guard narrowing for `respondsTo:` guards ──
 
-/// BT-3369: `(x respondsTo: #foo) ifFalse: [^default]` should narrow `x` to
+/// `(x respondsTo: #foo) ifFalse: [^default]` should narrow `x` to
 /// `Dynamic` post-guard (no protocol registered for the selector), so a
 /// subsequent send of that selector does not raise a DNU warning — the same
 /// gap as singleton-equality, for `responded_selector` instead.
@@ -777,7 +777,7 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-3369 (matches BT-1833 in-branch behaviour): when exactly one protocol
+/// Matches the in-branch behaviour: when exactly one protocol
 /// requires the tested selector, `(x respondsTo: #foo) ifFalse: [^default]`
 /// narrows `x` to that concrete `Protocol` type post-guard, not just
 /// `Dynamic`.
@@ -809,10 +809,10 @@ typed Object subclass: Caller
     );
 }
 
-/// BT-3369 AC: `(x respondsTo: #foo) ifTrue: [^default]` correctly still
+/// `(x respondsTo: #foo) ifTrue: [^default]` correctly still
 /// does NOT narrow `x` post-guard — there is no sound complement type for
 /// "doesn't respond to X" (mirrors the already-locked-in in-branch
-/// behaviour from BT-1833/`bt2825_non_diverging_is_kind_of_if_false_guard_does_not_narrow`-style
+/// behaviour from `bt2825_non_diverging_is_kind_of_if_false_guard_does_not_narrow`-style
 /// negative tests). `x customMethod` must still raise a DNU warning.
 #[test]
 fn bt3369_responds_to_if_true_guard_does_not_narrow() {

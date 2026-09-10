@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Argument and return type checking, @expect suppression (BT-671).
+//! Argument and return type checking, @expect suppression.
 
 use super::common::*;
 
-// ---- BT-671: Argument and return type checking tests ----
+// ---- Argument and return type checking tests ----
 
 #[test]
 fn test_integer_plus_string_warns_operand_type() {
@@ -260,7 +260,7 @@ fn test_expect_type_suppresses_type_warning() {
 
 #[test]
 fn test_expect_type_suppresses_dnu_hint() {
-    // BT-1273: @expect type also suppresses method-not-found (DNU) hints,
+    // @expect type also suppresses method-not-found (DNU) hints,
     // not just type-mismatch warnings.
     let hierarchy = ClassHierarchy::with_builtins();
 
@@ -283,7 +283,7 @@ fn test_expect_type_suppresses_dnu_hint() {
 
 #[test]
 fn test_expect_type_stale_when_no_dnu_or_type_diagnostic() {
-    // BT-1273: @expect type is stale when the following expression has
+    // @expect type is stale when the following expression has
     // neither a type warning nor a DNU hint.
     let hierarchy = ClassHierarchy::with_builtins();
 
@@ -443,7 +443,7 @@ fn test_keyword_arg_type_match_no_warning() {
 
 #[test]
 fn test_parametric_block_arg_type_mismatch_warns() {
-    // BT-2002: A non-Block argument to a `Block(T, R)` parameter should still
+    // A non-Block argument to a `Block(T, R)` parameter should still
     // produce a type warning. Previously the hierarchy lookup on the raw
     // annotation string (e.g. "Block(Integer, R)") missed the base class and
     // the conservative "unknown → compatible" escape hatch suppressed the
@@ -509,7 +509,7 @@ fn test_parametric_block_arg_type_mismatch_warns() {
 
 #[test]
 fn test_parametric_block_arg_type_match_no_warning() {
-    // BT-2002: A Block argument to a `Block(T, R)` parameter should not warn.
+    // A Block argument to a `Block(T, R)` parameter should not warn.
     let class_def = ClassDefinition::with_modifiers(
         ident("Repro"),
         Some(ident("Object")),
@@ -671,7 +671,7 @@ fn test_override_compatible_param_type_no_warning() {
 
 #[test]
 fn test_override_parametric_incompatible_param_type_warns() {
-    // BT-2002: Child overrides parent with a parameterized type annotation
+    // Child overrides parent with a parameterized type annotation
     // (`Array(Integer)`) that is not compatible with the parent's type
     // (`Number`). Previously `is_type_compatible` only normalized the
     // expected side, so `hierarchy.has_class("Array(Integer)")` on the
@@ -768,16 +768,15 @@ fn test_all_type_warnings_are_severity_warning() {
     }
 }
 
-// ---- BT-2845: cascade continuation messages (2nd+) run argument-type checking ----
+// ---- Cascade continuation messages (2nd+) run argument-type checking ----
 //
-// Prior to this fix, `Expression::Cascade`'s `for msg in messages` loop
-// inferred argument types purely for block-param propagation
-// (`infer_args_with_block_context`) but never fed the result into
-// `check_argument_types` — so a mistyped argument on the *second or later*
-// cascaded message went completely unchecked, unlike writing the same sends
-// as separate statements. These tests use the exact repro shape from the
-// issue: a `typed Value` class with two Integer-parameter methods sent in a
-// cascade from a class method.
+// `Expression::Cascade`'s `for msg in messages` loop must feed inferred
+// argument types into `check_argument_types`, not just use them for
+// block-param propagation (`infer_args_with_block_context`) — otherwise a
+// mistyped argument on the *second or later* cascaded message goes
+// completely unchecked, unlike writing the same sends as separate
+// statements. These tests use a `typed Value` class with two
+// Integer-parameter methods sent in a cascade from a class method.
 
 /// (a) A second cascade message with an incompatible `Known` (concrete)
 /// argument type must warn — mirrors the issue's exact repro.
@@ -862,11 +861,11 @@ typed Value subclass: Thing
 }
 
 /// (d) Block-parameter propagation into cascaded messages (the reason
-/// `infer_args_with_block_context` exists, BT-2158) must keep working once
+/// `infer_args_with_block_context` exists) must keep working once
 /// `check_argument_types` also runs on those messages — the new check must
 /// not regress typed block params into "Dynamic" false warnings. Exercises
 /// the instance-side cascade path (`self.nums sort: [...]; yourself`) as a
-/// second BT-2845-focused example alongside the pre-existing BT-2158
+/// second cascade-continuation example alongside the pre-existing
 /// class-side coverage in `dynamic_and_blocks.rs`.
 #[test]
 fn test_cascade_block_param_propagation_still_works_with_arg_check() {

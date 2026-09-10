@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Type checker tests, split by feature per BT-2061.
+//! Type checker tests, split by feature.
 //!
 //! Shared fixtures live in `common`. Each feature module is kept under ~2000
 //! lines so parallel PRs adding tests rarely conflict on the same region.

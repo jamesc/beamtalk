@@ -1,13 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `check_return_type` no longer bails silently on `Union`/`Dynamic` method
-//! bodies in `typed` classes (BT-2829).
+//! `check_return_type` must not bail silently on `Union`/`Dynamic` method
+//! bodies in `typed` classes.
 //!
 //! Part A: a `Union` body is validated against the declared return type —
 //! any incompatible member produces the same `DiagnosticCategory::Type`
 //! mismatch the `Known`-body arm already produces. A union whose members are
-//! all compatible (including BT-2047's legitimate branch-union case) stays
+//! all compatible (including the legitimate branch-union case, e.g.
+//! `ifNil:ifNotNil:`) stays
 //! silent.
 //!
 //! Part B: a `Dynamic` body with reason `AmbiguousControlFlow` or
@@ -16,16 +17,15 @@
 //! inferred something better. `DynamicReceiver`, `UntypedFfi`, `DynamicSpec`,
 //! and `Unknown` stay silent (legitimately dynamic, not actionable).
 //!
-//! Both parts are scoped to `typed` classes only (see the issue title and
-//! its acceptance criteria) — untyped/dynamic classes get no new diagnostics
-//! regardless of body type.
+//! Both parts are scoped to `typed` classes only — untyped/dynamic classes
+//! get no new diagnostics regardless of body type.
 
 use super::common::*;
 
 /// Build a hierarchy containing a single empty `typed` class named
 /// `class_name`, on top of the builtins (so `String`/`Integer`/`Object`
 /// comparisons resolve). Mirrors the empty-class pattern already used by the
-/// BT-2047 tests (`typed Object subclass: ReplaySnapshot` with no body).
+/// branch-union tests (`typed Object subclass: ReplaySnapshot` with no body).
 fn typed_class_hierarchy(class_name: &str) -> ClassHierarchy {
     let source = format!("typed Object subclass: {class_name}\n");
     let module = parse_source(&source);
@@ -95,7 +95,7 @@ fn bt2829_union_body_all_compatible_no_diagnostic() {
     );
 }
 
-/// AC (a), BT-2047 case: the declared return type is itself a `Union`
+/// The declared return type is itself a `Union`
 /// (`String | Integer`) and the body infers to exactly that union — the
 /// legitimate branch-union case (e.g. `ifNil:ifNotNil:`) must stay silent.
 #[test]
@@ -120,11 +120,10 @@ fn bt2829_union_body_matches_declared_union_no_diagnostic() {
     );
 }
 
-/// AC (b): a `Union` body with one incompatible member (declared `-> String`,
+/// A `Union` body with one incompatible member (declared `-> String`,
 /// body `Union(String, Integer)`) produces the same `DiagnosticCategory::Type`
-/// mismatch diagnostic the `Known`-body arm already produces. This is the
-/// exact repro from the issue: `foo -> String => self bar ifTrue: ["yes"]
-/// ifFalse: [42]`.
+/// mismatch diagnostic the `Known`-body arm already produces — the exact
+/// shape of `foo -> String => self bar ifTrue: ["yes"] ifFalse: [42]`.
 #[test]
 fn bt2829_union_body_incompatible_member_warns() {
     let hierarchy = typed_class_hierarchy("Probe");
@@ -152,7 +151,7 @@ fn bt2829_union_body_incompatible_member_warns() {
 
 /// Conservative skip: a union with a non-`Known` member (nested `Dynamic`)
 /// can't be reliably compared, so it stays silent — mirrors the existing
-/// `classify_union_members` (BT-1832) fallback used for argument checking.
+/// `classify_union_members` fallback used for argument checking.
 #[test]
 fn bt2829_union_body_with_dynamic_member_skips() {
     let hierarchy = typed_class_hierarchy("Probe");
@@ -294,7 +293,7 @@ fn bt2829_untyped_class_dynamic_ambiguous_control_flow_no_diagnostic() {
     );
 }
 
-// ── BT-2840: Union arm generic type-arg comparison ───────────────────────
+// ── Union arm generic type-arg comparison ───────────────────────
 //
 // `known_type_compatible_with_expected`'s (and `check_return_type`'s own
 // directly-declared-`Union`) `Union` arm used to only check base-class

@@ -10,7 +10,7 @@ use super::common::*;
 // ---- split_type_params ----
 //
 // Thin wrapper over `string_utils::split_top_level`, whose exhaustive
-// nesting/edge-case coverage lives at its definition site (BT-3089).
+// nesting/edge-case coverage lives at its definition site.
 // This is a smoke test that the wrapper is wired up correctly.
 
 #[test]
@@ -19,7 +19,7 @@ fn split_type_params_nested() {
     assert_eq!(result, vec!["GenResult(A, B)", "E"]);
 }
 
-// ---- extract_ffi_function_info (BT-3089) ----
+// ---- extract_ffi_function_info ----
 //
 // Pins the resolved binary-selector edge case: a binary selector has no
 // FFI-proxy-call name (mirrors `erlang_function_name`/dispatch_codegen's
@@ -148,7 +148,7 @@ fn substitute_no_match_passes_through() {
 #[test]
 fn substitute_generic_base_extracted() {
     // When return type is "Array(R)" and R is not in subst, base "Array" is still extracted
-    // BT-1834: Unresolved type param R falls back to Dynamic instead of Known("R")
+    // Unresolved type param R falls back to Dynamic instead of Known("R")
     let result = type_resolver::resolve_declared_type(
         &DeclaredType::parse("Array(R)"),
         &type_resolver::SubstitutionMap::new(),
@@ -164,18 +164,18 @@ fn substitute_generic_base_extracted() {
         } => {
             assert_eq!(class_name.as_str(), "Array");
             assert_eq!(type_args.len(), 1);
-            // R not in subst → Dynamic (BT-1834)
+            // R not in subst → Dynamic
             assert_eq!(type_args[0], InferredType::Dynamic(DynamicReason::Unknown));
         }
         other => panic!("Expected Known, got {other:?}"),
     }
 }
 
-// ---- resolve_type_string with self_type (BT-1992) ----
+// ---- resolve_type_string with self_type ----
 
 #[test]
 fn substitute_self_in_generic_uses_full_receiver_type() {
-    // BT-1992: `Result(Self, Error)` on a parameterised receiver `Box(Integer)`
+    // `Result(Self, Error)` on a parameterised receiver `Box(Integer)`
     // should produce `Result(Box(Integer), Error)`, not `Result(Box, Error)`.
     let receiver_ty = InferredType::Known {
         class_name: EcoString::from("Box"),
@@ -242,7 +242,7 @@ fn substitute_self_in_generic_non_parameterised_receiver() {
 
 #[test]
 fn substitute_self_in_union_uses_full_receiver_type() {
-    // BT-1992: `Self | Error` on `Box(Integer)` should produce
+    // `Self | Error` on `Box(Integer)` should produce
     // `Box(Integer) | Error`.
     let receiver_ty = InferredType::Known {
         class_name: EcoString::from("Box"),

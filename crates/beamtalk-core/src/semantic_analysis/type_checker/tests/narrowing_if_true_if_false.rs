@@ -1,22 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Narrowing-path `ifTrue:` / `ifFalse:` carrying `Block(R)` type args (BT-2020, BT-2039).
+//! Narrowing-path `ifTrue:` / `ifFalse:` carrying `Block(R)` type args.
 
 use super::super::*;
 use super::common::*;
 
 // =========================================================================
-// BT-2020: narrowing-path ifTrue:/ifFalse:/ifTrue:ifFalse: block type_args
+// narrowing-path ifTrue:/ifFalse:/ifTrue:ifFalse: block type_args
 //
-// Before BT-2020, `infer_block_with_narrowing` returned a bare `Block` with
-// no type_args. That stripped the inferred return type of the block body,
-// and `infer_method_local_params` had nothing to unify `R` in
-// `ifTrue: _ :: Block(R) ifFalse: _ :: Block(R) -> R` against — so
-// `cond ifTrue: [...] ifFalse: [...]` collapsed to `Dynamic`.
+// `infer_block_with_narrowing` must return `Block(R)` with the block body's
+// inferred return type as its type arg, so `infer_method_local_params` has
+// something to unify `R` in `ifTrue: _ :: Block(R) ifFalse: _ :: Block(R) ->
+// R` against — otherwise `cond ifTrue: [...] ifFalse: [...]` collapses to
+// `Dynamic`.
 // =========================================================================
 
-/// BT-2020: `cond ifTrue: [Integer] ifFalse: [Integer]` should infer
+/// `cond ifTrue: [Integer] ifFalse: [Integer]` should infer
 /// `Integer`, not `Dynamic`.
 #[test]
 fn bt_2020_if_true_if_false_integer_branches_yield_integer() {
@@ -39,7 +39,7 @@ fn bt_2020_if_true_if_false_integer_branches_yield_integer() {
     );
 }
 
-/// BT-2020: `x isNil ifTrue: [default] ifFalse: [x + 1]` should preserve
+/// `x isNil ifTrue: [default] ifFalse: [x + 1]` should preserve
 /// the `Integer` return type across both branches.
 #[test]
 fn bt_2020_is_nil_if_true_if_false_preserves_integer_return() {
@@ -78,7 +78,7 @@ fn bt_2020_is_nil_if_true_if_false_preserves_integer_return() {
     );
 }
 
-/// BT-2020: `cond ifTrue: [String] ifFalse: [Integer]` should infer a
+/// `cond ifTrue: [String] ifFalse: [Integer]` should infer a
 /// concrete type (not `Dynamic`). The current substitution mechanism
 /// picks one arm's concrete type rather than synthesising the full union,
 /// which satisfies the AC's "union (or simplified common type)" clause;
@@ -124,7 +124,7 @@ fn bt_2020_if_true_if_false_mixed_arms_yield_concrete_type() {
     }
 }
 
-/// BT-2020: Reproducer from the issue — `r isOk ifTrue: [r value] ifFalse: [MyVal new]`
+/// Reproducer from the issue — `r isOk ifTrue: [r value] ifFalse: [MyVal new]`
 /// assigned to `picked` should let `picked` bind as `MyVal`, so `picked xyzzyNonsense`
 /// warns with a DNU naming `xyzzyNonsense`.
 #[test]
@@ -233,7 +233,7 @@ fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
     );
 }
 
-/// BT-2020: `(v isKindOf: List) ifTrue: [v size]` — narrowing path
+/// `(v isKindOf: List) ifTrue: [v size]` — narrowing path
 /// recurses into the block body correctly, so `v size` inside the
 /// narrowed block should not produce a DNU warning.
 #[test]
@@ -305,17 +305,18 @@ fn bt_2020_narrowed_if_true_is_kind_of_preserves_inner_sends() {
 }
 
 // =========================================================================
-// BT-2039: Dynamic|Known join on narrowing ifTrue:ifFalse:
+// Dynamic|Known join on narrowing ifTrue:ifFalse:
 //
-// BT-2020 taught `ifTrue:ifFalse:` to carry `Block(R)` so the method-local
-// `R` could be unified. But `infer_method_local_params` last-wins when the
-// same type var appears in multiple arg positions: if branch 1 gave R=T and
-// branch 2 gave R=Dynamic(UntypedFfi), R collapsed to Dynamic and the BT-1914
-// "expression inferred as Dynamic in typed class" warning fired on the
-// method body. The fix prefers Known over Dynamic when merging bindings.
+// `ifTrue:ifFalse:` carries `Block(R)` so the method-local `R` can be
+// unified. `infer_method_local_params` last-wins when the same type var
+// appears in multiple arg positions, so it must prefer Known over Dynamic
+// when merging bindings: if branch 1 gives R=T and branch 2 gives
+// R=Dynamic(UntypedFfi), R must stay `T`, not collapse to Dynamic and fire
+// the "expression inferred as Dynamic in typed class" warning on the method
+// body.
 // =========================================================================
 
-/// BT-2039: `method -> Integer => cond ifTrue: [self.value] ifFalse: [(Erlang foo) bar]`
+/// `method -> Integer => cond ifTrue: [self.value] ifFalse: [(Erlang foo) bar]`
 /// must not produce the "Dynamic in typed class" warning — the Known branch
 /// pins `R` to `Integer` so the method's declared return type is preserved.
 #[test]
@@ -366,9 +367,9 @@ fn bt_2039_if_true_if_false_known_branch_suppresses_ffi_warning() {
 
     // The inner `(Erlang foo) bar` call still produces its own "Dynamic in
     // typed class" warning (that's a separate, pre-existing warning at the
-    // FFI call itself). What BT-2039 fixes is the *outer* warning on the
-    // whole `ifTrue:ifFalse:` expression — so we should see exactly one
-    // Dynamic warning (the inner FFI call), not two.
+    // FFI call itself). The *outer* `ifTrue:ifFalse:` expression must not
+    // also warn — so we should see exactly one Dynamic warning (the inner FFI
+    // call), not two.
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -378,8 +379,8 @@ fn bt_2039_if_true_if_false_known_branch_suppresses_ffi_warning() {
         dynamic_warnings.len(),
         1,
         "expected exactly one Dynamic-in-typed-class warning (the inner FFI \
-         call). Before BT-2039 the outer ifTrue:ifFalse: also collapsed to \
-         Dynamic and added a second warning. Got: {:?}",
+         call) — the outer ifTrue:ifFalse: must not also collapse to \
+         Dynamic and add a second warning. Got: {:?}",
         dynamic_warnings
             .iter()
             .map(|d| &d.message)
@@ -387,10 +388,10 @@ fn bt_2039_if_true_if_false_known_branch_suppresses_ffi_warning() {
     );
 }
 
-// ── BT-2624 item 4: singleton-union narrowing, integration through infer_expr ──
+// ── Singleton-union narrowing, integration through infer_expr ──
 
-/// BT-2624 item 4 — the previously-blocked end-to-end narrowing check for
-/// BT-2617, at the highest level currently reachable.
+/// The end-to-end narrowing check for singleton-union narrowing, at the
+/// highest level currently reachable.
 ///
 /// A singleton union (`Integer | #infinity`) cannot yet be *constructed* from
 /// parseable source — it is unwritable as a type annotation (the parser rejects
@@ -463,16 +464,14 @@ fn bt2624_singleton_union_narrowing_suppresses_branch_warning() {
     assert!(plus_dnu[0].message.contains("#infinity"));
 }
 
-/// BT-2834 established that solo `ifTrue:` on an UNNARROWED `Boolean`
-/// receiver (no isNil/isKindOf/comparison pattern for `detect_narrowing` to
-/// find) must NOT infer the block's return type outright: `False>>ifTrue:`
-/// never invokes the block — it returns `self` (`False`) — so promising
-/// `Integer` here would be unsound.
-///
-/// BT-2868 refines that: collapsing all the way to `Dynamic` is more
-/// conservative than necessary. The sound type is the union of the
+/// Solo `ifTrue:` on an UNNARROWED `Boolean` receiver (no
+/// isNil/isKindOf/comparison pattern for `detect_narrowing` to find) must
+/// NOT infer the block's return type outright: `False>>ifTrue:` never
+/// invokes the block — it returns `self` (`False`) — so promising `Integer`
+/// here would be unsound. Collapsing all the way to `Dynamic` is more
+/// conservative than necessary, though: the sound type is the union of the
 /// `Boolean` self-branch and the block's own return type — `Boolean |
-/// Integer`, not `Dynamic`. Mirrors BT-2824's `ifNil:`/`ifNotNil:` fix.
+/// Integer`, not `Dynamic`. Mirrors the `ifNil:`/`ifNotNil:` fix.
 #[test]
 fn bt_2868_solo_if_true_unnarrowed_boolean_receiver_yields_boolean_or_r() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -501,7 +500,7 @@ fn bt_2868_solo_if_true_unnarrowed_boolean_receiver_yields_boolean_or_r() {
     );
 }
 
-/// BT-2868: same fix for solo `ifFalse:` (`True>>ifFalse:` returns `self`,
+/// same fix for solo `ifFalse:` (`True>>ifFalse:` returns `self`,
 /// not the block's result, so the sound type is `Boolean | String`).
 #[test]
 fn bt_2868_solo_if_false_unnarrowed_boolean_receiver_yields_boolean_or_r() {
@@ -530,7 +529,7 @@ fn bt_2868_solo_if_false_unnarrowed_boolean_receiver_yields_boolean_or_r() {
     );
 }
 
-/// BT-2868: `ifTrue:ifFalse:` (two-armed) behaviour is unchanged — both
+/// `ifTrue:ifFalse:` (two-armed) behaviour is unchanged — both
 /// arms are exhaustive, so the pre-existing unification to a single `R`
 /// still applies (no spurious `Boolean` member).
 #[test]
@@ -554,7 +553,7 @@ fn bt_2868_two_armed_if_true_if_false_unaffected() {
     );
 }
 
-/// BT-2868: a receiver already narrowed to exactly `True` resolves through
+/// a receiver already narrowed to exactly `True` resolves through
 /// the normal declared-return-type path (`True>>ifTrue: -> R`), so it must
 /// NOT gain a spurious `Boolean` union member — the fix only fires for an
 /// unnarrowed `Boolean` receiver.
@@ -576,7 +575,7 @@ fn bt_2868_narrowed_true_receiver_unaffected() {
     );
 }
 
-/// BT-2868: a genuinely Dynamic receiver must still infer Dynamic — the fix
+/// a genuinely Dynamic receiver must still infer Dynamic — the fix
 /// only widens well-typed `Boolean` receivers.
 #[test]
 fn bt_2868_dynamic_receiver_unaffected() {
@@ -595,7 +594,7 @@ fn bt_2868_dynamic_receiver_unaffected() {
     );
 }
 
-/// BT-2868 regression test from the issue's exact repro: a `typed` method
+/// Regression test from an exact repro: a `typed` method
 /// whose body sends `fromIdx > n ifTrue: [0]` as a non-return statement (its
 /// value is discarded — the method actually returns the following bare `0`)
 /// should still infer the *send itself* as `Boolean | Integer` in the type
@@ -630,7 +629,7 @@ typed Object subclass: TypeTest5
     );
 }
 
-/// BT-2868: when the block always exits via a non-local return (`^`), it
+/// when the block always exits via a non-local return (`^`), it
 /// contributes `Never` to the union — which `union_of` skips — so the send
 /// infers plain `Boolean` (the surviving self-branch alone), not a
 /// `Boolean | Never` union or `Dynamic`. Mirrors the equivalent
@@ -676,7 +675,7 @@ typed Object subclass: Repro
     );
 }
 
-/// BT-2868: a solo `ifTrue:`/`ifFalse:` on a `Boolean`-containing UNION
+/// a solo `ifTrue:`/`ifFalse:` on a `Boolean`-containing UNION
 /// receiver (e.g. `Boolean | Nil`) also widens to `Boolean | R` instead of
 /// poisoning the whole union to `Dynamic` — audits the structurally
 /// identical fallback inside `infer_union_message_send`.
@@ -706,14 +705,14 @@ typed Object subclass: Repro
     );
 }
 
-/// BT-2868: the terminal Dynamic fallback for a solo `ifTrue:`/`ifFalse:`
+/// the terminal Dynamic fallback for a solo `ifTrue:`/`ifFalse:`
 /// on a `Known` receiver whose method exists but declares no return type
 /// must report `UnannotatedReturn`, not `DynamicReceiver` — the receiver
 /// itself is perfectly well-typed. Deliberately scoped to a *non*-`Boolean`
 /// synthetic class so `if_true_false_solo_boolean_ret_ty` doesn't short-
 /// circuit with its `Boolean | R` union (that path is covered by the tests
 /// above) — this test isolates the honest-reason fallback itself. Uses a
-/// hierarchy-only class (not part of the checked module) so the BT-1047
+/// hierarchy-only class (not part of the checked module) so the
 /// "inferred return types from this same pass" cache can't mask the
 /// terminal fallback with an unrelated hit.
 #[test]
@@ -756,7 +755,8 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
     }]);
 
     let mut checker = TypeChecker::new();
-    // Simulate being inside a `typed` class so BT-1914 has a context to warn on.
+    // Simulate being inside a `typed` class so the Dynamic-in-typed-class
+    // lint has a context to warn on.
     checker.typed_class_context = Some(eco_string("Repro"));
     let mut env = TypeEnv::new();
     env.set_local("recv", InferredType::known("Weird"));
@@ -777,8 +777,8 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
             .iter()
             .any(|d| d.message.contains("inferred as Dynamic in typed class")
                 && d.message.contains("unannotated return")),
-        "UnannotatedReturn is not in the BT-1914 suppression list, so the \
-         warning should fire now that the reason is honest; got: {:?}",
+        "UnannotatedReturn is not in the Dynamic-in-typed-class suppression \
+         list, so the warning should fire now that the reason is honest; got: {:?}",
         checker.diagnostics()
     );
 }

@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Generalized method-local param inference and singleton types (BT-1818, BT-1830).
+//! Generalized method-local param inference and singleton types.
 
 use super::super::*;
 use super::common::*;
 
-// ---- BT-1818: Generalized infer_method_local_params tests ----
+// ---- Generalized infer_method_local_params tests ----
 
 /// Add a non-parametric `Processor` class with methods that accept parametric param types.
 ///
@@ -66,7 +66,7 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
     hierarchy.add_from_beam_meta(vec![info]);
 }
 
-/// BT-1818: Block inference still works after generalization (regression).
+/// Block inference still works after generalization (regression).
 /// `map:` on `GenResult(Integer, IOError)` with a `Block(Integer, String)` arg
 /// should infer R=String and return `GenResult(String, IOError)`.
 #[test]
@@ -135,7 +135,7 @@ fn method_local_params_block_regression() {
     }
 }
 
-/// BT-1818: Infer method-local params from Result(T, E) argument type.
+/// Infer method-local params from Result(T, E) argument type.
 /// `processResult:` on non-parametric Processor with `GenResult(Integer, IOError)` arg
 /// should infer T=Integer and return Integer.
 #[test]
@@ -177,7 +177,7 @@ fn method_local_params_from_result_type() {
     );
 }
 
-/// BT-1818: Infer method-local params from Array(T) argument type.
+/// Infer method-local params from Array(T) argument type.
 /// `processArray:` on non-parametric Processor with Array(String) arg
 /// should infer T=String and return String.
 #[test]
@@ -215,7 +215,7 @@ fn method_local_params_from_array_type() {
     );
 }
 
-// ---- BT-1830: Singleton type inference and validation ----
+// ---- Singleton type inference and validation ----
 
 #[test]
 fn is_assignable_to_singleton_exact_match() {
@@ -237,7 +237,7 @@ fn is_assignable_to_singleton_mismatch() {
 
 #[test]
 fn is_assignable_to_singleton_rejects_symbol() {
-    // BT-1878: Symbol is NOT assignable to #ok — subtyping goes the other direction.
+    // Symbol is NOT assignable to #ok — subtyping goes the other direction.
     // #ok is a subtype of Symbol, not the reverse.
     let hierarchy = ClassHierarchy::with_builtins();
     assert!(
@@ -350,11 +350,11 @@ fn is_assignable_to_singleton_to_object() {
     );
 }
 
-// ── BT-1878: Singleton/Symbol subtyping direction regression tests ──
+// ── Singleton/Symbol subtyping direction regression tests ──
 
 #[test]
 fn symbol_not_assignable_to_singleton_union() {
-    // BT-1878: Symbol should NOT be assignable to a union of singletons
+    // Symbol should NOT be assignable to a union of singletons
     let hierarchy = ClassHierarchy::with_builtins();
     assert!(
         !TypeChecker::is_assignable_to(&"Symbol".into(), &"#ok | #error".into(), &hierarchy),
@@ -378,4 +378,4 @@ fn singleton_assignable_to_singleton_union() {
     );
 }
 
-// ── BT-1832: Union type validation across all contexts ──────────────────
+// ── Union type validation across all contexts ──────────────────
