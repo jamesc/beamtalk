@@ -46,7 +46,7 @@ impl CoreErlangGenerator {
     /// 2. Wraps the pid in a `#beamtalk_object{}` record with class metadata
     /// 3. Returns the object record, or throws error on failure
     ///
-    /// BT-3072: `actor.bt` separately declares a real `class sealed spawn`
+    /// `actor.bt` separately declares a real `class sealed spawn`
     /// body (`(Erlang beamtalk_actor) doSpawn: self`) as the documented,
     /// xref-visible definition of dynamic-dispatch `spawn` — but this
     /// per-actor-module compiled function remains the one every dispatch
@@ -56,8 +56,8 @@ impl CoreErlangGenerator {
     /// `erlang:apply(Module, spawn, Args)`), and `self spawn` in a class
     /// method (`class_self_spawn`) all call *this* function, never the
     /// inherited class-method body. Same "keeps the compiled artifact as the
-    /// real definition" choice BT-3071 made for `new`/`new:` — see that
-    /// commit and `beamtalk_actor:doSpawn/1`'s doc for the rationale.
+    /// real definition" choice made for `new`/`new:` — see
+    /// `beamtalk_actor:doSpawn/1`'s doc for the rationale.
     ///
     /// # Generated Code
     ///
@@ -77,7 +77,7 @@ impl CoreErlangGenerator {
         &mut self,
         _module: &Module,
     ) -> Result<Document<'static>> {
-        // BT-1417: initialize is now called inside init/1, not here.
+        // initialize is now called inside init/1, not here.
         // This ensures all spawn paths (direct, supervised, named) run initialize.
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
@@ -90,7 +90,7 @@ impl CoreErlangGenerator {
             ", Pid}",
         ];
 
-        // BT-1541: Use safe_spawn which handles trap_exit + await_initialize
+        // Use safe_spawn which handles trap_exit + await_initialize
         let doc = docvec![
             "'spawn'/0 = fun () ->",
             nest(
@@ -111,7 +111,7 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
-                                    // BT-572: Register instance for hot reload tracking
+                                    // Register instance for hot reload tracking
                                     Self::instance_registration_doc(&class_name),
                                     line(),
                                     ok_body,
@@ -123,7 +123,7 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
-                                    // BT-1541: Include the actual error reason in the hint
+                                    // Include the actual error reason in the hint
                                     super::super::errors::beamtalk_error_doc(
                                         Document::Str("SpawnErr0"),
                                         Document::Str("SpawnErr0"),
@@ -184,7 +184,7 @@ impl CoreErlangGenerator {
         &mut self,
         _module: &Module,
     ) -> Result<Document<'static>> {
-        // BT-1417: initialize is now called inside init/1, not here.
+        // initialize is now called inside init/1, not here.
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
 
@@ -196,8 +196,8 @@ impl CoreErlangGenerator {
             ", Pid}",
         ];
 
-        // BT-473: Validate InitArgs is a map before passing to gen_server
-        // BT-476: This is the single source of truth for spawnWith: argument validation.
+        // Validate InitArgs is a map before passing to gen_server
+        // This is the single source of truth for spawnWith: argument validation.
         // The runtime (beamtalk_object_class.erl handle_call({spawn, Args})) delegates
         // validation to this generated code for both static and dynamic dispatch paths.
         let doc = docvec![
@@ -234,7 +234,7 @@ impl CoreErlangGenerator {
                                 ]
                             ),
                             line(),
-                            // BT-1541: Use safe_spawn which handles trap_exit + await_initialize
+                            // Use safe_spawn which handles trap_exit + await_initialize
                             "<'true'> when 'true' ->",
                             nest(
                                 INDENT,
@@ -254,7 +254,7 @@ impl CoreErlangGenerator {
                                                 INDENT,
                                                 docvec![
                                                     line(),
-                                                    // BT-572: Register instance for hot reload tracking
+                                                    // Register instance for hot reload tracking
                                                     Self::instance_registration_doc(&class_name),
                                                     line(),
                                                     ok_body,
@@ -266,7 +266,7 @@ impl CoreErlangGenerator {
                                                 INDENT,
                                                 docvec![
                                                     line(),
-                                                    // BT-1541: Include the actual error reason in the hint
+                                                    // Include the actual error reason in the hint
                                                     super::super::errors::beamtalk_error_doc(
                                                         Document::Str("SpawnErr0"),
                                                         Document::Str("SpawnErr0"),
@@ -300,7 +300,7 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Generates the `new/0` error method for actors (BT-217).
+    /// Generates the `new/0` error method for actors.
     ///
     /// Actors cannot be instantiated with `new` - they must use `spawn`.
     #[allow(clippy::unused_self)] // method on impl for API consistency
@@ -316,7 +316,7 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// Generates the `new/1` error method for actors (BT-217).
+    /// Generates the `new/1` error method for actors.
     ///
     /// Actors cannot be instantiated with `new:` - they must use `spawnWith:`.
     #[allow(clippy::unused_self)] // method on impl for API consistency
@@ -332,7 +332,7 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// Generates the `spawn/0` error method for abstract classes (BT-105).
+    /// Generates the `spawn/0` error method for abstract classes.
     ///
     /// Abstract classes cannot be instantiated — they must be subclassed first.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
@@ -348,7 +348,7 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// Generates the `spawn/1` error method for abstract classes (BT-105).
+    /// Generates the `spawn/1` error method for abstract classes.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_abstract_spawn_with_args_error_method(
         &mut self,
@@ -370,7 +370,7 @@ impl CoreErlangGenerator {
     /// `erlang:apply(Module, new, Args)` fast path, which bypasses
     /// class-method dispatch entirely.
     ///
-    /// BT-3071/BT-3074: actor.bt's own `class sealed new` / `class sealed
+    /// actor.bt's own `class sealed new` / `class sealed
     /// new:` declarations used to compile through this same helper (via an
     /// `@intrinsic` marker), guaranteeing the two could never drift. They now
     /// send `Exception signalKind:class:selector:hint:` instead — a plain

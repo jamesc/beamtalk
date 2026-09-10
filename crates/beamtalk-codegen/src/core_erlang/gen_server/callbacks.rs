@@ -14,7 +14,7 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{ClassDefinition, Module, TypeAnnotation};
 
-/// BT-1951 (ADR 0078): Identifies a single class's `initialize` method in the
+/// ADR 0078: Identifies a single class's `initialize` method in the
 /// auto-chained dispatch sequence emitted by `generate_handle_continue`.
 #[derive(Debug, Clone)]
 pub(in crate::core_erlang) struct InitializeChainEntry {
@@ -27,11 +27,11 @@ pub(in crate::core_erlang) struct InitializeChainEntry {
     pub module_name: String,
 }
 
-/// BT-1951 (ADR 0078): A typed-no-default state field annotated with the class
+/// ADR 0078: A typed-no-default state field annotated with the class
 /// that declared it, so post-initialize diagnostics can name the owning class
 /// rather than always the leaf.
 ///
-/// BT-1976: Values are owned (rather than borrowed from the AST) because
+/// Values are owned (rather than borrowed from the AST) because
 /// cross-file ancestors produce synthetic entries from `ClassInfo` when the
 /// defining class's AST is absent from the current compilation unit.
 #[derive(Debug, Clone)]
@@ -109,12 +109,12 @@ impl CoreErlangGenerator {
             false
         };
 
-        // BT-1417: Check if the class defines an initialize method.
+        // Check if the class defines an initialize method.
         // If so, dispatch it at the end of init/1 — but only when not called
         // as a parent state-building helper. The __skip_initialize__ flag in
         // InitArgs suppresses dispatch when a child's init calls us as a helper.
         //
-        // BT-1951 (ADR 0078): Also defer to handle_continue when any *ancestor*
+        // ADR 0078: Also defer to handle_continue when any *ancestor*
         // class defines initialize — handle_continue auto-chains each ancestor's
         // initialize parent-first. And defer when any class in the chain has
         // typed-no-default fields so the post-initialize validation runs.
@@ -132,17 +132,17 @@ impl CoreErlangGenerator {
 
         let module_name = self.module_name.clone();
 
-        // BT-1642: Use the clean Beamtalk class name (e.g., "EventStore") for
+        // Use the clean Beamtalk class name (e.g., "EventStore") for
         // lifecycle telemetry metadata instead of the compiled Erlang module name
         // (e.g., "bt@exdura@event_store"). This matches how dispatch traces
         // report class names via lookup_class/1.
         let class_name = current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
 
-        // BT-1417: Generate the init return — either plain {ok, State} or
+        // Generate the init return — either plain {ok, State} or
         // dispatch initialize first, then return {ok, NewState} / {stop, Error}.
         // When has_initialize is true, we wrap the dispatch in a guard that
         // checks __skip_initialize__ in InitArgs, so parent helpers skip it.
-        // BT-1638: Lifecycle start telemetry is emitted here, guarded by
+        // Lifecycle start telemetry is emitted here, guarded by
         // __skip_initialize__ so parent helper calls don't double-fire.
         let init_return = if has_initialize {
             Self::init_initialize_guarded_doc(&class_name)
@@ -156,7 +156,7 @@ impl CoreErlangGenerator {
             // so this expect cannot fail unless there's a logic error
             let class = current_class.expect("has_parent_init implies current_class is Some");
             let parent_module = {
-                // ADR 0016 / BT-794: Use the same module naming logic as
+                // ADR 0016: Use the same module naming logic as
                 // superclass_module_name() which handles stdlib (bt@stdlib@*),
                 // package (bt@{pkg}@*), and legacy (bt@*) modules
                 self.compiled_module_name(class.superclass_name())
@@ -171,7 +171,7 @@ impl CoreErlangGenerator {
                     INDENT,
                     docvec![
                         line(),
-                        // BT-1988 / ADR 0079: set the `$beamtalk_actor` marker
+                        // ADR 0079: set the `$beamtalk_actor` marker
                         // so `class named:` / `allRegistered` can filter this
                         // process as a Beamtalk actor. Guarded by
                         // `__skip_initialize__` so parent helpers don't overwrite
@@ -180,7 +180,7 @@ impl CoreErlangGenerator {
                         line(),
                         "%% Call parent init to get inherited state fields",
                         line(),
-                        // BT-1417: Pass __skip_initialize__ to parent so it
+                        // Pass __skip_initialize__ to parent so it
                         // doesn't dispatch initialize — only the leaf should.
                         "let _ParentArgs = call 'maps':'put'('__skip_initialize__', 'true', InitArgs) in",
                         line(),
@@ -255,7 +255,7 @@ impl CoreErlangGenerator {
                     INDENT,
                     docvec![
                         line(),
-                        // BT-1988 / ADR 0079: set the `$beamtalk_actor` marker
+                        // ADR 0079: set the `$beamtalk_actor` marker
                         // so `class named:` / `allRegistered` can filter this
                         // process as a Beamtalk actor. Guarded by
                         // `__skip_initialize__` so parent helpers don't overwrite
@@ -287,7 +287,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-1988 / ADR 0079: Generate the `$beamtalk_actor` process-dictionary
+    /// ADR 0079: Generate the `$beamtalk_actor` process-dictionary
     /// marker call. Every Beamtalk actor init/1 sets this so `all_registered/0`,
     /// `class named:`, and future tooling can distinguish compiled Beamtalk
     /// actors from raw OTP processes via `erlang:process_info(Pid, dictionary)`.
@@ -324,11 +324,11 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-1638: Generate the lifecycle start telemetry call for init/1.
+    /// Generate the lifecycle start telemetry call for init/1.
     ///
     /// Emits `[beamtalk, actor, lifecycle, start]` via `beamtalk_actor:maybe_execute_telemetry/3`.
     /// Uses a `let` binding for `self()` since Core Erlang map literals cannot contain calls.
-    /// BT-1642: Takes the clean Beamtalk class name (e.g., `EventStore`), not the
+    /// Takes the clean Beamtalk class name (e.g., `EventStore`), not the
     /// compiled module name, so lifecycle traces match dispatch trace format.
     fn lifecycle_start_telemetry_doc(class_name: &str) -> Document<'static> {
         docvec![
@@ -343,7 +343,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-1638: Generate a plain init return with lifecycle telemetry.
+    /// Generate a plain init return with lifecycle telemetry.
     ///
     /// For classes WITHOUT `initialize`, emits lifecycle start telemetry
     /// guarded by `__skip_initialize__` so parent helper calls don't double-fire.
@@ -351,7 +351,7 @@ impl CoreErlangGenerator {
     /// returns `{ok, State}` directly.
     fn init_plain_return_doc(class_name: &str) -> Document<'static> {
         docvec![
-            // BT-1638: Guard telemetry behind __skip_initialize__ to avoid
+            // Guard telemetry behind __skip_initialize__ to avoid
             // double-fire when called as parent state-building helper
             "in case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of",
             nest(
@@ -386,19 +386,19 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-1417/BT-1541: Generate the guarded initialize dispatch block for init/1.
+    /// Generate the guarded initialize dispatch block for init/1.
     ///
     /// Checks `__skip_initialize__` in `InitArgs` — when a child's init calls
     /// us as a parent state helper, it sets this flag to prevent double dispatch.
     /// When called as the outermost init (by OTP), the flag is absent and
     /// initialize is deferred to `handle_continue`.
     ///
-    /// BT-1541: Uses OTP's `handle_continue` pattern instead of dispatching
+    /// Uses OTP's `handle_continue` pattern instead of dispatching
     /// initialize inline. This ensures the `gen_server` message loop is running
     /// when initialize executes, so self-sends don't deadlock. OTP guarantees
     /// no messages arrive before `handle_continue` runs.
     ///
-    /// BT-1638: Also emits lifecycle start telemetry in the non-helper branch.
+    /// Also emits lifecycle start telemetry in the non-helper branch.
     fn init_initialize_guarded_doc(class_name: &str) -> Document<'static> {
         docvec![
             "%% BT-1417/BT-1541: Defer initialize to handle_continue unless called as a parent helper",
@@ -428,10 +428,10 @@ impl CoreErlangGenerator {
                             // Strip the flag from state before returning
                             "let CleanState1 = call 'maps':'remove'('__skip_initialize__', FinalState) in",
                             line(),
-                            // BT-1638: Emit lifecycle start telemetry before returning
+                            // Emit lifecycle start telemetry before returning
                             Self::lifecycle_start_telemetry_doc(class_name),
                             line(),
-                            // BT-1541: Return {ok, State, {continue, initialize}} to defer
+                            // Return {ok, State, {continue, initialize}} to defer
                             // initialize dispatch to handle_continue where the loop is running
                             "{'ok', CleanState1, {'continue', 'initialize'}}",
                         ]
@@ -443,7 +443,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-1949/BT-1951: Generates the success body for `handle_continue` after
+    /// Generates the success body for `handle_continue` after
     /// the auto-chained initialize sequence.
     ///
     /// Collects typed-no-default state fields from the full inheritance chain
@@ -460,10 +460,10 @@ impl CoreErlangGenerator {
         // spawning class in addition to the field's owning class.
         _leaf_class_name: &ecow::EcoString,
     ) -> Document<'static> {
-        // BT-1951: Collect typed-no-default fields from the full inheritance
+        // Collect typed-no-default fields from the full inheritance
         // chain (leaf + ancestors), not just the current class.
         //
-        // BT-1976: Ancestors defined outside this module fall back to
+        // Ancestors defined outside this module fall back to
         // `ClassInfo` metadata so cross-file typed-no-default fields are
         // validated too.
         let typed_no_default: Vec<InheritedTypedField> = current_class
@@ -471,7 +471,7 @@ impl CoreErlangGenerator {
             .unwrap_or_default();
 
         if typed_no_default.is_empty() {
-            // BT-2717: strip codegen-internal `__local__` threading temps from the
+            // strip codegen-internal `__local__` threading temps from the
             // post-initialize committed state, the same outermost-boundary clean-up
             // handle_call/handle_cast apply — an `initialize` that threads an outer
             // local must not persist the temporary into the actor's first state.
@@ -485,13 +485,13 @@ impl CoreErlangGenerator {
 
         // Build nested checks: each field gets a case that either stops or continues.
         // We build from the inside out — the innermost is the cleaned {'noreply', …}
-        // (BT-2717: __local__ threading temps stripped from the committed state).
+        // (__local__ threading temps stripped from the committed state).
         let mut body: Document<'static> = docvec!["{'noreply', InitCleanState}"];
 
         for (i, field) in typed_no_default.iter().enumerate().rev() {
             let field_name = field.field_name.clone();
             let type_name = field.type_name.clone();
-            // BT-1951: Use the owning class name (which may be an ancestor)
+            // Use the owning class name (which may be an ancestor)
             // in the diagnostic, while keeping the leaf class in logger metadata
             // so operators see which actor failed to start.
             let owning_class = field.owning_class.as_str();
@@ -565,7 +565,7 @@ impl CoreErlangGenerator {
                                 leaf::var(err_var1),
                                 ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
                                 line(),
-                                // BT-2717: terminating path — the state flows to
+                                // terminating path — the state flows to
                                 // terminate/2, not persistence, so no clean-up contract
                                 // applies; use the cleaned binding for consistency with
                                 // the success arm.
@@ -586,7 +586,7 @@ impl CoreErlangGenerator {
 
         docvec![
             line(),
-            // BT-2717: clean the committed state once before the field checks; the
+            // clean the committed state once before the field checks; the
             // checks read user fields (never `__local__`) so they are unaffected.
             "let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in",
             line(),
@@ -607,7 +607,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-1951 (ADR 0078): Returns the list of user-defined initializers to run
+    /// ADR 0078: Returns the list of user-defined initializers to run
     /// for a class, parent-first.
     ///
     /// Each entry identifies a class in the inheritance chain (leaf last) that
@@ -675,18 +675,18 @@ impl CoreErlangGenerator {
         out
     }
 
-    /// BT-1951 (ADR 0078): Collect typed-no-default state fields across the
+    /// ADR 0078: Collect typed-no-default state fields across the
     /// inheritance chain for post-initialize validation.
     ///
     /// Returns fields in parent-first order (ancestors first, then the leaf's
     /// own fields), annotated with the owning class name so diagnostics can
     /// point at the class that declared the field.
     ///
-    /// BT-1976: When an ancestor's AST is not present in the current `Module`
+    /// When an ancestor's AST is not present in the current `Module`
     /// (cross-file parent), the function falls back to `ClassInfo` metadata
     /// loaded from that ancestor's `__beamtalk_meta/0` (see `state_types` /
     /// `state_has_default`). This closes the cross-file inherited-field
-    /// validation gap left by BT-1951.
+    /// validation gap.
     pub(in crate::core_erlang) fn inherited_typed_no_default_fields(
         &self,
         module: &Module,
@@ -748,7 +748,7 @@ impl CoreErlangGenerator {
                     }
                 }
             } else if let Some(info) = hierarchy.get_class(&name) {
-                // BT-1976: Cross-file ancestor — use ClassInfo metadata.
+                // Cross-file ancestor — use ClassInfo metadata.
                 // Preserve the declaration order by iterating `info.state`.
                 for field_name in &info.state {
                     let Some(type_name) = info.state_types.get(field_name) else {
@@ -780,7 +780,7 @@ impl CoreErlangGenerator {
         out
     }
 
-    /// BT-1976: String form of [`Self::is_nilable_type`] for cross-file
+    /// String form of [`Self::is_nilable_type`] for cross-file
     /// ancestors whose types come from `ClassInfo.state_types` rather than
     /// a parsed `TypeAnnotation`. Matches the AST path: a type is nilable if
     /// it is `Nil` itself or a top-level union that contains `Nil`.
@@ -793,13 +793,13 @@ impl CoreErlangGenerator {
         type_name.split(" | ").any(|t| t.trim() == "Nil")
     }
 
-    /// Generates the `handle_continue/2` callback (BT-1541, BT-1951).
+    /// Generates the `handle_continue/2` callback.
     ///
-    /// BT-1951 (ADR 0078): Auto-chains `initialize` methods parent-first across
+    /// ADR 0078: Auto-chains `initialize` methods parent-first across
     /// the full inheritance hierarchy. For each ancestor class that defines its
     /// own `initialize`, we emit a `safe_dispatch` call, threading the state
     /// from one initializer to the next. After the chain completes, the
-    /// post-initialize check (BT-1949) validates that every typed-no-default
+    /// post-initialize check validates that every typed-no-default
     /// field (from any class in the chain) was set.
     ///
     /// Dispatches run via `beamtalk_dispatch:lookup/5` with each class's own
@@ -841,7 +841,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
 
-        // BT-1949/BT-1951: Find typed-no-default fields (leaf + ancestors) for
+        // Find typed-no-default fields (leaf + ancestors) for
         // post-initialize validation.
         let current_class = self.current_class(module);
         let leaf_class_name =
@@ -849,7 +849,7 @@ impl CoreErlangGenerator {
         let success_body =
             self.generate_post_initialize_check(current_class, module, &leaf_class_name);
 
-        // BT-1951 (ADR 0078): Walk the user-defined initialize chain (parent-first).
+        // ADR 0078: Walk the user-defined initialize chain (parent-first).
         // Each entry is the (class_name, compiled_module_name) for a class that
         // defines its own `initialize`. Root classes (Actor/Object/ProtoObject)
         // are filtered out since their `initialize` is a no-op default.
@@ -975,7 +975,7 @@ impl CoreErlangGenerator {
                             ],
                             nest(INDENT, inner),
                             line(),
-                            // BT-1822: Destructure error triple to capture stacktrace
+                            // Destructure error triple to capture stacktrace
                             docvec![
                                 "<{'error', {",
                                 leaf::var(err_triple_type.clone()),
@@ -1109,9 +1109,9 @@ impl CoreErlangGenerator {
                             "<'initialize'> when 'true' ->",
                             nest(
                                 INDENT,
-                                // BT-1951: The auto-chained dispatch body. Each
+                                // The auto-chained dispatch body. Each
                                 // class's initialize is bracketed by its own
-                                // pdict stash/restore pair to preserve BT-1325
+                                // pdict stash/restore pair to preserve
                                 // re-entrant self-send semantics.
                                 inner,
                             ),
@@ -1133,8 +1133,8 @@ impl CoreErlangGenerator {
     ///
     /// Handles the fire-and-forget cast format: `{cast, Selector, Args}` — sent by
     /// `beamtalk_actor:cast_send/3`. Dispatches the message and updates state;
-    /// errors are logged via `logger:warning` and discarded (BT-943).
-    /// BT-1325: Generates the pdict stash preamble for re-entrant self-sends.
+    /// errors are logged via `logger:warning` and discarded.
+    /// Generates the pdict stash preamble for re-entrant self-sends.
     /// Returns `let _OldState = ... in let _PutOk = ... in` — caller appends
     /// the dispatch body and must call `pdict_restore_epilogue()` after.
     fn pdict_stash_preamble() -> Document<'static> {
@@ -1146,7 +1146,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-1325: Generates the pdict restore epilogue. Must follow the dispatch
+    /// Generates the pdict restore epilogue. Must follow the dispatch
     /// result binding (e.g., `let _DispatchResult = ... in`).
     fn pdict_restore_epilogue() -> Document<'static> {
         docvec![
@@ -1176,10 +1176,10 @@ impl CoreErlangGenerator {
         ]
     }
 
-    // BT-920: helper — generates the inner `case safe_dispatch ... end` for fire-and-forget casts.
+    // helper — generates the inner `case safe_dispatch ... end` for fire-and-forget casts.
     fn cast_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
-            // BT-1325: Stash State for re-entrant self-sends
+            // Stash State for re-entrant self-sends
             Self::pdict_stash_preamble(),
             line(),
             // Use safe_dispatch for error isolation; discard result on error
@@ -1188,7 +1188,7 @@ impl CoreErlangGenerator {
                 leaf::atom(module_name.clone()),
                 ":'safe_dispatch'(CastSelector, CastArgs, State) in"
             ],
-            // BT-1325: Restore pdict
+            // Restore pdict
             Self::pdict_restore_epilogue(),
             line(),
             "case _CastDispatchResult of",
@@ -1200,11 +1200,11 @@ impl CoreErlangGenerator {
                     nest(
                         INDENT,
                         docvec![
-                            // BT-2717: strip codegen-internal `__local__` threading
+                            // strip codegen-internal `__local__` threading
                             // temporaries before persist + notify (see handle_call).
                             line(),
                             "let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in",
-                            // BT-2524: same per-object change push as handle_call, for
+                            // same per-object change push as handle_call, for
                             // a state write committed via a fire-and-forget cast.
                             line(),
                             "let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in",
@@ -1213,7 +1213,7 @@ impl CoreErlangGenerator {
                         ]
                     ),
                     line(),
-                    // BT-943/BT-1822: log error but don't crash — shared with handle_info
+                    // log error but don't crash — shared with handle_info
                     noreply_error_arms("Cast", leaf::var("CastSelector")),
                 ]
             ),
@@ -1222,7 +1222,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-1604 (ADR 0069 Phase 2b): Matches 4-tuple messages with `PropCtx`
+    /// ADR 0069 Phase 2b: Matches 4-tuple messages with `PropCtx`
     /// for both fire-and-forget casts and async sends. Falls back to 3-tuple
     /// for backward compatibility.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
@@ -1238,7 +1238,7 @@ impl CoreErlangGenerator {
                     nest(
                         INDENT,
                         docvec![
-                            // BT-1604: Fire-and-forget cast with propagated context
+                            // Fire-and-forget cast with propagated context
                             line(),
                             "<{'cast', CastSelector, CastArgs, CastPropCtx}> when 'true' ->",
                             nest(
@@ -1249,7 +1249,7 @@ impl CoreErlangGenerator {
                                     Self::cast_dispatch_case(&module_name),
                                 ]
                             ),
-                            // BT-920: Fire-and-forget cast without context (backward compat)
+                            // Fire-and-forget cast without context (backward compat)
                             line(),
                             "<{'cast', CastSelector, CastArgs}> when 'true' ->",
                             nest(INDENT, Self::cast_dispatch_case(&module_name)),
@@ -1269,10 +1269,10 @@ impl CoreErlangGenerator {
 
     /// Generates the `handle_call/3` callback for sync message sends.
     ///
-    /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
+    /// Uses `safe_dispatch/3` for error isolation and
     /// returns `{ok, Result}` or `{error, Error}` tuples.
     ///
-    /// BT-1604 (ADR 0069 Phase 2b): Matches 3-tuple `{Selector, Args, PropCtx}`
+    /// ADR 0069 Phase 2b: Matches 3-tuple `{Selector, Args, PropCtx}`
     /// to restore propagated context (`OTel` trace context) before dispatch.
     /// Falls back to 2-tuple `{Selector, Args}` for backward compatibility.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
@@ -1289,7 +1289,7 @@ impl CoreErlangGenerator {
                     nest(
                         INDENT,
                         docvec![
-                            // BT-1604: 3-tuple with propagated context — restore before dispatch
+                            // 3-tuple with propagated context — restore before dispatch
                             line(),
                             "<{Selector, Args, PropCtx}> when 'true' ->",
                             nest(
@@ -1316,20 +1316,20 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// BT-1604: Generates the inner `case safe_dispatch ... end` block for `handle_call`.
+    /// Generates the inner `case safe_dispatch ... end` block for `handle_call`.
     /// Shared between 3-tuple (with `PropCtx`) and 2-tuple (backward compat) patterns.
     fn handle_call_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
-            // BT-1325: Stash State for re-entrant self-sends
+            // Stash State for re-entrant self-sends
             Self::pdict_stash_preamble(),
             line(),
-            // Use safe_dispatch for error isolation per BT-29
+            // Use safe_dispatch for error isolation
             docvec![
                 "let _DispatchResult = call ",
                 leaf::atom(module_name.clone()),
                 ":'safe_dispatch'(Selector, Args, State) in"
             ],
-            // BT-1325: Restore pdict
+            // Restore pdict
             Self::pdict_restore_epilogue(),
             line(),
             "case _DispatchResult of",
@@ -1342,13 +1342,13 @@ impl CoreErlangGenerator {
                     nest(
                         INDENT,
                         docvec![
-                            // BT-2717: strip codegen-internal `__local__` threading
+                            // strip codegen-internal `__local__` threading
                             // temporaries before persist + notify, so an outer local
                             // threaded through a control-flow desugar never leaks into
                             // the committed actor state or a watch notification.
                             line(),
                             "let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in",
-                            // BT-2524: notify the per-object change substrate so a
+                            // notify the per-object change substrate so a
                             // watched compiled actor's committed state write pushes
                             // {object_changed, …} to the live Inspector — the runtime
                             // beamtalk_actor path does this via log_dispatch_complete.
@@ -1372,7 +1372,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates the `handle_info/2` callback (BT-936, ADR 0065 / BT-1457).
+    /// Generates the `handle_info/2` callback (ADR 0065).
     ///
     /// For **Server subclasses**, dispatches to the user-defined `handleInfo:` method
     /// with log-and-continue error semantics: if `handleInfo:` raises an error, the
@@ -1409,7 +1409,7 @@ impl CoreErlangGenerator {
                 nest(
                     INDENT,
                     docvec![
-                        // BT-1325: Stash State for re-entrant self-sends
+                        // Stash State for re-entrant self-sends
                         Self::pdict_stash_preamble(),
                         line(),
                         docvec![
@@ -1428,7 +1428,7 @@ impl CoreErlangGenerator {
                                 nest(
                                     INDENT,
                                     docvec![
-                                        // BT-2717: handle_info is an outermost state-commit
+                                        // handle_info is an outermost state-commit
                                         // boundary too — a Server `handleInfo:` that threads an
                                         // outer local through a control-flow desugar must not
                                         // persist `__local__` temps into the committed state.
@@ -1439,7 +1439,7 @@ impl CoreErlangGenerator {
                                     ]
                                 ),
                                 line(),
-                                // BT-1822/BT-943: log error but don't crash — shared with handle_cast
+                                // log error but don't crash — shared with handle_cast
                                 noreply_error_arms("Info", leaf::atom("handleInfo:")),
                                 line(),
                                 "<_Other> when 'true' -> {'noreply', State}",
@@ -1493,8 +1493,8 @@ impl CoreErlangGenerator {
 
     /// Generates the `terminate/2` callback for `gen_server` shutdown.
     ///
-    /// Per BT-29 design doc, this calls the `terminate` method if defined.
-    /// Instance tracking cleanup (BT-96) is automatic via process monitor.
+    /// This calls the `terminate` method if defined.
+    /// Instance tracking cleanup is automatic via process monitor.
     ///
     /// # Generated Code
     ///
@@ -1514,7 +1514,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
 
-        // BT-1642: Use the clean Beamtalk class name for lifecycle telemetry
+        // Use the clean Beamtalk class name for lifecycle telemetry
         // metadata, matching how dispatch traces report class names.
         let current_class = self.current_class(module);
         let class_name = current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
@@ -1525,7 +1525,7 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    // BT-1638: Emit lifecycle stop telemetry from compiled terminate
+                    // Emit lifecycle stop telemetry from compiled terminate
                     "let _TelPid = call 'erlang':'self'() in",
                     line(),
                     docvec![
@@ -1601,7 +1601,7 @@ fn noreply_error_arms(var_prefix: &str, selector: Document<'static>) -> Document
     let msg_plain_v = leaf::var(format!("{var_prefix}ErrMsg2"));
 
     docvec![
-        // BT-1822: Triple-format arm — destructure error triple to log stacktrace
+        // Triple-format arm — destructure error triple to log stacktrace
         docvec![
             "<{",
             leaf::atom("error"),
@@ -1671,7 +1671,7 @@ fn noreply_error_arms(var_prefix: &str, selector: Document<'static>) -> Document
             ],
         ),
         line(),
-        // BT-943: Plain-format fallback — {error, Error, State} (DNU, #beamtalk_error{}, etc.)
+        // Plain-format fallback — {error, Error, State} (DNU, #beamtalk_error{}, etc.)
         docvec![
             "<{",
             leaf::atom("error"),
