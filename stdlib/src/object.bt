@@ -267,7 +267,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// object fieldAt: #name
   /// ```
-  sealed fieldAt: name :: Symbol => @intrinsic fieldAt
+  sealed fieldAt: name :: Symbol -> Object => @intrinsic fieldAt
 
   /// Set the value of the named field (returns new state).
   ///
@@ -275,7 +275,8 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// object fieldAt: #name put: "Alice"
   /// ```
-  sealed fieldAt: name :: Symbol put: value => @intrinsic fieldAtPut
+  sealed fieldAt: name :: Symbol put: value :: Object -> Self =>
+    @intrinsic fieldAtPut
 
   /// Send a unary message dynamically.
   ///
@@ -283,7 +284,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 perform: #abs       // => 42
   /// ```
-  sealed perform: selector :: Symbol => @intrinsic dynamicSend
+  sealed perform: selector :: Symbol -> Object => @intrinsic dynamicSend
 
   /// Send a message dynamically with arguments.
   ///
@@ -291,7 +292,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 3 perform: #max: withArguments: #(5)   // => 5
   /// ```
-  sealed perform: selector :: Symbol withArguments: args :: List =>
+  sealed perform: selector :: Symbol withArguments: args :: List -> Object =>
     @intrinsic dynamicSendWithArgs
 
   // === Abstract method markers ===

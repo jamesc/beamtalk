@@ -67,7 +67,14 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actorAt: "<0.132.0>"
   /// ```
-  actorAt: pidString :: String -> Object =>
+  ///
+  /// The FFI spec types the result as a generic `tuple() | nil` (the compiler
+  /// can't tell it's a Beamtalk actor proxy from that alone), but
+  /// `handle_actor_at/1` always builds a live actor reference or `nil` —
+  /// suppress the resulting `Tuple | Nil` vs. declared `Actor | Nil`
+  /// return-type mismatch (see `packageName`, BT-2829, for the same pattern).
+  @expect type
+  actorAt: pidString :: String -> Actor | Nil =>
     (Erlang beamtalk_workspace_interface_primitives) actorAt: pidString
 
   /// Return all actors of a given class.
@@ -293,7 +300,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace flush          // => _ (flush summary)
   /// ```
-  flush -> Object => (Erlang beamtalk_workspace_interface_primitives) flush
+  flush -> Dictionary => (Erlang beamtalk_workspace_interface_primitives) flush
 
   /// Flush the pending Tier 1 ChangeLog entries matching `filter` (ADR 0082
   /// Phase 2).
@@ -314,7 +321,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace flush: #'new-class'        // => _
   /// Workspace flush: #{ #file => "src/counter.bt" }  // => _
   /// ```
-  flush: filter :: Object -> Object =>
+  flush: filter :: Behaviour | Symbol | Dictionary -> Dictionary =>
     (Erlang beamtalk_workspace_interface_primitives) flush: filter
 
   /// Flush the pending ChangeLog entries matching `filter`, additionally
@@ -331,7 +338,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace flush: Counter confirmDestructive: true   // => _
   /// ```
-  flush: filter :: Object confirmDestructive: confirmDestructive :: Boolean -> Object =>
+  flush: filter :: Behaviour | Symbol | Dictionary confirmDestructive: confirmDestructive :: Boolean -> Dictionary =>
     (Erlang beamtalk_workspace_interface_primitives) flush: filter confirmDestructive: confirmDestructive
 
   /// Flush every pending durable+flushable ChangeEntry, Tier 1 *and* Tier 2
@@ -350,7 +357,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace flushIncludingDestructive   // => _
   /// ```
-  flushIncludingDestructive -> Object =>
+  flushIncludingDestructive -> Dictionary =>
     (Erlang beamtalk_workspace_interface_primitives) flushIncludingDestructive
 
   // === Rechecking and testing ===
@@ -375,7 +382,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace recheckImage          // => _ (checked/stale summary)
   /// ```
-  recheckImage -> Object =>
+  recheckImage -> Dictionary =>
     (Erlang beamtalk_workspace_interface_primitives) recheckImage
 
   /// Run all loaded test classes and return a TestResult.
@@ -431,7 +438,13 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace supervisor                  // => Supervisor(AppSup, 0.200.0)
   /// Workspace supervisor children         // => #(#DatabasePool #HTTPRouter)
   /// ```
-  supervisor -> Object =>
+  ///
+  /// The FFI spec types the result as a generic `tuple() | nil`, but
+  /// `rootSupervisor/0` always builds a live Supervisor reference or `nil` —
+  /// suppress the resulting `Tuple | Nil` vs. declared `Supervisor | Nil`
+  /// return-type mismatch (see `packageName`, BT-2829, for the same pattern).
+  @expect type
+  supervisor -> Supervisor | Nil =>
     (Erlang beamtalk_workspace_interface_primitives) rootSupervisor
 
   /// Start and attach a supervisor to the workspace supervision tree.
@@ -445,7 +458,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace startSupervisor: MySup      // => Supervisor(MySup, 0.200.0)
   /// Workspace startSupervisor: MySup      // => Supervisor(MySup, 0.200.0)  (idempotent)
   /// ```
-  startSupervisor: aClass :: Class -> Object =>
+  startSupervisor: aClass :: Class -> Supervisor =>
     (Erlang beamtalk_workspace_interface_primitives) startSupervisor: aClass
 
   /// Stop and remove a supervisor from the workspace.
@@ -472,7 +485,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace supervisors                 // => #(Supervisor(MySup, 0.200.0))
   /// ```
-  supervisors -> List =>
+  supervisors -> List(Supervisor) =>
     (Erlang beamtalk_workspace_interface_primitives) supervisors
 
   // === Settings ===

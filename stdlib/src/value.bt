@@ -62,7 +62,7 @@ Object subclass: Value
   /// ```beamtalk
   /// Point new: #{#x => 3, #y => 4}
   /// ```
-  class sealed new: initArgs -> Self => @intrinsic basicNewWith
+  class sealed new: initArgs :: Object -> Self => @intrinsic basicNewWith
 
   // === Printing ===
 

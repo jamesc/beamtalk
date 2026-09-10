@@ -51,7 +51,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// c := Counter spawnWith: #{#count => 10}
   /// ```
-  class sealed spawnWith: initArgs -> Self =>
+  class sealed spawnWith: initArgs :: Object -> Self =>
     (Erlang beamtalk_actor) doSpawnWith: self args: initArgs
 
   /// Actors cannot be created with `new` — always raises (BT-217).
@@ -255,7 +255,7 @@ Object subclass: Actor
 
   /// Internal FFI seam (ADR 0101 Part 4): release this actor's registered
   /// name. Keeps `unregister` pure Beamtalk.
-  internal unregisterName -> Object => (Erlang beamtalk_actor) unregister: self
+  internal unregisterName -> Symbol => (Erlang beamtalk_actor) unregister: self
 
   /// Return the Symbol this actor is registered under, or `nil` if unnamed.
   ///
@@ -352,7 +352,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// counter delegate   // => ERROR: delegate called on a non-native Actor
   /// ```
-  sealed delegate => @intrinsic "actorDelegate"
+  sealed delegate -> Never => @intrinsic "actorDelegate"
 
   /// Return the raw Erlang PID backing this actor.
   ///

@@ -64,7 +64,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// Binary fromBytes: #(104, 101, 108, 108, 111)   // => _
   /// ```
-  class sealed fromBytes: bytes :: List -> Binary =>
+  class sealed fromBytes: bytes :: List(Integer) -> Binary =>
     (Erlang beamtalk_binary) fromBytes: bytes
 
   /// Deserialize a binary and return both the value and bytes consumed.
@@ -79,7 +79,7 @@ sealed typed Collection subclass: Binary
   /// result first    // => 42
   /// result second   // => bytes consumed
   /// ```
-  class sealed deserializeWithUsed: binary :: Binary -> Object =>
+  class sealed deserializeWithUsed: binary :: Binary -> Tuple =>
     (Erlang beamtalk_binary) deserializeWithUsed: binary
 
   /// Decode a standard (RFC 4648 §4) base64 string to a Binary.

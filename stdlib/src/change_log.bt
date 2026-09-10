@@ -117,7 +117,7 @@ sealed typed Value subclass: ChangeLog
   /// // After `Counter >> increment => ...`:
   /// // Workspace changes dirtyMethods   // => #{#Counter => #{#increment}}
   /// ```
-  dirtyMethods -> Dictionary =>
+  dirtyMethods -> Dictionary(Symbol, Set(Symbol)) =>
     // FFI returns a Dictionary `#{ClassSymbol => Set(selectorSymbol)}`
     // (beamtalk_workspace_changelog:dirtyMethods/0), matching the declared
     // return type.
@@ -142,7 +142,7 @@ sealed typed Value subclass: ChangeLog
   /// ```beamtalk
   /// Workspace changes do: [:e | e isAgent ifTrue: [Workspace changes revert: e]]
   /// ```
-  revert: anEntry :: ChangeEntry -> Object =>
+  revert: anEntry :: ChangeEntry -> Behaviour =>
     (Erlang beamtalk_workspace_interface_primitives) changeLogRevert: anEntry
 
   /// Discard every pending ChangeLog entry without writing to disk
@@ -190,7 +190,7 @@ sealed typed Value subclass: ChangeLog
   /// Workspace changes flushKinds: #{#'new-class'}        // => _
   /// Workspace changes flushKinds: #{#agent, #instance}   // => _
   /// ```
-  flushKinds: kinds :: Object -> Object =>
+  flushKinds: kinds :: Object -> Dictionary =>
     (Erlang beamtalk_workspace_interface_primitives) changeLogFlushKinds: kinds
 
   /// Flush the ChangeEntries whose kind or author_kind is in `kinds`,
@@ -206,7 +206,7 @@ sealed typed Value subclass: ChangeLog
   /// ```beamtalk
   /// Workspace changes flushKinds: #( #'remove-class' ) confirmDestructive: true  // => _
   /// ```
-  flushKinds: kinds :: Object confirmDestructive: confirmDestructive :: Boolean -> Object =>
+  flushKinds: kinds :: Object confirmDestructive: confirmDestructive :: Boolean -> Dictionary =>
     (Erlang beamtalk_workspace_interface_primitives) changeLogFlushKinds: kinds confirmDestructive: confirmDestructive
 
   // === Printing ===
