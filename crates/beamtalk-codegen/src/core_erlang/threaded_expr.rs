@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Context-agnostic outer-local mutation threading (BT-2361 steps 1-2).
+//! Context-agnostic outer-local mutation threading.
 //!
 //! **DDD Context:** Code Generation
 //!
@@ -31,8 +31,8 @@
 //!   [`ThreadingBoundary`] captures how the bound result var is returned/stored:
 //!   the value-type `{Result, Self{N}}` / bare-`Result` shape, the class-method
 //!   `{class_var_result, Result, ClassVarsN}` / bare-`Result` shape, or the Actor
-//!   `{'reply', Reply, NewState}` `gen_server` reply shape (BT-2378). This mirrors the
-//!   [`NlrBoundary`](super::NlrBoundary) precedent (BT-2361 step 4 / PR #2408).
+//!   `{'reply', Reply, NewState}` `gen_server` reply shape. This mirrors the
+//!   [`NlrBoundary`](super::NlrBoundary) precedent.
 //!
 //! The Actor boundary is structurally distinct from the other two: its mutated outer
 //! locals do not ride a *separate* `StateAcc` map that is discarded at the boundary —
@@ -43,19 +43,17 @@
 //! [`CoreErlangGenerator::emit_actor_threaded_assign_rhs_stmts`] — a genuine *extension* of
 //! the seam, not a fold of the existing `{Value, StateAcc}` transform.
 //!
-//! ## BT-3148 task 4: `ThreadingBoundary` audit — survives, narrowed to one job
+//! ## `ThreadingBoundary`'s narrowed job
 //!
-//! ADR 0111 Addendum 4 asked whether `ThreadingBoundary` survives BT-3148's routing
-//! unification (task 1) as pure lowering-time classification, or is fully replaced.
-//! Audited: it **survives**, but its job has narrowed to exactly one thing —
-//! [`CoreErlangGenerator::threading_result_tail`]'s return-shape adapter (which
-//! `{Result, ...}` Document a bound value renders as). Its *other*, pre-BT-3148 job —
-//! deciding whether a construct routes through the shared emitter at all, by rechecking
-//! [`CoreErlangGenerator::control_flow_has_mutations`] a second time — is gone:
+//! ADR 0111 Addendum 4: `ThreadingBoundary`'s job has narrowed to exactly one
+//! thing — [`CoreErlangGenerator::threading_result_tail`]'s return-shape
+//! adapter (which `{Result, ...}` Document a bound value renders as). It no
+//! longer decides whether a construct routes through the shared emitter at
+//! all, by rechecking [`CoreErlangGenerator::control_flow_has_mutations`] a
+//! second time:
 //! [`CoreErlangGenerator::lower_threaded_last`] and
-//! [`CoreErlangGenerator::emit_threaded_assign_rhs`] no longer take a `boundary` param to
-//! redirect on (`ThreadingBoundary::Actor` used to short-circuit both into the Actor
-//! transform below); the Actor path is now reached directly, by construction, from
+//! [`CoreErlangGenerator::emit_threaded_assign_rhs`] take no `boundary` param
+//! to redirect on; the Actor path is reached directly, by construction, from
 //! `gen_server/methods.rs`'s already-classified `BodyExprKind::ControlFlowWithMutations`/
 //! `LocalAssignControlFlow` arms calling [`CoreErlangGenerator::emit_actor_threaded_last_stmts`]/
 //! [`CoreErlangGenerator::emit_actor_threaded_assign_rhs_stmts`] — functions that take no
@@ -111,7 +109,7 @@ pub(super) enum ThreadingBoundary {
     /// constructs mutate *locals*, not class vars, so the wrapping is driven solely by
     /// `class_var_mutated()`.
     ClassMethod,
-    /// Actor (`gen_server`) methods: BT-2378. Structurally distinct from the value-type
+    /// Actor (`gen_server`) methods. Structurally distinct from the value-type
     /// and class-method boundaries:
     ///
     /// * **Where threaded state lives.** Actors do not carry mutated outer locals in a
@@ -142,7 +140,7 @@ pub(super) struct ThreadedExpr {
     /// Core Erlang variable bound to the construct's threaded state (tuple element 2),
     /// when the boundary needs it. `None` for value-type / class-method last position,
     /// where the mutated outer locals ride a *separate* `StateAcc` map that does not
-    /// escape and is discarded. `Some` for the Actor boundary (BT-2378), where element 2
+    /// escape and is discarded. `Some` for the Actor boundary, where element 2
     /// **is** the `gen_server` `State` map that must be returned in the reply tuple.
     pub(super) state_var: Option<String>,
     /// Outer locals the construct threads via tuple element 2. Unused in last position
@@ -158,7 +156,7 @@ pub(super) struct ThreadedExpr {
 impl CoreErlangGenerator {
     /// Lowers a last/return-position threading construct into a [`ThreadedExpr`],
     /// binding its logical value (tuple element 1) to a fresh result var. The
-    /// value-type / class-method boundaries share the BT-2342
+    /// value-type / class-method boundaries share the
     /// `{Value, StateAcc}` transform primitives below.
     ///
     /// Returns `None` when `expr` (after peeling redundant parentheses) is not a
@@ -171,10 +169,10 @@ impl CoreErlangGenerator {
     ///   value, avoiding the 0-arg dispatch crash on a stateful arity-1 block.
     ///
     /// The threaded locals do not escape in last position, so tuple element 2 is
-    /// discarded. BT-2358: redundant parentheses (`^(items collect: …)`) are peeled so
+    /// discarded. Redundant parentheses (`^(items collect: …)`) are peeled so
     /// the construct inside is unwrapped rather than leaking its raw tuple.
     ///
-    /// BT-3148 (ADR 0111 Addendum 4): the Actor boundary no longer routes
+    /// ADR 0111 Addendum 4: the Actor boundary no longer routes
     /// through this recognizer — `gen_server/methods.rs`'s
     /// `classify_body_expr` is the single classification pass, and its
     /// `ControlFlowWithMutations`/`LocalAssignControlFlow` arms call
@@ -209,7 +207,7 @@ impl CoreErlangGenerator {
         }))
     }
 
-    /// BT-2378/BT-3148: Actor-boundary transform for a last-position
+    /// Actor-boundary transform for a last-position
     /// control-flow construct that threads state (field mutations,
     /// conditionals, loops, foldl list-ops, exception handlers). Such a
     /// construct lowers — via the actor-context `expression_doc` path — to a
@@ -219,15 +217,15 @@ impl CoreErlangGenerator {
     /// to element 2 through a real [`ThreadedStmt::Bind`], and closes with
     /// the Actor `{'reply', Result, NewState}` tail.
     ///
-    /// ADR 0111 Addendum 4 (BT-3148 task 1): this NEVER declines — the
+    /// ADR 0111 Addendum 4: this NEVER declines — the
     /// caller is `gen_server/methods.rs`'s already-classified
     /// `BodyExprKind::ControlFlowWithMutations` arm, and `classify_body_expr`
-    /// is the single classification pass. The pre-BT-3148 shape re-checked
-    /// `control_flow_has_mutations` here and could fall through to the
-    /// generic path, which is exactly the "two independently-computed
-    /// decisions must agree" drift `verify_routing_invariant` existed to
-    /// compare; with one decision consumed instead of two compared,
-    /// `RoutingMismatch` is unrepresentable and that check is deleted.
+    /// is the single classification pass, so there is no second,
+    /// independently-computed `control_flow_has_mutations` recheck here to
+    /// possibly disagree with it — the "two independently-computed
+    /// decisions must agree" drift class `verify_routing_invariant` existed
+    /// to compare is unrepresentable by construction, and that check is
+    /// deleted.
     ///
     /// The state-version step is a real `Bind` (target/source read off the
     /// live counter) sitting in the method body's `Vec<ThreadedStmt>`; the
@@ -241,7 +239,7 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         let span = expr.span();
 
-        // ADR 0118 phase 4 (BT-3420): when `expr` is itself an inline-
+        // ADR 0118 phase 4: when `expr` is itself an inline-
         // threaded control-flow construct (`ifTrue:`/`ifFalse:`/
         // `ifTrue:ifFalse:`, `and:`/`or:`, the nil-conditional family, or
         // `match:`) needing mutation threading, this function's OWN caller
@@ -324,7 +322,7 @@ impl CoreErlangGenerator {
     /// This is the single shared entry point that subsumes the value-type
     /// `emit_vt_last_expr` threading branch (loops, foldl list-ops, and read+write
     /// conditionals) and the class-method `try_generate_class_method_threaded_last`.
-    /// The Actor boundary does not route here (BT-3148) — see
+    /// The Actor boundary does not route here — see
     /// [`Self::emit_actor_threaded_last_stmts`].
     pub(super) fn emit_threaded_last(
         &mut self,
@@ -333,7 +331,7 @@ impl CoreErlangGenerator {
         boundary: ThreadingBoundary,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<bool> {
-        // BT-3169: captured before lowering — `lower_threaded_last`'s two
+        // Captured before lowering — `lower_threaded_last`'s two
         // internal builders (`emit_vt_threaded_tuple_unwrap_to_var`,
         // `emit_vt_conditional_case_to_var`) both bind the construct's own
         // Document opaquely (`let TupleVar = <construct> in ...`), which
@@ -370,12 +368,12 @@ impl CoreErlangGenerator {
     /// mutating `body_parts`) when the RHS is not a threading construct, so the caller
     /// falls back to its generic local-binding path. Handles both the loop / foldl
     /// list-op RHS (`emit_vt_threaded_local_assignment`) and the read+write conditional
-    /// RHS (`emit_vt_conditional_assign_rhs`, BT-2359/BT-2371). BT-2358: the conditional
+    /// RHS (`emit_vt_conditional_assign_rhs`). The conditional
     /// RHS is peeled of redundant parentheses first.
     ///
     /// Shared by the value-type instance-method body sequencer and the class-method
     /// non-last local-var binder, which previously re-derived this branch independently.
-    /// The Actor boundary does not route here (BT-3148) — see
+    /// The Actor boundary does not route here — see
     /// [`Self::emit_actor_threaded_assign_rhs_stmts`].
     pub(super) fn emit_threaded_assign_rhs(
         &mut self,
@@ -397,7 +395,7 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
-    /// BT-2378/BT-3148: Actor-boundary assign-RHS transform —
+    /// Actor-boundary assign-RHS transform —
     /// `var := <control-flow-with-mutations>`.
     ///
     /// The RHS lowers to a `{Value, NewState}` tuple whose element 2 **is** the `gen_server`
@@ -406,7 +404,7 @@ impl CoreErlangGenerator {
     /// outer-locals from the new state so both the assigned value and the mutations are
     /// visible to subsequent statements.
     ///
-    /// ADR 0111 Addendum 4 (BT-3148 task 1): this NEVER declines — see
+    /// ADR 0111 Addendum 4: this NEVER declines — see
     /// [`Self::emit_actor_threaded_last_stmts`]'s doc comment for the
     /// single-classification-pass rationale (the caller is the already-classified
     /// `BodyExprKind::LocalAssignControlFlow` arm; the deleted
@@ -423,7 +421,7 @@ impl CoreErlangGenerator {
             .lookup_var(var_name)
             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
 
-        // ADR 0118 phase 4 (BT-3420): see `emit_actor_threaded_last_stmts`'s
+        // ADR 0118 phase 4: see `emit_actor_threaded_last_stmts`'s
         // matching check — this function's own caller
         // (`gen_server/methods.rs`'s `LocalAssignControlFlow` arm) already
         // called `thread_ahead(value, ..)` immediately before this, which
@@ -502,7 +500,7 @@ impl CoreErlangGenerator {
         let mut rebind_parts: Vec<Document<'static>> = Vec::new();
         if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
             for var in &threaded_vars {
-                // BT-2378: skip the assignment target itself. When the RHS construct mutates
+                // Skip the assignment target itself. When the RHS construct mutates
                 // the same local internally (`x := (1 to: 3 do: [:i | x := x + i])`), `var_name`
                 // appears in `threaded_vars`; rebinding it from `NewState` would emit a second
                 // `let` overwriting the value already bound from element 1 (the construct's
@@ -535,7 +533,7 @@ impl CoreErlangGenerator {
     /// `boundary`. This is the single place the value-type vs class-method divergence
     /// lives — the boundary adapter the design calls for.
     ///
-    /// BT-875: Use Document/docvec! — never format!() for Core Erlang fragments.
+    /// Use Document/docvec! — never format!() for Core Erlang fragments.
     pub(super) fn threading_result_tail(
         &self,
         result_var: &str,
@@ -544,7 +542,7 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         match boundary {
             ThreadingBoundary::Actor => {
-                // BT-2378: gen_server reply. `state_var` is element 2 of the construct's
+                // gen_server reply. `state_var` is element 2 of the construct's
                 // `{Value, NewState}` tuple — the threaded gen_server `State` map.
                 let state = state_var.map_or_else(
                     || self.current_state_var(),

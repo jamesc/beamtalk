@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Shared leaf module (BT-3457, `architecture-principles.md` § Duplication &
+//! Shared leaf module (see `architecture-principles.md` § Duplication &
 //! the Shared-Leaf-Module Pattern): the `is_*` classifiers that recognize a
 //! *syntactic* shape of an `Expression` — a field assignment, a class-var
 //! assignment, a self-send that dispatches, a Character-typed receiver, and
@@ -81,7 +81,7 @@ fn unwrap_parens(expr: &Expression) -> &Expression {
     current
 }
 
-/// BT-3214 (extends BT-2095): true if `expr`'s static type is Character,
+/// True if `expr`'s static type is Character,
 /// determined purely from its syntactic shape — no general static type
 /// inference exists in codegen, so this recognizes exactly the syntactic
 /// forms that `character.bt` declares as producing a Character: a Character
@@ -95,13 +95,13 @@ fn unwrap_parens(expr: &Expression) -> &Expression {
 /// runtime `beamtalk_primitive:class_of/1` and `module_for_value/1` both
 /// match `is_integer/1` unconditionally and route to `Integer`'s BIF module
 /// — they cannot tell a Character-tagged integer from a `SmallInteger`,
-/// because there is no runtime tag to tell them apart. BT-2095 fixed this
-/// for the literal case (`$A asString`) by special-casing the receiver's
-/// AST shape at codegen. `(Character value: 10) asString` and `$a uppercase
+/// because there is no runtime tag to tell them apart. The literal case
+/// (`$A asString`) is special-cased by the receiver's AST shape at codegen.
+/// `(Character value: 10) asString` and `$a uppercase
 /// asString` are the same problem: the receiver is statically Character
-/// (per the sender's declared `-> Character` return type) but was not
-/// recognized because it isn't a literal, so it fell through to the generic
-/// runtime-dispatch path and was misrouted to `Integer>>asString`,
+/// (per the sender's declared `-> Character` return type), so without
+/// recognizing these additional shapes it would fall through to the generic
+/// runtime-dispatch path and be misrouted to `Integer>>asString`,
 /// producing `"10"` instead of a genuine 1-byte LF string. Recognizing
 /// these additional shapes closes that gap without requiring general
 /// static type inference in codegen.
@@ -150,7 +150,7 @@ pub(super) fn is_field_assignment(expr: &Expression) -> bool {
     false
 }
 
-/// BT-2797: Checks if an expression is a self-field access (`self.field`).
+/// Checks if an expression is a self-field access (`self.field`).
 ///
 /// Used to scope the runtime Tier 1/Tier 2 discrimination for block value
 /// calls (`self.field value: ...`) to exactly the shape that needs it — a
@@ -183,8 +183,8 @@ pub(super) fn is_class_var_assignment(ctx: &ShapeCtx<'_>, expr: &Expression) -> 
     false
 }
 
-/// Checks if an expression is a self-send to a class method (BT-412),
-/// including an explicit same-class-name receiver (BT-773: `ClassName
+/// Checks if an expression is a self-send to a class method,
+/// including an explicit same-class-name receiver (`ClassName
 /// foo` from inside `ClassName`'s own class method dispatches exactly
 /// like `self foo` — `try_handle_class_reference` routes both through
 /// [`CoreErlangGenerator::generate_class_method_self_send`] identically).
@@ -192,13 +192,13 @@ pub(super) fn is_class_var_assignment(ctx: &ShapeCtx<'_>, expr: &Expression) -> 
 /// update `ClassVars` via `let ClassVarsN = ... in` which must not be
 /// wrapped.
 ///
-/// ADR 0118 phase 5b (BT-3422): missing the `ClassReference` shape here
-/// left `subexpr_needs_prelude` blind to it — a locally-declared
+/// ADR 0118 phase 5b: without the `ClassReference` shape here,
+/// `subexpr_needs_prelude` is blind to it — a locally-declared
 /// same-class-name self-send nested as a cascade/message argument
-/// (`w add: … value: (CascadeNestedKeywordArg noop: 1)`) was compiled
+/// (`w add: … value: (CascadeNestedKeywordArg noop: 1)`) would compile
 /// as an opaque, self-contained value instead of a real prelude, so the
-/// `ClassVarsN` it introduced never became visible to a LATER sibling
-/// argument that also needed it (`bt3406_cascade_nested_keyword_arg`).
+/// `ClassVarsN` it introduces would never become visible to a LATER sibling
+/// argument that also needs it (see `bt3406_cascade_nested_keyword_arg`).
 pub(super) fn is_class_method_self_send(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     if !ctx.in_class_method || ctx.class_method_selectors.is_empty() {
         return false;
@@ -241,9 +241,9 @@ pub(super) fn is_super_message_send(expr: &Expression) -> bool {
     }
 }
 
-/// BT-245: Checks if an expression is a self-send in actor context.
+/// Checks if an expression is a self-send in actor context.
 /// These may mutate actor state and need state threading in loop bodies.
-/// BT-920: Excludes cast sends (`self method!`), which are fire-and-forget
+/// Excludes cast sends (`self method!`), which are fire-and-forget
 /// and must not thread state through the loop accumulator.
 pub(super) fn is_actor_self_send(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     if ctx.context != CodeGenContext::Actor {
@@ -263,7 +263,7 @@ pub(super) fn is_actor_self_send(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool 
     false
 }
 
-/// BT-1420: Checks if an expression is a self-send that goes through `safe_dispatch`
+/// Checks if an expression is a self-send that goes through `safe_dispatch`
 /// (or sealed dispatch) and returns `{reply, Result, NewState}`.
 ///
 /// Excludes self-sends with selectors that are intercepted by handlers before
@@ -287,7 +287,7 @@ pub(super) fn is_dispatching_actor_self_send(ctx: &ShapeCtx<'_>, expr: &Expressi
 }
 
 /// The selector half of [`is_dispatching_actor_self_send`]'s check —
-/// extracted (ADR 0118 phase 1b, BT-3416) so a caller that already knows
+/// extracted (ADR 0118 phase 1b) so a caller that already knows
 /// the receiver is a bare `self` without owning an `Expression::MessageSend`
 /// node to hand back (a cascade message, whose selector/arguments come from
 /// `CascadeMessage` — see `util.rs`'s `cascade_self_dispatch_messages`) can
@@ -309,7 +309,7 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
     if matches!(selector, MessageSelector::Binary(_)) {
         return false;
     }
-    // BT-2065/BT-2071/BT-2073: Well-known selectors that the intrinsics
+    // Well-known selectors that the intrinsics
     // layer **unconditionally** handles before `try_handle_self_dispatch`.
     // Covers ProtoObject (`class`, `perform:`/`perform:withArguments:`/
     // `performLocally:withArguments:`), Object reflection (`respondsTo:`,
@@ -378,7 +378,7 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
 /// Since `erlang:error/1` never returns (always throws an exception),
 /// expressions ending with `error:` should not be wrapped in reply tuples.
 pub(super) fn is_error_message_send(expr: &Expression) -> bool {
-    // BT-2073: classify via the well-known enum so a future rename of the
+    // Classify via the well-known enum so a future rename of the
     // `Error` variant forces this site to update too. The classifier
     // guarantees keyword/arity = 1, but we still gate on arguments.len()
     // for the same defensive reason the original predicate did.
@@ -394,7 +394,7 @@ pub(super) fn is_error_message_send(expr: &Expression) -> bool {
     false
 }
 
-/// BT-1324: Checks if an expression is `self fieldAt: <name> put: <value>` in actor context.
+/// Checks if an expression is `self fieldAt: <name> put: <value>` in actor context.
 /// These need state threading via maps:put, similar to field assignments.
 pub(super) fn is_self_field_at_put(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     if ctx.context != CodeGenContext::Actor {
@@ -408,7 +408,7 @@ pub(super) fn is_self_field_at_put(ctx: &ShapeCtx<'_>, expr: &Expression) -> boo
     } = expr
     {
         if let Expression::Identifier(id) = receiver.as_ref() {
-            // BT-2073: classify via the well-known enum. The classifier
+            // Classify via the well-known enum. The classifier
             // already guarantees the two-part keyword shape; arguments.len()
             // is checked defensively for parser-shape consistency.
             if id.name == "self"

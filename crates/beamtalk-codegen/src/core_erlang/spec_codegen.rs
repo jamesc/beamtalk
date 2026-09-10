@@ -16,7 +16,7 @@
 //!   in their own `-spec` annotations (requires a paired `-export_type([t/0])`
 //!   emitted by `value_type_codegen.rs`)
 //! - [`generate_alias_type_attrs`] / [`format_alias_type_attributes`] — emit a
-//!   named `-type` per Beamtalk `type Name = ...` alias (ADR 0108, BT-2900),
+//!   named `-type` per Beamtalk `type Name = ...` alias (ADR 0108),
 //!   so annotation sites referencing the alias can emit a `user_type`
 //!   reference instead of re-expanding the alias inline. Every function above
 //!   takes an `Option<&AliasRegistry>`: `None` preserves pre-ADR-0108
@@ -80,11 +80,11 @@ use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 /// through to `any()`. `None` reproduces pre-ADR-0108 behaviour exactly.
 ///
 /// `referenced`, when present, records every alias name this walk actually
-/// emits a `user_type` reference for (BT-2940) — callers use this to scope
+/// emits a `user_type` reference for — callers use this to scope
 /// [`generate_alias_type_attrs`]'s emission to only the aliases a module's
 /// specs/state fields reference, instead of every pre-loaded alias.
 ///
-/// `pub(super)`: BT-2957 also calls this directly from `gen_server::methods`
+/// `pub(super)`: also called directly from `gen_server::methods`
 /// to embed type metadata in `register_protocol` maps — protocol methods
 /// have no standalone function to attach a real `-spec` to, so they never go
 /// through [`generate_method_spec`]/[`generate_class_specs`].
@@ -169,7 +169,7 @@ fn alias_erlang_type_name(alias_name: &str) -> String {
 /// is always empty.
 ///
 /// This is the *only* place a `user_type` term is emitted, so recording
-/// `alias_name` into `referenced` (BT-2940) here — rather than as a
+/// `alias_name` into `referenced` here — rather than as a
 /// separate statement at each of this function's call sites — makes it
 /// structurally impossible for a `user_type` emission to go untracked: any
 /// future call site automatically gets the bookkeeping for free.
@@ -269,7 +269,7 @@ fn generic_type_to_spec(
         "Tuple" => Document::Str("{'type', 0, 'tuple', 'any'}"),
         // Any other generic type (custom classes like Result, Array, etc.)
         // maps to any() — the base class is not a built-in Erlang type.
-        // BT-2900: if the base name is itself a registered alias (e.g. a
+        // If the base name is itself a registered alias (e.g. a
         // non-parametric `type MyList = List` applied as `MyList(Integer)`),
         // reference it by name instead — mirrors the `Simple` case in
         // `type_annotation_to_spec`. The (illegitimate, since ADR 0108 defers
@@ -294,10 +294,10 @@ fn generic_type_to_spec(
 /// For value type methods, the arity includes the Self parameter.
 ///
 /// `aliases`, when present, resolves alias-named annotations to `user_type`
-/// references (ADR 0108, BT-2900) — see [`type_annotation_to_spec`].
+/// references (ADR 0108) — see [`type_annotation_to_spec`].
 ///
 /// `referenced`, when present, accumulates the alias names this method's
-/// annotations actually reference (BT-2940) — see [`type_annotation_to_spec`].
+/// annotations actually reference — see [`type_annotation_to_spec`].
 pub fn generate_method_spec(
     method: &MethodDefinition,
     is_value_type: bool,
@@ -377,10 +377,10 @@ pub fn generate_method_spec(
 /// and use the `class_{selector}` naming convention.
 ///
 /// `aliases`, when present, resolves alias-named annotations to `user_type`
-/// references (ADR 0108, BT-2900) — see [`type_annotation_to_spec`].
+/// references (ADR 0108) — see [`type_annotation_to_spec`].
 ///
 /// `referenced`, when present, accumulates the alias names this method's
-/// annotations actually reference (BT-2940) — see [`type_annotation_to_spec`].
+/// annotations actually reference — see [`type_annotation_to_spec`].
 fn generate_class_method_spec(
     method: &MethodDefinition,
     aliases: Option<&AliasRegistry>,
@@ -450,16 +450,16 @@ fn generate_class_method_spec(
 /// Only primary methods generate specs.
 /// Includes both instance methods and class-side methods.
 ///
-/// BT-1944: For actor classes (`is_value_type: false`), instance method specs
+/// For actor classes (`is_value_type: false`), instance method specs
 /// are skipped because actor methods are dispatch clauses inside `safe_dispatch/3`,
 /// not standalone functions — a spec referencing a non-existent function is invalid.
 /// Value type methods ARE standalone functions, so their specs are valid.
 ///
 /// `aliases`, when present, resolves alias-named annotations to `user_type`
-/// references (ADR 0108, BT-2900) — see [`type_annotation_to_spec`].
+/// references (ADR 0108) — see [`type_annotation_to_spec`].
 ///
 /// `referenced`, when present, accumulates the alias names this class's
-/// method specs actually reference (BT-2940) — pass the same accumulator to
+/// method specs actually reference — pass the same accumulator to
 /// [`generate_alias_type_attrs`] to scope its emission to just those names.
 pub fn generate_class_specs(
     class: &ClassDefinition,
@@ -467,7 +467,7 @@ pub fn generate_class_specs(
     aliases: Option<&AliasRegistry>,
     referenced: Option<&RefCell<HashSet<EcoString>>>,
 ) -> Vec<Document<'static>> {
-    // BT-1944: Only generate instance method specs for value types where methods
+    // Only generate instance method specs for value types where methods
     // are standalone functions. Actor instance methods live inside safe_dispatch/3.
     let instance_specs: Box<dyn Iterator<Item = Document<'static>>> = if is_value_type {
         Box::new(
@@ -524,10 +524,10 @@ pub fn format_spec_attributes(specs: &[Document<'static>]) -> Option<Document<'s
 /// ```
 ///
 /// `aliases`, when present, resolves alias-named field annotations to
-/// `user_type` references (ADR 0108, BT-2900) — see [`type_annotation_to_spec`].
+/// `user_type` references (ADR 0108) — see [`type_annotation_to_spec`].
 ///
 /// `referenced`, when present, accumulates the alias names this class's
-/// `state:` fields actually reference (BT-2940) — see [`type_annotation_to_spec`].
+/// `state:` fields actually reference — see [`type_annotation_to_spec`].
 pub fn generate_type_alias(
     class: &ClassDefinition,
     class_name: &str,
@@ -573,7 +573,7 @@ pub fn generate_type_alias(
 }
 
 /// Generates the named `-type` attribute for a single type alias declaration
-/// (ADR 0108, BT-2900).
+/// (ADR 0108).
 ///
 /// Produces `'type' = [{alias_name, <expansion-spec>, []}]`, where
 /// `<expansion-spec>` is the alias RHS's Erlang abstract type representation
@@ -612,7 +612,7 @@ fn generate_alias_type_attr(
 ///
 /// Called from the module-level codegen drivers (`actor_codegen.rs`,
 /// `value_type_codegen.rs`, `supervisor_codegen.rs`,
-/// `gen_server/native_facade.rs`; ADR 0108, BT-2909) after their
+/// `gen_server/native_facade.rs`; ADR 0108) after their
 /// `generate_class_specs`/`generate_method_spec`/`generate_type_alias` call
 /// sites have populated `referenced` by walking the module's own
 /// annotations with `Some(&referenced)` — every class module that could
@@ -620,11 +620,12 @@ fn generate_alias_type_attr(
 /// `-type` in the same module attribute list, since a reference to an
 /// undeclared type is an `erlc` compile error, not just a Dialyzer warning.
 ///
-/// BT-2940: emits a `-type` only for names actually referenced (directly or
+/// Emits a `-type` only for names actually referenced (directly or
 /// transitively) by the module's own specs/state fields, not every alias in
-/// `aliases` — before this, `aliases` being the full pre-loaded registry
-/// seeded from every source file in the compilation unit (BT-2932) meant a
-/// module using one cross-module alias declared `-type` attributes for the
+/// `aliases` — `aliases` is the full pre-loaded registry seeded from every
+/// source file in the compilation unit, so emitting the full set instead
+/// would have a module using one cross-module alias declare `-type`
+/// attributes for the
 /// full project's alias count (`A` aliases × `M` modules), growing Dialyzer's
 /// PLT scan well past the actual reference count at project scale.
 ///
@@ -1236,7 +1237,7 @@ mod tests {
         );
     }
 
-    // Tests for generic type spec generation (BT-1574)
+    // Tests for generic type spec generation
 
     #[test]
     fn generic_list_with_integer_element() {
@@ -1565,7 +1566,7 @@ mod tests {
         );
     }
 
-    // ---- Named `-type` emission for type aliases (ADR 0108, BT-2900) ----
+    // ---- Named `-type` emission for type aliases (ADR 0108) ----
 
     /// Builds an `AliasRegistry` containing a single alias `name = annotation`.
     fn alias_registry_with(name: &str, annotation: TypeAnnotation) -> AliasRegistry {
@@ -1626,7 +1627,7 @@ mod tests {
     fn alias_reference_inside_union_member_uses_user_type() {
         // Nested `Simple` positions (e.g. a member of a larger union) must
         // also consult the alias table, mirroring resolve_type_annotation's
-        // recursive alias lookup (BT-2895).
+        // recursive alias lookup.
         let registry = alias_registry_with("Timeout", TypeAnnotation::simple("Integer", span()));
         let ann = TypeAnnotation::union(
             vec![
@@ -1793,7 +1794,7 @@ mod tests {
             span: span(),
         });
 
-        // BT-2940: both names must be marked referenced for this test —
+        // Both names must be marked referenced for this test —
         // `generate_alias_type_attrs` now only emits names present in the
         // `referenced` accumulator, not every name in `aliases`.
         let referenced = RefCell::new(HashSet::from(["Zeta".into(), "Alpha".into()]));
@@ -1821,7 +1822,7 @@ mod tests {
 
     #[test]
     fn generate_alias_type_attrs_only_emits_referenced_names() {
-        // BT-2940: a registry with several pre-loaded aliases, only one of
+        // A registry with several pre-loaded aliases, only one of
         // which is actually referenced, must only emit a `-type` for that
         // one — not every alias in the registry (the A×M scaling bug).
         let mut registry = AliasRegistry::new();
@@ -1859,7 +1860,7 @@ mod tests {
 
     #[test]
     fn generate_alias_type_attrs_includes_transitive_alias_dependency() {
-        // BT-2940: `type B = A | #z` — a module referencing only `B` must
+        // `type B = A | #z` — a module referencing only `B` must
         // still get `A`'s `-type` declaration too, since B's own expansion
         // names it via `user_type`. A third, wholly unrelated alias must
         // still be excluded.
@@ -1919,12 +1920,12 @@ mod tests {
 
     #[test]
     fn generate_alias_type_attrs_diamond_dependency_emits_shared_alias_once() {
-        // BT-2940: `type C = A | #p`, `type D = A | #q` — both C and D are
+        // `type C = A | #p`, `type D = A | #q` — both C and D are
         // directly referenced, and both transitively depend on the same A.
-        // The worklist-based closure (BT-2940 review follow-up: rewritten
-        // from a full-set rescan to an explicit worklist for linear-time
-        // closure) must not emit A twice, nor loop, when two different
-        // referenced aliases converge on the same dependency.
+        // The worklist-based closure (an explicit worklist rather than a
+        // full-set rescan, for linear-time closure) must not emit A twice,
+        // nor loop, when two different referenced aliases converge on the
+        // same dependency.
         let mut registry = AliasRegistry::new();
         registry.register_test_alias(AliasInfo {
             name: "A".into(),

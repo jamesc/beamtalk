@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Synthetic value-accessor doc/signature metadata (BT-2734), auto-slot-method
-//! rule (ADR 0042/BT-923), and the opaque-`native:` `basicNew` guard (BT-2998).
+//! Synthetic value-accessor doc/signature metadata, auto-slot-method
+//! rule (ADR 0042), and the opaque-`native:` `basicNew` guard.
 
 use super::*;
 use beamtalk_core::ast::{
@@ -53,7 +53,7 @@ fn value_class(name: &str, slots: Vec<AstStateDeclaration>) -> AstClassDefinitio
     )
 }
 
-// ─── ADR 0042/BT-923: which accessors get auto-generated ──────────────────
+// ─── ADR 0042: which accessors get auto-generated ──────────────────
 
 #[test]
 fn test_with_star_selector_single_char() {
@@ -107,7 +107,7 @@ fn test_compute_auto_slot_methods_no_slots() {
     assert!(auto.keyword_constructor.is_none());
 }
 
-// ─── BT-2998: Opaque `native:` representations ─────────────────────────────
+// ─── Opaque `native:` representations ─────────────────────────────
 
 fn parse_one_class(source: &str) -> AstClassDefinition {
     beamtalk_core::test_helpers::test_support::parse_bt(source)
@@ -138,7 +138,7 @@ fn test_bt_2998_has_opaque_native_representation() {
     )));
 }
 
-// ─── BT-2734: synthetic accessor doc/signature metadata ────────────────────
+// ─── Synthetic accessor doc/signature metadata ────────────────────
 
 fn find_entry<'a>(
     entries: &'a [SyntheticAccessorEntry],

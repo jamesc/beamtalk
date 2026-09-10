@@ -159,7 +159,7 @@ impl PrimitiveBindingTable {
 
     /// Returns the set of known runtime module names from all class names in the table.
     ///
-    /// Used during codegen (BT-938) to validate that a referenced `bt@stdlib@X`
+    /// Used during codegen to validate that a referenced `bt@stdlib@X`
     /// module will actually be compiled. Returns an empty set when the table is
     /// empty (no stdlib bindings loaded), in which case validation is skipped.
     #[must_use]
@@ -487,7 +487,7 @@ mod tests {
             PrimitiveBindingTable::runtime_module_for_class("SequenceableCollection"),
             "bt@stdlib@sequenceable_collection"
         );
-        // BT-375: Actor-based singletons
+        // Actor-based singletons
         assert_eq!(
             PrimitiveBindingTable::runtime_module_for_class("TranscriptStream"),
             "bt@stdlib@transcript_stream"
@@ -586,7 +586,7 @@ mod tests {
 
     #[test]
     fn test_class_method_primitive_extraction() {
-        // BT-444: Verify that @primitive bindings in class_methods are extracted.
+        // Verify that @primitive bindings in class_methods are extracted.
         let mut class = ClassDefinition::new(
             Identifier::new("File", span()),
             Identifier::new("Object", span()),
@@ -721,7 +721,7 @@ mod tests {
             })
         );
 
-        // BT-1054: Integer timesRepeat: is now pure BT — no longer in the binding table
+        // Integer timesRepeat: is pure BT — not in the binding table
         assert!(table.lookup("Integer", "timesRepeat:").is_none());
 
         // String length is a selector-based primitive

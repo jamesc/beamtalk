@@ -5,8 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! BT-3465: split out of `expressions.rs`, no logic changes. This module
-//! handles code generation for Beamtalk blocks (closures):
+//! This module handles code generation for Beamtalk blocks (closures):
 //! - Tier 1 (plain fun) and Tier 2 (stateful `StateAcc`-threading) block
 //!   compilation, and the Erlang-interop wrapper that strips the Tier 2
 //!   protocol for a block crossing into plain Erlang code
@@ -29,14 +28,14 @@ use beamtalk_core::ast::{Block, Expression, Pattern};
 /// Classification of how a block body expression should be handled.
 /// Produced by [`CoreErlangGenerator::classify_block_expr`] and consumed
 /// by [`CoreErlangGenerator::generate_block_expr`]. `pub(super)`: both are
-/// also called from `while_loops.rs` (ADR 0118 phase 3, BT-3419) — see
+/// also called from `while_loops.rs` (ADR 0118 phase 3) — see
 /// their own doc comments.
 pub(super) enum BlockExprKind {
     /// `{a, b} := expr` or `#[a, b] := expr` — destructure assignment.
     /// Carries `is_last` so the handler can append `'nil'` when the destructure
     /// is the final expression in the block.
     Destructure { is_last: bool },
-    /// Last expression that is a class method self-send (BT-1397).
+    /// Last expression that is a class method self-send.
     LastClassMethodSelfSend,
     /// Last expression (general case) — its value is the block's result.
     LastExpr,
@@ -46,7 +45,7 @@ pub(super) enum BlockExprKind {
     LocalAssignment,
     /// `whileTrue:` / `whileFalse:` / `timesRepeat:` with threaded vars (non-last).
     ControlFlowWithThreadedVars,
-    /// Class method self-send as non-last expression (BT-1397).
+    /// Class method self-send as non-last expression.
     ClassMethodSelfSend,
     /// Expression evaluated for side effects only — result discarded.
     SideEffect,
@@ -93,7 +92,7 @@ impl CoreErlangGenerator {
             .collect()
     }
 
-    /// BT-1213: Returns captured mutation variable names if `expr` is a
+    /// Returns captured mutation variable names if `expr` is a
     /// `[block] value`/`value:`/etc. with a literal block that mutates outer locals.
     pub(super) fn inline_block_captured_mutations(expr: &Expression) -> Option<Vec<String>> {
         if let Expression::MessageSend {
@@ -123,7 +122,7 @@ impl CoreErlangGenerator {
         None
     }
 
-    /// BT-3151: Rejects a same-class self-send inside a block whose target
+    /// Rejects a same-class self-send inside a block whose target
     /// selector isn't provably free of class-variable mutation (see
     /// `ClassMethodSelfSendInUnthreadedBlock`'s doc comment for the full
     /// rationale) — such a block has no way to thread a classState mutation
@@ -145,7 +144,7 @@ impl CoreErlangGenerator {
     /// method always runs in that class's own `gen_server` process, so a
     /// same-class self-send inside it is genuine cross-process messaging,
     /// not the lossy in-process direct-call optimization — see ADR 0110
-    /// BT-3039 / `shadow_cross_class_owner.bt`) or merely unproven (an
+    /// / `shadow_cross_class_owner.bt`) or merely unproven (an
     /// `ifTrue:`/`ifFalse:` block reached via generic dynamic dispatch is a
     /// long-documented ADR 0110 "known limitation" (BT-1550), not something
     /// this guard introduces). `generate_block` has no way to tell those apart
@@ -160,7 +159,7 @@ impl CoreErlangGenerator {
     /// (`enumeration_ops.rs`) — every one a bare, no-mutation-threading
     /// block that falls through to a plain/BIF dispatch. Called directly
     /// (not through that shared helper) at three shapes it doesn't cover:
-    /// `generate_list_inject`'s BT-1327 pure-block fast path (bypasses
+    /// `generate_list_inject`'s pure-block fast path (bypasses
     /// `generate_block` entirely — calls `generate_block_body` directly to
     /// avoid wrapper overhead), a `whileTrue:`/`whileFalse:` condition
     /// block, a bare `timesRepeat:`/`to:do:`/`to:by:do:` body that falls
@@ -201,18 +200,17 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    // BT-3430 (ADR 0118 §Decision 5 follow-up — design decision, not yet
-    // implemented; see this issue): investigated routing this predicate's
+    // ADR 0118 §Decision 5 follow-up — design decision, not yet
+    // implemented: investigated routing this predicate's
     // ~10 call sites through `ThreadedValue::close(ctx, CloseContext::Opaque)`
     // / `VerifyError::StateEffectEscapesExpression` instead of (or on top
     // of) `class_var_mutating_selectors()` above. Kept separate — full
     // finding below.
     //
-    // **Where things actually stand** (re-verified against this repo state,
-    // not the BT-3422 issue body's forward-looking sketch):
+    // **Where things actually stand:**
     // `generate_class_method_self_send` (`dispatch_codegen.rs`) already
-    // returns a real `ThreadedValue` (ADR 0118 phases 5a/5b, BT-3421/
-    // BT-3422) — its `ClassVars` `Bind` is a genuine, un-rendered
+    // returns a real `ThreadedValue` (ADR 0118 phases 5a/5b) — its
+    // `ClassVars` `Bind` is a genuine, un-rendered
     // `ThreadedStmt::Bind` in the prelude, not baked eagerly into a
     // `Document`. The *ambient* re-entry point every self-send reached via
     // ordinary (non-`threaded_expression`) `generate_expression` funnels
@@ -250,8 +248,8 @@ impl CoreErlangGenerator {
     // regression, it is a build break across the corpus. That is real,
     // non-trivial redesign risk against the very protection this predicate
     // (and its 20 `test_class_method_self_send_*` pins) exists to keep sound
-    // — comparable in shape to BT-3423's own "genuinely different questions"
-    // scope boundary, not a small change scoped to this one predicate.
+    // — a similarly non-trivial scope boundary, not a small change scoped
+    // to this one predicate.
     //
     // **Why `compute_class_var_mutating_selectors` can't be replaced
     // either.** It is a `beamtalk-core` (Compilation) whole-class,
@@ -273,7 +271,7 @@ impl CoreErlangGenerator {
 
     /// Generates code for a block (closure).
     ///
-    /// BT-852: Automatically selects Tier 1 (plain) or Tier 2 (stateful) codegen
+    /// Automatically selects Tier 1 (plain) or Tier 2 (stateful) codegen
     /// based on `BlockMutationAnalysis`:
     ///
     /// - **Tier 2 (stateful):** blocks with captured variable mutations emit
@@ -284,16 +282,16 @@ impl CoreErlangGenerator {
     /// Captured mutations = variables written inside the block that were also
     /// read from the outer scope (i.e. `local_writes ∩ captured_reads`).
     /// Field writes (`self.x := ...`) and self-sends are handled separately:
-    /// - Field writes are threaded via `gen_server` State at the method level (BT-1140 for Tier 2).
-    /// - Self-sends are pre-scanned via `generate_tier2_self_send_open` (BT-851).
+    /// - Field writes are threaded via `gen_server` State at the method level (for Tier 2).
+    /// - Self-sends are pre-scanned via `generate_tier2_self_send_open`.
     pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
         use crate::core_erlang::block_analysis::analyze_block;
         let analysis = analyze_block(block);
 
-        // BT-2792: `self.field :=` inside a block that reaches this generic
+        // `self.field :=` inside a block that reaches this generic
         // fallback can't correctly thread state — see `validate_stored_closure`
-        // for why, and BT-2797 for the follow-up that will lift this once
-        // stored/opaque blocks get proper Tier 2 support. Checked *before* the
+        // for why. Lifting this once stored/opaque blocks get proper Tier 2
+        // support is tracked separately. Checked *before* the
         // captured-local-mutation promotion below: a block with both a field
         // write and a captured-local mutation (e.g. `[:x | outerCount :=
         // outerCount + x. self.total := self.total + outerCount]`) would
@@ -319,7 +317,7 @@ impl CoreErlangGenerator {
             })?;
         }
 
-        // BT-3151: deliberately NOT calling `check_no_unsafe_class_method_self_sends`
+        // Deliberately NOT calling `check_no_unsafe_class_method_self_sends`
         // here — `generate_block` is the universal block-to-closure compiler,
         // reached both from genuinely unsafe bare-block call sites (a
         // `select:`/`do:`/`inject:into:` argument, a `whileTrue:` condition —
@@ -334,9 +332,9 @@ impl CoreErlangGenerator {
         // Passing Blocks Through Class Methods), so a same-class self-send
         // inside it is genuine cross-process messaging, not the in-process
         // direct-call optimization, and correctly commits (confirmed by the
-        // pre-existing, passing `shadow_cross_class_owner.bt` fixture/
+        // passing `shadow_cross_class_owner.bt` fixture/
         // `testCrossClassMutationDoesNotCorruptForeignProcessShadow`, ADR
-        // 0110 BT-3039). `generate_block` has no way to distinguish these
+        // 0110). `generate_block` has no way to distinguish these
         // from its own call site, so the check instead lives at each
         // specific, individually-verified-unsafe call site: see
         // `check_no_unsafe_class_method_self_sends`'s doc comment for the
@@ -344,21 +342,21 @@ impl CoreErlangGenerator {
 
         let captured_mutations = Self::captured_mutations_from_analysis(&analysis);
 
-        // BT-852: Blocks with captured local mutations use Tier 2 stateful calling convention.
+        // Blocks with captured local mutations use Tier 2 stateful calling convention.
         if !captured_mutations.is_empty() {
             return self.generate_block_stateful(block, &captured_mutations);
         }
 
         // Pure block: plain fun (no mutations to thread via Tier 2)
         self.push_scope();
-        // BT-1475: Track block nesting so self-cast sends route through the mailbox
+        // Track block nesting so self-cast sends route through the mailbox
         self.block_depth += 1;
-        // BT-1550: Save class_var_version so that self-calls inside the closure
+        // Save class_var_version so that self-calls inside the closure
         // don't leak ClassVars{N} bindings into the enclosing scope.  The closure
         // is a separate Core Erlang `fun`, so any let-bindings inside it are not
         // visible to the outer method body.
         let saved_class_var_version = self.class_var_version();
-        // BT-3433: Save state_version too. A pure block's body can still
+        // Save state_version too. A pure block's body can still
         // contain a conditional/field-mutation whose own state threading
         // bumps `state_version` (deliberately visible to later statements
         // *within this same block* — see `generate_block_body_slice`'s doc
@@ -383,13 +381,13 @@ impl CoreErlangGenerator {
         let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
 
         // Generate block body as Document.
-        // BT-1475: Ensure block_depth and scope are restored even on error.
+        // Ensure block_depth and scope are restored even on error.
         let body_result = self.generate_block_body(block);
         self.block_depth -= 1;
         self.set_class_var_version(saved_class_var_version);
         self.set_state_version(saved_state_version);
         self.pop_scope();
-        // BT-1937: The block is a closed `fun () -> ... end` expression. Any
+        // The block is a closed `fun () -> ... end` expression. Any
         // open let-chain produced inside the body is closed by the body
         // handlers and scoped inside the fun, so the block as a whole MUST
         // NOT propagate an open scope to its outer context. Clear the
@@ -398,7 +396,7 @@ impl CoreErlangGenerator {
         Ok(docvec![header, body_result?])
     }
 
-    /// BT-851: Generates a Tier 2 stateful block (ADR 0041 Phase 0).
+    /// Generates a Tier 2 stateful block (ADR 0041 Phase 0).
     ///
     /// Emits a block with the stateful calling convention:
     /// `fun(Param1, ..., ParamN, StateAcc) -> {Result, NewStateAcc}`
@@ -418,25 +416,24 @@ impl CoreErlangGenerator {
     /// end
     /// ```
     ///
-    /// BT-3149 (ADR 0111 close-out): this arm's mutation sequence is built
+    /// ADR 0111 close-out: this arm's mutation sequence is built
     /// as real [`ThreadedStmt`]s (the same C1/C2-style shapes
     /// `conditionals.rs`'s ADR 0111 Addendum 5 pinned, via
     /// `lower_field_assignment_bind`/`lower_local_var_assignment_bind`),
     /// wrapped in one [`threaded_ir::ThreadedStmt::Threaded`] node (this
     /// single-arm `with_branch_context`'s own [`threaded_ir::FrameId`]),
     /// [`threaded_ir::verify`]d and [`threaded_ir::render`]ed via
-    /// `conditionals.rs`'s `verify_and_render_branch_arm` — the last real
-    /// production caller of the scalar-synthesis `check_branch_frame_linearity`
-    /// scaffolding is gone; `UnboundVersion` is a live check against this
-    /// arm's real IR for the first time (see that scaffolding's own doc
-    /// comment on why it could never fire from here before).
+    /// `conditionals.rs`'s `verify_and_render_branch_arm`. `UnboundVersion`
+    /// is a live check against this arm's real IR (see the scalar-synthesis
+    /// `check_branch_frame_linearity` scaffolding's own doc comment for why
+    /// it could not check this before).
     pub(super) fn generate_block_stateful(
         &mut self,
         block: &Block,
         captured_vars: &[String],
     ) -> Result<Document<'static>> {
         self.push_scope();
-        // BT-1475: Track block nesting so self-cast sends route through the mailbox
+        // Track block nesting so self-cast sends route through the mailbox
         self.block_depth += 1;
 
         // Bind block parameters
@@ -463,7 +460,7 @@ impl CoreErlangGenerator {
             let mut stmts: Vec<ThreadedStmt> = Vec::new();
 
             // Unpack captured-mutated vars from StateAcc.
-            // BT-909: Use maps:get/3 with the current outer value as fallback so the block
+            // Use maps:get/3 with the current outer value as fallback so the block
             // remains callable even when StateAcc was not pre-seeded with the local state keys
             // (e.g. when called through the runtime arity normalization wrapper).
             for var_name in captured_vars {
@@ -507,10 +504,10 @@ impl CoreErlangGenerator {
                 block.span,
             ))
         });
-        // BT-1475: Ensure block_depth and scope are restored even on error.
+        // Ensure block_depth and scope are restored even on error.
         self.block_depth -= 1;
         self.pop_scope();
-        // BT-1937: Stateful blocks are also closed `fun (...) -> {Result, NewStateAcc}`
+        // Stateful blocks are also closed `fun (...) -> {Result, NewStateAcc}`
         // expressions and must not propagate an open scope from their body to
         // the outer context.
         self.loop_mode.direct_params_do_open_chain = false;
@@ -520,7 +517,7 @@ impl CoreErlangGenerator {
         Ok(docvec![header, body_doc])
     }
 
-    /// BT-855: Generates an Erlang-compatible wrapper for a block at an Erlang call site.
+    /// Generates an Erlang-compatible wrapper for a block at an Erlang call site.
     ///
     /// Erlang/Elixir code does not know about the Beamtalk state-threading protocol.
     /// When a Beamtalk block is passed to an Erlang call site (e.g. `lists:map/2`),
@@ -588,7 +585,7 @@ impl CoreErlangGenerator {
             let next_state = self.fresh_temp_var("WStateAcc");
             let key = Self::local_state_key(var_name);
 
-            // BT-857: Generate code to fetch the captured variable.
+            // Generate code to fetch the captured variable.
             // If the variable is bound in the local scope, use it directly.
             // Otherwise, fetch it from the current State map (for REPL/Actor contexts).
             let var_ref = if let Some(bound_var) = self.lookup_var(var_name).cloned() {
@@ -688,11 +685,11 @@ impl CoreErlangGenerator {
         Ok((wrapper_doc, true))
     }
 
-    /// BT-851: Generates the body of a Tier 2 stateful block with state threading.
+    /// Generates the body of a Tier 2 stateful block with state threading.
     ///
-    /// BT-3149 (ADR 0111 close-out, task 2 — the last real production
+    /// ADR 0111 close-out (the last real production
     /// caller of `check_branch_frame_linearity`'s scalar-synthesis
-    /// scaffolding): field-/local-var-assignment mutations now lower
+    /// scaffolding): field-/local-var-assignment mutations lower
     /// through `conditionals.rs`'s `lower_field_assignment_bind`/
     /// `lower_local_var_assignment_bind` — real [`ThreadedStmt::Bind`]
     /// nodes, not a hand-rolled `maps:put` `Document` fragment — appended
@@ -799,12 +796,12 @@ impl CoreErlangGenerator {
                 }
             } else {
                 // Non-assignment expression
-                // ADR 0118 phase 2a (BT-3417): thread every state-effecting
+                // ADR 0118 phase 2a: thread every state-effecting
                 // sub-expression (`1 + (self bump)`) as real `Bind`s ahead
                 // of the compile, via `thread_ahead` — the Tier 2
                 // counterpart of `conditionals.rs`'s C12 catch-all.
                 let hoist_scope = self.thread_ahead(expr, stmts, frame)?;
-                // ADR 0118 phase 5b (BT-3422): `thread_ahead` already
+                // ADR 0118 phase 5b: `thread_ahead` already
                 // threads any class-var producer nested in `expr` (at any
                 // depth) as a real `Bind` in `stmts` above — the plain
                 // compile below reads the substituted value back via
@@ -894,7 +891,7 @@ impl CoreErlangGenerator {
     /// The order of checks matters: more specific patterns (e.g. destructuring,
     /// field assignment) must come before general ones (e.g. pure expression).
     ///
-    /// `pub(super)` (ADR 0118 phase 3, BT-3419): `while_loops.rs`'s stateful
+    /// `pub(super)` (ADR 0118 phase 3): `while_loops.rs`'s stateful
     /// while-condition compile reuses this dispatch for a condition block's
     /// own NON-TAIL statements (its local writes thread exactly as this
     /// already gives every other block body) rather than re-deriving the
@@ -933,7 +930,7 @@ impl CoreErlangGenerator {
 
     /// Generate code for a single block body expression, dispatching by kind.
     ///
-    /// `pub(super)` (ADR 0118 phase 3, BT-3419): see
+    /// `pub(super)` (ADR 0118 phase 3): see
     /// [`Self::classify_block_expr`]'s doc comment.
     pub(super) fn generate_block_expr(
         &mut self,
@@ -946,7 +943,7 @@ impl CoreErlangGenerator {
             }
             BlockExprKind::LastClassMethodSelfSend | BlockExprKind::LastExpr => {
                 // Last expression: its value is the block's result. ADR 0118
-                // phase 5b (BT-3422): `threaded_expression` closes any
+                // phase 5b: `threaded_expression` closes any
                 // `ClassVars` prelude (a class-method self-send, or one
                 // nested in a message's receiver/args) into a self-contained
                 // `Document` so the block body is a complete closed
@@ -969,7 +966,7 @@ impl CoreErlangGenerator {
             }
             BlockExprKind::ClassMethodSelfSend | BlockExprKind::SideEffect => {
                 // Not an assignment or loop — generate and discard the
-                // result. ADR 0118 phase 5b (BT-3422): `threaded_expression`
+                // result. ADR 0118 phase 5b: `threaded_expression`
                 // threads a class-method self-send (or one nested in a
                 // message's receiver/args) as a real prelude, closed here
                 // into a self-contained `Document` since a Tier 1 block body
@@ -1128,7 +1125,7 @@ impl CoreErlangGenerator {
             return Ok(Document::Nil);
         };
 
-        // BT-852: Stored blocks with mutations are now supported via Tier 2.
+        // Stored blocks with mutations are supported via Tier 2.
         // generate_block() handles stateful emission; no validation needed here.
 
         let var_name = &id.name;
@@ -1142,7 +1139,7 @@ impl CoreErlangGenerator {
         // Important: capture BEFORE updating the mapping,
         // so that any uses of the variable in the RHS see the previous binding.
         //
-        // ADR 0118 phase 5b (BT-3422): a class method's own top-level body
+        // ADR 0118 phase 5b: a class method's own top-level body
         // splices a class-var producer's prelude directly (`lower_class_method_body`),
         // but a block nested inside a class method (this function) still
         // reaches this assignment for `result := self foo`-shaped RHSes. When
@@ -1150,7 +1147,7 @@ impl CoreErlangGenerator {
         // `is_class_method_self_send`), `threaded_expression` gives it a real
         // prelude whose rebound `ClassVarsN` stays lexically visible here.
         // Otherwise `value` may still dispatch one that the compile below
-        // reaches opaquely and closes (e.g. BT-2007 inherited dispatch) —
+        // reaches opaquely and closes (e.g. an inherited dispatch) —
         // closing loses the mutated name's LEXICAL visibility, but not the
         // mutation itself: the compiler's OWN `current_class_var()`
         // bookkeeping advances to track it regardless, so a later statement
@@ -1200,7 +1197,7 @@ impl CoreErlangGenerator {
     /// as captured-mutating (see [`Self::get_control_flow_threaded_vars`]),
     /// so the enclosing block still compiled as a plain (non-`StateAcc`) fun.
     ///
-    /// BT-3162: every one of these constructs' `generate_*_with_mutations`
+    /// Every one of these constructs' `generate_*_with_mutations`
     /// generator returns a `{Result, StateAcc}` 2-tuple (`StateAcc` a map
     /// keyed by [`Self::local_state_key`]) — `expr` alone is never the bare
     /// scalar value. `element(2, ...)` + `maps:get` unpacks it the same way
