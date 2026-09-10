@@ -137,16 +137,14 @@ fn visit_match_exhaustiveness(expr: &Expression, diagnostics: &mut Vec<Diagnosti
 /// ]
 /// ```
 ///
-/// # Local variables only (BT-3489)
+/// # Local variables only
 ///
-/// A `self.field := ...` arm body used to get a sibling warning here. It was
-/// wrong on both counts: in `Actor` context the mutation now threads
-/// correctly (codegen routes the arm through the same branch-merge an
-/// `ifTrue:` branch's field write uses), and in value-type context it was
-/// never the promised silent no-op either — it reached codegen and crashed
-/// `erlc` with an unbound `Self{N}`, which codegen now reports as
-/// `ValueSelfFieldAssignmentInMatchArm`. Neither case is a dead assignment,
-/// so neither belongs in this lint.
+/// A `self.field := ...` arm body is not a dead assignment and does not
+/// belong in this lint: in `Actor` context the mutation threads correctly
+/// (codegen routes the arm through the same branch-merge an `ifTrue:`
+/// branch's field write uses); in value-type context it reaches codegen and
+/// is rejected there as `ValueSelfFieldAssignmentInMatchArm` rather than
+/// silently no-op'd.
 pub(crate) fn warn_assignment_in_match_arms(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
     walk_module(module, &mut |expr| {
         visit_assignment_in_match_arm(expr, diagnostics);
@@ -737,13 +735,12 @@ mod tests {
         );
     }
 
-    /// BT-3489: a `self.field :=` arm body is NOT a dead assignment and must
-    /// not warn. In `Actor` context codegen threads it correctly (same
+    /// A `self.field :=` arm body is NOT a dead assignment and must not
+    /// warn. In `Actor` context codegen threads it correctly (same
     /// branch-merge an `ifTrue:` branch's field write uses); in value-type
     /// context it is a hard codegen rejection
-    /// (`CodeGenError::ValueSelfFieldAssignmentInMatchArm`), not the
-    /// silent no-op the old warning promised. Either way this lint would be
-    /// wrong.
+    /// (`CodeGenError::ValueSelfFieldAssignmentInMatchArm`), not a silent
+    /// no-op. Either way this lint would be wrong.
     #[test]
     fn self_field_assignment_in_match_arm_does_not_warn() {
         let src = "Actor subclass: Probe\n  state: total = 0\n\n  bump: v =>\n    v match: [1 -> self.total := self.total + 10; _ -> self.total := self.total + 1]\n    self.total\n";
