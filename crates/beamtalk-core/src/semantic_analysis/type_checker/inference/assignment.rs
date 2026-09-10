@@ -20,7 +20,7 @@ use crate::source_analysis::Span;
 use ecow::EcoString;
 
 impl TypeChecker {
-    /// Describes where an expression's type originated (BT-1588).
+    /// Describes where an expression's type originated.
     ///
     /// Returns `Some((description, span))` when the value expression is a
     /// message send that returns a generic type parameter (e.g., `V` from
@@ -77,7 +77,7 @@ impl TypeChecker {
     }
 
     /// Detect a declared-vs-inferred type mismatch on an assignment's type
-    /// annotation (BT-3469) — pure data, no diagnostic construction; see
+    /// annotation — pure data, no diagnostic construction; see
     /// `validation.rs::emit_assignment_type_mismatch` for the rendering.
     ///
     /// Returns `None` when the RHS is `Dynamic` (the primary use case for
@@ -104,7 +104,7 @@ impl TypeChecker {
         if rhs_assignable_to_declared || declared_assignable_to_rhs {
             return None;
         }
-        // BT-2066: use source-sympathetic spelling (`Nil`) for user-facing messages.
+        // Use source-sympathetic spelling (`Nil`) for user-facing messages.
         Some(AssignmentTypeMismatch {
             declared_display: declared
                 .display_for_diagnostic()
@@ -121,7 +121,7 @@ impl TypeChecker {
     /// When a type annotation is present, the declared type wins over the
     /// inferred RHS type (with a mismatch warning when the two are
     /// unrelated). The target then determines how the resulting type is
-    /// recorded: an `Identifier` binds it (with BT-1588 origin tracking) in
+    /// recorded: an `Identifier` binds it (with origin tracking) in
     /// `env`; a `self.field` `FieldAccess` validates it against the
     /// declared state type and invalidates any stale narrowing; any other
     /// `FieldAccess` (mutating another object's state) is rejected.
@@ -142,16 +142,16 @@ impl TypeChecker {
         // of the inferred type. Emit a warning if the RHS has a known
         // (non-Dynamic) type that is incompatible with the annotation.
         let ty = if let Some(ann) = type_annotation {
-            // ADR 0102 §1/§3 (BT-2743): thread the protocol registry
+            // ADR 0102 §1/§3: thread the protocol registry
             // through so a local `x :: P1 & P2` annotation resolves
             // class ∩ protocol correctly rather than falling to `Never`.
-            // ADR 0108 (BT-2895): thread the alias registry through so
+            // ADR 0108: thread the alias registry through so
             // a local `heading :: Direction := ...` annotation
             // expands to its declared union, feeding the exact same
             // `InferredType` a spelled-out union would into
             // downstream narrowing/exhaustiveness.
             //
-            // ADR 0108 hot-reload re-check trigger (BT-2899): this is
+            // ADR 0108 hot-reload re-check trigger: this is
             // exactly the `heading :: Direction := ...` site the ADR's
             // REPL example builds on, so recording its alias deps here
             // is load-bearing, not incidental.
@@ -169,7 +169,7 @@ impl TypeChecker {
                 &type_resolver::SubstitutionMap::new(),
                 self.protocol_registry.as_ref(),
             );
-            // BT-3469: detection (is this RHS type actually incompatible
+            // Detection (is this RHS type actually incompatible
             // with the declared annotation?) stays here; rendering the
             // resulting fact as a diagnostic is `validation.rs`'s job.
             if let Some(mismatch) =
@@ -184,7 +184,7 @@ impl TypeChecker {
 
         match target {
             Expression::Identifier(ident) => {
-                // BT-1588: Track type origin for generic type params
+                // Track type origin for generic type params
                 if let Some(origin) = Self::describe_type_origin(value, &ty, hierarchy, env) {
                     env.set_with_origin(
                         EnvKey::local(ident.name.clone()),
@@ -206,14 +206,14 @@ impl TypeChecker {
                 if is_self_receiver {
                     // `self.field := value` — validate against declared state type
                     self.check_field_assignment(field, &ty, span, hierarchy, env);
-                    // BT-2048 / BT-2062: Invalidate any stale narrowing on
+                    // Invalidate any stale narrowing on
                     // `self.<field>`. After a write, the narrowed type is
                     // no longer guaranteed.
                     env.remove(&EnvKey::self_field(field.name.clone()));
                 } else {
                     // `other.field := value` or `(expr).field := value` —
-                    // objects cannot mutate another object's state. BT-3469:
-                    // the fact (which receiver/field) is detected here; the
+                    // objects cannot mutate another object's state. The
+                    // fact (which receiver/field) is detected here; the
                     // message (including the `withField:` suggestion text)
                     // is rendered by `validation.rs`.
                     let recv_name = match receiver.as_ref() {

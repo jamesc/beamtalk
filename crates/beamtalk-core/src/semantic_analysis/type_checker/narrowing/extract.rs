@@ -5,13 +5,13 @@
 //!
 //! Narrowing rules need to lift a stable key out of the expression under the
 //! type test so that the refinement can be stored in `TypeEnv` keyed by that
-//! key. BT-2062 replaced the old `"self.field"` string convention with a
-//! typed [`EnvKey`] — the shape of the refinement is now visible in the type
-//! system rather than buried in a prefix.
+//! key, using a
+//! typed [`EnvKey`] — the shape of the refinement is visible in the type
+//! system rather than buried in a `"self.field"` string prefix.
 //!
-//! Extracted from `inference.rs` under BT-2050; re-typed under BT-2062.
+//! Extracted from `inference.rs`.
 //!
-//! BT-2063 note: these helpers deliberately do **not** use
+//! These helpers deliberately do **not** use
 //! [`crate::ast::visitor`]. They are shape destructors — "peel parens, then
 //! match one specific shape and return" — not structural walkers; feeding
 //! them through a recursive visitor would obscure their intent and change
@@ -25,13 +25,13 @@ use crate::semantic_analysis::type_checker::EnvKey;
 /// Extract a [`EnvKey`] naming the variable under a type test.
 ///
 /// Supports identifiers, parenthesized identifiers, and `self.<field>`
-/// access (BT-2048). Returns `None` for any other shape — narrowing only
+/// access. Returns `None` for any other shape — narrowing only
 /// applies to bindings the env can key.
 pub(crate) fn extract_variable_name(expr: &Expression) -> Option<EnvKey> {
     match expr {
         Expression::Identifier(ident) => Some(EnvKey::local(ident.name.clone())),
         Expression::Parenthesized { expression, .. } => extract_variable_name(expression),
-        // BT-2048: `self.<field>` — the binding lives in the narrowing
+        // `self.<field>` — the binding lives in the narrowing
         // overlay, not on the class hierarchy.
         Expression::FieldAccess {
             receiver, field, ..

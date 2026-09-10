@@ -31,7 +31,7 @@ impl TypeChecker {
     /// the registry's declared parameter names (ADR 0075 — footgun prevention).
     ///
     /// **References:** ADR 0075 — Type Checker Integration, Keyword mismatch warning
-    #[allow(clippy::too_many_arguments)] // BT-2846: hierarchy needed for Union-arm compatibility checks
+    #[allow(clippy::too_many_arguments)] // hierarchy needed for Union-arm compatibility checks
     pub(in crate::semantic_analysis::type_checker) fn infer_ffi_call(
         &mut self,
         receiver_type_args: &[InferredType],
@@ -52,10 +52,10 @@ impl TypeChecker {
         };
 
         // Extract the canonical Erlang function name and arity from the selector
-        // (BT-3089: delegates to the one canonical erlang_function_name/erlang_arity
+        // (delegates to the one canonical erlang_function_name/erlang_arity
         // pair, see extract_ffi_function_info's doc comment). `None` for a binary
-        // selector — unreachable today since the BT-1880 guard at this method's
-        // call site already excludes `MessageSelector::Binary` before we get here,
+        // selector — unreachable today since the call site's own guard already
+        // excludes `MessageSelector::Binary` before we get here,
         // but falling back to `UntypedFfi` rather than panicking/asserting keeps
         // that a soft invariant instead of a hard one.
         let Some((function_name, arity)) = Self::extract_ffi_function_info(selector, arguments)
@@ -87,7 +87,7 @@ impl TypeChecker {
             hierarchy,
         );
 
-        // BT-2023(C): Propagate call-site type_args into the FFI return type.
+        // Propagate call-site type_args into the FFI return type.
         // Erlang specs with polymorphic types (e.g., `[T] -> [T]` for lists:reverse/1)
         // are registered as bare `List -> List` with no type_args. When the call-site
         // argument carries type_args (e.g., `List(String)`), propagate them to the
@@ -105,7 +105,7 @@ impl TypeChecker {
     /// Delegates to the canonical FFI-naming pair
     /// [`erlang_function_name`](crate::semantic_analysis::validators::erlang_function_name) /
     /// [`erlang_arity`](crate::semantic_analysis::validators::erlang_arity)
-    /// (BT-3089) rather than re-deriving "first keyword sans colon" with its
+    /// rather than re-deriving "first keyword sans colon" with its
     /// own `.split(':')` — that duplicate previously computed a name for
     /// *binary* selectors too (e.g. `"+".split(':').next()` ⇒ `"+"`), which
     /// disagreed with the canonical function (binary ⇒ `None`, no FFI-name
@@ -155,7 +155,7 @@ impl TypeChecker {
             let param_pos = i + 1;
             let fallback_label = format!("parameter {param_pos}");
             let param_label = param.keyword.as_deref().unwrap_or(&fallback_label);
-            // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+            // Render `UndefinedObject` as `Nil` in user-facing messages.
             let expected_display = InferredType::class_name_for_diagnostic(expected.as_str());
 
             // Object is the root of the BT class hierarchy — any class is a
@@ -168,7 +168,7 @@ impl TypeChecker {
                 InferredType::Known {
                     class_name: actual, ..
                 } => {
-                    // BT-3024: use the same subtyping predicate the `Union` arm
+                    // Use the same subtyping predicate the `Union` arm
                     // below already uses, rather than bare name equality — a
                     // lone singleton `#first` is a subtype of a `Symbol` param
                     // (Erlang spec `atom()`) exactly as `#first | #last` is.
@@ -186,7 +186,7 @@ impl TypeChecker {
                     .with_category(DiagnosticCategory::Type));
                 }
                 InferredType::Union { members, .. } => {
-                    // BT-2846 / BT-3462: every member of the argument's union
+                    // Every member of the argument's union
                     // is checked against the declared FFI parameter type,
                     // via the same classification `check_argument_types`
                     // uses (`UnionArgCompat`) — not a re-derived copy.
@@ -236,7 +236,7 @@ impl TypeChecker {
         }
     }
 
-    /// BT-2023(C): Propagate call-site `type_args` into an FFI return type.
+    /// Propagate call-site `type_args` into an FFI return type.
     ///
     /// Erlang specs lose type-variable identity during extraction -- a spec like
     /// `-spec reverse([T]) -> [T]` becomes `List -> List` with empty `type_args`

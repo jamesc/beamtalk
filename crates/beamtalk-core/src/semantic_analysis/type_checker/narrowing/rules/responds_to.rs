@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `x respondsTo: #selector` narrowing (ADR 0068 Phase 2e, BT-1833).
+//! `x respondsTo: #selector` narrowing (ADR 0068 Phase 2e).
 //!
 //! Sets `true_type` to `Dynamic` initially; `refine_responds_to_narrowing` in
 //! `inference.rs` consults the protocol registry and upgrades to a concrete

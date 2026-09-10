@@ -10,10 +10,10 @@
 //! * [`Scope::BlockScope`] — the refinement is active inside a block (today's
 //!   behaviour for `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` narrowing).
 //! * [`Scope::MethodRemainder`] — the refinement outlives the guard and applies
-//!   to the remainder of the enclosing method body (BT-2049 post-guard
+//!   to the remainder of the enclosing method body (post-guard
 //!   narrowing after `isNil ifTrue: [^err]`).
 //!
-//! Extracted from `inference.rs` under BT-2050.
+//! Extracted from `inference.rs`.
 
 use crate::semantic_analysis::type_checker::{EnvKey, InferredType};
 
@@ -24,7 +24,7 @@ pub(crate) enum Scope {
     /// `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` / `ifNotNil:` narrowings.
     BlockScope,
     /// Survives past the guard statement into the enclosing method body
-    /// (BT-2049: `isNil ifTrue: [^err]` narrows the tested variable for the
+    /// (`isNil ifTrue: [^err]` narrows the tested variable for the
     /// rest of the method).
     MethodRemainder,
 }
@@ -39,7 +39,7 @@ pub(crate) enum Scope {
 #[derive(Debug, Clone)]
 pub(crate) struct RefinementLayer {
     /// Env key being refined. `EnvKey::SelfField(..)` for synthetic
-    /// `self.<field>` bindings (BT-2048 / BT-2062).
+    /// `self.<field>` bindings.
     pub(crate) variable: EnvKey,
     /// The refined type.
     pub(crate) ty: InferredType,
@@ -57,7 +57,7 @@ impl RefinementLayer {
         }
     }
 
-    /// Build a method-remainder refinement (post-guard narrowing, BT-2049).
+    /// Build a method-remainder refinement (post-guard narrowing).
     pub(crate) fn method_remainder(variable: EnvKey, ty: InferredType) -> Self {
         Self {
             variable,

@@ -17,7 +17,7 @@ use ecow::{EcoString, eco_format};
 
 impl TypeChecker {
     /// Joins the inferred element types of a collection literal into a single
-    /// element type (BT-2620).
+    /// element type.
     ///
     /// Delegates to [`InferredType::union_of`], which collapses a homogeneous
     /// literal to its single element type (`#[1, 2, 3]` → `Integer`), joins a
@@ -31,8 +31,7 @@ impl TypeChecker {
         InferredType::union_of(elements)
     }
 
-    /// Extracts the element type contributed by a list literal `tail` (cons)
-    /// (BT-2620).
+    /// Extracts the element type contributed by a list literal `tail` (cons).
     ///
     /// A BEAM cons tail must be a list, so only a known `List(T)` contributes
     /// its element type `T` to the literal's element join. Any other tail
@@ -54,7 +53,7 @@ impl TypeChecker {
     }
 
     /// Reports whether a list-literal cons tail is a *known, non-`List`* type —
-    /// i.e. one that would form an improper BEAM list at runtime (BT-2623).
+    /// i.e. one that would form an improper BEAM list at runtime.
     ///
     /// A cons tail (`[1 | tail]`) must evaluate to a proper list. A known type
     /// whose base class is not `List` (most notably `Array`, which is
@@ -79,7 +78,7 @@ impl TypeChecker {
         }
     }
 
-    /// BT-2254 (ADR 0075 amendment): infer the element type of
+    /// ADR 0075 amendment: infer the element type of
     /// `aTuple at: <literal int>` from a known `Tuple(T1, …, Tn)` type.
     ///
     /// Returns `Some(element_type)` only when **all** of the following hold:
@@ -142,7 +141,7 @@ impl TypeChecker {
     ) -> InferredType {
         // Infer key/value in interleaved source order (k1, v1, k2, v2, …)
         // so any narrowing an expression applies to the shared `env`
-        // propagates exactly as it did before BT-2620 — the keys and
+        // propagates — the keys and
         // values share one env (no per-pair `env.child()`), so order is
         // observable.
         let mut key_types: Vec<InferredType> = Vec::with_capacity(pairs.len());
@@ -173,10 +172,10 @@ impl TypeChecker {
             .collect();
         if let Some(t) = tail {
             let tail_ty = self.infer_expr(t, hierarchy, env, in_abstract_method);
-            // BT-2623: A cons tail must be a proper list. A known
+            // A cons tail must be a proper list. A known
             // non-`List` tail (e.g. `Array`, tuple-backed) builds an
             // improper list at runtime; flag it instead of silently
-            // widening the element type to `Dynamic`. BT-3469: the fact
+            // widening the element type to `Dynamic`. The fact
             // (this pure check) stays here; `validation.rs` renders it.
             if let Some(tail_display) = Self::improper_cons_tail_display(&tail_ty) {
                 self.emit_improper_cons_tail(&tail_display, t.span());

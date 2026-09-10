@@ -1,13 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `x isNil` narrowing rule (BT-1573 Phase 1g).
+//! `x isNil` narrowing rule.
 //!
 //! True branch narrows `x` to `UndefinedObject` (the nil type). False branch
 //! narrows `x` to non-nil via the `is_nil_check` flag — the post-guard
-//! narrowing in BT-2049 also keys off this flag.
+//! narrowing also keys off this flag.
 //!
-//! Supports `x isNil` and `self.field isNil` (BT-2048 synthetic key path via
+//! Supports `x isNil` and `self.field isNil` (synthetic key path via
 //! [`extract_variable_name`]).
 
 use crate::ast::{Expression, WellKnownSelector};

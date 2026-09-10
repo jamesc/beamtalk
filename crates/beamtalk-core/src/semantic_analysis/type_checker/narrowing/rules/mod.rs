@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Narrowing rule table (BT-2050).
+//! Narrowing rule table.
 //!
 //! Each rule is a self-contained detector: given the receiver of a
 //! `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` send, it inspects the expression

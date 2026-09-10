@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Result-shape narrowing rules: `isOk`, `ok`, `isError` (BT-1859).
+//! Result-shape narrowing rules: `isOk`, `ok`, `isError`.
 //!
 //! All three set a placeholder `Dynamic(Unknown)` `true_type`; the real types
 //! are filled in by `refine_result_narrowing` in `inference.rs` once the
