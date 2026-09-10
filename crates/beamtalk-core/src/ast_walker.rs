@@ -72,7 +72,7 @@ where
 /// [`crate::ast::Block`] bodies** — see that module's comparison table, which
 /// names lint, validators and *codegen* as this walker's audience.
 ///
-/// `pub` (not `pub(crate)`): BT-3488 — `beamtalk-codegen`'s
+/// `pub` (not `pub(crate)`): `beamtalk-codegen`'s
 /// `reject_unthreadable_value_self_field_write` needs the same descend-into-blocks
 /// walk to find a `self.field :=` write buried in a loop-body statement's
 /// nested block, and re-deriving a second exhaustive `Expression` match there
