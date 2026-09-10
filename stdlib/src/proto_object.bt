@@ -71,11 +71,15 @@ abstract nil subclass: ProtoObject
 
   /// Handle messages the receiver does not understand. Override for custom dispatch.
   ///
+  /// No declared return type (BT-2834 pattern, see `Object>>fieldAt:`): a
+  /// custom override can return any type, and callers chain further sends
+  /// on the result that a fixed `-> Object` would statically reject.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// 42 unknownMessage   // => ERROR: does_not_understand
   /// ```
-  doesNotUnderstand: selector :: Symbol args: arguments :: List -> Object =>
+  doesNotUnderstand: selector :: Symbol args: arguments :: List =>
     @intrinsic "doesNotUnderstand:args:"
 
   // === Dynamic Messaging ===

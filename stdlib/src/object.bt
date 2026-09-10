@@ -263,11 +263,16 @@ ProtoObject subclass: Object
 
   /// Return the value of the named field.
   ///
+  /// Left without a declared return type deliberately (BT-2834 pattern,
+  /// see `Block>>value`): the field's actual value can be any type, and
+  /// callers routinely send it further messages (`(self fieldAt: #x) + 1`)
+  /// that a fixed `-> Object` would statically reject.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// object fieldAt: #name
   /// ```
-  sealed fieldAt: name :: Symbol -> Object => @intrinsic fieldAt
+  sealed fieldAt: name :: Symbol => @intrinsic fieldAt
 
   /// Set the value of the named field (returns new state).
   ///
@@ -280,19 +285,26 @@ ProtoObject subclass: Object
 
   /// Send a unary message dynamically.
   ///
+  /// Left without a declared return type deliberately (BT-2834 pattern,
+  /// see `fieldAt:` above): the invoked method's return type is unknown
+  /// statically, and a fixed `-> Object` would block legitimate chained
+  /// sends on the real (narrower) result.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// 42 perform: #abs       // => 42
   /// ```
-  sealed perform: selector :: Symbol -> Object => @intrinsic dynamicSend
+  sealed perform: selector :: Symbol => @intrinsic dynamicSend
 
   /// Send a message dynamically with arguments.
+  ///
+  /// See `perform:` above for why no return type is declared.
   ///
   /// ## Examples
   /// ```beamtalk
   /// 3 perform: #max: withArguments: #(5)   // => 5
   /// ```
-  sealed perform: selector :: Symbol withArguments: args :: List -> Object =>
+  sealed perform: selector :: Symbol withArguments: args :: List =>
     @intrinsic dynamicSendWithArgs
 
   // === Abstract method markers ===

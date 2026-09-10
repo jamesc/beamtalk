@@ -424,19 +424,14 @@ TestCase subclass: BinaryTest
   testDeserializeWithUsed =>
     bin := Binary serialize: 42
     result := Binary deserializeWithUsed: bin
-    @expect type
     self assert: result size equals: 2
-    @expect type
     self assert: (result at: 1) equals: 42
-    @expect type
     self assert: (result at: 2) equals: bin byteSize
 
   testDeserializeWithUsedString =>
     bin := Binary serialize: "hello"
     result := Binary deserializeWithUsed: bin
-    @expect type
     self assert: (result at: 1) equals: "hello"
-    @expect type
     self assert: (result at: 2) equals: bin byteSize
 
   // testDeserializeWithUsedTypeError: removed — type checker now prevents

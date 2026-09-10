@@ -348,11 +348,16 @@ Object subclass: Actor
   /// Native Actors (declared with `native:` in ClassBuilder) override this
   /// intrinsic via the compiler's codegen phase.
   ///
+  /// Deliberately left without a declared return type (BT-2862): the type
+  /// checker special-cases an unannotated `self delegate` body to stay
+  /// `Dynamic`, since a native override's real return type depends on
+  /// whichever backing module it delegates to.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// counter delegate   // => ERROR: delegate called on a non-native Actor
   /// ```
-  sealed delegate -> Never => @intrinsic "actorDelegate"
+  sealed delegate => @intrinsic "actorDelegate"
 
   /// Return the raw Erlang PID backing this actor.
   ///

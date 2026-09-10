@@ -146,7 +146,13 @@ Value subclass: TestCase
   /// Returns nil when no setUpOnce fixture has been set.
   /// The test runner injects the fixture value into the instance map
   /// before each test method runs.
-  suiteFixture -> Object => (Erlang beamtalk_test_case) suiteFixture: self
+  ///
+  /// Left without a declared return type deliberately (BT-2834 pattern,
+  /// see `Object>>fieldAt:`): the fixture can be any type set by the
+  /// suite's own `setUpOnce`, and tests routinely send it further messages
+  /// (`self suiteFixture at: #key`) that a fixed `-> Object` would
+  /// statically reject.
+  suiteFixture => (Erlang beamtalk_test_case) suiteFixture: self
 
   // === Assertions ===
 
