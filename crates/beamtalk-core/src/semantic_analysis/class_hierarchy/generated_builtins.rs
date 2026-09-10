@@ -4451,7 +4451,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
 }
 
 /// Returns the verbatim `type Name = ...` declaration source text for every
-/// stdlib type alias (BT-2935), sorted by alias name.
+/// stdlib type alias, sorted by alias name.
 ///
 /// Auto-generated from `stdlib/src/*.bt` ASTs. See
 /// `crates/beamtalk-cli/src/commands/build_stdlib.rs`'s `generate_builtins_rs`

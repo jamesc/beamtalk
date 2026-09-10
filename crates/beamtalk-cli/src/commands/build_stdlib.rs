@@ -1728,7 +1728,7 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
 fn generate_alias_sources_section(code: &mut String, alias_sources: &[String]) {
     code.push_str(
         "\n/// Returns the verbatim `type Name = ...` declaration source text for every\n\
-         /// stdlib type alias (BT-2935), sorted by alias name.\n\
+         /// stdlib type alias, sorted by alias name.\n\
          ///\n\
          /// Auto-generated from `stdlib/src/*.bt` ASTs. See\n\
          /// `crates/beamtalk-cli/src/commands/build_stdlib.rs`'s `generate_builtins_rs`\n\
