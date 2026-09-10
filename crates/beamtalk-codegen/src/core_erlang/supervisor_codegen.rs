@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! OTP supervisor module code generation (BT-1220, ADR 0059 Phase 3).
+//! OTP supervisor module code generation (ADR 0059 Phase 3).
 //!
 //! **DDD Context:** Code Generation
 //!
@@ -34,10 +34,10 @@ use beamtalk_core::ast::{MethodKind, Module, SupervisorKind};
 
 impl CoreErlangGenerator {
     /// Generates an OTP supervisor module for `Supervisor subclass:` or
-    /// `DynamicSupervisor subclass:` classes (BT-1220).
+    /// `DynamicSupervisor subclass:` classes.
     ///
     /// Delegates to `generate_static_supervisor` or `generate_dynamic_supervisor`
-    /// based on the `supervisor_kind` field set by semantic analysis (BT-1218).
+    /// based on the `supervisor_kind` field set by semantic analysis.
     pub(super) fn generate_supervisor_module(
         &mut self,
         module: &Module,
@@ -49,7 +49,7 @@ impl CoreErlangGenerator {
             CodeGenError::Internal("supervisor module must have a class".to_string())
         })?;
         self.set_class_identity(Some(ClassIdentity::new(&class.name.name)));
-        // BT-2710 follow-up: record field declared types so `self.<field>`
+        // Record field declared types so `self.<field>`
         // comparisons/arithmetic on object-typed fields dispatch here too,
         // consistent with value-type and actor modules.
         self.set_class_field_types(&class.state);
@@ -89,14 +89,14 @@ impl CoreErlangGenerator {
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
         let file_attr = self.file_attr();
         let source_path_attr = self.source_path_attr();
-        // BT-2909/BT-2932: use the generator's cross-module-aware alias
+        // Use the generator's cross-module-aware alias
         // registry (this module's own `type_aliases` merged with any
         // pre-loaded aliases from other modules in the same compilation
         // unit — see `CoreErlangGenerator::alias_registry`'s doc) so an
         // alias-named annotation resolves to a `user_type` reference (ADR
         // 0108) instead of falling through to `any()`, regardless of which
         // module declared the alias.
-        // BT-2940: tracks which alias names the specs below actually
+        // Tracks which alias names the specs below actually
         // reference, so `generate_alias_type_attrs` only emits `-type`
         // declarations for those (plus transitive deps) instead of every
         // pre-loaded alias in the compilation unit.
@@ -109,7 +109,7 @@ impl CoreErlangGenerator {
         );
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
-        // BT-2909: every class module that could contain a `user_type`
+        // Every class module that could contain a `user_type`
         // reference must also declare the matching named `-type` in the same
         // module attribute list (an `erlc` compile error otherwise) — empty
         // for a module with no `type_aliases`, so this is a no-op change for
@@ -190,14 +190,14 @@ impl CoreErlangGenerator {
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
         let file_attr = self.file_attr();
         let source_path_attr = self.source_path_attr();
-        // BT-2909/BT-2932: use the generator's cross-module-aware alias
+        // Use the generator's cross-module-aware alias
         // registry (this module's own `type_aliases` merged with any
         // pre-loaded aliases from other modules in the same compilation
         // unit — see `CoreErlangGenerator::alias_registry`'s doc) so an
         // alias-named annotation resolves to a `user_type` reference (ADR
         // 0108) instead of falling through to `any()`, regardless of which
         // module declared the alias.
-        // BT-2940: tracks which alias names the specs below actually
+        // Tracks which alias names the specs below actually
         // reference, so `generate_alias_type_attrs` only emits `-type`
         // declarations for those (plus transitive deps) instead of every
         // pre-loaded alias in the compilation unit.
@@ -210,7 +210,7 @@ impl CoreErlangGenerator {
         );
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
-        // BT-2909: every class module that could contain a `user_type`
+        // Every class module that could contain a `user_type`
         // reference must also declare the matching named `-type` in the same
         // module attribute list (an `erlc` compile error otherwise) — empty
         // for a module with no `type_aliases`, so this is a no-op change for
@@ -224,7 +224,7 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
 
         // Module header
-        // BT-1220: childClass/0 is called directly by beamtalk_supervisor:startChild/1,2
+        // childClass/0 is called directly by beamtalk_supervisor:startChild/1,2
         // (SupMod:'childClass'() at `beamtalk_supervisor.erl (startChild/1,2)`)
         docs.push(docvec![
             "module ",

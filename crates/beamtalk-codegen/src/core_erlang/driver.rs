@@ -24,7 +24,7 @@ use ecow::EcoString;
 /// This is the main entry point for code generation. It transforms
 /// the parsed AST into Core Erlang text that can be compiled by `erlc`.
 ///
-/// # BT-213: Value Types vs Actors
+/// # Value Types vs Actors
 ///
 /// Routes to different code generators based on class hierarchy:
 /// - **Actor subclasses** → `generate_actor_module` (`gen_server` with mailbox)
@@ -81,12 +81,12 @@ pub fn generate_module_with_warnings(
     // ADR 0098 Phase 3: bake the producing-toolchain identity into `__beamtalk_meta`.
     generator.beamtalk_version = options.beamtalk_version.map(EcoString::from);
     generator.otp_release = options.otp_release.map(EcoString::from);
-    // BT-1343: Override codegen diagnostics flag if explicitly set in options.
+    // Override codegen diagnostics flag if explicitly set in options.
     if let Some(enabled) = options.codegen_diagnostics {
         generator.codegen_diagnostics_enabled = enabled;
     }
 
-    // BT-3123: Consume the driver's already-computed analysis when supplied
+    // Consume the driver's already-computed analysis when supplied
     // (`CodegenOptions::with_analysis`) instead of re-deriving semantic facts,
     // the class hierarchy, and inferred method return types from scratch —
     // eliminating a second full type-checking pass per compiled module. `None`
@@ -95,7 +95,7 @@ pub fn generate_module_with_warnings(
     let (mut hierarchy, analysis_handed_off, mut driver_method_return_types) =
         if let Some(analysis) = options.analysis {
             generator.semantic_facts = analysis.semantic_facts;
-            // BT-3217: carry the driver's already-computed `TypeMap` through
+            // Carry the driver's already-computed `TypeMap` through
             // for `recv_type` projection. May be superseded below if this
             // generation's own cross-file enrichment invalidates the
             // hand-off and forces a fuller re-inference pass.
@@ -106,7 +106,7 @@ pub fn generate_module_with_warnings(
                 Some(analysis.method_return_types),
             )
         } else {
-            // BT-1288: Compute semantic facts before codegen begins.
+            // Compute semantic facts before codegen begins.
             generator.semantic_facts =
                 beamtalk_core::semantic_analysis::compute_semantic_facts(module);
 
@@ -121,38 +121,40 @@ pub fn generate_module_with_warnings(
     // ADR 0050 Phase 4: inject richer user-class entries from BEAM metadata first,
     // so that add_external_superclasses (which uses contains_key before inserting)
     // does not overwrite BEAM data with partial stubs. Both calls are no-ops for
-    // classes the handed-off analysis hierarchy already carries (BT-1523/BT-894
+    // classes the handed-off analysis hierarchy already carries (both calls
     // insert only into vacant entries) — the common case, since a driver that
     // hands off analysis typically fed the same cross-file class metadata to
     // `AnalysisContext::with_pre_loaded_classes`. `class_superclass_index`
-    // (BT-894) is codegen-only and has no `AnalysisContext` counterpart, so it
+    // is codegen-only and has no `AnalysisContext` counterpart, so it
     // can still add genuinely new stub entries analysis never saw; both calls
     // report whether they did so the lowering step below knows whether the
     // handed-off AST preparation is still trustworthy.
     let added_beam_meta = hierarchy.add_from_beam_meta(options.pre_class_hierarchy);
 
-    // BT-894: Backfill missing cross-file superclass stubs (only for classes not
+    // Backfill missing cross-file superclass stubs (only for classes not
     // already present from build() or BEAM metadata).
     let added_superclasses = hierarchy.add_external_superclasses(&options.class_superclass_index);
 
-    // BT-3125: A driver that handed off `AnalysisResult` is expected to have
-    // already called `semantic_analysis::lower_module_for_codegen` on its own
-    // module — using the very same `class_hierarchy`/`method_return_types` —
-    // *before* invoking `generate_module`, per `CodegenOptions::with_analysis`'s
+    // The hand-off contract: a driver that handed off `AnalysisResult` is
+    // expected to have already called
+    // `semantic_analysis::lower_module_for_codegen` on its own module — using
+    // the very same `class_hierarchy`/`method_return_types` — *before*
+    // invoking `generate_module`, per `CodegenOptions::with_analysis`'s
     // contract. When that hand-off is still trustworthy (no cross-file
     // enrichment above added anything the driver's own hierarchy didn't have),
     // codegen no longer schedules the writeback trio itself: it trusts the
     // already-prepared `module` it was given and skips the clone entirely.
     //
-    // Two cases still require preparing the AST here, exactly as before
-    // BT-3125: no analysis was handed off at all (self-sufficient codegen —
+    // Two cases still require preparing the AST here, exactly as if the
+    // hand-off contract didn't apply: no analysis was handed off at all
+    // (self-sufficient codegen —
     // unit tests, ad-hoc codegen, REPL trace mode), or this generation's own
     // cross-file enrichment (above) added stub classes the driver's
     // `lower_module_for_codegen` call never saw, making its writeback
     // possibly incomplete for this generation's fuller view of the hierarchy.
     let mut module_owned;
     let module: &Module = if analysis_handed_off && !added_beam_meta && !added_superclasses {
-        // BT-3249: `module` is used exactly as the driver prepared it (no
+        // `module` is used exactly as the driver prepared it (no
         // clone/re-infer below), so the driver's own `method_return_types`
         // map is precisely "which methods did inference write a return type
         // into" for *this* `module` — record it for `extract_method_source`
@@ -183,7 +185,7 @@ pub fn generate_module_with_warnings(
                 written_by,
             );
         }
-        // BT-3217 (ADR 0115 Phase 2 spike §1d): `infer_types_and_returns`
+        // ADR 0115 Phase 2 spike §1d: `infer_types_and_returns`
         // returns both `TypeMap` and `method_return_types` from the same
         // single `TypeChecker` pass `infer_method_return_types` already ran
         // — zero extra inference. Refreshes `generator.type_map` for this
@@ -202,14 +204,14 @@ pub fn generate_module_with_warnings(
             &hierarchy,
             &method_return_types,
         );
-        // BT-3249: record which methods *this* (re-)inference wrote a
+        // Record which methods *this* (re-)inference wrote a
         // return type into, for `extract_method_source` to strip before
         // emitting image-resident `__source__` text — see the field's doc.
         generator.method_return_types_written_back = method_return_types;
         &module_owned
     };
 
-    // BT-2932: build the alias registry once, merging this module's own
+    // Build the alias registry once, merging this module's own
     // `type_aliases` with any pre-loaded aliases from other modules in the
     // same compilation unit, so a cross-module alias reference resolves to
     // a `user_type` reference instead of falling through to `any()` in
@@ -220,24 +222,24 @@ pub fn generate_module_with_warnings(
             &options.pre_loaded_aliases,
         );
 
-    // ADR 0065 / BT-1457: Set Server subclass flag for handle_info codegen dispatch.
+    // ADR 0065: Set Server subclass flag for handle_info codegen dispatch.
     if let Some(class) = module.classes.first() {
         generator.is_server_subclass = hierarchy.is_server_subclass(&class.name.name);
     }
 
-    // BT-1639: Pre-compute direct-call eligible class methods from the hierarchy.
+    // Pre-compute direct-call eligible class methods from the hierarchy.
     // For sealed classes with no class variables, their class methods can be called
     // directly (bypassing gen_server dispatch). This is safe because the methods
     // are pure functions that don't mutate class state.
     generator.direct_call_eligible =
         CoreErlangGenerator::compute_direct_call_eligible(&hierarchy, &generator);
 
-    // BT-1951: Stash the hierarchy for use by actor callback generation
+    // Stash the hierarchy for use by actor callback generation
     // (auto-chained initialize dispatch in handle_continue and inherited
     // typed-no-default field validation).
     generator.class_hierarchy = Some(hierarchy.clone());
 
-    // BT-213: Route based on whether class is actor or value type
+    // Route based on whether class is actor or value type
     let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
         generator.generate_actor_module(module)?
     } else {
@@ -262,8 +264,8 @@ pub fn generate(module: &Module) -> Result<String> {
 }
 
 impl CoreErlangGenerator {
-    /// BT-213: Determines if a class is an actor (process-based) or value type (plain term).
-    /// BT-1639: Computes the set of sealed classes whose class methods are eligible
+    /// Determines if a class is an actor (process-based) or value type (plain term).
+    /// Computes the set of sealed classes whose class methods are eligible
     /// for direct calls (bypassing `gen_server` dispatch).
     ///
     /// A class method is eligible when all four conditions hold:
@@ -299,15 +301,15 @@ impl CoreErlangGenerator {
             }
             // Gate 3: Class must have class methods
             //
-            // BT-3435 (ADR 0119 Context): this is the only place that
+            // ADR 0119 Context: this is the only place that
             // iterates *every* hierarchy class unconditionally, including
             // `Future` (a runtime-only builtin with no `stdlib/src/Future.bt`
             // source — see `class_hierarchy/builtins.rs`). `Future`'s
             // hardcoded `ClassInfo` always has empty `class_methods` today,
             // so this gate is what keeps it from reaching
             // `compiled_module_name` here and emitting a reference to a
-            // nonexistent `bt@...` module. If BT-507 ever gives `Future` (or
-            // another no-`.bt`-source builtin) real class methods, this gate
+            // nonexistent `bt@...` module. If `Future` (or another
+            // no-`.bt`-source builtin) ever gains real class methods, this gate
             // stops protecting it and its module resolution needs a real
             // registry answer (`ClassModuleRegistry`'s `ModuleName::Native`
             // variant exists for exactly this) — not implemented
@@ -354,12 +356,12 @@ impl CoreErlangGenerator {
     ///
     /// # Implementation Note
     ///
-    /// BT-3086: Delegates to `ClassHierarchy::resolve_class_kind`, the single authority for
+    /// Delegates to `ClassHierarchy::resolve_class_kind`, the single authority for
     /// actor/value classification (see its doc comment for the walk + default-to-`Object`
-    /// policy on a fully-known chain). This used to be a third, independent implementation
-    /// that re-walked the chain itself and consulted a hand-maintained list of "known value
-    /// roots" (`Object`, `Exception`, `RuntimeError`, ...) that went stale every time the
-    /// exception hierarchy grew. Both `ClassKind::Value` and `ClassKind::Object` route to
+    /// policy on a fully-known chain), avoiding a second, independent walk that
+    /// consults a hand-maintained list of "known value roots" (`Object`, `Exception`,
+    /// `RuntimeError`, ...) that would go stale every time the exception hierarchy
+    /// grows. Both `ClassKind::Value` and `ClassKind::Object` route to
     /// `generate_value_type_module` here — the Value/Object distinction only matters for
     /// auto-slot codegen *within* the value-type path, not for actor-vs-value routing.
     ///
@@ -375,7 +377,7 @@ impl CoreErlangGenerator {
     /// # Returns
     ///
     /// - `true` if class inherits from Actor anywhere in the (fully-known) chain
-    /// - `true` if a concrete (non-abstract) Supervisor/DynamicSupervisor subclass (BT-1220)
+    /// - `true` if a concrete (non-abstract) Supervisor/DynamicSupervisor subclass
     /// - `true` if the chain has an unregistered ancestor (incomplete-chain default, above)
     /// - `false` if class resolves to Value or Object on a fully-known chain
     /// - `true` if module contains no class (backward compatibility for REPL)
@@ -386,7 +388,7 @@ impl CoreErlangGenerator {
         let Some(class) = module.classes.first() else {
             return true;
         };
-        // BT-1220: Concrete Supervisor/DynamicSupervisor subclasses use supervisor codegen,
+        // Concrete Supervisor/DynamicSupervisor subclasses use supervisor codegen,
         // routed through generate_actor_module which delegates to supervisor_codegen.
         // Abstract base classes (Supervisor, DynamicSupervisor themselves) remain value types.
         if class.supervisor_kind.is_some() && !class.is_abstract {

@@ -1,8 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `ClassBuilder` `methodSource:` / `classMethodSource:` auto-population
-//! (BT-2246, BT-2270).
+//! `ClassBuilder` `methodSource:` / `classMethodSource:` auto-population.
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
@@ -14,14 +13,14 @@
 //! classes are visible to `SystemNavigation` source-text queries (`sendersOf:`,
 //! `methodsMatching:`, ...) exactly like file-defined classes.
 //!
-//! BT-2270 extends the same pass to the **class** side: a builder
+//! This module also extends the same pass to the **class** side: a builder
 //! `classMethods: #{ #sel => [block] }` setter gets a companion
 //! `classMethodSource:` setter synthesised from the block literals, so
 //! builder-defined class methods are navigable via the class-side channel
-//! BT-2195 added (`Counter class sendersOf:`, `methodsMatching:`, ...). This is
-//! only meaningful now that BT-2266/BT-2267 made builder class methods callable
-//! (installed as runtime class-method funs); previously they were not
-//! dispatchable, so indexing their source would have served no method.
+//! (`Counter class sendersOf:`, `methodsMatching:`, ...). This is
+//! only meaningful because builder class methods are callable (installed as
+//! runtime class-method funs) — otherwise they would not be dispatchable, so
+//! indexing their source would serve no method.
 //!
 //! Only the **literal** case is handled, on both sides: a symbol-literal
 //! selector mapped to a block literal. Computed selectors or funs assembled at
@@ -112,8 +111,8 @@ fn block_method_source(selector_sym: &str, block: &Block, is_class_method: bool)
         .collect();
     let mut method = MethodDefinition::new(selector, parameters, block.body.clone(), block.span);
     // Carry the side so `unparse_method` re-emits the `class ` prefix for a
-    // class-side method, matching a file-defined class method's stored source
-    // (BT-2594).
+    // class-side method, matching a file-defined class method's stored
+    // source.
     method.is_class_method = is_class_method;
     Some(beamtalk_core::unparse::unparse_method(&method))
 }
@@ -164,8 +163,8 @@ fn keyword_setter(name: &str) -> MessageSelector {
 /// Recognises a `ClassBuilder` construction cascade (terminating in `register`)
 /// with literal block methods and returns an augmented message list with the
 /// synthesised source setters prepended: `methodSource:` from `methods:`
-/// (BT-2246, instance side) and `classMethodSource:` from `classMethods:`
-/// (BT-2270, class side).
+/// (instance side) and `classMethodSource:` from `classMethods:`
+/// (class side).
 ///
 /// Each side is injected independently: a cascade with only `classMethods:`
 /// gets only `classMethodSource:`, and a side that already carries an explicit
@@ -266,7 +265,7 @@ pub(super) fn inject_method_source(
     Some(injected)
 }
 
-/// ADR 0084 / BT-2267: Recognise a `ClassBuilder` construction cascade that
+/// ADR 0084: Recognise a `ClassBuilder` construction cascade that
 /// carries a `classMethods:` setter, returning `(ClassName, ClassVarNames)` for
 /// the codegen that lowers the class-method block literals into funs.
 ///
@@ -333,7 +332,7 @@ pub(super) fn builder_class_method_context(
                     class_var_names.clear();
                 }
             }
-            // BT-2269: an incremental `addClassState: #name default: …` adds one
+            // An incremental `addClassState: #name default: …` adds one
             // class variable name (when the name is a literal symbol), so blocks
             // installed by `addClassMethod:body:` recognise `self.name` as a
             // class-variable access. Later setters add to the running set;
@@ -346,7 +345,7 @@ pub(super) fn builder_class_method_context(
                     }
                 }
             }
-            // BT-2269: `addClassMethod:body:` is the incremental counterpart of
+            // `addClassMethod:body:` is the incremental counterpart of
             // `classMethods:` — its block argument is lowered as a class-method
             // fun, so the cascade must enter the class-method lowering context.
             "classMethods:" | "addClassMethod:body:" => has_class_methods = true,
@@ -519,7 +518,7 @@ mod tests {
         assert!(inject_method_source(&recv, &msgs).is_none());
     }
 
-    // BT-2270: class-side `classMethods:` → `classMethodSource:`.
+    // Class-side `classMethods:` → `classMethodSource:`.
 
     fn has_setter(messages: &[CascadeMessage], setter: &str) -> bool {
         messages.iter().any(|m| m.selector.name() == setter)
@@ -535,7 +534,7 @@ mod tests {
         let entries = injected_source_map(&augmented, "classMethodSource:");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "bump");
-        // BT-2594: a builder-defined class method's stored source carries the
+        // A builder-defined class method's stored source carries the
         // `class ` prefix, matching a file-defined class method's shape.
         assert!(
             entries[0].1.starts_with("class bump") && entries[0].1.contains("total"),
@@ -665,7 +664,7 @@ mod tests {
         assert!(!has_setter(&augmented, "classMethodSource:"));
     }
 
-    // BT-2269: the incremental `addClassMethod:body:` setter enables the
+    // The incremental `addClassMethod:body:` setter enables the
     // class-method lowering context, just like `classMethods:`.
     #[test]
     fn context_recognises_incremental_add_class_method() {
@@ -677,7 +676,7 @@ mod tests {
         assert_eq!(ctx.0, "Foo");
     }
 
-    // BT-2269: `addClassState: #name default: …` contributes its name to the
+    // `addClassState: #name default: …` contributes its name to the
     // class-variable set so `addClassMethod:body:` blocks treat `self.name` as a
     // class-variable access.
     #[test]
@@ -691,7 +690,7 @@ mod tests {
         assert!(cvars.contains(&"total".to_string()), "got: {cvars:?}");
     }
 
-    // BT-2269: `classVars:` and `addClassState:default:` both feed the class-var
+    // `classVars:` and `addClassState:default:` both feed the class-var
     // set; a later `classVars:` (bulk replace) resets, then incremental adds
     // accumulate after it.
     #[test]
@@ -707,7 +706,7 @@ mod tests {
         assert!(cvars.contains(&"b".to_string()), "got: {cvars:?}");
     }
 
-    // BT-2269: no class-side methods (bulk or incremental) → no class-method
+    // No class-side methods (bulk or incremental) → no class-method
     // lowering context.
     #[test]
     fn context_none_without_any_class_methods() {

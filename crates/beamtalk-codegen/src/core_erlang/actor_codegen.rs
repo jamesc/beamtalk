@@ -26,12 +26,12 @@ use beamtalk_core::ast::{MethodKind, Module};
 impl CoreErlangGenerator {
     /// Generates a full actor module with `gen_server` behaviour.
     ///
-    /// Per BT-29 design doc, each actor class generates a `gen_server` module with:
+    /// Each actor class generates a `gen_server` module with:
     /// - Error isolation via `safe_dispatch/3`
     /// - `doesNotUnderstand:args:` fallback dispatch
     /// - `terminate/2` with method call support
     ///
-    /// ## Object References (BT-100)
+    /// ## Object References
     ///
     /// The `#beamtalk_object{}` record is defined in `runtime/include/beamtalk.hrl`
     /// and is now used by generated code:
@@ -40,7 +40,7 @@ impl CoreErlangGenerator {
     /// - This enables reflection (`obj class`) and proper object semantics
     #[allow(clippy::too_many_lines)]
     pub(super) fn generate_actor_module(&mut self, module: &Module) -> Result<Document<'static>> {
-        // BT-1220: Concrete Supervisor/DynamicSupervisor subclasses generate OTP supervisor
+        // Concrete Supervisor/DynamicSupervisor subclasses generate OTP supervisor
         // behaviour, not gen_server. Abstract base classes compile as value types.
         if module
             .classes
@@ -69,35 +69,35 @@ impl CoreErlangGenerator {
             return self.generate_native_facade_module(module);
         }
 
-        // BT-213: Set context to Actor for this module
+        // Set context to Actor for this module
         self.context = CodeGenContext::Actor;
         self.setup_class_identity(module);
 
         // Check if module has class definitions for registration
         let has_classes = !module.classes.is_empty();
-        // BT-1610: Protocol-only files also need register_class/0 for protocol registration
+        // Protocol-only files also need register_class/0 for protocol registration
         let has_protocols = !module.protocols.is_empty();
-        // BT-2250: Pure-extension files (only `Target >> sel`, no host class) need
+        // Pure-extension files (only `Target >> sel`, no host class) need
         // register_class/0 + on_load to register their foreign extensions at load.
         let has_foreign_extensions = Self::has_foreign_extensions(module);
         let needs_register_class = has_classes || has_protocols || has_foreign_extensions;
-        // BT-403: Build sealed method exports
+        // Build sealed method exports
         let sealed_export_doc = self.build_sealed_export_doc(module);
-        // BT-411: Build class method exports
+        // Build class method exports
         let class_method_export_doc = Self::build_class_method_export_doc(module);
-        // BT-1218: Synthesize class_supervisionSpec for Actor subclasses that don't define it
+        // Synthesize class_supervisionSpec for Actor subclasses that don't define it
         let needs_spec_synthesis = self.needs_supervision_spec_synthesis(module);
         let supervision_spec_export: Document<'static> = if needs_spec_synthesis {
             Document::Str(", 'class_supervisionSpec'/2")
         } else {
             Document::Nil
         };
-        // BT-105: Check if class is abstract
+        // Check if class is abstract
         let is_abstract = module.classes.first().is_some_and(|c| c.is_abstract);
 
-        // Module header with expanded exports per BT-29
-        // BT-217: Add 'new'/0 and 'new'/1 exports for error methods
-        // BT-242: Add 'has_method'/1 export for reflection
+        // Module header with expanded exports
+        // Add 'new'/0 and 'new'/1 exports for error methods
+        // Add 'has_method'/1 export for reflection
         let has_primitive_methods = self.class_has_primitive_instance_methods(module);
 
         let dispatch_3_export: Document<'static> = if has_primitive_methods {
@@ -106,14 +106,14 @@ impl CoreErlangGenerator {
             Document::Nil
         };
 
-        // BT-942: Only export __beamtalk_meta/0 for class-based modules
+        // Only export __beamtalk_meta/0 for class-based modules
         let meta_export: Document<'static> = if has_classes {
             Document::Str(", '__beamtalk_meta'/0")
         } else {
             Document::Nil
         };
 
-        // BT-3482: has_method_local/1 (the strictly-local probe used by
+        // has_method_local/1 (the strictly-local probe used by
         // beamtalk_dispatch:class_chain_step/6) is only ever emitted for a
         // class-definition module (generate_has_method's DispatchSpec path,
         // emit_local_probe: true) — an expression-based script/workspace
@@ -140,15 +140,15 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
-        // BT-586: Generate spec attributes from type annotations
-        // BT-2909/BT-2932: use the generator's cross-module-aware alias
+        // Generate spec attributes from type annotations
+        // Use the generator's cross-module-aware alias
         // registry (this module's own `type_aliases` merged with any
         // pre-loaded aliases from other modules in the same compilation
         // unit — see `CoreErlangGenerator::alias_registry`'s doc) so an
         // alias-named annotation resolves to a `user_type` reference (ADR
         // 0108) instead of falling through to `any()`, regardless of which
         // module declared the alias.
-        // BT-2940: tracks which alias names the specs below actually
+        // Tracks which alias names the specs below actually
         // reference, so `generate_alias_type_attrs` only emits `-type`
         // declarations for those (plus transitive deps) instead of every
         // pre-loaded alias in the compilation unit.
@@ -167,7 +167,7 @@ impl CoreErlangGenerator {
             .unwrap_or_default();
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
-        // BT-2957: protocol method signatures have no standalone function to
+        // Protocol method signatures have no standalone function to
         // attach a real `-spec` to, so they never reach `generate_class_specs`
         // above — but a signature referencing a cross-module alias must still
         // mark that alias as referenced *before* `generate_alias_type_attrs`
@@ -204,7 +204,7 @@ impl CoreErlangGenerator {
                 }
             }
         }
-        // BT-2909: every class module that could contain a `user_type`
+        // Every class module that could contain a `user_type`
         // reference must also declare the matching named `-type` in the same
         // module attribute list (an `erlc` compile error otherwise) — empty
         // for a module with no `type_aliases`, so this is a no-op change for
@@ -215,16 +215,16 @@ impl CoreErlangGenerator {
             spec_codegen::format_alias_type_attributes(&alias_type_attrs)
                 .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
-        // BT-745: Build beamtalk_class attribute for dependency-ordered bootstrap
+        // Build beamtalk_class attribute for dependency-ordered bootstrap
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
 
-        // BT-845/BT-860: Build beamtalk_source attribute when source_path is set.
+        // Build beamtalk_source attribute when source_path is set.
         let source_path_attr = self.source_path_attr();
-        // BT-940: Build 'file' attribute so BEAM stacktraces show the .bt source file.
+        // Build 'file' attribute so BEAM stacktraces show the .bt source file.
         let file_attr = self.file_attr();
 
         // Module header with exports and attributes
-        // BT-1610: Include register_class/0 export and on_load attribute when
+        // Include register_class/0 export and on_load attribute when
         // the module has classes OR protocols (protocol-only files need it too).
         let module_header = if needs_register_class {
             docvec![
@@ -292,11 +292,11 @@ impl CoreErlangGenerator {
         push_fn(self.generate_class_name_function(module)?)?;
         push_fn(self.generate_init_function(module)?)?;
 
-        // BT-403: Abstract classes skip gen_server callback scaffolding.
+        // Abstract classes skip gen_server callback scaffolding.
         if is_abstract {
             push_fn(self.generate_abstract_callbacks_doc())?;
         } else {
-            // BT-1541: handle_continue dispatches initialize after the loop starts
+            // handle_continue dispatches initialize after the loop starts
             push_fn(self.generate_handle_continue(module)?)?;
             push_fn(self.generate_handle_cast()?)?;
             push_fn(self.generate_handle_call()?)?;
@@ -314,25 +314,25 @@ impl CoreErlangGenerator {
         // has_method/1 — no trailing newline needed
         docs.push(self.generate_has_method(module)?);
 
-        // BT-403: Generate sealed method standalone functions
+        // Generate sealed method standalone functions
         if !self.sealed_method_selectors().is_empty() {
             docs.push(self.generate_sealed_method_functions_doc(module)?);
         }
 
-        // BT-411: Generate class-side method standalone functions
+        // Generate class-side method standalone functions
         if let Some(class) = module.classes.first() {
             if !class.class_methods.is_empty() {
                 docs.push(self.generate_class_method_functions(class)?);
             }
         }
 
-        // BT-1218: Synthesize class_supervisionSpec for Actor subclasses
+        // Synthesize class_supervisionSpec for Actor subclasses
         if needs_spec_synthesis {
             docs.push(Document::Str("\n"));
             // Determine which module's class_supervisionPolicy to call.
             // We check within the current file's AST (both inline class methods and
             // standalone method definitions); cross-file inherited overrides are not
-            // resolved here (BT-1218 Phase 1 limitation — see the doc comment on
+            // resolved here (a Phase 1 limitation — see the doc comment on
             // generate_supervision_spec_synthesis).
             let has_local_policy_override = module.classes.first().is_some_and(|c| {
                 let class_name = &c.name.name;
@@ -352,13 +352,13 @@ impl CoreErlangGenerator {
 
         // Generate class registration and metadata functions
         if !module.classes.is_empty() {
-            // BT-942: Generate __beamtalk_meta/0 for zero-process reflection
+            // Generate __beamtalk_meta/0 for zero-process reflection
             docs.push(Document::Str("\n"));
             docs.push(self.generate_meta_function(module, needs_spec_synthesis)?);
-            // BT-218: Generate register_class/0 for class system registration
+            // Generate register_class/0 for class system registration
             docs.push(self.generate_register_class(module, needs_spec_synthesis)?);
         } else if has_protocols || has_foreign_extensions {
-            // BT-1610 / BT-2250: Protocol-only and pure-extension modules need
+            // Protocol-only and pure-extension modules need
             // register_class/0 (for protocol registration and/or foreign
             // extension registration) even though there are no classes.
             docs.push(Document::Str("\n"));
@@ -385,8 +385,8 @@ impl CoreErlangGenerator {
     }
 
     /// Sets up class identity and sealed method selectors from the module's class definition.
-    /// BT-295: Set class identity for @primitive codegen.
-    /// BT-403: Include sealed/abstract flags and collect sealed method selectors.
+    /// Set class identity for @primitive codegen.
+    /// Include sealed/abstract flags and collect sealed method selectors.
     pub(in crate::core_erlang) fn setup_class_identity(&mut self, module: &Module) {
         if let Some(class) = module.classes.first() {
             self.set_class_identity(Some(ClassIdentity::from_class_def(
@@ -394,7 +394,7 @@ impl CoreErlangGenerator {
                 class.is_sealed,
                 class.is_abstract,
             )));
-            // BT-2710 follow-up: record field declared types so `self.<field>`
+            // Record field declared types so `self.<field>`
             // comparisons/arithmetic on object-typed fields route through the
             // guard rather than silently term-ordering / `badarith`-ing.
             self.set_class_field_types(&class.state);
@@ -413,7 +413,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Builds the export fragment for sealed method standalone functions (BT-403).
+    /// Builds the export fragment for sealed method standalone functions.
     fn build_sealed_export_doc(&self, module: &Module) -> Document<'static> {
         // Sort selectors for deterministic output across builds
         let mut selectors: Vec<String> = self.sealed_method_selectors().iter().cloned().collect();
@@ -432,7 +432,7 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
-    /// Builds the export fragment for class-side method functions (BT-411).
+    /// Builds the export fragment for class-side method functions.
     pub(in crate::core_erlang) fn build_class_method_export_doc(
         module: &Module,
     ) -> Document<'static> {
@@ -445,7 +445,7 @@ impl CoreErlangGenerator {
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
         {
-            // BT-412: Class method takes ClassSelf + ClassVars + user params
+            // Class method takes ClassSelf + ClassVars + user params
             parts.push(docvec![
                 ", ",
                 fname(
@@ -457,7 +457,7 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
-    /// Generates minimal `gen_server` callbacks for abstract classes (BT-403).
+    /// Generates minimal `gen_server` callbacks for abstract classes.
     ///
     /// Abstract classes can't be instantiated, so these callbacks will never
     /// be called. But `gen_server` behaviour requires them to be exported.
@@ -501,7 +501,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates standalone functions for sealed methods (BT-403).
+    /// Generates standalone functions for sealed methods.
     ///
     /// Each sealed method gets a `'__sealed_{selector}'/N` function that
     /// can be called directly from self-sends, bypassing both `safe_dispatch/3`
@@ -636,7 +636,7 @@ impl CoreErlangGenerator {
         !has_inline && !has_standalone
     }
 
-    /// Generates the synthesized `class_supervisionSpec/2` function (BT-1218).
+    /// Generates the synthesized `class_supervisionSpec/2` function.
     ///
     /// Calls `class_supervisionPolicy` **directly** to avoid a `gen_server` re-entrant
     /// deadlock: class methods execute inside a `gen_server:call` handler, so routing

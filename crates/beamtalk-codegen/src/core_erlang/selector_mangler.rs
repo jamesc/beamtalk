@@ -19,7 +19,7 @@
 //!
 //! Selectors are converted to Erlang atom *strings* by
 //! [`MessageSelector::name()`](beamtalk_core::ast::MessageSelector::name), the single
-//! selector→string authority (BT-3089; selector text needs no mangling of
+//! selector→string authority (selector text needs no mangling of
 //! its own to become atom content). This module provides the
 //! atom-*length*-safe mangling utilities layered on top —
 //! [`safe_class_method_selector`] and [`safe_class_method_fn_name`].
@@ -35,7 +35,7 @@ const MAX_ATOM_LEN: usize = 255;
 /// function names (see `beamtalk_class_dispatch:class_method_fun_name/1`).
 const CLASS_METHOD_PREFIX: &str = "class_";
 
-/// The prefix used for sealed-method standalone function names (see BT-403).
+/// The prefix used for sealed-method standalone function names.
 ///
 /// A sealed method `foo:` compiles to a `'__sealed_foo:'/N` function that is
 /// called directly (bypassing dynamic dispatch). Both the function definition
@@ -217,7 +217,7 @@ mod tests {
         );
     }
 
-    /// BT-3090: the Erlang runtime's `beamtalk_class_dispatch:class_method_fun_name/1`
+    /// The Erlang runtime's `beamtalk_class_dispatch:class_method_fun_name/1`
     /// ports this exact FNV-1a hashing scheme (same offset basis, same prime,
     /// same 255-byte threshold, same `"class_kw_<16-hex>"` naming) so that a
     /// selector long enough to need hashing produces the *same* atom whether

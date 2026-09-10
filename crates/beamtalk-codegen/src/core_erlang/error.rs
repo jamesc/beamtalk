@@ -188,7 +188,7 @@ pub enum CodeGenError {
         location: String,
     },
 
-    /// BT-3484: the value-type (`Self`-threading) mirror of
+    /// The value-type (`Self`-threading) mirror of
     /// [`Self::ClassVarMutationLostAcrossNestedLoop`]. A `Letrec`-shaped
     /// loop nested inside another one, where the inner loop's own body
     /// threads a `self.field := ...` value-type mutation through its own

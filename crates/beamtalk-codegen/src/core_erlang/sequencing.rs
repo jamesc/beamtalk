@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Shared leaf module (BT-3457, `architecture-principles.md` § Duplication &
+//! Shared leaf module (see `architecture-principles.md` § Duplication &
 //! the Shared-Leaf-Module Pattern): the "compile a group of sub-expressions,
 //! hoisting into a `let`-prelude whichever ones need to run ahead of a
 //! not-yet-emitted call, then splice that prelude back around the finished
@@ -36,7 +36,7 @@ use beamtalk_core::source_analysis::Span;
 pub(super) struct PrecompiledSubexpr {
     /// The already-compiled value to substitute for the node.
     doc: Document<'static>,
-    /// Whether a hit should wrap `doc` in the BT-940 source-line
+    /// Whether a hit should wrap `doc` in the source-line
     /// annotation `generate_expression` gives every closed message send —
     /// `true` only for a producer's own result reference (which never
     /// went through `generate_expression`), so a sequenced self-send
@@ -70,9 +70,8 @@ impl PrecompiledScope {
     }
 }
 
-/// BT-3457: collapses the repeated `thread_subexprs` → `docs.remove(0)` →
-/// `close_prelude` idiom (45 call sites pre-extraction) into one owned
-/// value.
+/// Collapses the repeated `thread_subexprs` → `docs.remove(0)` →
+/// `close_prelude` idiom into one owned value.
 ///
 /// [`CoreErlangGenerator::sequence_call`] threads a list of sub-expressions
 /// up front; [`Self::next`] hands back each threaded document in the same
@@ -134,7 +133,7 @@ impl SequencedCall {
 }
 
 impl CoreErlangGenerator {
-    /// ADR 0118 phase 1a (BT-3415): records `expr`'s already-sequenced
+    /// ADR 0118 phase 1a: records `expr`'s already-sequenced
     /// value so the enclosing parent's ordinary compile substitutes it —
     /// see [`Self::precompiled_subexprs`]. Keyed by the paren-unwrapped
     /// span: `generate_expression`'s `Parenthesized` arm recurses, and
@@ -179,7 +178,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// ADR 0118 phase 5b (BT-3422): `true` if `expr` (any nesting of
+    /// ADR 0118 phase 5b: `true` if `expr` (any nesting of
     /// parens) was already registered by an enclosing `sequence_children`
     /// call — a pure, non-consuming check for a caller deciding whether to
     /// re-thread `expr` itself (wrong: double-dispatch) or read the
@@ -207,7 +206,7 @@ impl CoreErlangGenerator {
             (entry.doc.clone(), entry.annotate)
         };
         // Never annotate while an open let-chain is in flight — an
-        // annotated open chain is invalid Core Erlang (BT-940). Defence in
+        // annotated open chain is invalid Core Erlang. Defence in
         // depth over the closed-doc invariant on `PrecompiledSubexpr::annotate`.
         if annotate && self.can_annotate_closed_expression() {
             if let Some(line_num) = self.span_to_line(span) {
@@ -217,7 +216,7 @@ impl CoreErlangGenerator {
         Some(doc)
     }
 
-    /// BT-940: whether the expression just produced may be wrapped in a
+    /// Whether the expression just produced may be wrapped in a
     /// source-line annotation — only a CLOSED expression can be; an open
     /// let-chain (a class-method send, a class-var assignment, a
     /// direct-params list op) ends in a dangling `in ` that `( expr -|
@@ -261,7 +260,7 @@ impl CoreErlangGenerator {
     /// over arguments with comma separation found throughout dispatch codegen.
     /// Captures a comma-separated argument list as a `Document` (ADR 0018 bridge).
     ///
-    /// ADR 0118 phase 5b (BT-3422): each argument is compiled via
+    /// ADR 0118 phase 5b: each argument is compiled via
     /// [`Self::threaded_expression_doc`], which closes any `ClassVars`
     /// prelude inline (a same-class self-send/class-var-assignment
     /// argument, e.g. `self classMethod: x`, no longer needs a dedicated
@@ -284,7 +283,7 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str(", "));
             }
             let saved_cv = self.class_var_version();
-            // ADR 0118 phase 5b (BT-3422): see `subexpr_needs_prelude`'s doc
+            // ADR 0118 phase 5b: see `subexpr_needs_prelude`'s doc
             // comment — an already-precompiled arg is read back via
             // `expression_doc`, never re-threaded.
             let doc = if self.precompiled_subexprs_contains(arg) {
@@ -298,7 +297,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
-    /// ADR 0118 phase 5b (BT-3422): the `ThreadedValue`-based replacement
+    /// ADR 0118 phase 5b: the `ThreadedValue`-based replacement
     /// for the deleted `capture_subexpr_sequence`/`hoist_subexpr_splits`/
     /// `split_subexpr_for_preamble` — same "decide once, hoist all or
     /// none" rule [`Self::sequence_children`] applies to a `MessageSend`'s
@@ -311,7 +310,7 @@ impl CoreErlangGenerator {
     /// to and including the last one that needs a prelude is hoisted, in
     /// order, into `prelude` (a plain one via a fresh `let <prefix>N = ...
     /// in`), preserving left-to-right evaluation order exactly as
-    /// `hoist_subexpr_splits` did (BT-1937).
+    /// `hoist_subexpr_splits` did.
     pub(super) fn thread_subexprs(
         &mut self,
         exprs: &[&Expression],
@@ -328,7 +327,7 @@ impl CoreErlangGenerator {
         };
         let mut docs: Vec<Document<'static>> = Vec::with_capacity(exprs.len());
         for (i, e) in exprs.iter().enumerate() {
-            // ADR 0118 phase 5b (BT-3422): a child an ENCLOSING
+            // ADR 0118 phase 5b: a child an ENCLOSING
             // `sequence_children` call already registered is read back via
             // the ordinary `expression_doc` (`take_precompiled_subexpr`)
             // instead of re-threading it — see `subexpr_needs_prelude`'s
@@ -352,7 +351,7 @@ impl CoreErlangGenerator {
         Ok((prelude, docs))
     }
 
-    /// BT-3457: threads `exprs` via [`Self::thread_subexprs`] and returns
+    /// Threads `exprs` via [`Self::thread_subexprs`] and returns
     /// the result as a [`SequencedCall`] — the builder that collapses the
     /// `thread_subexprs` → `docs.remove(0)` → `close_prelude` idiom into a
     /// single `next()`/`close()` pair at each call site.
@@ -372,8 +371,8 @@ impl CoreErlangGenerator {
     /// sub-expression so a later one's effects can run ahead of it" rule:
     /// mints a fresh `<prefix>N` temp and returns the `let <temp> = <doc>
     /// in ` binding plus the temp's name. Shared by [`Self::thread_subexprs`]
-    /// and `threaded_expression`'s sequencing rule (ADR 0118 §Decision 3,
-    /// BT-3415) so the two cannot drift.
+    /// and `threaded_expression`'s sequencing rule (ADR 0118 §Decision 3)
+    /// so the two cannot drift.
     pub(super) fn bind_subexpr_to_temp(
         &mut self,
         prefix: &str,
@@ -384,7 +383,7 @@ impl CoreErlangGenerator {
         (binding, var)
     }
 
-    /// ADR 0118 phase 5b (BT-3422): the `ThreadedValue`-based replacement
+    /// ADR 0118 phase 5b: the `ThreadedValue`-based replacement
     /// for the deleted `capture_args_with_preamble` — threads every
     /// argument via [`Self::thread_subexprs`] and joins the resulting docs
     /// with commas. Convenience wrapper for the common "no receiver, just
@@ -400,7 +399,7 @@ impl CoreErlangGenerator {
         Ok((prelude, Self::join_docs_with_commas(var_docs)))
     }
 
-    /// ADR 0118 phase 5b (BT-3422): the `ThreadedValue`-based replacement
+    /// ADR 0118 phase 5b: the `ThreadedValue`-based replacement
     /// for the deleted `bind_args_to_temps` — binds every argument
     /// expression to a fresh temp var via a prelude, returning `(prelude,
     /// arg_refs)`.
@@ -423,7 +422,7 @@ impl CoreErlangGenerator {
         let mut arg_refs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         for arg in arguments {
             let span = arg.unwrap_parens().span();
-            // ADR 0118 phase 5b (BT-3422): see `subexpr_needs_prelude`'s doc
+            // ADR 0118 phase 5b: see `subexpr_needs_prelude`'s doc
             // comment — an already-precompiled arg is read back via
             // `expression_doc`, never re-threaded.
             let value_doc = if self.precompiled_subexprs_contains(arg) {
@@ -440,7 +439,7 @@ impl CoreErlangGenerator {
         Ok((prelude, arg_refs))
     }
 
-    /// BT-1937: Joins a list of documents into a comma-separated `Document::Vec`.
+    /// Joins a list of documents into a comma-separated `Document::Vec`.
     pub(super) fn join_docs_with_commas(docs: Vec<Document<'static>>) -> Document<'static> {
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(docs.len() * 2);
         for (i, doc) in docs.into_iter().enumerate() {
@@ -452,7 +451,7 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
-    /// ADR 0118 phase 5b (BT-3422): the `ThreadedValue`-based replacement
+    /// ADR 0118 phase 5b: the `ThreadedValue`-based replacement
     /// for the deleted `finalize_dispatch_with_preamble` — wraps a closed
     /// dispatch `call_doc` with an optional threaded `prelude` from
     /// [`Self::thread_args`]/[`Self::thread_subexprs`] or a receiver's own

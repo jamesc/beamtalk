@@ -15,14 +15,14 @@ use beamtalk_core::ast::{Block, Expression, MessageSelector, WellKnownSelector};
 use std::collections::HashSet;
 
 impl CoreErlangGenerator {
-    /// BT-153/BT-245/BT-598: Check if mutation threading should be used for a block.
+    /// Check if mutation threading should be used for a block.
     /// In REPL mode, local variable mutations trigger threading.
     /// In actor module mode, field writes, self-sends, OR local variable
     /// mutations trigger threading. Local vars are threaded through the state accumulator
     /// map alongside fields.
     /// In value type module mode, only field writes trigger threading (no state map).
-    /// BT-1346: Class methods have no State variable — field/self-send threading is disabled.
-    /// BT-1414: Captured local variable mutations in class method blocks are threaded
+    /// Class methods have no State variable — field/self-send threading is disabled.
+    /// Captured local variable mutations in class method blocks are threaded
     /// via a fresh local map (same as value types).
     pub(in crate::core_erlang) fn needs_mutation_threading(
         &self,
@@ -32,9 +32,9 @@ impl CoreErlangGenerator {
             // REPL: both local vars and fields need threading
             analysis.has_mutations()
         } else if self.in_class_method() {
-            // BT-1346: Class methods have no actor State variable — field writes and
+            // Class methods have no actor State variable — field writes and
             // self-sends must NOT trigger state threading.
-            // BT-1414: However, captured local variable mutations (outer vars both read
+            // However, captured local variable mutations (outer vars both read
             // and written in the block) DO need threading via a fresh local map, same as
             // value types. Without this, `do:` blocks silently lose local mutations.
             analysis
@@ -42,13 +42,13 @@ impl CoreErlangGenerator {
                 .iter()
                 .any(|v| analysis.local_writes.contains(v))
         } else if self.context == CodeGenContext::Actor {
-            // BT-598: Actor methods: field writes, self-sends,
+            // Actor methods: field writes, self-sends,
             // OR local variable mutations all need threading
             analysis.has_state_effects() || !analysis.local_writes.is_empty()
         } else {
-            // BT-892: Value types have no State variable, so self-sends should
+            // Value types have no State variable, so self-sends should
             // NOT trigger state threading. Only field writes need threading.
-            // BT-1053: Captured local variable mutations (outer vars both read and
+            // Captured local variable mutations (outer vars both read and
             // written in the block) also need threading via a fresh local map.
             !analysis.field_writes.is_empty()
                 || analysis
@@ -58,7 +58,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-1329: Returns `true` if the block body contains list op message sends
+    /// Returns `true` if the block body contains list op message sends
     /// (do:, collect:, select:, reject:, inject:into:) whose blocks capture and
     /// mutate variables from the outer scope. These cross-scope mutations are
     /// invisible to `analyze_block` (which doesn't propagate `local_writes` from
@@ -78,7 +78,7 @@ impl CoreErlangGenerator {
         !cross_scope_writes.is_empty()
     }
 
-    /// BT-3423: the precomputed [`block_analysis::BlockMutationAnalysis`]
+    /// The precomputed [`block_analysis::BlockMutationAnalysis`]
     /// profile for `block` when one exists (populated by `compute_semantic_facts`
     /// alongside every other fact), else computed on the fly. This exact
     /// `block_profile(…).cloned().unwrap_or_else(|| analyze_block(…))` pattern
@@ -96,7 +96,7 @@ impl CoreErlangGenerator {
             .unwrap_or_else(|| block_analysis::analyze_block(block))
     }
 
-    /// BT-3423 (ADR 0118 phase 6): the single "does this literal block's body
+    /// ADR 0118 phase 6: the single "does this literal block's body
     /// need mutation threading" check — block-local/field mutations
     /// ([`Self::needs_mutation_threading`], reading [`Self::block_profile_or_analyze`])
     /// OR a cross-scope mutation buried in a nested list-op/counted loop the
@@ -118,7 +118,7 @@ impl CoreErlangGenerator {
             || self.body_has_list_op_cross_scope_mutations(block)
     }
 
-    /// BT-1329: Recursively scans an expression for list op message sends with
+    /// Recursively scans an expression for list op message sends with
     /// cross-scope mutations. Unlike `collect_list_op_cross_scope_mutations`,
     /// this also looks inside Assignment values.
     pub(in crate::core_erlang) fn collect_list_op_cross_scope_mutations_recursive(
@@ -137,7 +137,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2363: Collects outer-scope locals that are *written* inside a nested
+    /// Collects outer-scope locals that are *written* inside a nested
     /// counted loop (`timesRepeat:`/`to:do:`/`to:by:do:`) or list op, including
     /// write-only mutations that `collect_list_op_cross_scope_mutations` (read+write
     /// only) misses.
@@ -174,7 +174,7 @@ impl CoreErlangGenerator {
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
 
-        // BT-3173: ensure:/on:do:/ifNotNil: aren't loops themselves, but a
+        // ensure:/on:do:/ifNotNil: aren't loops themselves, but a
         // loop may be nested inside one of their blocks — recurse straight
         // through (the receiver for ensure:/on:do:, any block arguments for
         // all three) so a nested loop's outer-local write buried behind one
@@ -259,7 +259,7 @@ impl CoreErlangGenerator {
     /// Check if an expression is a control flow construct (whileTrue:, whileFalse:, timesRepeat:, etc.)
     /// with literal blocks that has threaded mutations. Returns the threaded variable names if so.
     ///
-    /// BT-2374: the loop / foldl-list-op extraction set is no longer re-derived by a
+    /// The loop / foldl-list-op extraction set is not re-derived by a
     /// parallel `threaded_vars_*` family — it delegates to the single packing-side
     /// authority [`Self::compute_threaded_locals_for_loop`] (which already branches per
     /// context). The extraction side reading back exactly the set the packing side wrote
@@ -271,7 +271,7 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> Option<Vec<String>> {
-        // BT-2355: `_r := (loop)` wraps the construct in parentheses; peel them so
+        // `_r := (loop)` wraps the construct in parentheses; peel them so
         // the threaded locals are still discovered when the construct is an
         // assignment RHS or sub-expression.
         let expr = expr.unwrap_parens();
@@ -285,7 +285,7 @@ impl CoreErlangGenerator {
             return None;
         };
 
-        // BT-2073: `whileTrue:` / `whileFalse:` are well-known; dispatch via the enum.
+        // `whileTrue:` / `whileFalse:` are well-known; dispatch via the enum.
         // The condition block (receiver) and body block (first argument) reads/writes are
         // unioned by `compute_threaded_locals_for_loop(body, Some(condition))`.
         if matches!(
@@ -307,7 +307,7 @@ impl CoreErlangGenerator {
         };
         let selector_name: String = parts.iter().map(|kw| kw.keyword.as_str()).collect();
 
-        // BT-2703: `eachWithIndex:`/`do:separatedBy:` desugar to an `inject:into:`
+        // `eachWithIndex:`/`do:separatedBy:` desugar to an `inject:into:`
         // fold (see `enumeration_ops`), packing the block's outer-local mutations
         // into the same `__local__` StateAcc keys. The element block is the first
         // argument; `do:separatedBy:`'s separator (the second block) runs in the
@@ -315,7 +315,7 @@ impl CoreErlangGenerator {
         // `enumeration_threads_actor_state`: only the actor fold packs those keys
         // into a `{Acc, State}` reply tuple, so outside it (value types, REPL, a
         // direct-params loop) there is no `__local__` StateAcc to extract from —
-        // context-dependent threading is exactly why BT-3423's shared
+        // context-dependent threading is exactly why the shared
         // `state_threaded_block_arg_indices` table excludes these two selectors
         // (see its doc comment), so they're handled here instead of falling
         // through to it.
@@ -331,7 +331,7 @@ impl CoreErlangGenerator {
             _ => {}
         }
 
-        // BT-2355: conditionals thread outer-local mutations through the StateAcc
+        // Conditionals thread outer-local mutations through the StateAcc
         // map under `__local__` keys (see generate_*_with_mutations, which also seed
         // those keys so extraction is safe even when the taken branch did not write
         // them). `is_conditional_selector` names exactly the selectors with a
@@ -342,7 +342,7 @@ impl CoreErlangGenerator {
             return Self::non_empty(self.conditional_threaded_locals(&Self::block_args(arguments)));
         }
 
-        // BT-3160: on:do:/ensure: thread outer-local mutations the same way a
+        // on:do:/ensure: thread outer-local mutations the same way a
         // conditional's branches do — the try (receiver) block and any
         // handler/cleanup block(s) are mutually-exclusive-or-sequential
         // alternatives that are all compiled, only some of which run at a given
@@ -360,11 +360,11 @@ impl CoreErlangGenerator {
             return Self::non_empty(self.conditional_threaded_locals(&blocks));
         }
 
-        // BT-3423 (ADR 0118 §7): everything else is the loop/list-op family —
+        // ADR 0118 §7: everything else is the loop/list-op family —
         // `to:do:`/`to:by:do:`/`inject:into:` (block at a non-zero index) and
         // the `timesRepeat:`/`do:`/`collect:`/… foldl family (block at index
         // 0), all of which pack updated locals into the StateAcc map returned
-        // as `element(2, …)` of the result tuple (BT-1276/BT-2355/BT-2356) via
+        // as `element(2, …)` of the result tuple via
         // `compute_threaded_locals_for_loop`, the single packing-side
         // authority. The shared `state_threaded_block_arg_indices` table
         // (single source with `is_state_threading_keyword_selector`) says
@@ -389,7 +389,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2374: Computes the threaded outer-locals for a counted loop (`timesRepeat:`,
+    /// Computes the threaded outer-locals for a counted loop (`timesRepeat:`,
     /// `to:do:`, `to:by:do:`) or foldl list/dict op body block via the single packing-side
     /// authority [`Self::compute_threaded_locals_for_loop`], returning `None` when the set
     /// is empty (so the caller's `if let Some(..)` short-circuits) or when `body_arg` is
@@ -404,14 +404,14 @@ impl CoreErlangGenerator {
         Self::non_empty(self.compute_threaded_locals_for_loop(body_block, None))
     }
 
-    /// BT-2374: `Some(v)` when `v` is non-empty, else `None`. Lets the threaded-locals
+    /// `Some(v)` when `v` is non-empty, else `None`. Lets the threaded-locals
     /// extraction collapse a `Vec<String>` packing-side set into the `Option<Vec<String>>`
     /// the Actor method-body sequencer consumes, where empty and absent are equivalent.
     pub(in crate::core_erlang) fn non_empty(v: Vec<String>) -> Option<Vec<String>> {
         if v.is_empty() { None } else { Some(v) }
     }
 
-    /// BT-2355: Collects the `Block` arguments of a message send (e.g. the branch
+    /// Collects the `Block` arguments of a message send (e.g. the branch
     /// blocks of a conditional), preserving order.
     pub(in crate::core_erlang) fn block_args(arguments: &[Expression]) -> Vec<&Block> {
         arguments
@@ -426,7 +426,7 @@ impl CoreErlangGenerator {
             .collect()
     }
 
-    /// BT-2355: Computes the outer-local variables that a conditional's branch
+    /// Computes the outer-local variables that a conditional's branch
     /// blocks mutate and that must be threaded back through the `StateAcc` map.
     ///
     /// A variable is threaded when it is written in some branch, is bound in the
@@ -452,7 +452,7 @@ impl CoreErlangGenerator {
                 .cloned()
                 .unwrap_or_else(|| analyze_block(block));
             let params = Self::block_param_names(block);
-            // BT-2356: `analyze_block` does not propagate `local_writes` out of nested
+            // `analyze_block` does not propagate `local_writes` out of nested
             // (non-conditional) blocks, so an outer local mutated by a nested list op in a
             // branch — e.g. `flag ifTrue: [ items do: [:x | sum := sum + x] ]` — is invisible
             // to `analysis.local_writes`. Collect those cross-scope mutations too so the var is
@@ -504,15 +504,15 @@ impl CoreErlangGenerator {
     /// analyses field-write-empty on purpose to test it, not for callers on a path
     /// where a genuine Tier 2 block could reach this function.
     ///
-    /// BT-852 claimed production call sites could be removed because blocks with
-    /// mutations are supported via the Tier 2 stateful block protocol (ADR 0041).
-    /// BT-2792 found that's only true for *captured local* mutations
+    /// Blocks with mutations are supported via the Tier 2 stateful block protocol
+    /// (ADR 0041), but only for *captured local* mutations
     /// (`captured_mutations_for_block` in `expressions.rs`, which promotes to
     /// `generate_block_stateful`) — Tier 2 promotion never triggers on `self.field :=`
     /// writes. A block with field writes that reaches the generic "pure fun" fallback
-    /// in `generate_block` silently emits Core Erlang `erlc` rejects with "unbound
-    /// variable" (the block's own `fun` bumps the shared state-version counter, but
-    /// that binding is scoped inside the `fun` and never reaches the caller).
+    /// in `generate_block` would silently emit Core Erlang `erlc` rejects with
+    /// "unbound variable" (the block's own `fun` bumps the shared state-version
+    /// counter, but that binding is scoped inside the `fun` and never reaches the
+    /// caller).
     ///
     /// Called from `generate_block` (with an already-computed analysis, so callers
     /// that need more than this check don't re-walk the block's AST) to turn that into
@@ -523,10 +523,10 @@ impl CoreErlangGenerator {
     /// branch below always fires from that call site and the local-mutation branch is
     /// unreachable from it — it's kept live (and directly unit-tested) since this
     /// function checks a block's mutation shape in general, not just the field-write
-    /// case `generate_block` currently cares about. BT-2797 tracks lifting the
+    /// case `generate_block` currently cares about. Lifting the
     /// field-write restriction for stored/opaque blocks by generalizing Tier 2 the same
-    /// way; once that lands this function's field-write branch should shrink to
-    /// whatever shapes remain genuinely unsupported.
+    /// way is tracked separately; once that lands this function's field-write branch
+    /// should shrink to whatever shapes remain genuinely unsupported.
     ///
     /// `location` is a lazy thunk rather than a pre-formatted `String`, so formatting
     /// only happens when an error is actually produced. From `generate_block`'s call
@@ -555,7 +555,7 @@ impl CoreErlangGenerator {
         // WARNING: Local mutations in stored closures won't work as expected
         // Note: For now we're treating this as an error too, but the error type
         // is labeled as a warning in the message.
-        // BT-665: Only flag mutations of captured variables, not new local definitions.
+        // Only flag mutations of captured variables, not new local definitions.
         // A "captured mutation" is a write to a variable that was read before being
         // locally defined (i.e., it captures from outer scope).
         if let Some(variable) = {
