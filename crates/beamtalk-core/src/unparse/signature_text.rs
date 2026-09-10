@@ -22,7 +22,7 @@
 //! `TypeAnnotation` via [`super::unparse_type_annotation_display`] for
 //! AST-based consumers, pre-stringified `ClassHierarchy::MethodInfo` fields,
 //! or `InferredType` from the native type registry
-//! (`beamtalk_cli::commands::generate::stubs::format_type`) — and pass the
+//! (`InferredType::display_annotation`) — and pass the
 //! already-rendered text in as `&str`. That text-in/text-out contract is
 //! what lets one composer serve every consumer without an AST adapter for
 //! the structurally different native-type input (see BT-3097's discussion of
