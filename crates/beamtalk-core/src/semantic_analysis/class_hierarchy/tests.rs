@@ -129,7 +129,7 @@ fn superclass_chain_for_unknown_class() {
     assert!(chain.is_empty());
 }
 
-// --- Subclass query tests (BT-2242) ---
+// --- Subclass query tests ---
 #[test]
 fn direct_subclasses_of_object_includes_actor_and_value() {
     let h = ClassHierarchy::with_builtins();
@@ -249,12 +249,11 @@ fn actor_spawn_methods_are_class_side() {
         selectors.contains(&"spawnWith:"),
         "spawnWith: must be in class_methods"
     );
-    // BT-3071: new/new: are back on Actor's class_methods — lifted from the
-    // codegen-injected error stubs (`generate_actor_new_error_method` et al.,
-    // BT-1524's era) into real, documented `class sealed new` / `new:`
-    // declarations in actor.bt. This does NOT reopen instantiation: the
-    // compiled body still always raises `instantiation_error`, and
-    // `check_actor_new_usage` (BT-563/BT-1524's own hard compile-time error,
+    // new/new: are on Actor's class_methods as real, documented `class
+    // sealed new` / `new:` declarations in actor.bt, not as codegen-injected
+    // error stubs. This does NOT reopen instantiation: the compiled body
+    // still always raises `instantiation_error`, and
+    // `check_actor_new_usage` (a hard compile-time error,
     // unaffected by hierarchy method resolution — see
     // `test_actor_new_error_in_standalone_method` in
     // `semantic_analysis::tests`) still rejects `ActorSubclass new` before
@@ -295,7 +294,8 @@ fn actor_spawn_methods_are_class_side() {
         spawn_with.doc.as_deref().unwrap().contains("actor"),
         "spawnWith: doc should describe actor creation"
     );
-    // BT-1524: new/new: overrides removed — no longer in Actor class_methods
+    // The codegen-injected error-stub overrides of new/new: are gone — they
+    // no longer appear separately in Actor class_methods.
 }
 #[test]
 fn all_methods_overrides_use_most_specific() {
@@ -344,7 +344,7 @@ fn resolves_selector_unknown_class_returns_false() {
     assert!(!h.resolves_selector("Nope", "isNil"));
     assert!(!h.resolves_selector("Nope", "subclassResponsibility"));
 }
-/// BT-889: When a class inherits from an external class (defined in a
+/// When a class inherits from an external class (defined in a
 /// separately-compiled file and therefore absent from the hierarchy), the
 /// walk must fall through to Object so that Object-level methods are
 /// still visible.
@@ -567,7 +567,7 @@ fn non_sealed_subclassing_allowed() {
     assert!(diags.is_empty());
     assert!(h.has_class("MyActor"));
 }
-// --- BT-791: stdlib_mode gating tests ---
+// --- stdlib_mode gating tests ---
 #[test]
 fn stdlib_mode_exempts_builtin_class_from_sealed_check() {
     // In stdlib_mode, a class named "Character" extending sealed "Integer" is allowed.
@@ -630,10 +630,10 @@ fn stdlib_mode_does_not_exempt_non_builtin_class() {
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed"));
 }
-// --- BT-778: Character hierarchy tests ---
+// --- Character hierarchy tests ---
 #[test]
 fn character_superclass_chain_includes_integer() {
-    // BT-778: Character inherits from Integer in the builtin hierarchy.
+    // Character inherits from Integer in the builtin hierarchy.
     let h = ClassHierarchy::with_builtins();
     let chain = h.superclass_chain("Character");
     assert!(
@@ -647,7 +647,7 @@ fn character_superclass_chain_includes_integer() {
 }
 #[test]
 fn character_resolves_integer_selectors() {
-    // BT-778: Character should resolve Integer methods via inheritance.
+    // Character should resolve Integer methods via inheritance.
     let h = ClassHierarchy::with_builtins();
     assert!(
         h.resolves_selector("Character", "+"),
@@ -672,7 +672,7 @@ fn character_resolves_integer_selectors() {
 }
 #[test]
 fn character_is_numeric_type() {
-    // BT-778: Character inherits from Integer which inherits from Number,
+    // Character inherits from Integer which inherits from Number,
     // so it should be treated as numeric for operand-type checks.
     let h = ClassHierarchy::with_builtins();
     assert!(h.is_numeric_type("Integer"), "Integer is numeric");
@@ -1310,7 +1310,7 @@ fn no_duplicate_for_different_selectors() {
     let (_, diags) = ClassHierarchy::build(&module);
     assert!(diags.is_empty());
 }
-// --- Typed class inheritance tests (BT-587) ---
+// --- Typed class inheritance tests ---
 #[test]
 fn typed_class_is_typed() {
     let mut class = make_class_with_sealed_method("StrictCounter", "Actor", "increment", false);
@@ -1752,7 +1752,7 @@ fn state_field_type_shadowed_untyped_field() {
 }
 #[test]
 fn has_instance_dnu_override_detects_erlang() {
-    // BT-1763: Erlang has doesNotUnderstand:args: as an instance method
+    // Erlang has doesNotUnderstand:args: as an instance method
     // (the singleton tagged map dispatches through instance dispatch).
     let h = ClassHierarchy::with_builtins();
     assert!(
@@ -1791,7 +1791,7 @@ fn has_dnu_override_false_for_normal_class() {
         "Integer should not have class DNU override"
     );
 }
-// --- BT-894: Cross-file superclass enrichment tests ---
+// --- Cross-file superclass enrichment tests ---
 #[test]
 fn add_external_superclasses_resolves_value_object_chain() {
     let mut h = ClassHierarchy::with_builtins();
@@ -1865,7 +1865,7 @@ fn add_external_superclasses_does_not_overwrite_existing() {
     let chain = h.superclass_chain("Object");
     assert_eq!(chain, vec![EcoString::from("ProtoObject")]);
 }
-// --- ClassKind / is_value integration tests (BT-922) ---
+// --- ClassKind / is_value integration tests ---
 #[test]
 fn value_subclass_sets_is_value_flag() {
     let class = ClassDefinition {
@@ -2139,7 +2139,7 @@ fn actor_subclass_does_not_set_is_value_flag() {
         .expect("Counter should be registered");
     assert!(!info.is_value, "Actor subclass should not have is_value");
 }
-/// BT-1056: Test sealed method override detection with external superclasses.
+/// Test sealed method override detection with external superclasses.
 /// When a class inherits from an external (unknown) class, ancestor lookup
 /// should not break early; it should continue walking up the chain
 /// using the `external_superclasses` data.
@@ -2407,7 +2407,7 @@ fn add_from_beam_meta_skips_builtins() {
         original_method_count
     );
 }
-// --- BT-1700: ClassInfo package + is_internal infrastructure ---
+// --- ClassInfo package + is_internal infrastructure ---
 #[test]
 fn classinfo_from_ast_populates_is_internal() {
     let source = "internal Actor subclass: InternalCounter\n  state: count = 0\n  increment => self.count := self.count + 1\n";
@@ -2494,7 +2494,7 @@ fn stamp_package_does_not_overwrite_existing_package() {
 }
 #[test]
 fn stamp_package_on_infos_sets_package_on_non_builtin_classes() {
-    // BT-2920: `stamp_package_on_infos` is `stamp_package`'s counterpart for
+    // `stamp_package_on_infos` is `stamp_package`'s counterpart for
     // Pass 1's cross-file `ClassInfo` extraction (build's class index,
     // lint's package walk) — a plain `Vec<ClassInfo>` collected before any
     // `ClassHierarchy` exists, so `stamp_package` itself can't reach it.
@@ -2585,7 +2585,7 @@ fn add_from_beam_meta_preserves_is_internal_and_package() {
         "package should be preserved from BEAM metadata"
     );
 }
-// --- extract_class_infos tests (BT-1523) ---
+// --- extract_class_infos tests ---
 #[test]
 fn extract_class_infos_from_empty_module() {
     let module = Module::new(vec![], crate::source_analysis::Span::default());
@@ -2606,7 +2606,7 @@ fn extract_class_infos_captures_methods_and_state() {
     assert!(info.methods.iter().any(|m| m.selector == "increment"));
     assert!(info.methods.iter().any(|m| m.selector == "getValue"));
 }
-// --- Extension method registration tests (BT-1517) ---
+// --- Extension method registration tests ---
 #[test]
 fn register_extensions_adds_instance_method() {
     use crate::compilation::extension_index::{
@@ -2801,7 +2801,7 @@ fn register_extensions_resolves_selector() {
         "extension should be resolvable via resolves_selector"
     );
 }
-// --- BT-1528: ClassKind hierarchy propagation tests ---
+// --- ClassKind hierarchy propagation tests ---
 #[test]
 fn resolve_class_kind_for_direct_value_subclass() {
     let mut h = ClassHierarchy::with_builtins();
@@ -2845,7 +2845,7 @@ fn resolve_class_kind_supervisor_stays_object() {
     assert_eq!(h.resolve_class_kind("Supervisor"), ClassKind::Object);
 }
 
-// --- ADR 0103: handleScope accessor (BT-2754) ---
+// --- ADR 0103: handleScope accessor ---
 #[test]
 fn handle_scope_stored_and_read() {
     let tokens = crate::source_analysis::lex_with_eof(
@@ -3082,7 +3082,7 @@ fn add_external_superclasses_indirect_value_is_value() {
         "MyValueChild (indirect Value subclass) should have is_value = true via external superclasses"
     );
 }
-/// BT-1559: Cross-file Value sub-subclass should find `new:` via hierarchy walk
+/// Cross-file Value sub-subclass should find `new:` via hierarchy walk
 /// and `propagate_cross_file_class_kind` should synthesize auto-slot methods.
 ///
 /// Simulates: file1 has `Value subclass: Base`, file2 has `Base subclass: Child`.

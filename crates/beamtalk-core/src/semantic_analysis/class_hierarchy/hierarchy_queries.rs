@@ -48,19 +48,18 @@ impl ClassHierarchy {
     /// Returns the names of all classes whose immediate superclass is
     /// `class_name`.
     ///
-    /// Counterpart to `Behaviour subclasses` in the stdlib (BT-2189). The
+    /// Counterpart to `Behaviour subclasses` in the stdlib. The
     /// order is unspecified (it follows hash iteration order); callers that
     /// need a stable presentation sort the result.
     ///
     /// Example: `direct_subclasses("Actor")` → `["Counter", "Logger", ...]`
     /// (every class declared as `Actor subclass: ...`).
     ///
-    /// **BT-2242:** powers `typeHierarchy/subtypes`. Answers come from the
+    /// Powers `typeHierarchy/subtypes`. Answers come from the
     /// in-process `ClassHierarchy` index; the LSP
     /// `typeHierarchy/{supertypes,subtypes}` handlers call this directly with
-    /// no runtime-attached path. See BT-2242 PR notes for the scope-keeping
-    /// decision (a runtime-attached `nav-query` mode was considered and
-    /// deferred to keep this PR focused on the cold-file path).
+    /// no runtime-attached path — a runtime-attached `nav-query` mode is
+    /// deliberately out of scope, kept to the cold-file path.
     #[must_use]
     pub fn direct_subclasses(&self, class_name: &str) -> Vec<EcoString> {
         self.classes
@@ -78,7 +77,7 @@ impl ClassHierarchy {
     /// grandchildren, ...), in breadth-first order. The receiver itself is
     /// not included.
     ///
-    /// Counterpart to `Behaviour allSubclasses` in the stdlib (BT-2189). The
+    /// Counterpart to `Behaviour allSubclasses` in the stdlib. The
     /// breadth-first order is stable across runs *within a level* only by
     /// `direct_subclasses`'s hash iteration order; consumers that need a
     /// fully-stable presentation sort the result.
@@ -86,11 +85,11 @@ impl ClassHierarchy {
     /// Cycles are guarded by a `visited` set (a malformed hierarchy with
     /// `A -> B -> A` would otherwise loop forever).
     ///
-    /// **BT-2242:** powers `typeHierarchy/subtypes`. Answers come from the
+    /// Powers `typeHierarchy/subtypes`. Answers come from the
     /// in-process `ClassHierarchy` index; the LSP
     /// `typeHierarchy/{supertypes,subtypes}` handlers call this directly with
-    /// no runtime-attached path. See [`Self::direct_subclasses`] and the
-    /// BT-2242 PR notes for the scope-keeping decision.
+    /// no runtime-attached path. See [`Self::direct_subclasses`] for the
+    /// scope-keeping rationale.
     #[must_use]
     pub fn all_subclasses(&self, class_name: &str) -> Vec<EcoString> {
         let mut result = Vec::new();
@@ -138,7 +137,7 @@ impl ClassHierarchy {
 
     /// Returns true if the named class is Actor or a subclass of Actor.
     ///
-    /// BT-2882: codegen (`dispatch_type_pattern_strategy`) trusts this to
+    /// codegen (`dispatch_type_pattern_strategy`) trusts this to
     /// decide the actor-tuple tag-test strategy for `x :: SomeClass`, and
     /// relies on it staying consistent with the runtime's own
     /// `beamtalk_supervisor:is_supervisor/1`-style classification of a
@@ -164,9 +163,9 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Actor")
     }
 
-    /// Returns true if the named class is Supervisor or a subclass of Supervisor (BT-1218).
+    /// Returns true if the named class is Supervisor or a subclass of Supervisor.
     ///
-    /// BT-2882: same cross-file-stub-chain invariant as
+    /// Same cross-file-stub-chain invariant as
     /// [`Self::is_actor_subclass`] — see its doc comment.
     #[must_use]
     pub fn is_supervisor_subclass(&self, class_name: &str) -> bool {
@@ -189,9 +188,9 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Server")
     }
 
-    /// Returns true if the named class is `DynamicSupervisor` or a subclass (BT-1218).
+    /// Returns true if the named class is `DynamicSupervisor` or a subclass.
     ///
-    /// BT-2882: same cross-file-stub-chain invariant as
+    /// Same cross-file-stub-chain invariant as
     /// [`Self::is_actor_subclass`] — see its doc comment.
     #[must_use]
     pub fn is_dynamic_supervisor_subclass(&self, class_name: &str) -> bool {
@@ -250,7 +249,7 @@ impl ClassHierarchy {
     }
 
     /// Returns true if any class in the superclass chain (including the class
-    /// itself) was extracted from a file with parse errors (BT-2796).
+    /// itself) was extracted from a file with parse errors.
     ///
     /// Parser error recovery can silently drop method definitions, so a
     /// marked class's recorded method surface may be incomplete. The
@@ -326,7 +325,7 @@ impl ClassHierarchy {
         class_info.is_sealed && self.is_value_subclass(class_name)
     }
 
-    /// Returns true if the named class is `TestCase` or a subclass of `TestCase` (BT-1533).
+    /// Returns true if the named class is `TestCase` or a subclass of `TestCase`.
     ///
     /// `TestCase` is a Value subclass with assertion methods that intentionally
     /// return Nil (side-effecting by design). This check allows validators to
@@ -341,9 +340,9 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "TestCase")
     }
 
-    /// Resolve the `ClassKind` for a class by walking its ancestor chain (BT-1528).
+    /// Resolve the `ClassKind` for a class by walking its ancestor chain.
     ///
-    /// This is the **single authority** for actor/value classification (BT-3086)
+    /// This is the **single authority** for actor/value classification
     /// — the only place that should decide whether a class is `Actor`, `Value`,
     /// or `Object`. Returns `ClassKind::Actor` if any ancestor is `Actor`,
     /// `ClassKind::Value` if any ancestor is `Value`, or `ClassKind::Object`
@@ -400,7 +399,7 @@ impl ClassHierarchy {
             .find_map(|s| self.get_class(s).and_then(|c| c.handle_scope.as_ref()))
     }
 
-    /// BT-1540: Check whether a class defines its own class-side method with the given selector.
+    /// Check whether a class defines its own class-side method with the given selector.
     ///
     /// Returns `true` if the class has a class method matching `selector` defined
     /// directly on it (not inherited). Used to exempt Object-kind classes that
@@ -412,7 +411,7 @@ impl ClassHierarchy {
             .is_some_and(|idx| idx.contains_key(selector))
     }
 
-    /// BT-1528: After all classes in a module are registered, propagate `is_value`
+    /// After all classes in a module are registered, propagate `is_value`
     /// by walking each class's ancestor chain. Classes that indirectly inherit
     /// from Value (e.g. `Value subclass: MyBase` then `MyBase subclass: MyChild`)
     /// get their `is_value` flag corrected and their auto-slot methods
@@ -449,7 +448,7 @@ impl ClassHierarchy {
         }
     }
 
-    /// BT-1559: Re-propagate `is_value` for ALL classes in the hierarchy,
+    /// Re-propagate `is_value` for ALL classes in the hierarchy,
     /// including cross-file classes injected via `add_from_beam_meta`.
     ///
     /// Unlike `propagate_class_kind` which only processes the current module's

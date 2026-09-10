@@ -21,7 +21,7 @@
 /// `split_intersection_type_string`, which layers "no separator found ⇒
 /// `None`" semantics on top for its caller).
 ///
-/// **Unbalanced-parens behaviour (BT-3089):** a stray extra `)` clamps depth
+/// **Unbalanced-parens behaviour:** a stray extra `)` clamps depth
 /// at zero via `saturating_sub` rather than going negative. Depth is only
 /// ever incremented by `(`, so once it reaches zero a further unmatched `)`
 /// cannot make later separators look "more nested" than they are — the
@@ -64,10 +64,8 @@ pub(crate) fn split_top_level(s: &str, sep: char) -> Vec<&str> {
 /// Shared by [`class_hierarchy::declared_type`](super::class_hierarchy::declared_type)
 /// and [`type_checker::type_resolver`](super::type_checker::type_resolver) —
 /// lives here, below both, rather than being duplicated upward into either
-/// (BT-3089; `class_hierarchy` sits below `type_checker` in the dependency
+/// (`class_hierarchy` sits below `type_checker` in the dependency
 /// graph and must not reach up into it).
-///
-/// **References:** BT-2025, BT-3089.
 #[must_use]
 pub(crate) fn split_generic_base(type_name: &str) -> (&str, Option<&str>) {
     match type_name.split_once('(') {
@@ -254,11 +252,10 @@ mod tests {
         );
     }
 
-    /// BT-3089: a stray unmatched `)` clamps depth at zero (`saturating_sub`)
+    /// A stray unmatched `)` clamps depth at zero (`saturating_sub`)
     /// rather than going negative — so the very next top-level separator is
     /// still recognised as top-level, instead of requiring a matching extra
-    /// `(` to "recover" first (the behaviour of the old plain `depth -= 1`
-    /// copy this scanner replaces).
+    /// `(` to "recover" first.
     #[test]
     fn split_top_level_unbalanced_closing_paren_recovers_immediately() {
         assert_eq!(split_top_level("A), B", ','), vec!["A)", "B"]);

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Supervisor kind writeback pass (BT-1218, ADR 0059 Phase 1).
+//! Supervisor kind writeback pass (ADR 0059 Phase 1).
 //!
 //! **DDD Context:** Semantic Analysis
 //!

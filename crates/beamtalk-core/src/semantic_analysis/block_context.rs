@@ -29,9 +29,9 @@ use crate::source_analysis::Span;
 /// pack/unpack codegen (whileTrue:, do:, collect:, etc.) directly inline,
 /// bypassing the universal Tier 2 stateful block protocol.
 ///
-/// After ADR 0041 Phase 3 (BT-856), state threading is universal — all blocks
-/// at unknown call sites use the Tier 2 protocol. The whitelist no longer
-/// determines *whether* state threading happens; it only identifies sites
+/// Under ADR 0041 Phase 3, state threading is universal — all blocks
+/// at unknown call sites use the Tier 2 protocol. The whitelist does not
+/// determine *whether* state threading happens; it only identifies sites
 /// where Tier 1 optimized inline codegen is applicable.
 ///
 /// New collection methods do NOT need to be added here to get state threading —
@@ -117,11 +117,11 @@ pub(crate) fn is_collection_hof_selector(selector: &str, arg_index: usize) -> bo
 /// - **`Other`** / **`Unknown`** → **Tier 2** by default; unknown sites use
 ///   the universal protocol.
 ///
-/// # ADR 0041 Phase 3 (BT-856)
+/// # ADR 0041 Phase 3
 ///
-/// After BT-852/BT-853, the Tier 2 protocol is universal. `classify_block()`
-/// is retained to route between Tier 1 (optimized inline) and Tier 2 (universal
-/// protocol) codegen. The whitelist (`is_control_flow_selector()`) is now an
+/// The Tier 2 protocol is universal. `classify_block()`
+/// routes between Tier 1 (optimized inline) and Tier 2 (universal
+/// protocol) codegen. The whitelist (`is_control_flow_selector()`) is an
 /// optimization hint — it identifies Tier 1 sites, not a correctness gate.
 ///
 /// # Key Distinctions
@@ -211,7 +211,7 @@ pub(crate) fn classify_block(
             return BlockContext::ControlFlow;
         }
 
-        // BT-410: on:do: and ensure: receiver (try body) is a control flow block
+        // on:do: and ensure: receiver (try body) is a control flow block
         if matches!(selector_str.as_str(), "on:do:" | "ensure:")
             && receiver.span() == block_span
             && is_literal_block(receiver)

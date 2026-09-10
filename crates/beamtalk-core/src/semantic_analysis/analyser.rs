@@ -19,7 +19,7 @@ pub(super) struct Analyser {
     pub(super) scope: scope::Scope,
     method_validators: method_validators::MethodValidatorRegistry,
     /// `pub(super)` (not private) so `analyse_full` can recover it by
-    /// destructuring `Analyser` at the end of analysis (BT-3217) — see
+    /// destructuring `Analyser` at the end of analysis — see
     /// `AnalysisResult::type_map`'s doc for why this is a destructure rather
     /// than a consuming accessor mid-pass.
     pub(super) type_map: TypeMap,
@@ -154,7 +154,7 @@ impl Analyser {
                         false
                     }
                 };
-                // BT-2797: `self.field := [block]` gets a distinct context from
+                // `self.field := [block]` gets a distinct context from
                 // `localVar := [block]` so a stored block's field-mutation
                 // diagnostic can tell them apart (see block_analyzer.rs).
                 let value_context = if is_self_field_target {
@@ -370,7 +370,7 @@ impl Analyser {
                     self.define_pattern_variables_in_scope(binding);
                 }
             }
-            // BT-2855: defensive parity with `Pattern::Constructor` above —
+            // Defensive parity with `Pattern::Constructor` above —
             // the parser currently never produces a `Pattern::Type` here
             // (`identifier :: Type := expr` is rejected as "Type annotations
             // on destructuring assignments are not yet supported"), so this
@@ -429,7 +429,7 @@ pub(super) enum ExprContext {
     MessageArg,
     /// Expression is being assigned to a local variable.
     Assignment,
-    /// BT-2797: Expression is being assigned to an instance field
+    /// Expression is being assigned to an instance field
     /// (`self.field := value`), as distinct from a local variable. A block
     /// stored this way is unconditionally safe to promote to Tier 2 even with
     /// field mutations — see `block_analyzer.rs`'s diagnostic for why.

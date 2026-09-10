@@ -61,7 +61,7 @@ pub struct ProtocolInfo {
     pub extending: Option<EcoString>,
     /// Required instance method signatures.
     pub methods: Vec<ProtocolMethodRequirement>,
-    /// Required class method signatures (BT-1611).
+    /// Required class method signatures.
     pub class_methods: Vec<ProtocolMethodRequirement>,
     /// Source span of the protocol definition (for diagnostics).
     pub span: Span,
@@ -159,7 +159,7 @@ impl ProtocolInfo {
         reqs
     }
 
-    /// Returns all required class method selectors, including from extended protocols (BT-1611).
+    /// Returns all required class method selectors, including from extended protocols.
     pub fn all_required_class_selectors<'a>(
         &'a self,
         registry: &'a ProtocolRegistry,
@@ -180,7 +180,7 @@ impl ProtocolInfo {
         selectors
     }
 
-    /// Returns all class method requirements, including from extended protocols (BT-1611).
+    /// Returns all class method requirements, including from extended protocols.
     pub fn all_class_requirements<'a>(
         &'a self,
         registry: &'a ProtocolRegistry,
@@ -223,7 +223,7 @@ impl ProtocolRegistry {
 
     /// Extract `ProtocolInfo` entries from a parsed module without registering them.
     ///
-    /// BT-2006: Mirrors `ClassHierarchy::extract_class_infos` — used by the
+    /// Mirrors `ClassHierarchy::extract_class_infos` — used by the
     /// `BUnit` test pipeline (and any other caller that pre-scans fixture
     /// files) to collect protocol metadata ahead of compiling a downstream
     /// module that references those protocol names.
@@ -238,7 +238,7 @@ impl ProtocolRegistry {
 
     /// Seed the registry with protocols pre-compiled from other source files.
     ///
-    /// BT-2006: The `BUnit` compile path parses fixture files, extracts their
+    /// The `BUnit` compile path parses fixture files, extracts their
     /// `ProtocolInfo`s via `extract_protocol_infos`, and injects them here so
     /// the unresolved-class validator and type checker recognise fixture-only
     /// protocol names when analysing the test module. Skips entries whose
@@ -256,7 +256,7 @@ impl ProtocolRegistry {
         let mut diagnostics = Vec::new();
         for info in protocols {
             if hierarchy.has_class(&info.name) {
-                // BT-2088: Skip collision when the existing "class" is a synthetic
+                // Skip collision when the existing "class" is a synthetic
                 // protocol class entry (superclass is Protocol) — this is just the
                 // class-side representation of the same protocol from a prior load.
                 let is_protocol_class = hierarchy
@@ -304,7 +304,7 @@ impl ProtocolRegistry {
             let name = &protocol_def.name.name;
 
             // Namespace collision: protocol name matches a class name.
-            // BT-2088: Allow re-registration when the existing "class" is actually
+            // Allow re-registration when the existing "class" is actually
             // a synthetic protocol class entry from a previous load (superclass is
             // `Protocol`). This happens during hot-reload when the compiler server's
             // class cache still contains the protocol from the first surface that
@@ -452,7 +452,7 @@ impl ProtocolRegistry {
         protocol: &ProtocolInfo,
         hierarchy: &ClassHierarchy,
     ) -> Result<(), Vec<EcoString>> {
-        // ADR 0100 Rule 1 (BT-2793): an unknown, DNU-overridden, or
+        // ADR 0100 Rule 1: an unknown, DNU-overridden, or
         // cross-file-parent receiver conforms by default — the checker
         // cannot prove non-conformance from an incomplete method surface
         // (Tier 3 DNU bypass folded into the classifier's `Open` state).
@@ -470,7 +470,7 @@ impl ProtocolRegistry {
             }
         }
 
-        // BT-1611: Check class method requirements against the metaclass
+        // Check class method requirements against the metaclass
         let required_class = protocol.all_required_class_selectors(self);
         for selector in required_class {
             if !hierarchy.resolves_class_selector(class_name, selector) {
@@ -486,7 +486,7 @@ impl ProtocolRegistry {
         }
     }
 
-    /// Check if the *class side* of a class conforms to a protocol (BT-2761).
+    /// Check if the *class side* of a class conforms to a protocol.
     ///
     /// This is the metatype counterpart of [`check_conformance`]: it asks
     /// whether the class *object* `C` — a value of type `C class`, inferred as
@@ -532,7 +532,7 @@ impl ProtocolRegistry {
             return Ok(());
         };
 
-        // ADR 0100 Rule 1 (BT-2793): an unknown, class-side-DNU-overridden,
+        // ADR 0100 Rule 1: an unknown, class-side-DNU-overridden,
         // or cross-file-parent receiver conforms by default (Tier 3 DNU
         // bypass folded into the classifier's `Open` state).
         if !receiver_knowledge::classify_receiver(class_name, hierarchy, true).is_closed_complete()
@@ -1094,7 +1094,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    // ---- BT-2761: Class-Side (Metatype) Conformance Tests ----
+    // ---- Class-Side (Metatype) Conformance Tests ----
 
     /// Builds a hierarchy containing a `Gadget` class whose class side has
     /// the given selectors (arity 0), on top of the builtins.
@@ -1286,7 +1286,7 @@ mod tests {
         assert!(result.unwrap_err().contains(&EcoString::from("compareTo:")));
     }
 
-    // ---- BT-1611: Class Method Protocol Tests ----
+    // ---- Class Method Protocol Tests ----
 
     #[test]
     fn register_protocol_with_class_methods() {
@@ -1398,7 +1398,7 @@ mod tests {
         assert!(class_sels.iter().any(|s| s.as_str() == "createWith:"));
     }
 
-    // ---- BT-2006: Pre-loaded protocol namespace collision ----
+    // ---- Pre-loaded protocol namespace collision ----
 
     #[test]
     fn add_pre_loaded_accepts_non_colliding_protocol() {
@@ -1443,7 +1443,7 @@ mod tests {
         assert!(!registry.has_protocol("Integer"));
     }
 
-    // ---- BT-2088: Protocol hot-reload with synthetic protocol class ----
+    // ---- Protocol hot-reload with synthetic protocol class ----
 
     #[test]
     fn register_module_allows_protocol_when_hierarchy_has_protocol_class() {
@@ -1517,7 +1517,7 @@ mod tests {
 
     #[test]
     fn add_pre_loaded_allows_protocol_class_entry() {
-        // BT-2088: Pre-loaded protocol should not collide with a synthetic
+        // Pre-loaded protocol should not collide with a synthetic
         // protocol class entry in the hierarchy.
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.classes_mut().insert(
