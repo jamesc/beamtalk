@@ -1312,6 +1312,28 @@ impl CoreErlangGenerator {
             }
             let is_last = i == body.body.len() - 1;
 
+            // BT-3492: a value-type `self.field := ...` write buried inside
+            // a NESTED construct of this arm's own body — most notably
+            // another `on:do:`/`ensure:` (or a conditional/loop) nested here
+            // — is not a bare top-level statement, so
+            // `block_writes_vt_self_field` (deliberately top-level-only, same
+            // reason as `loop_body_threads_value_self`) never sees it and the
+            // enclosing construct's trailing `Self` slot carries no such
+            // mutation. Left unrejected, the nested write's own `Self{N}`
+            // stays scoped to its own nested `let` and is silently dropped
+            // once that scope closes — confirmed empirically for `ensure:`
+            // nested inside `ensure:`. Reject with the SAME diagnostic the
+            // identical loop-nesting shape already gets
+            // ([`CoreErlangGenerator::reject_unthreadable_value_self_field_write`],
+            // BT-3488) rather than adding support: consistent with that
+            // precedent, and this arm's SINGLE per-statement pass covers
+            // every exception-construct arm (try body, on:do: handler,
+            // ensure: cleanup) since all three lower through this same
+            // function. A no-op outside value-type context, and a no-op for
+            // THIS statement when it is itself the bare top-level write that
+            // `exception_blocks_thread_value_self` already threads correctly.
+            self.reject_unthreadable_value_self_field_write(expr, Self::is_field_assignment(expr))?;
+
             if Self::is_field_assignment(expr) {
                 // E1 — same shape/mint-order as C1; reused directly.
                 let _val_var = self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;

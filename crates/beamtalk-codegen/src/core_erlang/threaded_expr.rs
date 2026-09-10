@@ -195,6 +195,15 @@ impl CoreErlangGenerator {
                 Some(result_var) => result_var,
                 None => return Ok(None),
             }
+        } else if self.is_exception_construct_with_vt_local_threading(expr)
+            || self.is_exception_construct_with_vt_self_field_threading(expr)
+        {
+            // BT-3492: `on:do:`/`ensure:` — the third construct family,
+            // completing the set `lower_threaded_last` recognizes alongside
+            // loops/foldl-list-ops and read+write conditionals. See
+            // `emit_vt_exception_tuple_unwrap_to_var`'s doc comment for why
+            // this was the one shape still missing here.
+            self.emit_vt_exception_tuple_unwrap_to_var(expr, &mut parts)?
         } else {
             return Ok(None);
         };
@@ -390,6 +399,18 @@ impl CoreErlangGenerator {
         if self.is_conditional_with_vt_local_threading(rhs) {
             return Ok(Some(
                 self.emit_vt_conditional_assign_rhs(var_name, rhs, body_parts)?,
+            ));
+        }
+        if self.is_exception_construct_with_vt_local_threading(rhs)
+            || self.is_exception_construct_with_vt_self_field_threading(rhs)
+        {
+            // BT-3492: the assign-RHS mirror of the `lower_threaded_last`
+            // addition above — `on:do:`/`ensure:` as an assignment RHS
+            // previously bound the target to the raw
+            // `{Result, StateAcc[, Self]}` tuple and dropped every threaded
+            // mutation.
+            return Ok(Some(
+                self.emit_vt_exception_assign_rhs(var_name, rhs, body_parts)?,
             ));
         }
         Ok(None)

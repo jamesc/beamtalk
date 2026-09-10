@@ -1066,6 +1066,58 @@ impl CoreErlangGenerator {
         Ok(result_var)
     }
 
+    /// BT-3492: emits a last/return-position `on:do:`/`ensure:` that mutates
+    /// captured outer locals and/or writes a value-type
+    /// `self.field := ...`, as an open let chain that binds the construct's
+    /// own `{Result, StateAcc[, Self]}` tuple and extracts element 1 (the
+    /// construct's logical result) to a fresh result var.
+    ///
+    /// The `SelfVt` mirror of [`Self::emit_vt_threaded_tuple_unwrap_to_var`]
+    /// for the third construct family — before this, `on:do:`/`ensure:` was
+    /// the one shape [`Self::lower_threaded_last`] did not recognize
+    /// (BT-3177's standing `emit_threaded_last` follow-up), so it fell
+    /// through to the generic last-expression path and leaked the raw tuple
+    /// as the method's own return value. Threaded outer locals (element 2)
+    /// don't escape in last position — same as the loop/conditional cases —
+    /// so, unlike [`Self::generate_vt_exception_construct_open`]'s non-last
+    /// extraction, they are never unpacked here. When the construct also
+    /// threads a value-type `Self`
+    /// ([`Self::is_exception_construct_with_vt_self_field_threading`]),
+    /// element 3 is rebound via
+    /// [`CoreErlangGenerator::rebind_value_self_from_doc`] — without this a
+    /// field-mutating `on:do:`/`ensure:` in last/return position would
+    /// compile and run, but the method's own returned `Self` (and the
+    /// `{Result, Self{N}}` NLR tuple) would carry the pre-`try` snapshot
+    /// instead of the construct's.
+    pub(in crate::core_erlang) fn emit_vt_exception_tuple_unwrap_to_var(
+        &mut self,
+        expr: &Expression,
+        body_parts: &mut Vec<Document<'static>>,
+    ) -> Result<String> {
+        let threads_value_self = self.is_exception_construct_with_vt_self_field_threading(expr);
+        let span = expr.span();
+        let tuple_var = self.fresh_temp_var("ExTuple");
+        let result_var = self.fresh_temp_var("ExResult");
+        let expr_doc = self.expression_doc(expr)?;
+        body_parts.push(docvec![
+            "    let ",
+            leaf::var(tuple_var.clone()),
+            " = ",
+            expr_doc,
+            " in\n    let ",
+            leaf::var(result_var.clone()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(tuple_var.clone()),
+            ") in\n",
+        ]);
+        if threads_value_self {
+            let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
+            let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
+            body_parts.push(docvec!["    ", rebind_doc, "\n"]);
+        }
+        Ok(result_var)
+    }
+
     /// Returns `true` if `expr` evaluates to a `{value, StateAcc}` threaded
     /// tuple in value-type / class-method context, whose element 1 is the logical result and
     /// element 2 is the `StateAcc` map of mutated outer locals.
@@ -2060,6 +2112,95 @@ impl CoreErlangGenerator {
                 let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
                 body_parts.push(docvec!["    ", rebind_doc, "\n"]);
             }
+        }
+
+        Ok(core_var)
+    }
+
+    /// BT-3492: emits a value-type/class-method local assignment whose RHS
+    /// is an `on:do:`/`ensure:` that mutates captured outer locals and/or
+    /// writes a value-type `self.field := ...`.
+    ///
+    /// Binds the target variable to element 1 (the construct's logical
+    /// result), rebinds each threaded outer local from element 2
+    /// (`StateAcc`) — unlike last position, an assignment RHS's threaded
+    /// locals DO need to escape to subsequent statements — and, when the
+    /// construct also threads a value-type `Self`
+    /// ([`Self::is_exception_construct_with_vt_self_field_threading`]),
+    /// rebinds `Self` from the trailing element 3. The `on:do:`/`ensure:`
+    /// mirror of [`Self::emit_vt_threaded_local_assignment`], and the
+    /// assign-RHS mirror of
+    /// [`Self::generate_vt_exception_construct_open`]'s non-last extraction.
+    /// Without this the target would be bound to the raw
+    /// `{Result, StateAcc[, Self]}` tuple and every threaded mutation would
+    /// keep its pre-construct value.
+    ///
+    /// Returns the Core Erlang variable bound to the assignment target.
+    pub(in crate::core_erlang) fn emit_vt_exception_assign_rhs(
+        &mut self,
+        var_name: &str,
+        value: &Expression,
+        body_parts: &mut Vec<Document<'static>>,
+    ) -> Result<String> {
+        let threads_value_self = self.is_exception_construct_with_vt_self_field_threading(value);
+        let span = value.span();
+        let rhs_doc = self.expression_doc(value)?;
+        let tuple_var = self.fresh_temp_var("AssignExTuple");
+
+        body_parts.push(docvec![
+            "    let ",
+            leaf::var(tuple_var.clone()),
+            " = ",
+            rhs_doc,
+            " in\n",
+        ]);
+
+        let core_var = self
+            .lookup_var(var_name)
+            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+        body_parts.push(docvec![
+            "    let ",
+            leaf::var(core_var.clone()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(tuple_var.clone()),
+            ") in\n",
+        ]);
+        self.bind_var(var_name, &core_var);
+
+        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
+            let rebind: Vec<&String> = threaded_vars
+                .iter()
+                .filter(|tl| tl.as_str() != var_name)
+                .collect();
+            if !rebind.is_empty() {
+                let state_var = self.fresh_temp_var("AssignExState");
+                body_parts.push(docvec![
+                    "    let ",
+                    leaf::var(state_var.clone()),
+                    " = call 'erlang':'element'(2, ",
+                    leaf::var(tuple_var.clone()),
+                    ") in\n",
+                ]);
+                for tl in rebind {
+                    let tl_core = self.fresh_var(tl);
+                    body_parts.push(docvec![
+                        "    let ",
+                        leaf::var(tl_core.clone()),
+                        " = call 'maps':'get'(",
+                        leaf::atom(Self::local_state_key(tl)),
+                        ", ",
+                        leaf::var(state_var.clone()),
+                        ") in\n",
+                    ]);
+                    self.bind_var(tl, &tl_core);
+                }
+            }
+        }
+
+        if threads_value_self {
+            let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
+            let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
+            body_parts.push(docvec!["    ", rebind_doc, "\n"]);
         }
 
         Ok(core_var)
