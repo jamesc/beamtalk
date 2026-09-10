@@ -191,10 +191,7 @@ impl CoreErlangGenerator {
         } {
             return Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock {
                 selector: selector.clone(),
-                location: self.span_to_line(span).map_or_else(
-                    || format!("offset {}", span.start()),
-                    |line| format!("line {line}"),
-                ),
+                location: self.location_label(span),
             });
         }
         Ok(())
@@ -309,12 +306,7 @@ impl CoreErlangGenerator {
         // spuriously trip validate_stored_closure's separate local-mutation
         // branch, which only applies to blocks that never reach Tier 2 at all.
         if !analysis.field_writes.is_empty() {
-            Self::validate_stored_closure(&analysis, || {
-                self.span_to_line(block.span).map_or_else(
-                    || format!("offset {}", block.span.start()),
-                    |line| format!("line {line}"),
-                )
-            })?;
+            Self::validate_stored_closure(&analysis, || self.location_label(block.span))?;
         }
 
         // Deliberately NOT calling `check_no_unsafe_class_method_self_sends`

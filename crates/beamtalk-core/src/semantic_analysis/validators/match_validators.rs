@@ -136,6 +136,17 @@ fn visit_match_exhaustiveness(expr: &Expression, diagnostics: &mut Vec<Diagnosti
 ///   _ -> "default"
 /// ]
 /// ```
+///
+/// # Local variables only (BT-3489)
+///
+/// A `self.field := ...` arm body used to get a sibling warning here. It was
+/// wrong on both counts: in `Actor` context the mutation now threads
+/// correctly (codegen routes the arm through the same branch-merge an
+/// `ifTrue:` branch's field write uses), and in value-type context it was
+/// never the promised silent no-op either — it reached codegen and crashed
+/// `erlc` with an unbound `Self{N}`, which codegen now reports as
+/// `ValueSelfFieldAssignmentInMatchArm`. Neither case is a dead assignment,
+/// so neither belongs in this lint.
 pub(crate) fn warn_assignment_in_match_arms(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
     walk_module(module, &mut |expr| {
         visit_assignment_in_match_arm(expr, diagnostics);
@@ -149,49 +160,22 @@ fn visit_assignment_in_match_arm(expr: &Expression, diagnostics: &mut Vec<Diagno
 
     for arm in arms {
         if let Expression::Assignment { target, span, .. } = &arm.body {
-            match target.as_ref() {
-                Expression::Identifier(id) => {
-                    diagnostics.push(
-                        Diagnostic::warning(
-                            format!(
-                                "Assignment to `{}` inside a match arm has no effect — \
-                                 the variable is not updated after the match expression.",
-                                id.name,
-                            ),
-                            *span,
-                        )
-                        .with_hint(format!(
-                            "Capture the match result instead: `{} := value match: [...]`",
+            if let Expression::Identifier(id) = target.as_ref() {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        format!(
+                            "Assignment to `{}` inside a match arm has no effect — \
+                             the variable is not updated after the match expression.",
                             id.name,
-                        ))
-                        .with_category(DiagnosticCategory::DeadAssignment),
-                    );
-                }
-                Expression::FieldAccess {
-                    receiver, field, ..
-                } if matches!(
-                    receiver.as_ref(),
-                    Expression::Identifier(r) if r.name == "self"
-                ) =>
-                {
-                    diagnostics.push(
-                        Diagnostic::warning(
-                            format!(
-                                "Assignment to `self.{}` inside a match arm has no effect — \
-                                 the state update is lost after the match expression.",
-                                field.name,
-                            ),
-                            *span,
-                        )
-                        .with_hint(
-                            "Move the field assignment outside the match, \
-                             or use an `ifTrue:ifFalse:` chain instead."
-                                .to_string(),
-                        )
-                        .with_category(DiagnosticCategory::DeadAssignment),
-                    );
-                }
-                _ => {}
+                        ),
+                        *span,
+                    )
+                    .with_hint(format!(
+                        "Capture the match result instead: `{} := value match: [...]`",
+                        id.name,
+                    ))
+                    .with_category(DiagnosticCategory::DeadAssignment),
+                );
             }
         }
     }
@@ -751,6 +735,27 @@ mod tests {
             diagnostics[0].message.contains("result"),
             "Expected variable name in message, got: {}",
             diagnostics[0].message
+        );
+    }
+
+    /// BT-3489: a `self.field :=` arm body is NOT a dead assignment and must
+    /// not warn. In `Actor` context codegen threads it correctly (same
+    /// branch-merge an `ifTrue:` branch's field write uses); in value-type
+    /// context it is a hard codegen rejection
+    /// (`CodeGenError::ValueSelfFieldAssignmentInMatchArm`), not the
+    /// silent no-op the old warning promised. Either way this lint would be
+    /// wrong.
+    #[test]
+    fn self_field_assignment_in_match_arm_does_not_warn() {
+        let src = "Actor subclass: Probe\n  state: total = 0\n\n  bump: v =>\n    v match: [1 -> self.total := self.total + 10; _ -> self.total := self.total + 1]\n    self.total\n";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        warn_assignment_in_match_arms(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no dead-assignment warning for a `self.field :=` match arm, got: {diagnostics:?}"
         );
     }
 

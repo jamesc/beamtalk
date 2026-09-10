@@ -595,6 +595,20 @@ impl CoreErlangGenerator {
         Some(span.line_number(source))
     }
 
+    /// Human-readable source location for a `CodeGenError`'s `location` field.
+    ///
+    /// `"line 12"` when [`Self::span_to_line`] can resolve the span against the
+    /// available source text, `"offset 431"` when it cannot (no source text
+    /// attached, or a span out of range). Every codegen rejection that carries a
+    /// `location: String` formats it this way, so this is the one place the
+    /// wording lives.
+    pub(in crate::core_erlang) fn location_label(&self, span: Span) -> String {
+        self.span_to_line(span).map_or_else(
+            || format!("offset {}", span.start()),
+            |l| format!("line {l}"),
+        )
+    }
+
     /// Wraps a Document with a Core Erlang line annotation.
     ///
     /// Delegates to [`leaf::annotated`] for the `[Line, {'file', Path}]` shape

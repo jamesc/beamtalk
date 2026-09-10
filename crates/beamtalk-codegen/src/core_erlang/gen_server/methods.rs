@@ -3173,37 +3173,83 @@ impl CoreErlangGenerator {
         false
     }
 
-    /// `true` when a `match:` needs actor state threading — i.e. it
-    /// runs in Actor context and at least one arm's body either is a Tier 2
-    /// value-call (most commonly a state-mutating `[...] value` block) or is
-    /// itself a nested control-flow-with-mutations construct (`ifTrue:`/
-    /// `ifFalse:`/a nested `match:`/etc. with no `[...] value` wrapper, e.g.
-    /// `nil -> flag ifTrue: [self.x := 1]`). `generate_match` checks this once
-    /// per `match:` and, when true, compiles every arm's body to a uniform
+    /// `true` when a `match:` needs state threading — i.e. at least one arm's
+    /// body either is a Tier 2 value-call (most commonly a state-mutating
+    /// `[...] value` block), is itself a nested control-flow-with-mutations
+    /// construct (`ifTrue:`/`ifFalse:`/a nested `match:`/etc. with no
+    /// `[...] value` wrapper, e.g. `nil -> flag ifTrue: [self.x := 1]`), or
+    /// is a bare `self.field := ...` write, parentheses aside (BT-3489).
+    /// `generate_match` checks this
+    /// once per `match:` and, when true, compiles every arm's body to a uniform
     /// `{Value, State}` shape so the whole expression can be unwrapped by the
     /// same machinery as `ifTrue:`/`ifFalse:` mutations
     /// (`control_flow_has_mutations`'s `Expression::Match` branch above — this
     /// function is mutually recursive with it, which is what lets a nested
     /// `match:` arm body be detected too).
+    ///
+    /// # Context gating (BT-3489)
+    ///
+    /// The Tier 2 / nested-control-flow / hoistable-self-send disjuncts are
+    /// Actor-only: each is about actor `State` threading or an actor self-send,
+    /// neither of which exists for a value type.
+    ///
+    /// The field-write disjunct (`threads_fields`) additionally covers a
+    /// value-type CLASS method, where `self.x :=` is a CLASS-var write on the
+    /// `ClassVars` chain: threading it routes the arm through
+    /// `lower_field_assignment_bind`'s shared `reject_class_var_field_assignment`
+    /// gate and yields a clean
+    /// [`CodeGenError::ClassVarAssignmentInThreadedBody`]. Without it that arm
+    /// compiled through plain `expression_doc` into a second arm reading the
+    /// first arm's `ClassVars1` binding — `erlc: unbound variable 'ClassVars1'`,
+    /// the class-var sibling of this issue's `State1`/`Self1` crash.
+    ///
+    /// A value-type INSTANCE method is the one field-writing context excluded:
+    /// its `Self`/`SelfN` chain (`VersionPrefix::SelfVt`) has no N-arm merge at
+    /// all, so `generate_match` rejects that shape up front as
+    /// [`CodeGenError::ValueSelfFieldAssignmentInMatchArm`] rather than
+    /// threading it.
+    ///
+    /// [`CodeGenError::ValueSelfFieldAssignmentInMatchArm`]: super::super::CodeGenError::ValueSelfFieldAssignmentInMatchArm
+    /// [`CodeGenError::ClassVarAssignmentInThreadedBody`]: super::super::CodeGenError::ClassVarAssignmentInThreadedBody
     pub(in crate::core_erlang) fn match_needs_mutation_threading(
         &self,
         arms: &[beamtalk_core::ast::MatchArm],
     ) -> bool {
-        self.context == super::super::CodeGenContext::Actor
-            && arms.iter().any(|arm| {
-                self.is_tier2_value_call(&arm.body)
-                    || self.control_flow_has_mutations(&arm.body)
-                    // (ADR 0118 phase 4): an arm body that is
-                    // neither a Tier 2 block-value call nor itself a nested
-                    // control-flow-with-mutations construct, but DOES
-                    // contain a (possibly nested, hoistable) actor
-                    // self-send — `1 -> 1 + (self bumpCount)` — still needs
-                    // this `match:` threaded, so `generate_match_arm_body`'s
-                    // plain-wrap arm gets a chance to hoist it instead of
-                    // silently dropping the mutation via a bare
-                    // `expression_doc` compile.
-                    || self.conditional_receiver_needs_threading(&arm.body)
-            })
+        let is_actor = self.context == super::super::CodeGenContext::Actor;
+        // A field write in a `match:` arm can only be merged back where there
+        // is an N-arm-capable version chain to merge it into: an actor's
+        // `State` (either method kind), or a class method's `ClassVars`. The
+        // remaining case — a value-type INSTANCE method's `Self` chain — has
+        // no such merge, so it is excluded here rather than left to depend on
+        // `generate_match`'s up-front
+        // [`CodeGenError::ValueSelfFieldAssignmentInMatchArm`] rejection
+        // running first: that rejection is what users see, but this gate stays
+        // correct on its own if it ever moves.
+        let threads_fields = is_actor
+            || (matches!(self.context, super::super::CodeGenContext::ValueType)
+                && self.in_class_method());
+        arms.iter().any(|arm| {
+            // BT-3489: a `self.field := ...` arm body. Before this, nothing
+            // here matched it, so `generate_match` left `base_state` as
+            // `None` and the arm compiled through plain `expression_doc`,
+            // whose field-write binding (`State1`/`ClassVars1`) is scoped to
+            // that one `case` arm — yet the code after the `match:` referenced
+            // it unconditionally, so `erlc` rejected the module outright.
+            (threads_fields && Self::is_field_assignment(arm.body.unwrap_parens()))
+                || (is_actor
+                    && (self.is_tier2_value_call(&arm.body)
+                        || self.control_flow_has_mutations(&arm.body)
+                        // (ADR 0118 phase 4): an arm body that is
+                        // neither a Tier 2 block-value call nor itself a nested
+                        // control-flow-with-mutations construct, but DOES
+                        // contain a (possibly nested, hoistable) actor
+                        // self-send — `1 -> 1 + (self bumpCount)` — still needs
+                        // this `match:` threaded, so `generate_match_arm_body`'s
+                        // plain-wrap arm gets a chance to hoist it instead of
+                        // silently dropping the mutation via a bare
+                        // `expression_doc` compile.
+                        || self.conditional_receiver_needs_threading(&arm.body)))
+        })
     }
 
     /// Returns captured mutation variable names for a Tier 2

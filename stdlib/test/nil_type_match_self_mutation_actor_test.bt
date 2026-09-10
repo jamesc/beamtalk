@@ -56,3 +56,64 @@ TestCase subclass: NilTypeMatchSelfMutationActorTest
     self assert: r3 equals: 1
     self assert: a currentCount equals: 2
     self assert: a currentOtherCount equals: 1
+
+  // --- BT-3489: bare `self.field := ...` arm bodies -------------------------
+  testBumpBareThreadsMatchingArmMutation =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpBare: 1) equals: 10
+    self assert: a currentCount equals: 10
+
+  testBumpBareThreadsWildcardArmMutation =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpBare: 99) equals: 1
+    self assert: a currentCount equals: 1
+
+  testBumpBareAccumulatesAcrossCalls =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    a bumpBare: 1
+    a bumpBare: 99
+    self assert: (a bumpBare: 1) equals: 21
+    self assert: a currentCount equals: 21
+
+  testBumpBareEitherOfMutatesOnlyTheMatchingArmsField =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    a bumpBareEitherOf: 1
+    a bumpBareEitherOf: 1
+    self assert: (a bumpBareEitherOf: 2) equals: 3
+    self assert: a currentCount equals: 2
+    self assert: a currentOtherCount equals: 1
+
+  testBumpBareUsingResultSeesBothValueAndMutation =>
+    // The arm's assigned value (10) is the match's value, and the post-match
+    // `self.count` read sees the same mutated 10 — so 20, not 10 or 0.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpBareUsingResult: 1) equals: 20
+    self assert: a currentCount equals: 10
+
+  testBumpBareTypedThreadsTypePatternArmMutation =>
+    // `Pattern::Type` arm -> generate_match_chain lowering, not the
+    // all-native fast path the other bumpBare* tests exercise.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpBareTyped: 5) equals: 5
+    self assert: a currentCount equals: 5
+
+  testBumpBareTypedThreadsWildcardArmMutation =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpBareTyped: "not an integer") equals: 1
+    self assert: a currentCount equals: 1
+
+  testBumpBareInLoopAccumulatesOnePerIteration =>
+    // i=1 takes the `1 ->` arm (+10), i=2..4 take the wildcard (+1 each): 13.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpBareInLoop: 4) equals: 13
+    self assert: a currentCount equals: 13
+
+  testBumpBareNestedThreadsInnerArmMutation =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpBareNested: 1) equals: 5
+    self assert: a currentCount equals: 5
+
+  testBumpBareNestedLeavesStateAloneOnNonMatchingArm =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpBareNested: 99) equals: 0
+    self assert: a currentCount equals: 0
