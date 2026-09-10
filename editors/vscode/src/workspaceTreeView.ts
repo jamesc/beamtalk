@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
+import { type StdlibDocumentOpener, resolveClassDocument } from "./documentResolution";
 import { GenerationTracker } from "./generationTracker";
 import {
   type DeclarationRef,
@@ -210,9 +211,7 @@ export class WorkspaceTreeDataProvider
    * compiled-in stdlib classes) has nothing to read and falls straight to
    * the hardcoded fallback tooltip — see `_resolveClassDocument`.
    */
-  private stdlibDocumentOpener:
-    | ((classInfo: ClassInfo) => Promise<vscode.TextDocument | undefined>)
-    | null = null;
+  private stdlibDocumentOpener: StdlibDocumentOpener | null = null;
   private connectionState: ConnectionState = "disconnected";
   private bindings: BindingsMap = {};
   private actors: ActorInfo[] = [];
@@ -273,23 +272,21 @@ export class WorkspaceTreeDataProvider
   }
 
   /**
-   * Set the session ID captured from `beamtalk repl` stdout.
-   * This session ID is used for bindings queries so the sidebar shows
-   * the session's variables rather than the extension's own (empty) session.
-   * Pass null to clear (e.g. when the session terminal is closed).
-   */
-  /**
    * Inject the stdlib virtual-URI document opener (see `stdlibDocumentOpener`
    * above). Pass null to clear. Independent of `setClient`/the workspace
    * protocol connection — it only needs the LSP `LanguageClient`, which
    * extension.ts wires up once at activation.
    */
-  setStdlibDocumentOpener(
-    opener: ((classInfo: ClassInfo) => Promise<vscode.TextDocument | undefined>) | null
-  ): void {
+  setStdlibDocumentOpener(opener: StdlibDocumentOpener | null): void {
     this.stdlibDocumentOpener = opener;
   }
 
+  /**
+   * Set the session ID captured from `beamtalk repl` stdout.
+   * This session ID is used for bindings queries so the sidebar shows
+   * the session's variables rather than the extension's own (empty) session.
+   * Pass null to clear (e.g. when the session terminal is closed).
+   */
   setSessionId(id: string | null): void {
     const wasAttached = this.sessionId !== null;
     this.sessionId = id;
@@ -652,33 +649,22 @@ export class WorkspaceTreeDataProvider
 
   /**
    * Open the document a class's source lives in, for hover/doc-comment
-   * lookups. Tries the real `source_file` first; falls back to the injected
-   * `stdlibDocumentOpener` (the `beamtalk-stdlib://` virtual URI scheme) for
-   * compiled-in stdlib classes, which the runtime never records a real
-   * `source_file` for — the same fallback `_hasNavigableSource`/
-   * `beamtalk.openClassSource` already use for navigation. Every hover path
+   * lookups. Delegates the actual "real `source_file`, else the
+   * `beamtalk-stdlib://` virtual URI fallback" rule to `resolveClassDocument`
+   * (the same one `beamtalk.openClassSource`/`navigateToMethod`/
+   * `navigateToStateVar` use for navigation, in documentResolution.ts) and
+   * collapses its result to a plain document-or-undefined — every hover path
    * below (`_lspHoverTooltip`, `_methodDocCommentTooltip`, `_stateVarTooltip`)
-   * goes through this, so a stdlib-defined class or a method/state var
-   * inherited from one gets the same doc-comment treatment as a local one —
-   * previously they fell straight to the hardcoded fallback tooltip.
+   * only needs "did this open," not why it didn't. So a stdlib-defined class
+   * or a method/state var inherited from one gets the same doc-comment
+   * treatment as a local one — previously they fell straight to the
+   * hardcoded fallback tooltip.
    */
   private async _resolveClassDocument(
     classInfo: ClassInfo
   ): Promise<vscode.TextDocument | undefined> {
-    const sourceFile = classInfo.source_file;
-    if (sourceFile && sourceFile !== "unknown") {
-      try {
-        return await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
-      } catch {
-        return undefined;
-      }
-    }
-    if (!this.stdlibDocumentOpener) return undefined;
-    try {
-      return await this.stdlibDocumentOpener(classInfo);
-    } catch {
-      return undefined;
-    }
+    const result = await resolveClassDocument(classInfo, this.stdlibDocumentOpener);
+    return result.kind === "opened" ? result.document : undefined;
   }
 
   private async _lspHoverTooltip(
