@@ -58,12 +58,161 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{join, leaf};
 use beamtalk_core::ast::{Block, Expression};
 
+/// BT-3486: one inlined `on:do:`/`ensure:` arm (a try body, an `on:do:`
+/// handler, or one of `ensure:`'s two cleanup runs), as produced by
+/// [`CoreErlangGenerator::generate_exception_body_with_threading`].
+///
+/// `self_mutated_version` is the arm's final [`VersionPrefix::SelfVt`]
+/// version when the arm performed a value-type `self.field := ...` write,
+/// and `None` when it did not — the `SelfVt` mirror of the `cv_mutated_version`
+/// / `self_mutated_version` pair `value_type_codegen.rs`'s `VtBranchPieces`
+/// carries for a conditional's branch arms (BT-3159/BT-3484), and read the
+/// same way: an arm that did not itself write carries the construct's
+/// pre-`try` baseline in the slot instead, so both arms agree on the tuple
+/// shape.
+struct ExceptionArm {
+    doc: Document<'static>,
+    result_var: String,
+    state_version: usize,
+    self_mutated_version: Option<usize>,
+}
+
 impl CoreErlangGenerator {
     fn state_acc_var_doc(state_version: usize) -> Document<'static> {
         match state_version {
             0 => docvec!["StateAcc"],
             n => leaf::var(super::super::util::versioned_var("StateAcc", n)),
         }
+    }
+
+    /// BT-3486: the value-type `Self` version this arm contributes to the
+    /// construct's trailing third result-tuple slot — the arm's own mutated
+    /// version if it wrote a field, else `self_before` (the version live
+    /// immediately before the `try`, which every arm inherits and which
+    /// `with_branch_context` restores on exit).
+    ///
+    /// `None` — no slot at all — whenever the construct carries no value-type
+    /// `Self` ([`Self::exception_blocks_thread_value_self`]), which is every
+    /// Actor- and class-method-context construct and every value-type one
+    /// whose blocks contain no top-level field write.
+    fn exception_self_slot(
+        threads_value_self: bool,
+        self_before: usize,
+        arm: &ExceptionArm,
+    ) -> Option<usize> {
+        threads_value_self.then(|| arm.self_mutated_version.unwrap_or(self_before))
+    }
+
+    /// BT-3486: generates one exception arm — seeding its value-type `Self`,
+    /// then pushing the seed and the arm's own code onto `docs` in that order
+    /// — and returns the three pieces the caller needs to close the arm's
+    /// result tuple: the variable holding its last expression's value, its
+    /// final `StateAcc` version, and the trailing `Self` slot it contributes
+    /// ([`Self::exception_self_slot`]).
+    ///
+    /// The seed / baseline / generate / slot sequence is identical for every
+    /// arm that starts from the construct's own pre-`try` baseline — both
+    /// `on:do:` arms and `ensure:`'s error-path cleanup run. `ensure:`'s
+    /// success-path cleanup is the one exception: it re-seeds from the try
+    /// tuple's trailing slot rather than from `outer_self`, so it open-codes
+    /// the same steps with that different seed.
+    fn push_exception_arm(
+        &mut self,
+        docs: &mut Vec<Document<'static>>,
+        body: &Block,
+        threads_value_self: bool,
+        outer_self: usize,
+    ) -> Result<(String, usize, Option<usize>)> {
+        let seed = self.seed_exception_arm_self(threads_value_self, outer_self);
+        let baseline = self.self_version();
+        let arm = self.generate_exception_body_with_threading(body)?;
+        let self_slot = Self::exception_self_slot(threads_value_self, baseline, &arm);
+        docs.push(seed);
+        docs.push(arm.doc);
+        Ok((arm.result_var, arm.state_version, self_slot))
+    }
+
+    /// BT-3486: renders `, Self{N}` for an arm's trailing slot, or nothing
+    /// when the construct carries no `Self` slot. Kept next to
+    /// [`Self::state_acc_var_doc`] so the two-element and three-element
+    /// return shapes are built in one place.
+    fn exception_self_slot_doc(self_slot: Option<usize>) -> Document<'static> {
+        self_slot.map_or(Document::Nil, |version| {
+            docvec![
+                ", ",
+                leaf::var(super::super::util::versioned_var("Self", version)),
+            ]
+        })
+    }
+
+    /// BT-3486: emits the arm-local `let Self = Self{N} in ` shadow that gives
+    /// a value-type exception arm the version-0 `SelfVt` entry parameter its
+    /// own [`threaded_ir`](super::super::threaded_ir) frame requires —
+    /// `verify`'s `check_use` treats version 0, and only version 0, as a
+    /// frame's implicit always-bound entry, so an arm handed a live `Self{N}`
+    /// baseline would consume a version its frame never produces — and resets
+    /// the counter so the arm mints `Self1`, `Self2`, … from there.
+    ///
+    /// This is the exact `Self` counterpart of the `let StateAcc = <outer> in `
+    /// rebind every one of these constructs already performs for the state
+    /// accumulator: same name shadowing, same version-0 restart, same reason.
+    ///
+    /// [`Document::Nil`] (and no reset) when the construct threads no
+    /// value-type `Self`, or when the live version is already 0 — the common
+    /// case, where `Self` is the method's own fun parameter and there is
+    /// nothing to shadow. `live > 0` happens when an earlier statement in the
+    /// same method already wrote a field, including a preceding `on:do:`/
+    /// `ensure:` whose own mutation this issue now threads out.
+    fn seed_exception_arm_self(
+        &mut self,
+        threads_value_self: bool,
+        live: usize,
+    ) -> Document<'static> {
+        if !threads_value_self || live == 0 {
+            return Document::Nil;
+        }
+        self.set_self_version(0);
+        docvec![
+            "let Self = ",
+            leaf::var(super::super::util::versioned_var("Self", live)),
+            " in ",
+        ]
+    }
+
+    /// BT-3486: whether an `on:do:`/`ensure:`'s inlined blocks thread a
+    /// value-type `Self` mutation out through the construct's trailing third
+    /// result-tuple slot.
+    ///
+    /// The single rule behind both halves of this fix: the emitters below
+    /// call it with the two `Block`s they are about to inline, and
+    /// `value_type_codegen.rs`'s
+    /// `is_exception_construct_with_vt_self_field_threading` calls it with
+    /// the same two blocks pulled back out of the `MessageSend` — so wherever
+    /// a consumer runs, the tuple SHAPE the emitter writes and the extraction
+    /// the consumer emits agree by construction (the same arrangement
+    /// `loop_body_threads_value_self` already has for BT-3484's loops).
+    ///
+    /// The consumer is `classify_vt_body_expr`'s non-last
+    /// `ExceptionConstructWithThreading` arm, so — exactly as for the
+    /// two-element `{Result, StateAcc}` tuple these constructs have returned
+    /// since BT-3177 — the tuple is left unextracted in the positions that
+    /// classification does not reach: last statement, assignment RHS, or
+    /// nested inside another construct's inlined body. Those positions leak
+    /// the raw tuple and drop the mutation today; widening them is BT-3177's
+    /// standing `emit_threaded_last` follow-up, not something this slot
+    /// changes either way.
+    ///
+    /// Context-gated inside [`Self::block_writes_vt_self_field`]: `false` in
+    /// Actor context (where `state.field :=` and the construct's `StateAcc`
+    /// are the same map and thread for free) and in class methods (where
+    /// `self.x :=` is a `ClassVar` write with its own ADR 0110 threading).
+    pub(in crate::core_erlang) fn exception_blocks_thread_value_self(
+        &self,
+        blocks: &[&Block],
+    ) -> bool {
+        blocks
+            .iter()
+            .any(|block| self.block_writes_vt_self_field(block))
     }
 
     /// Emits `primop 'raw_raise'(Type, Error, Stack)` — the shared re-raise
@@ -337,6 +486,9 @@ impl CoreErlangGenerator {
     /// value-type field mutations (`VersionPrefix::SelfVt`) are threaded
     /// entirely separately — this map never needs to carry them, so an
     /// empty seed outside Actor context is correct, not just a stopgap.
+    /// BT-3486: "threaded entirely separately" is literal for `SelfVt` —
+    /// it rides the construct's trailing third result-tuple slot
+    /// ([`Self::exception_self_slot_doc`]), never this map.
     /// Before this fix, both callers unconditionally called
     /// `current_state_var()`, which at version 0 renders as the bare
     /// identifier `"State"` regardless of context — valid only in Actor
@@ -373,6 +525,11 @@ impl CoreErlangGenerator {
     ///         true  -> let _e = ExObj in <handler body with threading> StateAccM
     ///         false -> primop 'raw_raise'(Type, Error, RawStack)
     /// ```
+    ///
+    /// BT-3486: in value-type context, when either block writes `self.field
+    /// := ...`, both returned tuples grow a trailing third slot carrying that
+    /// arm's own `Self{N}` — see
+    /// [`Self::exception_blocks_thread_value_self`].
     fn generate_on_do_with_mutations(
         &mut self,
         receiver_block: &Block,
@@ -413,6 +570,16 @@ impl CoreErlangGenerator {
         // `maps:get/2` would hit a missing key.
         let (seed_doc, base_state) =
             self.seed_conditional_locals(&[receiver_block, handler_block], &current_state);
+        // BT-3486: decided from the AST BEFORE either arm is generated, so
+        // both arms' return tuples agree on the shape even though only one of
+        // them may actually contain the field write — the `element/3`
+        // extraction the consumer emits after the construct is fixed at
+        // compile time and runs whichever arm executed.
+        let threads_value_self =
+            self.exception_blocks_thread_value_self(&[receiver_block, handler_block]);
+        // The construct's own live `Self{N}`, restored between arms (they are
+        // siblings: only one ever runs) and once more after the construct.
+        let outer_self = self.self_version();
 
         let mut docs: Vec<Document<'static>> = vec![docvec![
             "let ",
@@ -427,10 +594,8 @@ impl CoreErlangGenerator {
         ]];
 
         // Generate try body (receiver block) with state threading
-        // BT-483: Now returns (doc, result_var, state_version)
-        let (try_body_doc, try_result_var, try_final) =
-            self.generate_exception_body_with_threading(receiver_block)?;
-        docs.push(try_body_doc);
+        let (try_result_var, try_final, try_self_slot) =
+            self.push_exception_arm(&mut docs, receiver_block, threads_value_self, outer_self)?;
         // BT-483: Return {Result, State} from try body
         // Success: pass {Result, State} through + catch clause with NLR passthrough.
         // BT-754/BT-761/BT-854: NLR re-raise via on_do_catch_preamble (see generate_on_do).
@@ -439,6 +604,7 @@ impl CoreErlangGenerator {
             leaf::var(try_result_var),
             ", ",
             Self::state_acc_var_doc(try_final),
+            Self::exception_self_slot_doc(try_self_slot),
             "} ",
             "of ",
             leaf::var(state_after_try.clone()),
@@ -476,16 +642,16 @@ impl CoreErlangGenerator {
         }
 
         // Generate handler body with state threading (from original StateAcc)
-        // BT-483: Now returns (doc, result_var, state_version)
-        let (handler_body_doc, handler_result_var, handler_final) =
-            self.generate_exception_body_with_threading(handler_block)?;
-        docs.push(handler_body_doc);
+        self.set_self_version(outer_self);
+        let (handler_result_var, handler_final, handler_self_slot) =
+            self.push_exception_arm(&mut docs, handler_block, threads_value_self, outer_self)?;
         // BT-483: Return {Result, State} from handler
         docs.push(docvec![
             " {",
             leaf::var(handler_result_var),
             ", ",
             Self::state_acc_var_doc(handler_final),
+            Self::exception_self_slot_doc(handler_self_slot),
             "} ",
         ]);
         self.pop_scope();
@@ -508,6 +674,12 @@ impl CoreErlangGenerator {
             Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var),
             " end end",
         ]);
+        // BT-3486: an arm's `let Self = … in ` shadow and its own `Self{N}`
+        // chain live entirely inside that arm's Core Erlang scope; the
+        // construct's single legitimate advance of the method's live version
+        // is the consumer's post-construct rebind
+        // (`generate_vt_exception_construct_open`), so leave it as found.
+        self.set_self_version(outer_self);
 
         Ok(Document::Vec(docs))
     }
@@ -619,6 +791,11 @@ impl CoreErlangGenerator {
     ///     <inlined cleanup with state threading from original StateAcc>
     ///     primop 'raw_raise'(Type, Error, Stack)
     /// ```
+    ///
+    /// BT-3486: in value-type context, when either block writes `self.field
+    /// := ...`, every returned tuple above grows a trailing third slot
+    /// carrying that arm's own `Self{N}` — see
+    /// [`Self::exception_blocks_thread_value_self`].
     fn generate_ensure_with_mutations(
         &mut self,
         receiver_block: &Block,
@@ -644,6 +821,13 @@ impl CoreErlangGenerator {
         // here run sequentially rather than as alternatives.
         let (seed_doc, base_state) =
             self.seed_conditional_locals(&[receiver_block, cleanup_block], &current_state);
+        // BT-3486: see `generate_on_do_with_mutations` — decided from the AST
+        // up front so every arm's return tuple agrees on the shape.
+        let threads_value_self =
+            self.exception_blocks_thread_value_self(&[receiver_block, cleanup_block]);
+        // The construct's own live `Self{N}` — restored between arms and once
+        // more after the construct (see `generate_on_do_with_mutations`).
+        let outer_self = self.self_version();
         let mut docs: Vec<Document<'static>> = vec![docvec![
             seed_doc,
             "let StateAcc = ",
@@ -652,16 +836,15 @@ impl CoreErlangGenerator {
         ]];
 
         // Generate try body with state threading
-        // BT-483: Now returns (doc, result_var, state_version)
-        let (try_body_doc, try_result_var, try_final) =
-            self.generate_exception_body_with_threading(receiver_block)?;
-        docs.push(try_body_doc);
+        let (try_result_var, try_final, try_self_slot) =
+            self.push_exception_arm(&mut docs, receiver_block, threads_value_self, outer_self)?;
         // BT-483: Return {Result, State} from try body
         docs.push(docvec![
             " {",
             leaf::var(try_result_var),
             ", ",
             Self::state_acc_var_doc(try_final),
+            Self::exception_self_slot_doc(try_self_slot),
             "} ",
         ]);
 
@@ -676,21 +859,53 @@ impl CoreErlangGenerator {
             " = call 'erlang':'element'(1, ",
             leaf::var(state_after_try.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
-            leaf::var(state_after_try),
+            leaf::var(state_after_try.clone()),
             ") in ",
         ]);
 
-        let (cleanup_success_doc, _, cleanup_success_final) =
-            self.generate_exception_body_with_threading(cleanup_block)?;
-        docs.push(cleanup_success_doc);
+        // BT-3486: on the SUCCESS path the cleanup runs after the try body, so
+        // it must see the try body's field writes — but an Erlang binding made
+        // inside `try` is not in scope in the `of` arm, so the try's own
+        // `Self{N}` is unreachable here. Re-seed from the tuple's trailing
+        // slot, shadowing the *unversioned* name `Self` exactly as the
+        // `StateAcc = element(2, …)` line immediately above shadows `StateAcc`
+        // — and for the same reason: an arm's `ThreadedIr` frame treats
+        // version 0 as its implicit, always-bound entry parameter (see
+        // `check_use` in `threaded_ir/verify.rs`), so a cleanup arm handed a
+        // version > 0 baseline would consume a version its own frame never
+        // produces. Version 0 in, the arm's own `Self1`, `Self2`, … out.
+        let cleanup_success_baseline = if threads_value_self {
+            docs.push(docvec![
+                "let Self = call 'erlang':'element'(3, ",
+                leaf::var(state_after_try),
+                ") in ",
+            ]);
+            self.set_self_version(0);
+            0
+        } else {
+            outer_self
+        };
+
+        let cleanup_success_arm = self.generate_exception_body_with_threading(cleanup_block)?;
+        let cleanup_success_self_slot = Self::exception_self_slot(
+            threads_value_self,
+            cleanup_success_baseline,
+            &cleanup_success_arm,
+        );
+        docs.push(cleanup_success_arm.doc);
         // BT-483: Return try body result with cleanup's final state
         docs.push(docvec![
             " {",
             leaf::var(result_from_try),
             ", ",
-            Self::state_acc_var_doc(cleanup_success_final),
+            Self::state_acc_var_doc(cleanup_success_arm.state_version),
+            Self::exception_self_slot_doc(cleanup_success_self_slot),
             "} ",
         ]);
+        // BT-3486: the error path below is a SIBLING of the whole `of` arm,
+        // not its successor, so it starts again from the construct's own
+        // pre-`try` baseline rather than from the success path's re-seed.
+        self.set_self_version(outer_self);
 
         // Error: run cleanup for side effects (from original StateAcc), then re-raise
         docs.push(docvec![
@@ -703,10 +918,12 @@ impl CoreErlangGenerator {
             "> -> ",
         ]);
 
-        // Cleanup body generates state mutations that are discarded (re-raise follows)
-        let (cleanup_error_doc, _, _cleanup_error_final) =
-            self.generate_exception_body_with_threading(cleanup_block)?;
-        docs.push(cleanup_error_doc);
+        // Cleanup body generates state mutations that are discarded (re-raise
+        // follows) — including, in value-type context, any `Self{N}` it mints:
+        // this path re-raises rather than returning a tuple, so it has no
+        // trailing slot to carry one (BT-3486). It still gets the version-0
+        // arm seed, since its own frame must verify like any other.
+        self.push_exception_arm(&mut docs, cleanup_block, threads_value_self, outer_self)?;
 
         // ADR 0111 Addendum 5 (BT-3165): three sibling with_branch_context
         // frames — the try body, the success-path cleanup run, and the
@@ -721,6 +938,9 @@ impl CoreErlangGenerator {
             " ",
             Self::emit_raw_raise(type_var, error_var, stack_var),
         ]);
+        // BT-3486: leave the method's live `Self{N}` as found — see the
+        // matching restore at the end of `generate_on_do_with_mutations`.
+        self.set_self_version(outer_self);
 
         Ok(Document::Vec(docs))
     }
@@ -1009,16 +1229,23 @@ impl CoreErlangGenerator {
     /// - Sets `in_loop_body = true` so field reads/writes use `StateAcc`
     /// - Resets `state_version` to 0 (`StateAcc` is version 0)
     /// - Threads field assignments, self-sends, and local var assignments
-    /// - Returns `(doc, result_var, final_state_version)` — the Document holding
-    ///   the generated code, the variable holding the last expression's result,
-    ///   and the final state version number
+    /// - Returns an [`ExceptionArm`] — the Document holding the generated
+    ///   code, the variable holding the last expression's result, the final
+    ///   state version number, and (BT-3486) the arm's final `SelfVt` version
+    ///   when it performed a value-type `self.field := ...` write
     ///
     /// The caller must have already bound `StateAcc` to the current state
     /// before calling this function.
-    fn generate_exception_body_with_threading(
-        &mut self,
-        body: &Block,
-    ) -> Result<(Document<'static>, String, usize)> {
+    ///
+    /// BT-3486: the `SelfVt` version must be read from INSIDE
+    /// `with_branch_context` — that guard lets each arm inherit the outer
+    /// version on entry (so both arms are true siblings, both sourcing their
+    /// `maps:put` chains from the same pre-`try` `Self`) and restores it on
+    /// exit (so an arm's own in-`try` `Self{N}`, unreachable from outside the
+    /// Core Erlang `try`, never leaks into the enclosing method's live
+    /// version). That restore is exactly why the caller cannot read it back
+    /// afterwards, and why it is returned here.
+    fn generate_exception_body_with_threading(&mut self, body: &Block) -> Result<ExceptionArm> {
         self.with_branch_context(|this| this.generate_exception_body_with_threading_inner(body))
     }
 
@@ -1050,8 +1277,14 @@ impl CoreErlangGenerator {
     fn generate_exception_body_with_threading_inner(
         &mut self,
         body: &Block,
-    ) -> Result<(Document<'static>, String, usize)> {
+    ) -> Result<ExceptionArm> {
         let frame = self.current_branch_frame();
+        // BT-3486: the `SelfVt` baseline this arm inherits (see
+        // `generate_exception_body_with_threading`'s doc comment) — compared
+        // against the post-body version below to detect a value-type field
+        // write, exactly as `build_vt_conditional_branch_pieces_inner` does
+        // for a conditional arm.
+        let self_before = self.self_version();
         // BT-3160: push a scope so a local-var assignment's `bind_var` rebind
         // (from `lower_local_var_assignment_bind`) is scoped to this try
         // body and doesn't leak into the enclosing method scope — matching the
@@ -1272,10 +1505,16 @@ impl CoreErlangGenerator {
         }
 
         let final_state_version = self.state_version();
+        let self_after = self.self_version();
         self.pop_scope();
         let (doc, _) =
             self.verify_and_render_branch_arm(stmts, frame, final_state_version, body.span);
-        Ok((doc, result_var, final_state_version))
+        Ok(ExceptionArm {
+            doc,
+            result_var,
+            state_version: final_state_version,
+            self_mutated_version: (self_after != self_before).then_some(self_after),
+        })
     }
 }
 

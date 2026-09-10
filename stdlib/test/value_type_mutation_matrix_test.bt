@@ -103,6 +103,14 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // threading) and through a conditional's branch-merge tuple (mirroring
   // BT-3159's `ClassVars` slot) — so both cells run their ground-truth
   // asserts. Kept as a switch for documentation/bisection.
+  //
+  // BT-3486 closed the same gap in the third construct family
+  // (`on:do:`/`ensure:`), where it was SILENT rather than a compile error:
+  // the construct's `{Result, StateAcc}` result tuple now grows a trailing
+  // `Self` slot whenever either inlined block writes a field, and the
+  // method-body sequencer rebinds the method's live `Self` from it. Its
+  // cells (`testStateFieldEnsure*` / `testStateFieldOnDo*` below) never
+  // needed a pending switch — they are added already passing.
   bt3484ValueTypeFieldWriteThreadingPending => false
 
   // ── TestCase-context fragments (the test class is itself a value-type) ──────
@@ -191,6 +199,94 @@ TestCase subclass: ValueTypeMutationMatrixTest
         self.total := self.total + 7
         seen := seen + 1
       ]
+    self.total
+
+  // BT-3486 axis-4, third construct family: `on:do:`/`ensure:`. Byte-for-byte
+  // the same bodies as mutation_corpus_actor.bt's `stateFieldEnsure*` /
+  // `stateFieldOnDo*` fragments, so the absolute oracle compares like with
+  // like across contexts. Before BT-3486 every one of these COMPILED CLEANLY
+  // and returned the field's original value (0) — the silent-data-loss half
+  // of the ADR 0120 gap list, and the reason these could not simply be added
+  // alongside BT-3484's loop/conditional cells.
+  fragStateFieldEnsureTryNonLastReadWrite =>
+    seen := 0
+    [
+      self.total := self.total + 1
+      seen := seen + 1
+    ] ensure: [nil]
+    self.total
+
+  fragStateFieldEnsureCleanupNonLastReadWrite =>
+    seen := 0
+    [
+      seen := seen + 1
+      nil
+    ]
+      ensure: [
+        self.total := self.total + 7
+        nil
+      ]
+    self.total
+
+  fragStateFieldEnsureBothNonLastReadWrite =>
+    seen := 0
+    [
+      self.total := self.total + 1
+      seen := seen + 1
+    ]
+      ensure: [
+        self.total := self.total + 10
+        nil
+      ]
+    self.total
+
+  fragStateFieldOnDoTryNonLastReadWrite =>
+    seen := 0
+    [
+      self.total := self.total + 3
+      seen := seen + 1
+    ] on: Error do: [:e | nil]
+    self.total
+
+  fragStateFieldOnDoHandlerNonLastReadWrite =>
+    seen := 0
+    [
+      self.total := self.total + 1
+      seen := seen + 1
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:e |
+        self.total := self.total + 5
+        nil
+      ]
+    self.total
+
+  // BT-3486's own repro, verbatim: the field write is the construct's ONLY
+  // mutation, so the BT-3177 outer-local predicate says "nothing to thread"
+  // and — before this fix — the whole construct was sequenced away as a bare
+  // `let _seqN = … in`, discarding the mutation. TestCase-only: the Actor
+  // corpus's fragments all carry a co-occurring outer-local read+write (see
+  // its `selfSendIfTrueNonLastReadWrite` comment on why), so there is no
+  // like-for-like Actor cell for this one shape.
+  fragStateFieldEnsureWriteOnlyNonLast =>
+    [
+      self.total := self.total + 1
+      nil
+    ] ensure: [nil]
+    self.total
+
+  // Two such constructs back to back: the second must chain from the first's
+  // threaded `Self`, not from the method's original one.
+  fragStateFieldEnsureChainedNonLast =>
+    [
+      self.total := self.total + 1
+      nil
+    ] ensure: [nil]
+    [
+      self.total := self.total + 2
+      nil
+    ] ensure: [nil]
     self.total
 
   // ════════════════════════════════════════════════════════════════════════
@@ -693,6 +789,49 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testClassVarIfTrueNonLastReadWriteFalseClassMethod =>
     self assert: (MutationCorpusClassMethod classVarIfTrueNonLastReadWrite: false) equals: 0
+
+  // ── axis 4 × on:do:/ensure: (BT-3486) ────────────────────────────────────
+  // The third construct family, at the same density as the loop and
+  // conditional cells above. Each TestCase (value-type) cell is paired with
+  // the Actor cell for the identical fragment body, and both assert the same
+  // ground truth — the "matching Actor's state.field := behavior in the
+  // identical shape" bar BT-3486 was written against.
+  testStateFieldEnsureTryNonLastReadWriteActor =>
+    self assert: self actorCorpus stateFieldEnsureTryNonLastReadWrite equals: 1
+
+  testStateFieldEnsureTryNonLastReadWriteTestCase =>
+    self assert: self fragStateFieldEnsureTryNonLastReadWrite equals: 1
+
+  testStateFieldEnsureCleanupNonLastReadWriteActor =>
+    self assert: self actorCorpus stateFieldEnsureCleanupNonLastReadWrite equals: 7
+
+  testStateFieldEnsureCleanupNonLastReadWriteTestCase =>
+    self assert: self fragStateFieldEnsureCleanupNonLastReadWrite equals: 7
+
+  testStateFieldEnsureBothNonLastReadWriteActor =>
+    self assert: self actorCorpus stateFieldEnsureBothNonLastReadWrite equals: 11
+
+  testStateFieldEnsureBothNonLastReadWriteTestCase =>
+    self assert: self fragStateFieldEnsureBothNonLastReadWrite equals: 11
+
+  testStateFieldOnDoTryNonLastReadWriteActor =>
+    self assert: self actorCorpus stateFieldOnDoTryNonLastReadWrite equals: 3
+
+  testStateFieldOnDoTryNonLastReadWriteTestCase =>
+    self assert: self fragStateFieldOnDoTryNonLastReadWrite equals: 3
+
+  testStateFieldOnDoHandlerNonLastReadWriteActor =>
+    self assert: self actorCorpus stateFieldOnDoHandlerNonLastReadWrite equals: 5
+
+  testStateFieldOnDoHandlerNonLastReadWriteTestCase =>
+    self assert: self fragStateFieldOnDoHandlerNonLastReadWrite equals: 5
+
+  // TestCase-only shapes (see the fragments' own comments).
+  testStateFieldEnsureWriteOnlyNonLastTestCase =>
+    self assert: self fragStateFieldEnsureWriteOnlyNonLast equals: 1
+
+  testStateFieldEnsureChainedNonLastTestCase =>
+    self assert: self fragStateFieldEnsureChainedNonLast equals: 3
 
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3414 (ADR 0118 phase 0) — self-send POSITION axis, Actor-only
