@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Dictionary primitive implementations (BT-418).
+//! Dictionary primitive implementations.
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
@@ -12,7 +12,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
-/// Dictionary primitive implementations (BT-418).
+/// Dictionary primitive implementations.
 pub(crate) fn generate_dictionary_bif(
     selector: &str,
     params: &[String],

@@ -15,7 +15,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
-/// Array primitive implementations (BT-822).
+/// Array primitive implementations.
 pub(crate) fn generate_array_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     let p0 = param(params, 0, "_Arg0");
     match selector {
@@ -31,8 +31,8 @@ pub(crate) fn generate_array_bif(selector: &str, params: &[String]) -> Option<Do
             leaf::var(p0.to_string()),
             ")"
         ]),
-        // BT-3027: mirrors String's "first"/"last" (BT-3021) — both raise
-        // `empty_collection` on an empty Array.
+        // Mirrors String's "first"/"last" — both raise `empty_collection`
+        // on an empty Array.
         "first" => Some(Document::Str("call 'beamtalk_array':'first'(Self)")),
         "last" => Some(Document::Str("call 'beamtalk_array':'last'(Self)")),
         "at:put:" => {

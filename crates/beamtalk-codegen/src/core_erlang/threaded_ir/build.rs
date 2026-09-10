@@ -19,7 +19,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_core::source_analysis::Span;
 
-// ─── BT-3133/BT-3147 (ADR 0111 Phase C) TupleAcc unpack: emission input ────
+// ─── ADR 0111 Phase C TupleAcc unpack: emission input ────
 
 /// Builds the real `ThreadedIr` for one `TupleAcc`-mode fold lambda's
 /// per-iteration positional unpack step — the single production emitter of
@@ -27,13 +27,13 @@ use beamtalk_core::source_analysis::Span;
 /// (`basic_ops.rs`, `filter_ops.rs`, `search_ops.rs`, `transform_ops.rs`,
 /// `dict_ops.rs`, all via `generate_foldl_loop_body`, `control_flow/body.rs`).
 ///
-/// BT-3147: promoted from a verification-only side channel (BT-3133) to
+/// Promoted from a verification-only side channel to
 /// genuine emission input — [`render`]ing this exact `ThreadedStmt` IS how
 /// `generate_foldl_loop_body` now produces its `Document` output, not a
 /// second, independently hand-Document-built duplicate of it. Each target's
 /// identity is a [`VersionPrefix::Gensym`] (never [`VersionPrefix::Local`]):
 /// the real per-iteration unpack binds the BARE `to_core_erlang_var` name
-/// (`Sum`, never `Sum1`) — matching every real call site's pre-BT-3147
+/// (`Sum`, never `Sum1`) — matching every real call site's
 /// hand-rolled loop byte-for-byte (confirmed against `basic_ops.rs`'s
 /// `generate_list_do_with_mutations`, the simplest call site) — never the
 /// sequential `prefix{version}` scheme `Local`'s renderer would apply to a
@@ -42,18 +42,18 @@ use beamtalk_core::source_analysis::Span;
 /// existing verbatim-regardless-of-version rendering closes it here too,
 /// with no new IR machinery.
 ///
-/// **Independent gate-slot derivation (BT-3147, invariant class 4 goes
-/// live)**: `mode_gate_slots` and `node_gate_slots` are now two genuinely
-/// separate sources, no longer the same argument threaded twice. Callers
+/// **Independent gate-slot derivation**: `mode_gate_slots` and
+/// `node_gate_slots` are two genuinely separate sources, not the same
+/// argument threaded twice. Callers
 /// pass `mode_gate_slots` from [`super::super::control_flow::ListOpKind::gate_slots`]
 /// — a canonical per-op-family table fixed at `ThreadingPlan` construction
 /// (lowering time, before any particular call site's `index_offset` is even
 /// chosen) — and `node_gate_slots` from their own already-computed
-/// `index_offset - 1` (rendering-side construction, unchanged from BT-3133).
+/// `index_offset - 1` (rendering-side construction).
 /// A call site whose `index_offset` disagrees with its declared
 /// `ListOpKind` (e.g. a future op miscategorized when copy-pasted from a
-/// same-shaped sibling) now trips [`VerifyError::EarlyExitGateSlotMismatch`]
-/// for real — see [`verify_tuple_acc_unpack_invariant`] and
+/// same-shaped sibling) trips [`VerifyError::EarlyExitGateSlotMismatch`]
+/// — see [`verify_tuple_acc_unpack_invariant`] and
 /// `control_flow::mod::ListOpKind`'s own doc comment for the full per-op
 /// gate-slot table (`0` for `do:`/`dict do:`; `1` for `collect:`/
 /// `select:`/`reject:`/`inject:into:`/`anySatisfy:`/`allSatisfy:`/`count:`/
@@ -101,7 +101,7 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
     (stmt, targets)
 }
 
-// ─── Class-var Bind construction (BT-3135/BT-3148, ADR 0110 contract) ─────
+// ─── Class-var Bind construction (ADR 0110 contract) ─────
 
 /// Constructs the single class-var version `Bind` a production emission site
 /// is about to render, and verifies it against a synthetic ADR 0110
@@ -117,7 +117,7 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
 /// see ADR 0110 §Runtime change's "no per-nesting-level save/restore is
 /// needed" reasoning).
 ///
-/// **BT-3148**: unlike the deleted `verify_class_var_bind` (which verified a
+/// Unlike the deleted `verify_class_var_bind` (which verified a
 /// hardcoded `0 -> 1` step, disconnected from the version actually in play —
 /// both call sites rendered their real `current_class_var()`/`next_class_var()`
 /// names by hand, and separately passed an always-`0->1` fixture here purely
@@ -155,7 +155,7 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
 /// **This is deliberately NOT `self.current_nlr_token().is_some()`** (whether
 /// *this* method's own body happens to contain a literal `^` inside one of
 /// its own block literals, gating whether `lower_class_method_body`'s
-/// caller prepends a real `NlrCatch` — BT-3164, formerly `wrap_class_method_body_with_nlr_catch`)
+/// caller prepends a real `NlrCatch` — formerly `wrap_class_method_body_with_nlr_catch`)
 /// — that would silently exempt the *exact* ADR 0110 repro shape from this
 /// check: `CollectionDriver countedRun:over:` mutates a class var and then
 /// invokes a **caller-supplied** block (`aBlock value: x`, inside its own
@@ -232,11 +232,11 @@ pub(in crate::core_erlang) fn construct_and_verify_class_var_bind(
     // Trigger 1 (unchanged from before Addendum 9): `frame != FrameId::ROOT`
     // must PUSH `frame` via a `Threaded` node, or `VerifyWalk::check_use`'s
     // frame-flow rule can never find a backfilled version `>0` at that frame
-    // (a bare top-level `Bind`/`NlrCatch` never pushes anything) — this is
-    // exactly the gap that produced a spurious `UnboundVersion` before
-    // BT-3148 added real backfill history here (the `dispatch_codegen.rs`
-    // rebind site's frame is now honestly `FrameId::ROOT` too, so it no
-    // longer triggers this one — see its own call-site comment).
+    // (a bare top-level `Bind`/`NlrCatch` never pushes anything) — without
+    // real backfill history here this would be a spurious `UnboundVersion`
+    // gap (the `dispatch_codegen.rs` rebind site's frame is honestly
+    // `FrameId::ROOT` too, so it never triggers this one — see its own
+    // call-site comment).
     //
     // Trigger 2 (new in Addendum 9): `!shadow_write_eligible` must ALSO wrap,
     // independently of `frame` — the `dispatch_codegen.rs` rebind site's
@@ -269,10 +269,10 @@ pub(in crate::core_erlang) fn construct_and_verify_class_var_bind(
     (bind, verify(&fixture))
 }
 
-// ─── Method-body verification with opaque version gaps (BT-3148) ──────────
+// ─── Method-body verification with opaque version gaps ──────────
 
 /// [`verify`]s a straight-line, [`FrameId::ROOT`]-frame method-body IR (ADR
-/// 0111 Addendum 4 / BT-3148 task 1: `gen_server/methods.rs`'s
+/// 0111 Addendum 4: `gen_server/methods.rs`'s
 /// `lower_body_exprs_with_reply` output — real `Bind`s interleaved with
 /// opaque [`ThreadedStmt::Statement`]s) whose opaque statements may have
 /// advanced the `State` version counter invisibly: a dispatching self-send,
@@ -298,7 +298,7 @@ pub(in crate::core_erlang) fn construct_and_verify_class_var_bind(
 /// time over whole-method emission structure rather than per-call-site
 /// fixtures: per-version linearity (a broken `next_state_var` regressing to
 /// an already-produced version now collides with the accumulated real/
-/// backfill history — the BT-3131 regression shape,
+/// backfill history — the shape
 /// `verify_would_catch_the_bt_3131_regression_shape_given_accumulated_history`'s
 /// previously-hypothetical capability made live), `UnboundVersion` for any
 /// source the chain never reached, and [`VerifyError::ShadowWriteMissing`]
@@ -315,7 +315,7 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
 /// The fixture-building half of [`verify_body_with_opaque_version_gaps`]:
 /// walks `ir` inserting a synthetic backfill `Bind` chain ahead of any real
 /// `Bind` whose source version an opaque `Statement` advanced past
-/// unrecorded, at `frame`. Split out (BT-3475, ADR 0111 Addendum 15's Foldl
+/// unrecorded, at `frame`. Split out (ADR 0111 Addendum 15's Foldl
 /// migration) so a caller that must WRAP the backfilled body in its own
 /// node before verifying — `control_flow::body::generate_foldl_loop_body`'s
 /// merged `Threaded` node, whose body lives at its own non-`ROOT` frame, not
@@ -359,12 +359,11 @@ pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
 /// [`backfill_opaque_version_gaps`]'s per-`Bind` scan — extracted so
 /// the identical technique isn't hand-duplicated once per prefix (CLAUDE.md's
 /// no-duplicate-implementations rule). The synthetic `Bind`s this inserts
-/// always carry `shadow_write: true` (BT-3164, fixing a real bug this
-/// issue's own review caught: an earlier `false` here spuriously tripped
+/// always carry `shadow_write: true` — an earlier `false` here spuriously tripped
 /// [`VerifyError::ShadowWriteMissing`] on a `ClassVars` gap step whenever a
 /// real `NlrCatch` was present — see the `shadow_write: true` assignment
 /// below for the full reasoning, the same [`construct_and_verify_class_var_bind`]
-/// already established for its own backfill loop). Moot for `State`
+/// already established for its own backfill loop. Moot for `State`
 /// (`ShadowWriteMissing` never inspects `State`-prefix `Bind`s); load-bearing
 /// for `ClassVars`.
 fn backfill_opaque_version_gap(
@@ -376,7 +375,7 @@ fn backfill_opaque_version_gap(
     last_version: &mut usize,
 ) {
     if source.prefix == *prefix && source.frame == frame && source.version > *last_version {
-        // BT-3164: `shadow_write: true`, not `false` — same reasoning
+        // `shadow_write: true`, not `false` — same reasoning
         // `construct_and_verify_class_var_bind`'s own backfill chain (above)
         // already documents for its synthetic steps: this stands in for a
         // REAL mutation this verifier cannot see (it lives inside an opaque
@@ -388,8 +387,8 @@ fn backfill_opaque_version_gap(
         // write" about a step whose real emission site this verifier never
         // inspected — exactly the false-positive `ShadowWriteMissing` a
         // class method with a class-var-mutating self-send followed by its
-        // own real last-statement class-var `Bind` spuriously tripped before
-        // this fix (confirmed by
+        // own real last-statement class-var `Bind` would otherwise spuriously
+        // trip (guarded against by
         // `verify_body_with_opaque_version_gaps_classvars_backfill_does_not_spuriously_fire_shadow_write_missing`
         // below). ADR 0111 §Verifier honesty: a check that cannot see the
         // real site must not assert a verdict about it — `true` is silence,
@@ -414,7 +413,7 @@ fn backfill_opaque_version_gap(
 /// [`construct_and_verify_class_var_bind`], [`backfill_opaque_version_gap`],
 /// and [`verify_simple_bind`] all need to give [`VerifyWalk::check_use`]'s
 /// frame-flow rule a producing `Bind` for version history a fixture can't
-/// otherwise see (BT-3179: extracted from three hand-duplicated copies of
+/// otherwise see (extracted from three hand-duplicated copies of
 /// this loop, CLAUDE.md's no-duplicate-implementations rule).
 fn backfill_version_chain(
     prefix: &VersionPrefix,
@@ -437,19 +436,19 @@ fn backfill_version_chain(
     chain
 }
 
-// ─── Simple version-bind construction (BT-3139) ────────────────────────────
+// ─── Simple version-bind construction ────────────────────────────
 
 /// Builds and verifies a minimal `ThreadedIr` fixture for a single `Self{N}`
 /// or `State{N}` version `Bind`, given the real source/target version
 /// numbers already read off the live generator counter at the call site
-/// (BT-3139: `generate_field_assignment`'s value-type and instance-actor
+/// (`generate_field_assignment`'s value-type and instance-actor
 /// branches, `expressions.rs` around lines 634/664 — the two sibling
 /// branches of the class-var branch [`construct_and_verify_class_var_bind`]
-/// already covers, BT-3135/BT-3148). Reused for both prefixes instead of
+/// already covers). Reused for both prefixes instead of
 /// copy-pasting [`construct_and_verify_class_var_bind`]'s body three times
 /// (CLAUDE.md's no-duplicate-implementations rule).
 ///
-/// Like [`construct_and_verify_class_var_bind`] (BT-3148 onward, both are
+/// Like [`construct_and_verify_class_var_bind`] (both are
 /// handed the real version numbers already read off the live generator
 /// counter and share its `1..=source_version` backfill technique), but
 /// without that function's class-var-specific `ShadowWriteMissing`
@@ -463,9 +462,9 @@ fn backfill_version_chain(
 /// backfilling that history, every mutation past a method's first would
 /// spuriously fail `UnboundVersion` (its `source_version` would have no
 /// producer in an isolated single-`Bind` fixture). The backfill chain
-/// (`1..=source_version`) is exactly the technique BT-3134's
-/// branch-frame-linearity check used (retired, ADR 0111 Addendum 5 /
-/// BT-3165), generalized here to an arbitrary prefix and reused rather than
+/// (`1..=source_version`) is exactly the technique the retired
+/// branch-frame-linearity check used (ADR 0111 Addendum 5), generalized
+/// here to an arbitrary prefix and reused rather than
 /// re-implemented.
 ///
 /// **Scope, honestly stated (ADR 0111 §Verifier honesty):** each call is
@@ -476,7 +475,7 @@ fn backfill_version_chain(
 /// (`target_version` colliding with a version the backfilled
 /// `1..=source_version` chain already reached — e.g. a broken
 /// `next_self_var()`/`next_state_var()` that returns a version `<=
-/// source_version`). It does **not** catch the historical BT-3131
+/// source_version`). It does **not** catch the historical
 /// `self_version` "reset instead of inherit on branch entry" shape as it
 /// actually manifested: two *separate* mutation call sites each
 /// independently computing `source=0, target=1`, which are each
@@ -487,8 +486,9 @@ fn backfill_version_chain(
 /// not a claim about what today's isolated per-call wiring provides.
 /// Threading a real per-method `Bind` history through
 /// `check_simple_field_bind_invariant` so this call actually closes that
-/// gap is tracked as a follow-up, not attempted here (BT-3139 is scoped to
-/// coverage extension via the existing checks, not new generator state).
+/// gap is tracked as a follow-up, not attempted here (this helper is
+/// scoped to coverage extension via the existing checks, not new generator
+/// state).
 pub(in crate::core_erlang) fn verify_simple_bind(
     prefix: VersionPrefix,
     source_version: usize,
