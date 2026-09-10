@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! List primitive implementations (BT-419).
+//! List primitive implementations.
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
@@ -13,7 +13,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
-/// List primitive implementations (BT-419).
+/// List primitive implementations.
 pub(crate) fn generate_list_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         // Access and ordering
@@ -32,7 +32,7 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
     match selector {
         "size" => Some(Document::Str("call 'erlang':'length'(Self)")),
         "isEmpty" => Some(Document::Str("call 'erlang':'=:='(Self, [])")),
-        // BT-3021: `first`/`last` raise `empty_collection`, not
+        // `first`/`last` raise `empty_collection`, not
         // `does_not_understand` — the receiver *does* understand the selector,
         // it just has no element to answer. `rest` is deliberately total (see
         // below), so only the element accessors raise here.
@@ -53,7 +53,7 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
                  end",
             ])
         }
-        // BT-3021: `rest` is a *subsequence* op, not an element accessor — it
+        // `rest` is a *subsequence* op, not an element accessor — it
         // has a well-defined total answer on empty (the empty list), matching
         // `drop:`/`take:`. Only `first`/`last`/`at:` raise on empty.
         "rest" => Some(Document::Str(
@@ -81,7 +81,7 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
             ])
         }
         "at:" => Some(call_self_p0("beamtalk_list", "at", param(params, 0, "_N"))),
-        // BT-2997: honours an `equals:` override on the elements. Takes
+        // Honours an `equals:` override on the elements. Takes
         // `lists:member/2` first and only dispatches on a raw miss, so the
         // positive case keeps the BIF's speed.
         "includes:" => Some(call_p0_self(
@@ -96,7 +96,7 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
             param(params, 0, "_Block"),
         )),
         "reversed" => Some(Document::Str("call 'lists':'reverse'(Self)")),
-        // BT-2997: `lists:usort/1` deduplicates by term order (`==`), which
+        // `lists:usort/1` deduplicates by term order (`==`), which
         // collapses `1` and `1.0`. Beamtalk element identity is `=:=`.
         "unique" => Some(Document::Str("call 'beamtalk_list':'unique'(Self)")),
         _ => None,
@@ -248,7 +248,7 @@ mod tests {
         let output = result.expect("first should produce code");
         assert!(output.contains("case Self of"));
         assert!(output.contains("<[H|_T]> when 'true' -> H"));
-        // BT-3021: empty-collection access is not a dispatch failure.
+        // Empty-collection access is not a dispatch failure.
         assert!(output.contains("'empty_collection'"));
         assert!(!output.contains("'does_not_understand'"));
         assert!(output.contains("'first'"));
@@ -275,7 +275,7 @@ mod tests {
         let output = result.expect("last should produce code");
         assert!(output.contains("case Self of"));
         assert!(output.contains("call 'lists':'last'(Self)"));
-        // BT-3021: empty-collection access is not a dispatch failure.
+        // Empty-collection access is not a dispatch failure.
         assert!(output.contains("'empty_collection'"));
         assert!(!output.contains("'does_not_understand'"));
         assert!(output.contains("'last'"));
@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn test_includes() {
-        // BT-2997: routes through `beamtalk_equality:member/2`, not bare
+        // Routes through `beamtalk_equality:member/2`, not bare
         // `lists:member/2`, so an `equals:` override on the element class is
         // honoured. That helper still takes `lists:member/2` first, so the
         // positive case costs the same as before.
@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn test_unique() {
-        // BT-2997: `lists:usort/1` deduplicates by term order (`==`), which
+        // `lists:usort/1` deduplicates by term order (`==`), which
         // collapses `1` and `1.0`. `beamtalk_list:unique/1` sorts the same way
         // but deduplicates with `=:=`.
         let result = doc_to_string(generate_list_bif("unique", &[]));

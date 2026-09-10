@@ -5,8 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! BT-3465: split out of `expressions.rs`, no logic changes. Submodules
-//! organize the code by domain:
+//! Submodules organize the code by domain:
 //! - [`match_lowering`] — `match:` expression compilation (`generate_match`
 //!   and its native/chain strategies), native `Pattern` → Core Erlang
 //!   pattern lowering, constructor/binary-segment patterns, and guards

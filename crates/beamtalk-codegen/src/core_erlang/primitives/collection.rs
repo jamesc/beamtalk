@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! BT-815: Most abstract Collection protocol methods are now self-hosted as
+//! Most abstract Collection protocol methods are self-hosted as
 //! pure Beamtalk in `collection.bt`.  The exception is `inject:into:`: the
 //! pure-BT implementation requires local-variable mutation threading through
 //! an abstract `do:` call, which the compiler does not yet support for

@@ -11,15 +11,15 @@
 //! into `beamtalk_behaviour_intrinsics`. These are thin data-access functions —
 //! hierarchy-walking logic lives in pure Beamtalk.
 //!
-//! BT-2234: the whole tower shares **one** selector table
+//! The whole tower shares **one** selector table
 //! ([`generate_tower_bif`]), reached for all three classes via the primitive
 //! registry in [`super`]. A primitive's lowering therefore follows the
 //! primitive, not the class that declares it, so moving a method up or down the
-//! tower can't silently drop it to runtime dispatch (the BT-2232 `className`
-//! regression). Tower selectors are uniquely named (`classXxx` / `metaclassXxx`)
-//! so the merged table has no collisions.
+//! tower can't silently drop it to runtime dispatch. Tower selectors are
+//! uniquely named (`classXxx` / `metaclassXxx`) so the merged table has no
+//! collisions.
 //!
-//! Exception: `@primitive "methodLookup"` (BT-1735) maps to
+//! Exception: `@primitive "methodLookup"` maps to
 //! `beamtalk_method_resolver:resolve/2` instead, since method lookup is a
 //! separate domain service.
 
@@ -93,7 +93,7 @@ fn intrinsic_self_arg2(func: &str, arg1: &str, arg2: &str) -> Document<'static> 
 
 /// Generates Core Erlang for a Behaviour / Class / Metaclass tower primitive.
 ///
-/// One table for the whole metaclass tower (BT-2234): the registry routes all
+/// One table for the whole metaclass tower: the registry routes all
 /// three classes here, so lowering follows the primitive, not the declaring
 /// class.
 pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
@@ -107,7 +107,7 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
         | "classSetDoc"
         | "classConformsTo"
         | "classRemoveSelector"
-        // ADR 0114 Phase 2 (BT-3278): renameTo: — a single Symbol argument,
+        // ADR 0114 Phase 2: renameTo: — a single Symbol argument,
         // same shape as classRemoveSelector.
         | "classRenameTo"
         | "metaclassIncludesSelector" => {
@@ -133,7 +133,7 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
                 ")"
             ])
         }
-        // ADR 0112 Phase 2 (BT-3186): removeSelector:ifAbsent: — the selector
+        // ADR 0112 Phase 2: removeSelector:ifAbsent: — the selector
         // Symbol plus the block (a compiled Block passed as a value, evaluated
         // by the intrinsic directly like any block argument to a Behaviour
         // primitive).
@@ -148,14 +148,14 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
                 ")"
             ])
         }
-        // ADR 0114 Phase 3 (BT-3279): renameSelector:to: — two Symbol
+        // ADR 0114 Phase 3: renameSelector:to: — two Symbol
         // arguments (old selector, new selector).
         "classRenameSelector" => {
             let old_sel = params.first()?;
             let new_sel = params.get(1)?;
             Some(intrinsic_self_arg2(selector, old_sel, new_sel))
         }
-        // ADR 0114 Phase 3 (BT-3279): renameSelector:to:ifAbsent: — old/new
+        // ADR 0114 Phase 3: renameSelector:to:ifAbsent: — old/new
         // selector Symbols plus the block, mirroring
         // classRemoveSelectorIfAbsent's shape above.
         "classRenameSelectorIfAbsent" => {
@@ -172,11 +172,11 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
                 ")"
             ])
         }
-        // ADR 0082 Phase 1 (BT-2283): live method patch primitives. Both take a
+        // ADR 0082 Phase 1: live method patch primitives. Both take a
         // selector Symbol and a body String *as values* and share one
         // compile-and-install path; only the intent differs (`durable` vs
         // `ephemeral`), which the intrinsic encodes when it logs the ChangeEntry.
-        // ADR 0105 Phase 3 (BT-2782): the read-only pre-save advisory precheck
+        // ADR 0105 Phase 3: the read-only pre-save advisory precheck
         // shares the same (Self, selector, source) shape — nothing installs,
         // but the intrinsic still needs the pending selector + body values.
         "classCompileSource" | "classTryCompileSource" | "classPrecheckCompileSource" => {
