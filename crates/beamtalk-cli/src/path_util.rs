@@ -109,12 +109,7 @@ mod tests {
         let source = DependencySource::Path {
             path: std::path::PathBuf::from("../my-dep"),
         };
-        let result = dep_root_for_source(
-            Utf8Path::new("/project/pkg"),
-            "my-dep",
-            &source,
-            &layout,
-        );
+        let result = dep_root_for_source(Utf8Path::new("/project/pkg"), "my-dep", &source, &layout);
         assert_eq!(result, Some(Utf8PathBuf::from("/project/my-dep")));
     }
 
@@ -125,12 +120,7 @@ mod tests {
             url: "https://example.com/repo.git".into(),
             reference: GitReference::Tag("v1.0.0".into()),
         };
-        let result = dep_root_for_source(
-            Utf8Path::new("/project"),
-            "my-git-dep",
-            &source,
-            &layout,
-        );
+        let result = dep_root_for_source(Utf8Path::new("/project"), "my-git-dep", &source, &layout);
         assert_eq!(
             result,
             Some(Utf8PathBuf::from("/project/_build/deps/my-git-dep"))
@@ -143,12 +133,7 @@ mod tests {
         let source = DependencySource::Registry {
             version: "1.2.3".into(),
         };
-        let result = dep_root_for_source(
-            Utf8Path::new("/project"),
-            "my-reg-dep",
-            &source,
-            &layout,
-        );
+        let result = dep_root_for_source(Utf8Path::new("/project"), "my-reg-dep", &source, &layout);
         assert_eq!(
             result,
             Some(Utf8PathBuf::from("/project/_build/deps/my-reg-dep"))
