@@ -36,9 +36,17 @@ export interface ClassInfo {
  * A `type` alias declaration (ADR 0108 Phase 8, BT-2903), as returned by the
  * `browse-type-aliases` op's `AliasRow` shape: `name`, `expansion` (the
  * alias's right-hand side, rendered to Beamtalk display form), `doc`,
- * `source_file`, and `internal`. Aliases erase entirely at compile time (no
- * BEAM module, no live process) — unlike `ClassInfo`, there is no
- * `actor_count` or anything else live to report.
+ * `source_file`, `internal`, and — per `alias_row/3`'s BT-3496 extension,
+ * mirroring `ClassRow`/`NativeModuleRow` — `package`/`source_origin`.
+ * Aliases erase entirely at compile time (no BEAM module, no live process) —
+ * unlike `ClassInfo`, there is no `actor_count` or anything else live to
+ * report.
+ *
+ * Unlike `ClassInfo.source_file`, this `source_file` is never an absolute,
+ * directly-openable path — it's a package-relative display path (BT-3496;
+ * see `browseAliasSource`'s doc). `package`/`source_origin` are optional
+ * only for backward compatibility with a server predating BT-3496 that
+ * doesn't send them; a current server always includes both.
  */
 export interface TypeAliasInfo {
   name: string;
@@ -46,6 +54,8 @@ export interface TypeAliasInfo {
   doc?: string;
   source_file?: string;
   internal?: boolean;
+  package?: string;
+  source_origin?: ClassOrigin;
 }
 
 export interface MethodInfo {
@@ -356,6 +366,8 @@ export class WorkspaceClient {
         doc?: string | null;
         source_file?: string | null;
         internal?: boolean;
+        package?: string;
+        source_origin?: ClassOrigin;
       }>;
     };
     return (resp.value ?? []).map((a) => ({
@@ -364,7 +376,38 @@ export class WorkspaceClient {
       doc: a.doc ?? undefined,
       source_file: a.source_file ?? undefined,
       internal: a.internal,
+      package: a.package,
+      source_origin: a.source_origin,
     }));
+  }
+
+  /**
+   * Read-only source content for a declared `type` alias (BT-3314's
+   * `browse-alias-source` op; wired up client-side in BT-3496). `pkg`
+   * disambiguates a same-named alias declared by more than one package
+   * (`browse-type-aliases` doesn't dedupe by name — see its doc) — always
+   * pass `TypeAliasInfo.package` where available.
+   *
+   * A `type` declaration produces no BEAM module (aliases erase entirely at
+   * compile time), so there is no compiled-module path to recover an
+   * absolute file location from at read time — unlike `ClassInfo.source_file`,
+   * `TypeAliasInfo.source_file` is a package-relative display path, not one
+   * `vscode.Uri.file()` can open directly. This op resolves it server-side
+   * instead and returns file content directly. `content` comes back `null`
+   * (never an error) whenever the runtime has no path to read from — always
+   * the case for a stdlib/dependency-origin alias (no live source tree to
+   * resolve against server-side), and possibly a project-origin alias whose
+   * recorded `source_file` no longer exists on disk.
+   */
+  async browseAliasSource(name: string, pkg?: string): Promise<{ content: string | null }> {
+    const resp = (await this._request({
+      op: "browse-alias-source",
+      name,
+      ...(pkg ? { package: pkg } : {}),
+    })) as {
+      value?: { content?: string | null };
+    };
+    return { content: resp.value?.content ?? null };
   }
 
   /** Get the internal state of an actor process. */

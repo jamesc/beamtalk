@@ -216,6 +216,57 @@ export function classNameToStdlibFilename(className: string): string {
 }
 
 /**
+ * Build the path+query-free URI *string* for a `type` alias's read-only
+ * source view under the `beamtalk-alias://` virtual URI scheme (BT-3314/
+ * BT-3496), e.g. `beamtalk-alias:///my_pkg/Foo.bt`. `pkg` is embedded as a
+ * path segment (empty when unknown) so `parseAliasSourceUriPath` can recover
+ * it with plain string splitting — `browse-alias-source` needs it to
+ * disambiguate a same-named alias declared by more than one package.
+ *
+ * Percent-encodes `name`/`pkg` exactly once — the resulting string must be a
+ * syntactically valid URI for `vscode.Uri.parse` to accept. `vscode.Uri`
+ * itself decodes exactly once when parsing, so the encode here and the
+ * (deliberately absent) decode in `parseAliasSourceUriPath` are each meant
+ * to run exactly once across a build → `Uri.parse` → `.path` round trip —
+ * see that function's doc for the double-decode bug this shape avoids.
+ *
+ * Returns a plain string, not a `vscode.Uri`, so this (like
+ * `classNameToStdlibFilename`) stays testable with no `vscode` dependency;
+ * `extension.ts`'s `aliasSourceUri` wraps it in `vscode.Uri.parse`.
+ */
+export function aliasSourceUriString(name: string, pkg: string | undefined): string {
+  return `beamtalk-alias:///${encodeURIComponent(pkg ?? "")}/${encodeURIComponent(name)}.bt`;
+}
+
+/**
+ * Inverse of `aliasSourceUriString` — recovers `{ name, pkg }` from a
+ * `beamtalk-alias://` URI's `.path` (e.g. `/my_pkg/Foo.bt` → `{ name: "Foo",
+ * pkg: "my_pkg" }`). `pkg` is undefined when the segment is empty, mirroring
+ * `aliasSourceUriString`'s "unknown package" encoding.
+ *
+ * Takes an *already-decoded* path — a real `vscode.Uri`'s `.path` getter is
+ * documented as returning the decoded string (VS Code percent-decodes once
+ * when parsing `aliasSourceUriString`'s percent-encoded URI string into a
+ * `Uri`), so this must NOT `decodeURIComponent` again: doing so previously
+ * double-decoded, throwing `URIError: URI malformed` for any name/package
+ * containing a literal `%` (e.g. `"50% Done"` → encoded once to `50%25%20Done`
+ * → VS Code decodes to `50% Done` → a second `decodeURIComponent` chokes on
+ * the bare `%`), silently degrading "Go to Definition" to a false "Source
+ * not available" even though real content existed.
+ */
+export function parseAliasSourceUriPath(uriPath: string): {
+  name: string;
+  pkg: string | undefined;
+} {
+  const [pkgSegment, nameSegment] = uriPath.replace(/^\//, "").split("/");
+  const pkg = pkgSegment ?? "";
+  return {
+    name: (nameSegment ?? "").replace(/\.bt$/, ""),
+    pkg: pkg.length > 0 ? pkg : undefined,
+  };
+}
+
+/**
  * Extract `///` doc comment lines immediately preceding a state variable
  * declaration. Mirrors `extractMethodDocComment` for methods — state vars
  * previously had no equivalent, so a `///` comment above a `state:` line
