@@ -7,9 +7,9 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Per-class shape-generation store (ADR 0105 Phase 2, BT-2780).
+Per-class shape-generation store (ADR 0105 Phase 2).
 
-Companion to `beamtalk_workspace_signature_store` (BT-2777), but for a
+Companion to `beamtalk_workspace_signature_store`, but for a
 class's *shape* — its `state:`/`field:` slot set and their declared types —
 rather than a single method's signature. A full class-body reload (the
 REPL's inline `subclass:` redefinition, `:load <file>`, or a file reload
@@ -69,7 +69,7 @@ workspace restart starts fresh. `Workspace changes revert:` does not call
 generations correct one class at a time. `clear/0` is test-only: it gives
 tests an explicit full reset without a restart.
 
-## Known, accepted concurrency gap (adversarial review, BT-2780)
+## Known, accepted concurrency gap (adversarial review)
 
 `prime/1` runs synchronously on the reloading session's own process,
 *before* `code:load_binary` — it is not, and cannot be, serialised against a
@@ -86,7 +86,7 @@ narrower cross-session races, on the same reasoning: a wrong/stale shape
 diff here is advisory noise, not data corruption, and reaching it requires
 two independent sessions genuinely racing an edit to the same class, not a
 single session's normal edit-reload loop. `beamtalk_workspace_shape_recheck_worker`
-(BT-2780 adversarial review) narrows the *capture* half of this considerably
+(from the adversarial review above) narrows the *capture* half of this considerably
 — every `capture/1` call this store ever sees is now serialised one at a
 time through that worker's mailbox, so two `capture/1` calls can no longer
 race *each other* — but does not and cannot close the outer install-ordering

@@ -3,7 +3,7 @@
 
 -module(beamtalk_workspace_diff_tests).
 
--moduledoc "Unit tests for beamtalk_workspace_diff (ADR 0082, BT-2575).".
+-moduledoc "Unit tests for beamtalk_workspace_diff (ADR 0082).".
 
 -include_lib("eunit/include/eunit.hrl").
 

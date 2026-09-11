@@ -406,7 +406,7 @@ export_traces_noninteger_limit_test_() ->
 error_handling_test_() ->
     {setup, fun setup_trace_store/0, fun cleanup_trace_store/1, fun(_Setup) ->
         [
-            %% BT-2402: invalid filter args are now returned as a structured
+            %% Invalid filter args are returned as a structured
             %% {error, #beamtalk_error{}} term from handle_term/4 (and encoded as
             %% an error response by handle/4) rather than raised, so dist clients
             %% always receive an op_result().

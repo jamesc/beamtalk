@@ -142,7 +142,7 @@ dedupe_empty_list_test() ->
     ?assertEqual([], beamtalk_erlang_help:dedupe_keyword_aliases([])).
 
 dedupe_removes_multi_keyword_alias_test() ->
-    %% BT-1904: run/2 is the dispatch alias for 'run:timeout:'/2
+    %% run/2 is the dispatch alias for 'run:timeout:'/2
     Specs = [
         #{name => <<"run:">>, arity => 1, params => [], return_type => <<"String">>},
         #{name => <<"run">>, arity => 1, params => [], return_type => <<"String">>},
@@ -206,7 +206,7 @@ dedupe_empty_name_spec_is_kept_test() ->
     Result = beamtalk_erlang_help:dedupe_keyword_aliases([#{name => <<>>, arity => 0}]),
     ?assertEqual(1, length(Result)).
 
-%% BT-3090: `is_keyword_name/1` now delegates to the canonical
+%% `is_keyword_name/1` now delegates to the canonical
 %% `beamtalk_class_builder:is_keyword_selector/1` (via `beamtalk_runtime_api`).
 %% A malformed name with an interior colon but no trailing colon (`at:put`) is
 %% NOT a keyword name, so it is never treated as a colon-suffixed alias target

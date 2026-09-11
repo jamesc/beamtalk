@@ -6,8 +6,7 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Line-oriented unified diff for ChangeLog method bodies (ADR 0082 Phase 5+,
-BT-2575).
+Line-oriented unified diff for ChangeLog method bodies (ADR 0082 Phase 5+).
 
 `unified/2` renders the net change between two method-body snapshots (the
 current on-disk body vs the installed in-memory body) as a compact, surface-

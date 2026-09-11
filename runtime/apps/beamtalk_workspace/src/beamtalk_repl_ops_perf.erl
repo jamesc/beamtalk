@@ -26,15 +26,14 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 
 -doc """
 Handle enable-tracing/disable-tracing/get-traces/actor-stats/export-traces ops
-for the WebSocket transport — encodes the term result to JSON at the edge
-(BT-2402).
+for the WebSocket transport — encodes the term result to JSON at the edge.
 """.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
 
 -doc """
-Term-returning handler for the tracing/performance ops (BT-2402).
+Term-returning handler for the tracing/performance ops.
 
 Returns `{ok, Value, Output, Warnings}` for the status/read ops
 (enable/disable-tracing, get-traces, actor-stats) and `{value, JsonValue}` for

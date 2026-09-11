@@ -7,8 +7,7 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Alias-name → dependent-class index (ADR 0108 hot-reload re-check trigger,
-BT-2899).
+Alias-name → dependent-class index (ADR 0108 hot-reload re-check trigger).
 
 ## Why this exists
 
@@ -45,7 +44,7 @@ exactly mirroring how `beamtalk_object_class:init/1` reads `method_xref` out
 of `__beamtalk_meta/0` and calls `beamtalk_xref:register_class/2`, just from
 a compiler-port response instead of installed BEAM metadata.
 
-## Whole-set replacement, not incremental — except REPL-inline compiles (BT-2955)
+## Whole-set replacement, not incremental — except REPL-inline compiles
 
 `register_class/2` takes the *complete* current set of aliases `ClassNameBin`
 references, not a delta — a class that stops referencing an alias (the
@@ -65,7 +64,7 @@ itself declares, but not for a REPL-inline class/protocol redefinition
 declared *at the REPL*, so a file-local alias (declared in the same file the
 class originally came from, not the REPL session) is invisible to them.
 Calling `register_class/2` from there would silently clobber a real edge a
-prior file `:load` registered (BT-2955's concrete `stdlib/src/ets.bt` +
+prior file `:load` registered (a concrete `stdlib/src/ets.bt` +
 `EtsTableType` repro). `register_class_additive/2` exists for exactly those
 two call sites: additive-only (never removes an edge), trading "a class's
 dependency set can only grow across a session, never accurately shrink from
@@ -146,8 +145,8 @@ register_class(ClassNameBin, AliasNames) when is_binary(ClassNameBin), is_list(A
     ok.
 
 -doc """
-Additive-only sibling of `register_class/2` for REPL-inline compiles
-(BT-2955): records that `ClassNameBin` also references `AliasNames`, without
+Additive-only sibling of `register_class/2` for REPL-inline compiles:
+records that `ClassNameBin` also references `AliasNames`, without
 touching any alias edge already recorded for it. Never removes an edge —
 the "whole-set replacement" behaviour `register_class/2` documents does not
 apply here.

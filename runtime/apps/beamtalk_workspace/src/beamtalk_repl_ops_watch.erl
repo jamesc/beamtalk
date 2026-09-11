@@ -6,7 +6,7 @@
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
-Op handler for the live-Inspector pid-stats read (ADR 0095 §5, BT-2489 — Cockpit
+Op handler for the live-Inspector pid-stats read (ADR 0095 §5 — Cockpit
 Phase 3).
 
 `pid-stats` is the read-op companion to the per-object change subscriptions
@@ -35,7 +35,7 @@ receive the live metrics map; `handle/4` is the WebSocket-edge JSON wrapper.
 -export([pid_stats/1, format_mfa/1]).
 -endif.
 
--doc "WebSocket-edge wrapper: encodes the term result to JSON (BT-2402).".
+-doc "WebSocket-edge wrapper: encodes the term result to JSON.".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).

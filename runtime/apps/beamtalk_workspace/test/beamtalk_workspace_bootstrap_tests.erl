@@ -252,7 +252,7 @@ terminate_ok_test_() ->
     end}.
 
 %%====================================================================
-%% Tests for project module discovery (BT-739)
+%% Tests for project module discovery
 %%====================================================================
 
 %% Test that find_bt_modules_in_dir returns bt@* modules from a directory.
@@ -339,7 +339,7 @@ bootstrap_start_link_with_nonexistent_path_test_() ->
     end}.
 
 %%====================================================================
-%% Integration test for full module activation path (BT-748)
+%% Integration test for full module activation path
 %%====================================================================
 
 %% Test that activate_project_modules/1 loads a compiled module, calls
@@ -427,7 +427,7 @@ compile_activation_fixture(ModName, ClassName) ->
 
 -doc """
 Build a minimal bt@ module with register_class/0 and a specified superclass.
-BT-745: Also emits a -beamtalk_class([{ClassName, Superclass}]) attribute for
+Also emits a -beamtalk_class([{ClassName, Superclass}]) attribute for
 dependency-ordered loading.
 """.
 compile_activation_fixture(ModName, ClassName, Superclass) ->
@@ -464,7 +464,7 @@ compile_activation_fixture(ModName, ClassName, Superclass) ->
     BeamBin.
 
 %%====================================================================
-%% Integration test for dependency-ordered activation (BT-745)
+%% Integration test for dependency-ordered activation
 %%====================================================================
 
 %% Test that activate_project_modules/1 sorts modules by superclass dependency
@@ -575,7 +575,7 @@ purge_bt745_modules() ->
     ok.
 
 %%====================================================================
-%% Tests for module name validation (BT-747)
+%% Tests for module name validation
 %%====================================================================
 
 %% Test that valid Beamtalk module names are accepted.
