@@ -6,12 +6,12 @@
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
-Tests for the `beamtalk_repl_subscriptions` facade after the BT-2531 migration of
+Tests for the `beamtalk_repl_subscriptions` facade after the migration of
 the actor/class/bindings/flush push streams onto the SystemAnnouncer bus
 (`beamtalk_announcements`).
 
 Focused on the explicit-pid forms (`subscribe/2`, `unsubscribe/2`,
-`subscribe_all/1`) added for the Attach topology (BT-2407): a dist-attached client
+`subscribe_all/1`) added for the Attach topology: a dist-attached client
 (Phoenix LiveView) calls these over `rpc:call/4` and must register *its own* pid as
 the subscriber. The `classes` stream (`ClassLoaded` / `ClassRemoved`) is the
 representative stream; the consumer receives the native
@@ -59,7 +59,7 @@ subscribe_pid_registers_that_pid_test() ->
     end.
 
 %%% ===========================================================================
-%%% classes stream delivers ClassRemoved too (newly visible on the bus, BT-2531)
+%%% classes stream delivers ClassRemoved too (newly visible on the bus)
 %%% ===========================================================================
 
 subscribe_classes_delivers_class_removed_test() ->
@@ -101,7 +101,7 @@ unsubscribe_pid_removes_that_pid_test() ->
     end.
 
 %%% ===========================================================================
-%%% bindings stream carries the session id (BT-2531 review: clear/put/remove
+%%% bindings stream carries the session id (clear/put/remove
 %%% refresh path uses announce_binding_changed/3 with an explicit session id)
 %%% ===========================================================================
 
@@ -127,7 +127,7 @@ binding_changed_carries_explicit_session_id_test() ->
     end.
 
 %%% ===========================================================================
-%%% subscribe_bus is idempotent per pid+class (BT-2531 review: dedup re-mount)
+%%% subscribe_bus is idempotent per pid+class (dedup re-mount)
 %%% ===========================================================================
 
 subscribe_twice_delivers_once_test() ->

@@ -17,7 +17,7 @@ Implements the nREPL-inspired message protocol for REPL communication
 A raw non-JSON line is accepted as an eval expression for robustness
 (manual testing via netcat and similar tools); the response uses the
 standard protocol shape. The pre-0.5.0 legacy format ("type" field
-requests, "type"-keyed responses) was removed in BT-2789.
+requests, "type"-keyed responses) has been removed.
 """.
 
 -export([
@@ -45,7 +45,7 @@ requests, "type"-keyed responses) was removed in BT-2789.
     encode_class_list/2,
     encode_health/3,
     encode_load_project/5,
-    %% BT-2801: per-finding encoder for the `reload-findings` op response,
+    %% Per-finding encoder for the `reload-findings` op response,
     %% shared with `beamtalk_ws_handler`'s `reload_check` push frame so the
     %% two wire shapes can never drift apart.
     encode_reload_finding/1,
@@ -143,7 +143,7 @@ encode_result(Value, Msg, TermToJson, Output, Warnings) ->
     ).
 
 -doc """
-Encode a connected-session `Program exit:` response (BT-2688, ADR 0099 §3).
+Encode a connected-session `Program exit:` response(ADR 0099 §3).
 
 A successful `done` response (NOT an error) that additionally carries the POSIX
 exit status in a dedicated `exit_code` field, so the connecting client can adopt
@@ -181,7 +181,7 @@ encode_error(Reason, Msg, FormatError, Output, Warnings) ->
 
 -doc """
 Encode an error response with captured stdout, warnings, and extra metadata fields.
-BT-1235: Metadata may include `<<"line">>' and `<<"hint">>' for compile errors.
+Metadata may include `<<"line">>' and `<<"hint">>' for compile errors.
 """.
 -spec encode_error(
     term(), protocol_msg(), fun((term()) -> binary()), binary(), [binary()], map()
@@ -204,7 +204,7 @@ encode_status(Status, Msg, TermToJson) ->
     ).
 
 -doc """
-Encode a streaming stdout chunk (BT-696).
+Encode a streaming stdout chunk.
 Sent as an intermediate message during eval before the final done message.
 """.
 -spec encode_out(binary(), protocol_msg(), binary()) -> binary().
@@ -213,7 +213,7 @@ encode_out(Chunk, Msg, Stream) ->
     iolist_to_binary(json:encode(Base#{Stream => Chunk})).
 
 -doc """
-Encode a need-input status message (BT-698).
+Encode a need-input status message.
 Sent when eval code requests stdin input (e.g. io:get_line).
 """.
 -spec encode_need_input(binary(), protocol_msg()) -> binary().
@@ -230,7 +230,7 @@ encode_loaded(Classes, Msg, TermToJson) ->
 
 -doc """
 Encode a loaded file response with warnings.
-BT-737: Warnings are class collision warnings from loading classes that
+Warnings are class collision warnings from loading classes that
 shadow classes already registered from a different module.
 """.
 -spec encode_loaded([map()], protocol_msg(), fun((term()) -> term()), [binary()]) -> binary().
@@ -425,7 +425,7 @@ maybe_add_class(Encoded, _Entry) ->
     Encoded.
 
 -doc """
-Encode a trace result response (BT-1238).
+Encode a trace result response.
 
 `Steps' is `[{SourceBin, Value}]' — one entry per top-level statement.
 The response includes a `steps' array where each entry has `src' and `value' fields.
@@ -445,7 +445,7 @@ encode_trace_result(Steps, Msg, TermToJson, Output, Warnings) ->
     ).
 
 -doc """
-Encode a completions response (BT-2402).
+Encode a completions response.
 
 The base response with a `completions` array and a `done` status. Used by
 the `complete` and `erlang-complete` ops.
@@ -460,7 +460,7 @@ encode_completions(Completions, Msg) ->
     ).
 
 -doc """
-Encode a diagnostics response (BT-2556).
+Encode a diagnostics response.
 
 Carries the parse-only diagnostics for an editor buffer: a list of maps, each
 with `message`, `severity`, `start`, and `end` (byte offsets into the buffer).
@@ -490,8 +490,8 @@ encode_diagnostics(Diagnostics, Msg) ->
 -doc """
 Encode one `beamtalk_recheck:finding()` map for the `reload_check` push
 frame (`beamtalk_ws_handler:encode_reload_check_event/1`) and the
-`reload-findings` op response (`beamtalk_repl_ops_dev:handle_term/4`,
-BT-2801) — the one shared wire shape both surfaces rely on, so a client that
+`reload-findings` op response (`beamtalk_repl_ops_dev:handle_term/4`)
+— the one shared wire shape both surfaces rely on, so a client that
 reads the initial snapshot via the op and then applies live `reload_check`
 pushes never sees the two disagree on shape.
 """.
@@ -529,7 +529,7 @@ undefined_to_null(undefined) -> null;
 undefined_to_null(Value) -> Value.
 
 -doc """
-Encode a show-codegen response (BT-2402).
+Encode a show-codegen response.
 
 Carries the generated Core Erlang source and any compiler warnings for the
 `show-codegen` op.
@@ -541,10 +541,10 @@ encode_codegen(CoreErlang, Warnings, Msg) ->
     iolist_to_binary(json:encode(maybe_add_warnings(Result, Warnings))).
 
 -doc """
-Encode a methods response (BT-2402).
+Encode a methods response.
 
 `Methods` and `StateVars` are both lists of descriptor maps for the `methods`
-op — `StateVars` entries carry `name` and `line` (BT-3439: `line` is `null`
+op — `StateVars` entries carry `name` and `line` (`line` is `null`
 when the class predates line tracking or was built via `ClassBuilder`).
 """.
 -spec encode_methods([map()], [map()], protocol_msg()) -> binary().
@@ -559,7 +559,7 @@ encode_methods(Methods, StateVars, Msg) ->
     ).
 
 -doc """
-Encode an inherited-methods response (BT-3478).
+Encode an inherited-methods response.
 
 `Methods` is the list of inherited method descriptors (each carrying a
 `defining_class`) for the sidebar's lazily-fetched "Inherited" tree groups.
@@ -575,7 +575,7 @@ encode_inherited_methods(Methods, Msg) ->
     ).
 
 -doc """
-Encode a list-classes response (BT-2402).
+Encode a list-classes response.
 
 `ClassList` is the sorted list of class-info maps for the `list-classes` op.
 """.
@@ -587,7 +587,7 @@ encode_class_list(ClassList, Msg) ->
     ).
 
 -doc """
-Encode a health response (BT-2402).
+Encode a health response.
 
 Carries the workspace identifier and the connection nonce for the `health` op.
 """.
@@ -603,7 +603,7 @@ encode_health(WorkspaceId, Nonce, Msg) ->
     ).
 
 -doc """
-Encode a load-project response (BT-2402).
+Encode a load-project response.
 
 `Classes` is the list of loaded class-name binaries, `Errors` the combined
 per-file and dependency-activation error maps, `Summary` the human-readable
@@ -622,7 +622,7 @@ encode_load_project(Classes, Errors, Summary, Warnings, Msg) ->
 
 %%% Utilities
 
-%% BT-3090: delegates to the canonical `beamtalk_text:to_binary/1` — kept as a
+%% Delegates to the canonical `beamtalk_text:to_binary/1` — kept as a
 %% local re-export since it is part of this module's public API and used
 %% across the workspace app.
 -doc "Normalise an atom, binary, list, or arbitrary term to a binary.".

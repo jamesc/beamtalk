@@ -6,7 +6,7 @@
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
-Term-returning op-layer seam for the curated REPL protocol (BT-2399, ADR 0017
+Term-returning op-layer seam for the curated REPL protocol (ADR 0017
 Phase 3).
 
 This module is the single dispatch table for protocol ops and the **only**
@@ -42,7 +42,7 @@ leak compiler/runtime internals.
 |-----|-------|-------------|
 | result | `{ok, Value, Output, Warnings}` | `eval`, `unload`, `clone`, tracing read ops |
 | trace | `{trace, Steps, Output, Warnings}` | `eval` (trace mode) |
-| script_exit | `{script_exit, Code, Output, Warnings}` | `eval` (connected `Program exit:`, BT-2688) |
+| script_exit | `{script_exit, Code, Output, Warnings}` | `eval` (connected `Program exit:`) |
 | actors | `{actors, [ActorMeta]}` | `actors` |
 | inspect | `{inspect, map() \| binary()}` | `inspect` |
 | status | `{status, ok}` | `kill`, `interrupt`, `close`, `shutdown` |
@@ -72,8 +72,8 @@ JSON value (a map/list of binaries, integers, booleans, and `null`), so
 
 ## Porting status
 
-All curated protocol ops return native `op_result()` term shapes (BT-2402); the
-`{json, Binary}` escape tag used during the incremental port (BT-2399) has been
+All curated protocol ops return native `op_result()` term shapes; the
+`{json, Binary}` escape tag used during the incremental port has been
 removed. Every op flows through the one `dispatch/4` → `encode/2` seam, and
 dist-attached clients consume the live terms directly without any JSON step.
 
@@ -129,7 +129,7 @@ Route a protocol op to its handler, returning a structured `op_result()` term.
 
 This is the term-returning entry point for dist-attached clients. It mirrors
 the op routing previously inlined in `beamtalk_repl_server:handle_op/4`. Every
-op returns a native `op_result()` term shape (BT-2402) — handlers never raise a
+op returns a native `op_result()` term shape — handlers never raise a
 user-facing error, they return `{error, #beamtalk_error{}}`.
 """.
 -spec dispatch(binary(), map(), protocol_msg(), pid()) -> op_result().
@@ -146,9 +146,9 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"load-source">>;
     Op =:= <<"load-project">>;
     Op =:= <<"unload">>;
-    %% BT-2670: edit → compile → reload → write-back for a project-owned native.
+    %% edit → compile → reload → write-back for a project-owned native.
     Op =:= <<"save-native-source">>;
-    %% BT-3238: add/rename a `// === Name ===` section-divider comment at the
+    %% add/rename a `// === Name ===` section-divider comment at the
     %% file/class level.
     Op =:= <<"save-section">>
 ->
@@ -167,7 +167,7 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"diagnostics">>;
     Op =:= <<"describe">>;
     Op =:= <<"methods">>;
-    %% BT-3478: lazy per-defining-class inherited method listing, backing
+    %% lazy per-defining-class inherited method listing, backing
     %% the sidebar's "Inherited" tree groups.
     Op =:= <<"inherited-methods">>;
     Op =:= <<"list-classes">>;
@@ -178,7 +178,7 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"test-all">>;
     Op =:= <<"erlang-help">>;
     Op =:= <<"erlang-complete">>;
-    %% BT-2801: reload-induced findings snapshot read (ADR 0105 surface-parity
+    %% reload-induced findings snapshot read (ADR 0105 surface-parity
     %% gap) — mirrors the workspace/cockpit UI's dist-attached
     %% `reload_findings` initial read for surfaces with no equivalent.
     Op =:= <<"reload-findings">>
@@ -193,7 +193,7 @@ dispatch(Op, Params, Msg, SessionPid) when
 ->
     beamtalk_repl_ops_perf:handle_term(Op, Params, Msg, SessionPid);
 dispatch(<<"pid-stats">>, Params, Msg, SessionPid) ->
-    %% ADR 0095 §5 / BT-2489 (Cockpit Phase 3): live-Inspector process metrics
+    %% ADR 0095 §5 (Cockpit Phase 3): live-Inspector process metrics
     %% read, the request/response companion to the `object` push stream.
     beamtalk_repl_ops_watch:handle_term(<<"pid-stats">>, Params, Msg, SessionPid);
 dispatch(<<"nav-query">>, Params, Msg, SessionPid) ->
@@ -205,17 +205,17 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"browse-protocols">>;
     Op =:= <<"browse-method-source">>;
     Op =:= <<"browse-class-definition">>;
-    %% BT-3238: divider-grouped ("// === Name ===") method view.
+    %% divider-grouped ("// === Name ===") method view.
     Op =:= <<"browse-categories">>;
-    %% BT-2578 native pane + BT-2648 native-modules enumeration.
+    %% Native pane + native-modules enumeration.
     Op =:= <<"browse-native-source">>;
     Op =:= <<"browse-native-modules">>;
-    %% BT-2903 (ADR 0108 Phase 8): type-alias enumeration.
+    %% ADR 0108 Phase 8: type-alias enumeration.
     Op =:= <<"browse-type-aliases">>;
-    %% BT-3314: read-only type-alias source view.
+    %% read-only type-alias source view.
     Op =:= <<"browse-alias-source">>
 ->
-    %% ADR 0095 (BT-2488): System Browser browse facade — read-only term-ops,
+    %% ADR 0095: System Browser browse facade — read-only term-ops,
     %% each returning `{value, JsonValue}`.
     beamtalk_repl_ops_browse:handle_term(Op, Params, Msg, SessionPid);
 dispatch(Op, _Params, _Msg, _SessionPid) ->
@@ -243,7 +243,7 @@ encode({trace, Steps, Output, Warnings}, Msg) ->
         Steps, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings
     );
 encode({script_exit, Code, Output, Warnings}, Msg) ->
-    %% BT-2688: connected-session `Program exit: Code`. Carries the POSIX exit
+    %% connected-session `Program exit: Code`. Carries the POSIX exit
     %% status in a dedicated `exit_code` field; the session shell has already
     %% terminated by the time this reply is encoded.
     beamtalk_repl_protocol:encode_script_exit(Code, Msg, Output, Warnings);

@@ -7,7 +7,7 @@
 EUnit tests for beamtalk_io_capture.
 
 Covers:
-- BT-1172 dead-process guard in reset_captured_group_leaders/2.
+- Dead-process guard in reset_captured_group_leaders/2.
 - is_stdin_request/1 edge clauses (get_chars/get_until no-encoding forms).
 - prompt_to_binary/1 fallback paths (non-binary unicode result; badarg exception).
 - handle_io_request/2 catch arms for {put_chars, Enc, Chars}, {put_chars, Chars},
@@ -36,10 +36,10 @@ await_down(Ref) ->
     end.
 
 %%====================================================================
-%% Tests: reset_captured_group_leaders — dead process guard (BT-1172)
+%% Tests: reset_captured_group_leaders — dead process guard
 %%====================================================================
 
-%% BT-1172: The TOCTOU race — a process whose group_leader is CapturePid
+%% The TOCTOU race — a process whose group_leader is CapturePid
 %% dies between is_process_alive/1 returning true and group_leader/2 being
 %% called. We approximate this by issuing exit(Pid, kill) and immediately
 %% calling reset without waiting. The kill signal may arrive during the scan,

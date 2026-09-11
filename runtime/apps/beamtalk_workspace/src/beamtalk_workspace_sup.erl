@@ -17,22 +17,22 @@ This supervisor manages all components of a persistent workspace:
 - Actor supervision (shared across sessions)
 - Session supervision (one per REPL connection)
 
-Architecture (from ADR 0004, implemented in BT-262):
+Architecture (from ADR 0004):
 ```
 beamtalk_workspace_sup
   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
-  ├─ beamtalk_workspace_changelog % Append-only ChangeLog (ADR 0082, BT-2282)
+  ├─ beamtalk_workspace_changelog % Append-only ChangeLog (ADR 0082)
   ├─ beamtalk_transcript_stream    % Transcript singleton (ADR 0010, Actor)
   ├─ beamtalk_actor_registry       % Workspace-wide actor registry
   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
   │     (also initialises sealed Object singletons: BeamtalkInterface, WorkspaceInterface)
   ├─ beamtalk_actor_sup           % Supervises user actors
   │   -- REPL mode only (repl=true) below this line --
-  ├─ beamtalk_workspace_signature_store % Signature-generation store (ADR 0105, BT-2777)
-  ├─ beamtalk_workspace_shape_store % Shape-generation store (ADR 0105, BT-2780)
-  ├─ beamtalk_alias_xref          % Alias-name -> dependent-class index (ADR 0108, BT-2899)
-  ├─ beamtalk_workspace_shape_recheck_worker % Serialised shape re-check queue (ADR 0105, BT-2780)
-  ├─ beamtalk_workspace_findings_store % Reload-induced findings store (ADR 0105, BT-2779)
+  ├─ beamtalk_workspace_signature_store % Signature-generation store (ADR 0105)
+  ├─ beamtalk_workspace_shape_store % Shape-generation store (ADR 0105)
+  ├─ beamtalk_alias_xref          % Alias-name -> dependent-class index (ADR 0108)
+  ├─ beamtalk_workspace_shape_recheck_worker % Serialised shape re-check queue (ADR 0105)
+  ├─ beamtalk_workspace_findings_store % Reload-induced findings store (ADR 0105)
   ├─ beamtalk_session_sup         % Supervises session shell processes (before repl_server)
   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
   └─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
@@ -51,7 +51,7 @@ beamtalk_workspace_sup
     tcp_port => inet:port_number() | undefined,
     bind_addr => inet:ip4_address(),
     auto_cleanup => boolean(),
-    %% web_port (the Phase-1 browser HTTP listener) was removed in BT-2415.
+    %% web_port (the Phase-1 browser HTTP listener) has been removed.
     max_idle_seconds => integer()
 }.
 
@@ -91,7 +91,7 @@ init(Config) ->
         false -> ok
     end,
 
-    %% Set up WebSocket log handler for live log streaming (BT-1433).
+    %% Set up WebSocket log handler for live log streaming.
     %% Registered in all modes — subscribers opt in per-session.
     setup_ws_log_handler(),
 
@@ -144,7 +144,7 @@ init(Config) ->
                 modules => [beamtalk_workspace_meta]
             },
 
-            %% ChangeLog gen_server (ADR 0082 Phase 1, BT-2282).
+            %% ChangeLog gen_server (ADR 0082 Phase 1).
             %% Append-only log of live in-memory method mutations; dirty-state +
             %% undo store, consumed cross-surface (REPL/MCP/LSP/browser). Owns the
             %% two-part on-disk persistence under <workspace>/changes/. Depends only
@@ -171,14 +171,14 @@ init(Config) ->
             %% by beamtalk_workspace_bootstrap after the actor registry is started.)
         ] ++ singleton_child_specs() ++
             [
-                %% BT-2531: the bespoke class-loaded / bindings-changed /
+                %% The bespoke class-loaded / bindings-changed /
                 %% flush-completion pub/sub gen_servers were retired. Those
                 %% workspace push streams now ride the SystemAnnouncer bus
                 %% (`beamtalk_announcements`, started under `beamtalk_runtime_sup`)
                 %% and are subscribed through `beamtalk_repl_subscriptions`.
 
                 %% Bootstrap worker — sets singleton class variables (ADR 0019 Phase 2)
-                %% and activates compiled project modules (BT-739).
+                %% and activates compiled project modules.
                 %% Must start after all singletons but before REPL server accepts connections.
                 %% Monitors singleton PIDs and re-sets class vars on restart.
                 #{
@@ -218,7 +218,7 @@ repl_child_specs(false, _TcpPort, _WorkspaceId, _BindAddr, _AutoCleanup, _MaxIdl
     [];
 repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSeconds) ->
     [
-        %% Signature-generation store (ADR 0105 Phase 1, BT-2777).
+        %% Signature-generation store (ADR 0105 Phase 1).
         %% Per-selector previous-generation method signatures, captured at
         %% patch time so a diff survives the class-state metadata wipe. Only
         %% meaningful in REPL mode — run mode (repl=false) executes a
@@ -235,7 +235,7 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSecon
             modules => [beamtalk_workspace_signature_store]
         },
 
-        %% Shape-generation store (ADR 0105 Phase 2, BT-2780).
+        %% Shape-generation store (ADR 0105 Phase 2).
         %% Per-class previous-generation `state:`/`field:` slot sets, captured
         %% around a full class-body reload so a diff survives the module
         %% replacement (companion to the signature store above, for shape
@@ -251,7 +251,7 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSecon
         },
 
         %% Alias-name -> dependent-class index (ADR 0108 hot-reload re-check
-        %% trigger, BT-2899). Populated at class-install time from the
+        %% trigger). Populated at class-install time from the
         %% compiler port's `referenced_aliases` response field; consulted by
         %% `beamtalk_recheck:trigger_alias_change/1` so a live alias
         %% redefinition re-checks only its recorded dependents instead of
@@ -266,7 +266,7 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSecon
             modules => [beamtalk_alias_xref]
         },
 
-        %% Shape re-check worker (ADR 0105 Phase 2, BT-2780).
+        %% Shape re-check worker (ADR 0105 Phase 2).
         %% Serialises `beamtalk_repl_loader:activate_module/3`'s shape
         %% re-check behind a single gen_server mailbox so a burst of
         %% class-body reloads can't flood `beamtalk_compiler_server` (ADR
@@ -282,7 +282,7 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSecon
             modules => [beamtalk_workspace_shape_recheck_worker]
         },
 
-        %% Reload-induced findings store (ADR 0105 Phase 1, BT-2779).
+        %% Reload-induced findings store (ADR 0105 Phase 1).
         %% Live, session-only findings keyed by caller class, published to
         %% every surface (LSP / REPL / workspace UI) via the
         %% `'ReloadCheckCompleted'` system announcement
@@ -309,7 +309,7 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSecon
         %% create_session -> supervisor:start_child(beamtalk_session_sup, _) exits
         %% with `noproc`, the handler crashes, and the connection is dropped. The CLI
         %% sees "port accepting TCP but WebSocket health check failed" and retries on
-        %% a fresh node (flaky workspace-startup CI failures, BT-2532). Ordering
+        %% a fresh node (flaky workspace-startup CI failures). Ordering
         %% session_sup first gates the port file behind a ready session tier.
         #{
             id => beamtalk_session_sup,
@@ -486,7 +486,7 @@ do_setup_file_logger(WorkspaceId) ->
             end
     end.
 
-%%% WebSocket Log Handler (BT-1433)
+%%% WebSocket Log Handler
 
 -doc """
 Register the WebSocket log handler with OTP logger.

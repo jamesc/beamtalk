@@ -29,16 +29,16 @@ for manipulating state during REPL sessions.
     set_actor_registry/2,
     get_module_tracker/1,
     set_module_tracker/2,
-    %% BT-1242: pending module removals (deferred during active eval)
+    %% pending module removals (deferred during active eval)
     get_pending_module_removals/1,
     add_pending_module_removal/2,
     clear_pending_module_removals/1,
-    %% BT-2366 (ADR 0081 Phase 2): pending session-local mutations (deferred
+    %% pending session-local mutations (deferred
     %% during active eval).
     get_pending_mutations/1,
     add_pending_mutation/2,
     clear_pending_mutations/1,
-    %% ADR 0108 Phase 8 (BT-2902): session-local type alias table.
+    %% ADR 0108 Phase 8: session-local type alias table.
     get_alias_table/1,
     put_alias/3,
     known_type_alias_sources/1
@@ -59,7 +59,7 @@ for manipulating state during REPL sessions.
     %%   user         :: binary() | undefined -- authenticated user (LiveView)
     %%   connected_at :: integer()| undefined -- system_time microsecond at start
     client_meta :: map(),
-    %% BT-2365 (ADR 0081 Phase 1): holds ONLY session locals. Workspace globals
+    %% holds ONLY session locals. Workspace globals
     %% (singletons + bind:as: names) are resolved lazily at eval time rather than
     %% injected here, so there is no injected_ws_keys reconciliation field.
     bindings :: map(),
@@ -67,12 +67,12 @@ for manipulating state during REPL sessions.
     loaded_modules :: [atom()],
     actor_registry :: pid() | undefined,
     module_tracker :: beamtalk_repl_modules:module_tracker(),
-    %% BT-1242: Modules removed via class_removed event while an eval worker
+    %% Modules removed via class_removed event while an eval worker
     %% is active.  Deferred here so they can be applied to the worker's returned
     %% state when eval_result arrives (prevents the worker snapshot from
     %% reinstating modules that were removed during the eval).
     pending_module_removals :: [atom()],
-    %% BT-2366 (ADR 0081 Phase 2): session-local mutations issued by primitives
+    %% session-local mutations issued by primitives
     %% (Session bindings at:put:/removeKey:, Session clear) while an eval worker
     %% is active.  Primitives enqueue {op, Key, Value} tuples here via a
     %% gen_server:call to the shell rather than writing directly, because the
@@ -80,7 +80,7 @@ for manipulating state during REPL sessions.
     %% Drained in the eval-exit clauses (apply_pending_mutations/2) in enqueue
     %% order — preserves insertion order (newest appended at the tail).
     pending_mutations :: [mutation()],
-    %% ADR 0108 Phase 8 (BT-2902): type aliases declared directly at this
+    %% ADR 0108 Phase 8: type aliases declared directly at this
     %% session's REPL prompt (`type Name = ...`). Aliases erase entirely at
     %% resolution time (ADR 0108 Semantics) — there is no loaded BEAM module
     %% or process to recover them from on a later turn the way classes are
@@ -99,8 +99,7 @@ for manipulating state during REPL sessions.
     | {clear, undefined, undefined}.
 
 -doc """
-A session-visible type alias entry (ADR 0108 Phase 8, BT-2902; stdlib
-seeding BT-2938).
+A session-visible type alias entry (ADR 0108 Phase 8; stdlib seeding).
 
 `expansion` is the alias's unparsed `TypeAnnotation` display form (e.g.
 `<<"#north | #south | #east | #west">>`) — both what `:help` renders and
@@ -156,7 +155,7 @@ new(ListenSocket, Port, Options) ->
         module_tracker = beamtalk_repl_modules:new(),
         pending_module_removals = [],
         pending_mutations = [],
-        %% BT-2938: seed with stdlib's own compiled aliases so `:help
+        %% seed with stdlib's own compiled aliases so `:help
         %% <StdlibAlias>` and `::`-typed locals referencing one resolve in a
         %% fresh session — see `stdlib_alias_table/0`. A later `type Name =
         %% ...` declaration at this session's REPL prompt (`put_alias/3`)
@@ -175,7 +174,7 @@ get_bindings(#state{bindings = Bindings}) ->
 set_bindings(Bindings, State) ->
     State#state{bindings = Bindings}.
 
--doc "Clear all session-local variable bindings (BT-2365: locals only).".
+-doc "Clear all session-local variable bindings (locals only).".
 -spec clear_bindings(state()) -> state().
 clear_bindings(State) ->
     State#state{bindings = #{}}.
@@ -243,7 +242,7 @@ set_module_tracker(Tracker, State) ->
 -doc """
 Get pending module removals (deferred during active eval).
 
-BT-1242: Returns the list of module atoms queued for removal while an eval
+Returns the list of module atoms queued for removal while an eval
 worker was running.  Applied to the worker result state in eval_result handler.
 """.
 -spec get_pending_module_removals(state()) -> [atom()].
@@ -253,7 +252,7 @@ get_pending_module_removals(#state{pending_module_removals = Removals}) ->
 -doc """
 Add a module to the pending-removals list.
 
-BT-1242: Called by handle_info({class_removed, ...}) when an eval worker is
+Called by handle_info({class_removed, ...}) when an eval worker is
 active.  Deduplicates via ordsets so repeated removals are idempotent.
 """.
 -spec add_pending_module_removal(atom(), state()) -> state().
@@ -263,7 +262,7 @@ add_pending_module_removal(Module, #state{pending_module_removals = Removals} = 
 -doc """
 Clear the pending-removals list.
 
-BT-1242: Called after applying pending removals on interrupt or worker crash,
+Called after applying pending removals on interrupt or worker crash,
 so the shell returns to idle with a clean slate.
 """.
 -spec clear_pending_module_removals(state()) -> state().
@@ -273,7 +272,7 @@ clear_pending_module_removals(State) ->
 -doc """
 Get pending session-local mutations (deferred during active eval).
 
-BT-2366 (ADR 0081 Phase 2): returns the queued `{op, Key, Value}` tuples in
+returns the queued `{op, Key, Value}` tuples in
 enqueue order (oldest first).  Drained by the eval-exit clauses in
 `beamtalk_repl_shell` (`apply_pending_mutations/2`).
 """.
@@ -284,7 +283,7 @@ get_pending_mutations(#state{pending_mutations = Mutations}) ->
 -doc """
 Append a session-local mutation to the pending queue.
 
-BT-2366 (ADR 0081 Phase 2): called by `beamtalk_session_primitives` (via the
+called by `beamtalk_session_primitives` (via the
 shell `enqueue_mutation` handler) when a session-scope write is issued during
 an active eval.  Appends at the tail so the queue preserves enqueue order; the
 fold in `apply_pending_mutations/2` then replays `put`/`remove`/`clear` in the
@@ -297,7 +296,7 @@ add_pending_mutation(Mutation, #state{pending_mutations = Mutations} = State) ->
 -doc """
 Clear the pending session-local mutations queue.
 
-BT-2366 (ADR 0081 Phase 2): called after applying (or discarding) the queue on
+called after applying (or discarding) the queue on
 an eval-exit path, so the shell returns to idle with an empty queue.
 """.
 -spec clear_pending_mutations(state()) -> state().
@@ -305,7 +304,7 @@ clear_pending_mutations(State) ->
     State#state{pending_mutations = []}.
 
 -doc """
-Get the session's type alias table (ADR 0108 Phase 8, BT-2902).
+Get the session's type alias table (ADR 0108 Phase 8).
 
 Keyed by alias name (binary). Consulted by the `:help <Alias>` interception
 in `beamtalk_repl_eval:do_eval/3` — see that module for why `:help` cannot
@@ -319,14 +318,14 @@ get_alias_table(#state{alias_table = AliasTable}) ->
 -doc """
 Register (or redefine) a session-local type alias.
 
-BT-2902: called by `beamtalk_repl_eval:handle_type_alias_definition/3`
+called by `beamtalk_repl_eval:handle_type_alias_definition/3`
 after the compiler port validates a `type Name = ...` declaration.
 Redeclaring an existing name overwrites its entry — ADR 0108 Semantics
 treats a live REPL redefinition as legal. `handle_type_alias_definition/3`
 follows this call with `beamtalk_compiler_server:register_aliases/1` (keeps
 the compiler port's ambient alias cache in sync) and
 `beamtalk_repl_loader:spawn_alias_change_recheck/1` (ADR 0108 hot-reload
-re-check trigger, BT-2899) — re-checking annotation sites that referenced
+re-check trigger) — re-checking annotation sites that referenced
 the old binding, once out of scope here, is now that trigger's job.
 """.
 -spec put_alias(binary(), alias_entry(), state()) -> state().
@@ -336,15 +335,15 @@ put_alias(Name, Entry, #state{alias_table = AliasTable} = State) ->
 -doc """
 Derive the `known_type_aliases` compiler-port request field: one
 reparseable `type Name = <expansion>` line per session-local alias (ADR
-0108 Phase 8, BT-2902).
+0108 Phase 8).
 
 Deliberately omits the doc comment — round-tripping it is unnecessary
 (`known_type_aliases` only feeds `resolve_type_annotation`'s structural
 lookup, never `:help`, which reads `alias_table` directly) and would risk a
 multi-line doc comment corrupting the single-line reparse.
 
-**BT-2958 perf note:** this re-derives the full list (now including every
-public stdlib-seeded alias, BT-2938) on every call, and the compiler port
+**Perf note:** this re-derives the full list (now including every
+public stdlib-seeded alias) on every call, and the compiler port
 re-lexes each returned line from scratch (`extract_known_type_aliases` in
 `beamtalk-compiler-port/src/main.rs`) with no cross-request cache — there is
 no memoization here or on the port side. Deliberately left unoptimized:
@@ -367,10 +366,10 @@ known_type_alias_sources(#state{alias_table = AliasTable}) ->
 
 -doc """
 Seed a fresh session's alias table from stdlib's own compiled `type Name =
-...` declarations (BT-2938).
+...` declarations.
 
 Reads `beamtalk_stdlib`'s `.app` `{type_aliases, [...]}` env key (ADR 0108
-Phase 8/BT-2903, written by `build_stdlib.rs`'s `generate_app_file`/
+Phase 8, written by `build_stdlib.rs`'s `generate_app_file`/
 `generate_app_src_file` from `app_file::AliasMetadata`) — the same durable
 record `beamtalk_repl_ops_browse:package_type_aliases/1` reads for
 `browse-type-aliases`. Without this, a stdlib alias like `SupervisionStrategy`

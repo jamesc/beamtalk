@@ -6,13 +6,13 @@
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
-Stable subscription facade for the workspace live push streams (BT-2399, ADR
+Stable subscription facade for the workspace live push streams (ADR
 0017 Phase 3).
 
 The curated op layer (`beamtalk_repl_ops`) covers request/response ops, but the
 workspace also pushes **live streams** — Transcript output, actor lifecycle,
 class loads, bindings changes, flush completions, and reload-induced
-re-check outcomes (ADR 0105, BT-2779). Previously those were
+re-check outcomes (ADR 0105). Previously those were
 wired only inside `beamtalk_ws_handler`, which called each underlying event
 module (`beamtalk_transcript_stream:subscribe/1`, `beamtalk_repl_actors:subscribe/0`,
 …) directly. A dist-attached client (Phoenix LiveView, runtime-attached LSP)
@@ -24,7 +24,7 @@ the subscribe/unsubscribe calls. The **calling process** (or an explicit pid)
 becomes the subscriber, so over Erlang distribution a LiveView process subscribes
 its own location-transparent pid and receives the push messages natively.
 
-## Substrate: SystemAnnouncer (ADR 0093, BT-2531)
+## Substrate: SystemAnnouncer (ADR 0093)
 
 The actor/class/bindings/flush streams ride the typed Announcements bus
 (`SystemAnnouncer`). The facade registers the subscriber pid on the bus
@@ -33,15 +33,15 @@ class(es) with an **inert handler term** (`?PUSH_HANDLER`); the bus delivers the
 native announcement message to the subscriber's mailbox (the inert-handler branch
 of `dispatch_one_veneer/5`). The bespoke per-stream gen_servers
 (`beamtalk_class_events` / `beamtalk_bindings_events` / `beamtalk_flush_events`
-and the actor registry's lifecycle casts) were retired in BT-2531. The
+and the actor registry's lifecycle casts) have been retired. The
 `transcript` stream is *not* on the bus — it is line-rate and stays on
 `beamtalk_transcript_stream` (ADR 0093 §5).
 
 `beamtalk_repl_subscriptions` is the only sanctioned entry point (and the future
 ADR 0091 RBAC seam): clients never call `beamtalk_announcements:subscribe/4`
 themselves. pg plays no role — membership is the bus's workspace-local ETS table
-and remote delivery is via explicit-pid registration (ADR 0093, corrected by
-BT-2530).
+and remote delivery is via explicit-pid registration (ADR 0093, later
+corrected to workspace-local scope).
 
 ## Stream → announcement class → push message
 
@@ -65,7 +65,7 @@ re-encodes these to JSON push frames in `beamtalk_ws_handler`.
 The `subscribe/1` / `subscribe_all/0` forms register `self()`, which is correct
 when the caller *is* the long-lived consumer (the WebSocket handler runs on the
 workspace node, so `self()` is the handler pid). A **dist-attached** client
-(Phoenix LiveView, BT-2407) cannot use those forms over `rpc:call/4`: the RPC
+(Phoenix LiveView) cannot use those forms over `rpc:call/4`: the RPC
 proxy spawned on the workspace node would become the (short-lived) subscriber
 instead of the LiveView pid. The `subscribe/2` / `subscribe_all/1` forms take an
 **explicit subscriber pid**: a LiveView passes its own location-transparent pid
@@ -84,7 +84,7 @@ Dispatch is caller-side (per-announcer), so there is **no cross-announcer orderi
 guarantee** — weaker than the retired serialised gen_servers. This is acceptable:
 every consumer of these streams is refresh-trigger driven.
 
-## Per-object change subscriptions (ADR 0095 §5, BT-2489)
+## Per-object change subscriptions (ADR 0095 §5)
 
 The streams above are *system-wide* (every transcript line, every class load).
 The **live Inspector** (Cockpit Phase 3) needs a narrower, *per-object* stream: a
@@ -123,7 +123,7 @@ membership read and never builds or sends an event (see `beamtalk_object_watch`)
 -define(TRANSCRIPT_REF, 'Transcript').
 
 %% Inert handler term registered for every workspace push-stream subscriber on the
-%% SystemAnnouncer bus (BT-2531). `beamtalk_announcements` recognises it as a
+%% SystemAnnouncer bus. `beamtalk_announcements` recognises it as a
 %% non-runnable handler and delivers the native `{beamtalk_announcement, …}`
 %% message to the subscriber's mailbox instead of trying to run it.
 -define(PUSH_HANDLER, repl_push_subscription).
@@ -203,11 +203,11 @@ unsubscribe_all(Pid) when is_pid(Pid) ->
     lists:foreach(fun(Stream) -> unsubscribe(Stream, Pid) end, streams()).
 
 %%====================================================================
-%% Internal — SystemAnnouncer bus registration (BT-2531)
+%% Internal — SystemAnnouncer bus registration
 %%====================================================================
 
 -doc """
-The announcement class(es) a bus-backed stream subscribes to (BT-2531). A stream
+The announcement class(es) a bus-backed stream subscribes to. A stream
 that fans into more than one class (`actors`, `classes`) registers one
 subscription per class so each announced event reaches the subscriber.
 """.
@@ -221,7 +221,7 @@ announcement_classes(reload_check) -> ['ReloadCheckCompleted'].
 -doc """
 Register `Pid` on the SystemAnnouncer bus for every announcement class of
 `Stream`, with the inert `?PUSH_HANDLER` term so the bus delivers the native
-`{beamtalk_announcement, …}` message to `Pid`'s mailbox (BT-2531).
+`{beamtalk_announcement, …}` message to `Pid`'s mailbox.
 
 Idempotent per pid+class: each class is detached (`system_unsubscribe/2`) before
 re-subscribing, so a LiveView that re-mounts within `net_ticktime` of a
@@ -273,7 +273,7 @@ unsubscribe_bus(Stream, Pid) ->
 
 -doc """
 Subscribe `Subscriber` to committed state-change events on a single actor
-`ActorPid` (ADR 0095 §5 / BT-2489). The subscriber receives
+`ActorPid` (ADR 0095 §5). The subscriber receives
 `{object_changed, ActorPid, ChangedSlots}` after each state write on the actor.
 
 Parameterised by the watched pid (unlike the system-wide streams), so it takes

@@ -18,7 +18,7 @@ beamtalk_repl_json_tests.
 %% Tests
 %%====================================================================
 
-%%% Nonce generation tests (BT-611)
+%%% Nonce generation tests
 
 generate_nonce_returns_binary_test() ->
     Nonce = beamtalk_repl_server:generate_nonce(),
@@ -40,7 +40,7 @@ generate_nonce_is_hex_test() ->
     ),
     ?assert(IsHex).
 
-%%% BT-520: safe_to_existing_atom tests
+%%% safe_to_existing_atom tests
 
 safe_to_existing_atom_existing_test() ->
     %% 'ok' is a well-known existing atom
@@ -89,12 +89,12 @@ tcp_integration_test_() ->
             {"inspect dead actor", fun() -> tcp_inspect_dead_actor_test(Port) end},
             {"malformed json", fun() -> tcp_malformed_json_test(Port) end},
             {"raw expression", fun() -> tcp_raw_expression_test(Port) end},
-            %% BT-523: TCP connection lifecycle tests
+            %% TCP connection lifecycle tests
             {"multiple sequential connects", fun() -> tcp_multiple_connects_test(Port) end},
             {"concurrent clients", fun() -> tcp_concurrent_clients_test(Port) end},
             {"client disconnect", fun() -> tcp_client_disconnect_test(Port) end},
             {"multi request same connection", fun() -> tcp_multi_request_same_conn_test(Port) end},
-            %% BT-523: Connection error handling tests
+            %% Connection error handling tests
             {"empty line", fun() -> tcp_empty_line_test(Port) end},
             {"binary garbage", fun() -> tcp_binary_garbage_test(Port) end},
             {"reload empty module", fun() -> tcp_reload_empty_module_test(Port) end},
@@ -104,7 +104,7 @@ tcp_integration_test_() ->
             end},
             {"inspect unknown actor", fun() -> tcp_inspect_unknown_actor_test(Port) end},
             {"kill unknown actor", fun() -> tcp_kill_unknown_actor_test(Port) end},
-            %% BT-523: gen_server callback tests
+            %% gen_server callback tests
             {"get port", fun() -> tcp_get_port_test(Port) end},
             {"get nonce", fun() -> tcp_get_nonce_test(Port) end},
             {"unknown gen_server call", fun() -> tcp_unknown_call_check() end},
@@ -112,13 +112,13 @@ tcp_integration_test_() ->
             {"gen_server info unknown", fun() -> tcp_info_unknown_check2() end},
             {"health op", fun() -> tcp_health_op_test(Port) end},
             {"start_link integer port", fun() -> tcp_start_link_integer_test() end},
-            %% BT-523: session ID uniqueness test
+            %% session ID uniqueness test
             {"clone uniqueness", fun() -> tcp_clone_uniqueness_test(Port) end},
-            %% BT-666: interrupt operation tests
+            %% interrupt operation tests
             {"interrupt no eval", fun() -> tcp_interrupt_no_eval_test(Port) end},
             {"interrupt unknown session", fun() -> tcp_interrupt_unknown_session_test(Port) end},
             %% The /ws route is the shared REPL transport; the Phase-1 browser
-            %% static routes (`/`, `/static/[...]`) were removed in BT-2415.
+            %% static routes (`/`, `/static/[...]`) have been removed.
             {"GET /ws without upgrade returns error", fun() -> http_ws_no_upgrade_test(Port) end},
             %% bind:as: / unbind: session refresh
             {"bind:as: appears in bindings immediately", fun() ->
@@ -355,7 +355,7 @@ ws_mask(<<B, Rest/binary>>, Key = <<K1, K2, K3, K4>>, I, Acc) ->
     ws_mask(Rest, Key, I + 1, <<Acc/binary, M>>).
 
 %% Test: `Session current clear` evaluates and returns a done status.
-%% BT-2369 (ADR 0081 Phase 6): the `clear` op was replaced by the Session API.
+%% (ADR 0081 Phase 6): the `clear` op was replaced by the Session API.
 tcp_clear_test(Port) ->
     Msg = iolist_to_binary(
         json:encode(#{
@@ -369,7 +369,7 @@ tcp_clear_test(Port) ->
     ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
 
 %% Test: `Session current bindings keys` evaluates to a value.
-%% BT-2369 (ADR 0081 Phase 6): the `bindings` op was replaced by the Session API.
+%% (ADR 0081 Phase 6): the `bindings` op was replaced by the Session API.
 tcp_bindings_empty_test(Port) ->
     Msg = iolist_to_binary(
         json:encode(#{
@@ -472,7 +472,7 @@ tcp_unload_empty_test(Port) ->
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %% Test: unload a raw BEAM module (not a Beamtalk class) returns class_not_found error.
-%% BT-1239: The unload op requires the name to be a registered Beamtalk class.
+%% The unload op requires the name to be a registered Beamtalk class.
 tcp_unload_in_use_test(Port) ->
     DummyMod = 'bt519_tcp_in_use',
     Forms = [
@@ -531,7 +531,7 @@ tcp_kill_invalid_pid_test(Port) ->
     ?assertMatch(#{<<"id">> := <<"t14">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
-%% BT-2091: reload op was hard-removed; sending it returns an unknown_op error.
+%% reload op was hard-removed; sending it returns an unknown_op error.
 tcp_reload_module_not_loaded_test(Port) ->
     Msg = iolist_to_binary(
         json:encode(#{
@@ -544,7 +544,7 @@ tcp_reload_module_not_loaded_test(Port) ->
     ErrorMsg = maps:get(<<"error">>, Resp),
     ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
-%% BT-2091: docs op was hard-removed; sending it returns an unknown_op error.
+%% docs op was hard-removed; sending it returns an unknown_op error.
 tcp_docs_unknown_class_test(Port) ->
     Msg = iolist_to_binary(
         json:encode(#{
@@ -557,7 +557,7 @@ tcp_docs_unknown_class_test(Port) ->
     ErrorMsg = maps:get(<<"error">>, Resp),
     ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
-%% BT-2091: modules op was hard-removed; sending it returns an unknown_op error.
+%% modules op was hard-removed; sending it returns an unknown_op error.
 tcp_modules_test(Port) ->
     Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"modules">>, <<"id">> => <<"t17">>})),
     Resp = tcp_send_op(Port, Msg),
@@ -615,7 +615,7 @@ tcp_raw_expression_test(Port) ->
     %% Raw expressions go through protocol decode
     ?assert(is_map(Resp)).
 
-%%% BT-523: TCP connection lifecycle tests
+%%% TCP connection lifecycle tests
 
 %% Test: multiple sequential connections to the same port
 tcp_multiple_connects_test(Port) ->
@@ -703,7 +703,7 @@ tcp_multi_request_same_conn_test(Port) ->
 
 %% Test: Workspace bind:as: during eval makes the name appear in `Workspace globals`
 %% immediately. Regression test: before the fix, it only appeared after reconnect.
-%% BT-2369 (ADR 0081 Phase 6): bind:as: entries are globals — observed via
+%% (ADR 0081 Phase 6): bind:as: entries are globals — observed via
 %% `Workspace globals keys` (eval), not the removed `bindings` op.
 tcp_bind_as_updates_bindings_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
@@ -743,7 +743,7 @@ tcp_bind_as_updates_bindings_test(Port) ->
 
 %% Test: Workspace unbind: during eval removes the name from `Workspace globals`
 %% immediately. Regression test: before the fix, it persisted until reconnect.
-%% BT-2369 (ADR 0081 Phase 6): observed via `Workspace globals keys` (eval).
+%% (ADR 0081 Phase 6): observed via `Workspace globals keys` (eval).
 tcp_unbind_removes_from_bindings_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
     BindMsg = iolist_to_binary(
@@ -853,7 +853,7 @@ tcp_unbind_unavailable_in_next_eval_test(Port) ->
     ?assert(maps:is_key(<<"error">>, EvalResp)),
     ws_close(Ws).
 
-%%% BT-523: Connection error handling tests
+%%% Connection error handling tests
 
 %% Test: send empty string to server via WebSocket
 tcp_empty_line_test(Port) ->
@@ -963,7 +963,7 @@ tcp_kill_unknown_actor_test(Port) ->
     ?assertMatch(#{<<"id">> := <<"ku1">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
-%%% BT-523: gen_server callback and lifecycle tests
+%%% gen_server callback and lifecycle tests
 
 %% Test: get_port returns port after start
 tcp_get_port_test(Port) ->
@@ -1032,7 +1032,7 @@ start_link_integer_port_test() ->
     Exports = beamtalk_repl_server:module_info(exports),
     ?assert(lists:member({start_link, 1}, Exports)).
 
-%%% BT-523: generate_session_id format and uniqueness tests (via clone op)
+%%% generate_session_id format and uniqueness tests (via clone op)
 
 %% Clone creates new sessions, each with a unique generated ID.
 %% This tests generate_session_id indirectly via the clone TCP op.
@@ -1055,7 +1055,7 @@ tcp_clone_uniqueness_test(Port) ->
     ?assert(binary:match(V2, <<"session_">>) =:= {0, 8}).
 
 %%% ===========================================================================
-%%% BT-627: Coverage tests for internal helper functions
+%%% Coverage tests for internal helper functions
 %%% ===========================================================================
 
 %%% validate_actor_pid/1 tests
@@ -1103,7 +1103,7 @@ get_completions_workspace_binding_prefix_test() ->
     Result = beamtalk_repl_server:get_completions(<<"Work">>),
     ?assert(lists:member(<<"Workspace">>, Result)).
 
-%%% parse_receiver_and_prefix/1 tests (BT-783)
+%%% parse_receiver_and_prefix/1 tests
 
 parse_receiver_class_and_prefix_test() ->
     ?assertEqual(
@@ -1160,7 +1160,7 @@ parse_receiver_multi_keyword_selector_test() ->
         beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"Boolean ifTrue:ifFalse:">>)
     ).
 
-%%% get_context_completions/1 tests (BT-783)
+%%% get_context_completions/1 tests
 
 context_completions_empty_test() ->
     ?assertEqual([], beamtalk_repl_ops_dev:get_context_completions(<<>>)).
@@ -1201,7 +1201,7 @@ context_completions_with_bindings_empty_line_test() ->
     %% Empty line with bindings returns empty
     ?assertEqual([], beamtalk_repl_ops_dev:get_context_completions(<<>>, #{a => 1})).
 
-%% BT-1044: Class receiver returns both class-side and instance methods
+%% Class receiver returns both class-side and instance methods
 context_completions_class_receiver_returns_class_methods_test() ->
     Pid = spawn_mock_class('TestCompletionClassA', #{spawn => ok, 'spawnWith:' => ok}, [
         increment, decrement
@@ -1405,7 +1405,7 @@ context_completions_nonexistent_atom_receiver_returns_empty_test() ->
     ),
     ?assertEqual([], Result).
 
-%%% beamtalk_session_table:resolve_pid/2 tests (BT-1045)
+%%% beamtalk_session_table:resolve_pid/2 tests
 %%% These test the ETS-based session lookup that allows the completion client
 %%% and the VS Code extension to read bindings from the user's main REPL session.
 
@@ -1465,7 +1465,7 @@ session_table_dead_pid_returns_default_test() ->
     beamtalk_session_table:delete(SessionId),
     ?assertEqual(Default, Result).
 
-%%% get_session_bindings/1 tests (BT-1045)
+%%% get_session_bindings/1 tests
 
 %% Live shell with no user bindings → returns a map (may include workspace singletons)
 get_session_bindings_from_live_shell_returns_map_test() ->
@@ -1487,7 +1487,7 @@ get_session_bindings_dead_pid_returns_empty_test() ->
     Result = beamtalk_repl_ops_dev:get_session_bindings(DeadPid),
     ?assertEqual(#{}, Result).
 
-%%% Integration: ETS session lookup feeds into completion (BT-1045)
+%%% Integration: ETS session lookup feeds into completion
 %%% This test simulates the full handle/4 code path for a "complete" op:
 %%%   create session → insert into ETS → verify resolve_pid → get_session_bindings
 
@@ -1526,13 +1526,13 @@ session_binding_lookup_pipeline_test() ->
         beamtalk_repl_shell:stop(ShellPid)
     end.
 
-%% Note (BT-2369, ADR 0081 Phase 6): the cross-session bindings read that the
+%% Note (ADR 0081 Phase 6): the cross-session bindings read that the
 %% removed `bindings` op provided (read target session via the top-level
 %% `session` field) is now expressed as `(Session withId: id) bindings keys`
 %% over `eval`; that path is covered by the Session API tests in
 %% beamtalk_session_tests.
 
-%%% tokenise_send_chain/1 tests (BT-1006)
+%%% tokenise_send_chain/1 tests
 
 tokenise_send_chain_simple_chain_test() ->
     %% Single hop unary chain
@@ -1563,7 +1563,7 @@ tokenise_send_chain_paren_returns_error_test() ->
     %% Parenthesised subexpression — not supported
     ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_send_chain(<<"(myList size)">>)).
 
-%%% parse_receiver_and_prefix/1 multi-token tests (BT-1006)
+%%% parse_receiver_and_prefix/1 multi-token tests
 
 parse_receiver_multi_token_expression_test() ->
     %% Multi-token receiver returns {expression, ReceiverExpr, Prefix}
@@ -1593,7 +1593,7 @@ parse_receiver_leading_whitespace_single_token_test() ->
         beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"  Integer s">>)
     ).
 
-%%% walk_chain/2 and walk_chain_class/2 tests (BT-1006)
+%%% walk_chain/2 and walk_chain_class/2 tests
 
 walk_chain_empty_selectors_test() ->
     %% walk_chain with no selectors returns the class unchanged — no registry call
@@ -1643,7 +1643,7 @@ walk_chain_class_single_hop_found_test() ->
         cleanup_mock_class('WalkChainClassTestA', Pid)
     end.
 
-%% BT-1048: `ClassName class` chain — `class` is an instance method on ProtoObject
+%% `ClassName class` chain — `class` is an instance method on ProtoObject
 %% (no class-side return-type annotation), but sending it to a class object returns
 %% the metaclass, which has the same class-side methods. The chain should stay on the
 %% class side rather than returning undefined.
@@ -1710,7 +1710,7 @@ walk_chain_superclass_inheritance_test() ->
         ets:insert(beamtalk_class_metadata, Saved)
     end.
 
-%%% resolve_chain_type/2 tests (BT-1006)
+%%% resolve_chain_type/2 tests
 
 resolve_chain_type_single_hop_test() ->
     Pid = spawn_mock_class_with_return_types(
@@ -1779,7 +1779,7 @@ resolve_chain_type_single_token_returns_undefined_test() ->
         beamtalk_repl_ops_dev:resolve_chain_type(<<"hello">>, #{})
     ).
 
-%%% get_context_completions chain resolution tests (BT-1006)
+%%% get_context_completions chain resolution tests
 
 context_completions_chained_no_annotation_returns_empty_test() ->
     %% Chained expression where the selector exists as an atom but has no return-type
@@ -1863,7 +1863,7 @@ cleanup_mock_class(Name, Pid) ->
     end),
     Pid ! stop.
 
-%% Helper: spawn a mock class that supports return-type lookups for chain resolution (BT-1006).
+%% Helper: spawn a mock class that supports return-type lookups for chain resolution.
 %% InstanceReturnTypes: #{selector() => atom()} — instance-side return types
 %% ClassReturnTypes:    #{selector() => atom()} — class-side return types
 spawn_mock_class_with_return_types(Name, InstanceReturnTypes, ClassReturnTypes) ->
@@ -1997,7 +1997,7 @@ ensure_structured_error_compile_error_binary_test() ->
     ?assertEqual('Compiler', Err#beamtalk_error.class).
 
 ensure_structured_error_compile_error_structured_diagnostics_test() ->
-    %% BT-1235: structured diagnostic maps with message field
+    %% structured diagnostic maps with message field
     Err = beamtalk_repl_server:ensure_structured_error(
         {compile_error, [#{message => <<"Unused variable `x`">>, line => 3}]}
     ),
@@ -2005,7 +2005,7 @@ ensure_structured_error_compile_error_structured_diagnostics_test() ->
     ?assertEqual('Compiler', Err#beamtalk_error.class).
 
 ensure_structured_error_compile_error_structured_with_hint_test() ->
-    %% BT-1235: structured diagnostic preserves hint
+    %% structured diagnostic preserves hint
     Err = beamtalk_repl_server:ensure_structured_error(
         {compile_error, [
             #{
@@ -2155,7 +2155,7 @@ format_name_other_test() ->
     ?assert(is_binary(Result)).
 
 %% ===================================================================
-%% handle_op direct tests (BT-627)
+%% handle_op direct tests
 %% These call handle_op/4 directly to ensure coverage in the test process
 %% (TCP tests run handle_op in spawned processes which may not report cover).
 %% ===================================================================
@@ -2307,7 +2307,7 @@ handle_op_complete_with_prefix_test() ->
     Decoded = json:decode(Result),
     ?assertMatch(#{<<"completions">> := _}, Decoded).
 
-%% BT-2091: docs op was hard-removed; handle_op now reports unknown_op.
+%% docs op was hard-removed; handle_op now reports unknown_op.
 handle_op_docs_unknown_op_test() ->
     Msg = make_proto_msg(<<"docs">>, <<"d1">>, #{<<"class">> => <<"NonexistentClassXyz">>}),
     Params = #{<<"class">> => <<"NonexistentClassXyz">>},
@@ -2334,7 +2334,7 @@ handle_op_unload_nonexistent_test() ->
     Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"ul2">>}, Decoded).
 
-%% BT-2091: reload op was hard-removed; handle_op now reports unknown_op.
+%% reload op was hard-removed; handle_op now reports unknown_op.
 handle_op_reload_unknown_op_test() ->
     Msg = make_proto_msg(<<"reload">>, <<"r1">>, #{<<"module">> => <<>>}),
     Params = #{<<"module">> => <<>>},
@@ -2345,7 +2345,7 @@ handle_op_reload_unknown_op_test() ->
     ErrorMsg = maps:get(<<"error">>, Decoded),
     ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
-%% BT-2091: load-file op was hard-removed; handle_op reports unknown_op.
+%% load-file op was hard-removed; handle_op reports unknown_op.
 handle_op_load_file_unknown_op_test() ->
     Msg = make_proto_msg(<<"load-file">>, <<"lf1">>, #{<<"path">> => <<"foo.bt">>}),
     Params = #{<<"path">> => <<"foo.bt">>},
@@ -2356,7 +2356,7 @@ handle_op_load_file_unknown_op_test() ->
     ErrorMsg = maps:get(<<"error">>, Decoded),
     ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
-%% BT-2091: modules op was hard-removed; handle_op reports unknown_op.
+%% modules op was hard-removed; handle_op reports unknown_op.
 handle_op_modules_unknown_op_test() ->
     Msg = make_proto_msg(<<"modules">>, <<"m1">>, #{}),
     Params = #{},
@@ -2381,7 +2381,7 @@ handle_op_sessions_no_sup_test() ->
     ?assertMatch(#{<<"id">> := <<"s1">>}, Decoded).
 
 %% ===================================================================
-%% show-codegen handle_op tests (BT-700)
+%% show-codegen handle_op tests
 %% ===================================================================
 
 handle_op_show_codegen_empty_test() ->
@@ -2430,7 +2430,7 @@ handle_op_show_codegen_in_describe_test() ->
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"show-codegen">>, Ops)),
     ShowCodegenOp = maps:get(<<"show-codegen">>, Ops),
-    %% BT-1236: show-codegen exposes optional params code, class, and selector.
+    %% show-codegen exposes optional params code, class, and selector.
     %% Requires either code (snippet) or class (loaded class); selector is only meaningful with class.
     ?assertEqual([], maps:get(<<"params">>, ShowCodegenOp)),
     Optional = maps:get(<<"optional">>, ShowCodegenOp),
@@ -2439,7 +2439,7 @@ handle_op_show_codegen_in_describe_test() ->
     ?assert(lists:member(<<"selector">>, Optional)).
 
 %% ===================================================================
-%% handle_protocol_request direct test (BT-627)
+%% handle_protocol_request direct test
 %% ===================================================================
 
 handle_protocol_request_crash_test() ->
@@ -2463,7 +2463,7 @@ handle_protocol_request_crash_test() ->
 %% ===================================================================
 %% recv_line tests removed — function replaced by WebSocket handler (ADR 0020)
 %% ===================================================================
-%% write_port_file tests (BT-627)
+%% write_port_file tests
 %% ===================================================================
 
 write_port_file_undefined_test() ->
@@ -2485,7 +2485,7 @@ write_port_file_with_workspace_test() ->
     end.
 
 %% ===================================================================
-%% gen_server callback direct tests (BT-627)
+%% gen_server callback direct tests
 %% ===================================================================
 
 handle_cast_unknown_test() ->
@@ -2500,7 +2500,7 @@ code_change_test() ->
     Exports = beamtalk_repl_server:module_info(exports),
     ?assert(lists:member({code_change, 3}, Exports)).
 
-%%% BT-666: Interrupt operation tests
+%%% Interrupt operation tests
 
 %% Test: interrupt op when no evaluation is running returns ok
 tcp_interrupt_no_eval_test(Port) ->
@@ -2523,7 +2523,7 @@ tcp_interrupt_unknown_session_test(Port) ->
     ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
 
 %%% HTTP-level checks against the cowboy listener.
-%%% The Phase-1 browser page (index.html) tests were removed in BT-2415 along
+%%% The Phase-1 browser page (index.html) tests have been removed along
 %%% with the static routes; only the `/ws` protocol route remains.
 
 %% Helper: HTTP GET request via raw TCP (avoids inets dependency)
@@ -2562,7 +2562,7 @@ http_ws_no_upgrade_test(Port) ->
     ?assert(binary:match(Response, <<"101">>) =:= nomatch).
 
 %%====================================================================
-%% write_port_file/3 (BT-611) — direct unit tests (no TCP listener)
+%% write_port_file/3 — direct unit tests (no TCP listener)
 %%
 %% Exercises the port-file writer's three top-level branches: undefined
 %% workspace (no-op), and the full atomic tmp+rename success path including

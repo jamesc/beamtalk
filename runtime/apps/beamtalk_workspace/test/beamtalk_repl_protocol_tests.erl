@@ -51,7 +51,7 @@ decode_new_format_complete_test() ->
     ?assertEqual(<<"complete">>, element(2, Msg)),
     ?assertEqual(#{<<"code">> => <<"Coun">>}, element(5, Msg)).
 
-%% BT-1045: session field must be accessible via get_session/1, NOT via get_params/1.
+%% session field must be accessible via get_session/1, NOT via get_params/1.
 %% The protocol decoder strips op/id/session from params — handlers must use
 %% get_session(Msg) to retrieve the session ID for binding lookups.
 decode_complete_with_session_accessible_via_get_session_test() ->
@@ -97,7 +97,7 @@ decode_raw_expression_test() ->
     ?assertEqual(undefined, element(4, Msg)),
     ?assertEqual(#{<<"code">> => <<"1 + 2">>}, element(5, Msg)).
 
-%% BT-2789: raw non-JSON eval responses use the standard op-protocol shape;
+%% Raw non-JSON eval responses use the standard op-protocol shape;
 %% base_response omits id/session when undefined.
 decode_raw_expression_response_shape_test() ->
     {ok, Msg} = beamtalk_repl_protocol:decode(<<"1 + 2">>),
@@ -161,7 +161,7 @@ encode_sessions_new_format_test() ->
     SessionList = maps:get(<<"sessions">>, Decoded),
     ?assertEqual(2, length(SessionList)).
 
-%% BT-2688: connected-session `Program exit:` reply carries the POSIX exit status
+%% Connected-session `Program exit:` reply carries the POSIX exit status
 %% in `exit_code`, alongside a `done` status and a null value — NOT an error.
 encode_script_exit_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"msg-exit-1">>, <<"alice">>),
@@ -307,10 +307,10 @@ encode_error_with_empty_warnings_omitted_test() ->
     Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
 
-%%% encode_error/6 — with metadata (BT-1235)
+%%% encode_error/6 — with metadata
 
 encode_error_with_metadata_new_format_test() ->
-    %% BT-1235: metadata (line/hint) merged into JSON response
+    %% Metadata (line/hint) merged into JSON response
     Msg = make_msg(<<"eval">>, <<"msg-m1">>, <<"s1">>),
     Metadata = #{<<"line">> => 3, <<"hint">> => <<"prefix with _">>},
     Result = beamtalk_repl_protocol:encode_error(
@@ -417,7 +417,7 @@ base_response_with_no_id_no_session_test() ->
 decode_missing_op_test() ->
     Result = beamtalk_repl_protocol:decode(<<"{\"foo\": \"bar\"}">>),
     ?assertMatch({error, {invalid_request, missing_op}}, Result),
-    %% BT-2789: the legacy "type"-field format is rejected, not translated
+    %% The legacy "type"-field format is rejected, not translated
     LegacyResult = beamtalk_repl_protocol:decode(<<"{\"type\": \"eval\"}">>),
     ?assertMatch({error, {invalid_request, missing_op}}, LegacyResult).
 
@@ -458,7 +458,7 @@ encode_describe_new_format_test() ->
         maps:get(<<"versions">>, Decoded)
     ).
 
-%%% encode_need_input tests (BT-698)
+%%% encode_need_input tests
 
 encode_need_input_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"msg-050">>, <<"sess1">>),
@@ -478,7 +478,7 @@ encode_need_input_no_session_test() ->
     ?assertEqual(<<"? ">>, maps:get(<<"prompt">>, Decoded)),
     ?assertEqual(error, maps:find(<<"session">>, Decoded)).
 
-%%% encode_trace_result tests (BT-1238)
+%%% encode_trace_result tests
 
 encode_trace_result_empty_steps_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"tr-001">>, <<"s1">>),
@@ -556,7 +556,7 @@ encode_trace_result_applies_term_to_json_test() ->
     [Step] = maps:get(<<"steps">>, Decoded),
     ?assertEqual(<<"hello">>, maps:get(<<"value">>, Step)).
 
-%%% Test results encoding (BT-1673)
+%%% Test results encoding
 
 encode_test_results_skip_entry_test() ->
     Msg = make_msg(<<"test">>, <<"t-001">>, undefined),
@@ -665,7 +665,7 @@ encode_test_results_skip_without_reason_test() ->
     ?assertEqual(error, maps:find(<<"reason">>, Entry)).
 
 %%====================================================================
-%% encode_diagnostics/2 (BT-2556)
+%% encode_diagnostics/2
 %%====================================================================
 
 encode_diagnostics_projects_atom_keyed_maps_test() ->
