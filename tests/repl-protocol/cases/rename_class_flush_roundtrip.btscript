@@ -90,10 +90,10 @@ File writeAll: _userPath contents: _userSource
 // => Result ok: nil
 
 Workspace load: _demoPath
-// => _
+// => ["Bt3271RenameFlushDemo"]
 
 Workspace load: _userPath
-// => _
+// => ["Bt3271RenameFlushDemoUser"]
 
 Object allSubclasses includes: Bt3271RenameFlushDemo
 // => true
@@ -222,10 +222,10 @@ Workspace changes clear
 // => _
 
 Workspace load: _renamedPath
-// => _
+// => ["Bt3271RenameFlushDemoRenamed"]
 
 Workspace load: _userPath
-// => _
+// => ["Bt3271RenameFlushDemoUser"]
 
 Bt3271RenameFlushDemoUser new makeDemo greet
 // => hi from the rename-flush e2e
@@ -249,10 +249,10 @@ Bt3271RenameFlushDemoUser removeFromSystem
 // => nil
 
 (Erlang file) delete: _renamedPath
-// => _
+// => Result ok: nil
 
 (Erlang file) delete: _userPath
-// => _
+// => Result ok: nil
 
 (Erlang file) del_dir: _projDir
 // => Result ok: nil
