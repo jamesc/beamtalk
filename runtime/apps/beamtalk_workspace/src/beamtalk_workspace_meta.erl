@@ -26,12 +26,12 @@ and can be queried by other components (e.g., idle monitor).
 -export([register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, register_module/2, unregister_module/1, loaded_modules/0]).
 -export([set_class_source/2, get_class_source/1, all_class_sources/0, remove_class_source/1]).
-%% BT-1685: File mtime tracking for incremental load-project.
+%% File mtime tracking for incremental load-project.
 -export([set_file_mtime/2, get_file_mtimes/0, clear_file_mtimes/0, remove_file_mtime/1]).
 -export([get_package_name/0]).
-%% ADR 0082 Phase 4 (BT-2290): workspace-scoped boolean settings (autoflush).
+%% ADR 0082 Phase 4: workspace-scoped boolean settings (autoflush).
 -export([get_setting/2, set_setting/2]).
-%% BT-2621: per-project-path cache of the git repository toplevel, so beamtalk_git
+%% per-project-path cache of the git repository toplevel, so beamtalk_git
 %% resolves `git rev-parse --show-toplevel` at most once per project path.
 -export([get_git_toplevel/1, set_git_toplevel/2]).
 % Alias for get_metadata/0
@@ -50,10 +50,10 @@ and can be queried by other components (e.g., idle monitor).
 -define(WORKSPACE_META_TABLE, beamtalk_workspace_registry).
 % Debounce disk writes to every 2 seconds
 -define(PERSIST_DELAY_MS, 2000).
-%% BT-2621: ETS row key for the cached git repo toplevel. Stored as its own
+%% ETS row key for the cached git repo toplevel. Stored as its own
 %% small row (`{?GIT_TOPLEVEL_KEY, ProjectPath, Toplevel}`) so the git hot path
 %% reads only this tuple via `ets:lookup/2` without a gen_server round-trip.
-%% BT-3108: this used to sit alongside a `{metadata, #state{}}` row that
+%% this used to sit alongside a `{metadata, #state{}}` row that
 %% mirrored the *entire* gen_server state (including class_sources and
 %% loaded_modules) into ETS after nearly every mutation — pure copy cost,
 %% since nothing in-tree ever read it (every public getter already goes
@@ -73,10 +73,10 @@ and can be queried by other components (e.g., idle monitor).
     supervised_actors :: [pid()],
     loaded_modules :: #{atom() => string() | undefined},
     class_sources :: #{binary() => string()},
-    %% BT-1685: Map from absolute file path (string) to mtime (erlang:universaltime()).
+    %% Map from absolute file path (string) to mtime (erlang:universaltime()).
     %% Used by incremental load-project to detect changed files.
     file_mtimes :: #{string() => calendar:datetime()},
-    %% ADR 0082 Phase 4 (BT-2290): workspace-scoped settings (e.g. `autoflush`).
+    %% ADR 0082 Phase 4: workspace-scoped settings (e.g. `autoflush`).
     %% Keyed by atom; persisted to metadata.json. Treated as opaque so future
     %% settings slot in without a schema migration.
     settings :: #{atom() => term()},
@@ -221,7 +221,7 @@ register_module(Module, SourcePath) when is_atom(Module) ->
     end.
 
 -doc """
-Unregister a loaded module (BT-1239: called when a class is removed from the system).
+Unregister a loaded module (called when a class is removed from the system).
 """.
 -spec unregister_module(atom()) -> ok.
 unregister_module(Module) when is_atom(Module) ->
@@ -265,13 +265,13 @@ get_class_source(ClassName) when is_binary(ClassName) ->
     end.
 
 -doc """
-Remove stored source text for a class (BT-3105).
+Remove stored source text for a class.
 
 Called when a class is removed from the system (`removeFromSystem` /
 `classRemoveFromSystemByName/1`), so a stale `class_sources` entry for a
 removed class does not survive — including in the persisted
 `metadata.json` — the way it did before this existed (only `set_class_source/2`
-was available). Mirrors `unregister_module/1`'s BT-1239 precedent: a
+was available). Mirrors `unregister_module/1`'s precedent: a
 fire-and-forget cast that degrades silently (returns `ok`) if the server is
 not running. Idempotent — removing a class with no stored source is a no-op.
 """.
@@ -285,8 +285,8 @@ remove_class_source(ClassName) when is_binary(ClassName) ->
     end.
 
 -doc """
-Every currently-recorded `{ClassName, Source}` pair (ADR 0105 Phase 3,
-BT-2782) — the candidate set for `Workspace recheckImage`'s whole-image
+Every currently-recorded `{ClassName, Source}` pair (ADR 0105 Phase 3)
+— the candidate set for `Workspace recheckImage`'s whole-image
 re-check (`beamtalk_recheck:trigger_image/0`), which needs every live class
 with a tracked source, not just one. Returns an empty map (not an error) if
 the server is not started, mirroring `get_class_source/1`'s degrade-silently
@@ -304,7 +304,7 @@ all_class_sources() ->
     end.
 
 -doc """
-Store the mtime for a loaded .bt file (BT-1685).
+Store the mtime for a loaded .bt file.
 Called after each successful file load during load-project.
 """.
 -spec set_file_mtime(string(), calendar:datetime()) -> ok.
@@ -317,7 +317,7 @@ set_file_mtime(FilePath, Mtime) when is_list(FilePath) ->
     end.
 
 -doc """
-Get all tracked file mtimes (BT-1685).
+Get all tracked file mtimes.
 Returns a map from absolute file path to its mtime at last load.
 """.
 -spec get_file_mtimes() -> {ok, #{string() => calendar:datetime()}} | {error, not_started}.
@@ -330,7 +330,7 @@ get_file_mtimes() ->
     end.
 
 -doc """
-Clear all tracked file mtimes (BT-1685).
+Clear all tracked file mtimes.
 Used when force-reloading a project.
 """.
 -spec clear_file_mtimes() -> ok.
@@ -343,7 +343,7 @@ clear_file_mtimes() ->
     end.
 
 -doc """
-Remove mtime tracking for a single file (BT-1685).
+Remove mtime tracking for a single file.
 Used when a file is detected as deleted during incremental reload.
 """.
 -spec remove_file_mtime(string()) -> ok.
@@ -356,7 +356,7 @@ remove_file_mtime(FilePath) when is_list(FilePath) ->
     end.
 
 -doc """
-Read a workspace-scoped setting (ADR 0082 Phase 4, BT-2290).
+Read a workspace-scoped setting (ADR 0082 Phase 4).
 
 Returns the stored value for `Key`, or `Default` if the setting was never set
 or the server is not running (run mode). Used today for the `autoflush` flag;
@@ -373,7 +373,7 @@ get_setting(Key, Default) when is_atom(Key) ->
     end.
 
 -doc """
-Set a workspace-scoped setting (ADR 0082 Phase 4, BT-2290).
+Set a workspace-scoped setting (ADR 0082 Phase 4).
 
 Updates the in-memory value, mirrors it to ETS, and schedules the debounced
 persist so the setting survives workspace restart. No-op (returns `ok`) when
@@ -389,7 +389,7 @@ set_setting(Key, Value) when is_atom(Key) ->
     end.
 
 -doc """
-Read the cached git repository toplevel for `ProjectPath` (BT-2621).
+Read the cached git repository toplevel for `ProjectPath`.
 
 Returns `{ok, Toplevel}` only when a toplevel was previously cached for *exactly*
 this project path; otherwise `miss` (never resolved, the project path changed
@@ -411,7 +411,7 @@ get_git_toplevel(ProjectPath) when is_binary(ProjectPath) ->
     end.
 
 -doc """
-Cache the resolved git repository toplevel for `ProjectPath` (BT-2621).
+Cache the resolved git repository toplevel for `ProjectPath`.
 
 Stores a single `{ProjectPath, Toplevel}` entry; a later lookup for a different
 project path misses and forces re-resolution, so the cache self-invalidates when
@@ -433,7 +433,7 @@ init(InitialMetadata) ->
     beamtalk_logging_config:set_domain(runtime),
     WorkspaceId = maps:get(workspace_id, InitialMetadata),
     ProjectPath = maps:get(project_path, InitialMetadata, undefined),
-    %% BT-775: Auto-detect package name from beamtalk.toml at project_path
+    %% Auto-detect package name from beamtalk.toml at project_path
     PackageName = detect_package_name(ProjectPath),
     CreatedAt = maps:get(created_at, InitialMetadata),
     ReplPort = maps:get(repl_port, InitialMetadata, undefined),
@@ -574,12 +574,12 @@ handle_cast({register_module, Module, NewSource}, State) ->
     State2 = State#state{loaded_modules = Modules#{Module => EffectiveSource}},
     {noreply, schedule_persist(State2)};
 handle_cast({unregister_module, Module}, State) ->
-    %% BT-1239: Remove a module when removeFromSystem is called.
+    %% Remove a module when removeFromSystem is called.
     Modules = State#state.loaded_modules,
     State2 = State#state{loaded_modules = maps:remove(Module, Modules)},
     {noreply, schedule_persist(State2)};
 handle_cast({remove_class_source, ClassName}, State) ->
-    %% BT-3105: Remove a class's stored source when removeFromSystem is called.
+    %% Remove a class's stored source when removeFromSystem is called.
     Sources = State#state.class_sources,
     State2 = State#state{class_sources = maps:remove(ClassName, Sources)},
     {noreply, schedule_persist(State2)};
@@ -595,7 +595,7 @@ handle_cast({remove_file_mtime, FilePath}, State) ->
     State2 = State#state{file_mtimes = maps:remove(FilePath, Mtimes)},
     {noreply, State2};
 handle_cast({set_git_toplevel, ProjectPath, Toplevel}, State) ->
-    %% BT-2621: cache the resolved toplevel in its own ETS row (single entry,
+    %% cache the resolved toplevel in its own ETS row (single entry,
     %% overwritten on project switch). Derived state — not persisted to disk, and
     %% it dies with the table when the server stops, so it is never restored stale
     %% across restarts (or across machines, where the path would not exist).
@@ -655,7 +655,7 @@ load_metadata_from_disk(#state{metadata_path = undefined} = State) ->
     State;
 load_metadata_from_disk(State) ->
     Path = State#state.metadata_path,
-    %% BT-3108: the mtime of metadata.json itself stands in for "the persisted
+    %% the mtime of metadata.json itself stands in for "the persisted
     %% snapshot" moment — the last time class_sources/loaded_modules were
     %% written to disk. A .bt source file whose own mtime is newer than this
     %% was edited after that snapshot (e.g. externally, while the workspace
@@ -676,7 +676,7 @@ load_metadata_from_disk(State) ->
 
                     %% Restore loaded_modules with source paths (atoms persist across restarts).
                     %% Handles both old format ([binary()]) and new format ([#{name,source}]).
-                    %% BT-3108: an entry survives only if its module is
+                    %% an entry survives only if its module is
                     %% *currently* loaded in the code server — an atom that
                     %% merely still exists proves nothing (the module behind
                     %% it may never load again this session, e.g. after a
@@ -739,7 +739,7 @@ load_metadata_from_disk(State) ->
                         end,
 
                     %% Restore class sources map (binary class name → source string).
-                    %% BT-3108: an entry survives only if (a) the class it
+                    %% an entry survives only if (a) the class it
                     %% names currently resolves to a *loaded* module — no live
                     %% class means no `>>`-patch target and no guarantee the
                     %% text describes what this VM actually compiled — and
@@ -774,7 +774,7 @@ load_metadata_from_disk(State) ->
                                 #{}
                         end,
 
-                    %% ADR 0082 Phase 4 (BT-2290): restore workspace-scoped
+                    %% ADR 0082 Phase 4: restore workspace-scoped
                     %% settings (autoflush etc.). `restore_settings/1` drops
                     %% setting keys whose name does not resolve to an
                     %% existing atom in this build, so unknown keys from a
@@ -791,7 +791,7 @@ load_metadata_from_disk(State) ->
                         supervised_actors = [],
                         loaded_modules = ValidatedModules,
                         class_sources = ClassSources,
-                        %% BT-1685: File mtimes always start fresh — files may
+                        %% File mtimes always start fresh — files may
                         %% have changed between sessions, so first load-project
                         %% after restart always does a full load.
                         file_mtimes = #{},
@@ -872,7 +872,7 @@ persist_metadata_to_disk(State) ->
             #{},
             State#state.class_sources
         ),
-        %% ADR 0082 Phase 4 (BT-2290): persist workspace-scoped settings so
+        %% ADR 0082 Phase 4: persist workspace-scoped settings so
         %% e.g. `autoflush` survives workspace restart.
         <<"settings">> => persist_settings(State#state.settings)
     },
@@ -933,7 +933,7 @@ safe_existing_atom(Binary) ->
     end.
 
 -doc """
-BT-3108: keep a restored `loaded_modules` entry only if `Atom`'s module is
+Keep a restored `loaded_modules` entry only if `Atom`'s module is
 currently loaded in the code server. Returns the `lists:filtermap/2` shape
 directly so restore call sites stay a one-liner.
 """.
@@ -946,7 +946,7 @@ keep_if_module_loaded(Atom, Source) ->
     end.
 
 -doc """
-BT-3108: fold step for restoring a single `class_sources` entry. Adds
+Fold step for restoring a single `class_sources` entry. Adds
 `ClassNameBin => Source` to `Acc` only if the class is currently backed by a
 loaded module (per `ValidatedModules`, itself already filtered to
 `code:is_loaded`) and — when that module has a known on-disk source path —
@@ -1030,8 +1030,8 @@ class_module_loaded(ClassNameBin, ValidatedModules, PackageName) ->
 Package-qualified module atom (`bt@{PackageName}@{snake_case}`) for
 `ClassAtom`, or `undefined` when `PackageName` is unknown or no such atom has
 ever been created in this VM. Delegates to
-`beamtalk_module_name:to_qualified_module_atom/2` (BT-3108 review follow-up:
-extracted there so this isn't a second independent copy of the
+`beamtalk_module_name:to_qualified_module_atom/2` — extracted there so this
+isn't a second independent copy of the
 `bt@{pkg}@{snake}` assembly alongside
 `beamtalk_repl_ops_dev:resolve_qualified_class_name/1`'s).
 """.
@@ -1058,7 +1058,7 @@ source_file_newer_than(SourcePath, SnapshotMtime) when is_list(SourcePath) ->
     end.
 
 -doc """
-BT-775: Detect the package name from beamtalk.toml at the given project path.
+Detect the package name from beamtalk.toml at the given project path.
 Uses simple regex extraction — no TOML parser needed since we only need
 the `name = "..."` field from the `[package]` section.
 """.
@@ -1074,7 +1074,7 @@ detect_package_name(ProjectPath) when is_binary(ProjectPath) ->
             undefined
     end.
 
-%% ADR 0082 Phase 4 (BT-2290): persist/restore opaque workspace settings via
+%% ADR 0082 Phase 4: persist/restore opaque workspace settings via
 %% the JSON metadata blob. Keys are stored as atom strings (so they round-trip
 %% to/from the existing atom-keyed map without intern leaks — we restore only
 %% atoms that already exist in this beam).

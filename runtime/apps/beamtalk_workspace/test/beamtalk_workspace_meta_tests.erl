@@ -35,7 +35,7 @@ stop_if_running() ->
             timer:sleep(10)
     end.
 
-%% BT-3108: compile and load a trivial module named after ClassNameAtom's
+%% compile and load a trivial module named after ClassNameAtom's
 %% static bt@{snake_case} module (ADR 0016), so `code:is_loaded/1` reports it
 %% loaded the same way a real compiled .bt class would — without needing the
 %% full compiler pipeline in a unit test. Returns the module atom.
@@ -52,7 +52,7 @@ load_fake_class_module(ClassNameAtom) ->
     {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
     Mod.
 
-%% BT-3108: like load_fake_class_module/1, but under the package-qualified
+%% like load_fake_class_module/1, but under the package-qualified
 %% bt@{PackageName}@{snake_case} module name a src/-located file in a
 %% packaged project actually compiles under
 %% (beamtalk_repl_loader:resolve_package_module/4's common case) — used to
@@ -333,7 +333,7 @@ register_module_when_not_started_test() ->
     %% Should not crash
     ?assertEqual(ok, beamtalk_workspace_meta:register_module(some_module)).
 
-%% BT-1239: unregister_module removes a module from the loaded_modules map.
+%% unregister_module removes a module from the loaded_modules map.
 unregister_module_test() ->
     stop_if_running(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
@@ -448,7 +448,7 @@ load_corrupt_json_falls_back_test() ->
     _ = file:delete(MetaFile),
     _ = file:del_dir(MetaDir).
 
-%%% Class source storage tests (BT-1174)
+%%% Class source storage tests
 
 set_get_class_source_test() ->
     stop_if_running(),
@@ -482,7 +482,7 @@ get_class_source_when_not_started_test() ->
     %% Should return undefined gracefully
     ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(<<"Foo">>)).
 
-%%% Class source removal tests (BT-3105)
+%%% Class source removal tests
 
 remove_class_source_test() ->
     stop_if_running(),
@@ -585,7 +585,7 @@ debounce_coalesces_rapid_changes_test() ->
     _ = file:delete(MetaFile),
     _ = file:del_dir(MetaDir).
 
-%%% Run mode tests (repl=false, BT-1317)
+%%% Run mode tests (repl=false)
 
 run_mode_no_disk_write_test() ->
     %% In run mode (repl=false), no entry should be written to ~/.beamtalk/workspaces/
@@ -633,7 +633,7 @@ run_mode_metadata_accessible_test() ->
 
     gen_server:stop(Pid).
 
-%%% ADR 0082 Phase 4 (BT-2290): workspace-scoped settings (autoflush)
+%%% ADR 0082 Phase 4: workspace-scoped settings (autoflush)
 
 settings_get_returns_default_when_unset_test() ->
     stop_if_running(),
@@ -693,7 +693,7 @@ settings_set_in_run_mode_is_noop_test() ->
     stop_if_running(),
     ?assertEqual(ok, beamtalk_workspace_meta:set_setting(autoflush, true)).
 
-%%% BT-1242: class_removed cast triggered by classRemoveFromSystemByName
+%%% class_removed cast triggered by classRemoveFromSystemByName
 
 class_removed_cast_unregisters_module_test() ->
     %% Verify that casting {unregister_module, Module} to beamtalk_workspace_meta
@@ -718,7 +718,7 @@ class_removed_cast_unregisters_module_test() ->
 
     gen_server:stop(Pid).
 
-%%% BT-1685: file mtime tracking (set/get/clear/remove)
+%%% file mtime tracking (set/get/clear/remove)
 
 set_get_file_mtimes_test() ->
     stop_if_running(),
@@ -791,7 +791,7 @@ get_file_mtimes_when_not_started_test() ->
     stop_if_running(),
     ?assertEqual({error, not_started}, beamtalk_workspace_meta:get_file_mtimes()).
 
-%%% BT-775: package name detection
+%%% package name detection
 
 get_package_name_when_not_started_test() ->
     stop_if_running(),
@@ -960,7 +960,7 @@ settings_int_and_binary_survive_restart_test() ->
         _ = file:delete(MetaFile)
     end.
 
-%%% BT-2621: git repo toplevel cache (set/get, project-path invalidation)
+%%% git repo toplevel cache (set/get, project-path invalidation)
 
 git_toplevel_cache_roundtrips_test() ->
     stop_if_running(),
@@ -1033,7 +1033,7 @@ set_git_toplevel_when_not_started_test() ->
 
 %%% Class source persistence round-trip (covers class_sources restore branch)
 
-%% BT-3108: a class_sources entry survives restore only when its class
+%% a class_sources entry survives restore only when its class
 %% resolves to a currently-loaded module (here: an in-process gen_server
 %% restart, so the fake module stays loaded across it, same as a real .bt
 %% class would after a supervisor-restart rather than a full VM restart).
@@ -1064,7 +1064,7 @@ class_source_survives_restart_when_module_loaded_test() ->
         _ = code:delete(ModuleAtom)
     end.
 
-%% BT-3108 review follow-up: a class_sources entry for a class in a
+%% a class_sources entry for a class in a
 %% *packaged* project — the common case, not an edge case — survives restore.
 %% Its module is registered under the package-qualified bt@{pkg}@{snake} name
 %% (resolve_package_module/4's shape for a src/-located file), not the
@@ -1107,7 +1107,7 @@ class_source_survives_restart_for_packaged_project_test() ->
         _ = code:delete(ModuleAtom)
     end.
 
-%% BT-3108: a class_sources entry whose class never resolves to a loaded
+%% a class_sources entry whose class never resolves to a loaded
 %% module (no register_module call, module never compiled/loaded this
 %% session) is dropped on restore rather than served as if still current.
 class_source_dropped_when_module_not_loaded_test() ->
@@ -1141,7 +1141,7 @@ class_source_dropped_when_module_not_loaded_test() ->
         _ = file:delete(MetaFile)
     end.
 
-%% BT-3108: a class_sources entry whose backing .bt file was edited (mtime
+%% a class_sources entry whose backing .bt file was edited (mtime
 %% bumped) after metadata.json's own last-write snapshot is discarded on
 %% restore, even though its module is still loaded — the persisted text can
 %% no longer be trusted to match what's on disk.
@@ -1187,7 +1187,7 @@ class_source_dropped_when_source_file_newer_than_snapshot_test() ->
         _ = code:delete(ModuleAtom)
     end.
 
-%%% BT-3108: loaded_modules entries are also validated against code:is_loaded
+%%% loaded_modules entries are also validated against code:is_loaded
 %%% on restore, not just restored on the strength of their atom still existing.
 
 loaded_modules_dropped_when_module_not_loaded_test() ->
