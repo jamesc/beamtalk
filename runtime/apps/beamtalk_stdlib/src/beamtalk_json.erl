@@ -24,7 +24,7 @@ Wraps the OTP `json` module (OTP 27+) with proper type mapping and structured er
 | null          | nil          |
 
 Custom objects can opt into JSON generation by implementing an `asJson`
-instance method returning a JSON-representable value (BT-2818).
+instance method returning a JSON-representable value.
 
 ## Methods
 
@@ -86,7 +86,7 @@ Generate a JSON string from a Beamtalk value.
 Dictionaries become JSON objects, Lists become arrays, Strings become
 JSON strings, Integer/Float become numbers, true/false become JSON
 booleans, nil becomes null. Custom objects that implement `asJson`
-are converted via that hook (BT-2818).
+are converted via that hook.
 """.
 -spec 'generate:'(term()) -> binary().
 'generate:'(Value) ->
@@ -187,7 +187,7 @@ Beamtalk uses `nil` for null; json:encode expects `null`.
 Maps with `$beamtalk_class` tags are stripped of metadata.
 
 Custom objects (Value instances, actors, ...) that implement `asJson`
-are converted via that hook (BT-2818): the hook's return value is
+are converted via that hook: the hook's return value is
 prepared recursively, so it may itself contain further `asJson` objects.
 Tagged maps whose class does not implement `asJson` keep the legacy
 behaviour of encoding their user fields directly as a JSON object.
@@ -262,7 +262,7 @@ encode_map_fields(Map, Seen) ->
     maps:map(fun(_K, V) -> prepare_for_encode(V, Seen) end, Cleaned).
 
 -doc """
-Dispatch the `asJson` conversion hook on a custom object (BT-2818).
+Dispatch the `asJson` conversion hook on a custom object.
 
 Returns `{ok, Prepared}` when the object understands `asJson`, `no_hook`
 otherwise. Uses `beamtalk_message_dispatch` (the unified send entry point)

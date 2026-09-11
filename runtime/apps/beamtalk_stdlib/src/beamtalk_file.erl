@@ -192,7 +192,7 @@ Returns a Result ok map on success, Result error map on failure.
     beamtalk_error:raise_type_error('File', 'writeAll:contents:', <<"Path must be a String">>).
 
 %%% ============================================================================
-%%% Binary I/O (BT-1555)
+%%% Binary I/O
 %%% ============================================================================
 
 -doc """
@@ -332,7 +332,7 @@ handle_has_method('isOpen') -> true;
 handle_has_method(_) -> false.
 
 %%% ============================================================================
-%%% File Streaming (BT-513)
+%%% File Streaming
 %%% ============================================================================
 
 -doc """
@@ -414,7 +414,7 @@ Returns a Result ok map with the result of the block.
     beamtalk_error:raise_type_error('File', 'open:do:', <<"Path must be a String">>).
 
 %%% ============================================================================
-%%% Incremental handle I/O (BT-2975)
+%%% Incremental handle I/O
 %%% ============================================================================
 
 -doc """
@@ -432,7 +432,7 @@ Modes map onto binary `file:open/2` option sets:
 Write-capable modes auto-create parent directories, matching
 `writeBinary:contents:`.
 
-The caller is responsible for `close`, but is not the sole backstop (BT-3020):
+The caller is responsible for `close`, but is not the sole backstop:
 the handle is registered against a resolved *owner* — the REPL/workspace
 session if there is one, else the calling Beamtalk actor, else unowned — and
 `beamtalk_file_handle_registry` closes an owned handle when its owner dies.
@@ -456,7 +456,7 @@ Returns a Result ok map holding the handle, or a Result error map.
     beamtalk_error:raise_type_error('File', 'open:mode:', <<"Path must be a String">>).
 
 -doc """
-Resolve the owner `open:mode:` registers its handle against (BT-3020, decision (a)).
+Resolve the owner `open:mode:` registers its handle against.
 
 `open:mode:` is not call-site lowered (see `mode_options/1`), so this runs
 inside the File class gen_server, where `self()` is the class process rather
@@ -464,7 +464,7 @@ than the caller. Two process-dictionary keys mirrored into *this* process for
 the duration of the call stand in for "who is calling":
 
 1. `beamtalk_session_pid` — the long-lived REPL/workspace session shell pid,
-   explicitly carried by `class_send_dispatch/3` (ADR 0081 / BT-2379) so
+   explicitly carried by `class_send_dispatch/3` (ADR 0081) so
    `Session current` works the same way from inside a class method. A pid here
    outlives the short-lived eval worker that made this particular call, so it
    survives across REPL turns — the property the rejected call-site-lowering
@@ -506,7 +506,7 @@ resolve_owner() ->
     end.
 
 -doc """
-List every outstanding `open:mode:` handle for diagnostics (BT-3020).
+List every outstanding `open:mode:` handle for diagnostics.
 
 Returns an Array of 3-element Arrays `#(path mode owner)`. `owner` is the
 session/actor pid for tiers 1-2, `nil` for an unowned (tier 3) handle. Handles
@@ -533,7 +533,7 @@ the way out — normal return, raised error, or non-local return alike (the same
 guarantee `ensure:` gives at the Beamtalk level). A block that closes the
 handle itself is fine: closing is idempotent.
 
-The block normally runs in the *caller's* process: BT-3018 / ADR 0109 lowers
+The block normally runs in the *caller's* process: ADR 0109 lowers
 `File open:…do:` at the call site to a direct call on the `open/3` shim below,
 so it never reaches the File class process. Nothing here bounds what the block
 may do — it can message `File` again, it holds nothing else up, and there is
@@ -576,8 +576,8 @@ file could not be opened.
 Shared open path for open:mode: and open:mode:do:.
 
 `open:mode:` (unlike the `do:` variants) is deliberately **not** call-site
-lowered to the caller's process, and must stay that way — BT-3020 measured why:
-OTP already auto-closes a handle when the process that opened it dies (a
+lowered to the caller's process, and must stay that way: OTP already
+auto-closes a handle when the process that opened it dies (a
 non-`raw` descriptor is a `file_io_server` process that monitors its opener),
 so lowering `open:mode:` would seem to make that auto-close "free". But the
 REPL spawns a fresh worker per evaluated statement (`spawn_monitor` in
@@ -707,7 +707,7 @@ open_error(Selector, Path, Reason) ->
     beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}).
 
 %%% ============================================================================
-%%% Directory Operations (BT-1120)
+%%% Directory Operations
 %%% ============================================================================
 
 -doc """
@@ -1180,7 +1180,7 @@ lines(Path) -> 'lines:'(Path).
 %% the first keyword), so they are told apart by their second argument: a Block
 %% is a fun, a mode is a Symbol.
 %%
-%% These two shims have a second caller beyond the inline FFI: BT-3018 / ADR
+%% These two shims have a second caller beyond the inline FFI: ADR
 %% 0109 compiles `File open:…do:` straight to `native_call(beamtalk_file, open,
 %% …)` so the user's block runs in the caller rather than the File class
 %% process. Removing the fun clause below would send those call sites to
@@ -1244,7 +1244,7 @@ or the caller's `close` for a handle from `open:mode:`.
 """.
 -spec handle_lines(file_handle()) -> beamtalk_stream:t().
 handle_lines(#{'$beamtalk_class' := 'FileHandle', fd := Fd} = Handle) ->
-    %% BT-2975: `lines` returns a Stream, not a Result, so a closed or
+    %% `lines` returns a Stream, not a Result, so a closed or
     %% write-only handle has to raise. Reading a write-only descriptor crashes
     %% the file_io_server, silently breaking every later write on the handle —
     %% and a closed one would surface only as a mysteriously empty stream.
@@ -1254,7 +1254,7 @@ handle_lines(_) ->
     beamtalk_error:raise_type_error('FileHandle', 'lines', <<"Expected a FileHandle">>).
 
 %%% ============================================================================
-%%% Stream Generator Helpers (BT-513)
+%%% Stream Generator Helpers
 %%% ============================================================================
 
 -doc "Create a Stream of lines from a file path, with finalizer-based cleanup.".

@@ -204,7 +204,7 @@ do_loop(Bin, Pos, Size, Fun) ->
 -doc """
 1-based byte access. Returns Integer 0-255.
 
-BT-3021: indexing an empty Binary raises `empty_collection`, matching
+Indexing an empty Binary raises `empty_collection`, matching
 `beamtalk_list:at/2`, `beamtalk_string:at/2` and `beamtalk_array:at/2`. An
 index below 1 is malformed whether or not the Binary is empty, so it stays
 `index_out_of_bounds`.

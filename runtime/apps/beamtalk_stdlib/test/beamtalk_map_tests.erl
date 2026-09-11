@@ -5,7 +5,7 @@
 
 -moduledoc """
 Tests for beamtalk_map helper module and compiled
-bt@stdlib@dictionary stdlib dispatch (BT-418).
+bt@stdlib@dictionary stdlib dispatch.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

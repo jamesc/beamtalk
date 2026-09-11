@@ -3,7 +3,7 @@
 
 -module(beamtalk_stream_tests).
 
--moduledoc "Unit tests for beamtalk_stream (BT-537, BT-1966).".
+-moduledoc "Unit tests for beamtalk_stream.".
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -64,7 +64,7 @@ detect_calls_finalizer_test() ->
     after 100 -> ?assert(false)
     end.
 
-%% BT-3028: the finalizer must still run when detect: exhausts the stream and
+%% The finalizer must still run when detect: exhausts the stream and
 %% raises — the raise happens after the `try ... after`, not inside it. Without
 %% this the no-match path would leak whatever resource the finalizer releases
 %% (e.g. the file handle behind `File open:do:`).
@@ -263,7 +263,7 @@ file_lines_take_closes_handle_test() ->
     end.
 
 %%% ============================================================================
-%%% Constructor Tests (BT-1966)
+%%% Constructor Tests
 %%% ============================================================================
 
 %% from: creates an infinite stream starting at the given integer
@@ -327,7 +327,7 @@ on_dictionary_error_test() ->
     ).
 
 %%% ============================================================================
-%%% Empty Stream Edge Cases (BT-1966)
+%%% Empty Stream Edge Cases
 %%% ============================================================================
 
 %% take on empty stream returns empty list
@@ -350,7 +350,7 @@ inject_into_empty_test() ->
     Stream = beamtalk_stream:on([]),
     ?assertEqual(42, beamtalk_stream:inject_into(Stream, 42, fun(Acc, _X) -> Acc end)).
 
-%% BT-3028: an empty stream is the degenerate no-match case, so detect raises
+%% An empty stream is the degenerate no-match case, so detect raises
 %% `not_found` like every other collection rather than answering nil.
 detect_empty_test() ->
     Stream = beamtalk_stream:on([]),
@@ -375,7 +375,7 @@ all_satisfy_empty_test() ->
     ?assertEqual(true, beamtalk_stream:all_satisfy(Stream, fun(_) -> false end)).
 
 %%% ============================================================================
-%%% Lazy Operation Chaining (BT-1966)
+%%% Lazy Operation Chaining
 %%% ============================================================================
 
 %% select filters elements from finite stream
@@ -434,7 +434,7 @@ chained_drop_take_test() ->
     ?assertEqual([6, 7, 8], beamtalk_stream:take(Dropped, 3)).
 
 %%% ============================================================================
-%%% Infinite Stream Truncation (BT-1966)
+%%% Infinite Stream Truncation
 %%% ============================================================================
 
 %% Infinite stream truncated by take
@@ -458,7 +458,7 @@ any_satisfy_infinite_test() ->
     ?assertEqual(true, beamtalk_stream:any_satisfy(Stream, fun(X) -> X > 100 end)).
 
 %%% ============================================================================
-%%% Terminal Operation Tests (BT-1966)
+%%% Terminal Operation Tests
 %%% ============================================================================
 
 %% do: iterates and returns nil
@@ -495,7 +495,7 @@ inject_into_sum_test() ->
     Sum = beamtalk_stream:inject_into(Stream, 0, fun(Acc, X) -> Acc + X end),
     ?assertEqual(10, Sum).
 
-%% BT-3028: detect raises `not_found` if no element matches (finite)
+%% detect raises `not_found` if no element matches (finite)
 detect_not_found_test() ->
     Stream = beamtalk_stream:on([1, 2, 3]),
     ?assertError(
@@ -536,7 +536,7 @@ all_satisfy_false_infinite_test() ->
     ?assertEqual(false, beamtalk_stream:all_satisfy(Stream, fun(X) -> X < 5 end)).
 
 %%% ============================================================================
-%%% Error Handling in Type Checks (BT-1966)
+%%% Error Handling in Type Checks
 %%% ============================================================================
 
 %% select: with non-function raises type error
@@ -612,7 +612,7 @@ all_satisfy_type_error_test() ->
     ).
 
 %%% ============================================================================
-%%% Display Tests (BT-1966)
+%%% Display Tests
 %%% ============================================================================
 
 %% print_string returns description
@@ -628,7 +628,7 @@ print_string_pipeline_test() ->
     ?assertEqual(<<"Stream(from: 1) | select: [...]">>, Desc).
 
 %%% ============================================================================
-%%% FFI Shim Tests (BT-1966)
+%%% FFI Shim Tests
 %%% ============================================================================
 
 %% from/2 shim delegates to from_by

@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-FileHandle instance-side implementation and dispatch (BT-513, BT-871, BT-1762, BT-2975).
+FileHandle instance-side implementation and dispatch.
 
 A `FileHandle` is a tagged map wrapping an open `file:io_device()` plus the
 mode it was opened with, the path it came from, and an `atomics` cell holding
@@ -43,7 +43,7 @@ See also: beamtalk_file for File class-side methods (`open:mode:`, `readAll:`, e
 
 -export([dispatch/3, has_method/1]).
 
-%% FFI shims for (Erlang beamtalk_file_handle) dispatch (BT-2975)
+%% FFI shims for (Erlang beamtalk_file_handle) dispatch
 -export([
     read/2,
     readAll/1,
@@ -142,7 +142,7 @@ descriptor_alive(Fd) when is_pid(Fd) -> is_process_alive(Fd);
 descriptor_alive(_Fd) -> true.
 
 %%% ============================================================================
-%%% Instance methods (BT-2975)
+%%% Instance methods
 %%% ============================================================================
 
 -doc """
@@ -265,7 +265,7 @@ sync(_) ->
 Close the handle. Idempotent — closing an already-closed handle returns
 `Result ok: nil` rather than an error.
 
-Unregisters the handle from `beamtalk_file_handle_registry` (BT-3020) so a
+Unregisters the handle from `beamtalk_file_handle_registry` so a
 closed handle never lingers in `File openHandles`, and a later death of the
 handle's owner can never double-close it. A no-op for a handle the registry
 never tracked (from `open:do:` / `open:mode:do:`, or opened before the

@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_os module (BT-1247).
+EUnit tests for beamtalk_os module.
 
 Tests cover:
 - run: success path (trimmed stdout)

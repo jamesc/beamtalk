@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_result module (BT-1254, BT-2187).
+EUnit tests for beamtalk_result module.
 
 Tests cover:
 - from_tagged_tuple/1 — ok tuple, error tuple (atom, #beamtalk_error{}, wrapped map)

@@ -68,7 +68,7 @@ layer). In a **shared/connected** context (REPL / MCP / LSP / connected
 `beamtalk run`) it must end only *this session's* job and leave the node up; it
 raises a tagged `script_exit` signal carrying the status, which the session
 evaluator catches to report the status to the connecting client and terminate
-the session (BT-2688, ADR 0099 §3 / Phase 5).
+the session (ADR 0099 §3 / Phase 5).
 
 **Process boundary.** The run-mode/escript path is an immediate `erlang:halt/1`,
 so it is effective from *any* process — including a spawned/supervised Actor —
@@ -86,7 +86,7 @@ block that wraps `Program exit:` in an `on:do:` whose handler class matches
 re-raises after running cleanup, so the exit still propagates). The robust fix is
 to add this signal to the non-local-return passthrough the `on:do:` codegen
 already emits for `{'$bt_nlr', _}` (see `control_flow/exception_handling.rs`);
-that is a follow-up (tracked on BT-2688). In practice `Program exit:` is called at
+that is a known follow-up. In practice `Program exit:` is called at
 the top of a `main:` or as a bare REPL expression, neither of which is wrapped in
 such a handler.
 """.
@@ -100,7 +100,7 @@ such a handler.
             %% shared node. The tagged `script_exit` signal carries the status; the
             %% session evaluator (`beamtalk_repl_eval`/`beamtalk_repl_shell`) catches
             %% it, replies with the exit status, and stops the session shell
-            %% (BT-2688). `throw` (not `error`) keeps it distinct from a user-level
+            %% `throw` (not `error`) keeps it distinct from a user-level
             %% `#beamtalk_error{}`, so an ordinary `on:do:` handler does not swallow
             %% it.
             throw({beamtalk_script_exit, Code})

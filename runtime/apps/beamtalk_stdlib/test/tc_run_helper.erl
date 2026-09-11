@@ -30,7 +30,7 @@ dispatch(testBeamtalkError, [], _Instance) ->
     error(#beamtalk_error{kind = type_error, class = 'TestCase', message = <<"generic error">>});
 dispatch(testUndef, [], _Instance) ->
     nonexistent_module_xyz_bt2391:'nope'();
-%% BT-2404: BEAM error-shape dispatchers for decode_beam_error/1 coverage.
+%% BEAM error-shape dispatchers for decode_beam_error/1 coverage.
 %% These all fall through to error:TestReason:TestST in run_test_method/5
 %% (they are not #beamtalk_error{} records nor `undef`, so they bypass
 %% the specialised catch clauses and reach format_test_error/3).

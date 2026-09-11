@@ -6,7 +6,7 @@
 %%% **DDD Context:** stdlib
 
 -moduledoc """
-EUnit tests for beamtalk_exec_port binary-finder helpers (BT-2521).
+EUnit tests for beamtalk_exec_port binary-finder helpers.
 
 This file lives in beamtalk_stdlib/test/ so that the coverage recipe
 (`rebar3 eunit --dir=apps/beamtalk_stdlib/test`) instruments and records

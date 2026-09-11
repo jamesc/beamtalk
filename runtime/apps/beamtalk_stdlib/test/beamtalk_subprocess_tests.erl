@@ -337,13 +337,12 @@ lines_stream_yields_correct_sequence_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
-%%% fast-exit stderr race regression (BT-1148)
+%%% fast-exit stderr race regression
 %%% ============================================================================
 
 %% Regression test for the port closure race: a fast-exiting process that writes
-%% only to stderr must not lose data.  Before BT-1148 this failed ~20% of the
-%% time because the reaper sent the exit event before the reader thread had
-%% finished flushing stderr data.
+%% only to stderr must not lose data. Without this guard the reaper can send
+%% the exit event before the reader thread has finished flushing stderr data.
 fast_exit_stderr_data_not_lost_test_() ->
     {ShExe, ShArgs} = shell_cmd(stderr_echo_script()),
     %% Guard against missing beamtalk-exec binary (not yet built in some envs).
@@ -385,13 +384,12 @@ stderrLines_stream_yields_correct_sequence_test() ->
 
 %%% ============================================================================
 %%% dispatch — open returns Result ok (ADR 0060)
-%%% BT-1211: Removed — dispatch/3 FFI shim no longer exists after native facade
-%%% migration. Result wrapping is now handled by the Beamtalk class method.
-%%% Equivalent coverage: SubprocessTest>>testSpawnAndReadLine in BUnit.
+%%% No dispatch/3 FFI shim: Result wrapping is handled by the Beamtalk class
+%%% method. Equivalent coverage: SubprocessTest>>testSpawnAndReadLine in BUnit.
 %%% ============================================================================
 
 %%% ============================================================================
-%%% validate_config — error paths (BT-1211)
+%%% validate_config — error paths
 %%% ============================================================================
 
 validate_config_missing_executable_test() ->

@@ -6,7 +6,7 @@
 %%% **DDD Context:** Runtime Context
 
 -moduledoc """
-EUnit tests for beamtalk_parallel module (BT-2974).
+EUnit tests for beamtalk_parallel module.
 
 Focus: the `'DOWN'` message branches in `gather_all/5` and `gather_any/5`
 that fire when a worker process is killed externally — bypassing

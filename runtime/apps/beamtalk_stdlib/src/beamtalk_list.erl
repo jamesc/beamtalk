@@ -10,8 +10,6 @@ Runtime helper for complex List operations.
 
 Provides implementations for List methods that require custom logic
 beyond simple BIF calls (bounds checking, error formatting, iteration).
-
-BT-419: Created as part of Array→List rename and compiled stdlib migration.
 """.
 
 -export([
@@ -37,7 +35,7 @@ BT-419: Created as part of Array→List rename and compiled stdlib migration.
 -doc """
 Access element at 1-based index with bounds checking.
 
-BT-3021: three distinct failures, three distinct kinds — a non-integer index is
+Three distinct failures, three distinct kinds — a non-integer index is
 a `type_error`, indexing an empty List is `empty_collection`, and any other
 out-of-range index is `index_out_of_bounds` (matching `Array`/`String` `at:`).
 None of them is `does_not_understand`: the List understands `at:` perfectly
@@ -80,11 +78,11 @@ raise_out_of_bounds(N, Suffix) ->
 -doc """
 Find first element matching block, error if not found.
 
-BT-3025: raises `not_found` when no element matches. It used to raise
-`does_not_understand`, which claimed the List had no `detect:` at all and sent
-readers hunting for a typo. Use `detect:ifNone:` for the non-raising form.
+Raises `not_found` when no element matches — not `does_not_understand`,
+which would claim the List had no `detect:` at all and send readers
+hunting for a typo. Use `detect:ifNone:` for the non-raising form.
 
-BT-3028: every other collection raises the same kind, so the error is built by
+Every other collection raises the same kind, so the error is built by
 the shared `beamtalk_collection:raiseDetectNotFound/1` rather than inline here.
 """.
 -spec detect(list(), function()) -> term().
@@ -93,7 +91,7 @@ detect(List, Block) when is_list(List), is_function(Block, 1) ->
         {ok, Found} ->
             Found;
         not_found ->
-            %% BT-3028: shared with the inherited `Collection>>detect:` and with
+            %% Shared with the inherited `Collection>>detect:` and with
             %% `beamtalk_stream:detect/2` so all three raise byte-identical
             %% errors — a caller that swaps receiver types sees no difference.
             beamtalk_collection:raiseDetectNotFound('List')
@@ -228,9 +226,9 @@ intersperse([H | T], Sep) -> [H, Sep | intersperse(T, Sep)].
 -doc """
 Extract subsequence from Start to End (1-based, inclusive).
 
-BT-3025: a start index below 1 raises `index_out_of_bounds`, matching `at/2`.
-It used to raise `does_not_understand`, which reported a malformed index as a
-dispatch failure. An `End` below `Start` is an empty range, not an error.
+A start index below 1 raises `index_out_of_bounds`, matching `at/2` — not
+`does_not_understand`, which would report a malformed index as a dispatch
+failure. An `End` below `Start` is an empty range, not an error.
 """.
 -spec from_to(list(), term(), term()) -> list().
 from_to(List, Start, End) when
@@ -285,7 +283,7 @@ zip_to_pairs(_, []) -> [];
 zip_to_pairs([H1 | T1], [H2 | T2]) -> [[H1, H2] | zip_to_pairs(T1, T2)].
 
 -doc """
-BT-1487: Reverse the value lists in a groupBy result map.
+Reverse the value lists in a groupBy result map.
 
 During foldl-based groupBy with state threading, elements are prepended
 to each group (building reversed lists). This reverses them to restore
@@ -310,14 +308,14 @@ describe_value(V) ->
     atom_to_binary(ClassName).
 
 %%% ============================================================================
-%%% Strict (`=:=`) element identity — BT-2997
+%%% Strict (`=:=`) element identity
 %%% ============================================================================
 %%%
 %%% `ordsets` and `lists:usort/1` decide element identity with Erlang term
 %%% *order*, which is `==` semantics: it treats the integer `1` and the float
 %%% `1.0` as the same element. Beamtalk's element identity is `=:=` — matching
 %%% `Dictionary` keys (Erlang maps), `List>>includes:`, and ADR 0002's
-%%% strict-by-default equality, which BT-1562 established for `5 =:= 5.0`.
+%%% strict-by-default equality (`5 =:= 5.0` is `false`).
 %%%
 %%% These helpers keep the term-order-sorted list representation (which
 %%% `beamtalk_set`, `beamtalk_inspector`, `beamtalk_primitive` and

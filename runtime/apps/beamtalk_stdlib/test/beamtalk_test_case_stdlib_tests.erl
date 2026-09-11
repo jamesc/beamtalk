@@ -4,7 +4,7 @@
 -module(beamtalk_test_case_stdlib_tests).
 
 -moduledoc """
-Stdlib-layer EUnit tests for beamtalk_test_case error paths (BT-2391).
+Stdlib-layer EUnit tests for beamtalk_test_case error paths.
 
 These tests run under coverage-bunit (which instruments beamtalk_stdlib),
 closing the coverage gap left by beamtalk_test_case_tests.erl living in
@@ -240,7 +240,7 @@ execute_tests_runall_no_methods_test() ->
     ?assertNotEqual(nomatch, binary:match(Result, <<"No test methods">>)).
 
 %%% ============================================================================
-%%% decode_beam_error/1 clause coverage via run_test_method/5 (BT-2404)
+%%% decode_beam_error/1 clause coverage via run_test_method/5
 %%%
 %%% decode_beam_error is private but reachable through run_test_method when
 %%% errors fall through to the generic `error:TestReason:TestST` catch clause
@@ -454,7 +454,7 @@ run_single_structured_fail_test() ->
     ?assertEqual(1, maps:get(failed, Result)).
 
 %%% ============================================================================
-%%% BT-3251 regression: BIF-fallback path against a REAL Beamtalk-compiled
+%%% Regression coverage: BIF-fallback path against a REAL Beamtalk-compiled
 %%% TestCase subclass — 'bt@bif_fallback_test_case', compiled by
 %%% compile_fixtures.escript from
 %%% runtime/apps/beamtalk_runtime/test_fixtures/bif_fallback_test_case.bt —
@@ -598,7 +598,7 @@ should_raise_unknown_error_shape_test() ->
     ?assertEqual(nil, beamtalk_test_case:should_raise(Block, error)).
 
 %%% ============================================================================
-%%% format_stacktrace/1 edge cases (BT-1743)
+%%% format_stacktrace/1 edge cases
 %%%
 %%% format_stacktrace/1 is exported under -ifdef(TEST).
 %%% Covers lines 440, 537–538, 556, 573 of beamtalk_test_case.erl.

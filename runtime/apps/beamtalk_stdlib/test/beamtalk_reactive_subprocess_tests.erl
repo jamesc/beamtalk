@@ -6,7 +6,7 @@
 %%% **DDD Context:** runtime
 
 -moduledoc """
-EUnit tests for beamtalk_reactive_subprocess gen_server (BT-1187).
+EUnit tests for beamtalk_reactive_subprocess gen_server.
 
 Tests cover:
 - stdout lines are pushed to the notify actor via cast
@@ -114,7 +114,7 @@ make_collector() ->
 collector_loop(Owner, Acc) ->
     receive
         %% gen_server:cast/2 sends {'$gen_cast', Msg} to the target process
-        %% BT-1604: cast_send now sends {cast, Selector, Args, PropCtx} with propagated context
+        %% cast_send sends {cast, Selector, Args, PropCtx} with propagated context
         {'$gen_cast', {cast, Selector, Args, _PropCtx}} ->
             collector_loop(Owner, [{Selector, Args} | Acc]);
         {'$gen_cast', {cast, Selector, Args}} ->
@@ -470,7 +470,7 @@ open_args_env_dir_notify_type_error_test() ->
     ).
 
 %%% ============================================================================
-%%% Additional coverage — handle_call/3 DNU path (BT-2456)
+%%% Additional coverage — handle_call/3 DNU path
 %%% ============================================================================
 
 unknown_tuple_call_returns_dnu_error_test() ->
@@ -508,7 +508,7 @@ unknown_plain_call_returns_dnu_error_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
-%%% Additional coverage — handle_cast/2 and handle_info/2 catch-alls (BT-2456)
+%%% Additional coverage — handle_cast/2 and handle_info/2 catch-alls
 %%% ============================================================================
 
 handle_cast_ignored_test() ->
@@ -548,7 +548,7 @@ unknown_info_message_ignored_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
-%%% Additional coverage — handle_writeLine/2 type-error path (BT-2456)
+%%% Additional coverage — handle_writeLine/2 type-error path
 %%% ============================================================================
 
 writeLine_type_error_test() ->

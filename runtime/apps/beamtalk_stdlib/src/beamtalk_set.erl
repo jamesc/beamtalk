@@ -8,25 +8,23 @@
 -moduledoc """
 Runtime helper operations for Set (a term-order-sorted list in a tagged map).
 
-BT-73: Complex Set operations that cannot be inlined as direct BIF
+Complex Set operations that cannot be inlined as direct BIF
 calls in generated Core Erlang. Called from compiled stdlib module
 bt@stdlib@set.
 
 Sets are represented as tagged maps:
   #{'$beamtalk_class' => 'Set', elements => SortedUniqueList}
 
-## Element identity is `=:=` (BT-2997)
+## Element identity is `=:=` (ADR 0002)
 
-This used `ordsets`, which decides membership by Erlang term *order* — `==`
-semantics. That made `Set` disagree with everything else in the language:
-`Set new add: 1; add: 1.0` held one element, while a `Dictionary` keyed on `1`
-and `1.0` (Erlang maps, hence `=:=`) held two, and `#(1) includes: 1.0`
-answered false. ADR 0002 and BT-1562 make `=:=` the language's element
-identity, so `Set` was the outlier.
+Membership and uniqueness use `=:=`, matching `Dictionary` keys (Erlang
+maps) and `List>>includes:` — not Erlang term *order* (`==` semantics),
+which would disagree: `1` and `1.0` would be the same Set element but
+distinct Dictionary keys.
 
-The representation is unchanged — a term-order-sorted list, which
+The representation is a term-order-sorted list, which
 `beamtalk_inspector`, `beamtalk_primitive` and `beamtalk_stream` all read
-directly, and which keeps `asList` sorted. Only identity moved to `=:=`, via
+directly, and which keeps `asList` sorted. Identity is `=:=`, via
 the `beamtalk_list:unique/1` / `strict_member_sorted/2` helpers. `==` and `=:=`
 disagree only for numbers, so mutually-`==` elements form a short contiguous
 run that those helpers scan strictly.

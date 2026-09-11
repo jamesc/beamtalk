@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_timer module (BT-1121, BT-1165).
+EUnit tests for beamtalk_timer module.
 
 Tests class methods (after:do:, every:do:, sleep:), instance methods
 (cancel, isActive, printString), the ack-based cancel protocol,
@@ -194,7 +194,7 @@ print_string_inactive_test() ->
     ?assertEqual(<<"Timer(inactive)">>, beamtalk_timer:'printString'(T)).
 
 %%% ============================================================================
-%%% FFI shims (BT-1165)
+%%% FFI shims
 %%% ============================================================================
 
 ffi_shim_after_returns_timer_test() ->
@@ -229,7 +229,7 @@ ffi_shim_sleep_error_propagates_test() ->
     ).
 
 %%% ============================================================================
-%%% spawn_link — automatic cleanup on caller death (BT-1455)
+%%% spawn_link — automatic cleanup on caller death
 %%% ============================================================================
 
 after_timer_dies_when_caller_dies_test() ->

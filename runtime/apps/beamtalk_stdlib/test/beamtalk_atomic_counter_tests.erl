@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_atomic_counter module (BT-1250).
+EUnit tests for beamtalk_atomic_counter module.
 
 Tests cover:
 - new:/1 — counter creation (success, already_exists, type error)

@@ -5,14 +5,14 @@
 -module(beamtalk_list_tests).
 
 -moduledoc """
-EUnit tests for beamtalk_list (BT-708).
+EUnit tests for beamtalk_list.
 
 Tests list operations: at, detect, detect_if_none, do, reject,
 zip, group_by, partition, intersperse, take, drop, sort_with,
 from_to — including error cases.
 
-Note: index_of/2 and each_with_index/2 were removed in BT-816
-(self-hosted in pure Beamtalk in list.bt).
+Note: index_of/2 and each_with_index/2 are self-hosted in pure Beamtalk
+in list.bt.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -72,7 +72,7 @@ at_negative_index_test() ->
         beamtalk_list:at([1, 2, 3], -1)
     ).
 
-%% BT-3021: indexing an *empty* List is `empty_collection`, a distinct
+%% Indexing an *empty* List is `empty_collection`, a distinct
 %% condition from an out-of-range index into a populated one.
 at_empty_list_test() ->
     ?assertException(
@@ -151,7 +151,7 @@ detect_first_match_test() ->
         )
     ).
 
-%% BT-3025: no element matched is `not_found`, not `does_not_understand` —
+%% No element matched is `not_found`, not `does_not_understand` —
 %% the List understands `detect:`, the search just came up empty.
 detect_not_found_test() ->
     ?assertException(
@@ -635,7 +635,7 @@ from_to_non_integer_end_test() ->
         beamtalk_list:from_to([1, 2, 3], 1, foo)
     ).
 
-%% BT-3025: a sub-1 start index is `index_out_of_bounds`, matching `at:` —
+%% A sub-1 start index is `index_out_of_bounds`, matching `at:` —
 %% the index is malformed, the selector is not.
 from_to_negative_start_test() ->
     ?assertException(
@@ -666,7 +666,7 @@ from_to_zero_start_test() ->
     ).
 
 %%% ============================================================================
-%%% Strict (`=:=`) element identity — BT-2997
+%%% Strict (`=:=`) element identity
 %%% ============================================================================
 
 unique_strict_keeps_int_and_float_test() ->
