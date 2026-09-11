@@ -12,6 +12,14 @@
 //! - Binary operand type checking
 //! - Field assignment and state default validation
 //! - "Did you mean?" suggestions for unknown selectors
+//!
+//! Dependency direction is one-way: `inference/` calls into this module to
+//! render diagnostics (inference dispatches, validation decides), never the
+//! reverse. `check_state_defaults` needs an inferred type for each state
+//! field's default-value expression but does not call `infer_expr` itself —
+//! it reads the result `inference/mod.rs::check_module` already cached in
+//! `TypeChecker::state_default_types` (BT-3481), keeping the direction
+//! one-way instead of calling back into `inference/`.
 
 use std::collections::HashMap;
 
@@ -2571,9 +2579,9 @@ impl TypeChecker {
             let Some(ref type_annotation) = decl.type_annotation else {
                 continue;
             };
-            let Some(ref default_value) = decl.default_value else {
+            if decl.default_value.is_none() {
                 continue;
-            };
+            }
             // ADR 0108: resolve the declared type through the alias
             // table before comparing against the default value's inferred
             // type — mirroring `check_method_return_type`'s existing
@@ -2607,15 +2615,19 @@ impl TypeChecker {
             let declared_display = resolved_declared
                 .display_for_diagnostic()
                 .unwrap_or_else(|| EcoString::from("Dynamic"));
-            let mut env = TypeEnv::new();
-            env.set_local("self", InferredType::known(class.name.name.clone()));
-            // This call makes the module's dependency direction cyclic: `inference/`
-            // already calls into `validation.rs` (`check_argument_types`,
-            // `check_instance_selector`, …), and this is `validation.rs`
-            // calling back into `inference/`'s `infer_expr`. Left as-is
-            // deliberately; eliminating it would mean threading the default
-            // value's already-inferred type through from the caller instead.
-            let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
+            // Read the pre-computed type instead of re-inferring: `inference/
+            // mod.rs::check_module` already inferred every state field's
+            // default-value expression (BT-3481) and cached it in
+            // `state_default_types` keyed by (class, field) — looking it up
+            // here keeps the module dependency direction one-way
+            // (`inference` → `validation`, never back).
+            let Some(inferred) = self
+                .state_default_types
+                .get(&(class.name.name.clone(), decl.name.name.clone()))
+                .cloned()
+            else {
+                continue;
+            };
             match &inferred {
                 InferredType::Known {
                     class_name: value_type,

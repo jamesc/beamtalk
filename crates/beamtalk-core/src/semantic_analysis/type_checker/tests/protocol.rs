@@ -1387,3 +1387,60 @@ fn test_project_complete_without_deps_still_warns_conformance() {
             .collect::<Vec<_>>()
     );
 }
+
+/// BT-3481 regression: a Generic-typed state field's default-value
+/// expression used to be inferred twice per compile — once by
+/// `validation.rs::check_state_defaults` (Phase 1) and again, independently,
+/// by `check_state_variance` in this module (Phase 2f) — because both called
+/// `infer_expr` directly instead of sharing one cached result. A default
+/// value containing an unknown-selector send makes that duplication
+/// observable: `infer_expr`'s message-send handling pushes a "does not
+/// understand" diagnostic as a side effect of inference itself, so calling
+/// it twice on the same expression used to double that diagnostic.
+/// `TypeChecker::state_default_types` (BT-3481) makes both consumers read
+/// one shared inference result computed once in `inference/mod.rs`, so the
+/// diagnostic fires exactly once.
+#[test]
+fn generic_state_default_dnu_diagnosed_once_not_twice() {
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+    let state = vec![StateDeclaration::with_type_and_default(
+        ident("items"),
+        TypeAnnotation::generic(
+            ident("List"),
+            vec![TypeAnnotation::simple("Integer", span())],
+            span(),
+        ),
+        msg_send(
+            int_lit(5),
+            MessageSelector::Unary("bogusSelectorBt3481".into()),
+            vec![],
+        ),
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let registry = ProtocolRegistry::new();
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    let dnu_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message.contains("does not understand") && d.message.contains("bogusSelectorBt3481")
+        })
+        .collect();
+    assert_eq!(
+        dnu_warnings.len(),
+        1,
+        "default-value expression should be inferred exactly once (BT-3481), \
+         not once per consumer of state_default_types: {:?}",
+        checker
+            .diagnostics()
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
