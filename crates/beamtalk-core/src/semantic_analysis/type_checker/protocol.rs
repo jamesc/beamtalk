@@ -19,7 +19,7 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 
 use super::well_known::WellKnownClass;
-use super::{InferredType, TypeChecker, TypeEnv};
+use super::{InferredType, TypeChecker};
 
 impl TypeChecker {
     /// Check protocol conformance for type annotations across a module.
@@ -525,9 +525,9 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         protocol_registry: &ProtocolRegistry,
     ) {
-        let Some(ref default_value) = state_decl.default_value else {
+        if state_decl.default_value.is_none() {
             return;
-        };
+        }
         let Some(ref type_annotation) = state_decl.type_annotation else {
             return;
         };
@@ -552,12 +552,20 @@ impl TypeChecker {
             );
         self.referenced_aliases.extend(alias_deps);
         let declared_type = resolved_declared.display_annotation();
-        let mut env = TypeEnv::new();
-        env.set_local("self", InferredType::known(class.name.name.clone()));
-        // This is the same validation-calls-back-into-inference cyclic
-        // dependency as `validation.rs::check_state_defaults` — see the
-        // comment there.
-        let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
+        // Read the pre-computed type instead of re-inferring: `inference/
+        // mod.rs::check_module` (Phase 1) already inferred this same
+        // default-value expression and cached it in `state_default_types`
+        // (BT-3481) — the same entry `validation.rs::check_state_defaults`
+        // reads. Looking it up here (Phase 2f, which always runs after
+        // Phase 1) keeps the module dependency direction one-way and avoids
+        // inferring the same expression twice.
+        let Some(inferred) = self
+            .state_default_types
+            .get(&(class.name.name.clone(), state_decl.name.name.clone()))
+            .cloned()
+        else {
+            return;
+        };
 
         let InferredType::Known {
             class_name: value_type,

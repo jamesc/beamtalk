@@ -328,6 +328,12 @@ pub fn infer_types(
 /// types for each method before writing them back into the AST.
 pub type MethodReturnKey = (EcoString, EcoString, bool);
 
+/// Key for the state-field default-value type map: (`ClassName`, `FieldName`)
+///
+/// Used by [`TypeChecker::state_default_types`] — see that field's doc for
+/// why the map exists (BT-3481).
+pub type StateDefaultKey = (EcoString, EcoString);
+
 /// Infers return types for all unannotated methods in a module.
 ///
 /// Only returns `InferredType::Known` results (including generic type args).
@@ -422,6 +428,27 @@ pub struct TypeChecker {
     pub(super) diagnostics: Vec<Diagnostic>,
     pub(super) type_map: TypeMap,
     pub(super) method_return_types: HashMap<MethodReturnKey, InferredType>,
+    /// Inferred type of each state field's default-value expression,
+    /// keyed by `(class name, field name)` (BT-3481).
+    ///
+    /// Populated once per class by `inference/mod.rs::check_module`
+    /// (Phase 1, alongside `check_state_defaults`) for every state field
+    /// that declares both a type annotation and a default value — the only
+    /// fields either consumer below ever looks up. `validation.rs`'s
+    /// `check_state_defaults` and `protocol.rs`'s `check_state_variance`
+    /// (Phase 2f, which runs strictly after Phase 1 — see
+    /// `check_module_with_protocols_and_aliases`) both read from this map
+    /// instead of independently re-calling `infer_expr` on the same
+    /// default-value expression, which kept the module dependency direction
+    /// one-way (`inference` → `validation`, never back) and used to mean a
+    /// generic-typed field's default value was inferred twice per compile
+    /// with no guarantee the two results agreed.
+    ///
+    /// A missing key means "nothing to check" (no default value, no type
+    /// annotation, or no state at all) — both consumers already guard on
+    /// `Option<default_value>`/`Option<type_annotation>` before doing
+    /// anything, so a missing entry is never an error case.
+    pub(super) state_default_types: HashMap<StateDefaultKey, InferredType>,
     /// The package being compiled (ADR 0071 Phase 3).
     ///
     /// When set, enables cross-package `internal` method visibility enforcement
@@ -480,6 +507,7 @@ impl TypeChecker {
             diagnostics: Vec::new(),
             type_map: TypeMap::new(),
             method_return_types: HashMap::new(),
+            state_default_types: HashMap::new(),
             current_package: None,
             protocol_registry: None,
             alias_registry: None,
@@ -499,6 +527,7 @@ impl TypeChecker {
             diagnostics: Vec::new(),
             type_map: TypeMap::new(),
             method_return_types: HashMap::new(),
+            state_default_types: HashMap::new(),
             current_package: Some(EcoString::from(package)),
             protocol_registry: None,
             alias_registry: None,

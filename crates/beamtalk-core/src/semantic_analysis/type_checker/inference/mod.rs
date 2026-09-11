@@ -12,6 +12,16 @@
 //! - The `infer_expr` dispatch skeleton — one match arm per [`Expression`]
 //!   variant, delegating the larger ones to a submodule
 //! - Shared context: [`TypeStringContext`], [`TypeChecker::set_param_types`]
+//!
+//! Dependency direction is one-way: this module (and everything under it)
+//! calls into `validation.rs`/`protocol.rs` to render diagnostics
+//! (`check_argument_types`, `check_instance_selector`, …), never the other
+//! way around. State-field default values are the one place validation
+//! needs an inferred type it didn't compute itself; rather than calling
+//! back into `infer_expr` (which would make the dependency cyclic),
+//! `check_module` infers each default value once here and caches the
+//! result in `TypeChecker::state_default_types` (BT-3481) for
+//! `validation.rs`/`protocol.rs` to read.
 
 use crate::ast::{Expression, ExpressionStatement, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
@@ -108,6 +118,10 @@ impl TypeChecker {
                 );
             }
 
+            // Infer state field default-value types once, before validating
+            // them — see `state_default_types`'s doc on `TypeChecker` (BT-3481).
+            self.infer_state_default_types(class, hierarchy);
+
             // Check state default values match declared types
             self.check_state_defaults(class, hierarchy);
 
@@ -150,6 +164,44 @@ impl TypeChecker {
 
         // Check top-level expressions last — method return types are now available.
         self.infer_stmts(&module.expressions, hierarchy, &mut env, false);
+    }
+
+    /// Infers each state field's default-value expression type and caches it
+    /// in `self.state_default_types`, keyed by `(class name, field name)`
+    /// (BT-3481).
+    ///
+    /// Only infers fields that declare *both* a type annotation and a
+    /// default value — `validation.rs::check_state_defaults` and
+    /// `protocol.rs::check_state_variance` (this map's only two readers)
+    /// both require both to be present before they look anything up, so a
+    /// field missing either would never be read back and inferring it here
+    /// would be wasted work — and could surface diagnostics (e.g. an
+    /// unknown selector inside the default expression) that no code path
+    /// previously observed for that field.
+    ///
+    /// Called once per class from [`Self::check_module`], immediately before
+    /// `check_state_defaults` (Phase 1) — strictly before
+    /// `check_module_with_protocols_and_aliases`'s Phase 2f
+    /// `check_generic_variance_in_module` pass, which reads the same
+    /// entries via `check_state_variance` instead of re-inferring them.
+    fn infer_state_default_types(
+        &mut self,
+        class: &crate::ast::ClassDefinition,
+        hierarchy: &ClassHierarchy,
+    ) {
+        for decl in &class.state {
+            if decl.type_annotation.is_none() {
+                continue;
+            }
+            let Some(ref default_value) = decl.default_value else {
+                continue;
+            };
+            let mut env = TypeEnv::new();
+            env.set_local("self", InferredType::known(class.name.name.clone()));
+            let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
+            self.state_default_types
+                .insert((class.name.name.clone(), decl.name.name.clone()), inferred);
+        }
     }
 
     /// Type-checks one method body and records its inferred return type —
