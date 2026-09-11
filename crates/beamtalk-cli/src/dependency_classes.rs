@@ -32,17 +32,17 @@
 //! walks the full transitive dependency graph — not just the project's own
 //! direct `[dependencies]` table — by recursively reading each discovered
 //! dependency's own `beamtalk.toml` (when its checkout is already present on
-//! disk) and queuing its dependencies in turn. This mirrors
-//! `discover_all_dep_roots` in `crate::commands::deps` (the CLI's own
+//! disk) and queuing its dependencies in turn. The BFS structure is similar
+//! to `discover_all_dep_roots` in `crate::commands::deps` (the CLI's own
 //! transitive-walk logic for `ensure_deps_resolved`'s freshness checks), but
-//! is reimplemented rather than shared: `discover_all_dep_roots` lives in
-//! the `beamtalk-cli` *binary* crate (`mod commands;` in `main.rs`), while
-//! this module is part of the `beamtalk-cli` *library* crate that
-//! `beamtalk-mcp` links against, so it cannot call into the binary's private
-//! modules. Keep the two algorithms in sync if either changes. As with
-//! direct dependencies, a checkout that hasn't been fetched yet (missing
-//! `_build/deps/<name>/`) is silently skipped rather than fetched — no
-//! network I/O.
+//! the two walkers produce different outputs (`ClassInfo` vs `DiscoveredDep`)
+//! and use different error strategies (warn-and-skip vs. return an error), so
+//! their BFS loops remain independent. The *checkout-path resolution* step
+//! (path vs. git/registry dispatch) is the shared primitive and lives in
+//! [`crate::path_util::dep_root_for_source`] — both walkers call it, so that
+//! piece cannot drift. As with direct dependencies, a checkout that hasn't
+//! been fetched yet (missing `_build/deps/<name>/`) is silently skipped
+//! rather than fetched — no network I/O.
 //!
 //! **Caching:** the MCP server's `lint`/`diagnostic_summary` tools
 //! call [`resolve_dependency_class_infos`] on *every* request. Without
@@ -57,8 +57,8 @@
 
 use crate::build_layout::BuildLayout;
 use crate::manifest;
-use crate::path_util::normalize_path;
-use beamtalk_core::compilation::{DependencyMap, DependencySource};
+use crate::path_util::dep_root_for_source;
+use beamtalk_core::compilation::DependencyMap;
 use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
@@ -130,28 +130,18 @@ pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<Cla
                 continue; // Already discovered via another path (diamond dep).
             }
 
-            let dep_root = match &spec.source {
-                DependencySource::Path { path } => {
-                    // Not sandboxed: a `..`-containing or absolute `path` can
-                    // point outside `project_root`, matching the trust model
-                    // of `beamtalk build`'s own path-dependency resolution
-                    // (`deps/path.rs::canonicalize_dep_path`) — `beamtalk.toml`
-                    // is authored by the project owner, not untrusted input.
-                    // Relative to `declaring_root` (the package whose
-                    // manifest declared this dependency), not necessarily
-                    // `project_root` — a transitive path dep is relative to
-                    // its own declaring package.
-                    let Some(relative) = Utf8Path::from_path(path) else {
-                        warn!(dep = %name, "Dependency path is not valid UTF-8; skipping");
-                        continue;
-                    };
-                    normalize_path(&declaring_root.join(relative))
-                }
-                // A registry dependency is fetched into the same checkout
-                // directory as a git dependency once resolved, so the offline
-                // walk treats the two identically.
-                DependencySource::Git { .. } | DependencySource::Registry { .. } => {
-                    layout.dep_checkout_dir(&name)
+            // Not sandboxed: a `..`-containing or absolute path dep can point
+            // outside `project_root`, matching the trust model of `beamtalk
+            // build`'s own path-dependency resolution — `beamtalk.toml` is
+            // authored by the project owner, not untrusted input. Path deps
+            // are relative to `declaring_root` (the package whose manifest
+            // declared them), not necessarily `project_root`.
+            let dep_root = match dep_root_for_source(&declaring_root, &name, &spec.source, &layout)
+            {
+                Ok(root) => root,
+                Err(path) => {
+                    warn!(dep = %name, path = %path.display(), "Dependency path is not valid UTF-8; skipping");
+                    continue;
                 }
             };
 
