@@ -363,4 +363,4 @@ typed Actor subclass: ClassBuilder
   /// methods into the class gen_server. If the class already exists (hot
   /// reload), updates the existing gen_server state via `update_class/2`
   /// rather than failing.
-  register -> Object => @intrinsic classBuilderRegister
+  register -> Class => @intrinsic classBuilderRegister

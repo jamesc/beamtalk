@@ -49,7 +49,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk classNamed: #Integer
   /// ```
-  classNamed: className :: Symbol -> Object =>
+  classNamed: className :: Symbol -> Class | Nil =>
     (Erlang beamtalk_interface) findClass: className
 
   /// Return the global namespace as a Dictionary populated from the class registry.

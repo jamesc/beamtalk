@@ -51,7 +51,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// c := Counter spawnWith: #{#count => 10}
   /// ```
-  class sealed spawnWith: initArgs -> Self =>
+  class sealed spawnWith: initArgs :: Object -> Self =>
     (Erlang beamtalk_actor) doSpawnWith: self args: initArgs
 
   /// Actors cannot be created with `new` — always raises (BT-217).
@@ -255,7 +255,7 @@ Object subclass: Actor
 
   /// Internal FFI seam (ADR 0101 Part 4): release this actor's registered
   /// name. Keeps `unregister` pure Beamtalk.
-  internal unregisterName -> Object => (Erlang beamtalk_actor) unregister: self
+  internal unregisterName -> Symbol => (Erlang beamtalk_actor) unregister: self
 
   /// Return the Symbol this actor is registered under, or `nil` if unnamed.
   ///
@@ -263,7 +263,8 @@ Object subclass: Actor
   /// ```beamtalk
   /// counter registeredName   // => #counter (or nil)
   /// ```
-  sealed registeredName => (Erlang beamtalk_actor) registeredName: self
+  sealed registeredName -> Symbol | Nil =>
+    (Erlang beamtalk_actor) registeredName: self
 
   /// Whether this actor currently has a registered name.
   ///
@@ -346,6 +347,11 @@ Object subclass: Actor
   /// Erlang module, so calling delegate raises an Error at runtime.
   /// Native Actors (declared with `native:` in ClassBuilder) override this
   /// intrinsic via the compiler's codegen phase.
+  ///
+  /// Deliberately left without a declared return type (BT-2862): the type
+  /// checker special-cases an unannotated `self delegate` body to stay
+  /// `Dynamic`, since a native override's real return type depends on
+  /// whichever backing module it delegates to.
   ///
   /// ## Examples
   /// ```beamtalk

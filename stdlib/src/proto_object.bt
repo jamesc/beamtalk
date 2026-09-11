@@ -67,15 +67,19 @@ abstract nil subclass: ProtoObject
   /// 42 class            // => Integer
   /// "hello" class       // => String
   /// ```
-  class => @intrinsic "class"
+  class -> Self class => @intrinsic "class"
 
   /// Handle messages the receiver does not understand. Override for custom dispatch.
+  ///
+  /// No declared return type (BT-2834 pattern, see `Object>>fieldAt:`): a
+  /// custom override can return any type, and callers chain further sends
+  /// on the result that a fixed `-> Object` would statically reject.
   ///
   /// ## Examples
   /// ```beamtalk
   /// 42 unknownMessage   // => ERROR: does_not_understand
   /// ```
-  doesNotUnderstand: selector args: arguments =>
+  doesNotUnderstand: selector :: Symbol args: arguments :: List =>
     @intrinsic "doesNotUnderstand:args:"
 
   // === Dynamic Messaging ===
@@ -86,7 +90,7 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// 42 perform: #abs withArguments: #()   // => 42
   /// ```
-  perform: selector withArguments: arguments =>
+  perform: selector :: Symbol withArguments: arguments :: List =>
     @intrinsic "perform:withArguments:"
 
   /// Execute a class method in the caller's process, bypassing gen_server dispatch.
@@ -103,7 +107,7 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// MyClass performLocally: #run:ctx: withArguments: #(input, ctx)
   /// ```
-  performLocally: selector withArguments: arguments =>
+  performLocally: selector :: Symbol withArguments: arguments :: List =>
     @intrinsic "performLocally:withArguments:"
 
   /// Send a message dynamically with an arguments list and explicit timeout.
@@ -115,5 +119,5 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// actor perform: #query withArguments: #(sql) timeout: 30000
   /// ```
-  perform: selector withArguments: arguments timeout: timeoutMs =>
+  perform: selector :: Symbol withArguments: arguments :: List timeout: timeoutMs :: Timeout =>
     @intrinsic "perform:withArguments:timeout:"

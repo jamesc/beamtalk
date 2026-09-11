@@ -83,7 +83,7 @@ abstract Object subclass: DynamicSupervisor(C)
     (Erlang beamtalk_supervisor) startLink: self
 
   /// Return the running supervisor instance, or nil if not started.
-  class current => (Erlang beamtalk_supervisor) current: self
+  class current -> Self | Nil => (Erlang beamtalk_supervisor) current: self
 
   // === Instance-side child management ===
 
@@ -186,7 +186,7 @@ abstract Object subclass: DynamicSupervisor(C)
 
   /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped
   /// `countChildren/1` call. Keeps `count` pure Beamtalk.
-  internal countChildrenResult =>
+  internal countChildrenResult -> Result(Integer, Error) =>
     (Erlang beamtalk_supervisor) countChildren: self
 
   /// Stop this supervisor and all its children.
@@ -198,4 +198,5 @@ abstract Object subclass: DynamicSupervisor(C)
 
   /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped `stop/1`
   /// call. Keeps `stop` pure Beamtalk.
-  internal stopResult => (Erlang beamtalk_supervisor) stop: self
+  internal stopResult -> Result(Nil, Error) =>
+    (Erlang beamtalk_supervisor) stop: self
