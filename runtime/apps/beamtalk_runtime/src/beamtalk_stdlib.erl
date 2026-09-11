@@ -22,7 +22,7 @@ from the .bt source files.
 This eliminates the previous pattern of hand-written register_*_class()
 functions which were a source of bugs (e.g., swapped maps, stale methods).
 
-## Startup Order (BT-446)
+## Startup Order
 
 1. beamtalk_bootstrap starts pg (process group for class registry)
 2. This module reads class metadata from beamtalk_stdlib.app env
@@ -43,7 +43,7 @@ No Erlang code changes needed.
 -export([dispatch/3, has_method/1]).
 
 -ifdef(TEST).
-%% Export internal helpers for EUnit coverage (BT-1975, BT-1983)
+%% Export internal helpers for EUnit coverage
 -export([
     format_bt_module/1,
     class_entry_module/1,
@@ -99,7 +99,7 @@ do_init() ->
     %% Each module's on_load → register_class/0 creates its class process
     %% with correct method maps generated from the .bt source.
     load_compiled_stdlib_modules(),
-    %% BT-1766: Load protocol-only modules (e.g. Printable) after class modules.
+    %% Load protocol-only modules (e.g. Printable) after class modules.
     %% These have no class definition but register protocols via on_load.
     load_protocol_modules(),
     ok.
@@ -122,7 +122,7 @@ Reads class hierarchy from the beamtalk_stdlib app env (embedded in .app file
 by build-stdlib), then loads modules in topological order (superclass before
 subclass). Each module's on_load → register_class/0 creates its class process.
 
-BT-446: All classes are loaded from compiled stdlib, including ProtoObject,
+All classes are loaded from compiled stdlib, including ProtoObject,
 Object, and Actor. The bootstrap no longer registers these classes.
 """.
 -spec load_compiled_stdlib_modules() -> ok.
@@ -136,7 +136,7 @@ load_compiled_stdlib_modules() ->
             %% #{name => 'ClassName', module => 'bt@stdlib@mod',
             %%   parent => 'SuperClass', package => 'stdlib',
             %%   kind => object|value|actor, type_params => []}
-            %% BT-446: Load ALL classes — bootstrap no longer registers any
+            %% Load ALL classes — bootstrap no longer registers any
             Sorted = beamtalk_module_activation:topo_sort(ClassList),
             StdlibOpts = #{log_domain => [beamtalk, stdlib]},
             lists:foreach(
@@ -155,7 +155,7 @@ load_compiled_stdlib_modules() ->
     end.
 
 -doc """
-Load protocol-only modules from the stdlib app env (BT-1766).
+Load protocol-only modules from the stdlib app env.
 
 Protocol-only files (e.g. printable.bt) define structural protocols but
 contain no class definition. They are compiled to BEAM modules with on_load
@@ -277,7 +277,7 @@ dispatch(allClasses, [], _Receiver) ->
     ];
 dispatch('classNamed:', [ClassName], _Receiver) when is_atom(ClassName) ->
     %% Look up a class by name, return wrapped class object or nil.
-    %% BT-1768: If the class is not registered but has a module table entry,
+    %% If the class is not registered but has a module table entry,
     %% the class process crashed — attempt auto-restart.
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->

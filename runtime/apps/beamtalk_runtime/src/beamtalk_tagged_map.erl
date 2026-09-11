@@ -155,7 +155,7 @@ user_field_keys(State) when is_map(State) ->
 %%% map representation is owned and constructed by `beamtalk_array` (stdlib);
 %%% these readers let lower-layer runtime modules (which cannot depend on stdlib)
 %%% interpret the `'data'` payload from a single source of truth. They are
-%%% forge-tolerant — a malformed `'data'` (missing or not a map, BT-2509) degrades
+%%% forge-tolerant — a malformed `'data'` (missing or not a map) degrades
 %%% to an empty array rather than crashing.
 %%% ============================================================================
 

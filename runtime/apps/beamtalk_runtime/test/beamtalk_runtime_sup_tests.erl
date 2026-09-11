@@ -62,7 +62,7 @@ children_ids_test() ->
 children_are_workers_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    %% xref (worker); class_sup (supervisor, BT-3236); class_monitor, bootstrap,
+    %% xref (worker); class_sup (supervisor); class_monitor, bootstrap,
     %% announcements, stdlib, object_instances are workers; subprocess_sup and
     %% reactive_subprocess_sup are supervisors; trace_store, object_watch, and
     %% file_handle_registry are workers.

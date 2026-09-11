@@ -11,7 +11,7 @@ Tests hot code reloading, actor migration, and module replacement.
 """.
 -include_lib("eunit/include/eunit.hrl").
 
-%% BT-1980: gen_server callbacks for a minimal test actor used to exercise
+%% gen_server callbacks for a minimal test actor used to exercise
 %% trigger_code_change/2,3 success paths via sys:change_code/4.
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3]).
@@ -84,7 +84,7 @@ code_change_handles_various_extra_test() ->
     ?assertMatch({ok, State}, beamtalk_hot_reload:code_change(v1, State, {migration, data})).
 
 %%====================================================================
-%% Tests for __class__ → $beamtalk_class migration (BT-399)
+%% Tests for __class__ → $beamtalk_class migration
 %%====================================================================
 
 %% Old state with __class__ is migrated to $beamtalk_class
@@ -319,7 +319,7 @@ test_field_migration_preserves_internal_keys() ->
 %%====================================================================
 
 %%====================================================================
-%% BT-1980: trigger_code_change — live actor success and error branches
+%% trigger_code_change — live actor success and error branches
 %%====================================================================
 
 %% Minimal gen_server for testing sys:change_code/4 success paths.
@@ -331,7 +331,7 @@ code_change(_OldVsn, _State, {crash, Reason}) -> exit(Reason);
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 trigger_code_change_live_actor_success_test() ->
-    %% BT-1980: trigger_code_change/2 reports Upgraded = 1 on a live actor
+    %% trigger_code_change/2 reports Upgraded = 1 on a live actor
     %% that accepts sys:change_code/4.
     {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
     try
@@ -344,7 +344,7 @@ trigger_code_change_live_actor_success_test() ->
     end.
 
 trigger_code_change_3_live_actor_success_test() ->
-    %% BT-1980: trigger_code_change/3 reports Upgraded = 1 on a live actor
+    %% trigger_code_change/3 reports Upgraded = 1 on a live actor
     %% with explicit Extra.
     {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
     try
@@ -358,7 +358,7 @@ trigger_code_change_3_live_actor_success_test() ->
     end.
 
 trigger_code_change_mixed_success_and_failure_test() ->
-    %% BT-1980: Mixed live + dead pids — Upgraded counts live ones, Failures the dead.
+    %% Mixed live + dead pids — Upgraded counts live ones, Failures the dead.
     {ok, LivePid} = gen_server:start_link(?MODULE, #{}, []),
     DeadPid = spawn(fun() -> ok end),
     Ref = erlang:monitor(process, DeadPid),
@@ -379,7 +379,7 @@ trigger_code_change_mixed_success_and_failure_test() ->
     end.
 
 try_change_code_crash_produces_exception_failure_test() ->
-    %% BT-1980: code_change that exits is caught by try_change_code and
+    %% code_change that exits is caught by try_change_code and
     %% surfaces as {error, _} — where the reason is either a structured
     %% {Class, Error} tuple (general catch) or an atomic reason derived
     %% from sys:change_code's OTP wrapping. Either way the failure is
@@ -407,11 +407,11 @@ try_change_code_crash_produces_exception_failure_test() ->
     end.
 
 %%====================================================================
-%% BT-1980: field migration error path — non-map state
+%% field migration error path — non-map state
 %%====================================================================
 
 field_migration_with_non_map_state_falls_through_test() ->
-    %% BT-1980: The field-migration code_change head only matches when
+    %% The field-migration code_change head only matches when
     %% State is a map. A non-map state falls through to the generic head
     %% and is returned unchanged even when Extra is a {NewVars, Module} tuple.
     State = [1, 2, 3],
@@ -420,11 +420,11 @@ field_migration_with_non_map_state_falls_through_test() ->
     ?assertEqual(State, NewState).
 
 %%====================================================================
-%% BT-1980: init failure exception — covers init_error catch branch (line 105 of src)
+%% init failure exception — covers init_error catch branch (line 105 of src)
 %%====================================================================
 
 field_migration_init_throws_returns_old_state_test() ->
-    %% BT-1980: When Module:init/1 throws any exception (not just returns
+    %% When Module:init/1 throws any exception (not just returns
     %% an error tuple), migrate_fields catches it and returns OldState.
     %% Using an atom that is a loaded module but whose init/1 throws.
     OldState = #{'$beamtalk_class' => 'X', value => 99},

@@ -57,7 +57,7 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
     %% Configuration
     max_events/0,
     max_events/1,
-    %% Causal trace linking (BT-1633)
+    %% Causal trace linking
     next_span_id/0,
     %% Health check
     telemetry_attached/0,
@@ -146,7 +146,7 @@ is_enabled() ->
     end.
 
 -doc """
-Generate the next monotonic span ID for causal trace linking (BT-1633).
+Generate the next monotonic span ID for causal trace linking.
 Uses a global atomics counter — one atomics:add_get/3 call (~10ns).
 Only called from within maybe_span when tracing is enabled.
 """.
@@ -163,11 +163,11 @@ clear() ->
 -doc """
 Record a dispatch aggregate (called from telemetry handler, NOT via gen_server).
 This runs in the calling process for lock-free performance.
-Class comes from telemetry metadata — the authoritative source (BT-1640).
+Class comes from telemetry metadata — the authoritative source.
 """.
 -spec record_dispatch(pid(), atom(), non_neg_integer(), atom(), atom(), atom()) -> ok.
 record_dispatch(Pid, Selector, Duration, Outcome, _Mode, Class) ->
-    %% BT-1640: Store Pid→Class mapping from telemetry metadata so actor_stats
+    %% Store Pid→Class mapping from telemetry metadata so actor_stats
     %% shows correct class names instead of relying on instance registry lookup.
     case Class of
         unknown -> ok;
@@ -334,12 +334,12 @@ handle_dispatch_stop(_EventName, #{duration := Duration}, Metadata, _Config) ->
     Class = maps:get(class, Metadata, unknown),
     DurationNs = erlang:convert_time_unit(Duration, native, nanosecond),
     record_dispatch(Pid, Selector, DurationNs, Outcome, Mode, Class),
-    %% BT-1625: Only fetch trace context when tracing is enabled to avoid
+    %% Only fetch trace context when tracing is enabled to avoid
     %% per-dispatch overhead when trace capture is disabled.
     case is_enabled() of
         true ->
             TraceCtx = beamtalk_actor:get_trace_context(),
-            %% BT-1633: Merge causal trace IDs (trace_id, span_id, parent_span_id)
+            %% Merge causal trace IDs (trace_id, span_id, parent_span_id)
             %% from process dictionary into trace event metadata.
             CausalCtx = beamtalk_actor:get_causal_ctx(),
             EventMeta = maps:merge(TraceCtx, CausalCtx),
@@ -360,12 +360,12 @@ handle_dispatch_exception(_EventName, #{duration := Duration}, Metadata, _Config
     Reason = maps:get(reason, Metadata, unknown),
     DurationNs = erlang:convert_time_unit(Duration, native, nanosecond),
     record_dispatch(Pid, Selector, DurationNs, error, Mode, Class),
-    %% BT-1625: Only fetch trace context and build enriched metadata when
+    %% Only fetch trace context and build enriched metadata when
     %% tracing is enabled to avoid per-dispatch overhead.
     case is_enabled() of
         true ->
             TraceCtx = beamtalk_actor:get_trace_context(),
-            %% BT-1633: Merge causal trace IDs into exception metadata.
+            %% Merge causal trace IDs into exception metadata.
             CausalCtx = beamtalk_actor:get_causal_ctx(),
             BaseMeta = #{error => Reason, kind => Kind},
             EventMeta = maps:merge(maps:merge(TraceCtx, CausalCtx), BaseMeta),
@@ -378,7 +378,7 @@ handle_dispatch_exception(_EventName, _Measurements, _Metadata, _Config) ->
     ok.
 
 -doc """
-Handler for [beamtalk, actor, lifecycle, *] events (BT-1629).
+Handler for [beamtalk, actor, lifecycle, *] events.
 Lifecycle events (start, stop, kill) are instantaneous — no duration.
 Recorded in the shared trace ring buffer with mode => lifecycle.
 """.
@@ -466,7 +466,7 @@ handle_call(clear, _From, State) ->
     ?LOG_INFO("Trace store cleared", #{}),
     {reply, ok, State};
 handle_call({grow_counters, CallerRef, CallerSize}, _From, State) ->
-    %% BT-1621: Serialized atomics grow to prevent concurrent persistent_term overwrites.
+    %% Serialized atomics grow to prevent concurrent persistent_term overwrites.
     %% Check if another caller already grew while we were queued.
     CurrentRef = persistent_term:get(?PT_COUNTERS),
     Result =
@@ -615,7 +615,7 @@ ensure_counters() ->
             atomics:put(Allocator, 1, 1),
             persistent_term:put(?PT_SLOT_ALLOCATOR, Allocator)
     end,
-    %% BT-1633: Span ID counter for causal trace linking.
+    %% Span ID counter for causal trace linking.
     %% Monotonically incrementing integers, one atomics:add_get/3 per span (~10ns).
     try persistent_term:get(?PT_SPAN_ID_COUNTER) of
         _SpanRef -> ok
@@ -668,11 +668,11 @@ allocate_counter_slot(Key) ->
     AtomicsRef = persistent_term:get(?PT_COUNTERS),
     SlotBase = allocate_next_slot(),
     #{size := AtomicsSize} = atomics:info(AtomicsRef),
-    %% Grow atomics if needed — serialized through the gen_server (BT-1621)
+    %% Grow atomics if needed — serialized through the gen_server
     %% to prevent concurrent grows from overwriting each other's persistent_term.
     case SlotBase + ?SLOTS_PER_KEY > AtomicsSize of
         true ->
-            %% Grow serialized through gen_server (BT-1621). Gracefully degrade
+            %% Grow serialized through gen_server. Gracefully degrade
             %% if the trace store is down or slow — observability should never
             %% crash the actor being observed.
             try
@@ -766,7 +766,7 @@ attach_telemetry_handlers() ->
         fun ?MODULE:handle_dispatch_exception/4,
         #{}
     ),
-    %% BT-1629: Lifecycle event handlers (start, stop, kill)
+    %% Lifecycle event handlers (start, stop, kill)
     ok = telemetry:attach(
         beamtalk_trace_store_lifecycle_start,
         [beamtalk, actor, lifecycle, start],
@@ -798,7 +798,7 @@ detach_telemetry_handlers() ->
     try
         telemetry:detach(beamtalk_trace_store_dispatch_stop),
         telemetry:detach(beamtalk_trace_store_dispatch_exception),
-        %% BT-1629: Lifecycle event handlers
+        %% Lifecycle event handlers
         telemetry:detach(beamtalk_trace_store_lifecycle_start),
         telemetry:detach(beamtalk_trace_store_lifecycle_stop),
         telemetry:detach(beamtalk_trace_store_lifecycle_kill),
@@ -855,7 +855,7 @@ delete_oldest_n(Table, N) ->
 
 -doc """
 Get trace events, filtered by opts map.
-Supported opts: actor, selector, class, outcome, min_duration_ns, trace_id (BT-1633).
+Supported opts: actor, selector, class, outcome, min_duration_ns, trace_id.
 """.
 do_get_traces(Opts) when is_map(Opts) ->
     Pid = maps:get(actor, Opts, undefined),
@@ -989,7 +989,7 @@ trace_event_to_map({
 trace_event_to_map({
     {MonotonicNs, _Unique}, Pid, Class, Selector, Mode, DurationNs, Outcome, Metadata
 }) ->
-    %% Legacy format (pre-BT-1620): fall back to monotonic-derived timestamp
+    %% Legacy format: fall back to monotonic-derived timestamp
     Base = #{
         <<"timestamp_us">> => MonotonicNs div 1000,
         <<"actor">> => list_to_binary(pid_to_list(Pid)),
@@ -1006,7 +1006,7 @@ trace_event_to_map({
     end.
 
 -doc """
-Sanitize metadata map values for JSON serialization (BT-1641).
+Sanitize metadata map values for JSON serialization.
 JSX requires all values to be JSON-compatible (binaries, numbers, booleans,
 null, lists, maps). Atom values like `normal` from lifecycle events, pid
 values, and tuples must be converted to binary strings.
@@ -1286,7 +1286,7 @@ to_binary_keys(Map) when is_map(Map) ->
     ).
 
 -doc """
-Resolve actor class name from the aggregate class table (BT-1640).
+Resolve actor class name from the aggregate class table.
 The agg class table is populated from telemetry metadata — the authoritative
 source — during record_dispatch/6. Falls back to instance registry lookup.
 """.

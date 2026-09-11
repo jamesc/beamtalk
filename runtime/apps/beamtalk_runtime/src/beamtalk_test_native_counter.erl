@@ -7,7 +7,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Test backing gen_server for native: facade e2e tests (BT-1210).
+Test backing gen_server for native: facade e2e tests.
 
 A minimal counter gen_server used by NativeCounter.bt to validate
 that dispatch functions correctly route through beamtalk_actor:sync_send/3.
@@ -25,7 +25,7 @@ init(Config) ->
     InitialValue = maps:get(initial, Config, 0),
     {ok, #{value => InitialValue}}.
 
-%% BT-1604: Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
+%% Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
 handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
     beamtalk_actor:restore_propagated_ctx(PropCtx),
     handle_call({Selector, Args}, From, State);

@@ -42,7 +42,7 @@ Raises beamtalk_error for invalid class references.
     ClassRef :: pid() | atom() | tuple().
 resolve(ClassPid, Selector) when is_pid(ClassPid) ->
     resolve_with_hierarchy(ClassPid, Selector);
-%% BT-2195: Metaclass receiver — look up class-side methods of the described
+%% Metaclass receiver — look up class-side methods of the described
 %% class. The 'Metaclass'-tagged beamtalk_object holds the *described* class's
 %% pid in its `pid` field (see beamtalk_behaviour_intrinsics:classClass/1); we
 %% ask that class gen_server for its class methods (which walks the metaclass
@@ -90,15 +90,15 @@ resolve(Other, _Selector) ->
 -doc """
 Resolve a method, walking the superclass chain if not found locally.
 
-BT-2786: The walk itself (depth guard, cycle warning, advance-to-superclass)
+The walk itself (depth guard, cycle warning, advance-to-superclass)
 is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
 per-class `{method, Selector}` gen_server probe.
 
 `ClassPid`'s own method table is checked here, outside the depth-counted
-walk — matching the pre-BT-2786 behaviour where the receiver's own class was
-"free" and the `?MAX_HIERARCHY_DEPTH` budget applied only to the superclass
-chain above it (the same split `beamtalk_class_dispatch:find_class_method_in_chain/2`
-uses). The walk itself starts at the immediate superclass.
+walk — the receiver's own class is "free" and the `?MAX_HIERARCHY_DEPTH`
+budget applies only to the superclass chain above it (the same split
+`beamtalk_class_dispatch:find_class_method_in_chain/2` uses). The walk
+itself starts at the immediate superclass.
 """.
 -spec resolve_with_hierarchy(pid(), selector()) -> compiled_method() | 'nil'.
 resolve_with_hierarchy(ClassPid, Selector) ->
@@ -128,7 +128,7 @@ resolve_with_hierarchy(ClassPid, Selector) ->
     end.
 
 -doc """
-BT-2195: Resolve a class-side method on the class identified by `ClassPid`.
+Resolve a class-side method on the class identified by `ClassPid`.
 
 Delegates to the class gen_server's `{class_method, Selector}` handler which
 returns a `CompiledMethod` map carrying the class-side source / signature /

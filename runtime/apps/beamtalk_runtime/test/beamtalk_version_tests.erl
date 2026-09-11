@@ -8,7 +8,7 @@
 EUnit tests for beamtalk_version module.
 
 Tests the version-report shape used as the RPC target for the
-desktop-attach readiness handshake (ADR 0097, BT-2991).
+desktop-attach readiness handshake (ADR 0097).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -24,7 +24,7 @@ get_returns_expected_keys_test() ->
         lists:sort(maps:keys(Report))
     ).
 
-%% BT-3090: `beamtalk_version:get/0` and `beamtalk_repl_ops_dev`'s `describe`
+%% `beamtalk_version:get/0` and `beamtalk_repl_ops_dev`'s `describe`
 %% op now both read the same `?PROTOCOL_VERSION` macro (`beamtalk.hrl`)
 %% instead of two independent `"2.0"` literals synced only by a comment — a
 %% future bump only requires editing the macro, and this test (and

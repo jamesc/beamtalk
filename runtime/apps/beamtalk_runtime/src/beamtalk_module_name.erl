@@ -7,7 +7,7 @@
 
 -moduledoc """
 Single Erlang-side authority for the `ClassName ⇄ bt@[pkg@]snake_case`
-naming convention (ADR 0016, BT-3081).
+naming convention (ADR 0016).
 
 Before this module, the CamelCase→snake_case conversion was re-typed four
 times: `beamtalk_primitive:camel_to_snake/1`, a byte-identical copy in
@@ -41,12 +41,11 @@ The package-qualified shape (`bt@{Package}@{snake}`) is built by
 by the caller, so this makes no assumption about where it came from — a
 trusted atom via `camel_to_snake/1`, or raw REPL text) plus the package name,
 and never creates an atom: `list_to_existing_atom`, returning `undefined` on
-a miss rather than raising. BT-3108: previously had exactly one caller,
-`beamtalk_repl_ops_dev:resolve_qualified_class_name/1` (raw, unbounded REPL
-user input), which is why no atom-returning helper existed here before — a
-second caller (`beamtalk_workspace_meta`'s restore-time freshness check,
-trusted `ClassAtom` input) showed the `"bt@" ++ Package ++ "@" ++ Snake`
-assembly was the shared part, not the trust level of the input feeding it.
+a miss rather than raising — needed because callers span both raw, unbounded
+REPL user input (`beamtalk_repl_ops_dev:resolve_qualified_class_name/1`) and
+trusted `ClassAtom` input (`beamtalk_workspace_meta`'s restore-time freshness
+check); the `"bt@" ++ Package ++ "@" ++ Snake` assembly is the shared part
+regardless of the input's trust level.
 
 ## Inverse (lossy — fallback only)
 
@@ -193,8 +192,8 @@ to_atom(Str) ->
 %%====================================================================
 %% is_stdlib_module/1
 %%
-%% BT-3081: was duplicated byte-for-byte in beamtalk_class_registry (BT-738)
-%% and beamtalk_behaviour_intrinsics (BT-785); both now delegate here.
+%% Single source of truth: beamtalk_class_registry and
+%% beamtalk_behaviour_intrinsics both delegate here rather than reimplementing.
 %%====================================================================
 
 -doc "Whether a module atom belongs to the Beamtalk stdlib (`bt@stdlib@` prefix).".

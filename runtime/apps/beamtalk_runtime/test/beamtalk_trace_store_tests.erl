@@ -69,7 +69,7 @@ direct_insert_and_query_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Class name wired into actor stats (BT-1640)
+%% Test: Class name wired into actor stats
 %%====================================================================
 
 class_in_actor_stats_test_() ->
@@ -635,7 +635,7 @@ vm_measurements_handler_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Wall-clock timestamp in trace events (BT-1620)
+%% Test: Wall-clock timestamp in trace events
 %%====================================================================
 
 wall_clock_timestamp_test_() ->
@@ -663,7 +663,7 @@ wall_clock_timestamp_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Serialized counter grow (BT-1621)
+%% Test: Serialized counter grow
 %%====================================================================
 
 serialized_counter_grow_test_() ->
@@ -693,7 +693,7 @@ serialized_counter_grow_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Min/max duration tracking (BT-1628)
+%% Test: Min/max duration tracking
 %%====================================================================
 
 min_max_duration_test_() ->
@@ -731,7 +731,7 @@ min_max_duration_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Min/max CAS correctness under concurrent updates (BT-1628)
+%% Test: Min/max CAS correctness under concurrent updates
 %%====================================================================
 
 min_max_concurrent_test_() ->
@@ -800,7 +800,7 @@ min_max_concurrent_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Clear resets min sentinel (BT-1628)
+%% Test: Clear resets min sentinel
 %%====================================================================
 
 clear_resets_min_sentinel_test_() ->
@@ -846,7 +846,7 @@ clear_resets_min_sentinel_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Slow methods sort by max duration (BT-1628)
+%% Test: Slow methods sort by max duration
 %%====================================================================
 
 slow_methods_sort_by_max_test_() ->
@@ -1186,7 +1186,7 @@ opts_map_combined_filters_test_() ->
     end}.
 
 %%====================================================================
-%% Test: export_traces with atom/non-JSON metadata (BT-1641)
+%% Test: export_traces with atom/non-JSON metadata
 %%====================================================================
 
 export_traces_atom_metadata_test_() ->
@@ -1346,7 +1346,7 @@ empty_store_get_traces_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Lifecycle event handler (BT-1629)
+%% Test: Lifecycle event handler
 %%====================================================================
 
 lifecycle_event_handler_test_() ->
@@ -1431,7 +1431,7 @@ lifecycle_event_handler_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Span ID generation (BT-1633)
+%% Test: Span ID generation
 %%====================================================================
 
 next_span_id_test_() ->
