@@ -5,7 +5,7 @@
 -module(beamtalk_class_registry_tests).
 
 -moduledoc """
-EUnit tests for beamtalk_class_registry (BT-708).
+EUnit tests for beamtalk_class_registry.
 
 Tests class lookup, hierarchy queries, process group management,
 and class object identity functions.
@@ -208,7 +208,7 @@ direct_subclasses_test_() ->
         fun() ->
             beamtalk_class_registry:ensure_hierarchy_table(),
             Saved = ets:tab2list(beamtalk_class_metadata),
-            %% BT-3221: direct_subclasses/1 now reads beamtalk_class_subclass_index,
+            %% direct_subclasses/1 reads beamtalk_class_subclass_index,
             %% a table separate from beamtalk_class_metadata. Wiping only the main
             %% table (as before) leaves this test's real, currently-loaded classes
             %% still indexed, so 'Object'/'Actor' would resolve to their genuine
@@ -254,7 +254,7 @@ all_subclasses_test_() ->
         fun() ->
             beamtalk_class_registry:ensure_hierarchy_table(),
             Saved = ets:tab2list(beamtalk_class_metadata),
-            %% BT-3221: see direct_subclasses_test_/0's setup for why the
+            %% See direct_subclasses_test_/0's setup for why the
             %% subclass index must be cleared/restored alongside the main table.
             SavedIndex = ets:tab2list(beamtalk_class_subclass_index),
             ets:delete_all_objects(beamtalk_class_metadata),
@@ -312,7 +312,7 @@ all_classes_test() ->
     ?assert(is_list(Result)).
 
 %%% ============================================================================
-%%% live_class_entries tests (BT-1090)
+%%% live_class_entries tests
 %%% ============================================================================
 
 live_class_entries_test_() ->
@@ -354,7 +354,7 @@ live_class_entries_test_() ->
         ]}.
 
 %%% ============================================================================
-%%% loaded-class name index tests (BT-2384)
+%%% loaded-class name index tests
 %%% ============================================================================
 
 %% A class started through the normal lifecycle records itself in the fast
@@ -391,7 +391,7 @@ loaded_class_index_lifecycle_test_() ->
 
 %% A class that crashes (its terminate/1 never runs) leaves a stale {Name, Pid}
 %% row, but the reader filters dead pids out via is_process_alive/1 — so the
-%% loaded set stays coherent without a gen_server round-trip. BT-2384.
+%% loaded set stays coherent without a gen_server round-trip.
 loaded_class_index_drops_dead_pid_test() ->
     beamtalk_class_registry:ensure_loaded_classes_table(),
     Class = 'LoadedIndexDeadPid2384',
@@ -411,7 +411,6 @@ loaded_class_index_drops_dead_pid_test() ->
 
 %% A reload (same name, new pid) overwrites the row; the dying old process must
 %% not clobber the replacement — forget_loaded_class/2 is guarded on the pid.
-%% BT-2384.
 loaded_class_index_reload_keeps_new_pid_test() ->
     beamtalk_class_registry:ensure_loaded_classes_table(),
     Class = 'LoadedIndexReload2384',
@@ -427,7 +426,7 @@ loaded_class_index_reload_keeps_new_pid_test() ->
     ?assertEqual([], ets:lookup(beamtalk_loaded_classes, Class)).
 
 %%% ============================================================================
-%%% backing-module reverse index tests (BT-2736)
+%%% backing-module reverse index tests
 %%% ============================================================================
 
 meta_backing_module_test_() ->
@@ -556,7 +555,7 @@ backing_module_index_lifecycle_test_() ->
 
 %% A reload (same name, new pid) overwrites the row; the dying old process must
 %% not clobber the replacement — forget_backing_module_entries/2 is guarded on
-%% the pid, exactly like forget_loaded_class/2. BT-2736.
+%% the pid, exactly like forget_loaded_class/2.
 backing_module_index_reload_keeps_new_pid_test() ->
     beamtalk_class_registry:ensure_backing_module_index_table(),
     Class = 'BackingIndexPidGuard2736',
@@ -570,7 +569,7 @@ backing_module_index_reload_keeps_new_pid_test() ->
     ?assertEqual([], beamtalk_class_registry:classes_backing_module(Backing)).
 
 %%% ============================================================================
-%%% get_method_return_type / get_class_method_return_type tests (BT-1002)
+%%% get_method_return_type / get_class_method_return_type tests
 %%% ============================================================================
 
 get_method_return_type_test_() ->
@@ -669,7 +668,7 @@ get_method_return_type_test_() ->
         ]}.
 
 %%% ============================================================================
-%%% user_classes tests (BT-1092)
+%%% user_classes tests
 %%% ============================================================================
 
 user_classes_test_() ->
@@ -713,7 +712,7 @@ user_classes_test_() ->
         ]}.
 
 %%% ============================================================================
-%%% ETS table ownership / heir tests (BT-1888)
+%%% ETS table ownership / heir tests
 %%% ============================================================================
 
 pid_table_survives_owner_death_test_() ->
@@ -819,7 +818,7 @@ heir_option_returns_empty_when_no_supervisor_test() ->
     ?assertNotEqual(undefined, ets:info(beamtalk_class_pids)).
 
 %%% ============================================================================
-%%% restart_class tests (BT-1888)
+%%% restart_class tests
 %%% ============================================================================
 
 restart_class_no_module_test() ->
@@ -887,7 +886,7 @@ restart_class_recovery_test_() ->
         ]}.
 
 %%% ============================================================================
-%%% class_name_for_pid tests (BT-1888)
+%%% class_name_for_pid tests
 %%% ============================================================================
 
 class_name_for_pid_test_() ->
@@ -913,7 +912,7 @@ class_name_for_pid_test_() ->
         ]}.
 
 %%% ============================================================================
-%%% extract_package_from_module tests (BT-1972)
+%%% extract_package_from_module tests
 %%% ============================================================================
 
 extract_package_from_module_qualified_test() ->
@@ -941,7 +940,7 @@ extract_package_from_module_stdlib_test() ->
     ).
 
 %%% ============================================================================
-%%% is_stdlib_module tests (BT-1972)
+%%% is_stdlib_module tests
 %%% ============================================================================
 
 is_stdlib_module_true_test() ->
@@ -957,7 +956,7 @@ is_stdlib_module_plain_atom_test() ->
     ?assertNot(beamtalk_class_registry:is_stdlib_module(some_module)).
 
 %%% ============================================================================
-%%% ensure_class_warnings_table / collision warning tests (BT-1972)
+%%% ensure_class_warnings_table / collision warning tests
 %%% ============================================================================
 
 ensure_class_warnings_table_test() ->
@@ -1019,7 +1018,7 @@ drain_warnings_no_table_test() ->
     ).
 
 %%% ============================================================================
-%%% ensure_module_table tests (BT-1972)
+%%% ensure_module_table tests
 %%% ============================================================================
 
 ensure_module_table_test() ->
@@ -1030,7 +1029,7 @@ ensure_module_table_test() ->
     ?assertNotEqual(undefined, ets:info(beamtalk_class_metadata)).
 
 %%% ============================================================================
-%%% pending load errors tests (BT-1972)
+%%% pending load errors tests
 %%% ============================================================================
 
 ensure_pending_errors_table_test() ->
@@ -1062,7 +1061,7 @@ drain_pending_errors_empty_test() ->
     ).
 
 %%% ============================================================================
-%%% validate_class_update tests (BT-1972)
+%%% validate_class_update tests
 %%% ============================================================================
 
 validate_class_update_same_module_test() ->
@@ -1107,7 +1106,7 @@ validate_class_update_bootstrap_stub_replacement_test() ->
     ).
 
 %%% ============================================================================
-%%% BT-1982: Additional coverage
+%%% Additional coverage
 %%% ============================================================================
 
 %% ensure_pg_started/0 is idempotent when pg is already running.

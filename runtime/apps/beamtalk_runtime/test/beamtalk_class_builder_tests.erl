@@ -5,27 +5,27 @@
 -module(beamtalk_class_builder_tests).
 
 -moduledoc """
-EUnit tests for beamtalk_class_builder:register/1 (ADR 0038 Phase 1, BT-835).
+EUnit tests for beamtalk_class_builder:register/1 (ADR 0038 Phase 1).
 
 Tests:
   - happy path: successful class registration
   - hot reload: registering an existing class updates it
   - missing superclass error: superclassRef = nil
-  - sealed superclass rejected (stdlibMode bypasses this for stdlib loading, BT-791)
+  - sealed superclass rejected (stdlibMode bypasses this for stdlib loading)
   - bad name error: className is not an atom (nil or non-atom)
   - bootstrap assertion: Class respondsTo: #classBuilder
-  - BT-1967: missing className key defaults to nil error
-  - BT-1967: missing superclassRef key defaults to nil error
-  - BT-1967: integer className rejected
-  - BT-1967: non-map methodSpecs rejected
-  - BT-1967: builder pid stopped after successful registration
-  - BT-1967: builder pid = self() skips stop
-  - BT-1967: compiled class metadata passthrough
-  - BT-1967: method specs with compiled method info map
-  - BT-1967: sealed and abstract modifiers applied
-  - BT-1967: hot reload updates methods
-  - BT-1967: superclass resolution via pid reference
-  - BT-1967: class_load_callback notification
+  - missing className key defaults to nil error
+  - missing superclassRef key defaults to nil error
+  - integer className rejected
+  - non-map methodSpecs rejected
+  - builder pid stopped after successful registration
+  - builder pid = self() skips stop
+  - compiled class metadata passthrough
+  - method specs with compiled method info map
+  - sealed and abstract modifiers applied
+  - hot reload updates methods
+  - superclass resolution via pid reference
+  - class_load_callback notification
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -173,7 +173,7 @@ register_missing_superclass_error_test_() ->
     end}.
 
 %% Sealed-superclass enforcement is done at runtime for user code.
-%% StdlibMode = true bypasses this for stdlib on_load hooks (BT-791).
+%% StdlibMode = true bypasses this for stdlib on_load hooks.
 register_sealed_superclass_rejected_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -335,7 +335,7 @@ classbuilder_registered_in_bootstrap_test_() ->
         end}.
 
 %%====================================================================
-%% BT-1967: Missing keys default to nil → error
+%% Missing keys default to nil → error
 %%====================================================================
 
 register_missing_classname_key_test_() ->
@@ -371,7 +371,7 @@ register_missing_superclass_key_test_() ->
     end}.
 
 %%====================================================================
-%% BT-1967: Integer className rejected
+%% Integer className rejected
 %%====================================================================
 
 register_integer_classname_test_() ->
@@ -391,7 +391,7 @@ register_integer_classname_test_() ->
     end}.
 
 %%====================================================================
-%% BT-1967: Non-map methodSpecs rejected
+%% Non-map methodSpecs rejected
 %%====================================================================
 
 register_bad_method_specs_type_test_() ->
@@ -411,7 +411,7 @@ register_bad_method_specs_type_test_() ->
     end}.
 
 %%====================================================================
-%% BT-1967: Builder pid stopped after successful registration
+%% Builder pid stopped after successful registration
 %%====================================================================
 
 register_stops_builder_pid_test_() ->
@@ -447,7 +447,7 @@ register_stops_builder_pid_test_() ->
     end}.
 
 %%====================================================================
-%% BT-1967: Builder pid = self skips stop (no deadlock)
+%% Builder pid = self skips stop (no deadlock)
 %%====================================================================
 
 register_builder_pid_self_noop_test_() ->
@@ -473,7 +473,7 @@ register_builder_pid_self_noop_test_() ->
     end}.
 
 %%====================================================================
-%% BT-1967: Compiled class metadata passthrough
+%% Compiled class metadata passthrough
 %%====================================================================
 
 register_compiled_class_metadata_test_() ->
@@ -505,7 +505,7 @@ register_compiled_class_metadata_test_() ->
     end}.
 
 %%====================================================================
-%% BT-1967: Method specs with compiled method info (map form)
+%% Method specs with compiled method info (map form)
 %%====================================================================
 
 register_compiled_method_specs_test_() ->
@@ -532,7 +532,7 @@ register_compiled_method_specs_test_() ->
     end}.
 
 %%====================================================================
-%% BT-1967: Sealed and abstract modifiers applied
+%% Sealed and abstract modifiers applied
 %%====================================================================
 
 register_sealed_modifier_test_() ->
@@ -574,7 +574,7 @@ register_abstract_modifier_test_() ->
     end}.
 
 %%====================================================================
-%% BT-1967: Hot reload updates methods
+%% Hot reload updates methods
 %%====================================================================
 
 register_hot_reload_updates_methods_test_() ->
@@ -609,7 +609,7 @@ register_hot_reload_updates_methods_test_() ->
     end}.
 
 %%====================================================================
-%% BT-1967: Superclass resolution via pid reference
+%% Superclass resolution via pid reference
 %%====================================================================
 
 register_superclass_as_pid_test_() ->
@@ -648,7 +648,7 @@ register_superclass_as_pid_test_() ->
     end}.
 
 %%====================================================================
-%% BT-1967: class_load_callback notification
+%% class_load_callback notification
 %%====================================================================
 
 register_class_load_callback_test_() ->
@@ -682,7 +682,7 @@ register_class_load_callback_test_() ->
                 gen_server:stop(ClassPid, normal, 5000)
             end),
 
-            %% BT-1982: Register passing a #beamtalk_object{} record as
+            %% Register passing a #beamtalk_object{} record as
             %% superclassRef — exercises the object-clause of
             %% resolve_superclass_name/1 and validate_superclass_not_sealed/1.
             ?_test(begin
@@ -714,7 +714,7 @@ register_class_load_callback_test_() ->
                 gen_server:stop(ParentPid, normal, 5000)
             end),
 
-            %% BT-1982: the maybe_stop_builder/1 branch (class_builder lines
+            %% The maybe_stop_builder/1 branch (class_builder lines
             %% 436-439) is not directly unit-testable because stopping a fake
             %% non-gen_server builderPid forces the class_builder's terminate
             %% callback to block for the full stop-timeout and then propagate
@@ -722,7 +722,7 @@ register_class_load_callback_test_() ->
             %% Coverage of this branch would require a real gen_server stand-in
             %% wired into the class_builder lifecycle (out of scope here).
 
-            %% BT-1982: build_method_map/1 skips entries with unexpected shapes
+            %% build_method_map/1 skips entries with unexpected shapes
             %% (neither function nor map) — covers the catch-all fold branch.
             ?_test(begin
                 State = #{
@@ -743,7 +743,7 @@ register_class_load_callback_test_() ->
                 gen_server:stop(ClassPid, normal, 5000)
             end),
 
-            %% BT-1982: Callback module that exists but raises a non-undef error
+            %% Callback module that exists but raises a non-undef error
             %% exercises the generic `Kind:Reason:Stacktrace` branch of
             %% notify_class_loaded/1. We dynamically compile a tiny module whose
             %% on_class_loaded/1 raises.
@@ -786,7 +786,7 @@ register_class_load_callback_test_() ->
     end}.
 
 %%====================================================================
-%% BT-2266 / ADR 0084: callable builder class methods + reload precedence
+%% ADR 0084: callable builder class methods + reload precedence
 %%====================================================================
 
 %% A builder class method supplied as a fun is wrapped through build_method_map,
@@ -816,7 +816,7 @@ register_class_method_fun_callable_test_() ->
         ]
     end}.
 
-%% BT-2275: `self new` inside a fun-backed class method of a module-less builder
+%% `self new` inside a fun-backed class method of a module-less builder
 %% class returns a usable generic instance. The class-method fun runs inside the
 %% class gen_server, so it routes through handle_self_instantiation exactly as
 %% compiled class-method codegen does — reading field defaults from the process
@@ -827,7 +827,7 @@ register_self_new_in_class_method_test_() ->
             ?_test(begin
                 %% `self new` from inside a class method routes through
                 %% class_send(self(), 'new', _), which short-circuits to the
-                %% self-instantiation path (BT-893) — exactly what class-method
+                %% self-instantiation path — exactly what class-method
                 %% codegen emits for a `self new` send.
                 Make = fun(_ClassSelf, _ClassVars) ->
                     beamtalk_class_dispatch:class_send(self(), 'new', [])
@@ -1002,7 +1002,7 @@ selector_arity_covered_binary_chars_test() ->
     ?assertEqual(1, beamtalk_class_builder:selector_arity('=')).
 
 %%====================================================================
-%% ADR 0087 Phase 4 (BT-2301): ClassBuilder methods reach beamtalk_xref
+%% ADR 0087 Phase 4: ClassBuilder methods reach beamtalk_xref
 %%====================================================================
 
 %% Setup that also stands up (and clears) a beamtalk_xref gen_server so the

@@ -12,11 +12,9 @@ Handles class-level message sending protocol, translating Beamtalk messages
 to gen_server calls. Also provides helpers for class method execution
 including test execution detection and result unwrapping.
 
-ADR 0032 Phase 0 (BT-732): Added class chain fallthrough.
+ADR 0032 Phase 0: class chain fallthrough.
 When a class-side message is not found in user-defined class methods,
 dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/5.
-
-Extracted from beamtalk_object_class.erl (BT-704).
 """.
 
 -include("beamtalk.hrl").
@@ -39,7 +37,7 @@ Extracted from beamtalk_object_class.erl (BT-704).
 -type class_name() :: atom().
 
 -doc """
-Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
+Send a message to a class object synchronously (ADR 0013 Phase 1).
 
 Dispatches messages to the class gen_server, translating the Beamtalk
 message protocol ({Selector, Args}) to the class process message format.
@@ -49,7 +47,7 @@ Unwraps {ok, Value} / {error, Error} results for seamless integration.
 class_send(undefined, Selector, _Args) ->
     Error = beamtalk_error:new(class_not_found, unknown, Selector),
     beamtalk_error:raise(Error);
-%% BT-893: Self-call for instantiation selectors — bypass gen_server to avoid deadlock.
+%% Self-call for instantiation selectors — bypass gen_server to avoid deadlock.
 %% When a class method sends new/new:/spawn/spawnWith: to its own class (ClassPid == self()),
 %% gen_server:call(self(), ...) would deadlock. Instead, perform instantiation directly
 %% using class metadata from the process dictionary (set during init).
@@ -77,7 +75,7 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
     class_send_with_recovery(ClassPid, 'spawnWith:', fun(P) ->
         unwrap_class_call(gen_server:call(P, {spawn, [Map]}))
     end);
-%% ADR 0032 Phase 2 (BT-734): 8 of the originally planned 12 hardcoded selector
+%% ADR 0032 Phase 2: 8 of the originally planned 12 hardcoded selector
 %% clauses were removed here (methods, superclass, class_name, module_name,
 %% printString, class, subclasses, allSubclasses); they now dispatch through the
 %% Class/Behaviour chain via the catch-all below.
@@ -85,12 +83,12 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
 %% The remaining 4 instantiation selectors (new, new:, spawn, spawnWith:) retain
 %% explicit clauses because they must route to the gen_server's {new, _} / {spawn, _}
 %% handlers, not to class_method_call. Moving them to the Behaviour/Class chain
-%% is future work (ADR 0032 Phase 4+). BT-3071/BT-3072 lifted real class-method
-%% bodies for all four onto actor.bt (`class sealed new`/`new:`/`spawn`/
-%% `spawnWith:`), but deliberately left this routing untouched — those bodies
-%% are the documented, xref-visible definition of dynamic-dispatch behaviour,
-%% not the code path an external `Counter spawn` actually runs today.
-%% BT-3018: every other selector aimed at the class's own gen_server from
+%% is future work (ADR 0032 Phase 4+). Real class-method bodies for all four
+%% live on actor.bt (`class sealed new`/`new:`/`spawn`/`spawnWith:`), but this
+%% routing deliberately does not use them — those bodies are the documented,
+%% xref-visible definition of dynamic-dispatch behaviour, not the code path
+%% an external `Counter spawn` actually runs today.
+%% Every other selector aimed at the class's own gen_server from
 %% inside that gen_server. `gen_server:call(self(), ...)` does not hang — it
 %% exits with `{calling_self, {gen_server, call, [...]}}`, a raw tuple that
 %% says nothing about what the caller did wrong. The commonest way to get here
@@ -98,7 +96,7 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
 %%
 %%     File open: p mode: #read do: [:h | File exists: q]
 %%
-%% Report it the way BT-2005's `handle_metaclass_self_call/2` already reports
+%% Report it the way `handle_metaclass_self_call/2` already reports
 %% the metaclass equivalent. No working path changes: the alternative was an
 %% exit, not a successful call.
 class_send(ClassPid, Selector, _Args) when ClassPid =:= self() ->
@@ -109,7 +107,7 @@ class_send(ClassPid, Selector, Args) ->
     end).
 
 -doc """
-Report a class-method self-send that would deadlock (BT-3018).
+Report a class-method self-send that would deadlock.
 
 The four instantiation selectors are short-circuited above; anything else
 sent to a class from inside that class's own process has no safe route, so
@@ -148,20 +146,20 @@ handle_class_self_call(Selector) ->
     beamtalk_error:raise(Error1).
 
 -doc """
-BT-2007: Dispatch an inherited class method from inside a class method body.
+Dispatch an inherited class method from inside a class method body.
 
 Codegen emits a call to this helper for every class-method self-send
 whose selector is not a local class method, a slot constructor, an
 instantiation intrinsic, or one of the auto-generated 0-arity exports.
 
-BT-3198: Checks the extension registry (keyed under the metaclass tag,
+Checks the extension registry (keyed under the metaclass tag,
 `class_object_tag(ClassName)`) BEFORE the superclass chain — mirroring
-`handle_class_method_call/6`'s BT-3192 "extension checked before local
+`handle_class_method_call/6`'s "extension checked before local
 method table / chain" order, so a class-side extension registered on
 `ClassName`'s own metaclass tag is reachable via `self extensionSel` from
 inside another class method of the same class, not just via an external
 `Target sel` / `Target class sel` send. Extensions are never inherited
-(same rule BT-3192 established for the external paths), so only
+(same rule the external-dispatch path established), so only
 `ClassName`'s own tag is checked here — not walked up the chain.
 
 When the extension registry has no match, walks the superclass chain via
@@ -194,7 +192,7 @@ class_self_dispatch(ClassName, Selector, ClassVars, Args) ->
     end.
 
 -doc """
-BT-3198: The superclass-chain half of `class_self_dispatch/4`, factored out
+The superclass-chain half of `class_self_dispatch/4`, factored out
 so `class_self_dispatch_local/4` can fall through to it directly after its
 own single extension check, instead of re-checking the (already-confirmed
 absent) extension a second time via a nested `class_self_dispatch/4` call.
@@ -222,23 +220,23 @@ class_self_dispatch_chain(ClassName, Selector, ClassVars, Args) ->
     end.
 
 -doc """
-ADR 0084 / BT-2266: Dispatch a class-method self-send that may resolve to the
+ADR 0084: Dispatch a class-method self-send that may resolve to the
 class's OWN runtime-installed class method.
 
-Class-method funs created by the programmatic `ClassBuilder` (BT-2267) are
+Class-method funs created by the programmatic `ClassBuilder` are
 anonymous funs with no `class_<sel>` module export, so a self-send inside such a
 fun cannot use the compiled direct-call path. It routes here instead.
 
-BT-3198: checks the extension registry first (same tag/priority rule as
-`class_self_dispatch/4` above — extension before local method, mirroring
-BT-3192), then the class's own runtime class-method fun (the retrieval
-store), and only falls back to `class_self_dispatch_chain/4` (super +
-inherited, walked from the superclass) when the selector is neither.
+Checks the extension registry first (same tag/priority rule as
+`class_self_dispatch/4` above — extension before local method), then the
+class's own runtime class-method fun (the retrieval store), and only falls
+back to `class_self_dispatch_chain/4` (super + inherited, walked from the
+superclass) when the selector is neither.
 
 Returns the raw `{class_var_result, Result, NewClassVars}` | plain value — the
 shape the calling fun threads — and raises a structured `does_not_understand`
 when no definition is found. No `gen_server` hop: the local lookup is the same
-ETS read the dispatch hot path already uses (BT-2008).
+ETS read the dispatch hot path already uses.
 """.
 -spec class_self_dispatch_local(class_name(), selector(), map(), list()) ->
     {class_var_result, term(), map()} | term() | no_return().
@@ -267,12 +265,12 @@ class_self_dispatch_local(ClassName, Selector, ClassVars, Args) ->
     end.
 
 -doc """
-BT-3198: Shared extension-registry probe for both `class_self_dispatch/4`
+Shared extension-registry probe for both `class_self_dispatch/4`
 and `class_self_dispatch_local/4` — a `self someSelector` send from inside
 another class method, checking whether `ClassName`'s own metaclass tag has a
 matching class-side extension (`beamtalk_extensions`, ADR 0066) before either
 function falls through to its local/inherited-method lookups. Mirrors
-`handle_class_method_call/6`'s BT-3192 priority order (extension before
+`handle_class_method_call/6`'s priority order (extension before
 local method table).
 
 Reuses `apply_class_extension_fun/6` for the same calling convention and
@@ -313,7 +311,7 @@ self_dispatch_module(ClassName) ->
     end.
 
 -doc """
-BT-3198: Adapt `apply_class_extension_fun/6`'s outcome to the self-dispatch
+Adapt `apply_class_extension_fun/6`'s outcome to the self-dispatch
 caller shape — mirroring `unwrap_self_dispatch_outcome/3` for compiled/
 runtime-installed class methods, but for the `{ok, {Result, NewClassVars}}`
 2-tuple `apply_extension_by_arity/4` returns rather than the plain `{ok,
@@ -341,7 +339,7 @@ unwrap_self_dispatch_extension_outcome(
 ) ->
     erlang:raise(ErrClass, Error, ST);
 unwrap_self_dispatch_extension_outcome(_ClassName, _Selector, {nlr_relay, Nlr, ST}) ->
-    %% ADR 0110 / BT-3032: resume the non-local return unwind directly, same
+    %% ADR 0110: resume the non-local return unwind directly, same
     %% as unwrap_self_dispatch_outcome/3's nlr_relay clause.
     erlang:raise(throw, Nlr, ST).
 
@@ -365,7 +363,7 @@ unwrap_self_dispatch_outcome(ClassName, Selector, Outcome) ->
         {error, {raised, ErrClass, Error, ST}} ->
             erlang:raise(ErrClass, Error, ST);
         {nlr_relay, Nlr, ST} ->
-            %% ADR 0110 / BT-3032: self-dispatch runs in the caller's own
+            %% ADR 0110: self-dispatch runs in the caller's own
             %% process, so resume the non-local return unwind directly —
             %% identical behavior to when these throws were tagged
             %% {error, {raised, throw, ...}}.
@@ -374,7 +372,7 @@ unwrap_self_dispatch_outcome(ClassName, Selector, Outcome) ->
             %% `TestCase>>runAll` / `run:` self-sent from inside another
             %% class method would run the test suite inline in the class
             %% gen_server process — the exact deadlock the `test_spawn`
-            %% escape hatch was added to avoid (BT-440). Surface a
+            %% escape hatch exists to avoid. Surface a
             %% structured error instead of blocking; callers should invoke
             %% test runners from outside the class body.
             raise_test_spawn_self_dispatch_unsupported(ClassName, Selector)
@@ -416,8 +414,8 @@ raise_class_self_dnu(ClassName, Selector) ->
 -doc "Dispatch a class method call (the main logic for the catch-all clause).".
 -spec class_send_dispatch(pid(), selector(), list()) -> term().
 class_send_dispatch(ClassPid, Selector, Args) ->
-    %% BT-411: Try user-defined class methods before raising does_not_understand
-    %% BT-440: Test execution may take a long time; use longer timeout.
+    %% Try user-defined class methods before raising does_not_understand.
+    %% Test execution may take a long time; use longer timeout.
     %% Class methods can do arbitrary I/O (HTTP, file, database), so the default
     %% must accommodate network latency.  Test selectors get 5 minutes because a
     %% full suite can run hundreds of tests sequentially.
@@ -428,7 +426,7 @@ class_send_dispatch(ClassPid, Selector, Args) ->
             % 60 seconds — class methods may do network I/O
             false -> 60000
         end,
-    %% ADR 0081 / BT-2379: pass the caller's session context explicitly in the
+    %% ADR 0081: pass the caller's session context explicitly in the
     %% message instead of having the class gen_server copy our whole process
     %% dictionary via `process_info/2`. We read our own two keys cheaply with
     %% `get/1` here and the receiving clause seeds from the tuple.
@@ -438,7 +436,7 @@ class_send_dispatch(ClassPid, Selector, Args) ->
         )
     of
         {ok, Result} ->
-            %% BT-1542 + BT-1994 (ADR 0080 Phase 0a, option 2): run the
+            %% ADR 0080 Phase 0a (option 2): run the
             %% initialize: lifecycle hook in the caller's process after a
             %% supervise call returns a freshly-started supervisor tuple.
             %%
@@ -456,7 +454,7 @@ class_send_dispatch(ClassPid, Selector, Args) ->
             %%
             %% We therefore match TWO shapes:
             %%   (a) the bare `{beamtalk_supervisor_new, ...}` tuple — the
-            %%       unwrapped case, and the historical BT-1542 case;
+            %%       unwrapped case, and the historical case;
             %%   (b) a Result tagged map wrapping the _new inner tuple —
             %%       the post-Phase-1 case where `supervise` no longer
             %%       unwraps and callers handle the Result themselves.
@@ -468,7 +466,7 @@ class_send_dispatch(ClassPid, Selector, Args) ->
             %% representation (`$beamtalk_class`, `isOk`, `okValue`). ADR
             %% 0080 §Phase 0a explicitly accepts this tradeoff: the
             %% alternative (option 3: helper process) was shown to
-            %% deadlock on existing e2e fixtures during the BT-1994 probe.
+            %% deadlock on existing e2e fixtures during testing.
             %% If Result's internal representation changes, update both
             %% `beamtalk_result:from_tagged_tuple/1` and this match
             %% together — they are the only two sites that encode the shape.
@@ -490,7 +488,7 @@ class_send_dispatch(ClassPid, Selector, Args) ->
             end;
         {error, not_found} ->
             ClassName = gen_server:call(ClassPid, class_name),
-            %% ADR 0032 Phase 0 (BT-732): Try Class chain before raising does_not_understand.
+            %% ADR 0032 Phase 0: Try Class chain before raising does_not_understand.
             %% Class objects are instances of 'Class'; fall through to Class instance methods.
             ModuleName = gen_server:call(ClassPid, module_name),
             ClassSelf = #beamtalk_object{
@@ -511,7 +509,7 @@ class_send_dispatch(ClassPid, Selector, Args) ->
                     beamtalk_error:raise(Error)
             end;
         {error, {beamtalk_script_exit, _} = ScriptExit} ->
-            %% BT-2691 (ADR 0099 §3): a connected `Program exit: N` raised inside
+            %% ADR 0099 §3: a connected `Program exit: N` raised inside
             %% the dispatched class method surfaces here as the class gen_server's
             %% error reply. Re-raise it as the `{beamtalk_script_exit, N}` *throw*
             %% in the caller's (eval/dispatch worker's) process, so that worker
@@ -519,7 +517,7 @@ class_send_dispatch(ClassPid, Selector, Args) ->
             %% unwrap_class_call/1 wrapping it as an ordinary method failure.
             throw(ScriptExit);
         {error, Nlr} when ?IS_NLR(Nlr) ->
-            %% BT-3022: a `^` inside a block that this class method ran on our
+            %% A `^` inside a block that this class method ran on our
             %% behalf. The matching catch frame is in *our* process — the class
             %% gen_server had no frame holding that token, so its reply is the only
             %% way the signal can get back here. Re-throw so the enclosing method
@@ -531,13 +529,13 @@ class_send_dispatch(ClassPid, Selector, Args) ->
     end.
 
 -doc """
-Send a message to a metaclass object (ADR 0036, BT-823).
+Send a message to a metaclass object (ADR 0036).
 
 Routes messages on metaclass objects (tagged `class='Metaclass'`) through:
   1. `{metaclass_method_call, Selector, Args, SessionCtx}` to the class
      gen_server via `gen_server:call/2` — resolves user-defined class methods
      (e.g. `withAll:`) via the superclass chain (ADR-0036 Phase 2). `SessionCtx`
-     carries the caller's session context explicitly (BT-2379).
+     carries the caller's session context explicitly.
   2. Fallthrough to `beamtalk_dispatch:lookup/5` starting at 'Metaclass', which
      walks the Metaclass → Class → Behaviour → Object → ProtoObject chain for
      built-in messages (`new`, `class`, etc.).
@@ -546,15 +544,15 @@ The class pid is the same as the described class (virtual tag approach, ADR 0013
 Self carries `class='Metaclass'` so method dispatch receives the correct receiver.
 """.
 -spec metaclass_send(pid(), atom(), list(), #beamtalk_object{}) -> term().
-%% BT-2005: `self class <msg>` inside a class method routes here with
+%% `self class <msg>` inside a class method routes here with
 %% Pid =:= self() (the class gen_server calling itself). A plain
 %% gen_server:call on the instantiation selectors would deadlock; short-circuit
 %% the spawn/new family via the process-dictionary-backed helpers used by
-%% BT-893 / BT-2004, and raise a clear error for everything else.
+%% `self new` / `self spawnAs:`, and raise a clear error for everything else.
 metaclass_send(Pid, Selector, Args, _Self) when Pid =:= self() ->
     handle_metaclass_self_call(Selector, Args);
 metaclass_send(Pid, Selector, Args, Self) ->
-    %% BT-1768: Wrap in crash recovery, same as class_send.
+    %% Wrap in crash recovery, same as class_send.
     %% Update Self's pid on recovery so downstream dispatch uses the new process.
     class_send_with_recovery(Pid, Selector, fun(P) ->
         metaclass_send_dispatch(P, Selector, Args, Self#beamtalk_object{pid = P})
@@ -563,11 +561,11 @@ metaclass_send(Pid, Selector, Args, Self) ->
 -doc "Dispatch a metaclass method call (the main logic for metaclass_send).".
 -spec metaclass_send_dispatch(pid(), atom(), list(), #beamtalk_object{}) -> term().
 metaclass_send_dispatch(Pid, Selector, Args, Self) ->
-    %% ADR-0036 Phase 2 (BT-823): Use metaclass_method_call so that
+    %% ADR-0036 Phase 2: Use metaclass_method_call so that
     %% `self species withAll: x` and similar dynamic class-side sends find
     %% user-defined class methods (e.g. `withAll:`) via the proper handler.
     %% Falls through to the Metaclass chain for built-in messages (`new`, `class`, etc.).
-    %% BT-2379: carry the caller's session context explicitly (see
+    %% Carry the caller's session context explicitly (see
     %% class_send_dispatch/3) so the class gen_server need not copy our dictionary.
     case
         gen_server:call(
@@ -598,12 +596,12 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
                     beamtalk_exception_handler:reraise(Error)
             end;
         {error, {beamtalk_script_exit, _} = ScriptExit} ->
-            %% BT-2691 (ADR 0099 §3): re-raise a connected `Program exit:` from a
+            %% ADR 0099 §3: re-raise a connected `Program exit:` from a
             %% metaclass-dispatched class method as the script-exit throw (parity
             %% with class_send_dispatch/3), so the worker adopts the status.
             throw(ScriptExit);
         {error, Nlr} when ?IS_NLR(Nlr) ->
-            %% BT-3022: same relay as class_send_dispatch/3, and for the same
+            %% Same relay as class_send_dispatch/3, and for the same
             %% reason — a metaclass-dispatched class method also runs in the class
             %% gen_server, so a `^` out of a caller-supplied block unwinds to here
             %% with no frame holding its token. Without this clause
@@ -625,7 +623,7 @@ Read this process's session context (`beamtalk_session_pid` /
 `beamtalk_session_id` / `beamtalk_session_meta` / `beamtalk_entry_group_leader`)
 for explicit propagation into a class-method call.
 
-ADR 0081 / BT-2379: the eval worker seeds these keys
+ADR 0081: the eval worker seeds these keys
 (`beamtalk_repl_shell:seed_session_context/3`). Class-method dispatch hops to
 the class gen_server, so factory methods like `Session current` need the
 caller's context there — including the origin metadata so `Session current kind`
@@ -634,7 +632,7 @@ cheaply with `get/1` and pass them in the message tuple, avoiding a
 `process_info(CallerPid, dictionary)` full-dictionary copy on the receiving
 side.
 
-BT-2963: the fourth element is the *entry group leader* — the IO sink a
+The fourth element is the *entry group leader* — the IO sink a
 connected `beamtalk run … --connect` dispatch wants its `Console` output to
 reach. It is seeded only by `beamtalk_repl_eval:do_dispatch/5` (the `run-entry`
 op) and is `undefined` everywhere else, including ordinary REPL `eval`, so no
@@ -662,7 +660,7 @@ Unwrap a class gen_server call result for use in class_send.
 Translates {ok, Value} → Value, {error, Error} → re-raise as exception.
 Handles both raw #beamtalk_error{} records and already-wrapped Exception
 maps (from raise/1 inside handle_call). Uses reraise/1 (which wraps
-idempotently) (BT-525).
+idempotently).
 """.
 -spec unwrap_class_call(term()) -> term().
 unwrap_class_call({ok, Value}) ->
@@ -673,30 +671,28 @@ unwrap_class_call({error, Error}) ->
 -doc """
 Handle a class method call from the gen_server.
 
-BT-411: User-defined class method dispatch.
-BT-412: Passes class variables to method and handles updates.
-BT-440: For test execution (runAll, run:), spawns in a separate process
+User-defined class method dispatch.
+Passes class variables to method and handles updates.
+For test execution (runAll, run:), spawns in a separate process
 to avoid gen_server deadlock.
 
 ADR 0032 Phase 1: Receives local class_methods (not flattened table).
 Walks the superclass chain if the method is not found locally.
 
-BT-3192: Checks the extension registry (keyed under the metaclass tag,
+Checks the extension registry (keyed under the metaclass tag,
 `class_object_tag(ClassName)`) BEFORE the local method table / superclass
 chain — mirroring `beamtalk_dispatch:lookup/5`'s own "extension checked
-before local method table" order. Before this, a class-side extension
-(`Target class >> sel => body`, ADR 0066) registered fine but was never read
-back by ANY class-side dispatch path: neither `class_method_call` (an
-ordinary `Target sel` send) nor `metaclass_method_call` (`Target class sel`)
-ever consulted `beamtalk_extensions` — both funnel through this same
-function (`beamtalk_object_class:dispatch_class_method/5`), so this one fix
-covers both.
+before local method table" order. A class-side extension
+(`Target class >> sel => body`, ADR 0066) is read back by both
+`class_method_call` (an ordinary `Target sel` send) and
+`metaclass_method_call` (`Target class sel`), which both funnel through this
+same function (`beamtalk_object_class:dispatch_class_method/5`).
 
 Scope: this covers *external* sends (`Target sel` / `Target class sel`). A
 `self someSelector` send from inside another class method of the same
 class — `class_self_dispatch/4` / `class_self_dispatch_local/4`, below —
 goes through `check_class_self_extension/4` instead, which checks the same
-registry under the same priority rule (BT-3198).
+registry under the same priority rule.
 
 Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
 """.
@@ -741,7 +737,7 @@ handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, C
 
 -doc """
 Invoke a class-side extension method found in the `beamtalk_extensions`
-registry (BT-3192).
+registry.
 
 Reuses `beamtalk_dispatch:apply_extension_by_arity/4` for the calling
 convention — the same one instance-side extensions already use: a 2-arity
@@ -753,7 +749,7 @@ class method — `class = ClassTag` (the metaclass tag), `class_mod = Module`
 is no separate "defining class" indirection), `pid = self()` (the class
 gen_server this handler is already running inside).
 
-Like `beamtalk_dispatch:invoke_extension/6` (BT-3199), this catches and
+Like `beamtalk_dispatch:invoke_extension/6`, this catches and
 converts a crashing extension body rather than letting it escape — but via
 `apply_class_extension_fun/6`'s own finer-grained classification
 (`undef_in_body` vs. generic, plus NLR-relay / script-exit passthrough for
@@ -771,7 +767,7 @@ invoke_class_extension(Fun, Args, ClassName, ClassTag, Module, ClassVars, Select
         {ok, {Result, NewClassVars}} ->
             {reply, {ok, Result}, NewClassVars};
         {nlr_relay, Nlr, _ST} ->
-            %% ADR 0110 / BT-3032, adapted for extensions: same relay as
+            %% ADR 0110, adapted for extensions: same relay as
             %% invoke_class_method/7, minus the class-var shadow-key read —
             %% extension codegen never writes that key (only compiled/
             %% runtime-installed class-method bodies do), so ClassVars as-is
@@ -785,8 +781,8 @@ invoke_class_extension(Fun, Args, ClassName, ClassTag, Module, ClassVars, Select
 
 -doc """
 Apply a class-side extension fun, classifying the outcome the same way
-`apply_class_method_fun/6` does for a runtime-installed class method
-(BT-3192) — script-exit passthrough, NLR relay, `undef` classification, and
+`apply_class_method_fun/6` does for a runtime-installed class method —
+script-exit passthrough, NLR relay, `undef` classification, and
 a generic catch-all — so a crashing extension body becomes a structured
 `{error, ...}` reply instead of taking down the class gen_server.
 """.
@@ -800,12 +796,12 @@ apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) 
         ResultAndVars ->
             {ok, ResultAndVars}
     catch
-        %% BT-2691 (ADR 0099 §3): see apply_class_method_fun/6 — pass a
+        %% ADR 0099 §3: see apply_class_method_fun/6 — pass a
         %% connected `Program exit: N` through unlogged as a control-flow
         %% signal, not a method failure.
         throw:({beamtalk_script_exit, _} = ScriptExit):ScriptST ->
             {error, {raised, throw, ScriptExit, ScriptST}};
-        %% BT-3022: see apply_class_method_fun/6 — a `^` unwinding through
+        %% See apply_class_method_fun/6 — a `^` unwinding through
         %% this extension belongs to a frame in the calling process.
         throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
             {nlr_relay, Nlr, NlrST};
@@ -848,17 +844,17 @@ apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) 
 ) ->
     {reply, term(), map()} | test_spawn.
 invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningModule, ClassVars) ->
-    %% BT-2007: shares apply_class_method_in_context/6 with class_self_dispatch/4
+    %% Shares apply_class_method_in_context/6 with class_self_dispatch/4
     %% so both dispatch paths see identical error classification, class-var
-    %% threading, and the BT-440 test_spawn escape hatch. This function
+    %% threading, and the test_spawn escape hatch. This function
     %% adapts the shared outcome to the gen_server `{reply, _, State}` shape.
     %%
-    %% ADR 0110 / BT-3032: the whole body runs inside try ... after so the
+    %% ADR 0110: the whole body runs inside try ... after so the
     %% '$bt_class_vars_shadow' process-dictionary key (written by codegen at
     %% top-level class-var mutations) never outlives a dispatch, whatever the
     %% outcome.
     %%
-    %% ADR 0110 amendment (BT-3039): the key is tagged with this call's own
+    %% ADR 0110 amendment: the key is tagged with this call's own
     %% class identity (`class_object_tag(ClassName)`, matching codegen's
     %% `element(2, ClassSelf)` write) so a mutating self-send inside a block
     %% invoked from a *different* class's process — which runs physically in
@@ -879,10 +875,10 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
             {ok, Result} ->
                 {reply, {ok, Result}, ClassVars};
             {nlr_relay, Nlr, _ST} ->
-                %% ADR 0110 / BT-3032: a foreign `^` relaying out of the class
+                %% ADR 0110: a foreign `^` relaying out of the class
                 %% method is control flow, not a failure — class-var writes made
                 %% before the unwind must survive. The codegen write-through
-                %% (BT-3037) records them under this class's shadow key; until
+                %% records them under this class's shadow key; until
                 %% that lands the shadow is never set and this falls back to the
                 %% pre-call ClassVars, exactly today's behavior. The reply shape
                 %% is byte-identical to the historical {error, Nlr}, so the
@@ -905,7 +901,7 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
         erlang:erase(ShadowKey)
     end.
 
-%% ADR 0110 / BT-3032: `{nlr_relay, Nlr, ST}` is a foreign `^` (non-local
+%% ADR 0110: `{nlr_relay, Nlr, ST}` is a foreign `^` (non-local
 %% return) relaying out of the class method — the relayed NLR tuple plus its
 %% stacktrace. It is kept distinct from `{error, {raised, ...}}` so
 %% `invoke_class_method/7` can preserve class-var writes recorded under the
@@ -920,7 +916,7 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
     | {error, {raised, atom(), term(), list()}}.
 
 -doc """
-BT-2007: Shared core of class-method dispatch.
+Shared core of class-method dispatch.
 
 Handles the TestCase `test_spawn` guard, constructs `ClassSelf` with
 `class_mod = DefiningModule`, applies the method, and classifies any
@@ -937,7 +933,7 @@ that need to re-raise (e.g. self-dispatch) get the original trace.
     selector(), list(), class_name(), class_name(), atom(), map()
 ) -> class_method_outcome().
 apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars) ->
-    %% BT-440: For test execution (runAll, run:) inherited from TestCase,
+    %% For test execution (runAll, run:) inherited from TestCase,
     %% return a spawn request so the caller (gen_server) can handle noreply.
     %% The self-dispatch caller translates this to a structured error.
     case is_test_execution_selector(Selector) andalso DefiningClass =:= 'TestCase' of
@@ -949,11 +945,11 @@ apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, Defining
                 class_mod = DefiningModule,
                 pid = self()
             },
-            %% ADR 0084 / BT-2266: a runtime-installed class-method fun shadows
+            %% ADR 0084: a runtime-installed class-method fun shadows
             %% the compiled export. The retrieval store is keyed by the resolved
             %% DefiningClass, so this works identically for own and inherited
             %% methods, and is gated so compile-time-only classes pay no extra
-            %% read on the dispatch hot path (BT-2008).
+            %% read on the dispatch hot path.
             case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
                 {ok, #{block := Fun}} ->
                     apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector);
@@ -971,7 +967,7 @@ apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, Defining
     end.
 
 -doc """
-Apply a runtime-installed class-method fun (ADR 0084 / BT-2266).
+Apply a runtime-installed class-method fun (ADR 0084).
 
 Same calling convention and `{class_var_result, …}` contract as the compiled
 path. A fun has no module export to mismatch, so an `undef` here is always raised
@@ -984,16 +980,16 @@ apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
         Raw ->
             {ok, Raw}
     catch
-        %% BT-2691 (ADR 0099 §3): a connected `Program exit: N` raised inside a
+        %% ADR 0099 §3: a connected `Program exit: N` raised inside a
         %% class method is a control-flow signal, not a method failure. Pass it
         %% through unchanged (no error log) so class_send_dispatch/3 can re-raise
         %% it to the eval/dispatch worker that reports the status.
         throw:({beamtalk_script_exit, _} = ScriptExit):ScriptST ->
             {error, {raised, throw, ScriptExit, ScriptST}};
-        %% BT-3022: a `^` non-local return that unwound through this class method
+        %% A `^` non-local return that unwound through this class method
         %% belongs to a method frame in the *calling* process. Pass it through
         %% unlogged so class_send_dispatch/3 can re-throw it there.
-        %% ADR 0110 / BT-3032: tagged as its own outcome variant (not
+        %% ADR 0110: tagged as its own outcome variant (not
         %% {error, {raised, ...}}) so invoke_class_method/7 can keep class-var
         %% writes made before the unwind instead of reverting them.
         throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
@@ -1033,20 +1029,20 @@ apply_compiled_class_method(
     ClassSelf, ClassVars, Args, ClassName, DefiningClass, DefiningModule, Selector
 ) ->
     FunName = class_method_fun_name(Selector),
-    %% BT-412: Pass class variables; the caller pattern-matches
+    %% Pass class variables; the caller pattern-matches
     %% `{class_var_result, Result, NewClassVars}` vs plain return.
     try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
         Raw ->
             {ok, Raw}
     catch
-        %% BT-2691 (ADR 0099 §3): pass a connected `Program exit: N` through as a
+        %% ADR 0099 §3: pass a connected `Program exit: N` through as a
         %% control-flow signal (no "method failed" log); class_send_dispatch/3
         %% re-raises it to the eval/dispatch worker.
         throw:({beamtalk_script_exit, _} = ScriptExit):ScriptST ->
             {error, {raised, throw, ScriptExit, ScriptST}};
-        %% BT-3022: see apply_class_method_fun/6 — a non-local return unwinding out
+        %% See apply_class_method_fun/6 — a non-local return unwinding out
         %% of a class method is control flow for a frame in the calling process.
-        %% ADR 0110 / BT-3032: tagged {nlr_relay, ...} so class-var writes made
+        %% ADR 0110: tagged {nlr_relay, ...} so class-var writes made
         %% before the unwind can be recovered rather than reverted.
         throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
             {nlr_relay, Nlr, NlrST};
@@ -1134,7 +1130,7 @@ method_not_found_hint(ClassName, DefiningClass, Selector) ->
 Walk the superclass chain to find an inherited class method.
 
 Uses the ETS hierarchy table for O(1) superclass lookup per level and
-the ETS class-methods table (BT-2008) for the per-ancestor selector +
+the ETS class-methods table for the per-ancestor selector +
 module lookup. The hot path issues no `gen_server:call`s — both tables
 are populated atomically inside `beamtalk_object_class:init/1` before
 the class becomes externally dispatch-visible, so a hierarchy entry
@@ -1143,7 +1139,7 @@ without a matching methods entry is not reachable from normal dispatch.
 Safe to call from within a gen_server `handle_call` because we only walk
 UP the hierarchy (no circular dependency possible).
 
-BT-2786: The walk itself (depth guard, cycle warning, advance-to-superclass)
+The walk itself (depth guard, cycle warning, advance-to-superclass)
 is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
 per-ancestor ETS probe.
 """.
@@ -1185,13 +1181,13 @@ superclass_from_ets(ClassName) ->
     end.
 
 -doc """
-BT-3200: Test whether `ClassName`'s own metaclass tag understands `Selector`
+Test whether `ClassName`'s own metaclass tag understands `Selector`
 — a class-side extension (ADR 0066), a local or inherited class method, or a
 local runtime-installed (ADR 0084) class method.
 
 Backs `beamtalk_object_ops:responds_to_result/3`'s `respondsTo:` on a
 class-object receiver. `SomeClass respondsTo: #sel` previously always
-answered against the generic `'Class'` protocol only (BT-776), because a
+answered against the generic `'Class'` protocol only, because a
 class's metaclass tag (`'SomeClass class'`) is virtual — never registered
 as its own class in `beamtalk_class_registry`/`beamtalk_class_metadata` —
 so the existing hierarchy-walk reflection helper
@@ -1224,7 +1220,7 @@ class_understands_class_selector(ClassName, Selector) ->
     end.
 
 -doc """
-BT-3200: Does `ClassName` itself (not an ancestor) define `Selector` as a
+Does `ClassName` itself (not an ancestor) define `Selector` as a
 class method — either a compiled/static one (`lookup_methods/1`'s local
 selector list) or a runtime-installed one (ADR 0084,
 `lookup_class_method_fun/2`)? Mirrors the same two lookups
@@ -1257,7 +1253,7 @@ selectors are bound atoms from user programs, so the class_ versions are
 equally bounded.  If the resulting function does not exist in the module,
 erlang:apply will raise undef, which invoke_class_method already handles.
 
-BT-3090: a selector built at runtime (e.g. via `perform:` with a
+A selector built at runtime (e.g. via `perform:` with a
 dynamically-assembled selector) can exceed Erlang's 255-byte atom limit even
 though no *compile-time* selector ever does — `list_to_atom` on the raw
 `"class_" ++ Selector` string would then crash with `system_limit` instead of
@@ -1301,7 +1297,7 @@ fnv1a_64(<<Byte, Rest/binary>>, Hash) ->
 
 -doc """
 Check if a class method selector is a test execution command.
-BT-440: These selectors need special handling to avoid gen_server deadlock.
+These selectors need special handling to avoid gen_server deadlock.
 """.
 -spec is_test_execution_selector(selector()) -> boolean().
 is_test_execution_selector(runAll) -> true;
@@ -1378,13 +1374,13 @@ is_dispatch_undef(_Module, _FunName, _ST) ->
     false.
 
 %%% ============================================================================
-%%% Internal Functions — BT-1768 (Class Process Crash Recovery)
+%%% Internal Functions — Class Process Crash Recovery
 %%% ============================================================================
 
 -doc """
 Execute a class_send operation with automatic crash detection and recovery.
 
-BT-1768: Wraps a gen_server call in a try/catch. If the target class process
+Wraps a gen_server call in a try/catch. If the target class process
 has crashed (noproc), looks up the class name from the pid reverse index,
 attempts auto-restart via `beamtalk_class_registry:restart_class/1`, and
 retries the operation with the new pid. If restart fails, raises a clear error.
@@ -1445,28 +1441,28 @@ handle_class_crash_recovery(ClassPid, Selector, Action) ->
     end.
 
 %%% ============================================================================
-%%% Internal Functions — BT-893 (Self-Instantiation)
+%%% Internal Functions — Self-Instantiation
 %%% ============================================================================
 
 -doc """
 Perform instantiation directly when a class method self-sends new/spawn.
 
-BT-893: Replaces BT-755's error-raising approach. Instead of raising an error
-when a class method sends new/spawn to itself, we bypass gen_server and call
-beamtalk_class_instantiation directly. Class name and module are read from the
-process dictionary (set during beamtalk_object_class:init/1).
+Instead of raising an error when a class method sends new/spawn to itself,
+bypasses gen_server and calls beamtalk_class_instantiation directly. Class
+name and module are read from the process dictionary (set during
+beamtalk_object_class:init/1).
 
-BT-3072: `actor.bt` now declares real `class sealed spawn`/`spawnWith:`
+`actor.bt` declares real `class sealed spawn`/`spawnWith:`
 bodies (`beamtalk_actor:doSpawn/1`, `doSpawnWith/2`), matching the treatment
-BT-3071 gave `new`/`new:`. This function — and `class_send/3`'s explicit
+given to `new`/`new:`. This function — and `class_send/3`'s explicit
 `spawn`/`spawnWith:` clauses above, and `handle_metaclass_self_call/2` below
 — deliberately keep routing through `class_self_spawn`/`class_self_new`
 directly rather than falling through to generic inherited class-method
 dispatch: doing so would mean a self-send here reaches the lifted body via
-`gen_server:call(self(), ...)`, which deadlocks (the exact regression the
-issue's own context warns against). Same "keep the shim, the lifted body is
+`gen_server:call(self(), ...)`, which deadlocks — the exact regression this
+routing exists to avoid. Same "keep the shim, the lifted body is
 the dynamic-dispatch definition, not the one every path actually calls"
-choice BT-3071 made — see `beamtalk_actor:doSpawn/1`'s doc.
+choice made for `new`/`new:` — see `beamtalk_actor:doSpawn/1`'s doc.
 """.
 -spec handle_self_instantiation(new | spawn, atom(), list()) -> term().
 handle_self_instantiation(Type, Selector, Args) ->
@@ -1494,11 +1490,11 @@ handle_self_instantiation(Type, Selector, Args) ->
     end.
 
 -doc """
-Handle `self class <selector>` self-calls from within a class method (BT-2005).
+Handle `self class <selector>` self-calls from within a class method.
 
 The class gen_server cannot `gen_server:call(self(), ...)` — the metaclass
 dispatch path would deadlock. Short-circuit the spawn/new family to the same
-helpers used by BT-893 (`self new`) and BT-2004 (`self spawnAs:`), and raise a
+helpers used by `self new` and `self spawnAs:`, and raise a
 clear, structured error for any other selector so callers see a useful
 diagnostic rather than an opaque `calling_self` timeout.
 """.
@@ -1538,7 +1534,7 @@ handle_metaclass_self_call(Selector, _Args) ->
     beamtalk_error:raise(Error1).
 
 -doc """
-Perform a named spawn directly from within a class method (BT-2005 / BT-2004).
+Perform a named spawn directly from within a class method.
 
 Mirrors `handle_self_instantiation/3` but routes to `class_self_spawn_as` /
 `class_self_spawn_with`, which return a Beamtalk `Result` rather than raising.
@@ -1620,7 +1616,7 @@ class_name_from_pid(ClassPid) ->
 %%% ============================================================================
 
 -doc """
-Try dispatching through the Class chain (ADR 0032 Phase 0, BT-732).
+Try dispatching through the Class chain (ADR 0032 Phase 0).
 
 When a class-side message is not found in user-defined class methods,
 fall through to instance methods of 'Class'. This implements the

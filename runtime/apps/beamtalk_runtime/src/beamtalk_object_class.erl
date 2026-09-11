@@ -59,7 +59,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     local_class_methods_map/1,
     local_instance_methods/1,
     dispatch_caller_pid/0,
-    %% ADR 0114 (BT-3278): in-place identity move for a dynamic
+    %% ADR 0114: in-place identity move for a dynamic
     %% (ClassBuilder) class's `renameTo:` — see rename/2's doc.
     rename/2
 ]).
@@ -99,22 +99,22 @@ and join the `beamtalk_classes` pg group for enumeration.
     instance_methods = #{} :: #{selector() => method_info()},
     class_methods = #{} :: #{selector() => method_info()},
     fields = [] :: [atom()],
-    %% BT-2275: Field name => default value map for module-less (builder-built)
+    %% Field name => default value map for module-less (builder-built)
     %% classes. Used by the generic instantiation path to construct an instance
     %% map when no compiled module exists. Compiled classes leave this empty and
     %% bake defaults into their generated `new/0`.
     field_defaults = #{} :: #{atom() => term()},
     class_state = #{} :: map(),
     method_source = #{} :: #{selector() => binary()},
-    %% BT-2195: Class-side method source. Symmetric companion to
+    %% Class-side method source. Symmetric companion to
     %% method_source, used by SystemNavigation source-text scanners to walk
     %% class-side bodies (`sendersOf:`, `referencesTo:`, `methodsMatching:`).
     class_method_source = #{} :: #{selector() => binary()},
-    %% BT-988: Method display signatures for :help command
+    %% Method display signatures for :help command
     method_signatures = #{} :: #{selector() => binary()},
-    %% BT-990: Class-side method display signatures for :help command
+    %% Class-side method display signatures for :help command
     class_method_signatures = #{} :: #{selector() => binary()},
-    %% BT-1002 / ADR 0045: Machine-readable return-type map for chain resolution.
+    %% ADR 0045: Machine-readable return-type map for chain resolution.
     %% ADR 0068: Values may be atoms (concrete types) or tagged tuples:
     %%   {type_param, Name :: atom(), Index :: integer()}
     %%   {generic, Base :: atom(), Params :: [meta_type_repr()]}
@@ -123,7 +123,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     %% ADR 0033: Runtime-embedded documentation
     doc = none :: binary() | none,
     method_docs = #{} :: #{selector() => binary()},
-    %% BT-1634: Class method doc comments
+    %% Class method doc comments
     class_method_docs = #{} :: #{selector() => binary()},
     %% ADR 0071 Phase 5: Class visibility (internal vs public)
     is_internal = false :: boolean()
@@ -136,11 +136,11 @@ and join the `beamtalk_classes` pg group for enumeration.
 -doc """
 Start a class process for on_load registration.
 
-BT-3236: Routes through `beamtalk_class_sup` so class processes live in the
+Routes through `beamtalk_class_sup` so class processes live in the
 OTP supervision tree, and registers the pid with `beamtalk_class_monitor`
 for eager crash recovery. When the supervisor is not running (EUnit suites
 start class processes without the runtime supervision tree), falls back to
-the pre-BT-3236 unlinked `gen_server:start/4` — that fallback never fires
+an unlinked `gen_server:start/4` — that fallback never fires
 in a running release, where `beamtalk_runtime_sup` starts the supervisor
 before any class registers.
 """.
@@ -309,7 +309,7 @@ superclass(ClassPid) ->
 -doc """
 Get the class name.
 
-BT-893: If called from within the class gen_server itself (self-call), read
+If called from within the class gen_server itself (self-call), read
 from the process dictionary instead of gen_server:call to avoid calling_self.
 """.
 -spec class_name(pid()) -> class_name().
@@ -321,7 +321,7 @@ class_name(ClassPid) ->
 -doc """
 Get the module name.
 
-BT-893: If called from within the class gen_server itself (self-call), read
+If called from within the class gen_server itself (self-call), read
 from the process dictionary instead of gen_server:call to avoid calling_self.
 """.
 -spec module_name(pid()) -> atom().
@@ -331,15 +331,14 @@ module_name(ClassPid) ->
     gen_server:call(ClassPid, module_name).
 
 -doc """
-Get the module name, preferring a deadlock-safe metadata lookup (BT-3054).
+Get the module name, preferring a deadlock-safe metadata lookup.
 
 `module_name/1`'s `gen_server:call(ClassPid, module_name)` only guards the
-*direct* self-call case (`ClassPid =:= self()`, BT-893). It deadlocks when
+*direct* self-call case (`ClassPid =:= self()`). It deadlocks when
 called from a process that `ClassPid` is itself synchronously blocked
 waiting on — e.g. a block that ADR 0109 runs in a foreign class's process,
-where that foreign process was invoked by `ClassPid`'s own process (see
-BT-3052, which fixed exactly this shape for
-`beamtalk_primitive:class_of_object_by_name/1`).
+where that foreign process was invoked by `ClassPid`'s own process (the
+same shape fixed for `beamtalk_primitive:class_of_object_by_name/1`).
 
 This resolves the module via `beamtalk_class_registry:class_name_for_pid/1`
 (a pure ETS reverse lookup, no message send) followed by
@@ -380,9 +379,9 @@ module_name_safe(ClassPid) ->
     end.
 
 -doc """
-Get the superclass, preferring a deadlock-safe metadata lookup (BT-3107).
+Get the superclass, preferring a deadlock-safe metadata lookup.
 
-Mirrors `module_name_safe/1` (BT-3054): resolves via
+Mirrors `module_name_safe/1`: resolves via
 `beamtalk_class_registry:class_name_for_pid/1` (a pure ETS reverse lookup, no
 message send) followed by `beamtalk_class_metadata:lookup_superclass/1` — the
 same ETS row `beamtalk_class_dispatch` reads on the dispatch hot path, kept in
@@ -390,7 +389,7 @@ sync with the process dictionary by `sync_identity/6` at every `init/1` and
 `apply_class_info/2`. Falls back to `superclass/1`'s `gen_server:call` only if
 either lookup misses.
 
-Before BT-3107, `beamtalk_behaviour_intrinsics` read the superclass via
+Without this, `beamtalk_behaviour_intrinsics` would read the superclass via
 `gen_server:call(ClassPid, superclass)` — a second, independent source from
 the one dispatch uses, which could disagree with it mid-reload (ADR 0057).
 Prefer this function at any reflection/hierarchy-walk call site instead.
@@ -410,16 +409,16 @@ superclass_safe(ClassPid) ->
     end.
 
 -doc """
-Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
+Send a message to a class object synchronously (ADR 0013 Phase 1).
 
-Delegates to beamtalk_class_dispatch (BT-704).
+Delegates to beamtalk_class_dispatch.
 """.
 -spec class_send(pid() | undefined, atom(), list()) -> term().
 class_send(ClassPid, Selector, Args) ->
     beamtalk_class_dispatch:class_send(ClassPid, Selector, Args).
 
 -doc """
-Execute a class method in the caller's process (BT-1664).
+Execute a class method in the caller's process.
 
 Resolves the target module from the class object, then calls
 Module:class_<Selector>(nil, #{}, Args) directly — bypassing the class
@@ -507,11 +506,11 @@ has_method(ClassPid, Selector) ->
 
 -doc """
 Check if a class has a method **locally** — like `has_method/2`, but never
-follows a compiled `has_method/1`'s own superclass delegation (BT-3482).
+follows a compiled `has_method/1`'s own superclass delegation.
 
 `has_method/2`'s module fallback answers via the class's compiled
-`has_method/1`, which — for an actor class (BT-3467's
-`SuperclassDelegation::Dynamic`) — itself walks the live hierarchy and
+`has_method/1`, which — for an actor class
+(`SuperclassDelegation::Dynamic`) — itself walks the live hierarchy and
 answers `true` for any *inherited* selector too, not just one this exact
 class defines. That breaks `beamtalk_dispatch:class_chain_step/6`'s
 per-node-probe contract: `class_chain_step` does its own node-by-node
@@ -525,7 +524,7 @@ compounding the hierarchy walk into O(depth²) for the common
 unoverridden-selector case instead of the documented O(depth).
 
 Falls back to `ModuleName:has_method/1` when the module has no
-`has_method_local/1` export (compiled before BT-3482, or a hand-written
+`has_method_local/1` export (compiled without one, or a hand-written
 runtime class) — correctness is unaffected (a class's `has_method/1` is
 always a superset of what it should answer locally), only the O(depth²)
 compounding for such a class isn't avoided.
@@ -544,8 +543,8 @@ has_method_local(ClassPid, Selector) ->
 %% hot-patched) means "locally installed" for both; otherwise fall back to a
 %% module-level probe whose function name `ResolveFun` picks — `has_method/2`
 %% always probes `has_method/1`, `has_method_local/2` prefers
-%% `has_method_local/1` when the module exports it (BT-3482). `EnsureLoaded`
-%% preserves `has_method/2`'s pre-BT-3482 behavior of not force-loading the
+%% `has_method_local/1` when the module exports it. `EnsureLoaded`
+%% preserves `has_method/2`'s existing behavior of not force-loading the
 %% module — only `has_method_local/2` needs it loaded up front, since it must
 %% see whether the newer `has_method_local/1` export exists before deciding
 %% which function to probe.
@@ -595,7 +594,7 @@ put_method(ClassPid, Selector, Fun, Source) ->
     gen_server:call(ClassPid, {put_method, Selector, Fun, Source}).
 
 -doc """
-Install or replace a class-side method with a runtime fun (ADR 0084, BT-2266).
+Install or replace a class-side method with a runtime fun (ADR 0084).
 
 Class-side mirror of `put_method/4`. The fun follows the compiled class-method
 calling convention exactly: `fun(ClassSelf, ClassVars, A1..An) -> Result |
@@ -635,7 +634,7 @@ is_abstract(ClassPid) ->
 
 -doc """
 Check if a class can be instantiated via new/new:.
-BT-474: Returns false for actors (use spawn) and sealed primitives.
+Returns false for actors (use spawn) and sealed primitives.
 """.
 -spec is_constructible(pid()) -> boolean().
 is_constructible(ClassPid) ->
@@ -686,20 +685,20 @@ init({ClassName, ClassInfo}) ->
         maps:get(class_methods, ClassInfo, #{})
     ),
 
-    %% BT-893: Store class metadata in process dictionary so class_send can
+    %% Store class metadata in process dictionary so class_send can
     %% bypass gen_server for self-calls (new/spawn from within class methods).
     put(beamtalk_class_name, ClassName),
-    %% BT-2222 / BT-3107: One unified metadata row carries hierarchy + module +
+    %% One unified metadata row carries hierarchy + module +
     %% class-method selectors, written together with the matching PD caches by
     %% sync_identity/6. The module name enables deadlock-free lookup during
-    %% supervisor init (BT-1285); the selector set lets the inherited
-    %% class-method chain walk in beamtalk_class_dispatch avoid gen_server hops
-    %% (BT-2008). BT-3047 / ADR 0109 amendment: is_abstract rides along so
+    %% supervisor init; the selector set lets the inherited
+    %% class-method chain walk in beamtalk_class_dispatch avoid gen_server hops.
+    %% ADR 0109 amendment: is_abstract rides along so
     %% instantiation intrinsics can look it up by class name too, without a
     %% gen_server hop.
     sync_identity(ClassName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create),
 
-    %% BT-3107: Clear any runtime class-method funs left behind by a *hard*
+    %% Clear any runtime class-method funs left behind by a *hard*
     %% crash of the previous incarnation of this class process — a hard crash
     %% skips terminate/2 (see module_name_safe/1's doc), so the funs table rows
     %% from before the crash can otherwise survive into the restarted process
@@ -708,18 +707,18 @@ init({ClassName, ClassInfo}) ->
     %% that never crashed (nothing to clear).
     beamtalk_class_metadata:delete_class_method_funs(ClassName),
 
-    %% ADR 0084 / BT-2266: Seed the runtime class-method fun retrieval store for
+    %% ADR 0084: Seed the runtime class-method fun retrieval store for
     %% any builder-supplied class methods that arrived as funs (#{block, arity}).
     %% Compile-time-only classes seed nothing and keep the gate flag false, so
     %% their dispatch never reads the funs table.
     seed_runtime_class_methods(ClassName, ClassMethods),
 
-    %% BT-2275: Cache field defaults in the process dictionary so the `self new`
+    %% Cache field defaults in the process dictionary so the `self new`
     %% self-instantiation path (which runs inside this gen_server) can build a
     %% generic instance for a module-less class without a gen_server:call to self.
     FieldDefaults = maps:get(field_defaults, ClassInfo, #{}),
     put(beamtalk_class_field_defaults, FieldDefaults),
-    %% BT-2277: Cache the local instance-method map so fun-backed instance
+    %% Cache the local instance-method map so fun-backed instance
     %% dispatch that happens *inside* this gen_server (e.g. a class method does
     %% `Inst := self new` then `Inst someMethod`) can resolve the block fun
     %% without a deadlocking `gen_server:call(self(), ...)`. The cache is the
@@ -729,18 +728,18 @@ init({ClassName, ClassInfo}) ->
     %% self-dispatch.
     put(beamtalk_class_instance_methods, InstanceMethods),
 
-    %% BT-1768: Record pid→classname mapping for crash recovery.
+    %% Record pid→classname mapping for crash recovery.
     %% This entry survives process death, allowing class_send to identify
     %% which class a dead pid belonged to and attempt auto-restart.
     beamtalk_class_registry:record_class_pid(self(), ClassName),
 
-    %% BT-2384: Record this class in the fast loaded-class name index so the
+    %% Record this class in the fast loaded-class name index so the
     %% ADR 0087 xref miss-policy can compute the loaded-class set with one ETS
     %% read instead of an O(loaded-classes) gen_server walk. Mirrors the
     %% pg:join above and the forget_loaded_class in terminate/1.
     beamtalk_class_registry:record_loaded_class(ClassName, self()),
 
-    %% BT-2736: Record this class's native backing module (ADR 0056), if any,
+    %% Record this class's native backing module (ADR 0056), if any,
     %% in the reverse index so the LiveView "Callers" op on a native module
     %% resolves its delegating classes in O(1) instead of scanning every
     %% loaded class. Guarded/forgotten the same way at shutdown in terminate/2.
@@ -749,7 +748,7 @@ init({ClassName, ClassInfo}) ->
     %% ADR 0050 Phase 3: Notify compiler server of this class registration.
     %% Cast is fire-and-forget — silently dropped if the compiler server is not running.
     %% Use Meta map availability (not function_exported, which returns false during on_load).
-    %% BT-1732: Wrap in try/catch so an undef crash (e.g., beamtalk_compiler_server
+    %% Wrap in try/catch so an undef crash (e.g., beamtalk_compiler_server
     %% not on code path) doesn't kill the class process during on_load.
     case Meta of
         CompilerMeta when is_map(CompilerMeta), map_size(CompilerMeta) > 0 ->
@@ -769,7 +768,7 @@ init({ClassName, ClassInfo}) ->
             ok
     end,
 
-    %% BT-877: is_constructible may be set by the compiler via ClassBuilder.
+    %% is_constructible may be set by the compiler via ClassBuilder.
     %% If not set (undefined), it will be computed lazily on first new call.
     %% ADR 0032 Phase 1: No flattened method tables — dispatch walks the chain directly.
     State = #class_state{
@@ -804,13 +803,13 @@ init({ClassName, ClassInfo}) ->
         is_internal = IsInternal
     },
 
-    %% BT-3407: seed the live classVars snapshot with the declared defaults
+    %% Seed the live classVars snapshot with the declared defaults
     %% before this init/1 returns, so a `static_init`/`dynamic_init`/direct
     %% class-method-call reader never observes a gap between the class
     %% process existing and its snapshot existing.
     beamtalk_class_registry:record_class_state_snapshot(self(), State#class_state.class_state),
 
-    %% ADR 0087 Phase 2 (BT-2298): Forward the per-method cross-reference index
+    %% ADR 0087 Phase 2: Forward the per-method cross-reference index
     %% to beamtalk_xref synchronously, before init returns. Running inside init/1
     %% means the rows are registered before start/2 yields {ok, Pid}, so the
     %% class is never observable as "loaded" without its xref rows. The codegen
@@ -819,18 +818,18 @@ init({ClassName, ClassInfo}) ->
     %% compatibility. A failure here propagates as a class-creation failure.
     MethodXref = maps:get(method_xref, ClassInfo, []),
     register_xref(ClassName, MethodXref),
-    %% BT-3439: Forward the per-instance-variable declaration-line index the
+    %% Forward the per-instance-variable declaration-line index the
     %% same way, from `ClassInfo`'s `state_var_xref` key (baked by codegen via
     %% `BuilderState.stateVarXref`, the state-var analogue of `method_xref`).
     StateVarXref = maps:get(state_var_xref, ClassInfo, []),
     register_state_var_xref(ClassName, StateVarXref),
 
-    %% ADR 0093 §2 (BT-2445): Announce ClassLoaded on the system bus *after* the
+    %% ADR 0093 §2: Announce ClassLoaded on the system bus *after* the
     %% metadata row is written (line above), so any subscriber that reads the
     %% class hierarchy during dispatch sees a consistent view (announce-after-
     %% commit). Fire-and-forget; never fails class creation.
     announce_class_lifecycle('ClassLoaded', ClassName),
-    %% BT-3222: A newly-registered class may change conforms_to/2 results for
+    %% A newly-registered class may change conforms_to/2 results for
     %% ClassName itself (a prior call, made before this class existed, could
     %% have cached `false`) — flush so the next query re-walks live state.
     beamtalk_protocol_registry:invalidate_conforms_cache(),
@@ -866,7 +865,7 @@ register_xref(ClassName, MethodXref) ->
 
 -doc """
 Forward a class's per-instance-variable declaration-line rows to
-`beamtalk_xref` (BT-3439), the state-var analogue of `register_xref/2`.
+`beamtalk_xref`, the state-var analogue of `register_xref/2`.
 
 A no-op when `StateVarXref` is empty — a hand-coded stub class, a class
 compiled before this feature landed, or a `ClassBuilder`-built class with no
@@ -891,11 +890,11 @@ register_state_var_xref(ClassName, StateVarXref) ->
     end.
 
 -doc """
-Refresh a class's xref rows on redefinition (ADR 0087 Phase 2, BT-2298).
+Refresh a class's xref rows on redefinition (ADR 0087 Phase 2).
 
 Purges the class's existing rows before re-registering, because Phase 1's
 `register_class/2` only inserts (the multi-generation sweep of stale rows lands
-in Phase 4 / BT-2300). Purging first keeps the index consistent with the new
+in Phase 4). Purging first keeps the index consistent with the new
 class definition — e.g. when a bootstrap stub's `unindexed_runtime_fun` rows are
 replaced by the compiled class's `indexed` rows. A no-op when `beamtalk_xref`
 is not running.
@@ -912,7 +911,7 @@ refresh_xref(ClassName, MethodXref) ->
 
 -doc """
 Announce a class-lifecycle system event (`'ClassLoaded'` | `'ClassRemoved'`) on
-the `SystemAnnouncer` bus (ADR 0093 §2, BT-2445).
+the `SystemAnnouncer` bus (ADR 0093 §2).
 
 The announcements bus is a `beamtalk_runtime_sup` worker started *after*
 `beamtalk_bootstrap`, so during early stdlib bootstrap (and on a minimal
@@ -937,8 +936,7 @@ announce_class_lifecycle(EventClass, ClassName) ->
     ok.
 
 -doc """
-Re-index a single hot-patched method in `beamtalk_xref` (ADR 0087 Phase 4,
-BT-2301).
+Re-index a single hot-patched method in `beamtalk_xref` (ADR 0087 Phase 4).
 
 Called from the `{put_method, ...}` / `{put_class_method, ...}` handlers after
 a live `>>` edit (ADR 0082). Re-parses the one method's `Source` via the
@@ -956,14 +954,14 @@ put_method_xref(ClassName, ClassSide, Selector, Source) ->
     %% be best-effort. A bare whereis/1 guard is racy: beamtalk_xref can die or
     %% restart between the check and the call, which would crash this class
     %% gen_server mid hot-patch. Degrade to a no-op on xref unavailability
-    %% instead, matching the documented behaviour (BT-2301).
+    %% instead, matching the documented behaviour.
     Entry = beamtalk_xref:build_method_entry(
         ClassSide, Selector, Source, indexed, put_method
     ),
     safe_xref(fun() -> beamtalk_xref:put_method(ClassName, ClassSide, Selector, Entry) end).
 
 -doc """
-Run a `beamtalk_xref` gen_server call best-effort (BT-2301).
+Run a `beamtalk_xref` gen_server call best-effort.
 
 The xref index is advisory tooling state; a hot patch must not crash the class
 gen_server if it is unavailable. Catches the `noproc`/`{noproc, _}` /
@@ -1025,7 +1023,7 @@ handle_call(
                 )
             of
                 {reply, Result, NewClassVars} ->
-                    %% BT-3407: keep the live snapshot in sync with this mutation.
+                    %% Keep the live snapshot in sync with this mutation.
                     beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
                     {reply, Result, State#class_state{class_state = NewClassVars}};
                 {error, not_found} ->
@@ -1057,7 +1055,7 @@ handle_call(class_name, _From, #class_state{name = Name} = State) ->
     {reply, Name, State};
 handle_call(module_name, _From, #class_state{module = Module} = State) ->
     {reply, Module, State};
-%% ADR 0114 (BT-3278): see rename/2's doc — the dynamic-class in-place
+%% ADR 0114: see rename/2's doc — the dynamic-class in-place
 %% identity move `classRenameTo` calls when there is no source to recompile.
 handle_call(
     {rename_class, NewName},
@@ -1134,7 +1132,7 @@ handle_call(
                 nil
         end,
     {reply, Result, State};
-%% BT-1002 / ADR 0045: Local return-type lookup (no chain walk — that is done in the registry).
+%% ADR 0045: Local return-type lookup (no chain walk — that is done in the registry).
 handle_call(
     {get_method_return_type, Selector},
     _From,
@@ -1155,9 +1153,9 @@ handle_call(
         {ok, Type} -> {reply, {ok, Type}, State};
         error -> {reply, not_found, State}
     end;
-%% BT-990: Return CompiledMethod-like map for class-side methods.
+%% Return CompiledMethod-like map for class-side methods.
 %% Walks superclass chain for inherited class methods (mirrors dispatch behaviour).
-%% BT-2195: Populate __source__ from class_method_source so that
+%% Populate __source__ from class_method_source so that
 %% SystemNavigation source-text scanners (sendersOf:, referencesTo:,
 %% methodsMatching:) can walk class-side method bodies. Empty binary when no
 %% source has been registered (e.g. dynamic methods, primitives).
@@ -1195,11 +1193,11 @@ handle_call(
     MethodInfo = #{block => Fun, arity => Arity},
     %% ADR 0032 Phase 1: No flattened table to rebuild or invalidate.
     %% Dispatch finds the new method via chain walk on the next call.
-    %% BT-988: Remove stale display signature — dynamically-defined methods
+    %% Remove stale display signature — dynamically-defined methods
     %% have no AST, so the fallback to selector atom is correct.
-    %% BT-1002: Also clear stale return-type entry for the same reason.
+    %% Also clear stale return-type entry for the same reason.
     NewInstanceMethods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
-    %% BT-2277: Keep the self-dispatch process-dictionary cache in sync with the
+    %% Keep the self-dispatch process-dictionary cache in sync with the
     %% authoritative instance_methods map so hot-patched fun-backed methods are
     %% visible to dispatch that happens inside this gen_server.
     put(beamtalk_class_instance_methods, NewInstanceMethods),
@@ -1209,7 +1207,7 @@ handle_call(
         method_signatures = maps:remove(Selector, State#class_state.method_signatures),
         method_return_types = maps:remove(Selector, State#class_state.method_return_types)
     },
-    %% ADR 0087 Phase 4 (BT-2301): re-index the patched method from its Source so
+    %% ADR 0087 Phase 4: re-index the patched method from its Source so
     %% the xref index reflects the live `>>` edit (ADR 0082). Instance-side, so
     %% ClassSide = false. A no-op when xref / the compiler app is unavailable.
     put_method_xref(ClassName, false, Selector, Source),
@@ -1218,15 +1216,15 @@ handle_call(
     %% from the live class_state record instead.  Return types are cleared for
     %% hot-patched methods — the compiler treats them as dynamic.
     notify_hot_patch(NewState),
-    %% BT-3222: A hot-patched instance method changes what ClassName (and
+    %% A hot-patched instance method changes what ClassName (and
     %% every subclass inheriting through it) understands, invalidating any
     %% cached conforms_to/2 result for either.
     beamtalk_protocol_registry:invalidate_conforms_cache(),
     {reply, ok, NewState};
-%% ADR 0084 / BT-2266: Install or replace a class-side method with a runtime fun.
+%% ADR 0084: Install or replace a class-side method with a runtime fun.
 %% Class-side mirror of {put_method, ...}. The fun is stored in the class_methods
 %% map (source of truth) and mirrored into the metadata retrieval store so
-%% inherited dispatch resolves it without a gen_server hop (BT-2008). Stale
+%% inherited dispatch resolves it without a gen_server hop. Stale
 %% class-side signature/return-type entries are cleared (no AST for dynamic funs).
 handle_call(
     {put_class_method, Selector, Fun, Source},
@@ -1251,18 +1249,18 @@ handle_call(
     %% is not yet present.
     beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, MethodInfo),
     beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(NewClassMethods)),
-    %% ADR 0087 Phase 4 (BT-2301): re-index the patched class-side method
+    %% ADR 0087 Phase 4: re-index the patched class-side method
     %% (ClassSide = true) from its Source. A no-op when xref / the compiler app
     %% is unavailable.
     put_method_xref(ClassName, true, Selector, Source),
     notify_hot_patch(NewState),
-    %% BT-3222: A hot-patched class-side method changes conforms_to/2's
+    %% A hot-patched class-side method changes conforms_to/2's
     %% class-method check (class_has_class_method/2) for ClassName and every
     %% descendant walked through it.
     beamtalk_protocol_registry:invalidate_conforms_cache(),
     {reply, ok, NewState};
-%% BT-572: Update class metadata after redefinition (hot reload).
-%% BT-737/BT-738: Validation (shadowing + collision) delegated to beamtalk_class_registry.
+%% Update class metadata after redefinition (hot reload).
+%% Validation (shadowing + collision) delegated to beamtalk_class_registry.
 %% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
 handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = State) ->
     OldModule = State#class_state.module,
@@ -1293,7 +1291,7 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
                 false ->
                     ok
             end,
-            %% ADR 0087 Phase 2 (BT-2298): Refresh the xref index on class
+            %% ADR 0087 Phase 2: Refresh the xref index on class
             %% redefinition. This path is hit both by interactive/hot redefinition
             %% (Phase 4 territory) and, more importantly for Phase 2, by the normal
             %% stdlib bootstrap: the metaclass-tower stubs (Class, Metaclass, …) are
@@ -1304,16 +1302,16 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             %% register_class/2 only inserts (the old-generation sweep is Phase 4),
             %% so a plain re-register would leave stale rows behind.
             refresh_xref(ClassName, maps:get(method_xref, ClassInfo, [])),
-            %% BT-3439: state-var rows were already cleared by refresh_xref's
+            %% State-var rows were already cleared by refresh_xref's
             %% purge_class/1 above (it purges every xref table, state vars
             %% included) — a plain register (not a refresh_xref-style
             %% purge-then-register) is enough here.
             register_state_var_xref(ClassName, maps:get(state_var_xref, ClassInfo, [])),
-            %% ADR 0093 §2 (BT-2445): hot redefinition is also a ClassLoaded —
+            %% ADR 0093 §2: hot redefinition is also a ClassLoaded —
             %% announced from the handle_call reply path after the refreshed
             %% metadata is committed.
             announce_class_lifecycle('ClassLoaded', ClassName),
-            %% BT-3222: Hot reload can change ClassName's method set (and this
+            %% Hot reload can change ClassName's method set (and this
             %% is also the path classRemoveSelector/2 takes for a local-method
             %% removal, via beamtalk_repl_eval:remove_method/4's recompile),
             %% which changes conforms_to/2 for ClassName and every descendant
@@ -1323,7 +1321,7 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
     end;
 handle_call(instance_variables, _From, #class_state{fields = IVars} = State) ->
     {reply, IVars, State};
-%% BT-2275: Expose field defaults so the generic instantiation path can read a
+%% Expose field defaults so the generic instantiation path can read a
 %% module-less superclass's defaults when building an inherited instance map.
 handle_call(field_defaults, _From, #class_state{field_defaults = Defaults} = State) ->
     {reply, Defaults, State};
@@ -1361,11 +1359,11 @@ handle_call({set_doc, DocBinary}, _From, State) ->
 handle_call({set_method_doc, Selector, DocBinary}, _From, State) ->
     NewMethodDocs = maps:put(Selector, DocBinary, State#class_state.method_docs),
     {reply, ok, State#class_state{method_docs = NewMethodDocs}};
-%% BT-411/BT-412/BT-440: Class method dispatch (BT-704).
-%% ADR 0036 Phase 2 (BT-823): Also handles metaclass_method_call with identical logic.
+%% Class method dispatch.
+%% ADR 0036 Phase 2: Also handles metaclass_method_call with identical logic.
 %% ADR 0032 Phase 1: Passes local class_methods; dispatch walks superclass chain.
 %%
-%% BT-2379: the 4-tuple message carries the caller's session context explicitly
+%% The 4-tuple message carries the caller's session context explicitly
 %% (`{Selector, Args, {SessionPid, SessionId}}`). We seed from the tuple, which
 %% avoids the `process_info(CallerPid, dictionary)` full-dictionary copy the
 %% legacy 3-tuple clause below must use.
@@ -1380,7 +1378,7 @@ handle_call(
     %% function_clause (it would otherwise miss both this and the 3-tuple clause).
     Restore = seed_session_context_from(SessionCtx),
     dispatch_class_method(Selector, Args, From, State, Restore);
-%% BT-2379: backward-compatible fallback for the legacy 3-tuple message shape
+%% Backward-compatible fallback for the legacy 3-tuple message shape
 %% (in-flight messages across a hot-code reload). Mirrors the caller's session
 %% context by reading its process dictionary via `process_info/2`.
 handle_call(
@@ -1398,7 +1396,7 @@ handle_call({get_class_var, Name}, _From, #class_state{class_state = ClassVars} 
     {reply, maps:get(Name, ClassVars, nil), State};
 handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
     NewClassVars = ClassVars#{Name => Value},
-    %% BT-3407: keep the live snapshot in sync with this mutation.
+    %% Keep the live snapshot in sync with this mutation.
     beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
     {reply, Value, State#class_state{class_state = NewClassVars}}.
 
@@ -1421,22 +1419,22 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, #class_state{name = ClassName}) ->
-    %% ADR 0093 §2 (BT-2445): Announce ClassRemoved on the system bus as the class
+    %% ADR 0093 §2: Announce ClassRemoved on the system bus as the class
     %% process shuts down (e.g. removeFromSystem). The event carries only the
     %% class name, so it is independent of the metadata-row deletion below.
     announce_class_lifecycle('ClassRemoved', ClassName),
-    %% BT-785: Clean up ETS hierarchy entry and pg group membership on shutdown.
+    %% Clean up ETS hierarchy entry and pg group membership on shutdown.
     %% This runs when removeFromSystem stops the gen_server (gen_server:stop/1),
     %% ensuring the class is fully removed from the runtime registries.
     %% Wrapped in catch/try to be safe during node shutdown when ETS/pg may be gone.
-    %% BT-2222: Single metadata row → single delete (was a three-table fan-out).
+    %% Single metadata row → single delete (was a three-table fan-out).
     _ =
         (try
             beamtalk_class_metadata:delete(ClassName)
         catch
             _:_ -> ok
         end),
-    %% BT-1768: Clean up pid reverse index. Only cleaned on graceful shutdown —
+    %% Clean up pid reverse index. Only cleaned on graceful shutdown —
     %% on crash, the entry intentionally survives for auto-restart recovery.
     _ =
         (try
@@ -1450,7 +1448,7 @@ terminate(_Reason, #class_state{name = ClassName}) ->
         catch
             _:_ -> ok
         end),
-    %% BT-2384: Drop this class from the fast loaded-class name index. Guarded
+    %% Drop this class from the fast loaded-class name index. Guarded
     %% on self() inside forget_loaded_class/2 so a reload that already recorded
     %% a replacement pid is not clobbered. On a hard crash this does not run;
     %% the reader's is_process_alive/1 filter drops the dead row instead.
@@ -1460,7 +1458,7 @@ terminate(_Reason, #class_state{name = ClassName}) ->
         catch
             _:_ -> ok
         end),
-    %% BT-2736: Drop this class from the backing-module reverse index, guarded
+    %% Drop this class from the backing-module reverse index, guarded
     %% on self() exactly like forget_loaded_class/2 above so a reload that
     %% already recorded a replacement pid's row is not clobbered.
     _ =
@@ -1469,7 +1467,7 @@ terminate(_Reason, #class_state{name = ClassName}) ->
         catch
             _:_ -> ok
         end),
-    %% BT-3407 review follow-up: drop this class's classVars live-snapshot
+    %% Drop this class's classVars live-snapshot
     %% row. Pid-keyed like beamtalk_loaded_classes/beamtalk_backing_module_index
     %% above (not name-keyed like beamtalk_class_pids, which is deliberately
     %% kept forever), so an uncleaned row for a dead/reloaded pid could never
@@ -1497,11 +1495,11 @@ Run a class-method (or metaclass-method) call against this class gen_server's
 state, restoring the previously-seeded session context afterwards.
 
 `Restore` is the zero-arity closure returned by `seed_session_context_from/1`
-(explicit-context path, BT-2379) or `seed_caller_session_context/1` (legacy
+(explicit-context path) or `seed_caller_session_context/1` (legacy
 3-tuple fallback). It is always run, even on a method-body crash, so a
 concurrent call from another session never observes a stale mirrored context.
 
-BT-3020: also mirrors the caller's pid into `beamtalk_dispatch_caller_pid` for
+Also mirrors the caller's pid into `beamtalk_dispatch_caller_pid` for
 the duration of the call. `From` is already supplied here for free by every
 `handle_call` — no wire-protocol change, unlike the session context above.
 `File open:mode:` reads this key to resolve tier-2 (calling-actor) FileHandle
@@ -1525,7 +1523,7 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
         )
     of
         {reply, Result, NewClassVars} ->
-            %% BT-3407: keep the live snapshot in sync with this mutation.
+            %% Keep the live snapshot in sync with this mutation.
             beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
             {reply, Result, State#class_state{class_state = NewClassVars}};
         test_spawn ->
@@ -1550,7 +1548,7 @@ duration of the current class-method call, or `undefined` outside one (or on a
 dispatch path — self-send, `perform:`, test-execution spawn — that reaches a
 class method without going through `dispatch_class_method/5` at all).
 
-BT-3020: this is the accessor consumers should use rather than reading the
+This is the accessor consumers should use rather than reading the
 `beamtalk_dispatch_caller_pid` process-dictionary key directly, so the
 coupling between writer and reader is greppable/xref-visible instead of a bare
 atom shared by convention between two apps.
@@ -1564,7 +1562,7 @@ dispatch_caller_pid() ->
 
 -doc """
 Seed this class gen_server with a session context passed explicitly in the
-class-method-call message (BT-2379), returning a zero-arity restore closure.
+class-method-call message, returning a zero-arity restore closure.
 
 ADR 0081: factory class methods like `Session current` /
 `Workspace currentSession` read `beamtalk_session_pid` / `beamtalk_session_id` /
@@ -1574,7 +1572,7 @@ keys in the message tuple (`beamtalk_class_dispatch:local_session_context/0`)
 rather than having us copy its entire dictionary via `process_info/2`. We
 `put/2` them locally and restore the previous values (or erase) on the way out.
 
-The 4-tuple shape adds the *entry group leader* (BT-2963) — the IO sink a
+The 4-tuple shape adds the *entry group leader* — the IO sink a
 connected `beamtalk run … --connect` dispatch streams its `Console` output to.
 This gen_server is long-lived, so it inherited the node's group leader at spawn
 and a class method's `Console` writes miss the dispatching session's IO capture
@@ -1601,7 +1599,7 @@ seed_session_context_from({SessionPid, SessionId, SessionMeta, EntryGroupLeader}
     PrevPid = put(beamtalk_session_pid, SessionPid),
     PrevId = put(beamtalk_session_id, SessionId),
     PrevMeta = put(beamtalk_session_meta, SessionMeta),
-    %% BT-2963: keep the key in the dictionary as well as adopting the sink, so
+    %% Keep the key in the dictionary as well as adopting the sink, so
     %% a nested class-method call made from inside this one re-emits it via
     %% `beamtalk_class_dispatch:local_session_context/0` and keeps streaming.
     PrevEntryGl = put(beamtalk_entry_group_leader, EntryGroupLeader),
@@ -1628,7 +1626,7 @@ seed_session_context_from(_Other) ->
 
 -doc """
 Adopt `EntryGroupLeader` as this process's group leader for the duration of one
-class-method call (BT-2963), returning a zero-arity closure that restores the
+class-method call, returning a zero-arity closure that restores the
 previous one.
 
 A no-op — returning a no-op closure — unless the caller passed a live local pid
@@ -1679,15 +1677,15 @@ Mirror the calling process's session context into this class gen_server for the
 duration of a class-method call, returning a zero-arity closure that restores
 the prior state.
 
-ADR 0081 (BT-2367): `seed_session_context/3` seeds the eval *worker*, but
+ADR 0081: `seed_session_context/3` seeds the eval *worker*, but
 class-method dispatch (`Session current`, `Workspace currentSession`) hops to
 this gen_server, where those keys are absent. We read them from the caller via
 `process_info/2` (no message-shape change) and `put/2` them locally, restoring
 the previous values (or erasing) on the way out so concurrent calls from other
 sessions never see a stale context.
 
-Deliberately leaves `beamtalk_entry_group_leader` (BT-2963) alone: only a
-pre-BT-2963 caller sends the 3-arity message this seeds from, and such a caller
+Deliberately leaves `beamtalk_entry_group_leader` alone: only a
+legacy caller sends the 3-arity message this seeds from, and such a caller
 never set that key. It cannot read a stale one either — `gen_server` serialises
 calls and `seed_session_context_from/1` always restores the key before its call
 returns, so the key is only ever set *during* a 4-tuple call.
@@ -1860,7 +1858,7 @@ meta_to_methods(MetaMethodInfo, _FallbackMethods) when is_map(MetaMethodInfo) ->
 -doc """
 Write a class's identity facts — module, superclass, is_abstract, and local
 class-method selectors — to the process-dictionary caches and the unified
-`beamtalk_class_metadata` ETS row in one place (BT-3107).
+`beamtalk_class_metadata` ETS row in one place.
 
 `init/1` and `apply_class_info/2` used to each perform these writes via
 several separate `put/2` calls plus a trailing
@@ -1905,7 +1903,7 @@ sync_identity(ClassName, Module, Superclass, IsAbstract, Selectors, Mode) ->
 -doc """
 Seed the runtime class-method fun retrieval store from a class_methods map.
 
-ADR 0084 / BT-2266: picks out the entries that carry a `block` (runtime/builder
+ADR 0084: picks out the entries that carry a `block` (runtime/builder
 funs, as opposed to compiled `#{arity => N}` references), writes each into the
 metadata retrieval store, then sets the per-class gate flag. Classes with no fun
 entries leave the gate flag false so their dispatch never reads the funs table.
@@ -2007,9 +2005,9 @@ ADR 0050 Phase 5: Static metadata read from __beamtalk_meta/0 on the new module.
 """.
 -spec apply_class_info(#class_state{}, map()) -> #class_state{}.
 apply_class_info(State, ClassInfo) ->
-    %% BT-893: NewModule/NewIsAbstract/NewSuperclass are written to the process
+    %% NewModule/NewIsAbstract/NewSuperclass are written to the process
     %% dictionary together with the ETS metadata row, in one place, by
-    %% sync_identity/6 below (BT-3107) — not here.
+    %% sync_identity/6 below — not here.
     NewModule = maps:get(module, ClassInfo, State#class_state.module),
 
     %% ADR 0050 Phase 5: Prefer meta from ClassInfo when available (same reason as init/1:
@@ -2026,7 +2024,7 @@ apply_class_info(State, ClassInfo) ->
         maps:get(is_abstract, ClassInfo, State#class_state.is_abstract)
     ),
 
-    %% BT-2275: Reconcile field defaults on reload (ADR 0082 "disk wins").
+    %% Reconcile field defaults on reload (ADR 0082 "disk wins").
     %% A compiled reload supplies no field_defaults (defaults are baked into the
     %% module's new/0), so we clear them; a builder re-register supplies them
     %% and they are re-cached. Keep the process-dict cache in sync for self new.
@@ -2072,21 +2070,21 @@ apply_class_info(State, ClassInfo) ->
             %% corrected value from compiled module
             {ok, S} -> S
         end,
-    %% BT-2277: Reconcile the self-dispatch instance-method cache on reload,
+    %% Reconcile the self-dispatch instance-method cache on reload,
     %% mirroring the field-defaults handling above so fun-backed instance
     %% dispatch from inside the class process resolves against the current
     %% method set. (Superclass/module/is_abstract PD caches are written by
     %% sync_identity/6 below, together with the ETS row.)
     put(beamtalk_class_instance_methods, NewInstanceMethods),
-    %% BT-2222 / BT-3107: One call writes module + superclass + is_abstract +
+    %% One call writes module + superclass + is_abstract +
     %% selectors to both the process dictionary and the unified metadata row,
     %% so dispatch/reflection never observe them at different points mid-reload
     %% (all four may change: new superclass, recompiled module, added class
     %% methods).
     %%
-    %% ADR 0084 / BT-2266: reload is memory-vs-disk reconciliation (ADR 0082) —
+    %% ADR 0084: reload is memory-vs-disk reconciliation (ADR 0082) —
     %% disk wins. Purge stale runtime class-method funs and explicitly reset the
-    %% gate (BT-3107: no longer an implicit side effect of a full-row
+    %% gate (no longer an implicit side effect of a full-row
     %% overwrite — merge_identity/5 below leaves it alone), then re-seed from
     %% the incoming class methods. A pure compiled reload thus drops runtime
     %% funs; a builder re-register that supplies funs re-installs them.
@@ -2100,7 +2098,7 @@ apply_class_info(State, ClassInfo) ->
         maps:keys(NewClassMethods),
         merge
     ),
-    %% BT-2736: Reconcile the backing-module reverse index on reload too — a
+    %% Reconcile the backing-module reverse index on reload too — a
     %% recompile can add, change, or drop a class's `native:` backing module
     %% (ADR 0056), and `record_backing_module_entry/3` unconditionally clears
     %% any stale row for this class name before writing the current one (or

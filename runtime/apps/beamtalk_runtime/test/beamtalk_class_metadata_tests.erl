@@ -3,20 +3,18 @@
 
 -module(beamtalk_class_metadata_tests).
 
-%% BT-2222: Unified class metadata table tests. Replaces the former
-%% beamtalk_class_module_table_tests, beamtalk_class_methods_table_tests, and
-%% beamtalk_class_hierarchy_table_tests after the three tables were merged.
+%% Unified class metadata table tests.
 
 -include_lib("eunit/include/eunit.hrl").
 
 -define(TABLE, beamtalk_class_metadata).
-%% BT-2266: sibling table holding runtime class-method funs.
+%% Sibling table holding runtime class-method funs.
 -define(FUN_TABLE, beamtalk_class_method_funs).
-%% BT-3221: reverse-edge index backing match_subclasses/1.
+%% Reverse-edge index backing match_subclasses/1.
 -define(SUBCLASS_INDEX, beamtalk_class_subclass_index).
 
 %% Save/clear/restore the shared table around each test so the live runtime's
-%% rows (if any) are not disturbed. BT-3221: insert/5 and friends also write
+%% rows (if any) are not disturbed. insert/5 and friends also write
 %% ?SUBCLASS_INDEX, so it must be cleared/restored in lockstep with ?TABLE —
 %% otherwise edges from one test's classes (e.g. 'Object' -> 'Actor') leak
 %% into the next test's match_subclasses/1 assertions via the index table,
@@ -36,7 +34,7 @@ with_clean_table(Fun) ->
         ets:insert(?SUBCLASS_INDEX, SavedIndex)
     end.
 
-%% BT-2266 / BT-3221: clean the metadata table, the funs sibling table, and
+%% Clean the metadata table, the funs sibling table, and
 %% the subclass index together.
 with_clean_tables(Fun) ->
     beamtalk_class_metadata:new(),
@@ -144,7 +142,7 @@ lookup_methods_requires_module_test() ->
     end).
 
 %%====================================================================
-%% is_abstract (BT-3047 / ADR 0109 amendment)
+%% is_abstract (ADR 0109 amendment)
 %%====================================================================
 
 %% Round-trips both booleans — not_found is a distinct case (tested below),
@@ -212,7 +210,7 @@ match_subclasses_test() ->
     end).
 
 %%====================================================================
-%% BT-3221: subclass index invalidation — register, re-register (same and
+%% Subclass index invalidation — register, re-register (same and
 %% changed superclass), and removal.
 %%====================================================================
 
@@ -324,7 +322,7 @@ foldl_empty_returns_acc_test() ->
         ?assertEqual(sentinel, beamtalk_class_metadata:foldl(fun(_, Acc) -> Acc end, sentinel))
     end).
 
-%% BT-3081: foldl_modules/2 collects {ClassName, Module} for every row with a
+%% foldl_modules/2 collects {ClassName, Module} for every row with a
 %% module written, regardless of superclass.
 foldl_modules_collects_entries_with_module_test() ->
     with_clean_table(fun() ->
@@ -363,7 +361,7 @@ foldl_modules_when_table_absent_test() ->
     end).
 
 %%====================================================================
-%% Runtime class-method funs + gate flag (BT-2266 / ADR 0084)
+%% Runtime class-method funs + gate flag (ADR 0084)
 %%====================================================================
 
 %% Default: a freshly inserted compiled-class row has the gate flag off.
@@ -442,7 +440,7 @@ delete_row_purges_funs_test() ->
     end).
 
 %%====================================================================
-%% merge_identity/5 + reset_runtime_class_methods/1 (BT-3107)
+%% merge_identity/5 + reset_runtime_class_methods/1
 %%====================================================================
 
 %% merge_identity/5 updates the identity fields exactly like insert/5 would.
@@ -457,8 +455,8 @@ merge_identity_updates_identity_fields_test() ->
     end).
 
 %% Unlike insert/5, merge_identity/5 never resets has_runtime_class_methods —
-%% this is the core BT-3107 guarantee: a reload that goes through
-%% merge_identity/5 cannot silently drop runtime class methods just because it
+%% this is the core guarantee: a reload that goes through merge_identity/5
+%% cannot silently drop runtime class methods just because it
 %% forgot to re-seed them afterward.
 merge_identity_preserves_runtime_class_methods_gate_test() ->
     with_clean_tables(fun() ->
@@ -485,7 +483,7 @@ merge_identity_creates_row_when_absent_test() ->
         ?assertEqual({ok, m}, beamtalk_class_metadata:lookup_module('Fresh')),
         ?assertEqual({ok, m, [a]}, beamtalk_class_metadata:lookup_methods('Fresh')),
         ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('Fresh')),
-        %% BT-3221: the create-fallback path also publishes the subclass
+        %% The create-fallback path also publishes the subclass
         %% index edge — it must not require a row to have pre-existed.
         ?assertEqual(['Fresh'], beamtalk_class_metadata:match_subclasses('Object'))
     end).
@@ -513,11 +511,11 @@ reset_runtime_class_methods_when_row_absent_test() ->
         ?assertEqual(ok, beamtalk_class_metadata:reset_runtime_class_methods('NeverSeen'))
     end).
 
-%% The reload sequence this issue was written for: purge funs, explicitly
-%% reset the gate, merge in new identity, re-seed from the new class methods —
-%% mirrors beamtalk_object_class:apply_class_info/2's actual call order.
+%% The reload sequence: purge funs, explicitly reset the gate, merge in new
+%% identity, re-seed from the new class methods — mirrors
+%% beamtalk_object_class:apply_class_info/2's actual call order.
 %% Verifies the reload path preserves runtime class methods without relying on
-%% any particular ordering between the merge and the re-seed (BT-3107 AC).
+%% any particular ordering between the merge and the re-seed.
 reload_sequence_preserves_and_replaces_runtime_class_methods_test() ->
     with_clean_tables(fun() ->
         ok = beamtalk_class_metadata:insert('Live', m, [bump], 'Object', undefined),
@@ -573,7 +571,7 @@ all_builtins_includes_core_classes_test() ->
     ?assert(lists:member('Integer', Builtins)).
 
 %%====================================================================
-%% Table-absent paths (BT-2222 follow-up)
+%% Table-absent paths
 %%
 %% Existing tests use with_clean_table/with_clean_tables which always
 %% call new/0 first, ensuring both tables exist before each assertion.
@@ -584,7 +582,7 @@ all_builtins_includes_core_classes_test() ->
 
 %% Helper: delete the main metadata table, run Fun, restore state.
 %% Used by the tests below that exercise the "table absent" return
-%% values of foldl/2, foldl_modules/2, and lookup_methods/1. BT-3221: also
+%% values of foldl/2, foldl_modules/2, and lookup_methods/1. Also
 %% clears/restores ?SUBCLASS_INDEX for isolation, even though none of these
 %% read it, since it is populated by the same insert/5 calls that seed ?TABLE.
 with_no_main_table(Fun) ->
@@ -630,8 +628,8 @@ with_no_fun_table(Fun) ->
         ets:insert(?SUBCLASS_INDEX, SavedIndex)
     end.
 
-%% Helper: delete the subclass index table, run Fun, restore state. BT-3221:
-%% match_subclasses/1 now reads ?SUBCLASS_INDEX, not ?TABLE, so its
+%% Helper: delete the subclass index table, run Fun, restore state.
+%% match_subclasses/1 reads ?SUBCLASS_INDEX, not ?TABLE, so its
 %% "table absent" contract is exercised against the table it actually reads.
 with_no_subclass_index_table(Fun) ->
     beamtalk_class_metadata:new(),
