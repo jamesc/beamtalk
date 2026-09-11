@@ -1,7 +1,7 @@
 # ADR 0120: Value-Type `Self` Threading — Patch the Remaining Gaps, or Generalize `ThreadedIr`'s Storage Families?
 
 ## Status
-Proposed (2026-09-09)
+Implemented (2026-09-09)
 
 ## Context
 
@@ -292,7 +292,7 @@ default.
 | # | Gap | Issue / PR | Mechanism |
 |---|---|---|---|
 | 3 | `on:do:`/`ensure:` silent drop | [BT-3486](https://linear.app/beamtalk/issue/BT-3486) / [#3836](https://github.com/jamesc/beamtalk/pull/3836) | New hand-built trailing tuple slot + rebind — a **third** distinct `SelfVt`-threading call site, after the loop and conditional this ADR's Context already counted as the first two |
-| — | Conditional nested in a loop | [BT-3488](https://linear.app/beamtalk/issue/BT-3488) / [#3834](https://github.com/jamesc/beamtalk/pull/3834) | Extended the existing rejection safety net (`reject_unthreadable_value_self_field_write`), matching this ADR's Implementation item 3 exactly — no new threading mechanism, a shared rejection function instead |
+| 1 | Conditional nested in a loop | [BT-3488](https://linear.app/beamtalk/issue/BT-3488) / [#3834](https://github.com/jamesc/beamtalk/pull/3834) | Extended the existing rejection safety net (`reject_unthreadable_value_self_field_write`), matching this ADR's Implementation item 3 exactly — no new threading mechanism, a shared rejection function instead |
 | 2 | Foldl-shaped list-op | [BT-3487](https://linear.app/beamtalk/issue/BT-3487) / [#3848](https://github.com/jamesc/beamtalk/pull/3848) | Found **already fixed**, for free, by BT-3488's rejection function being shared across the Letrec and Foldl body-lowering call sites. Zero new code — the best-case outcome this ADR's Implementation item 2 hoped for ("likely blocked on, or shares a fix with" the `ClassVars`-in-Foldl gap) |
 | — | `match:` arm (found mid-epic, not one of the three named gaps) | [BT-3489](https://linear.app/beamtalk/issue/BT-3489) / [#3837](https://github.com/jamesc/beamtalk/pull/3837) | Actor context: reused the conditional's own `generate_conditional_branch_inline` branch merge directly (no new tuple-shape design). Value-type/class-method context: clean rejection, new error variant. Still a **fourth** distinct call site, since it needed its own arm-mutation detector (`match_needs_mutation_threading`) that the loop/conditional/`on:do:` detectors don't share |
 
