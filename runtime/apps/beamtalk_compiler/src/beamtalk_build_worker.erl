@@ -262,7 +262,7 @@ compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
 %% Internal: shared `compile:forms/2' arm used by both wire shapes.
 %% Includes `debug_info' (this is the build path).
 %%
-%% BT-3115: `clint' is passed explicitly for documentation purposes, but is
+%% `clint' is passed explicitly for documentation purposes, but is
 %% a no-op today — `core_lint' already runs unconditionally on the
 %% `from_core' pipeline this call takes (see `beamtalk_compile_diagnostics'
 %% moduledoc for the full explanation of why `clint'/`clint0' only matter on
@@ -271,10 +271,9 @@ compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
 %% NOT applicable here: both skip code generation entirely, which this build
 %% path requires (it must produce a `.beam' binary, not just diagnostics).
 %%
-%% BT-3126: `return_warnings' replaces `report_warnings' — the latter prints
+%% `return_warnings' replaces `report_warnings' — the latter prints
 %% via `io:fwrite' to the compiling process's default group leader, which
-%% lands on stdout, not stderr (same finding as BT-3115's `report_errors'
-%% fix). `return_warnings' hands the warning terms back instead, printed
+%% lands on stdout, not stderr. `return_warnings' hands the warning terms back instead, printed
 %% here explicitly to `standard_error' via
 %% `beamtalk_compile_diagnostics:print_warnings/1' so they reach the
 %% developer instead of being silently dropped by the Rust CLI's stdout
@@ -311,7 +310,7 @@ compile_core_forms(CoreModule) ->
 
 %% Render a `compile_core_erlang/1' error `Reason' for stderr. The
 %% `core_compile_error' shape (compile:forms failures — by definition an
-%% internal-compiler-error at this pipeline stage, BT-3115) gets the
+%% internal-compiler-error at this pipeline stage) gets the
 %% human-readable `sys_messages'-formatted text carrying the offending
 %% variable/function name; every other shape (scan/parse errors, which are
 %% already compact) falls back to a plain term dump.

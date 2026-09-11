@@ -9,7 +9,7 @@
 %% Helper to find the compiler binary
 compiler_binary() ->
     %% Look in target/debug from project root. `beamtalk_test_corpus`
-    %% (BT-3099) walks up from the test CWD to the project root (the dir
+    %% walks up from the test CWD to the project root (the dir
     %% holding `Cargo.toml`) — shared with the other EUnit suites that also
     %% need project-root discovery.
     ProjectRoot = beamtalk_test_corpus:project_root(),
@@ -182,7 +182,7 @@ handle_response_error_binary_test() ->
     ).
 
 handle_response_error_structured_test() ->
-    %% BT-1235: Structured diagnostic maps with line and hint.
+    %% Structured diagnostic maps with line and hint.
     Diag = #{message => <<"Unused variable `x`">>, line => 2, hint => <<"prefix with _">>},
     Response = #{status => error, diagnostics => [Diag]},
     ?assertEqual(
@@ -191,7 +191,7 @@ handle_response_error_structured_test() ->
     ).
 
 handle_response_error_unexpected_type_test() ->
-    %% BT-1235: unexpected diagnostic types are formatted as ~p
+    %% Unexpected diagnostic types are formatted as ~p
     Response = #{status => error, diagnostics => [some_atom]},
     {error, [Diag]} = beamtalk_compiler_port:handle_response(Response),
     ?assert(is_map(Diag)),
@@ -205,7 +205,7 @@ handle_response_unexpected_test() ->
     ).
 
 %%% ---------------------------------------------------------------
-%%% to_binary/1 — BT-3090: golden test for the compiler-local copy.
+%%% to_binary/1 — golden test for the compiler-local copy.
 %%%
 %%% This deliberately does NOT compare against `beamtalk_text:to_binary/1`
 %%% (the canonical runtime-side helper) — `beamtalk_compiler` is a peer of
@@ -366,7 +366,7 @@ compile_expression_trace_invalid_returns_error_test() ->
     end).
 
 %%% ---------------------------------------------------------------
-%%% find_senders_in_source/3 (BT-2190) — live port
+%%% find_senders_in_source/3 — live port
 %%% ---------------------------------------------------------------
 
 find_senders_in_source_atom_selector_test() ->
@@ -391,7 +391,7 @@ find_senders_in_source_invalid_selector_test() ->
     ?assert(binary:match(maps:get(message, Diag), <<"selector must be">>) =/= nomatch).
 
 %%% ---------------------------------------------------------------
-%%% find_all_sends_in_source/2 (BT-2206) — live port
+%%% find_all_sends_in_source/2 — live port
 %%% ---------------------------------------------------------------
 
 find_all_sends_in_source_test() ->
@@ -408,7 +408,7 @@ find_all_sends_in_source_invalid_source_test() ->
     ?assert(binary:match(maps:get(message, Diag), <<"source must be a binary">>) =/= nomatch).
 
 %%% ---------------------------------------------------------------
-%%% find_references_to_in_source/3 (BT-2203) — live port
+%%% find_references_to_in_source/3 — live port
 %%% ---------------------------------------------------------------
 
 find_references_to_in_source_atom_test() ->
@@ -436,7 +436,7 @@ find_references_to_in_source_invalid_test() ->
     ?assert(binary:match(maps:get(message, Diag), <<"class name must be">>) =/= nomatch).
 
 %%% ---------------------------------------------------------------
-%%% find_field_readers/writers_in_source/3 (BT-2208) — live port
+%%% find_field_readers/writers_in_source/3 — live port
 %%% ---------------------------------------------------------------
 
 find_field_readers_in_source_test() ->
@@ -464,7 +464,7 @@ find_field_readers_invalid_field_test() ->
     ?assert(binary:match(maps:get(message, Diag), <<"field name must be">>) =/= nomatch).
 
 %%% ---------------------------------------------------------------
-%%% find_ffi_sites_in_source/5 (BT-2211) — live port
+%%% find_ffi_sites_in_source/5 — live port
 %%% ---------------------------------------------------------------
 
 %% A non-negative integer constrains the match to that argument count (the
@@ -548,7 +548,7 @@ resolve_method_span_invalid_side_test() ->
     ?assertMatch({error, bad_argument, _}, Result).
 
 %%% ---------------------------------------------------------------
-%%% resolve_completion_type/3 (BT-1068) — live port
+%%% resolve_completion_type/3 — live port
 %%% ---------------------------------------------------------------
 
 resolve_completion_type_test() ->
@@ -664,7 +664,7 @@ find_senders_invalid_source_returns_error_test() ->
 %%% handle_response/1 — additional ok-kind and diagnostic shapes (pure)
 %%% ---------------------------------------------------------------
 
-%% BT-903: a class_definition response carrying trailing_core_erlang must
+%% A class_definition response carrying trailing_core_erlang must
 %% forward it into the returned info map.
 handle_response_class_definition_with_trailing_test() ->
     Response = #{
@@ -679,7 +679,7 @@ handle_response_class_definition_with_trailing_test() ->
     {ok, class_definition, Info} = beamtalk_compiler_port:handle_response(Response),
     ?assertEqual(<<"trailing">>, maps:get(trailing_core_erlang, Info)).
 
-%% BT-1612: protocol_definition response shape.
+%% protocol_definition response shape.
 handle_response_protocol_definition_test() ->
     Response = #{
         status => ok,
@@ -693,7 +693,7 @@ handle_response_protocol_definition_test() ->
     ?assertEqual(<<"proto_mod">>, maps:get(module_name, Info)),
     ?assertEqual([<<"Drawable">>], maps:get(protocols, Info)).
 
-%% BT-1235: a diagnostic map whose `message` is not a binary is coerced to a
+%% A diagnostic map whose `message` is not a binary is coerced to a
 %% binary via ensure_binary/1 (the non-binary fallback arm).
 handle_response_diagnostic_non_binary_message_test() ->
     Response = #{status => error, diagnostics => [#{message => 12345, line => 3}]},

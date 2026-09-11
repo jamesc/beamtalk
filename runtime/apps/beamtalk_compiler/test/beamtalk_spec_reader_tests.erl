@@ -78,10 +78,10 @@ read_specs_nonexistent_file_test() ->
     Result = beamtalk_spec_reader:read_specs("/nonexistent/path/fake.beam"),
     ?assertMatch({error, {beam_lib, _}}, Result).
 
-%% BT-2159: `:erlang` BIFs (whereis/1, is_process_alive/1, spawn/3, self/0, etc.)
+%% `:erlang` BIFs (whereis/1, is_process_alive/1, spawn/3, self/0, etc.)
 %% live in `erts-<vsn>/ebin/erlang.beam` even though `code:which(erlang)` is
 %% `preloaded`. Verify the spec reader extracts them when handed the file path
-%% directly — the Rust discovery side (BT-2159) now finds it via the `erts`
+%% directly — the Rust discovery side finds it via the `erts`
 %% app entry in `discover_otp_beam_files`.
 read_specs_erlang_bifs_test() ->
     case find_erlang_beam() of
@@ -161,25 +161,25 @@ map_type_atom_test() ->
 map_type_list_test() ->
     ?assertEqual(<<"List">>, beamtalk_spec_reader:map_type({type, 0, list, []})).
 
-%% BT-2254: an informative list element type is now carried as `List(T)`.
+%% An informative list element type is carried as `List(T)`.
 map_type_list_with_element_type_test() ->
     ElemType = {type, 0, integer, []},
     ?assertEqual(
         <<"List(Integer)">>, beamtalk_spec_reader:map_type({type, 0, list, [ElemType]})
     ).
 
-%% BT-2254: an uninformative element type (Dynamic from term()) collapses to
+%% An uninformative element type (Dynamic from term()) collapses to
 %% bare `List` — no spurious `List(Dynamic)`.
 map_type_list_dynamic_element_collapses_test() ->
     ElemType = {type, 0, term, []},
     ?assertEqual(<<"List">>, beamtalk_spec_reader:map_type({type, 0, list, [ElemType]})).
 
-%% BT-2254: bare tuple() element is uninformative — `[tuple()]` stays `List`.
+%% Bare tuple() element is uninformative — `[tuple()]` stays `List`.
 map_type_list_bare_tuple_element_collapses_test() ->
     ElemType = {type, 0, tuple, any},
     ?assertEqual(<<"List">>, beamtalk_spec_reader:map_type({type, 0, list, [ElemType]})).
 
-%% BT-2254: nonempty_list carries its element type too.
+%% nonempty_list carries its element type too.
 map_type_nonempty_list_with_element_type_test() ->
     ElemType = {type, 0, atom, []},
     ?assertEqual(
@@ -190,7 +190,7 @@ map_type_nonempty_list_with_element_type_test() ->
 map_type_tuple_test() ->
     ?assertEqual(<<"Tuple">>, beamtalk_spec_reader:map_type({type, 0, tuple, any})).
 
-%% BT-2254: a typed tuple carries positional element types as `Tuple(T1, ..., Tn)`.
+%% A typed tuple carries positional element types as `Tuple(T1, ..., Tn)`.
 map_type_tuple_positional_test() ->
     Elements = [{type, 0, atom, []}, {type, 0, pos_integer, []}, {type, 0, atom, []}],
     ?assertEqual(
@@ -198,12 +198,12 @@ map_type_tuple_positional_test() ->
         beamtalk_spec_reader:map_type({type, 0, tuple, Elements})
     ).
 
-%% BT-2254: a tuple whose every element is uninformative collapses to bare Tuple.
+%% A tuple whose every element is uninformative collapses to bare Tuple.
 map_type_tuple_all_uninformative_collapses_test() ->
     Elements = [{type, 0, term, []}, {type, 0, any, []}],
     ?assertEqual(<<"Tuple">>, beamtalk_spec_reader:map_type({type, 0, tuple, Elements})).
 
-%% BT-2254: a list of typed tuples carries both layers —
+%% A list of typed tuples carries both layers —
 %% `[{atom(), pos_integer(), atom()}]` → `List(Tuple(Symbol, Integer, Symbol))`.
 map_type_list_of_typed_tuples_test() ->
     Tuple =
@@ -271,19 +271,19 @@ map_type_byte_test() ->
     ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_type({type, 0, byte, []})).
 
 map_type_string_test() ->
-    %% BT-2817: `string()` widens to `String | List` so binary-backed
+    %% `string()` widens to `String | List` so binary-backed
     %% Beamtalk Strings type-check against classic charlist-typed params.
     ?assertEqual(<<"String | List">>, beamtalk_spec_reader:map_type({type, 0, string, []})).
 
 map_type_nonempty_string_test() ->
-    %% BT-2817: `nonempty_string()` (e.g. `os:env_var_name()`) gets the same
+    %% `nonempty_string()` (e.g. `os:env_var_name()`) gets the same
     %% widened mapping as `string()`.
     ?assertEqual(
         <<"String | List">>, beamtalk_spec_reader:map_type({type, 0, nonempty_string, []})
     ).
 
 map_type_list_of_char_test() ->
-    %% BT-2817: `[char()]` is the expanded form of `string()` (a charlist is
+    %% `[char()]` is the expanded form of `string()` (a charlist is
     %% literally a list of char codes) — it must get the same `String | List`
     %% mapping as `string()`, not fall through to the generic element-carrying
     %% `List(Integer)` clause.
@@ -293,7 +293,7 @@ map_type_list_of_char_test() ->
     ).
 
 map_type_nonempty_list_of_char_test() ->
-    %% BT-2817: `nonempty_list(char())` gets the same treatment.
+    %% `nonempty_list(char())` gets the same treatment.
     ?assertEqual(
         <<"String | List">>,
         beamtalk_spec_reader:map_type({type, 0, nonempty_list, [{type, 0, char, []}]})
@@ -309,7 +309,7 @@ map_type_list_of_integer_still_carries_element_type_test() ->
     ).
 
 map_type_union_dedups_flattened_members_test() ->
-    %% BT-2817: `atom() | string() | binary()` (this is literally `io:format/0`'s
+    %% `atom() | string() | binary()` (this is literally `io:format/0`'s
     %% definition) must not duplicate `String` — `string()` and `binary()` both
     %% expand to compound unions that share the `String` member. Members must be
     %% deduped after flattening, not deduped as whole branch strings.
@@ -353,7 +353,7 @@ map_type_integer_literal_test() ->
 map_type_neg_integer_test() ->
     ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_type({type, 0, neg_integer, []})).
 
-%% BT-2254: nonempty_list carries an informative element type as `List(T)`.
+%% nonempty_list carries an informative element type as `List(T)`.
 map_type_nonempty_list_test() ->
     ?assertEqual(
         <<"List(Integer)">>,
@@ -379,7 +379,7 @@ map_type_union_dedup_test() ->
         )
     ).
 
-%% BT-2632: a union of plain literal atoms maps to a Beamtalk singleton union
+%% A union of plain literal atoms maps to a Beamtalk singleton union
 %% (`#text | #json`) instead of collapsing to bare `Symbol`.
 map_type_singleton_union_test() ->
     ?assertEqual(
@@ -419,12 +419,11 @@ map_type_singleton_union_too_wide_falls_back_test() ->
         beamtalk_spec_reader:map_type({type, 0, union, Branches})
     ).
 
-%% BT-2647: a pure-atom enumeration that *contains* the bare atom `error` (or
+%% A pure-atom enumeration that *contains* the bare atom `error` (or
 %% `ok`) but also has atoms beyond `ok`/`error` is a genuine enum, so the
-%% singleton-union path now wins over ADR-0076 ok/error Result recognition. This
+%% singleton-union path wins over ADR-0076 ok/error Result recognition. This
 %% gives `logLevel/0`'s `... | error | ...` spec its narrow singleton union via
-%% FFI inference (previously `Result(Dynamic, Nil) | Symbol`, a documented
-%% BT-2632 limitation).
+%% FFI inference.
 map_type_singleton_union_with_error_atom_is_singleton_test() ->
     ?assertEqual(
         <<"#emergency | #error | #info | #debug">>,
@@ -438,7 +437,7 @@ map_type_singleton_union_with_error_atom_is_singleton_test() ->
         )
     ).
 
-%% BT-2647: a union whose only atoms are `ok`/`error` stays a Result — ADR-0076
+%% A union whose only atoms are `ok`/`error` stays a Result — ADR-0076
 %% bare ok/error semantics are preserved (`has_non_result_atom/1` is false).
 map_type_bare_ok_error_stays_result_test() ->
     ?assertEqual(
@@ -448,7 +447,7 @@ map_type_bare_ok_error_stays_result_test() ->
         )
     ).
 
-%% BT-2647: tuple-form Result recognition is unaffected by the enum precedence —
+%% Tuple-form Result recognition is unaffected by the enum precedence —
 %% a `{ok, T} | {error, E}` union with an extra plain atom is still a Result,
 %% because a tuple branch makes `singleton_union_members/1` reject the union.
 map_type_result_tuples_with_atom_stays_result_test() ->
@@ -463,7 +462,7 @@ map_type_result_tuples_with_atom_stays_result_test() ->
         )
     ).
 
-%% BT-2647 (decision 1): `undefined` is NOT mapped to `Nil`. The runtime does not
+%% `undefined` is NOT mapped to `Nil`. The runtime does not
 %% coerce Erlang `undefined` -> Beamtalk `nil` at the FFI boundary
 %% (`beamtalk_erlang_proxy:coerce_result/1` passes it through), so the honest
 %% type for a `value | undefined` enum is the singleton union `#value |
@@ -476,7 +475,7 @@ map_type_undefined_in_atom_union_is_singleton_not_nil_test() ->
         )
     ).
 
-%% BT-2647 (decision 1): a lone `undefined` atom maps to `Symbol` (the runtime
+%% A lone `undefined` atom maps to `Symbol` (the runtime
 %% value is the atom `undefined`, a Beamtalk Symbol), never `Nil`.
 map_type_lone_undefined_is_symbol_test() ->
     ?assertEqual(
@@ -485,8 +484,7 @@ map_type_lone_undefined_is_symbol_test() ->
     ).
 
 %% Duplicate atoms are deduped; a union that collapses to a single member is
-%% rejected as a singleton union and falls back to `Symbol` (BT-2647 defers the
-%% lone-atom case).
+%% rejected as a singleton union and falls back to `Symbol`.
 map_type_singleton_union_dedup_to_single_test() ->
     ?assertEqual(
         <<"Symbol">>,
@@ -666,7 +664,7 @@ verify_file_read_file_result_test() ->
     %% Should start with "Result(" — the ok type is String | Binary from binary()
     ?assertMatch(<<"Result(String | Binary,", _/binary>>, RetType).
 
-%% BT-2817: os:putenv/2 params — `VarName :: env_var_name()` resolves to
+%% os:putenv/2 params — `VarName :: env_var_name()` resolves to
 %% `nonempty_string()` and `Value :: env_var_value()` resolves to `string()`
 %% (both local user_types in os.erl). Both must map to `String | List`, not
 %% `List` only — `os:putenv/2` accepts binaries fine at runtime on modern OTP.
@@ -691,7 +689,7 @@ verify_os_putenv_params_test() ->
         Params
     ).
 
-%% BT-2817: `io_lib:format/2`'s `Format` param resolves (via the remote type
+%% `io_lib:format/2`'s `Format` param resolves (via the remote type
 %% `io:format()`) to the literal union `atom() | string() | binary()`.
 %% `string()` and `binary()` both expand to compound unions sharing the
 %% `String` member, so this is a real-world reproduction of the
@@ -1112,7 +1110,7 @@ read_specs_batch_module_names_test() ->
     [{ModName, _}] = Results,
     ?assertEqual(<<"lists">>, ModName).
 
-%% BT-2469: parallel batch processing must produce exactly the same results,
+%% Parallel batch processing must produce exactly the same results,
 %% in the same order, as a sequential `read_specs/1' map — across a batch large
 %% enough to span multiple worker chunks and to exercise the shared remote-type
 %% memo (several of these modules reference remote types like `sets:set()').
@@ -1294,7 +1292,7 @@ map_type_unknown_form_test() ->
     ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({unknown_form, 0, something})).
 
 %%% ---------------------------------------------------------------
-%%% Type resolution — user_type and remote_type (BT-1902)
+%%% Type resolution — user_type and remote_type
 %%% ---------------------------------------------------------------
 
 %% Local user_type resolution: a type alias resolves to its definition.
@@ -1460,23 +1458,21 @@ resolve_remote_type_disk_log_test() ->
             [Spec | _] = NextFileSpecs,
             RetType = maps:get(return_type, Spec),
             %% Should be Result(Nil, Symbol | Tuple...) instead of Result(Nil, Dynamic).
-            %% BT-2254: the error tuples now carry their positional element types
+            %% The error tuples carry their positional element types
             %% (`{error, Reason}` shapes), so the Tuple branches are parametric.
-            %% BT-2817: the `string()`-typed element now widens to `String | List`.
+            %% The `string()`-typed element widens to `String | List`.
             ?assertEqual(
                 <<"Result(Nil, Symbol | Tuple(Symbol, Dynamic) | Tuple(Symbol, String | List, Dynamic))">>,
                 RetType
             )
     end.
 
-%% BT-2185: Remote type references into preloaded modules (`erlang`, `init`,
-%% `erts_internal`, ...) resolve via `code:get_object_code/1`. Previously this
-%% arm short-circuited to Dynamic because the comment claimed preloaded
-%% modules had no .beam on disk — they do, the file just isn't what
-%% `code:which/1` returns.
+%% Remote type references into preloaded modules (`erlang`, `init`,
+%% `erts_internal`, ...) resolve via `code:get_object_code/1` — preloaded
+%% modules do have a `.beam` on disk, `code:which/1` just doesn't return it.
 %%
 %% `erlang:timestamp()` is defined as `{non_neg_integer(), non_neg_integer(),
-%% non_neg_integer()}`. BT-2254: the positional element types are now carried,
+%% non_neg_integer()}`. The positional element types are carried,
 %% so it maps to `Tuple(Integer, Integer, Integer)`.
 resolve_remote_type_erlang_preloaded_test() ->
     case code:get_object_code(erlang) of
@@ -1497,8 +1493,8 @@ resolve_remote_type_erlang_preloaded_test() ->
             end
     end.
 
-%% BT-2185: Also verify that a Result-shaped union type in a preloaded module
-%% resolves through the new code path. `prim_file:prim_file_name_error()` is
+%% Also verify that a Result-shaped union type in a preloaded module
+%% resolves correctly. `prim_file:prim_file_name_error()` is
 %% defined as `error | ignore | warning` — the bare `error` atom should be
 %% classified as a Result error branch (with Nil reason), and the remaining
 %% `ignore | warning` atoms fall through to the Symbol union.
@@ -1509,10 +1505,10 @@ resolve_remote_type_prim_file_preloaded_test() ->
         {_, Bin, _} ->
             case beam_lib:chunks(Bin, [abstract_code]) of
                 {ok, {_, [{abstract_code, {raw_abstract_v1, _}}]}} ->
-                    %% BT-2647: `prim_file:prim_file_name_error()` is the pure-atom
+                    %% `prim_file:prim_file_name_error()` is the pure-atom
                     %% enum `error | ignore | warning`. Although it contains the bare
-                    %% atom `error`, the enum precedence rule now narrows it to a
-                    %% singleton union (was `Result(Dynamic, Nil) | Symbol`).
+                    %% atom `error`, the enum precedence rule narrows it to a
+                    %% singleton union.
                     ?assertEqual(
                         <<"#error | #ignore | #warning">>,
                         beamtalk_spec_reader:map_type(

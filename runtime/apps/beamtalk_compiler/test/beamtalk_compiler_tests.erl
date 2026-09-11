@@ -159,7 +159,7 @@ diagnostics_errors() ->
     ?assert(is_binary(maps:get(severity, First))).
 
 diagnostics_method_mode_accepts_bare_body() ->
-    %% BT-2569: a bare method body is a false parse error under the default
+    %% A bare method body is a false parse error under the default
     %% (expression) grammar — `=>` is not a valid top-level token — but parses
     %% clean in method mode.
     Body = <<"decrement => self.value := self.value - 1">>,
@@ -243,7 +243,7 @@ compiler_app_callbacks() ->
     %% stop/1 returns ok
     ?assertEqual(ok, beamtalk_compiler_app:stop(undefined)).
 
-%% --- resolve_method_span (ADR 0082 Phase 1, BT-2283) ---
+%% --- resolve_method_span (ADR 0082 Phase 1) ---
 
 %% Shared fixture: a small class with an instance and a class-side method.
 span_fixture() ->
@@ -276,7 +276,7 @@ resolve_method_span_not_found() ->
         beamtalk_compiler:resolve_method_span(Source, <<"SpanCounter">>, <<"nope">>, instance),
     ?assertMatch({error, selector_not_found, _}, Result).
 
-%% --- resolve_class_span (ADR 0082 extension, BT-3248) ---
+%% --- resolve_class_span (ADR 0082 extension) ---
 
 resolve_class_span_header_only() ->
     Source = span_fixture(),
@@ -286,8 +286,8 @@ resolve_class_span_header_only() ->
     %% property as the method-span resolver.
     ?assertEqual(PrevSource, binary:part(Source, Start, End - Start)),
     %% span_fixture()'s SpanCounter has no state declarations, so the span is
-    %% just its header line — deliberately excluding every method (BT-3248:
-    %% a class-def entry must never be able to reach a method's bytes).
+    %% just its header line — deliberately excluding every method
+    %% (a class-def entry must never be able to reach a method's bytes).
     ?assertEqual(<<"Object subclass: SpanCounter\n">>, PrevSource),
     ?assertEqual(nomatch, binary:match(PrevSource, <<"increment =>">>)),
     ?assertEqual(nomatch, binary:match(PrevSource, <<"class new =>">>)).
@@ -297,7 +297,7 @@ resolve_class_span_not_found() ->
     Result = beamtalk_compiler:resolve_class_span(Source, <<"NoSuchClass">>),
     ?assertMatch({error, class_not_found, _}, Result).
 
-%% --- categorize_methods (BT-3238) ---
+%% --- categorize_methods ---
 
 %% span_fixture()'s SpanCounter has no `// === Name ===` dividers, so it must
 %% come back as a single, unnamed (implicit leading) category — the
@@ -352,7 +352,7 @@ class_state_field_defaults_not_found() ->
     Result = beamtalk_compiler:class_state_field_defaults(Source, <<"NoSuchClass">>),
     ?assertMatch({error, class_not_found, _}, Result).
 
-%% --- build_class_module_index_in_source (BT-3441) ---
+%% --- build_class_module_index_in_source ---
 
 build_class_module_index_in_source_root_file() ->
     Result = beamtalk_compiler:build_class_module_index_in_source(
@@ -385,10 +385,10 @@ build_class_module_index_in_source_invalid_path_segment() ->
     ?assertMatch({error, invalid_path_segment, _}, Result).
 
 %%% ---------------------------------------------------------------
-%%% Command-vocabulary conformance corpus (BT-3095)
+%%% Command-vocabulary conformance corpus
 %%% ---------------------------------------------------------------
 
-%% BT-3095 conformance: every command in the shared wire-vocabulary corpus
+%% Every command in the shared wire-vocabulary corpus
 %% must dispatch successfully through `beamtalk_compiler`'s public API,
 %% against the REAL compiled `beamtalk-compiler-port` binary (via
 %% `beamtalk_compiler_server`'s port, opened by this file's `setup/0`). The
@@ -519,7 +519,7 @@ assert_command_recognized(Command) ->
     error({no_dispatch_table_entry_for_corpus_command, Command}).
 
 %% Load the shared compiler-port command-vocabulary conformance corpus
-%% (BT-3095) from the repo tree. `beamtalk_test_corpus` (BT-3099) walks up
+%% from the repo tree. `beamtalk_test_corpus` walks up
 %% from the test CWD to the project root (the dir holding `Cargo.toml`),
 %% then reads the fixture both surfaces share. `beamtalk_test_support` is a
 %% test-only peer app (ADR 0022 — `beamtalk_compiler` has no dependency on

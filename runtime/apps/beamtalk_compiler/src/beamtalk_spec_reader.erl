@@ -462,7 +462,7 @@ dedup_types([T | Rest], Acc, Seen) ->
         false -> dedup_types(Rest, [T | Acc], Seen#{T => true})
     end.
 
-%% BT-2817: Join a list of mapped type strings into a single type string,
+%% Join a list of mapped type strings into a single type string,
 %% flattening and deduping at the individual-member level rather than the
 %% branch-string level. A branch may itself already map to a top-level union
 %% (e.g. `string()` -> `"String | List"`, `binary()` -> `"String | Binary"`),
@@ -792,7 +792,7 @@ resolve_remote_type_from_beam(BeamRef, Mod, TypeName, Arity, Depth) ->
     end.
 
 %% Return the parsed artifacts `{ok, OpaqueSet, TypeRegistry}' of a remote module
-%% (or `error' if it has no abstract code), memoised per batch (BT-2469).
+%% (or `error' if it has no abstract code), memoised per batch.
 %%
 %% Reading and folding `abstract_code' depends only on the module's `.beam', so
 %% the result is cached in the batch-scoped ETS table installed by
@@ -871,7 +871,7 @@ map_type({type, _, 'fun', _}) ->
 %% List types
 map_type({type, _, list, []}) ->
     <<"List">>;
-%% BT-2817: `[char()]` / `nonempty_list(char())` are the expanded forms of
+%% `[char()]` / `nonempty_list(char())` are the expanded forms of
 %% `string()` / `nonempty_string()` (a charlist is a list of char codes) —
 %% some specs use the expanded list-of-char() shape directly instead of the
 %% `string()` alias. Map them identically to `string()` (`String | List`)
@@ -882,7 +882,7 @@ map_type({type, _, list, [{type, _, char, []}]}) ->
 map_type({type, _, nonempty_list, [{type, _, char, []}]}) ->
     <<"String | List">>;
 map_type({type, _, list, [ElemType]}) ->
-    %% ADR 0075 amendment (BT-2254): carry the element type so iterating an
+    %% ADR 0075 amendment: carry the element type so iterating an
     %% FFI-typed list binds block params to the element type instead of Dynamic.
     %% A Dynamic element collapses back to bare `List` to avoid `List(Dynamic)`.
     wrap_collection_type(<<"List">>, [map_type(ElemType)]);
@@ -896,7 +896,7 @@ map_type({type, _, tuple, any}) ->
     <<"Tuple">>;
 %% Typed tuple `{T1, ..., Tn}` — carry positional element types so
 %% `aTuple at: <literal int>` can infer the element type at that index
-%% (ADR 0075 amendment, BT-2254). All-Dynamic elements collapse to bare `Tuple`.
+%% (ADR 0075 amendment). All-Dynamic elements collapse to bare `Tuple`.
 map_type({type, _, tuple, Elements}) when is_list(Elements) ->
     wrap_collection_type(<<"Tuple">>, [map_type(E) || E <- Elements]);
 map_type({type, _, tuple, _}) ->
@@ -918,7 +918,7 @@ map_type({atom, _, false}) ->
     <<"False">>;
 map_type({atom, _, nil}) ->
     <<"Nil">>;
-%% BT-2647: `undefined` is deliberately NOT mapped to `Nil`. Beamtalk's canonical
+%% `undefined` is deliberately NOT mapped to `Nil`. Beamtalk's canonical
 %% Nil is the `nil` atom (class `UndefinedObject`); `undefined` is a distinct
 %% atom. The FFI boundary does not coerce `undefined` -> `nil`
 %% (`beamtalk_erlang_proxy:coerce_result/1` passes it through unchanged), so an
@@ -948,7 +948,7 @@ map_type({type, _, char, []}) ->
     <<"Integer">>;
 map_type({type, _, byte, []}) ->
     <<"Integer">>;
-%% BT-2817: classic Erlang `string()` / `nonempty_string()` (charlist) specs
+%% Classic Erlang `string()` / `nonempty_string()` (charlist) specs
 %% are common on stdlib functions (e.g. `os:putenv/2`, whose `env_var_name()`
 %% type resolves to `nonempty_string()`) that accept binaries/iodata fine at
 %% runtime on modern OTP. Map to `String | List` (mirroring the `binary()` ->
@@ -1021,7 +1021,7 @@ Dispatch order (BT-2647):
 """.
 -spec map_union([tuple()], term()) -> binary().
 map_union(Branches, _Line) ->
-    %% BT-2647: a pure-atom enumeration that contains atoms beyond `ok`/`error`
+    %% A pure-atom enumeration that contains atoms beyond `ok`/`error`
     %% (e.g. the log levels `emergency | … | error | … | none`) is a genuine
     %% enum, not a Result — even though it contains the bare atom `error`. Let the
     %% singleton-union path win over ADR-0076 bare ok/error Result recognition in
@@ -1059,7 +1059,7 @@ map_union_result(Branches) ->
     case {OkTypes, ErrTypes} of
         {[], []} ->
             %% No ok/error branches — standard union. `map_union/2` already tried
-            %% the narrow pure-atom singleton enumeration first (BT-2632/BT-2647)
+            %% the narrow pure-atom singleton enumeration first
             %% and only delegates here when the union is *not* such an enum, so a
             %% re-check would always be `not_singleton_union`. Map each branch via
             %% map_type: a lone atom keeps its `Symbol` mapping; mixed unions map
@@ -1097,7 +1097,7 @@ map_union_result(Branches) ->
 %% `?MAX_SINGLETON_UNION_MEMBERS`. Otherwise returns `not_singleton_union`,
 %% leaving the caller's standard branch-by-branch mapping in place. A
 %% single-member result (e.g. a degenerate `text | text`) is rejected so a lone
-%% atom stays `Symbol`, matching the deferred single-atom decision in BT-2647.
+%% atom stays `Symbol`.
 -spec singleton_union_members([tuple()]) -> {ok, [binary()]} | not_singleton_union.
 singleton_union_members(Branches) ->
     case collect_singleton_atoms(Branches, []) of
@@ -1207,7 +1207,7 @@ format_result_type(OkType, ErrType) ->
 
 %% Format a parametric collection type like `List(T)` or `Tuple(T1, ..., Tn)`.
 %%
-%% ADR 0075 amendment (BT-2254). When *every* element type is uninformative the
+%% ADR 0075 amendment. When *every* element type is uninformative the
 %% bare base type is emitted instead (`List` rather than `List(Dynamic)` /
 %% `List(Object)` / `List(Tuple)`). "Uninformative" means an element type that
 %% adds no actionable precision over the bare collection and would otherwise
