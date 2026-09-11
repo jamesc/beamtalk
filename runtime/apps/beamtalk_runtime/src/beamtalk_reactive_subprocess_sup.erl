@@ -7,7 +7,7 @@
 %%% **DDD Context:** Actor System Context
 
 -moduledoc """
-simple_one_for_one supervisor for beamtalk_reactive_subprocess gen_servers (BT-1187).
+simple_one_for_one supervisor for beamtalk_reactive_subprocess gen_servers.
 
 Each ReactiveSubprocess actor starts one `beamtalk_reactive_subprocess`
 gen_server via `start_child/1`.  The `temporary` restart strategy means a

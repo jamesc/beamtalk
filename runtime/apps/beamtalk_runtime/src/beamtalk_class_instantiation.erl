@@ -12,7 +12,7 @@ Handles the spawn and new protocols for creating class instances.
 Contains the logic for compiled class instantiation, abstract
 class validation, and constructibility checks.
 
-Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
+Extracted from `beamtalk_object_class` for single-responsibility.
 Called by `beamtalk_object_class` gen_server handle_call clauses.
 
 ## Responsibilities
@@ -50,7 +50,7 @@ Called by `beamtalk_object_class` gen_server handle_call clauses.
 -doc """
 Handle the spawn protocol for actor creation.
 
-BT-246: Actor spawn via dynamic class dispatch.
+Actor spawn via dynamic class dispatch.
 Routes spawn/spawnWith: through class_send → {spawn, Args} protocol.
 Returns gen_server reply tuple.
 """.
@@ -103,12 +103,12 @@ handle_spawn(Args, ClassName, Module, false) ->
 -doc """
 Handle the new protocol for value type instantiation.
 
-BT-246 / ADR 0013: Value types support new/new:. Actor classes should use
+ADR 0013: Value types support new/new:. Actor classes should use
 {spawn, Args} protocol via class_send.
 
-BT-873: Compiled classes go through the compiled path (`Module:new/0,1`).
+Compiled classes go through the compiled path (`Module:new/0,1`).
 
-BT-2275 / ADR 0082: A class built purely programmatically via `ClassBuilder`
+ADR 0082: A class built purely programmatically via `ClassBuilder`
 has a *module name* (defaulting to the class name) but **no loaded BEAM module**
 behind it — compilation is "persist + optimise", never a prerequisite for using
 a class. When the module is not loaded, build a generic, module-free instance: a
@@ -134,7 +134,7 @@ handle_new(Args, ClassName, Module, IsConstructible0) ->
 Returns true when `Module` is a loaded BEAM module exporting `new/0`.
 
 This discriminates the compiled instantiation path from the generic
-module-free path (BT-2275). `code:ensure_loaded/1` triggers lazy load so
+module-free path. `code:ensure_loaded/1` triggers lazy load so
 `function_exported/3` sees a freshly-loaded module; a module-less builder class
 (module name with no `.beam` behind it) fails to load and falls through to the
 generic path.
@@ -152,7 +152,7 @@ is_module_loaded_with_new(_) ->
 
 -doc """
 Look up a class's `is_abstract` flag by name for the generic `new` path
-(BT-3106).
+.
 
 Unlike `resolve_is_abstract_or_raise/2`, this does not raise on a metadata
 miss: `handle_new_generic/2` is reached from the external `X new` gen_server
@@ -186,7 +186,7 @@ probe for the legacy non-constructible pattern.
 Abstract classes are screened twice: the external `X new` path is rejected by
 the gen_server `{new, _}` handler before reaching here, and the `self new` path
 (`class_self_new`, which does not pre-screen) is caught here via a name-keyed
-`beamtalk_class_metadata:lookup_is_abstract/1` lookup (BT-3106) — not the
+`beamtalk_class_metadata:lookup_is_abstract/1` lookup — not the
 `beamtalk_class_is_abstract` process-dictionary flag, which only reflects the
 *executing process's* class identity and resolves against the wrong class when
 `class_self_new` runs somewhere other than the owning class's own gen_server
@@ -409,13 +409,13 @@ handle_new_compiled(Args, ClassName, Module, IsConstructible0) ->
     end.
 
 %%====================================================================
-%% Class Method Self-Send (BT-893)
+%% Class Method Self-Send
 %%====================================================================
 
 -doc """
 Create a new instance from within a class method (bypasses gen_server).
 
-BT-893: When a class method calls `self new` or `self new:`, the codegen
+When a class method calls `self new` or `self new:`, the codegen
 routes here instead of through `module:new()` → `gen_server:call()` which
 would deadlock since the class method is already executing inside handle_call.
 """.
@@ -432,7 +432,7 @@ class_self_new(ClassName, Module, Args) ->
 -doc """
 Spawn an actor from within a class method (bypasses gen_server).
 
-BT-893: When a class method calls `self spawn` or `self spawnWith:`, the
+When a class method calls `self spawn` or `self spawnWith:`, the
 codegen routes here instead of through `module:spawn()` → `gen_server:call()`
 which would deadlock.
 """.
@@ -443,7 +443,7 @@ class_self_spawn(ClassName, Module, Args) ->
 -doc """
 Spawn with explicit abstract class flag (used by runtime self-instantiation).
 
-BT-908: The IsAbstract parameter may come from erlang:get(beamtalk_class_is_abstract)
+The IsAbstract parameter may come from erlang:get(beamtalk_class_is_abstract)
 in codegen-generated class methods. Normalize to boolean defensively — undefined or
 any non-true value is treated as false (non-abstract).
 """.
@@ -461,7 +461,7 @@ class_self_spawn(ClassName, Module, IsAbstract0, Args) ->
 -doc """
 Spawn a named actor from within a class method (bypasses gen_server).
 
-BT-2004: When a class method calls `self spawnAs: name`, the codegen routes
+When a class method calls `self spawnAs: name`, the codegen routes
 here so that ClassName/Module come from the process dictionary rather than a
 gen_server:call on the current class — which would deadlock.
 
@@ -477,7 +477,7 @@ class_self_spawn_as(ClassName, Module, IsAbstract0, Name) ->
 -doc """
 Spawn a named actor with init args from within a class method.
 
-BT-2004: `self spawnWith: InitArgs as: Name` equivalent. See
+`self spawnWith: InitArgs as: Name` equivalent. See
 `class_self_spawn_as/4` for the deadlock-avoidance rationale.
 """.
 -spec class_self_spawn_with(class_name(), atom(), boolean() | term(), term(), term()) ->
@@ -496,9 +496,9 @@ do_class_self_named_spawn(ClassName, Module, IsAbstract0, InitArgs, Name, Select
                 {error, abstract_class_error(ClassName, Selector)}
             );
         false ->
-            %% BT-3243: beamtalk_actor:'spawnAs'/3 (safe_spawn_named) always
+            %% beamtalk_actor:'spawnAs'/3 (safe_spawn_named) always
             %% links — it doubles as the real OTP supervisor child MFA for
-            %% named children (ADR 0079/BT-1990), where that link is the
+            %% named children (ADR 0079), where that link is the
             %% restart mechanism. For *this* call site, the caller is
             %% normally a class method body executing `self spawnAs:`/
             %% `self spawnWith:as:` inside the class's own gen_server
@@ -510,8 +510,8 @@ do_class_self_named_spawn(ClassName, Module, IsAbstract0, InitArgs, Name, Select
             %% the actor started and initialized, so no risk window remains
             %% to protect against.
             %%
-            %% BT-3243 supervisor-restart follow-up: the exception is a
-            %% `SupervisionSpec withClassMethod:` child (BT-1862) whose
+            %% The exception is a
+            %% `SupervisionSpec withClassMethod:` child whose
             %% factory calls `self spawnAs:`/`self spawnWith:as:` — that body
             %% runs directly inside the real OTP supervisor process via
             %% `beamtalk_supervisor:start_child_via_class_method/4` (no
@@ -553,7 +553,7 @@ do_class_self_named_spawn(ClassName, Module, IsAbstract0, InitArgs, Name, Select
 %%====================================================================
 
 -doc """
-Ensure is_constructible is computed and cached (BT-474).
+Ensure is_constructible is computed and cached.
 
 Lazily computes whether a class can be instantiated via new/new: on first
 access. Cannot be computed during init because the module isn't fully
@@ -568,7 +568,7 @@ ensure_is_constructible(undefined, Module, IsAbstract) ->
 -doc """
 Compute whether a class is constructible via new/new:.
 
-BT-877: The compiler now infers is_constructible at compile time by detecting
+The compiler infers is_constructible at compile time by detecting
 the `new => self error: "..."` pattern, and ClassBuilder inherits the flag
 from superclasses. This function is only called for bootstrap/legacy classes
 that weren't registered with an explicit is_constructible flag.
@@ -616,7 +616,7 @@ abstract_class_error(ClassName, Selector) ->
 
 -doc """
 Build a structured internal_error for a class-metadata lookup miss during
-instantiation (BT-3047 / ADR 0109 amendment) — a resolved `ClassName` with no
+instantiation (ADR 0109 amendment) — a resolved `ClassName` with no
 `beamtalk_class_metadata` row, which should never happen for a class already
 live enough to be dispatching. `internal_error` (not `instantiation_error`,
 which `abstract_class_error/2` uses): this is a runtime/dispatch bug, not a
@@ -631,8 +631,8 @@ class_metadata_missing_error(ClassName, Selector) ->
     ).
 
 -doc """
-Resolve a class's own compiled module for a class-method self-send (BT-3047 /
-ADR 0109 amendment).
+Resolve a class's own compiled module for a class-method self-send
+(ADR 0109 amendment).
 
 Codegen calls this from the instantiation intrinsics with a `ClassName` derived
 from `ClassSelf` (closure-captured, correct even inside a block executing in a
@@ -667,8 +667,8 @@ resolve_module_or_raise(ClassName, Selector) ->
     end.
 
 -doc """
-Resolve a class's `is_abstract` flag for a class-method self-send (BT-3047 /
-ADR 0109 amendment).
+Resolve a class's `is_abstract` flag for a class-method self-send
+(ADR 0109 amendment).
 
 Codegen calls this from `self spawn`/`self spawnWith:`/`self spawnAs:`/
 `self spawnWith:as:` with a `ClassName` derived from `ClassSelf` (closure-

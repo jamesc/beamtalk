@@ -4,7 +4,7 @@
 -module(beamtalk_class_instantiation_tests).
 
 -moduledoc """
-Unit tests for beamtalk_class_instantiation module (BT-623).
+Unit tests for beamtalk_class_instantiation module.
 
 Tests instance creation logic including spawn/new protocols,
 constructibility checks, abstract class errors, and dynamic
@@ -34,7 +34,7 @@ instantiation_test_() ->
             {"spawn with too many args returns type_error", fun test_spawn_too_many_args/0},
             {"spawn with no args succeeds", fun test_spawn_no_args/0},
             {"spawn with one arg (spawnWith:) succeeds", fun test_spawn_with_arg/0},
-            %% BT-3243: actor spawned via the class gen_server must not be
+            %% Actor spawned via the class gen_server must not be
             %% linked to it — killing the actor must not kill the class.
             {"killing an actor spawned via the class gen_server leaves the class alive",
                 fun test_kill_actor_spawned_via_class_survives_class/0},
@@ -51,7 +51,7 @@ instantiation_test_() ->
             {"abstract class is not constructible", fun test_compute_abstract/0},
             {"actor class (has spawn/0) is not constructible", fun test_compute_actor/0},
             {"value type (has new/0, no spawn/0) is constructible", fun test_compute_value_type/0},
-            %% BT-877: compiler-inferred non-constructibility tests
+            %% Compiler-inferred non-constructibility tests
             {"Actor class is registered as non-constructible (compiler-inferred)",
                 fun test_actor_registered_non_constructible/0},
             {"Counter (Actor subclass) inherits non-constructible",
@@ -62,11 +62,11 @@ instantiation_test_() ->
             {"abstract_class_error returns structured error", fun test_abstract_error_structure/0},
             {"abstract_class_error with spawnWith: selector", fun test_abstract_error_spawn_with/0},
             {"abstract_class_error with new selector", fun test_abstract_error_new/0},
-            %% class_self_new tests (BT-893)
+            %% class_self_new tests
             {"class_self_new succeeds for constructible class", fun test_class_self_new_success/0},
             {"class_self_new raises for non-constructible class",
                 fun test_class_self_new_non_constructible/0},
-            %% class_self_spawn tests (BT-893)
+            %% class_self_spawn tests
             {"class_self_spawn succeeds for non-abstract actor",
                 fun test_class_self_spawn_success/0},
             {"class_self_spawn/4 raises for abstract class", fun test_class_self_spawn_abstract/0},
@@ -80,12 +80,12 @@ instantiation_test_() ->
             %% handle_spawn with abstract and spawnWith:
             {"spawn abstract with spawnWith: returns instantiation_error",
                 fun test_spawn_abstract_spawn_with/0},
-            %% class_self_spawn_as / class_self_spawn_with tests (BT-2004)
+            %% class_self_spawn_as / class_self_spawn_with tests
             {"class_self_spawn_as returns Result ok wrapping named actor",
                 fun test_class_self_spawn_as_success/0},
             {"class_self_spawn_as returns Result error for reserved name",
                 fun test_class_self_spawn_as_reserved/0},
-            %% BT-3243 supervisor-restart follow-up
+            %% Supervisor-restart follow-up
             {"class_self_spawn_as stays linked when the supervisor-spawn context is set",
                 fun test_class_self_spawn_as_stays_linked_in_supervisor_context/0},
             {"class_self_spawn_as returns Result error for abstract class",
@@ -96,7 +96,7 @@ instantiation_test_() ->
                 fun test_class_self_spawn_with_duplicate/0},
             {"class_self_spawn_with returns Result error for abstract class",
                 fun test_class_self_spawn_with_abstract/0},
-            %% BT-2275: module-less (builder-built) generic instantiation
+            %% Module-less (builder-built) generic instantiation
             {"module-less new returns a generic instance with field defaults",
                 fun test_generic_new_defaults/0},
             {"module-less new: merges initialiser over defaults", fun test_generic_new_with_map/0},
@@ -108,10 +108,10 @@ instantiation_test_() ->
                 fun test_generic_instance_method_dispatch/0},
             {"module-less subclass inherits builder superclass field defaults",
                 fun test_generic_new_inherited_defaults/0},
-            %% BT-2277: ancestor exit handling during default collection
+            %% Ancestor exit handling during default collection
             {"new on a child stays robust when its builder ancestor process is gone",
                 fun test_generic_new_ancestor_gone/0},
-            %% BT-2277: fun-backed instance dispatch from inside the class process
+            %% Fun-backed instance dispatch from inside the class process
             {"self new + instance-method dispatch resolves inside the class process",
                 fun test_self_new_instance_method_dispatch/0},
             {"self new + inherited instance-method dispatch resolves inside the class process",
@@ -168,7 +168,7 @@ test_spawn_with_arg() ->
     gen_server:stop(Obj#beamtalk_object.pid).
 
 test_kill_actor_spawned_via_class_survives_class() ->
-    %% BT-3243: handle_spawn/4 runs *inside* the class gen_server process
+    %% handle_spawn/4 runs *inside* the class gen_server process
     %% when reached via the {spawn, Args} dynamic-dispatch handler — the
     %% exact scenario the bug report describes. Before the fix, safe_spawn
     %% used gen_server:start_link, linking the new actor to the class
@@ -214,7 +214,7 @@ test_new_compiled() ->
     cleanup_if_process(Obj).
 
 test_new_compiled_non_constructible() ->
-    %% Integer's compiled new/0 raises instantiation_error. BT-2275: use the
+    %% Integer's compiled new/0 raises instantiation_error. Use the
     %% real loaded module (bt@stdlib@integer) so handle_new takes the compiled
     %% path; a non-loadable module name would now route to the generic path.
     code:ensure_loaded('bt@stdlib@integer'),
@@ -282,7 +282,7 @@ test_compute_value_type() ->
     ).
 
 %%====================================================================
-%% BT-877: Compiler-inferred non-constructibility tests
+%% Compiler-inferred non-constructibility tests
 %%====================================================================
 
 test_actor_registered_non_constructible() ->
@@ -350,7 +350,7 @@ test_abstract_error_new() ->
     ).
 
 %%====================================================================
-%% class_self_new tests (BT-893)
+%% class_self_new tests
 %%====================================================================
 
 test_class_self_new_success() ->
@@ -364,7 +364,7 @@ test_class_self_new_success() ->
 
 test_class_self_new_non_constructible() ->
     %% Integer's compiled new/0 raises, so class_self_new should raise error.
-    %% BT-2275: use the real loaded module so the compiled path is exercised.
+    %% Use the real loaded module so the compiled path is exercised.
     code:ensure_loaded('bt@stdlib@integer'),
     ?assertError(
         _,
@@ -372,7 +372,7 @@ test_class_self_new_non_constructible() ->
     ).
 
 %%====================================================================
-%% class_self_spawn tests (BT-893)
+%% class_self_spawn tests
 %%====================================================================
 
 test_class_self_spawn_success() ->
@@ -446,7 +446,7 @@ test_spawn_abstract_spawn_with() ->
     ).
 
 %%====================================================================
-%% class_self_spawn_as / class_self_spawn_with tests (BT-2004)
+%% class_self_spawn_as / class_self_spawn_with tests
 %%====================================================================
 
 test_class_self_spawn_as_success() ->
@@ -462,9 +462,9 @@ test_class_self_spawn_as_success() ->
     ),
     #{'okValue' := Obj} = Result,
     ?assert(erlang:whereis(Name) =/= undefined),
-    %% BT-3243: beamtalk_actor:'spawnAs'/3 (safe_spawn_named) always links —
+    %% beamtalk_actor:'spawnAs'/3 (safe_spawn_named) always links —
     %% it doubles as the real OTP supervisor child MFA for named children
-    %% (ADR 0079/BT-1990). do_class_self_named_spawn/6 must sever that link
+    %% (ADR 0079). do_class_self_named_spawn/6 must sever that link
     %% right after a successful `self spawnAs:`, since the caller here (this
     %% test process, standing in for a class method body) is not a
     %% supervisor — a later kill of the actor must not take it down too.
@@ -473,7 +473,7 @@ test_class_self_spawn_as_success() ->
     gen_server:stop(Obj#beamtalk_object.pid).
 
 test_class_self_spawn_as_stays_linked_in_supervisor_context() ->
-    %% BT-3243 supervisor-restart follow-up: when
+    %% Supervisor-restart follow-up: when
     %% beamtalk_supervisor:start_child_via_class_method/4 is on the call
     %% stack (a `SupervisionSpec withClassMethod:` child's factory calling
     %% `self spawnAs:`/`self spawnWith:as:`), it marks the process
@@ -593,7 +593,7 @@ test_class_self_spawn_with_abstract() ->
     ).
 
 %%====================================================================
-%% BT-2275: module-less (builder-built) generic instantiation
+%% Module-less (builder-built) generic instantiation
 %%====================================================================
 
 test_generic_new_defaults() ->
@@ -683,7 +683,7 @@ test_generic_new_inherited_defaults() ->
     end.
 
 %%====================================================================
-%% BT-2277: ancestor exit handling
+%% Ancestor exit handling
 %%====================================================================
 
 test_generic_new_ancestor_gone() ->
@@ -716,13 +716,13 @@ test_generic_new_ancestor_gone() ->
     end.
 
 %%====================================================================
-%% BT-2277: fun-backed instance dispatch from inside the class process
+%% Fun-backed instance dispatch from inside the class process
 %%====================================================================
 
 test_self_new_instance_method_dispatch() ->
     %% A fun-backed class method that does `self new` then sends an
     %% instance-method message runs entirely inside the class gen_server. Before
-    %% BT-2277 the `Pid =/= self()` guard reported `none` for the self case and
+    %% The `Pid =/= self()` guard reported `none` for the self case and
     %% dispatch fell through to does_not_understand; now the local instance-method
     %% cache resolves the block fun deadlock-free.
     GetA = fun(Self) -> maps:get(a, Self) end,
@@ -778,7 +778,7 @@ test_self_new_inherited_instance_method_dispatch() ->
 %% The function is internal; we reach it via handle_new/4 which calls it.
 %% When Module is not an atom (e.g. 42), the `when is_atom(Module)` guard
 %% fails → catch-all returns false → handle_new routes to generic path.
-%% BT-3106: the generic path's is_abstract lookup fails toward *rejecting*
+%% The generic path's is_abstract lookup fails toward *rejecting*
 %% instantiation on a metadata miss (not toward permitting it), so this test
 %% registers real (non-abstract) metadata rather than relying on the old
 %% permissive fall-through — see test_generic_new_abstract_with_args below.
@@ -794,7 +794,7 @@ test_module_loaded_with_new_non_atom() ->
         beamtalk_class_metadata:delete('BtciNonAtomMod')
     end.
 
-%% BT-3106 review follow-up: a genuine beamtalk_class_metadata miss on the
+%% A genuine beamtalk_class_metadata miss on the
 %% generic `new` path must fail toward *rejecting* instantiation (an
 %% internal_error), not toward silently treating the class as non-abstract.
 %% No beamtalk_class_metadata:insert/5 call here — 'BtciTrulyUnregistered'
@@ -810,7 +810,7 @@ test_generic_new_metadata_miss_rejects() ->
 
 %% Line 179: handle_new_generic chooses 'new:' selector when the abstract
 %% class is called with a non-empty args list (as opposed to [] → 'new').
-%% BT-3106: is_abstract is resolved by class name via
+%% is_abstract is resolved by class name via
 %% `beamtalk_class_metadata:lookup_is_abstract/1`, not the
 %% `beamtalk_class_is_abstract` process-dictionary flag (which resolved
 %% against the wrong class when `self new` runs somewhere other than the
@@ -875,7 +875,7 @@ register_builder_class(ClassName, Superclass, FieldSpecs, MethodSpecs) ->
 
 %% Like register_builder_class/4 but also installs class-side method funs
 %% (selector => fun(ClassSelf, ClassVars, A1..An)). Used to exercise the
-%% self-dispatch path (BT-2277): a class method that does `self new` then sends
+%% self-dispatch path: a class method that does `self new` then sends
 %% an instance message, all while inside the class gen_server.
 register_builder_class_with_class_methods(
     ClassName, Superclass, FieldSpecs, MethodSpecs, ClassMethodSpecs

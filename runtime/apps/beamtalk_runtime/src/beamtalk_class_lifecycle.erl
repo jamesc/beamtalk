@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Single teardown path for class removal (BT-3105).
+Single teardown path for class removal.
 
 `beamtalk_behaviour_intrinsics:classRemoveFromSystemByName/1` stops live
 actors, stops the class gen_server (whose `terminate/2` removes the
@@ -24,7 +24,7 @@ holding stale rows for the removed class:
 - `beamtalk_protocol_registry` — a protocol whose defining module is purged
   had no unregister path at all until this existed.
 - `beamtalk_compiler_server` — the ambient class-metadata cache
-  (`register_class/2`'s accumulator, BT-2916) never shrank, so the compiler
+  (`register_class/2`'s accumulator) never shrank, so the compiler
   kept type-checking against classes long gone from the runtime.
 - `beamtalk_workspace_meta` — the `class_sources` map (only `set_class_source/2`
   existed; no delete), so a removed class's source text leaked, including
@@ -37,11 +37,11 @@ requirement between them.
 
 `purge_class_registries/1` factors out the four *name-keyed* purges (xref,
 extensions, compiler cache, workspace class source) as their own exported
-step, reused by `classRenameTo` (ADR 0114, BT-3278) to retire a class's OLD
+step, reused by `classRenameTo` (ADR 0114) to retire a class's OLD
 identity after a rename installs the new one. Rename deliberately does NOT
 call `class_removed/2` itself for this: `purge_protocol/1` is keyed by
-`Module`, not by class name, and an in-memory-only rename (no disk flush,
-BT-3271) keeps the SAME BEAM module atom serving the class under its NEW
+`Module`, not by class name, and an in-memory-only rename (no disk flush)
+keeps the SAME BEAM module atom serving the class under its NEW
 name — purging protocols for that still-live module would wrongly erase
 registrations the renamed class still needs.
 
@@ -94,7 +94,7 @@ extensions, compiler cache, and workspace class source — WITHOUT touching
 module's doc for why `classRenameTo` must not call `class_removed/2` itself).
 
 Used by `class_removed/2` for a full class removal, and directly by
-`beamtalk_behaviour_intrinsics:classRenameTo/2` (ADR 0114, BT-3278) to retire
+`beamtalk_behaviour_intrinsics:classRenameTo/2` (ADR 0114) to retire
 a class's OLD name after installing it under a new one.
 """.
 -spec purge_class_registries(atom()) -> ok.
@@ -108,7 +108,7 @@ purge_class_registries(ClassName) ->
 -doc """
 Purge `ClassName`'s rows from `beamtalk_xref` — both instance- and
 class-side method entries, and its sends/references. Run best-effort via
-`beamtalk_extensions:safe_xref/1` (BT-2301's existing helper) so a dead or
+`beamtalk_extensions:safe_xref/1` (the existing helper) so a dead or
 restarting `beamtalk_xref` cannot raise out of this stage and skip the
 other four purges below it.
 """.
