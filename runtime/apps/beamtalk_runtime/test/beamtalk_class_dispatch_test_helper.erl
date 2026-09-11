@@ -6,7 +6,7 @@
 %%% **DDD Context:** Runtime — Object System
 
 -moduledoc """
-Test helper module for beamtalk_class_dispatch_tests (BT-1085).
+Test helper module for beamtalk_class_dispatch_tests.
 
 Provides minimal class method implementations so beamtalk_class_dispatch
 tests can exercise the successful invoke_class_method path without touching
@@ -86,7 +86,7 @@ class_testRaise(_ClassSelf, _ClassVars) ->
 
 -doc """
 Zero-argument class method that raises the connected `Program exit:` signal
-(BT-2691, ADR 0099 §3) — `throw({beamtalk_script_exit, 7})` — exactly as
+(ADR 0099 §3) — `throw({beamtalk_script_exit, 7})` — exactly as
 `beamtalk_program:'exit:'/1` does inside a method body. Exercises the
 script-exit pass-through in the class-method apply catch + the re-raise in
 class_send_dispatch/3.
@@ -97,7 +97,7 @@ class_testScriptExit(_ClassSelf, _ClassVars) ->
 
 -doc """
 Zero-argument class method that throws a `^` non-local return signal
-(ADR 0110 / BT-3036) — the state-carrying `{'$bt_nlr', Token, Value, State}`
+(ADR 0110) — the state-carrying `{'$bt_nlr', Token, Value, State}`
 4-tuple codegen throws for a foreign `^` unwinding out of a class method.
 Exercises the `{nlr_relay, Nlr, ST}` catch + the shadow read/erase in
 `invoke_class_method/7`.
@@ -120,7 +120,7 @@ erlang:apply receives [ClassSelf, ClassVars, Arg1, Arg2] → function/4.
 Zero-argument class method that returns a Result-wrapped
 `beamtalk_supervisor_new` tuple.
 
-BT-1981 + BT-1994 (ADR 0080 Phase 0a, option 2): exercises the
+ADR 0080 Phase 0a (option 2): exercises the
 supervisor_new rewrap path in `class_send_dispatch` where a
 freshly-started supervisor tuple — now wrapped in a `Result` tagged
 map by FFI coercion at the `(Erlang beamtalk_supervisor) startLink: self`
@@ -141,7 +141,7 @@ class_testSupervisorNew(_ClassSelf, _ClassVars) ->
 Zero-argument class method that returns a Result-wrapped
 `beamtalk_supervisor` tuple (the already_started / idempotent path).
 
-BT-1996 (ADR 0080 Phase 1): exercises the class_send_dispatch hook's
+ADR 0080 Phase 1: exercises the class_send_dispatch hook's
 pass-through behaviour for already-normalised supervisor tuples. The
 hook must NOT call run_initialize on this path — only the `_new` tag
 triggers initialization.
@@ -158,7 +158,7 @@ class_testAlreadyStarted(_ClassSelf, _ClassVars) ->
 -doc """
 Zero-argument class method that returns a Result error tagged map.
 
-BT-1996 (ADR 0080 Phase 1): exercises the class_send_dispatch hook's
+ADR 0080 Phase 1: exercises the class_send_dispatch hook's
 pass-through behaviour for error Results. The hook must NOT call
 run_initialize on error paths.
 """.
@@ -175,7 +175,7 @@ class_testSupError(_ClassSelf, _ClassVars) ->
 -doc """
 Zero-argument class method that reports where its output would go.
 
-BT-2963: returns the class gen_server's group leader *as seen from inside the
+Returns the class gen_server's group leader *as seen from inside the
 method body* together with the `beamtalk_entry_group_leader` key it was seeded
 with. `Console` writes resolve `standard_io` to the group leader, so the first
 element is exactly the sink a `Console printLine:` in this method would reach;

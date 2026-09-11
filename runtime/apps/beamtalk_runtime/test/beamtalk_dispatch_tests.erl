@@ -32,7 +32,7 @@ setup() ->
     %% The beamtalk_runtime app should handle starting necessary supervisors
     application:ensure_all_started(beamtalk_runtime),
 
-    %% BT-446: Ensure stdlib classes are registered (may have been killed by
+    %% Ensure stdlib classes are registered (may have been killed by
     %% earlier test teardowns since class processes are unlinked)
     beamtalk_stdlib:init(),
 
@@ -82,10 +82,10 @@ dispatch_test_() ->
                 fun test_out_of_order_registration/0},
             {"BT-429: super finds extension on superclass",
                 fun test_super_finds_extension_on_superclass/0},
-            %% BT-623: Additional coverage tests
+            %% Additional coverage tests
             {"lookup on non-existent class returns class_not_found",
                 fun test_lookup_nonexistent_class/0},
-            %% BT-1086: Uncovered path tests
+            %% Uncovered path tests
             {"actor instance displayString bypasses module dispatch",
                 fun test_actor_instance_displaystring/0},
             {"actor instance inspect returns an Inspector cursor",
@@ -107,11 +107,11 @@ dispatch_test_() ->
             {"super at Object for unknown method", fun test_super_object_unknown/0},
             {"lookup with class_not_found in superclass chain",
                 fun test_lookup_missing_superclass_in_chain/0},
-            %% BT-1512: Extension state threading tests (previously unwired)
+            %% Extension state threading tests
             {"arity-3 extension threads state correctly", fun test_extension_state_threading/0},
             {"arity-2 value-type extension via runtime dispatch",
                 fun test_value_type_extension_via_runtime_dispatch/0},
-            %% BT-1970: Additional coverage tests
+            %% Additional coverage tests
             {"extension with bad arity is caught and wrapped (BT-3199)",
                 fun test_extension_bad_arity/0},
             {"non-actor Self uses normal dispatch for displayString",
@@ -121,7 +121,7 @@ dispatch_test_() ->
             {"lookup succeeds with extensions table present",
                 fun test_lookup_with_extensions_table/0},
             {"super from class with no superclass returns DNU", fun test_super_no_superclass/0},
-            %% BT-1981: additional dispatch-pipeline coverage
+            %% Additional dispatch-pipeline coverage
             {"continue_to_superclass when superclass is not in registry",
                 fun test_continue_to_superclass_missing_registry/0},
             {"extension method that raises is caught and wrapped (BT-3199)",
@@ -132,7 +132,7 @@ dispatch_test_() ->
                 fun test_compiled_dispatch_returns_error_tuple/0},
             {"invoke_method with module=undefined continues to superclass",
                 fun test_invoke_method_module_undefined_continues/0},
-            %% BT-3482: class_chain_step's per-node probe must stay O(depth)
+            %% class_chain_step's per-node probe must stay O(depth)
             {"class_chain_step probes has_method_local/2 exactly once per level",
                 fun test_class_chain_step_probe_cost_is_linear_in_depth/0}
         ]
@@ -260,7 +260,7 @@ test_extension_priority() ->
     ok = beamtalk_extensions:init(),
 
     TestFun = fun(_Args, _Self, State) ->
-        %% BT-1512: Return {Result, NewState}
+        %% Return {Result, NewState}
         {extension_called, State}
     end,
 
@@ -360,7 +360,7 @@ ensure_counter_loaded() ->
     end.
 
 %%% ============================================================================
-%%% BT-344: Additional Test Cases
+%%% Additional Test Cases
 %%% ============================================================================
 
 %% Test responds_to for a method that exists
@@ -384,12 +384,12 @@ test_responds_to_inherited_method() ->
     ?assert(beamtalk_dispatch:responds_to(class, 'Counter')).
 
 %% Test extension method error propagation.
-%% BT-3199: a crashing extension is now caught and converted to a structured
+%% A crashing extension is caught and converted to a structured
 %% #beamtalk_error{} — matching invoke_method/6's crash-safety for compiled/
 %% inherited methods reached via the same hierarchy walk — instead of
-%% re-raising the bare Erlang exception (the pre-BT-3199 behavior, which left
-%% the caller with a raw crash and, for an actor receiver, could crash the
-%% actor process itself; see beamtalk_actor_tests:instance_side_extension_crash_test/0).
+%% re-raising the bare Erlang exception, which would leave the caller with a
+%% raw crash and, for an actor receiver, could crash the actor process
+%% itself; see beamtalk_actor_tests:instance_side_extension_crash_test/0.
 test_extension_error_propagation() ->
     ok = ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
@@ -418,7 +418,7 @@ test_extension_error_propagation() ->
         end)
     end.
 
-%% BT-3199 follow-up (post-review): a `^` non-local return in flight must
+%% A `^` non-local return in flight must
 %% pass through invoke_extension/6 untouched for a value-type (arity-2)
 %% extension, which runs inline in the caller's own process — the throw is a
 %% control-flow signal aimed at a catch further up this *same* call stack,
@@ -450,7 +450,7 @@ test_extension_nlr_passthrough() ->
         end)
     end.
 
-%% BT-3199 follow-up (post-review): a connected `Program exit: N` (ADR 0099
+%% A connected `Program exit: N` (ADR 0099
 %% §3) must likewise pass through untouched rather than be reported as a
 %% method failure. Mirrors
 %% beamtalk_class_dispatch_tests:test_invoke_script_exit_passthrough/0 (the
@@ -499,7 +499,7 @@ test_responds_to_extension_method() ->
     end.
 
 %%% ============================================================================
-%%% BT-283: Performance and Correctness Tests (ADR 0032 Phase 1)
+%%% Performance and Correctness Tests (ADR 0032 Phase 1)
 %%% ============================================================================
 
 %% Benchmark: chain walk dispatch for inherited methods
@@ -599,7 +599,7 @@ test_out_of_order_registration() ->
     gen_server:stop(ChildPid),
     gen_server:stop(ParentPid).
 
-%% BT-429: Test that super/5 finds extension methods registered on a superclass.
+%% Test that super/5 finds extension methods registered on a superclass.
 %% Register extension on Actor class, verify it's found via super from Counter.
 test_super_finds_extension_on_superclass() ->
     ok = ensure_counter_loaded(),
@@ -607,7 +607,7 @@ test_super_finds_extension_on_superclass() ->
 
     %% Register an extension method on Actor (Counter's superclass)
     TestFun = fun(_Args, _Self, State0) ->
-        %% BT-1512: Return {Result, NewState}
+        %% Return {Result, NewState}
         {super_extension_called, State0}
     end,
 
@@ -636,7 +636,7 @@ test_super_finds_extension_on_superclass() ->
     end.
 
 %%% ============================================================================
-%%% BT-1512: Extension method state threading tests
+%%% Extension method state threading tests
 %%% ============================================================================
 
 %% Test: arity-3 (actor) extension threads state correctly via runtime dispatch
@@ -700,7 +700,7 @@ test_value_type_extension_via_runtime_dispatch() ->
     end.
 
 %%% ============================================================================
-%%% BT-623: Additional Coverage Tests
+%%% Additional Coverage Tests
 %%% ============================================================================
 
 %% Test lookup on a completely non-existent class
@@ -811,7 +811,7 @@ test_lookup_missing_superclass_in_chain() ->
     gen_server:stop(ChildPid).
 
 %%% ============================================================================
-%%% BT-1086: Uncovered path tests
+%%% Uncovered path tests
 %%% ============================================================================
 
 %% Test that displayString sent to an actor instance bypasses the compiled
@@ -837,7 +837,7 @@ test_actor_instance_displaystring() ->
 
     ?assertMatch({reply, _, _}, Result).
 
-%% ADR 0095 Phase 3 (BT-2504): inspect sent to an actor instance now flows
+%% ADR 0095 Phase 3: inspect sent to an actor instance flows
 %% through normal dispatch into beamtalk_object_ops, returning an Inspector
 %% cursor (a tagged map) rather than a printString binary. (Here `pid = self()`
 %% is the EUnit process, not a live Beamtalk actor, so the cursor classifies as
@@ -1055,7 +1055,7 @@ test_actor_default_displaystring_bypass() ->
     ?assertMatch({reply, <<"Actor(Counter, ", _/binary>>, _}, Result).
 
 %%% ============================================================================
-%%% BT-1970: Additional coverage tests
+%%% Additional coverage tests
 %%% ============================================================================
 
 %% Test: extension with bad arity raises {bad_extension_arity, N}
@@ -1074,8 +1074,8 @@ test_extension_bad_arity() ->
     Self = make_ref(),
 
     try
-        %% BT-3199: caught and wrapped like any other extension-body crash,
-        %% rather than raising the raw {bad_extension_arity, 1} tuple.
+        %% Caught and wrapped like any other extension-body crash, rather
+        %% than raising the raw {bad_extension_arity, 1} tuple.
         Result = beamtalk_dispatch:lookup(badArityExt, [], Self, State, 'Counter'),
         ?assertMatch({error, #beamtalk_error{selector = badArityExt}}, Result)
     after
@@ -1144,7 +1144,7 @@ test_lookup_with_extensions_table() ->
     Result = beamtalk_dispatch:lookup(increment, [], Self, State, 'Counter'),
     ?assertMatch({reply, _, _}, Result).
 
-%% BT-1981: continue_to_superclass path when the superclass is registered
+%% continue_to_superclass path when the superclass is registered
 %% in metadata but its class process is not in the registry. The walk
 %% should surface class_not_found rather than crash.
 test_continue_to_superclass_missing_registry() ->
@@ -1178,8 +1178,7 @@ test_continue_to_superclass_missing_registry() ->
         code:delete(bt_test_nodisp_leaf)
     end.
 
-%% BT-1981: extension method that raises is logged.
-%% BT-3199: ... and, since then, caught and converted to a structured
+%% Extension method that raises is caught and converted to a structured
 %% #beamtalk_error{} rather than re-raised — see test_extension_error_propagation/0
 %% above for the fuller explanation; this test pins the same contract via a
 %% second, independently-registered crashing extension.
@@ -1205,7 +1204,7 @@ test_extension_raises_reraised() ->
         end)
     end.
 
-%% BT-1981: invoke_method with module_name=undefined continues to superclass.
+%% invoke_method with module_name=undefined continues to superclass.
 %% Covers the 'undefined' branch in invoke_method which routes to
 %% continue_to_superclass (line 320), and its recursive lookup (line 418)
 %% when the superclass has the method.
@@ -1272,7 +1271,7 @@ test_invoke_method_module_undefined_continues() ->
         code:delete(ParentModule)
     end.
 
-%% BT-1981: compiled dispatch/4 returning a 3-tuple error is normalized to
+%% compiled dispatch/4 returning a 3-tuple error is normalized to
 %% a 2-tuple {error, Error} via the 'Other/normalize' path of invoke_method.
 test_compiled_dispatch_returns_error_tuple() ->
     Forms = [
@@ -1322,7 +1321,7 @@ test_compiled_dispatch_returns_error_tuple() ->
         code:delete(bt_test_dispatch_err_stub)
     end.
 
-%% BT-1981: super finds extension on superclass (covers super -> extension -> invoke).
+%% super finds extension on superclass (covers super -> extension -> invoke).
 test_super_extension_invoke() ->
     ok = ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
@@ -1365,11 +1364,11 @@ test_super_no_superclass() ->
     end.
 
 %%% ============================================================================
-%%% BT-3482: class_chain_step per-node probe cost regression
+%%% class_chain_step per-node probe cost regression
 %%% ============================================================================
 
 -doc """
-Regression test for BT-3482: `class_chain_step/6`'s per-node probe must
+Regression test: `class_chain_step/6`'s per-node probe must
 answer "does *this exact class* define `Selector`", never "does this class
 or any ancestor" — otherwise every level's `dispatch/4` re-entry via
 `super/5` repeats the (already inflated) probe cost of the level above it,
@@ -1377,10 +1376,10 @@ turning the documented ~O(depth) hierarchy walk into O(depth²) for the
 common unoverridden-selector case.
 
 Builds a chain of `Depth` compiled stub classes mirroring real actor codegen
-(BT-3467's `SuperclassDelegation::Dynamic`): each class's `has_method/1`
+(`SuperclassDelegation::Dynamic`): each class's `has_method/1`
 delegates to its superclass dynamically via `beamtalk_dispatch:responds_to/2`
 (so a `respondsTo:`-facing caller still sees a hot-reloaded ancestor
-immediately), while `has_method_local/1` (BT-3482) never delegates — only
+immediately), while `has_method_local/1` never delegates — only
 the class actually defining the selector answers `true`. Only the deepest
 class in the chain defines `bt3482DeepMethod` locally.
 
@@ -1389,8 +1388,8 @@ one `beamtalk_dispatch:lookup/5` call for the inherited selector and asserts:
 - `has_method_local/2` is called exactly `Depth` times — one per hierarchy
   level, the O(depth) contract `class_chain_step/6` is supposed to uphold.
 - `has_method/2` (the dynamic-delegating fallback) is never called at all —
-  confirming the per-node probe doesn't fall back to the eager/delegating
-  form BT-3467 introduced.
+  confirming the per-node probe doesn't fall back to that eager/delegating
+  form.
 """.
 test_class_chain_step_probe_cost_is_linear_in_depth() ->
     Depth = 6,

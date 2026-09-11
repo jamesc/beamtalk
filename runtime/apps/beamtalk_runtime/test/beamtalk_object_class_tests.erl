@@ -25,14 +25,14 @@ setup() ->
         Pid ->
             Pid
     end,
-    %% BT-1768: Ensure ETS tables are owned by the test process (not the first
+    %% Ensure ETS tables are owned by the test process (not the first
     %% class process), so they survive class process death during crash recovery tests.
     beamtalk_class_registry:ensure_hierarchy_table(),
     beamtalk_class_registry:ensure_module_table(),
     beamtalk_class_registry:ensure_pid_table().
 
 teardown(_) ->
-    %% Clean up ETS pending load errors table entries (BT-738)
+    %% Clean up ETS pending load errors table entries
     try
         ets:delete_all_objects(beamtalk_pending_load_errors)
     catch
@@ -138,7 +138,7 @@ teardown(_) ->
             beamtalk_class_ConstructibleDefaultTest,
             beamtalk_class_HandleInfoTest,
             beamtalk_class_InstanceMethodsTest,
-            %% BT-1982 additions
+            %% Additional coverage
             beamtalk_class_BT1982LocalCM,
             beamtalk_class_BT1982LocalIM,
             beamtalk_class_BT1982PutMethod3,
@@ -151,19 +151,19 @@ teardown(_) ->
             beamtalk_class_BT1982HasClassNew
         ]
     ),
-    %% Clean up unified class metadata table entries (BT-2222)
+    %% Clean up unified class metadata table entries
     try
         ets:delete_all_objects(beamtalk_class_metadata)
     catch
         _:_ -> ok
     end,
-    %% BT-737: Clean up collision warnings table entries
+    %% Clean up collision warnings table entries
     try
         ets:delete_all_objects(beamtalk_class_warnings)
     catch
         _:_ -> ok
     end,
-    %% BT-1768: Clean up pid reverse index entries
+    %% Clean up pid reverse index entries
     try
         ets:delete_all_objects(beamtalk_class_pids)
     catch
@@ -360,7 +360,7 @@ method_test_() ->
         ]
     end}.
 
-%% BT-323: Tests for beamtalk_method_resolver domain service
+%% Tests for beamtalk_method_resolver domain service
 method_resolver_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -543,7 +543,7 @@ whereis_nonexistent_class_test() ->
     ?assertEqual(undefined, Result).
 
 %%====================================================================
-%% BT-344: Async cast dispatch (Future protocol) tests
+%% Async cast dispatch (Future protocol) tests
 %%====================================================================
 
 async_cast_methods_test_() ->
@@ -687,7 +687,7 @@ async_cast_non_tuple_ignored_test_() ->
     end}.
 
 %%====================================================================
-%% BT-344: handle_info / terminate / code_change tests
+%% handle_info / terminate / code_change tests
 %%====================================================================
 
 handle_info_unknown_test_() ->
@@ -726,7 +726,7 @@ terminate_graceful_test_() ->
     end}.
 
 %%====================================================================
-%% BT-510: ETS Class Hierarchy Tests
+%% ETS Class Hierarchy Tests
 %%====================================================================
 
 %% Test that class registration populates the hierarchy ETS table
@@ -868,7 +868,7 @@ hierarchy_methods_normal_order_test_() ->
         ]
     end}.
 
-%% BT-510: Test that ETS hierarchy records orphan relationships
+%% Test that ETS hierarchy records orphan relationships
 hierarchy_orphan_registration_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -895,10 +895,10 @@ hierarchy_orphan_registration_test_() ->
     end}.
 
 %%====================================================================
-%% BT-525: raise/1 inside handle_call — unwrap_class_call idempotency
+%% raise/1 inside handle_call — unwrap_class_call idempotency
 %%====================================================================
 
-%% Compile a minimal test module in-memory for BT-525 tests.
+%% Compile a minimal test module in-memory for these tests.
 %% Returns the module name atom. The module exports new/0 (returns
 %% an empty map) so compute_is_constructible/2 sees it as constructible.
 compile_bt525_test_module() ->
@@ -916,8 +916,8 @@ compile_bt525_test_module() ->
 
 %% Test that new: with a non-map argument raises a singly-wrapped
 %% type_error via class_send (exercises raise → catch → unwrap_class_call).
-%% Before BT-525 fix, raise/1 in handle_call produced an already-wrapped
-%% Exception map, and unwrap_class_call called raise/1 again → double-wrap.
+%% Guards against raise/1 in handle_call producing an already-wrapped
+%% Exception map that unwrap_class_call then re-wraps via raise/1 → double-wrap.
 new_with_non_map_raises_type_error_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -1000,7 +1000,7 @@ new_with_non_map_not_double_wrapped_test_() ->
     end}.
 
 %%====================================================================
-%% BT-737: Class Collision Warning Tests
+%% Class Collision Warning Tests
 %%====================================================================
 
 %% Test that update_class with DIFFERENT module emits a warning in ETS.
@@ -1110,7 +1110,7 @@ new_on_primitive_not_double_wrapped_test_() ->
         end}.
 
 %%====================================================================
-%% BT-742: Package-aware collision warning drain tests
+%% Package-aware collision warning drain tests
 %%====================================================================
 
 %% Test that draining by qualified name only removes the target package's
@@ -1195,7 +1195,7 @@ extract_package_from_module_test_() ->
     end}.
 
 %%====================================================================
-%% BT-738: Stdlib class shadowing protection tests
+%% Stdlib class shadowing protection tests
 %%====================================================================
 
 %% Test that update_class returns a structured error when user code tries
@@ -1271,7 +1271,7 @@ update_class_stdlib_to_stdlib_no_error_test_() ->
     end}.
 
 %% Test that update_class with two non-stdlib modules does NOT trigger stdlib
-%% shadowing protection — it only emits a cross-package collision warning (BT-737).
+%% shadowing protection — it only emits a cross-package collision warning.
 update_class_non_stdlib_no_shadowing_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -1308,11 +1308,11 @@ update_class_non_stdlib_no_shadowing_test_() ->
     end}.
 
 %%====================================================================
-%% Multi-class stdlib shadowing integration tests (BT-751)
+%% Multi-class stdlib shadowing integration tests
 %%====================================================================
 
-%% BT-751: Integration test for the multi-class short-circuit behaviour
-%% validated at the codegen level by BT-749.
+%% Integration test for the multi-class short-circuit behaviour
+%% validated at the codegen level.
 %%
 %% Simulates the generated register_class/0 for a two-class module where
 %% the first class (Integer) shadows a stdlib class.  The short-circuit
@@ -1340,7 +1340,7 @@ multi_class_stdlib_shadowing_short_circuits_test_() ->
                 %%   Class 0: "Integer" (shadows stdlib)
                 %%   Class 1: "MyHelper" (innocent bystander)
                 %%
-                %% Generated Core Erlang (BT-749) looks like:
+                %% Generated Core Erlang looks like:
                 %%   _Reg0 = case start(...Integer...) of ... end
                 %%   case _Reg0 of
                 %%     <{'error', Err}> -> {'error', Err}   % short-circuit
@@ -1427,13 +1427,13 @@ multi_class_stdlib_shadowing_short_circuits_test_() ->
     end}.
 
 %%====================================================================
-%% BT-755: class method self-call (new/new: on own class)
+%% Class method self-call (new/new: on own class)
 %%====================================================================
 
 -doc """
 Verify class_send raises a clean instantiation_error when ClassPid =:= self().
 
-BT-755: A class method calling new: on its own class would deadlock the
+A class method calling new: on its own class would deadlock the
 gen_server with a {calling_self,...} OTP error.  The guard added in
 beamtalk_class_dispatch detects this upfront and raises a structured error.
 """.
@@ -1477,7 +1477,7 @@ class_method_self_call_spawn_with_test() ->
 -doc """
 Verify the error contains the class name extracted from the registered pid name.
 
-BT-755: class_name_from_pid/1 strips 'beamtalk_class_' from the registered
+class_name_from_pid/1 strips 'beamtalk_class_' from the registered
 name to populate the error's class field. Exercise the full error path by
 spawning a process registered as a class and calling class_send on self().
 """.
@@ -1599,7 +1599,7 @@ apply_class_info_preserves_dynamic_class_superclass_test_() ->
     end}.
 
 %%====================================================================
-%% local_call/3 Tests (BT-1664)
+%% local_call/3 Tests
 %%====================================================================
 
 local_call_test_() ->
@@ -1708,7 +1708,7 @@ test_local_call_non_object() ->
     ).
 
 %%====================================================================
-%% BT-1768: Class Process Crash Detection and Recovery
+%% Class Process Crash Detection and Recovery
 %%====================================================================
 
 %% Test that killing a class process and looking it up via restart_class
@@ -2105,7 +2105,7 @@ get_instance_methods_test_() ->
     end}.
 
 %%% ============================================================================
-%%% BT-1982: Additional coverage for class system modules (→ 90%)
+%%% Additional coverage for class system modules (→ 90%)
 %%% ============================================================================
 
 %% local_class_methods/1 returns the selector list (0% → covered).
@@ -2375,11 +2375,10 @@ bt1982_find_inherited_class_method_test_() ->
         ]
     end}.
 
-%% BT-2195: class_method_source flows from ClassInfo through init/1 into the
+%% class_method_source flows from ClassInfo through init/1 into the
 %% per-class state and shows up in the `{class_method, Sel}` CompiledMethod
-%% reply's `__source__` field. Closes the gap that previously hard-coded
-%% `<<"">>` and made SystemNavigation's source-text scanners blind to
-%% class-side bodies.
+%% reply's `__source__` field, so SystemNavigation's source-text scanners
+%% can see class-side bodies instead of a hard-coded `<<"">>`.
 bt2195_class_method_source_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -2406,7 +2405,7 @@ bt2195_class_method_source_test_() ->
                 ?assertEqual(Source, maps:get('__source__', Result))
             end),
             %% Selectors without a source entry fall back to empty binary —
-            %% preserves the pre-BT-2195 default for primitives / dynamic
+            %% preserves the default for primitives / dynamic
             %% methods that have no source.
             ?_test(begin
                 Method = fun(_, CVars, _) -> {reply, cm_ok, CVars} end,
@@ -2430,7 +2429,7 @@ bt2195_class_method_source_test_() ->
     end}.
 
 %%====================================================================
-%% ADR 0087 Phase 2 (BT-2298): method_xref forwarded to beamtalk_xref
+%% ADR 0087 Phase 2: method_xref forwarded to beamtalk_xref
 %% during class creation.
 %%====================================================================
 
@@ -2583,7 +2582,7 @@ method_xref_forwarded_on_class_creation_test_() ->
                     [], beamtalk_xref:defined_selectors('XrefNoIndexClass', false)
                 )
             end),
-            %% BT-2298 (CodeRabbit review): update_class/2 must refresh the xref
+            %% update_class/2 must refresh the xref
             %% index. The metaclass-tower stubs register with bootstrap rows, then
             %% get update_class'd by their compiled module — the compiled rows must
             %% replace the stub rows, not accumulate alongside them.
@@ -2659,7 +2658,7 @@ method_xref_forwarded_on_class_creation_test_() ->
     end}.
 
 %%====================================================================
-%% ADR 0087 Phase 4 (BT-2301): put_method/4 re-indexes the patched
+%% ADR 0087 Phase 4: put_method/4 re-indexes the patched
 %% method in beamtalk_xref from its Source.
 %%====================================================================
 

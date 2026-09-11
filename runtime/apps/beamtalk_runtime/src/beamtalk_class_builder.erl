@@ -43,7 +43,7 @@ timeout. The builder is single-use: create, configure, register, done.
 %% API
 -export([register/1]).
 
-%% BT-3090: selector-shape helpers, shared with the workspace app via
+%% Selector-shape helpers, shared with the workspace app via
 %% `beamtalk_runtime_api` — see the moduledoc on `is_keyword_selector/1`.
 -export([is_keyword_selector/1, selector_arity/1]).
 
@@ -62,7 +62,7 @@ Accepts a map with the following keys:
   - `modifiers`    — list (optional): [:abstract, :sealed, ...]
   - `builderPid`   — pid (optional): builder process to stop after registration
 
-Additional keys for compiled classes (BT-837 / ADR 0038 Phase 3):
+Additional keys for compiled classes (ADR 0038 Phase 3):
   - `moduleName`   — atom: compiled Erlang module name (default: className)
   - `classMethods` — map: class method specs (default: #{})
   - `methodSource`  — map: selector => binary source text (default: #{})
@@ -70,7 +70,7 @@ Additional keys for compiled classes (BT-837 / ADR 0038 Phase 3):
   - `classDoc`     — binary | none: class doc comment (default: none)
   - `methodDocs`   — map: selector => binary doc text (default: #{})
 
-Programmatic metadata-parity keys (BT-2268 / ADR 0084 Phase 3). These let a
+Programmatic metadata-parity keys (ADR 0084 Phase 3). These let a
 builder- or browser-built class reach metadata parity with a file-defined one
 (`:help` signatures, doc reflection, return-type metadata, `meta`, and
 constructibility). Each is optional; `nil`/`undefined` falls back to the same
@@ -97,14 +97,14 @@ register(BuilderState) when is_map(BuilderState) ->
     MethodSpecs = maps:get(methodSpecs, BuilderState, #{}),
     Modifiers = maps:get(modifiers, BuilderState, []),
     BuilderPid = maps:get(builderPid, BuilderState, undefined),
-    %% BT-791: stdlib_mode bypasses sealed-superclass check so stdlib classes
+    %% stdlib_mode bypasses the sealed-superclass check so stdlib classes
     %% like Character (extends sealed Integer) can load via on_load hooks.
     StdlibMode = maps:get(stdlibMode, BuilderState, false),
     case validate(ClassName, SuperclassRef, StdlibMode) of
         {error, _} = Err ->
             Err;
         ok when is_map(FieldSpecs), is_map(MethodSpecs) ->
-            %% BT-2276: a computed (non-block) classMethods: fun of the wrong
+            %% A computed (non-block) classMethods: fun of the wrong
             %% arity would otherwise install successfully and only crash with an
             %% opaque error:undef when the class method is first called. Validate
             %% each class-method fun's arity here and surface a structured
@@ -195,7 +195,7 @@ The Beamtalk compiler (semantic_analysis) enforces it at compile time,
 and stdlib classes compiled with stdlib_mode are explicitly permitted to
 subclass sealed classes (e.g. Character extends Integer). Enforcing it
 again at runtime causes stdlib on_load hooks to fail when topo-sorted
-stdlib loading registers Integer (sealed) before Character (BT-791).
+stdlib loading registers Integer (sealed) before Character.
 """.
 -spec validate(term(), term(), boolean()) -> ok | {error, #beamtalk_error{}}.
 validate(nil, _, _) ->
@@ -227,7 +227,7 @@ validate(_ClassName, SuperclassRef, _) when
 validate(_ClassName, SuperclassRef, false) ->
     validate_superclass_not_sealed(SuperclassRef);
 validate(_ClassName, _SuperclassRef, true) ->
-    %% BT-791: stdlib mode — skip sealed check so stdlib on_load hooks succeed.
+    %% Stdlib mode — skip sealed check so stdlib on_load hooks succeed.
     ok.
 
 -doc """
@@ -235,7 +235,7 @@ Check that the superclass is not sealed (user code enforcement).
 
 Looks up the superclass class process and checks `is_sealed`. Only called
 when StdlibMode = false (user-invoked classBuilder). Stdlib on_load hooks
-pass StdlibMode = true and skip this check entirely (BT-791).
+pass StdlibMode = true and skip this check entirely.
 """.
 -spec validate_superclass_not_sealed(atom() | pid() | #beamtalk_object{}) ->
     ok | {error, #beamtalk_error{}}.
@@ -289,11 +289,9 @@ resolve_superclass_name(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
 -doc """
 Build a ClassInfo map for beamtalk_object_class:start/2.
 
-BT-837: Accepts the full builder state as the last argument to extract
+Accepts the full builder state as the last argument to extract
 additional metadata for compiled classes (moduleName, classMethods,
-methodSource, classState, classDoc, methodDocs).
-
-BT-873: Dynamic path (BT-838) removed. All classes go through the
+methodSource, classState, classDoc, methodDocs). All classes go through the
 compiled path regardless of whether moduleName is present.
 """.
 -spec build_class_info(atom(), atom(), map(), map(), list(), map()) -> map().
@@ -335,17 +333,17 @@ build_compiled_class_info(
 ) ->
     InstanceMethods = build_method_map(MethodSpecs),
     Module = maps:get(moduleName, BuilderState, ClassName),
-    %% ADR 0084 / BT-2266: wrap class-method specs the same way instance methods
+    %% ADR 0084: wrap class-method specs the same way instance methods
     %% are wrapped, so builder-supplied funs become dispatchable #{block, arity}
     %% entries (compiled #{arity => N} references pass through unchanged). This is
     %% what makes builder class methods callable and seedable into the retrieval
     %% store at registration time.
     ClassMethods = build_method_map(maps:get(classMethods, BuilderState, #{})),
-    %% BT-877: Read is_constructible from compiler inference.
+    %% Read is_constructible from compiler inference.
     %% The compiler emits isConstructible based on the `new => self error:` pattern.
     %% Superclass inheritance is handled at init/query time via the class hierarchy.
     IsConstructible = maps:get(isConstructible, BuilderState, undefined),
-    %% BT-2275: Preserve the full fieldSpecs map (field => default value) so a
+    %% Preserve the full fieldSpecs map (field => default value) so a
     %% module-less builder class can build a generic instance from the declared
     %% defaults. `fields` carries only the names (the convergence target —
     %% compiled value-type metadata also stores names only, baking the defaults
@@ -363,7 +361,7 @@ build_compiled_class_info(
         is_sealed => IsSealed,
         is_abstract => IsAbstract
     },
-    %% BT-3439: per-instance-variable declaration-line index, the state-var
+    %% Per-instance-variable declaration-line index, the state-var
     %% analogue of methodXref below. Wrapped as the outermost maybe_put
     %% (rather than nested inside the existing pyramid, next to methodXref)
     %% purely to avoid hand-formatting yet another level of an already very
@@ -375,14 +373,14 @@ build_compiled_class_info(
     maybe_put(
         state_var_xref,
         maps:get(stateVarXref, BuilderState, []),
-        %% BT-837: Pass through optional compiler metadata if present
+        %% Pass through optional compiler metadata if present
         maybe_put(
             is_constructible,
             IsConstructible,
             maybe_put(
                 method_source,
                 maps:get(methodSource, BuilderState, undefined),
-                %% BT-2195: Class-side method source is the symmetric companion to
+                %% Class-side method source is the symmetric companion to
                 %% method_source. Used by SystemNavigation source-text scanners.
                 maybe_put(
                     class_method_source,
@@ -419,12 +417,12 @@ build_compiled_class_info(
                                                     maybe_put(
                                                         meta,
                                                         maps:get(meta, BuilderState, undefined),
-                                                        %% ADR 0087 Phase 2 (BT-2298):
+                                                        %% ADR 0087 Phase 2:
                                                         %% per-method xref index baked by
                                                         %% codegen. Defaults to [] (not
                                                         %% undefined) so init/1 always gets
                                                         %% a list; maybe_put inserts [] as-is.
-                                                        %% ADR 0087 Phase 4 (BT-2301): when
+                                                        %% ADR 0087 Phase 4: when
                                                         %% codegen did not bake methodXref
                                                         %% (runtime-built ClassBuilder with
                                                         %% only methodSource: populated),
@@ -469,7 +467,7 @@ maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
 
 -doc """
-Compute the per-method xref index for a ClassBuilder-built class (BT-2301).
+Compute the per-method xref index for a ClassBuilder-built class.
 
 Prefers a codegen-baked `methodXref` list when present (the compiled path,
 ADR 0087 Phase 2). When absent — a runtime-constructed ClassBuilder that only
@@ -506,8 +504,8 @@ builder_method_xref(BuilderState) ->
     end.
 
 -doc """
-Return the set of selectors installed by a `methodSpecs:`/`classMethods:` map
-(BT-2301). Non-map inputs yield the empty set.
+Return the set of selectors installed by a `methodSpecs:`/`classMethods:` map.
+Non-map inputs yield the empty set.
 """.
 -spec installed_selectors(term()) -> sets:set(atom()).
 installed_selectors(SpecMap) when is_map(SpecMap) ->
@@ -516,8 +514,8 @@ installed_selectors(_Other) ->
     sets:new().
 
 -doc """
-Derive xref entries from a `selector => Source` map for one method side
-(BT-2301). `ClassSide` is `false` for instance methods, `true` for class-side.
+Derive xref entries from a `selector => Source` map for one method side.
+`ClassSide` is `false` for instance methods, `true` for class-side.
 Only selectors present in `Installed` (the selectors actually installed on the
 class) are emitted, so xref never advertises a method the class cannot
 dispatch. Non-map inputs (or non-atom/non-binary pairs) are skipped.
@@ -546,7 +544,7 @@ source_map_to_xref(_NotMap, _ClassSide, _Installed) ->
     [].
 
 -doc """
-Validate the arity of every class-method fun in a classMethods: spec (BT-2276).
+Validate the arity of every class-method fun in a classMethods: spec.
 
 A class-method fun is dispatched as `apply(Fun, [ClassSelf, ClassVars | Args])`
 (`beamtalk_class_dispatch:apply_class_method_fun/6`), so a fun for `Selector`
@@ -591,7 +589,7 @@ validate_class_method_arities(_ClassName, _Other) ->
     ok.
 
 -doc """
-Build the structured #beamtalk_error{} for a wrong-arity class-method fun (BT-2276).
+Build the structured #beamtalk_error{} for a wrong-arity class-method fun.
 
 The reported arities are the dispatch arities (`selector_arity + 2`: the leading
 ClassSelf and ClassVars plus one per selector argument). The hint frames the
@@ -617,7 +615,7 @@ class_method_arity_error(ClassName, Selector, Expected, Actual) ->
     ).
 
 -doc """
-Count the selector arity of a class-method selector atom (BT-2276).
+Count the selector arity of a class-method selector atom.
 
 A keyword selector *ends* with `:` and has one argument slot per colon
 (`addTo:from:` -> 2). A unary selector has no colon (`answer` -> 0). A binary
@@ -629,7 +627,7 @@ The trailing-colon guard mirrors the compiler-side `selector_from_symbol`
 (`class_builder_source.rs`), which rejects malformed selectors that contain an
 interior colon without a trailing one (e.g. `'at:put'`). Such selectors are not
 valid keyword selectors, so counting their interior colons would yield a
-misleading expected arity and a spurious `arity_mismatch` (BT-2278). A malformed
+misleading expected arity and a spurious `arity_mismatch`. A malformed
 selector is treated as unary (arity 0) here; the matching computed-fun arity is
 then `0 + 2`, the same shape the dispatcher uses for a unary selector.
 """.
@@ -653,16 +651,14 @@ selector_arity(Selector) when is_atom(Selector) ->
 
 -doc """
 True when a selector is a keyword selector — non-empty and ending with `:`
-(BT-3090: canonical for atom, binary, and string selector representations).
+(canonical for atom, binary, and string selector representations).
 
-Before BT-3090 this exact "non-empty and ends with `:`" check was re-typed as
-`beamtalk_repl_eval:is_keyword_selector/1` (binary) and
-`beamtalk_erlang_help:is_keyword_name/1` (binary); both now delegate here via
-`beamtalk_runtime_api:is_keyword_selector/1`. All three copies already agreed
-on this boolean (a malformed selector like `'at:put'` — interior colon, no
-trailing colon — correctly answers `false` in all of them, since none of them
-inspects anything but the last character), so consolidating removes the
-duplication without changing behavior. `selector_arity/1` below is what
+`beamtalk_repl_eval:is_keyword_selector/1` and
+`beamtalk_erlang_help:is_keyword_name/1` both delegate here via
+`beamtalk_runtime_api:is_keyword_selector/1`, so this is the single
+implementation of "non-empty and ends with `:`" (a malformed selector like
+`'at:put'` — interior colon, no trailing colon — correctly answers `false`,
+since only the last character is inspected). `selector_arity/1` below is what
 actually needs the "malformed selector = arity 0, not 1" guard this check
 enables — see its doc.
 """.
@@ -691,7 +687,7 @@ count_colons(Chars) ->
         Chars
     ).
 
--doc "Mirror of the compiler's is_binary_selector_char for BT-2276 selector arity.".
+-doc "Mirror of the compiler's is_binary_selector_char for selector arity.".
 -spec is_binary_selector_char(char()) -> boolean().
 is_binary_selector_char($+) -> true;
 is_binary_selector_char($-) -> true;
@@ -746,7 +742,7 @@ maybe_stop_builder(undefined) ->
 maybe_stop_builder(Pid) when is_pid(Pid) ->
     case Pid =:= self() of
         true ->
-            %% BT-838: Builder calling register from its own gen_server handler.
+            %% Builder calling register from its own gen_server handler.
             %% Cannot stop self synchronously — the process will be cleaned up
             %% when the caller drops the reference.
             ok;
@@ -762,7 +758,7 @@ maybe_stop_builder(Pid) when is_pid(Pid) ->
     end.
 
 -doc """
-Notify class_load_callback module that a class was loaded (BT-1020).
+Notify class_load_callback module that a class was loaded.
 Checks application env `class_load_callback` — same pattern as `actor_spawn_callback`.
 Safe to call if the callback module is not running.
 """.
@@ -802,7 +798,7 @@ notify_class_loaded(ClassName) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-%%% --- selector_arity/1 (BT-2276, BT-2278) ---
+%%% --- selector_arity/1 ---
 
 selector_arity_unary_test() ->
     %% Unary selector: no colon, not all operator chars -> 0.
@@ -824,7 +820,7 @@ selector_arity_keyword_test() ->
     ?assertEqual(3, selector_arity('a:b:c:')).
 
 selector_arity_malformed_interior_colon_test() ->
-    %% BT-2278: an interior colon without a trailing one is NOT a keyword
+    %% An interior colon without a trailing one is NOT a keyword
     %% selector. It must not be counted as a keyword (would yield a misleading
     %% arity and a spurious arity_mismatch). Treated as unary (arity 0).
     ?assertEqual(0, selector_arity('at:put')),
@@ -845,7 +841,7 @@ is_keyword_selector_test() ->
     ?assertNot(is_keyword_selector("answer")),
     ?assertNot(is_keyword_selector("")).
 
-%%% --- validate_class_method_arities/2 (BT-2276, BT-2278) ---
+%%% --- validate_class_method_arities/2 ---
 
 validate_class_method_arities_keyword_ok_test() ->
     %% A keyword selector 'at:put:' (arity 2) dispatches with arity 2 + 2 = 4.
@@ -865,7 +861,7 @@ validate_class_method_arities_keyword_mismatch_test() ->
     ?assertEqual('Demo', Err#beamtalk_error.class).
 
 validate_class_method_arities_malformed_no_false_mismatch_test() ->
-    %% BT-2278: a malformed selector 'at:put' is treated as unary (arity 0),
+    %% A malformed selector 'at:put' is treated as unary (arity 0),
     %% so a fun with arity 0 + 2 = 2 validates cleanly instead of being
     %% rejected with a misleading arity_mismatch from counting the interior
     %% colon (which would expect 1 + 2 = 3).

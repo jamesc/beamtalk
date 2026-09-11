@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_class_dispatch (BT-1085, BT-1963).
+EUnit tests for beamtalk_class_dispatch.
 
 Coverage target: ≥ 85% of beamtalk_class_dispatch.erl.
 
@@ -16,27 +16,27 @@ Test groups:
    2. handle_class_method_call/6 — found, not_found, class_var_result, test_spawn
    3. handle_async_dispatch/5 — all branches (methods, superclass, class_name, …)
    4. unwrap_class_call/1 — ok and error paths
-   5. undef classification — module_not_loaded vs method_not_found (BT-999)
+   5. undef classification — module_not_loaded vs method_not_found
    6. class_send/3 — undefined class, unknown selector, new/spawn
    7. class_name_from_pid/1 — via registered/unregistered processes
    8. find_class_method_in_ancestors — chain traversal, depth limits
    9. metaclass_send — local and not_found paths
-  10. undef classification extended — local vs inherited hint variants (BT-1963)
+  10. undef classification extended — local vs inherited hint variants
   11. invoke_class_method error paths — internal undef, raises, multi-arg dispatch
   12. class_send instantiation variants — new:, spawnWith:
   13. handle_self_instantiation — error paths (new:, spawnWith:)
   14. class_send_with_recovery — noproc crash recovery
   15. metaclass_send extended — not_found, dead pid
   16. try_class_chain_fallthrough — Class chain dispatch
-  17. handle_class_method_call/6 — class-side extension dispatch (BT-3192)
+  17. handle_class_method_call/6 — class-side extension dispatch
   18. class_self_dispatch/4 & class_self_dispatch_local/4 — self-send
-      class-side extension dispatch (BT-3198)
+      class-side extension dispatch
 """.
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
-%% Selector used in undef-classification tests (kept from BT-999 tests).
+%% Selector used in undef-classification tests.
 -define(TEST_SELECTOR, bt999_dispatch_test_method).
 
 %%% ============================================================================
@@ -126,10 +126,10 @@ class_method_fun_name_test_() ->
     ].
 
 %%====================================================================
-%% class_method_fun_name/1 — long-selector hashing guard (BT-3090)
+%% class_method_fun_name/1 — long-selector hashing guard
 %%
-%% Before BT-3090, a selector long enough that `"class_" ++ Selector`
-%% exceeds Erlang's 255-byte atom limit crashed `list_to_atom/1` with
+%% Without this guard, a selector long enough that `"class_" ++ Selector`
+%% exceeds Erlang's 255-byte atom limit would crash `list_to_atom/1` with
 %% `system_limit` instead of producing a name — reachable at runtime via
 %% `perform:` with a dynamically-built selector, even though no
 %% *compile-time* selector is ever that long. This now mirrors the Rust
@@ -142,8 +142,8 @@ class_method_fun_name_test_() ->
 class_method_fun_name_long_selector_does_not_crash_test() ->
     %% Simulates a selector assembled at runtime (e.g. via `perform:`) rather
     %% than known at compile time — `list_to_atom/1` on the raw
-    %% "class_" ++ Selector string would have raised `system_limit` here
-    %% before BT-3090.
+    %% "class_" ++ Selector string would raise `system_limit` here
+    %% without the hashing guard.
     LongSelector = list_to_atom(lists:duplicate(250, $a)),
     Result = beamtalk_class_dispatch:class_method_fun_name(LongSelector),
     ?assert(is_atom(Result)),
@@ -155,7 +155,7 @@ class_method_fun_name_boundary_exactly_fits_unhashed_test() ->
     Expected = list_to_atom("class_" ++ lists:duplicate(249, $a)),
     ?assertEqual(Expected, beamtalk_class_dispatch:class_method_fun_name(Selector)).
 
-%% BT-3090 conformance: `class_method_fun_name/1` must hash a long selector
+%% Conformance: `class_method_fun_name/1` must hash a long selector
 %% identically to the Rust codegen's `safe_class_method_fn_name`
 %% (`crates/beamtalk-core/src/codegen/core_erlang/selector_mangler.rs`) — same
 %% FNV-1a 64-bit hash, same threshold, same naming scheme. The corpus is the
@@ -170,7 +170,7 @@ class_method_fun_name_matches_shared_corpus_test() ->
             SelectorBin = maps:get(<<"selector">>, Case),
             ExpectedBin = maps:get(<<"expected_fn_name">>, Case),
             Why = maps:get(<<"why">>, Case, <<>>),
-            %% BT-3090: selectors are bound atoms from user programs — the
+            %% Selectors are bound atoms from user programs — the
             %% corpus values are all valid Erlang atom text (<=300 bytes
             %% raw), so `binary_to_atom/2` here mirrors real usage, not a
             %% test-only shortcut.
@@ -186,7 +186,7 @@ class_method_fun_name_matches_shared_corpus_test() ->
     ).
 
 %% Load the shared class-method-fun-name conformance corpus from the repo
-%% tree. `beamtalk_test_corpus` (BT-3099) walks up from the test CWD to the
+%% tree. `beamtalk_test_corpus` walks up from the test CWD to the
 %% project root (the dir holding `Cargo.toml`), then reads the fixture both
 %% surfaces share.
 load_class_method_fun_name_corpus() ->
@@ -218,7 +218,7 @@ is_test_execution_selector_test_() ->
     ].
 
 %%% ============================================================================
-%%% 2. handle_class_method_call/6 — direct tests (BT-1085)
+%%% 2. handle_class_method_call/6 — direct tests
 %%% ============================================================================
 
 handle_class_method_call_test_() ->
@@ -497,7 +497,7 @@ unwrap_class_call_test_() ->
     ].
 
 %%% ============================================================================
-%%% 5. undef classification — module_not_loaded vs method_not_found (BT-999)
+%%% 5. undef classification — module_not_loaded vs method_not_found
 %%% ============================================================================
 
 dispatch_undef_test_() ->
@@ -638,7 +638,7 @@ test_class_send_user_method() ->
         end)
     end.
 
-%% BT-2691 (ADR 0099 §3): a connected `Program exit: N` raised inside a class
+%% ADR 0099 §3: a connected `Program exit: N` raised inside a class
 %% method must propagate across the class gen_server boundary back to the caller
 %% (the eval/dispatch worker) as the `{beamtalk_script_exit, N}` *throw*, so the
 %% worker reports the status and ends the session. Without the
@@ -668,7 +668,7 @@ test_class_send_script_exit_propagates() ->
     end.
 
 %%% ----------------------------------------------------------------------------
-%%% BT-2963: entry group-leader propagation across the class gen_server hop.
+%%% Entry group-leader propagation across the class gen_server hop.
 %%%
 %%% A class gen_server is long-lived, so it keeps the group leader it inherited
 %%% at spawn and a class method's `Console` output misses the calling session's
@@ -1034,7 +1034,7 @@ test_metaclass_method_found() ->
     end.
 
 %%% ============================================================================
-%%% 10. undef classification — indirect tests via handle_class_method_call (BT-1963)
+%%% 10. undef classification — indirect tests via handle_class_method_call
 %%% ============================================================================
 
 undef_classification_extended_test_() ->
@@ -1136,7 +1136,7 @@ test_undef_inherited_method_not_found() ->
     end.
 
 %%% ============================================================================
-%%% 11. invoke_class_method error paths (BT-1963)
+%%% 11. invoke_class_method error paths
 %%% ============================================================================
 
 invoke_class_method_errors_test_() ->
@@ -1187,7 +1187,7 @@ test_invoke_raises_error() ->
     ),
     ?assertMatch({reply, {error, test_deliberate_error}, _}, Result).
 
-%% BT-2691: a class method raising the connected `Program exit:` signal
+%% A class method raising the connected `Program exit:` signal
 %% (`throw({beamtalk_script_exit, 7})`) is passed through the apply catch as
 %% `{error, {beamtalk_script_exit, 7}}` — no "method failed" log, ready for
 %% class_send_dispatch/3 to re-raise as a throw.
@@ -1216,7 +1216,7 @@ test_invoke_two_arg_keyword() ->
     ),
     ?assertMatch({reply, {ok, {two_args, alpha, beta}}, _}, Result).
 
-%% ADR 0110 / BT-3036: a foreign `^` (NLR throw) relaying out of a class method
+%% ADR 0110: a foreign `^` (NLR throw) relaying out of a class method
 %% replies {error, Nlr} with the *pre-call* ClassVars when nothing has written
 %% the class's shadow key — exactly today's revert behavior.
 test_invoke_nlr_relay_no_shadow() ->
@@ -1242,8 +1242,8 @@ test_invoke_nlr_relay_no_shadow() ->
         )
     ).
 
-%% ADR 0110 / BT-3036, class-keyed per BT-3039: when this class's shadow key IS
-%% set (as the BT-3037 codegen write-through will do at top-level class-var
+%% ADR 0110, class-keyed: when this class's shadow key IS
+%% set (as the codegen write-through will do at top-level class-var
 %% mutations), the NLR relay path replies with the shadow class vars —
 %% preserving writes made before the unwind — and the after clause erases the
 %% key.
@@ -1271,7 +1271,7 @@ test_invoke_nlr_relay_reads_shadow() ->
         erlang:erase(ShadowKey)
     end.
 
-%% ADR 0110 / BT-3036: a genuine error still reverts to the pre-call ClassVars
+%% ADR 0110: a genuine error still reverts to the pre-call ClassVars
 %% even when the shadow key is set — only the NLR relay path reads it. The
 %% after clause still erases the key.
 test_invoke_error_ignores_shadow() ->
@@ -1295,7 +1295,7 @@ test_invoke_error_ignores_shadow() ->
         erlang:erase(ShadowKey)
     end.
 
-%% ADR 0110 amendment (BT-3039): reproduces the class-var shadow's original
+%% ADR 0110 amendment: reproduces the class-var shadow's original
 %% cross-class contamination hole directly — a mutating self-send inside a
 %% block invoked from a foreign class's process writes the shadow physically
 %% in *this* process, under *its own* class's key. Simulate that here by
@@ -1338,7 +1338,7 @@ test_invoke_nlr_relay_ignores_foreign_class_shadow() ->
         erlang:erase(ForeignShadowKey)
     end.
 
-%% ADR 0111 Phase D (BT-3135): the Erlang half of the cross-boundary
+%% ADR 0111 Phase D: the Erlang half of the cross-boundary
 %% conformance fixture — CLAUDE.md's cross-Rust/Erlang-boundary rule ("needs
 %% a shared conformance fixture or code generation, not a comment"). The
 %% Rust side (`crates/beamtalk-core/src/codegen/core_erlang/tests/
@@ -1351,7 +1351,7 @@ test_shadow_key_atom_matches_codegen_contract() ->
     ?assertEqual('$bt_class_vars_shadow', ?BT_CLASS_VARS_SHADOW_KEY_ATOM).
 
 %%% ============================================================================
-%%% 12. class_send instantiation variants (BT-1963)
+%%% 12. class_send instantiation variants
 %%% ============================================================================
 
 class_send_instantiation_test_() ->
@@ -1393,9 +1393,9 @@ test_class_send_new_colon() ->
     {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
     try
         %% The new: clause calls gen_server:call(Pid, {new, [Map]}).
-        %% The helper module exports no new/0, so BT-2275 routes this through
+        %% The helper module exports no new/0, so instantiation routes this through
         %% the generic, module-free instantiation path, returning a
-        %% $beamtalk_class-tagged instance map (before BT-2275 this raised
+        %% $beamtalk_class-tagged instance map (without this it would raise
         %% because there was no real new handler). The new: clause path is
         %% still exercised; the observable is now a generic instance.
         Result = beamtalk_class_dispatch:class_send(Pid, 'new:', [#{}]),
@@ -1405,7 +1405,7 @@ test_class_send_new_colon() ->
     end.
 
 %%% ============================================================================
-%%% 13. handle_self_instantiation error paths (BT-1963)
+%%% 13. handle_self_instantiation error paths
 %%% ============================================================================
 
 self_instantiation_error_test_() ->
@@ -1435,7 +1435,7 @@ test_self_instantiation_spawn_with_error() ->
     ).
 
 %%% ============================================================================
-%%% 14. class_send_with_recovery — noproc crash recovery (BT-1963)
+%%% 14. class_send_with_recovery — noproc crash recovery
 %%% ============================================================================
 
 class_send_recovery_test_() ->
@@ -1474,7 +1474,7 @@ test_send_dead_pid_structured_error() ->
     end.
 
 %%% ============================================================================
-%%% 15. metaclass_send extended tests (BT-1963)
+%%% 15. metaclass_send extended tests
 %%% ============================================================================
 
 metaclass_send_extended_test_() ->
@@ -1518,7 +1518,7 @@ test_metaclass_dead_pid() ->
     ).
 
 %%% ============================================================================
-%%% 16. try_class_chain_fallthrough via class_send (BT-1963)
+%%% 16. try_class_chain_fallthrough via class_send
 %%% ============================================================================
 
 class_chain_fallthrough_test_() ->
@@ -1540,7 +1540,7 @@ test_fallthrough_print_string() ->
     ?assert(is_binary(Result)).
 
 %%% ============================================================================
-%%% BT-1981: Additional dispatch-pipeline coverage
+%%% Additional dispatch-pipeline coverage
 %%% ============================================================================
 
 %% class_send with an unexpected result shape from the class gen_server falls
@@ -1610,7 +1610,7 @@ class_send_self_instantiation_spawn_with_test() ->
         beamtalk_class_dispatch:class_send(self(), 'spawnWith:', [#{}])
     ).
 
-%% BT-2005: `self class <selector>` inside a class method routes through
+%% `self class <selector>` inside a class method routes through
 %% metaclass_send with Pid =:= self(). The previous implementation issued a
 %% `gen_server:call(self(), {metaclass_method_call, ...})` and deadlocked with
 %% `{calling_self, ...}`. The self-call branch now short-circuits spawn/new
@@ -1645,7 +1645,7 @@ metaclass_send_self_call_unknown_selector_raises_dispatch_error_test() ->
         beamtalk_class_dispatch:metaclass_send(self(), someUserSelector, [], Self)
     ).
 
-%% BT-2005 review: guard in handle_metaclass_self_named_spawn/3 must reject
+%% Guard in handle_metaclass_self_named_spawn/3 must reject
 %% `Module = undefined` explicitly — `is_atom(undefined)` returns true, so a
 %% process dictionary with the name/is_abstract keys set but the module key
 %% missing would otherwise slip through into `class_self_spawn_*` and crash.
@@ -1951,7 +1951,7 @@ test_self_instantiation_spawn_branch() ->
 %% {beamtalk_supervisor_new, ...} tuple, class_send_dispatch runs the
 %% initialize: lifecycle hook and rewrites the inner tag.
 %%
-%% BT-1994 (ADR 0080 Phase 0a, option 2): the hook now pattern-matches
+%% ADR 0080 Phase 0a (option 2): the hook pattern-matches
 %% the Result tagged map produced by FFI coercion on the class method
 %% body's return, not the bare `_new` tuple.
 class_send_supervisor_new_rewrap_test_() ->
@@ -1999,7 +1999,7 @@ test_class_send_supervisor_new_rewrap() ->
     end.
 
 %%% ============================================================================
-%%% BT-2266 / ADR 0084: runtime class-side fun dispatch
+%%% ADR 0084: runtime class-side fun dispatch
 %%% ============================================================================
 
 runtime_class_method_fun_test_() ->
@@ -2025,7 +2025,7 @@ runtime_class_method_fun_test_() ->
     end}.
 
 %% A class-method fun supplied at registration accumulates class-variable state
-%% across calls — the BT-873 "dropped state" regression must not return.
+%% across calls — the "dropped state" regression must not return.
 test_runtime_fun_threads_class_vars() ->
     ClassName = 'BT2266ThreadVars',
     BumpFun = fun(_ClassSelf, ClassVars) ->
@@ -2071,7 +2071,7 @@ test_put_class_method_live() ->
 
 %% A subclass dispatches a runtime class method defined on an ancestor. The fun
 %% is resolved from the retrieval store keyed by the DEFINING class (the parent),
-%% so the walk uses only ETS — no gen_server hop into the parent (BT-2008).
+%% so the walk uses only ETS — no gen_server hop into the parent.
 test_inherited_runtime_class_method() ->
     ParentName = 'BT2266InhParent',
     ChildName = 'BT2266InhChild',
@@ -2247,19 +2247,19 @@ test_class_self_dispatch_local() ->
     end.
 
 %%% ============================================================================
-%%% 17. handle_class_method_call/6 — class-side extension dispatch (BT-3192)
+%%% 17. handle_class_method_call/6 — class-side extension dispatch
 %%%
-%%% Before BT-3192, handle_class_method_call/6 checked only LocalClassMethods
-%%% and find_class_method_in_chain/2 — never beamtalk_extensions — so a
-%%% class-side extension (`Target class >> sel`, ADR 0066, registered under
-%%% the metaclass tag `class_object_tag(ClassName)`) was written to the ETS
-%%% table but never read back by any class-side dispatch path. These first
-%%% four tests drive handle_class_method_call/6 directly against a real
+%%% handle_class_method_call/6 checks beamtalk_extensions before
+%%% LocalClassMethods and find_class_method_in_chain/2, so a class-side
+%%% extension (`Target class >> sel`, ADR 0066, registered under the
+%%% metaclass tag `class_object_tag(ClassName)`) is read back by every
+%%% class-side dispatch path. These first four tests drive
+%%% handle_class_method_call/6 directly against a real
 %%% beamtalk_extensions:register/4 registration; the last two go through the
 %%% actual gen_server message types (`class_method_call` /
 %%% `metaclass_method_call`) to confirm both `Target sel` and
-%%% `Target class sel` reach the fix — they share this one handler, so a
-%%% single fix covers both.
+%%% `Target class sel` reach the extension — they share this one handler, so
+%%% one check covers both.
 %%% ============================================================================
 
 class_extension_dispatch_test_() ->
@@ -2365,7 +2365,7 @@ test_class_extension_receives_class_self() ->
     ),
     ?assertMatch({reply, {ok, {ClassTag, my_module, true}}, _}, Result).
 
-%% BT-3201: Extension checked before find_class_method_in_chain/2 for an
+%% Extension checked before find_class_method_in_chain/2 for an
 %% *external* send too — mirrors test_class_self_dispatch_extension_priority_over_inherited
 %% (section 18's self-send counterpart), but drives handle_class_method_call/6
 %% directly rather than a self-send. A real, invokable inherited class method
@@ -2474,7 +2474,7 @@ test_metaclass_method_class_side_extension() ->
         end)
     end.
 
-%% Code-review regression (BT-3192 PR): a crashing extension body must not
+%% A crashing extension body must not
 %% take down the class's own gen_server — every other class-method dispatch
 %% path (apply_class_method_fun/6, apply_compiled_class_method/7) already
 %% guarantees this via catch-and-convert; invoke_class_extension/7 must too.
@@ -2499,8 +2499,8 @@ test_class_extension_crash_does_not_kill_class_process() ->
             beamtalk_class_dispatch:class_send(Pid, crashExt, [])
         ),
         %% ...but the class gen_server itself survives: still alive, and a
-        %% follow-up call succeeds instead of hitting {noproc, ...} (BT-1768
-        %% auto-restart, which would also have dropped ClassVars/hot patches).
+        %% follow-up call succeeds instead of hitting {noproc, ...}
+        %% (auto-restart would also have dropped ClassVars/hot patches).
         ?assert(is_process_alive(Pid)),
         ?assertEqual(
             test_success_result, beamtalk_class_dispatch:class_send(Pid, testSuccess, [])
@@ -2528,16 +2528,17 @@ class_send_and_metaclass_extension_e2e_test_() ->
 
 %%% ============================================================================
 %%% 18. class_self_dispatch/4 & class_self_dispatch_local/4 — self-send
-%%%     class-side extension dispatch (BT-3198)
+%%%     class-side extension dispatch
 %%%
-%%% BT-3192 fixed EXTERNAL class-side sends (`Target sel` / `Target class
-%%% sel`) to consult beamtalk_extensions. A `self extensionSel` send from
-%%% inside another class method of the SAME class still fell straight to
-%%% the superclass-chain walk (`class_self_dispatch/4`) or the local
-%%% runtime-method lookup (`class_self_dispatch_local/4`) and raised
-%%% does_not_understand. These tests drive both functions directly against
-%%% a real beamtalk_extensions:register/4 registration, mirroring section
-%%% 17's style for the external-send fix.
+%%% External class-side sends (`Target sel` / `Target class sel`) consult
+%%% beamtalk_extensions (see section 17). A `self extensionSel` send from
+%%% inside another class method of the SAME class must reach the same
+%%% registry too, rather than falling straight to the superclass-chain walk
+%%% (`class_self_dispatch/4`) or the local runtime-method lookup
+%%% (`class_self_dispatch_local/4`) and raising does_not_understand. These
+%%% tests drive both functions directly against a real
+%%% beamtalk_extensions:register/4 registration, mirroring section 17's
+%%% style for the external-send case.
 %%% ============================================================================
 
 class_self_dispatch_extension_test_() ->
@@ -2629,7 +2630,7 @@ class_self_dispatch_extension_priority_test_() ->
     end}.
 
 %% Extension checked before the superclass-chain walk (mirroring
-%% handle_class_method_call/6's BT-3192 extension-before-local-table order):
+%% handle_class_method_call/6's extension-before-local-table order):
 %% a real, invokable inherited class method (`shared`, defined on the parent)
 %% is shadowed once a same-named extension is registered on the child's own
 %% metaclass tag.
@@ -2674,7 +2675,7 @@ test_class_self_dispatch_extension_priority_over_inherited() ->
     end.
 
 %% Same priority rule for class_self_dispatch_local/4's own-runtime-method
-%% branch (ADR 0084 / BT-2266 ClassBuilder funs): the extension shadows a
+%% branch (ADR 0084 ClassBuilder funs): the extension shadows a
 %% real, invokable runtime class-method fun of the same selector.
 test_class_self_dispatch_local_extension_priority_over_runtime_fun() ->
     ClassName = 'Bt3198SelfExtLocal',
