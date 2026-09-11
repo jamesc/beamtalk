@@ -205,7 +205,7 @@ encode_reloaded(Classes, ActorCount, MigrationFailures, Msg) ->
 
 -doc """
 Encode a reload response with optional class collision warnings.
-BT-737: Warnings are surfaced when a reload causes a cross-package class collision.
+Warnings are surfaced when a reload causes a cross-package class collision.
 """.
 -spec encode_reloaded(
     [map()],
@@ -259,9 +259,9 @@ encode_error(Err, Msg, Output, Warnings, Metadata) ->
 term_to_json(Value) when is_integer(Value); is_boolean(Value) ->
     Value;
 term_to_json(Value) when is_float(Value) ->
-    %% BT-1336: Convert floats to explicit decimal strings so JSX cannot
+    %% Convert floats to explicit decimal strings so JSX cannot
     %% strip the ".0" from whole-number floats (e.g. 6.0 → "6").
-    %% BT-3082: beamtalk_primitive:print_string/1 is the single canonical
+    %% beamtalk_primitive:print_string/1 is the single canonical
     %% float renderer, shared with format_result/1 — this used to carry its
     %% own separate `~p` + ".0"-append copy.
     beamtalk_runtime_api:print_string(Value);
@@ -286,15 +286,15 @@ term_to_json(Value) when is_list(Value) ->
             end
     end;
 term_to_json({beamtalk_future, Pid}) when is_pid(Pid) ->
-    %% BT-840: Tagged future — display based on the underlying process state.
+    %% Tagged future — display based on the underlying process state.
     term_to_json_future_pid(Pid);
 term_to_json(Value) when is_pid(Value) ->
-    %% BT-3082: beamtalk_primitive:pid_label/1 is the single canonical
+    %% beamtalk_primitive:pid_label/1 is the single canonical
     %% liveness-probed pid renderer, shared with format_result/1 — this used
     %% to carry its own separate copy of the same Actor/Dead/Future logic.
     beamtalk_runtime_api:pid_label(Value);
 term_to_json(Value) when is_function(Value) ->
-    %% BT-3082: beamtalk_primitive:block_label/1 is the single canonical
+    %% beamtalk_primitive:block_label/1 is the single canonical
     %% `Block/N` renderer, shared with format_result/1 — this used to carry
     %% its own separate copy of the same erlang:fun_info/2 + format logic.
     beamtalk_runtime_api:block_label(Value);
@@ -434,7 +434,7 @@ is_local_process_alive(Pid) ->
 -doc """
 Format an error reason as a human-readable message.
 
-BT-3084: this is a thin wrapper over `beamtalk_repl_errors:ensure_structured_error/1`
+This is a thin wrapper over `beamtalk_repl_errors:ensure_structured_error/1`
 — the single canonical raw-error-tuple dispatch table — plus `beamtalk_error:format/1`.
 Previously this function carried its own duplicate dispatch table that had drifted
 from `ensure_structured_error/1` (some tuples handled only here, some only there,

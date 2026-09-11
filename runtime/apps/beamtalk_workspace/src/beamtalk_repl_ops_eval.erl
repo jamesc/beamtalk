@@ -8,12 +8,12 @@
 -moduledoc """
 Op handler for the `eval` operation.
 
-Extracted from beamtalk_repl_server (BT-705). The `clear` and `bindings`
-ops were removed in BT-2369 (ADR 0081 Phase 6) — session state is now read
+Extracted from beamtalk_repl_server. The `clear` and `bindings`
+ops have been removed (ADR 0081 Phase 6) — session state is now read
 and mutated through the Beamtalk-native `Session` API
 (`Session current bindings`, `Session current clear`) via `eval`.
 
-`eval` is the canonical term-returning core path (BT-2399, ADR 0017 Phase 3):
+`eval` is the canonical term-returning core path (ADR 0017 Phase 3):
 `handle_term/4` returns a structured `beamtalk_repl_ops:op_result()` term and
 never produces JSON. `handle/4` is the WebSocket-edge wrapper that encodes that
 term to the protocol JSON binary via `beamtalk_repl_ops:encode/2`.
@@ -33,7 +33,7 @@ handle(<<"eval">>, Params, Msg, SessionPid) ->
 Term-returning eval handler. Returns `{ok, Value, Output, Warnings}` on success,
 `{trace, Steps, Output, Warnings}` in trace mode,
 `{script_exit, Code, Output, Warnings}` when the expression called
-`Program exit: Code` in this connected session (BT-2688), or
+`Program exit: Code` in this connected session, or
 `{error, #beamtalk_error{}}` / `{error, #beamtalk_error{}, Output, Warnings}` on
 failure. No JSON in this path — dist-attached clients consume the term directly.
 """.
@@ -56,7 +56,7 @@ handle_term(<<"eval">>, Params, _Msg, SessionPid) ->
                 {ok, Steps, Output, Warnings} ->
                     {trace, Steps, Output, Warnings};
                 {script_exit, Code2, Output, Warnings} ->
-                    %% BT-2688: `Program exit: Code2` inside a traced eval — same
+                    %% `Program exit: Code2` inside a traced eval — same
                     %% connected-exit handling as the non-trace branch.
                     {script_exit, Code2, Output, Warnings};
                 {error, ErrorReason, Output, Warnings} ->
@@ -68,7 +68,7 @@ handle_term(<<"eval">>, Params, _Msg, SessionPid) ->
                 {ok, Result, Output, Warnings} ->
                     {ok, Result, Output, Warnings};
                 {script_exit, Code2, Output, Warnings} ->
-                    %% BT-2688: `Program exit: Code2` ended this connected session.
+                    %% `Program exit: Code2` ended this connected session.
                     {script_exit, Code2, Output, Warnings};
                 {error, ErrorReason, Output, Warnings} ->
                     WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),

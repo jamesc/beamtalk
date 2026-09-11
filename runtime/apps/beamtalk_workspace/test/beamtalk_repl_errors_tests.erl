@@ -6,7 +6,7 @@
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
-EUnit tests for beamtalk_repl_errors (BT-2097).
+EUnit tests for beamtalk_repl_errors.
 
 Covers all five exported functions:
   safe_to_existing_atom/1  — empty-binary, known atom, nonexistent atom, non-binary
@@ -104,7 +104,7 @@ ensure_structured_error_eval_error_unknown_reason_test() ->
     ?assertMatch(#beamtalk_error{kind = internal_error}, Result).
 
 ensure_structured_error_eval_error_same_tag_different_arity_test() ->
-    %% BT-3084: is_known_error_reason/1 matches {Tag, Arity} pairs, not bare
+    %% is_known_error_reason/1 matches {Tag, Arity} pairs, not bare
     %% Tag. beamtalk_behaviour_intrinsics.erl:706 constructs a 4-arity
     %% {class_not_found, _, Path, Defined}, distinct from the REPL's own
     %% 2-arity {class_not_found, ClassName} clause in ensure_structured_error/1.
@@ -335,7 +335,7 @@ ensure_structured_error_2_fallback_different_classes_test() ->
     ?assert(binary:match(ResultExit#beamtalk_error.message, <<"exit">>) =/= nomatch).
 
 %%% ============================================================================
-%%% BT-3084: vocabulary previously only handled by
+%%% vocabulary previously only handled by
 %%% beamtalk_repl_json:format_error_message/1's separate dispatch table.
 %%% Folded into ensure_structured_error/1 so there is one canonical table.
 %%% ============================================================================
@@ -372,7 +372,7 @@ ensure_structured_error_class_not_found_test() ->
         Result#beamtalk_error.message
     ).
 
-%% BT-3084 acceptance criteria: DNU rendered only by
+%% DNU rendered only by
 %% beamtalk_error:generate_message/3 — the selector is quoted, and the
 %% record's `selector` field is populated when the selector is an atom.
 ensure_structured_error_method_not_found_atom_selector_test() ->
@@ -432,7 +432,7 @@ ensure_structured_error_session_creation_failed_test() ->
     ?assertMatch(#beamtalk_error{kind = session_creation_failed}, Result),
     ?assertEqual(<<"Failed to create session: timeout">>, Result#beamtalk_error.message).
 
-%% BT-3084 acceptance criteria: no raw-`~p` fallthrough for known tuples —
+%% no raw-`~p` fallthrough for known tuples —
 %% {registration_error, ...} was already structured here, but was previously
 %% absent from beamtalk_repl_json's separate table (fixed by unifying on
 %% this one). Assert the message never degrades to a bare tuple dump.
@@ -443,7 +443,7 @@ ensure_structured_error_registration_error_no_raw_fallthrough_test() ->
     ?assertMatch(#beamtalk_error{kind = registration_error}, Result),
     ?assertEqual(nomatch, binary:match(Result#beamtalk_error.message, <<"{registration_error">>)).
 
-%% BT-3084: previously this clause silently dropped the exception Class,
+%% previously this clause silently dropped the exception Class,
 %% diverging from beamtalk_repl_json's separate "Evaluation error: Class:Reason"
 %% wording for the same shape. Assert Class now survives.
 ensure_structured_error_eval_error_generic_preserves_class_test() ->
@@ -452,7 +452,7 @@ ensure_structured_error_eval_error_generic_preserves_class_test() ->
     ?assertEqual(<<"Evaluation error: error:badarg">>, Result#beamtalk_error.message).
 
 %%% ============================================================================
-%%% ensure_structured_error/2 — delegation for the BT-3084 vocabulary above
+%%% ensure_structured_error/2 — delegation for the vocabulary above
 %%% ============================================================================
 
 ensure_structured_error_2_delegates_module_not_found_test() ->

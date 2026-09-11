@@ -6,19 +6,19 @@
 %%% **DDD Context:** REPL Session Context (Navigation bridge)
 
 -moduledoc """
-Op handler for the structured `nav-symbols` operation (BT-2244).
+Op handler for the structured `nav-symbols` operation.
 
 `nav-symbols` is the bulk class+method outline channel that the LSP uses
 to back `textDocument/documentSymbol` (per-open-file outline) and
 `workspace/symbol` (project-wide Ctrl-T quick-symbol-open) when the
 editor's `delegateToRuntime` flag is on and a workspace is attached.
 
-It is a deliberate sibling of `nav-query` (BT-2239) rather than a new
+It is a deliberate sibling of `nav-query` rather than a new
 `kind` on that op: `nav-query`'s wire shape is locked to selector-shaped
 navigation (senders / implementors / references — selector or class
 name argument, one site per call site). The outline payload here is
 shaped per-class-with-method-children, which doesn't fit the
-single-flat-sites schema. `textDocument/typeHierarchy` (BT-2242) set the
+single-flat-sites schema. `textDocument/typeHierarchy` set the
 precedent — when the wire shape diverges, add a new op rather than
 overloading `nav-query`.
 
@@ -85,14 +85,14 @@ inherited tail).
 
 -doc """
 Handle the `nav-symbols` op for the WebSocket transport — encodes the term
-result to JSON at the edge (BT-2402).
+result to JSON at the edge.
 """.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
 
 -doc """
-Term-returning handler for `nav-symbols` (BT-2402, ADR 0085 read-surface).
+Term-returning handler for `nav-symbols` (ADR 0085 read-surface).
 
 Returns `{value, #{<<"classes">> => Sorted}}` — the class/method outline is
 already a wire-shaped JSON value (see the module doc) — or

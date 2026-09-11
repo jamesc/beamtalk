@@ -5,7 +5,7 @@
 -module(beamtalk_repl_json_tests).
 
 -moduledoc """
-EUnit tests for beamtalk_repl_json (BT-708).
+EUnit tests for beamtalk_repl_json.
 
 Tests JSON formatting for REPL protocol responses: format_response,
 format_error, format_actors, format_modules,
@@ -59,11 +59,11 @@ format_response_boolean_test() ->
 format_response_float_test() ->
     Result = beamtalk_repl_json:format_response(3.14),
     {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
-    %% BT-1336: Floats are serialized as strings to preserve ".0" in whole numbers.
+    %% Floats are serialized as strings to preserve ".0" in whole numbers.
     ?assertEqual(<<"3.14">>, maps:get(<<"value">>, Decoded)).
 
 format_response_whole_float_test() ->
-    %% BT-1336: Whole-number floats must preserve ".0", not become integers.
+    %% Whole-number floats must preserve ".0", not become integers.
     Result = beamtalk_repl_json:format_response(6.0),
     {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
     ?assertEqual(<<"6.0">>, maps:get(<<"value">>, Decoded)).
@@ -241,11 +241,11 @@ term_to_json_integer_test() ->
     ?assertEqual(42, beamtalk_repl_json:term_to_json(42)).
 
 term_to_json_float_test() ->
-    %% BT-1336: Floats are converted to binary strings to preserve decimal point.
+    %% Floats are converted to binary strings to preserve decimal point.
     ?assertEqual(<<"3.14">>, beamtalk_repl_json:term_to_json(3.14)).
 
 term_to_json_whole_float_test() ->
-    %% BT-1336: Whole-number floats preserve ".0".
+    %% Whole-number floats preserve ".0".
     ?assertEqual(<<"6.0">>, beamtalk_repl_json:term_to_json(6.0)).
 
 term_to_json_negative_float_test() ->
@@ -481,7 +481,7 @@ encode_reloaded_with_failures_test() ->
     ?assertEqual(1, maps:get(<<"migration_failures">>, Decoded)).
 
 %%% ============================================================================
-%%% Additional tests migrated from beamtalk_repl_server_tests (BT-831)
+%%% Additional tests migrated from beamtalk_repl_server_tests
 %%% ============================================================================
 
 %%% format_response additional tests
@@ -495,7 +495,7 @@ format_response_map_test() ->
     Response = beamtalk_repl_json:format_response(#{x => 1, y => 2}),
     Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
-    %% BT-535: Maps are now pre-formatted as Beamtalk syntax strings
+    %% Maps are now pre-formatted as Beamtalk syntax strings
     ?assert(is_binary(Value)),
     ?assert(binary:match(Value, <<"#x => 1">>) =/= nomatch),
     ?assert(binary:match(Value, <<"#y => 2">>) =/= nomatch).
@@ -520,7 +520,7 @@ format_response_tuple_test() ->
     Response = beamtalk_repl_json:format_response({ok, value}),
     Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
-    %% BT-536: Tuples are formatted as {el1, el2, ...} with symbol notation
+    %% Tuples are formatted as {el1, el2, ...} with symbol notation
     ?assertEqual(<<"{#ok, #value}">>, Value).
 
 format_response_nil_test() ->
@@ -611,7 +611,7 @@ format_error_generic_atom_test() ->
     ?assert(is_binary(Message)),
     ?assert(byte_size(Message) > 0).
 
-%% BT-238: format_error with #beamtalk_error{} record (with selector)
+%% format_error with #beamtalk_error{} record (with selector)
 format_error_beamtalk_error_with_selector_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Counter'),
     ErrorWithSelector = beamtalk_error:with_selector(Error, super),
@@ -717,7 +717,7 @@ term_to_json_nested_list_test() ->
     ?assertEqual([<<"a">>, 1, true], Result).
 
 term_to_json_map_with_atom_keys_test() ->
-    %% BT-535: Maps are pre-formatted as Beamtalk syntax strings
+    %% Maps are pre-formatted as Beamtalk syntax strings
     Result = beamtalk_repl_json:term_to_json(#{name => <<"test">>, count => 5}),
     ?assert(is_binary(Result)),
     ?assert(binary:match(Result, <<"#count => 5">>) =/= nomatch),
@@ -728,7 +728,7 @@ term_to_json_map_with_binary_keys_test() ->
     ?assertEqual(<<"#{\"key\" => \"val\"}">>, Result).
 
 term_to_json_map_with_list_keys_test() ->
-    %% BT-535: List keys are printed using print_string format
+    %% List keys are printed using print_string format
     Result = beamtalk_repl_json:term_to_json(#{"stringkey" => 42}),
     ?assert(is_binary(Result)),
     ?assert(binary:match(Result, <<"42">>) =/= nomatch).
@@ -791,7 +791,7 @@ term_to_json_beamtalk_object_tuple_test() ->
     exit(Pid, kill).
 
 term_to_json_beamtalk_object_registered_proxy_test() ->
-    %% ADR 0079 / BT-1991: name-resolving proxies carry `{registered, Name}`
+    %% ADR 0079: name-resolving proxies carry `{registered, Name}`
     %% in the identity slot instead of a pid. The formatter must not call
     %% `pid_to_list/1` on the tuple (which would crash and tear down the
     %% REPL WebSocket). Instead, render the name so the proxy is
@@ -826,7 +826,7 @@ term_to_json_future_timeout_test() ->
     exit(Pid, kill).
 
 term_to_json_tagged_future_timeout_test() ->
-    %% BT-840: Tagged future variant of future_timeout
+    %% Tagged future variant of future_timeout
     Pid = spawn(fun() ->
         receive
             _ -> ok
@@ -842,7 +842,7 @@ term_to_json_future_rejected_test() ->
 
 term_to_json_generic_tuple_test() ->
     Result = beamtalk_repl_json:term_to_json({a, b, c}),
-    %% BT-536: Tuples formatted with symbol notation for atoms
+    %% Tuples formatted with symbol notation for atoms
     ?assertEqual(<<"{#a, #b, #c}">>, Result).
 
 term_to_json_fallback_reference_test() ->
@@ -907,7 +907,7 @@ format_error_message_parse_error_v2_test() ->
     ?assert(binary:match(Msg, <<"Parse error">>) =/= nomatch).
 
 format_error_message_compile_error_structured_diagnostics_test() ->
-    %% BT-1235: structured diagnostic maps extract first message
+    %% structured diagnostic maps extract first message
     Msg = beamtalk_repl_json:format_error_message(
         {compile_error, [#{message => <<"Unused variable `x`">>, line => 3}]}
     ),
@@ -923,7 +923,7 @@ format_error_message_fallback_test() ->
     ?assert(byte_size(Msg) > 0).
 
 %%% ============================================================================
-%%% BT-3084 regression tests: format_error_message/1 derives from
+%%% Regression tests: format_error_message/1 derives from
 %%% beamtalk_repl_errors:ensure_structured_error/1 (one canonical table)
 %%% ============================================================================
 
@@ -971,7 +971,7 @@ format_error_message_method_not_found_quoted_selector_test() ->
         Msg
     ).
 
-%% BT-3084: the two eval_error prose variants ("Evaluation error: Class:Reason")
+%% the two eval_error prose variants ("Evaluation error: Class:Reason")
 %% previously drifted between ensure_structured_error/1 (dropped Class) and
 %% format_error_message/1 (kept it). Assert both entry points now agree.
 format_error_message_eval_error_generic_matches_ensure_structured_error_test() ->
@@ -982,7 +982,7 @@ format_error_message_eval_error_generic_matches_ensure_structured_error_test() -
     ?assertEqual(ViaErrors, ViaJson),
     ?assertMatch(<<"Evaluation error: error:badarg">>, ViaJson).
 
-%% BT-237: eval_error with #beamtalk_error{} formatting
+%% eval_error with #beamtalk_error{} formatting
 
 format_error_message_eval_error_beamtalk_error_test() ->
     Error = beamtalk_error:with_selector(
@@ -1055,14 +1055,14 @@ format_modules_single_test() ->
 format_response_empty_map_test() ->
     Response = beamtalk_repl_json:format_response(#{}),
     Decoded = json:decode(Response),
-    %% BT-535: Empty map is pre-formatted as "#{}"
+    %% Empty map is pre-formatted as "#{}"
     ?assertEqual(<<"#{}">>, maps:get(<<"value">>, Decoded)).
 
 format_response_nested_map_test() ->
     Response = beamtalk_repl_json:format_response(#{a => #{b => 1}}),
     Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
-    %% BT-535: Nested maps are pre-formatted as Beamtalk syntax
+    %% Nested maps are pre-formatted as Beamtalk syntax
     ?assert(is_binary(Value)),
     ?assertEqual(<<"#{#a => #{#b => 1}}">>, Value).
 
@@ -1104,7 +1104,7 @@ format_response_with_warnings_complex_value_test() ->
     ),
     Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
-    %% BT-535: Maps are pre-formatted as Beamtalk syntax strings
+    %% Maps are pre-formatted as Beamtalk syntax strings
     ?assert(is_binary(Value)),
     ?assert(binary:match(Value, <<"#x => 1">>) =/= nomatch),
     ?assertEqual([<<"shadow">>], maps:get(<<"warnings">>, Decoded)).
@@ -1302,7 +1302,7 @@ format_error_message_eval_error_wrapped_exception_test() ->
 %%% term_to_json additional tests
 
 term_to_json_future_pending_test() ->
-    %% BT-840: Futures are now tagged tuples {beamtalk_future, Pid}
+    %% Futures are now tagged tuples {beamtalk_future, Pid}
     Future = beamtalk_future:new(),
     timer:sleep(50),
     Result = beamtalk_repl_json:term_to_json(Future),
@@ -1310,7 +1310,7 @@ term_to_json_future_pending_test() ->
     beamtalk_future:resolve(Future, ok).
 
 term_to_json_nested_map_test() ->
-    %% BT-535: Nested maps are pre-formatted as Beamtalk syntax
+    %% Nested maps are pre-formatted as Beamtalk syntax
     Result = beamtalk_repl_json:term_to_json(#{a => #{b => #{c => 42}}}),
     ?assertEqual(<<"#{#a => #{#b => #{#c => 42}}}">>, Result).
 
@@ -1318,7 +1318,7 @@ term_to_json_empty_map_test() ->
     ?assertEqual(<<"#{}">>, beamtalk_repl_json:term_to_json(#{})).
 
 term_to_json_map_with_mixed_keys_test() ->
-    %% BT-535: Mixed keys are formatted as Beamtalk syntax
+    %% Mixed keys are formatted as Beamtalk syntax
     Result = beamtalk_repl_json:term_to_json(#{atom_key => 1, <<"bin_key">> => 2}),
     ?assert(is_binary(Result)),
     ?assert(binary:match(Result, <<"#atom_key => 1">>) =/= nomatch),
@@ -1326,26 +1326,26 @@ term_to_json_map_with_mixed_keys_test() ->
 
 term_to_json_single_element_tuple_test() ->
     Result = beamtalk_repl_json:term_to_json({only}),
-    %% BT-536: Tuples formatted with symbol notation for atoms
+    %% Tuples formatted with symbol notation for atoms
     ?assertEqual(<<"{#only}">>, Result).
 
 term_to_json_large_tuple_test() ->
     Result = beamtalk_repl_json:term_to_json({a, b, c, d, e}),
-    %% BT-536: Tuples formatted with symbol notation for atoms
+    %% Tuples formatted with symbol notation for atoms
     ?assertEqual(<<"{#a, #b, #c, #d, #e}">>, Result).
 
 term_to_json_mixed_tuple_test() ->
-    %% BT-536: Tuple with mixed types: integer, atom, string
+    %% Tuple with mixed types: integer, atom, string
     Result = beamtalk_repl_json:term_to_json({ok, 42, <<"hello">>}),
     ?assertEqual(<<"{#ok, 42, \"hello\"}">>, Result).
 
 term_to_json_empty_tuple_test() ->
-    %% BT-536: Empty tuple
+    %% Empty tuple
     Result = beamtalk_repl_json:term_to_json({}),
     ?assertEqual(<<"{}">>, Result).
 
 term_to_json_nested_list_with_maps_test() ->
-    %% BT-535: Maps in lists are pre-formatted as strings
+    %% Maps in lists are pre-formatted as strings
     Result = beamtalk_repl_json:term_to_json([#{a => 1}, #{b => 2}]),
     ?assertEqual(2, length(Result)),
     [First, Second] = Result,

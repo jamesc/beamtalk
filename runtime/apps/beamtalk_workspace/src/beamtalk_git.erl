@@ -6,7 +6,7 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Git operations on the workspace project root (ADR 0082 Amendment 1, BT-2586).
+Git operations on the workspace project root (ADR 0082 Amendment 1).
 
 The cockpit's post-flush, human-facing VCS surface. Beamtalk's `.bt` files
 *are* the git working tree (ADR 0004), so this is a thin shell-out to the
@@ -25,7 +25,7 @@ directory. `git status --porcelain` reports paths relative to the toplevel, and
 `git restore`/`git add` resolve pathspecs relative to cwd; pinning both the
 listing and the mutating ops to the toplevel keeps the paths the Changes pane
 surfaces identical to the pathspecs revert/stage/unstage receive. This matters
-when the project root is a *subdirectory* of the repo (BT-2608); when the
+when the project root is a *subdirectory* of the repo; when the
 project root *is* the repo root the two coincide.
 
 == Operations ==
@@ -51,7 +51,7 @@ never crashed.
 
 == References ==
 
-* ADR 0082 Amendment 1 (BT-2585) — surface split: cockpit = git-first (humans)
+* ADR 0082 Amendment 1 — surface split: cockpit = git-first (humans)
 * ADR 0004 — `.bt` files are the source of truth (the git working tree)
 * ADR 0051 — subprocess execution (the `beamtalk_exec` port reused here)
 * ADR 0097 — workspace node seam
@@ -70,8 +70,8 @@ never crashed.
     parse_status/1,
     parse_log/1,
     classify_xy/1,
-    %% Subprocess seams exposed for the subdirectory-project regression tests
-    %% (BT-2608): they drive a real git repo without the workspace_meta
+    %% Subprocess seams exposed for the subdirectory-project regression tests:
+    %% they drive a real git repo without the workspace_meta
     %% gen_server, exercising cwd/pathspec consistency end to end.
     run_git_in/3,
     repo_toplevel/2
@@ -251,11 +251,11 @@ mutate(Selector, Args, FailMsg) ->
 %% revert/stage/unstage. When the project root *is* the repo root the two
 %% coincide; when it is a subdirectory (e.g. `examples/getting-started` inside
 %% the `beamtalk` repo) this prevents the path from being re-prefixed and
-%% matching nothing (BT-2608).
+%% matching nothing.
 %%
 %% The toplevel is static for a given project path, so it is resolved once and
 %% cached in beamtalk_workspace_meta (keyed by project path), removing the
-%% per-op `rev-parse` spawn on the hot read path (BT-2621). The cache
+%% per-op `rev-parse` spawn on the hot read path. The cache
 %% self-invalidates when the project path changes (the keyed lookup misses).
 -spec run_git(atom(), [binary()]) ->
     {ok, binary(), non_neg_integer()} | {error, #beamtalk_error{}}.
@@ -273,7 +273,7 @@ run_git(Selector, Args) ->
     end.
 
 %% Resolve the repo toplevel for the project dir, consulting the per-project-path
-%% cache in beamtalk_workspace_meta first (BT-2621). On a cache miss the toplevel
+%% cache in beamtalk_workspace_meta first. On a cache miss the toplevel
 %% is resolved via `git rev-parse --show-toplevel` (one subprocess) and the
 %% successful result is cached for subsequent ops. Error results (not a git
 %% repository, git absent) are deliberately left uncached so they are re-detected
@@ -371,7 +371,7 @@ run_git_in(Selector, Args, Dir) ->
 
 %% Receive-loop accumulating raw stdout/stderr bytes until the child exits.
 %% The beamtalk-exec binary joins its reader threads before sending the exit
-%% event (BT-1148), so by the time we see {exit, ...} all output has arrived.
+%% event, so by the time we see {exit, ...} all output has arrived.
 -spec collect(atom(), port(), non_neg_integer()) ->
     {ok, binary(), non_neg_integer()} | {error, #beamtalk_error{}}.
 collect(Selector, Port, ChildId) ->
