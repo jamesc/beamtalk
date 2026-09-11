@@ -1,7 +1,7 @@
 # ADR 0120: Value-Type `Self` Threading — Patch the Remaining Gaps, or Generalize `ThreadedIr`'s Storage Families?
 
 ## Status
-Proposed (2026-09-09)
+Implemented (2026-09-09)
 
 ## Context
 
@@ -277,3 +277,77 @@ currently-broken (crash or silent-drop) shapes.
   (`ThreadingPlan.threads_class_vars`/`threads_value_self`),
   `control_flow/analysis.rs` (`loop_body_threads_class_vars`/
   `loop_body_threads_value_self`), `threaded_ir/ir.rs` (`VersionPrefix`)
+
+## Addendum 1 (2026-09-11): Epic BT-3490 close-out — the deferral trigger fired
+
+All three gaps this ADR named, plus a fourth found independently during the
+same investigation, are now fixed and merged. This addendum records that
+the Decision section's own stated trigger — "the next new gap in this
+family (a fourth distinct call site, or a fourth storage family)" — has
+fired, and makes a fresh call rather than letting the deferral continue by
+default.
+
+**What shipped, against the plan:**
+
+| # | Gap | Issue / PR | Mechanism |
+|---|---|---|---|
+| 3 | `on:do:`/`ensure:` silent drop | [BT-3486](https://linear.app/beamtalk/issue/BT-3486) / [#3836](https://github.com/jamesc/beamtalk/pull/3836) | New hand-built trailing tuple slot + rebind — a **third** distinct `SelfVt`-threading call site, after the loop and conditional this ADR's Context already counted as the first two |
+| 1 | Conditional nested in a loop | [BT-3488](https://linear.app/beamtalk/issue/BT-3488) / [#3834](https://github.com/jamesc/beamtalk/pull/3834) | Extended the existing rejection safety net (`reject_unthreadable_value_self_field_write`), matching this ADR's Implementation item 3 exactly — no new threading mechanism, a shared rejection function instead |
+| 2 | Foldl-shaped list-op | [BT-3487](https://linear.app/beamtalk/issue/BT-3487) / [#3848](https://github.com/jamesc/beamtalk/pull/3848) | Found **already fixed**, for free, by BT-3488's rejection function being shared across the Letrec and Foldl body-lowering call sites. Zero new code — the best-case outcome this ADR's Implementation item 2 hoped for ("likely blocked on, or shares a fix with" the `ClassVars`-in-Foldl gap) |
+| — | `match:` arm (found mid-epic, not one of the three named gaps) | [BT-3489](https://linear.app/beamtalk/issue/BT-3489) / [#3837](https://github.com/jamesc/beamtalk/pull/3837) | Actor context: reused the conditional's own `generate_conditional_branch_inline` branch merge directly (no new tuple-shape design). Value-type/class-method context: clean rejection, new error variant. Still a **fourth** distinct call site, since it needed its own arm-mutation detector (`match_needs_mutation_threading`) that the loop/conditional/`on:do:` detectors don't share |
+
+Two things push this past "we are at three, not yet past it," not just up
+to it:
+
+1. **Call-site count.** Counting the same way this ADR's own Context and
+   "Negative consequences" sections did (one entry per hand-written
+   "does this body mutate `Self`, and how do I thread it out" answer): loop
+   and conditional (BT-3484, pre-existing) plus `on:do:`/`ensure:`
+   (BT-3486) is the "fourth... hand-copied implementation" the Consequences
+   section explicitly named as the cost of deferring. `match:` (BT-3489) —
+   not one of the three gaps this ADR scoped, found independently during
+   the same axis-4 matrix investigation — is a fifth. The rejection side
+   fared better: BT-3488's rejection function was written once and shared
+   by two call sites (Letrec, Foldl) from the start, which is exactly the
+   convergence this ADR hoped a future generalization would force, arriving
+   on its own on the "reject" half of the problem without anyone
+   designing for it.
+2. **The severity premise partly failed.** "Why the severity is bounded"
+   rests entirely on every shape being reachable only via the `TestCase`
+   exemption (BT-1533), "reachable only by a BUnit test fixture... never by
+   a real `Value` object at runtime." BT-3489 falsified this for its own
+   shape: the `match:`-arm crash reproduces identically for `Actor
+   subclass:` with `state:`, i.e., it can hit real production code. The
+   three gaps this ADR actually scoped remained `TestCase`-only as
+   predicted; the fourth, found looking for them, did not.
+
+**Decision:** do not undertake the full generalization as a follow-up to
+this addendum. The regression-risk argument in the original Steelman
+Analysis is unchanged — a generalization still has to reconcile Actor's
+`StateAcc` "free rider" case with `ClassVars`/`SelfVt`'s "extra slot" case
+and prove itself against the entire stdlib + bootstrap-test corpus, and
+that design work is exactly as unstarted today as it was when this ADR was
+written. What changes is the deferral condition itself: this ADR's Prior
+Art section said to "let real, found gaps drive the design of a
+generalization, rather than generalizing ahead of the third data point
+turning into a fourth" — the fourth (and fifth) data points now exist,
+fixed, merged, and validated (`cargo test -p beamtalk-codegen`,
+`just verify-threaded-ir`, hand-checked runtime ground truths), which is
+more design material than existed at any previous decision point. Filed
+[BT-3499](https://linear.app/beamtalk/issue/BT-3499) to scope the
+generalization design as its own issue, using these five call sites as the
+worked examples — explicitly not to implement it inline here. Continuing to
+patch a sixth gap narrowly, without that scoping issue at least being
+triaged first, would no longer be following this ADR's own decision rule.
+
+**Not double-counted here:** three further issues were filed during the
+epic — [BT-3491](https://linear.app/beamtalk/issue/BT-3491) (the rejection
+diagnostic's rewrite suggestion is wrong wording), [BT-3492](https://linear.app/beamtalk/issue/BT-3492)
+(BT-3486's own result tuple is left unextracted in last-statement/
+assignment-RHS/nested positions — an incompleteness in call site #3, not a
+new call site), and [BT-3493](https://linear.app/beamtalk/issue/BT-3493)
+(a field write wrapped in another assignment fails `ThreadedIr` verify,
+proven to also hit `ifTrue:` and loop bodies — a bug in the shared ADR 0111
+Addendum 5 statement classifier, not a per-family duplication at all).
+None of the three adds a sixth call site; they are tracked independently
+and don't change the count or the decision above.
