@@ -4,7 +4,7 @@
 -module(beamtalk_xref_tests).
 
 -moduledoc """
-EUnit tests for `beamtalk_xref` (BT-2297 / ADR 0087 Phase 1).
+EUnit tests for `beamtalk_xref` (ADR 0087 Phase 1).
 
 Covers: insert via register_class/2, query via the four read APIs,
 purge via purge_class/1, per-class generation increments, put_method/4
@@ -122,7 +122,7 @@ point_xref() ->
         }
     ].
 
-%% ADR 0087 Phase 6 (BT-2304): a value class's `method_xref` payload as codegen
+%% ADR 0087 Phase 6: a value class's `method_xref` payload as codegen
 %% now emits it — the hand-written method plus the compiler-generated
 %% auto-accessors for the `value` slot. The synthetic getter / setter carry
 %% `source_status => synthetic` and a `synthetic_origin` line pointing at the
@@ -191,8 +191,8 @@ register_and_read_test_() ->
                 ?assertEqual(self_recv, maps:get(recv_kind, PlusSite)),
                 ?assertEqual(17, maps:get(line, PlusSite)),
                 ?assertEqual(1, maps:get(gen, PlusSite)),
-                %% BT-3217: `counter_xref/0`'s `+` send carries no `recv_type`
-                %% key at all (a pre-BT-3217 shape) — `insert_one_method`
+                %% `counter_xref/0`'s `+` send carries no `recv_type`
+                %% key at all (a pre-ADR-0115 shape) — `insert_one_method`
                 %% must default it to `dynamic`, exactly like `recv_kind`
                 %% already defaults to `other` for legacy rows.
                 ?assertEqual(dynamic, maps:get(recv_type, PlusSite)),
@@ -215,7 +215,7 @@ register_and_read_test_() ->
     end}.
 
 %%====================================================================
-%% BT-3217 (ADR 0115 Phase 2): recv_type propagation
+%% ADR 0115 Phase 2: recv_type propagation
 %%====================================================================
 
 %% A compile-time-populated `sends` entry (mimicking `build_method_xref_entry`'s
@@ -297,7 +297,7 @@ multi_class_test_() ->
     end}.
 
 %%====================================================================
-%% ADR 0087 Phase 6 (BT-2304): synthetic auto-accessor parity
+%% ADR 0087 Phase 6: synthetic auto-accessor parity
 %%====================================================================
 
 synthetic_accessor_visibility_test_() ->
@@ -388,7 +388,7 @@ purge_class_test_() ->
     end}.
 
 %%====================================================================
-%% State-var (instance-variable) declaration-line index (BT-3439)
+%% State-var (instance-variable) declaration-line index
 %%====================================================================
 
 register_state_vars_test_() ->
@@ -425,7 +425,7 @@ register_state_vars_test_() ->
         ]
     end}.
 
-%% BT-3439 (review follow-up): register_state_vars/2 inserts the new rows
+%% register_state_vars/2 inserts the new rows
 %% before deleting any now-stale ones, rather than delete-then-insert, so a
 %% concurrent state_var_line/2 reader can never observe a retained field as
 %% momentarily absent (see that function's doc for the full rationale — the
@@ -494,7 +494,7 @@ generation_increments_test_() ->
                 ?assertEqual(2, current_gen('Counter')),
 
                 %% put_method is a surgical single-method patch and must NOT
-                %% bump the class generation (Phase 4 / BT-2300) — a bump would
+                %% bump the class generation (Phase 4) — a bump would
                 %% strand the unbumped sibling methods behind the reader's
                 %% current-gen filter. The patched method joins the class's
                 %% current generation, leaving it unchanged at 2.
@@ -611,7 +611,7 @@ method_info_picks_current_generation_test_() ->
                 %% new gen and publishes it before the async old-gen sweep
                 %% runs, so a window exists where rows from two generations
                 %% coexist. `method_info/3` must return the row carrying the
-                %% class's *current* gen, never a stale one (Phase 4 / BT-2300).
+                %% class's *current* gen, never a stale one (Phase 4).
                 ok = beamtalk_xref:register_class('Counter', counter_xref()),
                 Info1 = beamtalk_xref:method_info('Counter', false, 'increment'),
                 ?assertEqual(1, maps:get(gen, Info1)),
@@ -661,7 +661,7 @@ method_info_picks_current_generation_test_() ->
     end}.
 
 %%====================================================================
-%% Generation filtering on the read path (Phase 4 / BT-2300)
+%% Generation filtering on the read path (Phase 4)
 %%====================================================================
 
 %% A re-register that drops a method/send/reference must not leave the
@@ -800,7 +800,7 @@ put_method_on_fresh_class_is_visible_test_() ->
     end}.
 
 %%====================================================================
-%% callers_of_native_module/1 (BT-2669)
+%% callers_of_native_module/1
 %%====================================================================
 
 callers_of_native_module_basic_test_() ->
@@ -1126,7 +1126,7 @@ check_counter_view() ->
     end.
 
 %%====================================================================
-%% purge_method isolation (BT-2301)
+%% purge_method isolation
 %%====================================================================
 
 purge_method_removes_one_method_test_() ->
@@ -1181,7 +1181,7 @@ purge_method_unknown_is_noop_test_() ->
     end}.
 
 %%====================================================================
-%% build_method_entry/5 — runtime xref-entry construction (BT-2301)
+%% build_method_entry/5 — runtime xref-entry construction
 %%====================================================================
 
 build_method_entry_sourceless_test_() ->
@@ -1220,7 +1220,7 @@ build_method_entry_indexed_shape_test_() ->
         end)
     ].
 
-%% BT-3217 (ADR 0115 Phase 2, Constraint 4): the runtime live-patch path has
+%% ADR 0115 Phase 2, Constraint 4: the runtime live-patch path has
 %% no type-checker access, so every send it indexes carries `recv_type =>
 %% dynamic` unconditionally — never a resolved name, regardless of how many
 %% sends the source contains or what they look like. Degrades gracefully to
@@ -1246,7 +1246,7 @@ build_method_entry_sends_always_carry_dynamic_recv_type_test_() ->
     ].
 
 %%====================================================================
-%% Miss-policy fallback (ADR 0087 Phase 3, BT-2299)
+%% Miss-policy fallback (ADR 0087 Phase 3)
 %%====================================================================
 
 %% A registry-loaded class that is artificially purged from the index must
@@ -1312,10 +1312,10 @@ miss_policy_fallback_test_() ->
 
 %%====================================================================
 %% Miss-policy fallback for referencesTo: / implementorsOf: /
-%% selectorsMatching: (ADR 0087 Phase 5, BT-2302)
+%% selectorsMatching: (ADR 0087 Phase 5)
 %%====================================================================
 
-%% The three navigation queries migrated in BT-2302 share the `senders_of_bt/1`
+%% The three navigation queries share the `senders_of_bt/1`
 %% partition shape: while a method-bearing class is indexed its rows come from
 %% the index and it never appears as a fallback class; once artificially purged
 %% (loaded-but-unindexed) it falls back and emits exactly one `xref_miss`
@@ -1418,7 +1418,7 @@ nav_query_miss_policy_test_() ->
             end)}
     end}.
 
-%% The CodeRabbit finding deferred from BT-2299 to BT-2300: the `indexed`
+%% A prior review finding: the `indexed`
 %% partition of senders_of_bt/1 must be filtered to the live generation so a
 %% re-register never exposes a stale sender row. Re-register a loaded class
 %% twice with a *different* send selector each generation and assert the
@@ -1481,7 +1481,7 @@ senders_of_bt_indexed_is_gen_filtered_test_() ->
 
 %%====================================================================
 %% Composite-query aggregate readers: all_sends_bt/0 + all_sent_selectors_bt/0
-%% (ADR 0087 Phase 5, BT-2303)
+%% (ADR 0087 Phase 5)
 %%====================================================================
 
 %% The two composite queries (`unimplementedSelectors` / `unusedSelectors`) read
@@ -1797,7 +1797,7 @@ log(LogEvent, #{capture_pid := Pid}) ->
     ok.
 
 %%====================================================================
-%% BT-3218 (ADR 0115 Phase 3): senders_of/2 read path
+%% ADR 0115 Phase 3: senders_of/2 read path
 %%====================================================================
 
 %% A small synthetic class hierarchy, written directly into
@@ -2345,7 +2345,7 @@ bt3218_drain_trace_counts(Conforms, IsProtocol) ->
     end.
 
 %%====================================================================
-%% BT-3215 (ADR 0115 follow-up): composed Union/Intersection recv_type
+%% ADR 0115 follow-up: composed Union/Intersection recv_type
 %%====================================================================
 
 %% EUnit: `{union, Names}` — relevant iff *any* member matches (OR-semantics).

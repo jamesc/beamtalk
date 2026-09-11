@@ -17,10 +17,10 @@ serialize through the gen_server; each filters rows to the owning class's
 current generation. Writes serialize through the gen_server so per-class
 generation bumps stay atomic.
 
-Phase 1 (BT-2297) provides the skeleton: tables, API contract, supervisor
+Phase 1 provides the skeleton: tables, API contract, supervisor
 wiring. Subsequent phases land producers (codegen → `register_class/0`,
 lifecycle hooks) and read-path migration in `SystemNavigation`. Phase 4
-(BT-2300) adds the atomic install protocol: a whole-class (re)register
+adds the atomic install protocol: a whole-class (re)register
 inserts the new generation's rows, publishes the gen bump in one ETS write,
 and reclaims the superseded generation's rows via an async sweep — readers
 filter by `current_gen` throughout, so they never observe a partially-built
@@ -31,8 +31,8 @@ Storage layout (all `protected, named_table, {read_concurrency, true}`):
 - `beamtalk_xref_senders` (bag): selector → call sites
 - `beamtalk_xref_references` (bag): class → reference sites
 - `xref_class_gen` (set): class → current generation
-- `beamtalk_xref_state_vars` (set): {class, var name} → declaration line
-  (BT-3439). Unlike the method tables, this has no generation/sweep
+- `beamtalk_xref_state_vars` (set): {class, var name} → declaration line.
+  Unlike the method tables, this has no generation/sweep
   machinery: instance variables are never hot-patched one at a time (there
   is no `put_state_var/3` counterpart to `put_method/4`) — they only ever
   change via a whole-class (re)register, so `register_state_vars/2` simply
@@ -45,7 +45,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 """.
 
 -include_lib("kernel/include/logger.hrl").
-%% BT-3218 (ADR 0115 Phase 3): ?MAX_HIERARCHY_DEPTH, for the ancestor-chain
+%% ADR 0115 Phase 3: ?MAX_HIERARCHY_DEPTH, for the ancestor-chain
 %% walk `hierarchy_related_classes/1` composes from the registry's existing
 %% primitives.
 -include("beamtalk.hrl").
@@ -79,7 +79,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     state_var_line/2
 ]).
 
-%% API — xref-entry construction helpers (ADR 0087 Phase 4, BT-2301)
+%% API — xref-entry construction helpers (ADR 0087 Phase 4)
 -export([
     build_method_entry/5
 ]).
@@ -101,7 +101,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 -define(CLASS_GEN_TABLE, xref_class_gen).
 -define(STATE_VARS_TABLE, beamtalk_xref_state_vars).
 
-%% Bound on `read_stable/1` revalidation retries (Phase 4 / BT-2300). Converges
+%% Bound on `read_stable/1` revalidation retries (Phase 4). Converges
 %% in 0-1 retries in practice; the bound only caps spin under a write storm.
 -define(READ_STABLE_RETRIES, 100).
 
@@ -117,7 +117,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 -type provenance() :: class_body | extension | class_builder | put_method.
 -type recv_kind() :: self_recv | super_recv | erlang_ffi | other.
 
-%% BT-3217 (ADR 0115 Phase 2): a message send's receiver, projected onto
+%% ADR 0115 Phase 2: a message send's receiver, projected onto
 %% either a resolved class-or-protocol name or `dynamic` (unresolved). Same
 %% atom space for both — `beamtalk_protocol_registry:is_protocol/1`
 %% disambiguates a nominal class from a structural protocol at read time
@@ -127,7 +127,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 %% `beamtalk_class_registry:class_object_tag/1` already uses — rather than
 %% falling into `dynamic` by omission.
 -type name() :: atom().
-%% BT-3215: a `Union`/`Intersection`-typed receiver whose members *all*
+%% A `Union`/`Intersection`-typed receiver whose members *all*
 %% resolved to a single `name()` each (write path: `project_composed` in
 %% `crates/.../gen_server/methods.rs`) — never a partial member list; a
 %% union/intersection with even one unresolvable member coarsens to
@@ -147,9 +147,9 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     %% For `erlang_ffi` sends, the native (Erlang) module the call targets
     %% (the `M` in `(Erlang M) fun: …`). `undefined` for non-FFI sends and for
     %% FFI chains whose module receiver is not a static `Erlang <module>` form.
-    %% Backs the reverse "callers of a native module" query (BT-2669).
+    %% Backs the reverse "callers of a native module" query.
     target_module => module() | undefined,
-    %% BT-3217 (ADR 0115 Phase 2): the receiver's compile-time-resolved
+    %% ADR 0115 Phase 2: the receiver's compile-time-resolved
     %% class/protocol name, or `dynamic`. Populated only by the compile-time
     %% write path (`build_method_xref_entry` in
     %% `crates/.../gen_server/methods.rs`) — the runtime live-patch path
@@ -182,7 +182,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     gen := gen()
 }.
 
-%% BT-3439: one row baked by codegen's `build_state_var_xref_list`
+%% One row baked by codegen's `build_state_var_xref_list`
 %% (`crates/beamtalk-codegen/src/core_erlang/gen_server/methods.rs`) per
 %% declared instance variable (`state:`/`field:`) — just a name and its
 %% 1-based declaration line. No `sends`/`references`/`source_status`
@@ -200,10 +200,10 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     method := selector(),
     line := pos_integer(),
     recv_kind => recv_kind(),
-    %% For `erlang_ffi` send sites, the native module targeted (BT-2669).
+    %% For `erlang_ffi` send sites, the native module targeted.
     %% Absent / `undefined` for non-FFI sites.
     target_module => module() | undefined,
-    %% BT-3217 (ADR 0115 Phase 2): the receiver's compile-time-resolved
+    %% ADR 0115 Phase 2: the receiver's compile-time-resolved
     %% class/protocol name, or `dynamic`. Absent on legacy (unmigrated) rows
     %% — `senders_of/2`'s Phase 3 read path defaults a missing key to
     %% "always relevant", identically to how `recv_kind`/`target_module` are
@@ -213,7 +213,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 }.
 
 %% A site reduced to the fields `SystemNavigation` consumes — the internal
-%% `gen` / `recv_kind` bookkeeping is dropped at the BT boundary (BT-2299).
+%% `gen` / `recv_kind` bookkeeping is dropped at the BT boundary.
 -type bt_row() :: #{
     owner := class_name(),
     class_side := class_side(),
@@ -222,7 +222,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 }.
 
 %% A Beamtalk call site into a native module, reduced to the fields the
-%% "Callers" view consumes (BT-2669): the calling class, whether the call is in
+%% "Callers" view consumes: the calling class, whether the call is in
 %% a class-side method, and the calling method selector. One row per distinct
 %% `{owner, class_side, method}` — a method that calls the module many times
 %% contributes a single row. `line` is the first FFI call site within the
@@ -237,7 +237,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 %% An implementor reduced to the fields `SystemNavigation implementorsOf:`
 %% consumes: the defining class and whether the definition is class-side. The
 %% BT layer maps this onto the class object (instance-side) or the metaclass
-%% object (class-side) — there is no line or sent-selector channel (BT-2302).
+%% object (class-side) — there is no line or sent-selector channel.
 -type impl_row() :: #{
     owner := class_name(),
     class_side := class_side()
@@ -245,7 +245,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 
 %% A defined-selector row reduced to the fields `SystemNavigation
 %% selectorsMatching:` consumes: the defining class, the side, and the selector
-%% name. The pattern filter runs BT-side over `selector` (BT-2302).
+%% name. The pattern filter runs BT-side over `selector`.
 -type selector_row() :: #{
     owner := class_name(),
     class_side := class_side(),
@@ -256,7 +256,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 %% / `#other`). It is the FFI-facing spelling produced by
 %% `beamtalk_interface:allSendsIn:`, NOT the internal `recv_kind()`
 %% (`self_recv | ...`); `recv_kind_to_bt/1` maps between them so the indexed and
-%% source-scan fallback paths feed `SystemNavigation` the same atoms (BT-2303).
+%% source-scan fallback paths feed `SystemNavigation` the same atoms.
 -type bt_recv_kind() :: self | super | erlang_ffi | other.
 
 %% A send site reduced to the fields `SystemNavigation unimplementedSelectors`
@@ -264,7 +264,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 %% selector / line, and the receiver tag (for the FFI + DNU exclusions). This is
 %% a `bt_row()` plus the `sent` selector and `recv` tag — the senders table is
 %% keyed by the sent selector, so the aggregate walk carries it back out
-%% (BT-2303).
+%% Identical rationale to the sibling _bt reads above.
 -type send_row() :: #{
     sent := selector(),
     owner := class_name(),
@@ -320,7 +320,7 @@ register_class(Class, MethodXref) when is_atom(Class), is_list(MethodXref) ->
 
 -doc """
 Replace all state-var (instance-variable) declaration-line rows for a class
-(BT-3439). Synchronous.
+Synchronous.
 
 Unlike `register_class/2`, this has no generation/sweep protocol: a class's
 instance variables only ever change as a whole (a full class reload), never
@@ -395,7 +395,7 @@ purge_method(Class, ClassSide, Selector) when
 
 -doc """
 Build a single `method_xref_entry()` from a method's source text (ADR 0087
-Phase 4, BT-2301).
+Phase 4).
 
 This is the *runtime* counterpart to the compile-time `build_method_xref_entry`
 in `crates/.../gen_server/methods.rs`: it re-parses the one method's `Source`
@@ -484,7 +484,7 @@ send_hit_to_entry(#{selector := SelBin, line := Line} = Hit) when
                 line => Line,
                 recv_kind => recv_to_recv_kind(maps:get(recv, Hit, other)),
                 target_module => target_module_atom(maps:get(target_module, Hit, <<>>)),
-                %% BT-3217 (ADR 0115 Phase 2, Constraint 4): the runtime
+                %% ADR 0115 Phase 2, Constraint 4: the runtime
                 %% live-patch path has no type-checker access and this ADR
                 %% does not add one — every send it indexes gets `dynamic`
                 %% unconditionally, matching the existing `references => []`
@@ -505,7 +505,7 @@ recv_to_recv_kind(_) -> other.
 
 -doc """
 Intern the FFI `target_module` binary the compiler reports onto a module atom
-for the reverse callers index (BT-2669), or `undefined` for non-FFI sends and
+for the reverse callers index, or `undefined` for non-FFI sends and
 unresolvable FFI chains.
 
 `binary_to_existing_atom` (never `binary_to_atom`): the compiler source is
@@ -534,11 +534,11 @@ target_module_atom(_) ->
 Return all sites that send `Selector`. Direct ETS lookup — does not
 go through the gen_server.
 
-Phase 1 (BT-2297): no miss-policy fallback. Callers should treat an
+Phase 1: no miss-policy fallback. Callers should treat an
 empty result as "no known senders"; the source-scan fallback for
-unloaded / unindexed classes lands with Phase 3 (BT-2299).
+unloaded / unindexed classes lands with Phase 3.
 
-Phase 4 (BT-2300): rows are filtered to each owner class's current
+Phase 4: rows are filtered to each owner class's current
 generation. Because `register_class/2` and `put_method/4` install under a
 new generation without synchronously purging the old one (the sweep is
 async), the bag can transiently hold stale rows from an earlier
@@ -558,7 +558,7 @@ senders_of(Selector) when is_atom(Selector) ->
     end.
 
 -doc """
-Receiver-type-aware extension of `senders_of/1` (ADR 0115 Phase 3, BT-3218):
+Receiver-type-aware extension of `senders_of/1` (ADR 0115 Phase 3):
 filters `Selector`'s candidate sender sites to those whose `recv_type` could
 actually dispatch to `ChangedClass`, rather than the unsound exact-match a
 naive filter would apply. Never excludes a site whose relatedness cannot be
@@ -569,11 +569,11 @@ dependent (ADR 0115 Constraint 1 / Constraint 2).
 `ChangedClass` names either the class itself (an **instance-side** change —
 a plain `class_name()` such as `'Counter'`) or its class-object (a
 **class-side** change — the same `'<C> class'` tag `recv_type` itself uses
-for a `Meta{C}` receiver, e.g. `'Counter class'`, per BT-3217's write-path
-convention). This lets one two-argument signature carry the "which side
+for a `Meta{C}` receiver, e.g. `'Counter class'`, per the compile-time write
+path's convention). This lets one two-argument signature carry the "which side
 changed" axis Amendment 3's relatedness test needs, without a third
 parameter or a wider tuple type — `senders_of/2` and `recv_type` already
-share one atom-space convention (BT-3217's reuse of
+share one atom-space convention (reusing the write path's
 `beamtalk_class_registry:class_object_tag/1`), so extending it to
 `ChangedClass` is reuse, not new vocabulary.
 
@@ -588,8 +588,8 @@ Amendment 1):
   (class-object) receiver only ever dispatches through the metaclass chain
   (class-side methods); a plain instance-typed receiver only ever dispatches
   through the instance chain. Conflating the two would be unsound in the
-  *unsafe* direction (Amendment 3, spike §1e / BT-3217 PR #3446's
-  description) — this is a hard boundary, not a soft default.
+  *unsafe* direction (Amendment 3, spike §1e) — this is a hard boundary, not
+  a soft default.
 - Otherwise, `T` (with any `' class'` suffix stripped, on both `T` and
   `ChangedClass`) is tested for relatedness to `ChangedClass`'s base name:
   protocol-conformant (`beamtalk_protocol_registry:conforms_to/2`) if `T` is
@@ -639,7 +639,7 @@ drop every subclass-inherited or ancestor-narrowed dependent).
 Composed entirely from already-shipped hierarchy primitives — no new
 traversal: `beamtalk_class_registry:all_subclasses/1`'s existing transitive
 `direct_subclasses/1` closure for the descendant half, and
-`beamtalk_hierarchy:walk_ancestors/3` (BT-2786, the same generic
+`beamtalk_hierarchy:walk_ancestors/3` (the same generic
 depth-guarded superclass-chain walker `beamtalk_class_dispatch:
 find_class_method_in_chain/2` already uses) over `beamtalk_class_metadata:
 lookup_superclass/1` reads for the ancestor half — pure ETS, no
@@ -647,8 +647,8 @@ lookup_superclass/1` reads for the ancestor half — pure ETS, no
 
 The descendant half was a full-table `ets:match/2` per node in the subtree
 (O(N²) in loaded-class count for a root-class change, ~500 µs at the
-109-class stdlib scale measured in spike §2) until BT-3221 gave
-`beamtalk_class_metadata:match_subclasses/1` a reverse-edge index
+109-class stdlib scale measured in spike §2) until
+`beamtalk_class_metadata:match_subclasses/1` gained a reverse-edge index
 (`beamtalk_class_subclass_index`, a `bag` keyed on superclass): now one
 indexed `ets:lookup/2` per node, so the closure's scan count no longer
 tracks loaded-class count.
@@ -663,7 +663,7 @@ hierarchy_related_classes(ChangedClass) ->
 
 %% Every strict ancestor of `ClassName` (order not significant — set
 %% membership is all `hierarchy_related_classes/1` needs). A thin
-%% `beamtalk_hierarchy:walk_ancestors/3` wrapper (BT-2786) over
+%% `beamtalk_hierarchy:walk_ancestors/3` wrapper over
 %% `beamtalk_class_metadata:lookup_superclass/1`, riding the accumulator
 %% inside the walked node per the walker's own documented pattern (see e.g.
 %% `beamtalk_behaviour_intrinsics:walk_hierarchy/3`).
@@ -695,7 +695,7 @@ class_superclass_or_none(ClassName) ->
         not_found -> none
     end.
 
-%% BT-3218 (ADR 0115 Phase 3): fold state for `is_relevant/5` — memoises the
+%% ADR 0115 Phase 3: fold state for `is_relevant/5` — memoises the
 %% hierarchy/protocol relatedness decision for a given (suffix-stripped)
 %% receiver name, since it is invariant across every site in one
 %% `senders_of/2` call sharing that name (Amendment 1).
@@ -709,18 +709,18 @@ class_superclass_or_none(ClassName) ->
 is_relevant(Site, BaseChanged, ChangedIsClassSide, Related, Cache) ->
     case maps:find(recv_type, Site) of
         error ->
-            %% Legacy row (pre-BT-3217, or a class that hasn't reloaded since
-            %% Phase 2 shipped): always relevant, identically to how
+            %% Legacy row (pre-ADR-0115-Phase-2, or a class that hasn't
+            %% reloaded since Phase 2 shipped): always relevant, identically to how
             %% `recv_kind`/`target_module` already default for legacy rows.
             {true, Cache};
         {ok, dynamic} ->
             {true, Cache};
         {ok, {union, Names}} ->
-            %% BT-3215: relevant iff *any* member is — the receiver could be
+            %% Relevant iff *any* member is — the receiver could be
             %% any one of the union's members at runtime.
             union_relevant(Names, BaseChanged, ChangedIsClassSide, Related, Cache);
         {ok, {intersection, Names}} ->
-            %% BT-3215: relevant iff *every* member is — the receiver must
+            %% Relevant iff *every* member is — the receiver must
             %% simultaneously satisfy all of them.
             intersection_relevant(Names, BaseChanged, ChangedIsClassSide, Related, Cache);
         {ok, T} ->
@@ -728,7 +728,7 @@ is_relevant(Site, BaseChanged, ChangedIsClassSide, Related, Cache) ->
     end.
 
 %% Shared single-name relevance test `is_relevant/5`'s plain-`T` clause and
-%% both BT-3215 composed-type folds below reduce to, member-by-member: strip
+%% both composed-type folds below reduce to, member-by-member: strip
 %% any `' class'` class-object tag, apply Amendment 3's side check, then
 %% `relatedness/4`.
 -spec member_relevant(name(), class_name(), boolean(), sets:set(class_name()), relevance_cache()) ->
@@ -746,7 +746,7 @@ member_relevant(T, BaseChanged, ChangedIsClassSide, Related, Cache) ->
             relatedness(BaseT, BaseChanged, Related, Cache)
     end.
 
-%% BT-3215: OR-fold over a `{union, Names}` member list — short-circuits on
+%% OR-fold over a `{union, Names}` member list — short-circuits on
 %% the first relevant member (no need to evaluate, or cache, the rest), still
 %% threading `Cache` through whatever prefix it did evaluate.
 -spec union_relevant([name()], class_name(), boolean(), sets:set(class_name()), relevance_cache()) ->
@@ -759,7 +759,7 @@ union_relevant([T | Rest], BaseChanged, ChangedIsClassSide, Related, Cache) ->
         {false, Cache1} -> union_relevant(Rest, BaseChanged, ChangedIsClassSide, Related, Cache1)
     end.
 
-%% BT-3215: AND-fold over an `{intersection, Names}` member list —
+%% AND-fold over an `{intersection, Names}` member list —
 %% short-circuits on the first irrelevant member.
 -spec intersection_relevant(
     [name()], class_name(), boolean(), sets:set(class_name()), relevance_cache()
@@ -820,7 +820,7 @@ is_known_class(Name) ->
 %% Split a `recv_type`/`ChangedClass` name into its base class name and
 %% whether it carried the `' class'` class-object-tag suffix
 %% (`beamtalk_class_registry:class_object_tag/1`'s own convention, reused —
-%% not reinvented — by BT-3217's write path for `Meta{C}` receivers).
+%% not reinvented — by the compile-time write path for `Meta{C}` receivers).
 %% `is_class_name/1`/`class_display_name/1` are the same suffix test and
 %% strip the runtime already uses elsewhere to recognise a class-object tag
 %% — reused here rather than re-deriving the `" class"`-suffix offset.
@@ -843,13 +843,13 @@ split_class_object_tag(Name) ->
 -doc """
 Resolve the senders of `Selector` with the ADR 0087 miss-policy applied,
 returning the partition `SystemNavigation sendersOf:` needs to assemble a
-correct result without re-parsing every method (BT-2299, Phase 3).
+correct result without re-parsing every method (Phase 3).
 
 The return map has two keys:
 
 - `indexed` — the sender sites drawn from the ETS index, with **stale rows
   dropped** on two axes: (1) `senders_of/1` already filters to each owner's
-  current generation (Phase 4 / BT-2300), so a re-register can never surface a
+  current generation (Phase 4), so a re-register can never surface a
   site from a superseded generation here; and (2) this function additionally
   discards any site whose `owner` class is no longer reported as loaded by
   `beamtalk_class_registry`. Each surviving row is shaped `#{owner := atom(),
@@ -870,7 +870,7 @@ The return map has two keys:
   correct and never appears here.
 
 The loaded set is read from the fast loaded-class ETS index
-(`beamtalk_class_registry:loaded_class_entries/0`, BT-2384) — a single ETS scan,
+(`beamtalk_class_registry:loaded_class_entries/0`) — a single ETS scan,
 not the O(loaded-classes) `gen_server:call` walk `live_class_entries/0` used to
 do. The indexed set is the distinct owners present in the methods table. The
 stale drop and miss partition are pure ETS / set work; only the (typically
@@ -892,7 +892,7 @@ senders_of_bt(Selector) when is_atom(Selector) ->
 -doc """
 Return all sites that reference `Class` (type annotations, class
 literals, etc.). Direct ETS lookup, filtered to each owner's current
-generation (Phase 4 / BT-2300 — see `senders_of/1`).
+generation (Phase 4 — see `senders_of/1`).
 """.
 -spec references_to(class_name()) -> [site()].
 references_to(Class) when is_atom(Class) ->
@@ -908,7 +908,7 @@ references_to(Class) when is_atom(Class) ->
 
 -doc """
 Resolve the references to `Class` with the ADR 0087 miss-policy applied,
-returning the partition `SystemNavigation referencesTo:` needs (BT-2302).
+returning the partition `SystemNavigation referencesTo:` needs.
 
 Identical in shape and semantics to `senders_of_bt/1` — the references channel
 is baked into the index by codegen alongside senders (one `references` row per
@@ -938,7 +938,7 @@ references_to_bt(Class) when is_atom(Class) ->
 -doc """
 Return all `{Class, ClassSide}` pairs that implement `Selector`.
 Direct ETS lookup via `match_object` on the methods bag, filtered to each
-class's current generation (Phase 4 / BT-2300) so a stale row left by an
+class's current generation (Phase 4) so a stale row left by an
 un-swept reload never reports a phantom implementor.
 """.
 -spec implementors_of(selector()) -> [{class_name(), class_side()}].
@@ -962,7 +962,7 @@ implementors_of(Selector) when is_atom(Selector) ->
 
 -doc """
 Resolve the implementors of `Selector` with the ADR 0087 miss-policy applied,
-returning the partition `SystemNavigation implementorsOf:` needs (BT-2302).
+returning the partition `SystemNavigation implementorsOf:` needs.
 
 `implementorsOf:` does not parse source — it asks each class which selectors it
 *defines*, which is exactly the methods-table channel. The return map mirrors
@@ -992,7 +992,7 @@ implementors_of_bt(Selector) when is_atom(Selector) ->
 Return the selectors defined on `Class` for the given side
 (`ClassSide = true` for class-side methods, `false` for instance-side).
 
-Filtered to `Class`'s current generation (Phase 4 / BT-2300): a selector
+Filtered to `Class`'s current generation (Phase 4): a selector
 that only survives in a stale, un-swept generation is not reported.
 """.
 -spec defined_selectors(class_name(), class_side()) -> [selector()].
@@ -1017,7 +1017,7 @@ defined_selectors(Class, ClassSide) when is_atom(Class), is_boolean(ClassSide) -
 -doc """
 Return every defined-selector row across the whole index with the ADR 0087
 miss-policy applied, the partition `SystemNavigation selectorsMatching:` needs
-(BT-2302).
+Identical partition shape to the sibling _bt reads above.
 
 Unlike the per-key queries, `selectorsMatching:` walks the *universe* of defined
 selectors and filters by a substring pattern BT-side, so this returns all
@@ -1047,7 +1047,7 @@ defined_selectors_bt() ->
                 %% available, then project to the selector_row() the BT layer
                 %% consumes. Drop rows whose owner is no longer loaded (stale
                 %% class) or that survive only in a stale, un-swept generation
-                %% (Phase 4 / BT-2300) — mirrors `implementors_of/1`, but spans
+                %% (Phase 4) — mirrors `implementors_of/1`, but spans
                 %% every class so each row is filtered against its own class's
                 %% generation in the snapshot.
                 {Snapshot, Rows} = read_stable(fun() ->
@@ -1066,7 +1066,7 @@ defined_selectors_bt() ->
 Return every send site across the whole index with the ADR 0087 miss-policy
 applied, the partition `SystemNavigation unimplementedSelectors` needs to
 compute `allSentSelectors − allDefinedSelectors` without re-parsing every method
-(BT-2303, Phase 5).
+(Phase 5).
 
 `unimplementedSelectors` groups *every* send by its sent selector and reports
 the sites of any selector defined nowhere, so this returns the whole senders
@@ -1074,7 +1074,7 @@ universe (not a single key's lookup). It is the senders-table analogue of
 `defined_selectors_bt/0`. The return map mirrors the other `_bt` reads:
 
 - `indexed` — one `send_row()` per senders-table row whose owner class is still
-  loaded (**stale rows dropped**) and whose `gen` is live (Phase 4 / BT-2300).
+  loaded (**stale rows dropped**) and whose `gen` is live (Phase 4).
   Each row carries the `sent` selector (the table key), the containing method's
   `owner` / `class_side` / `method` / `line`, and the `recv` tag (mapped to the
   FFI-facing `#self` / `#super` / `#erlang_ffi` / `#other` spelling) so the BT
@@ -1113,7 +1113,7 @@ all_sends_bt() ->
 -doc """
 Return the distinct set of *sent* selectors across the whole index with the ADR
 0087 miss-policy applied, the partition `SystemNavigation unusedSelectors` needs
-to compute `allDefinedSelectors − allSentSelectors` (BT-2303, Phase 5).
+to compute `allDefinedSelectors − allSentSelectors` (Phase 5).
 
 `unusedSelectors` only needs the *set* of selectors that are sent somewhere — it
 does not need the sites — so this projects the senders universe down to the
@@ -1154,13 +1154,13 @@ all_sent_selectors_bt() ->
 -doc """
 Return the Beamtalk methods that call into native (Erlang) module `Module` via
 the `(Erlang <module>) …` FFI bridge — the reverse of "go to native source"
-(BT-2669). Backs the "Callers" affordance on the IDE's native-module viewer.
+Backs the "Callers" affordance on the IDE's native-module viewer.
 
 Unlike the BT-facing `_bt` reads, this is a direct ETS read (like
 `senders_of/1`): the senders table already records every `erlang_ffi` send with
 its `target_module`, so the callers of a module are exactly the live FFI send
 sites whose `target_module` matches. Rows are filtered to each owner's current
-generation (stale-row drop, BT-2300) and de-duplicated to one
+generation (stale-row drop) and de-duplicated to one
 `native_caller_row()` per `{owner, class_side, method}` — a method that calls
 the module many times yields a single row anchored at its first FFI call line.
 
@@ -1225,11 +1225,11 @@ dedup_caller_rows(Sites) ->
 Return the `method_info()` record for a method, or `undefined` if the
 class+selector+side triple is not registered.
 
-Used by the LSP `nav-query` op (BT-2239) to surface the method-header line
-number to `textDocument/implementation` consumers (BT-2241). Direct ETS
+Used by the LSP `nav-query` op to surface the method-header line
+number to `textDocument/implementation` consumers. Direct ETS
 lookup — does not go through the gen_server.
 
-Phase 4 (BT-2300): `?METHODS_TABLE` is a bag, and `register_class/2` /
+Phase 4: `?METHODS_TABLE` is a bag, and `register_class/2` /
 `put_method/4` install under a new generation without synchronously
 purging the old one (the sweep is async). Multiple rows can therefore
 share `{Class, ClassSide, Selector}`. The lookup is filtered to `Class`'s
@@ -1256,7 +1256,7 @@ method_info(Class, ClassSide, Selector) when
 
 -doc """
 Return the 1-based declaration line of `Class`'s instance variable `Name`, or
-`undefined` if unregistered (BT-3439) — e.g. a class compiled before this
+`undefined` if unregistered — e.g. a class compiled before this
 feature landed, a runtime-built `ClassBuilder` class (no compiler to derive a
 line from), or simply not a real field on the class.
 
@@ -1283,7 +1283,7 @@ state_var_line(Class, Name) when is_atom(Class), is_atom(Name) ->
 %%====================================================================
 
 -doc """
-Compute the ADR 0087 miss partition shared by every `_bt` read API (BT-2302):
+Compute the ADR 0087 miss partition shared by every `_bt` read API:
 the set of loaded class names (for stale-dropping indexed rows) and the list of
 loaded-but-unindexed, method-bearing classes the BT side must fall back to
 source-scanning.
@@ -1298,7 +1298,7 @@ bounded by the miss count, not the workspace size, exactly as the original
 """.
 -spec miss_partition(atom()) -> {sets:set(class_name()), [class_name()]}.
 miss_partition(Query) ->
-    %% BT-2384: The loaded-class set comes from the fast ETS loaded-class index
+    %% The loaded-class set comes from the fast ETS loaded-class index
     %% (`beamtalk_class_registry:loaded_class_entries/0`) — a single ETS scan
     %% plus cheap local `is_process_alive/1` filtering — NOT the old
     %% `live_class_entries/0` walk that issued one `gen_server:call` per loaded
@@ -1358,7 +1358,7 @@ indexed_class_set() ->
     end.
 
 %%====================================================================
-%% Internal: generation filtering (Phase 4 / BT-2300)
+%% Internal: generation filtering (Phase 4)
 %%====================================================================
 
 -doc """
@@ -1474,7 +1474,7 @@ site_to_bt_row(Site) ->
 -doc """
 Project a sent-selector / `site()` pair onto the `send_row()` the BT
 `unimplementedSelectors` walk consumes: the `bt_row()` fields plus the `sent`
-selector (the senders-table key) and the FFI-facing `recv` tag (BT-2303).
+selector (the senders-table key) and the FFI-facing `recv` tag.
 """.
 -spec site_to_send_row(selector(), site()) -> send_row().
 site_to_send_row(Sent, Site) ->
@@ -1493,7 +1493,7 @@ on. The inverse of `recv_to_recv_kind/1`: the index stores `self_recv` /
 `super_recv` (to avoid clashing with the bare `self` atom), but
 `SystemNavigation` compares against `#self` / `#super` / `#erlang_ffi` —
 exactly what `beamtalk_interface:allSendsIn:` returns on the source-scan
-fallback path — so the two paths feed identical atoms (BT-2303).
+fallback path — so the two paths feed identical atoms.
 """.
 -spec recv_kind_to_bt(recv_kind()) -> bt_recv_kind().
 recv_kind_to_bt(self_recv) -> self;
@@ -1535,7 +1535,7 @@ init([]) ->
     ?SENDERS_TABLE = ets:new(?SENDERS_TABLE, BagOpts),
     ?REFERENCES_TABLE = ets:new(?REFERENCES_TABLE, BagOpts),
     ?CLASS_GEN_TABLE = ets:new(?CLASS_GEN_TABLE, SetOpts),
-    %% BT-3439: `set`, not `bag` — `register_state_vars/2` replaces a class's
+    %% `set`, not `bag` — `register_state_vars/2` replaces a class's
     %% rows outright rather than versioning them, so at most one row per
     %% {Class, Name} ever exists.
     ?STATE_VARS_TABLE = ets:new(?STATE_VARS_TABLE, SetOpts),
@@ -1560,7 +1560,7 @@ handle_call({register_class, Class, MethodXref}, _From, State) ->
     schedule_sweep(Class, NewGen),
     {reply, ok, State};
 handle_call({register_state_vars, Class, StateVarXref}, _From, State) ->
-    %% BT-3439 (review follow-up): insert the new rows *before* removing any
+    %% Insert the new rows *before* removing any
     %% now-stale ones, rather than delete-then-insert. `state_var_line/2` is a
     %% direct ETS lookup outside this gen_server's serialization, so a
     %% concurrent reader can run between two separate ETS calls in this
@@ -1797,11 +1797,11 @@ insert_one_method(Class, Entry, Gen) ->
                 line => maps:get(line, Send, Line),
                 recv_kind => maps:get(recv_kind, Send, other),
                 target_module => maps:get(target_module, Send, undefined),
-                %% BT-3217: a `Send` map from a pre-ADR-0115 compiled module
+                %% A `Send` map from a pre-ADR-0115 compiled module
                 %% (or the runtime live-patch path) carries no `recv_type`
                 %% key at all — defaulting to `dynamic` here, exactly like
                 %% `recv_kind`/`target_module` already default for legacy
-                %% rows, resolves identically to `senders_of/2`'s (BT-3218,
+                %% rows, resolves identically to `senders_of/2`'s (ADR 0115
                 %% Phase 3) "always relevant" read-time default for a
                 %% genuinely absent key — both routes agree.
                 recv_type => maps:get(recv_type, Send, dynamic),
@@ -1853,7 +1853,7 @@ do_purge_class(Class) ->
         [{{'_', #{owner => '$1'}}, [{'=:=', '$1', {const, Class}}], [true]}]
     ),
     true = ets:delete(?CLASS_GEN_TABLE, Class),
-    %% BT-3439: state-var rows are keyed by {Class, Name} — direct match.
+    %% State-var rows are keyed by {Class, Name} — direct match.
     true = ets:match_delete(?STATE_VARS_TABLE, {{Class, '_'}, '_'}),
     ok.
 
