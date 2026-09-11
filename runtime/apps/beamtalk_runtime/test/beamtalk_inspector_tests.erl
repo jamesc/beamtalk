@@ -31,7 +31,7 @@ Coverage:
 %% Test gen_server
 %%====================================================================
 
-%% Mark the process as a Beamtalk actor (BT-2503): classification keys on a
+%% Mark the process as a Beamtalk actor: classification keys on a
 %% `'$beamtalk_actor'` process-dictionary entry, distinguishing a real actor
 %% (`#actor`) from a foreign OTP process (`#foreign`). A `{foreign, State}` arg
 %% starts without the marker, standing in for a foreign OTP gen_server.
@@ -273,7 +273,7 @@ dictionary_integer_key_drills_by_key_test() ->
 %% `at:` on a Dictionary uses exact (`=:=`) keys via `maps:find/2`, matching
 %% `Dictionary >> at:` (`beamtalk_map:at:`): an exact key drills; a numerically-
 %% equal-but-not-identical key (`at: 1` against a `1.0` entry) misses cleanly —
-%% no crash, no `==` false hit (BT-2507; replaces the BT-2503 `==`-keyfind path).
+%% no crash, no `==` false hit.
 dictionary_numeric_key_exact_match_test() ->
     Dict = #{1.0 => one_point_oh},
     I = beamtalk_inspector:on(Dict),
@@ -283,7 +283,7 @@ dictionary_numeric_key_exact_match_test() ->
     ?assertEqual(no_such_field, Err#beamtalk_error.kind).
 
 %% Dictionary `size` is the user-key count — `maps:size/1` minus the class tag,
-%% for both tagged and plain maps (BT-2507, cheap on the render hot path).
+%% for both tagged and plain maps (cheap on the render hot path).
 dictionary_size_excludes_tag_test() ->
     Tagged = #{'$beamtalk_class' => 'Dictionary', a => 1, b => 2, c => 3},
     ?assertEqual(3, beamtalk_inspector:sizeOf(beamtalk_inspector:on(Tagged))),
@@ -291,7 +291,7 @@ dictionary_size_excludes_tag_test() ->
 
 %% A large Array windows over the page's index range via direct key lookup into
 %% the canonical index→value `'data'` map (not a whole-array materialisation),
-%% with correct absolute indices (BT-2507, ADR 0090).
+%% with correct absolute indices (ADR 0090).
 large_array_windowed_test() ->
     Arr = #{
         '$beamtalk_class' => 'Array',
@@ -310,7 +310,7 @@ large_array_windowed_test() ->
 
 %% An improper list (routine in foreign OTP process state) is *not* a collection:
 %% it degrades to a #value cursor instead of crashing the windowing paths
-%% (length/1, lists:sublist/3, lists:nth/2) (BT-2503 regression).
+%% (length/1, lists:sublist/3, lists:nth/2).
 improper_list_degrades_to_value_test() ->
     I = beamtalk_inspector:on([1 | 2]),
     ?assertEqual(value, beamtalk_inspector:kindOf(I)),
@@ -354,7 +354,7 @@ dead_foreign_unavailable_test() ->
 
 %% A pid on another node must not crash classification — `is_beamtalk_actor/1`,
 %% `is_process_alive/1`, and `process_info/2` all raise `badarg` for a remote pid.
-%% It degrades to the single #status => #unavailable foreign field (BT-2508).
+%% It degrades to the single #status => #unavailable foreign field.
 remote_pid_degrades_to_unavailable_test() ->
     RemotePid = a_remote_pid(),
     ?assert(node(RemotePid) =/= node()),
@@ -378,7 +378,7 @@ a_remote_pid() ->
     %% (SMALL_ATOM_UTF8_EXT) takes a 1-byte length — pairing it with Len:16
     %% decodes the node as the empty atom '' (still remote-shaped, but not the
     %% intended node name). Fixed alongside the same bug in
-    %% beamtalk_announcements_tests (BT-2530 review).
+    %% beamtalk_announcements_tests.
     binary_to_term(<<131, 88, 118, Len:16, NodeBin/binary, 1:32, 0:32, 0:32>>).
 
 %%====================================================================
@@ -400,7 +400,7 @@ foreign_evaluate_unsupported_test() ->
     gen_server:stop(Pid).
 
 %%====================================================================
-%% Edge cases (BT-2509)
+%% Edge cases
 %%====================================================================
 
 %% The empty list `#()` is a leaf `#value`, not a `#collection` — consistent with
@@ -446,7 +446,7 @@ forged_collection_maps_never_crash_test() ->
     ?assertEqual(0, beamtalk_inspector:sizeOf(beamtalk_inspector:on(Bag))).
 
 %%====================================================================
-%% Foreign-state charlist rendering (BT-2511, provenance-scoped)
+%% Foreign-state charlist rendering (provenance-scoped)
 %%====================================================================
 
 %% A foreign process whose *whole state* is an Erlang string (a charlist) renders
@@ -476,7 +476,7 @@ foreign_state_map_charlist_value_drills_as_string_test() ->
 
 %% The heuristic is **scoped to foreign provenance**: a top-level Beamtalk integer
 %% `List` (`#(72, 73)`) is NOT reinterpreted as the string `"HI"` — this is the
-%% regression the global `printable_list/1` fix would have caused (BT-2511).
+%% regression the global `printable_list/1` fix would have caused.
 beamtalk_integer_list_not_coerced_test() ->
     I = beamtalk_inspector:on([72, 73]),
     ?assertEqual(collection, beamtalk_inspector:kindOf(I)),
@@ -517,13 +517,13 @@ foreign_empty_list_stays_leaf_test() ->
 
 %%====================================================================
 %% Foreign-state charlist rendering in the printString text tree
-%% (BT-2519, provenance-scoped deep summary)
+%% (provenance-scoped deep summary)
 %%====================================================================
 
 %% The `printString` text tree one-lines a `#foreign` cursor's plain (untagged)
 %% state map inline rather than recursing into it; under foreign provenance a
 %% charlist *nested* in that summary is reinterpreted as a `String`, not an
-%% Integer `List` — the gap BT-2511 left in the navigable-only fix.
+%% Integer `List` — the gap left by a navigable-only fix.
 foreign_nested_charlist_text_tree_renders_as_string_test() ->
     Pid = start_foreign(#{name => "bob"}),
     I = beamtalk_inspector:on(Pid),
