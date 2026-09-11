@@ -5,7 +5,7 @@
 -module(beamtalk_module_name_tests).
 
 -moduledoc """
-EUnit tests for beamtalk_module_name (BT-3081).
+EUnit tests for beamtalk_module_name.
 
 Covers the forward CamelCase→snake_case conversion (`camel_to_snake/1`),
 the `bt@…` module-atom assembly helpers, `is_stdlib_module/1`, and the lossy
@@ -15,7 +15,7 @@ the `bt@…` module-atom assembly helpers, `is_stdlib_module/1`, and the lossy
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================
-%%% camel_to_snake/1 — cross-language conformance fixtures (BT-3081)
+%%% camel_to_snake/1 — cross-language conformance fixtures
 %%%
 %%% Kept byte-identical to the Rust fixture
 %%% (MODULE_NAME_CONFORMANCE_FIXTURES in crates/beamtalk-core/src/ast/mod.rs,
@@ -24,8 +24,7 @@ the `bt@…` module-atom assembly helpers, `is_stdlib_module/1`, and the lossy
 %%% implementations stay provably in sync on the same inputs, including the
 %%% acronym case-fold collision (BEAMError/Beamerror) and the
 %%% lowercase-initial + Unicode cases that previously drifted between the
-%%% four now-deleted Erlang copies of this conversion (copies A-D in the
-%%% BT-3081 issue).
+%%% four now-deleted Erlang copies of this conversion.
 %%% ============================================================================
 
 -define(CONFORMANCE_FIXTURES, [
@@ -52,7 +51,7 @@ camel_to_snake_conformance_test_() ->
      || {Input, Expected} <- ?CONFORMANCE_FIXTURES
     ].
 
-%% BT-3081 regression: beamtalk_repl_loader:to_snake_case/1 (copy D) used to
+%% Regression: beamtalk_repl_loader:to_snake_case/1 (copy D) used to
 %% force-lowercase the first character unconditionally, discarding whether it
 %% actually started lowercase — so a lowercase-initial name immediately
 %% followed by an uppercase letter (no lowercase letter in between to
@@ -78,14 +77,14 @@ to_stdlib_module_atom_test() ->
     ).
 
 to_stdlib_module_atom_acronym_test() ->
-    %% BT-3081: BEAMError is the documented case-fold collision fixture —
+    %% BEAMError is the documented case-fold collision fixture —
     %% forward conversion is not lossy (only the inverse is).
     ?assertEqual(
         'bt@stdlib@beamerror', beamtalk_module_name:to_stdlib_module_atom('BEAMError')
     ).
 
 %%% ============================================================================
-%%% to_qualified_module_atom/2 (BT-3108)
+%%% to_qualified_module_atom/2
 %%% ============================================================================
 
 to_qualified_module_atom_found_test() ->

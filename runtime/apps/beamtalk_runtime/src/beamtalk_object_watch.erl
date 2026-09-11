@@ -8,7 +8,7 @@
 
 -moduledoc """
 Per-object change subscriptions — the push substrate for the live Inspector
-(ADR 0095 §5, BT-2489, Cockpit Phase 3).
+(ADR 0095 §5, Cockpit Phase 3).
 
 ADR 0095 ships the Inspector poll-only: a LiveView pane re-issues `refresh` on a
 timer. This module is the documented *opt-in push* follow-up §5 specified. A
@@ -37,7 +37,7 @@ A subscribed pid receives, after each committed state write on the watched actor
 
 `ChangedSlots` is the list of user-visible state keys whose values differed
 (ADR 0095 §5's `changedSlots`; `[]` means "unknown — refresh all"). This is a
-*refresh trigger*, mirroring the `bindings` stream (BT-2399): the consumer
+*refresh trigger*, mirroring the `bindings` stream: the consumer
 re-issues `inspect`/`refresh` to read the new snapshot, keeping actor opacity
 intact (the snapshot is still a guarded `sys:get_state`, never a hot-path read).
 
@@ -81,7 +81,7 @@ so the dispatch path stops paying for it.
   lost and the public table comes back empty. Remote (dist-attached) subscribers
   are *not* notified and will silently stop receiving pushes. A live consumer
   must therefore re-issue `subscribe_object` on dist reconnect / pane remount
-  (the Cockpit Inspector does this on LiveView mount, BT-2492), not only once.
+  (the Cockpit Inspector does this on LiveView mount), not only once.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -201,7 +201,7 @@ init([]) ->
 
 handle_call({subscribe, Pid, Subscriber}, _From, State) ->
     %% Synchronous so the watched-table registration is committed before the
-    %% caller's next state write — closes the first-write race (BT-2492).
+    %% caller's next state write — closes the first-write race.
     {reply, ok, do_subscribe(Pid, Subscriber, State)};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
@@ -369,7 +369,7 @@ do_publish(Pid, ActorClass, ChangedSlots, #state{watchers = Watchers}) ->
     %% A plain send — NOT `nosuspend`: `nosuspend` silently DROPS the message
     %% whenever delivery would suspend the sender, which includes a dist link that
     %% is busy *or still being brought up*. That dropped the very first push to a
-    %% freshly-attached pane (BT-2492) — and with no later write there is nothing
+    %% freshly-attached pane — and with no later write there is nothing
     %% to recover it. Subscribers are monitored, responsive LiveView pids, so
     %% reliable delivery of this low-frequency trigger is worth more than
     %% guaranteeing this fan-out never blocks; dist send-buffering gives

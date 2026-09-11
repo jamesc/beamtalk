@@ -55,7 +55,7 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 ]).
 
 %%% ===================================================================
-%%% Class Removal (BT-1239)
+%%% Class Removal
 %%% ===================================================================
 -export([
     remove_class_from_system/1
@@ -139,7 +139,7 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 ]).
 
 %%% ===================================================================
-%%% Selector Shape (BT-3090)
+%%% Selector Shape
 %%% ===================================================================
 -export([
     is_keyword_selector/1
@@ -198,7 +198,7 @@ get_class_method_return_type(ClassName, Selector) ->
     beamtalk_class_registry:get_class_method_return_type(ClassName, Selector).
 
 %%% ====================================================================
-%%% Class Removal (BT-1239)
+%%% Class Removal
 %%% ====================================================================
 
 -doc """
@@ -243,7 +243,7 @@ class_name(Pid) ->
 -doc """
 Get the BEAM module name for a class object's pid.
 
-Delegates to `beamtalk_object_class:module_name_safe/1` (BT-3054) and
+Delegates to `beamtalk_object_class:module_name_safe/1` and
 inherits its caveat verbatim: it may not raise `noproc`/`timeout` for a
 class process killed via an untrappable `kill` signal before `terminate/2`
 ran, because the ETS rows it reads survive that kind of death. See
@@ -309,7 +309,7 @@ Full protocol metadata for a registered protocol, or `undefined` (ADR 0068).
 The map carries `required_methods` / `required_class_methods` (each a list of
 `#{selector, arity}`), `type_params`, `extending`, and `doc` — pure registry
 reflection, no user code. Used by the System Browser to surface a protocol's
-required members (BT-2615).
+required members.
 """.
 -spec protocol_info(atom()) -> map() | undefined.
 protocol_info(ProtocolName) ->
@@ -377,12 +377,12 @@ process_label(Value) ->
 primitive_class_of(Value) ->
     beamtalk_primitive:class_of(Value).
 
--doc "BT-3082: canonical liveness-probed pid label (#Actor<>/#Dead<>/#Future<...>).".
+-doc "Canonical liveness-probed pid label (#Actor<>/#Dead<>/#Future<...>).".
 -spec pid_label(pid()) -> binary().
 pid_label(Pid) ->
     beamtalk_primitive:pid_label(Pid).
 
--doc "BT-3082: canonical `Block/N` label for a bare fun.".
+-doc "Canonical `Block/N` label for a bare fun.".
 -spec block_label(function()) -> binary().
 block_label(Fun) ->
     beamtalk_primitive:block_label(Fun).
@@ -423,7 +423,7 @@ hierarchy_foldl(Fun, Acc) ->
     beamtalk_class_metadata:foldl(Fun, Acc).
 
 %%% ====================================================================
-%%% Selector Shape Delegators (BT-3090)
+%%% Selector Shape Delegators
 %%% ====================================================================
 
 -doc """

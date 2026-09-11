@@ -13,8 +13,8 @@ access. Wraps `#beamtalk_error{}' records as exception hierarchy value
 type objects (tagged maps). Called by compiler-generated try/catch code.
 
 Exception objects are value types (tagged maps), not actors.
-The `$beamtalk_class' is set based on error kind (BT-452), or from the
-error's class field if it is a user-defined exception subclass (BT-480):
+The `$beamtalk_class' is set based on error kind, or from the
+error's class field if it is a user-defined exception subclass:
 ```
 #{
   '$beamtalk_class' => 'MyCustomError',  %% user-defined, or RuntimeError, TypeError, etc.
@@ -22,7 +22,7 @@ error's class field if it is a user-defined exception subclass (BT-480):
 }
 ```
 
-**BT-480: User-defined error subclasses.** When `signal` or `signal:` is
+**User-defined error subclasses.** When `signal` or `signal:` is
 called on an instance of a user-defined Exception subclass (e.g.,
 `Error subclass: MyCustomError`), the class name is preserved in the
 `#beamtalk_error.class' field. `wrap/1' and `matches_class_name/2' check
@@ -72,7 +72,7 @@ Falls back to 'Error' for unknown kinds (safe bootstrap default).
 
 NOTE: When adding new error subclasses (e.g., IOError), add a clause here.
 is_exception_class/1 and matches_class_name/2 derive hierarchy from the
-class system automatically (BT-475).
+class system automatically.
 """.
 -spec kind_to_class(atom()) -> atom().
 kind_to_class(does_not_understand) -> 'RuntimeError';
@@ -80,24 +80,24 @@ kind_to_class(arity_mismatch) -> 'RuntimeError';
 kind_to_class(immutable_value) -> 'RuntimeError';
 kind_to_class(runtime_error) -> 'RuntimeError';
 kind_to_class(index_out_of_bounds) -> 'RuntimeError';
-%% BT-3021: accessing an element of an empty collection (List/String/Array
+%% Accessing an element of an empty collection (List/String/Array
 %% first/last/at:, Interval first/last, Collection max/min/average).
 kind_to_class(empty_collection) -> 'RuntimeError';
 %% `empty_queue` is the same condition on Queue, and predates `empty_collection`
-%% (BT-1250). It kept its own kind for compatibility — callers catch
+%% It kept its own kind for compatibility — callers catch
 %% `#empty_queue` — but it classified as bare 'Error' while every other
 %% empty-collection access is a 'RuntimeError'. RuntimeError is a subclass of
 %% Error, so `on: Error do:` still catches it; `on: RuntimeError do:` now does
 %% too, making the family uniform.
 kind_to_class(empty_queue) -> 'RuntimeError';
-%% BT-3025: a search that completed but matched nothing (`detect:`). Distinct
+%% A search that completed but matched nothing (`detect:`). Distinct
 %% from `empty_collection` — the collection may be full, just of non-matches —
 %% and from `key_error`, which names a *key* the receiver was asked for.
 kind_to_class(not_found) -> 'RuntimeError';
 kind_to_class(class_not_found) -> 'RuntimeError';
 kind_to_class(no_superclass) -> 'RuntimeError';
 kind_to_class(class_already_exists) -> 'RuntimeError';
-%% ADR 0112 (BT-3186): `Behaviour removeSelector:` on an absent selector —
+%% ADR 0112: `Behaviour removeSelector:` on an absent selector —
 %% deliberately not `does_not_understand` (the message itself was understood;
 %% only its argument had nothing to remove). See beamtalk_behaviour_intrinsics's
 %% `selector_not_found_error/2`.
@@ -107,7 +107,7 @@ kind_to_class(callback_failed) -> 'RuntimeError';
 kind_to_class(actor_dead) -> 'RuntimeError';
 kind_to_class(future_not_awaited) -> 'RuntimeError';
 kind_to_class(internal_error) -> 'RuntimeError';
-%% BT-2707: classified raw-error kinds (bucket A user-input, bucket C resource/env).
+%% Classified raw-error kinds (bucket A user-input, bucket C resource/env).
 %% No dedicated stdlib class exists for these yet, so they live under RuntimeError
 %% for catchability (a future KeyError/ResourceError hierarchy can refine this).
 kind_to_class(key_error) -> 'RuntimeError';
@@ -117,7 +117,7 @@ kind_to_class(process_not_found) -> 'RuntimeError';
 kind_to_class(timeout_error) -> 'RuntimeError';
 kind_to_class(type_error) -> 'TypeError';
 kind_to_class(instantiation_error) -> 'InstantiationError';
-%% BEAM interop exceptions (ADR 0028 §1, BT-678)
+%% BEAM interop exceptions (ADR 0028 §1)
 kind_to_class(erlang_exit) -> 'ExitError';
 kind_to_class(erlang_throw) -> 'ThrowError';
 %% signal (from signal_message/1) stays Error — user decides semantics.
@@ -129,7 +129,7 @@ kind_to_class(_) -> 'Error'.
 Derive the canonical error kind for a named exception class.
 
 Inverse of kind_to_class/1 for the stdlib exception subclasses that have
-a dedicated kind (BT-1056: InstantiationError and TypeError have canonical kinds
+a dedicated kind (InstantiationError and TypeError have canonical kinds
 so that `SomeClass new signal: msg` produces the correct catchable kind).
 User-defined subclasses without a dedicated kind use `signal`.
 """.
@@ -141,7 +141,7 @@ class_to_kind(_) -> signal.
 -doc """
 Check if a class name belongs to the exception hierarchy.
 
-Delegates to the class system's superclass chain (BT-475).
+Delegates to the class system's superclass chain.
 Returns true if ClassName is 'Exception' or any subclass of 'Exception'.
 Returns false if class is not registered (safe during bootstrap).
 """.
@@ -176,12 +176,12 @@ matches_class(_Other, _Error) ->
     true.
 
 -doc """
-Match by class name atom with hierarchy-aware matching (BT-475).
+Match by class name atom with hierarchy-aware matching.
 
 Derives the error's class from kind_to_class/1, then uses the class
 system's superclass chain to check if it matches the requested filter.
-If the error's class field is itself an exception class (BT-480:
-user-defined error subclasses), uses it directly instead of kind_to_class.
+If the error's class field is itself an exception class (a
+user-defined error subclass), uses it directly instead of kind_to_class.
 Handles both "ClassName" and "ClassName class" variants (metaclass refs).
 Raw Erlang errors (not #beamtalk_error{}) are wrapped first.
 """.
@@ -189,7 +189,7 @@ Raw Erlang errors (not #beamtalk_error{}) are wrapped first.
 matches_class_name(ClassName, #beamtalk_error{kind = Kind, class = ErrorClass}) ->
     %% Strip " class" suffix if present (metaclass reference from class objects)
     BaseName = strip_class_suffix(ClassName),
-    %% BT-480: If error.class is an exception class, use it directly.
+    %% If error.class is an exception class, use it directly.
     %% Otherwise fall back to kind_to_class (built-in error kinds).
     ActualClass =
         case is_exception_class(ErrorClass) of
@@ -220,9 +220,9 @@ strip_class_suffix(ClassName) ->
 -doc """
 Wrap a `#beamtalk_error{}` record as an Exception tagged map.
 
-Sets `$beamtalk_class` based on the error kind (BT-452), or uses the
+Sets `$beamtalk_class` based on the error kind, or uses the
 error's class field directly if it is a registered exception subclass
-(BT-480: user-defined error subclasses).
+(a user-defined error subclass).
 """.
 -spec wrap(#beamtalk_error{} | term()) -> map().
 wrap(#beamtalk_error{kind = Kind, class = ErrorClass} = Error) ->
@@ -236,7 +236,7 @@ wrap(Other) ->
     wrap_raw(Other).
 
 -doc """
-Map a raw Erlang error reason to its Beamtalk error kind (BT-2707).
+Map a raw Erlang error reason to its Beamtalk error kind.
 
 The single source of truth for raw-error classification. `wrap_raw/2` uses it to
 pick the kind for the error it builds; the runtime-only actor method-error path
@@ -279,10 +279,10 @@ wrap_raw(Reason) ->
     wrap_raw(Reason, #{}).
 
 -doc """
-Wrap a raw Erlang error into a well-classified `#beamtalk_error{}` (BT-2707).
+Wrap a raw Erlang error into a well-classified `#beamtalk_error{}`.
 
 Raw Erlang errors (`badarith`, `{badkey,K}`, `function_clause`, …) are sorted
-into three buckets that are presented differently (BT-2704):
+into three buckets that are presented differently:
 
 * **Bucket A — user-input** (`type_error`/`key_error`/`argument_error`):
   `badarith`, `{badkey,K}`, `{badmap,M}`, `badarg`. Carries selector + value
@@ -293,7 +293,7 @@ into three buckets that are presented differently (BT-2704):
 * **Bucket C — resource/env** (`resource_error`/`process_not_found`/
   `timeout_error`): `system_limit`, `noproc`, `timeout`.
 
-`Context` is the dispatch-layer breadcrumb (BT-2705): a map that may carry
+`Context` is the dispatch-layer breadcrumb: a map that may carry
 `selector` and `class` for the active send. It disambiguates the overloaded
 `badarg` and lets bucket-A errors render located messages
 (e.g. `Tuple>>sum: …`). It is consulted only on this (error) path, so it adds
@@ -336,7 +336,7 @@ wrap_raw(badarg, Context) ->
     %% `badarg` is overloaded (user mistake vs internal misuse) and the bare
     %% error can't tell which. With a dispatch breadcrumb we can locate it as a
     %% user argument error; without one we still give it its own kind rather
-    %% than the generic runtime_error catch-all (BT-2707 floor).
+    %% than the generic runtime_error catch-all.
     {Sel, Cls} = breadcrumb(Context),
     Message = located(Sel, Cls, <<"invalid argument">>),
     Hint = <<"Check the argument types and values for this message.">>,
@@ -404,7 +404,7 @@ wrap_classified(Kind, Class, Selector, Message, Hint, Details) ->
     %% `Class` is the *receiver* breadcrumb (already baked into the located
     %% Message). Do not store it as the error's class when it is itself an
     %% exception class: matches_class_name/2 treats #beamtalk_error.class as
-    %% authoritative for hierarchy matching (BT-480), so a raw error that merely
+    %% authoritative for hierarchy matching, so a raw error that merely
     %% occurred on an Exception-subclass receiver must not hijack catch matching.
     %% Fall back to undefined there, letting the kind-derived class drive matching.
     RecordClass =
@@ -422,7 +422,7 @@ wrap_classified(Kind, Class, Selector, Message, Hint, Details) ->
     },
     #{'$beamtalk_class' => kind_to_class(Kind), error => GenError}.
 
-%% Extract the {Selector, Class} breadcrumb from a dispatch context (BT-2705).
+%% Extract the {Selector, Class} breadcrumb from a dispatch context.
 -spec breadcrumb(map()) -> {atom() | undefined, atom() | undefined}.
 breadcrumb(Context) ->
     {maps:get(selector, Context, undefined), maps:get(class, Context, undefined)}.
@@ -485,7 +485,7 @@ reraise(Type, Reason, Stacktrace, Context) ->
     error(ensure_wrapped(Type, Reason, Stacktrace, Context)).
 
 -doc """
-Idempotent exception wrapper with stacktrace capture (BT-107).
+Idempotent exception wrapper with stacktrace capture.
 
 Like ensure_wrapped/1 but also stores the Erlang stacktrace as a list
 of StackFrame objects on the exception tagged map.
@@ -498,7 +498,7 @@ ensure_wrapped(Other, Stacktrace) ->
     Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)}.
 
 -doc """
-Idempotent exception wrapper with Erlang exception type (BT-728).
+Idempotent exception wrapper with Erlang exception type.
 
 Like ensure_wrapped/2 but also accepts the Erlang exception class atom
 (error, exit, throw) from the try/catch <Type, Error, Stack> triple.
@@ -549,7 +549,7 @@ ensure_wrapped(exit, Reason, Stacktrace) ->
     Wrapped = wrap(Error),
     Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
 ensure_wrapped(throw, Reason, Stacktrace) ->
-    %% BT-869: Unwrap future_rejected errors (thrown from beamtalk_future:await/*)
+    %% Unwrap future_rejected errors (thrown from beamtalk_future:await/*)
     %% Future rejects with {future_rejected, ActualError} where ActualError may be:
     %%   - #beamtalk_error{}           (old hand-written gen_servers via beamtalk_future:reject/2)
     %%   - #{error := #beamtalk_error{}} (already-wrapped map, e.g. from compiled actors)
@@ -579,7 +579,7 @@ ensure_wrapped(_Type, Other, Stacktrace) ->
     Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)}.
 
 -doc """
-Idempotent exception wrapper with a dispatch breadcrumb (BT-2705).
+Idempotent exception wrapper with a dispatch breadcrumb.
 
 Like ensure_wrapped/3 but threads a dispatch `Context` (a map that may carry
 `selector` and `class` for the active send) into `wrap_raw/2`, so raw Erlang
@@ -643,10 +643,10 @@ dispatch('class', [], #{'$beamtalk_class' := Class}) ->
 dispatch('signal', [], #{error := Error}) ->
     beamtalk_error:raise(Error);
 dispatch('signal', [], #{'$beamtalk_class' := ClassName}) ->
-    %% BT-480: New exception instance (no error field yet) — create and raise
+    %% New exception instance (no error field yet) — create and raise
     signal_from_class(ClassName);
 dispatch('signal:', [Message], #{'$beamtalk_class' := ClassName}) ->
-    %% BT-480: Preserve exception class name from the signaling object
+    %% Preserve exception class name from the signaling object
     signal_message(Message, ClassName).
 
 -doc "Check if Exception responds to a selector.".
@@ -698,7 +698,7 @@ signal_message(Message) ->
 -doc """
 Raise a new exception with a message, preserving the exception class.
 
-BT-480: Used when signal: is called on a user-defined exception instance.
+Used when signal: is called on a user-defined exception instance.
 The exception class is taken from the signaling object's $beamtalk_class.
 """.
 -spec signal_message(term(), atom()) -> no_return().
@@ -720,7 +720,7 @@ signal_message(Message, ExceptionClass) ->
 -doc """
 Raise a new exception from a class instance without a message.
 
-BT-480: Used when signal (no args) is called on a new exception instance
+Used when signal (no args) is called on a new exception instance
 that has $beamtalk_class but no error field yet.
 """.
 -spec signal_from_class(atom()) -> no_return().
@@ -738,7 +738,7 @@ signal_from_class(ClassName) ->
 -doc """
 Class-side signal: raise an exception with message from a class object.
 
-BT-1524: Called by `Exception signal: "msg"` or `MyCustomError signal: "msg"`.
+Called by `Exception signal: "msg"` or `MyCustomError signal: "msg"`.
 Extracts the class name from the ClassSelf record and delegates to signal_message/2.
 """.
 -spec class_signal_message(term(), #beamtalk_object{} | term()) -> no_return().
@@ -752,7 +752,7 @@ class_signal_message(Message, _ClassSelf) ->
 -doc """
 Class-side signal: raise an exception from a class object (no message).
 
-BT-1524: Called by `Exception signal` or `MyCustomError signal`.
+Called by `Exception signal` or `MyCustomError signal`.
 Extracts the class name from the ClassSelf record and delegates to signal_from_class/1.
 """.
 -spec class_signal(#beamtalk_object{} | term()) -> no_return().
@@ -765,7 +765,7 @@ class_signal(_ClassSelf) ->
 -doc """
 Signal a named error kind with a caller-supplied hint, from pure Beamtalk.
 
-BT-3042: backs `Exception class >> signalKind:class:selector:hint:` — the
+Backs `Exception class >> signalKind:class:selector:hint:` — the
 sanctioned, first-class way for pure-Beamtalk code (core or third-party
 package) to signal any named kind (`index_out_of_bounds`, `empty_collection`,
 or any kind in the Beamtalk `ExceptionKind` type) with a hint specific to the

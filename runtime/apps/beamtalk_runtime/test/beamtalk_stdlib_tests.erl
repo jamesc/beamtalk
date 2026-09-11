@@ -23,12 +23,12 @@ stdlib_setup() ->
     end,
     %% Initialize extensions ETS table
     beamtalk_extensions:init(),
-    %% BT-2385: Initialize the protocol registry ETS table so protocol-only
+    %% Initialize the protocol registry ETS table so protocol-only
     %% modules (e.g. Printable) can register during stdlib load. Without this
     %% their on_load `register_protocol/1` crashes on a missing ETS table and
     %% the protocol class object (with its xref rows) is never created.
     beamtalk_protocol_registry:init(),
-    %% BT-2385: Start beamtalk_xref before loading stdlib so that class on_load
+    %% Start beamtalk_xref before loading stdlib so that class on_load
     %% (`register_class/0`) and protocol registration forward their baked
     %% method_xref rows into the index. In the real runtime xref is the first
     %% supervisor child, ahead of bootstrap; mirror that ordering here so the
@@ -165,7 +165,7 @@ transcript_stream_class_registered_test() ->
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('TranscriptStream', beamtalk_object_class:class_name(Pid)).
 
-%% BT-2736: The backing-module reverse index (write side: beamtalk_object_class
+%% The backing-module reverse index (write side: beamtalk_object_class
 %% :init/1's beamtalk_class_registry:record_backing_module_entry/3 call) is
 %% populated from each class's *real, compiled* `__beamtalk_meta/0` here —
 %% unlike the beamtalk_class_registry_tests.erl coverage, which passes a
@@ -194,15 +194,15 @@ backing_module_index_reflects_real_stdlib_native_classes_test() ->
     %% A plain (non-native) class is never indexed under its own module name.
     ?assertEqual([], beamtalk_class_registry:classes_backing_module('Integer')).
 
-%% BT-2385: Regression — these method-bearing stdlib classes previously loaded
-%% with NO baked method_xref, so they were absent from `xref_class_gen` and every
-%% navigation query source-scanned them via the miss-policy fallback (one
-%% `xref_miss` warning per query). The gaps were three distinct class shapes:
+%% These method-bearing stdlib classes each need their own baked method_xref
+%% so they appear in `xref_class_gen` rather than falling to the miss-policy
+%% source-scan fallback (one `xref_miss` warning per query). Three distinct
+%% class shapes:
 %%   * `Printable` — a `Protocol define:`; its class object's two class-side
 %%     methods (`requiredMethods`/`conformingClasses`) are runtime funs created
-%%     in beamtalk_protocol_registry, which now bakes their method_xref.
+%%     in beamtalk_protocol_registry, which bakes their method_xref.
 %%   * `TranscriptStream` / `Subprocess` — `native:` actors whose facade
-%%     `register_class/0` (native_facade.rs) now bakes method_xref like the
+%%     `register_class/0` (native_facade.rs) bakes method_xref like the
 %%     standard path.
 %% Asserts each appears in the `xref_class_gen` index after a normal stdlib load.
 method_bearing_classes_indexed_test() ->
@@ -435,7 +435,7 @@ dispatch_unknown_selector_test() ->
     ).
 
 %%% ============================================================================
-%%% format_bt_module/1 Tests (BT-1975)
+%%% format_bt_module/1 Tests
 %%% ============================================================================
 
 format_bt_module_test_() ->
@@ -455,7 +455,7 @@ format_bt_module_test_() ->
     ].
 
 %%% ============================================================================
-%%% class_entry_module/1 Tests (BT-1975)
+%%% class_entry_module/1 Tests
 %%% ============================================================================
 
 class_entry_module_map_test() ->
@@ -474,7 +474,7 @@ class_entry_module_tuple_test() ->
     ?assertEqual(mod_a, beamtalk_stdlib:class_entry_module(Entry)).
 
 %%% ============================================================================
-%%% find_stdlib_ebin/0 Tests (BT-1975)
+%%% find_stdlib_ebin/0 Tests
 %%% ============================================================================
 
 find_stdlib_ebin_test() ->
@@ -485,7 +485,7 @@ find_stdlib_ebin_test() ->
     ?assertEqual("ebin", filename:basename(Dir)).
 
 %%% ============================================================================
-%%% start_link/0 Tests (BT-1975)
+%%% start_link/0 Tests
 %%% ============================================================================
 
 start_link_test_() ->
@@ -512,7 +512,7 @@ start_link_returns_pid_test() ->
     end.
 
 %%% ============================================================================
-%%% stdlib_loop/0 Tests (BT-1983)
+%%% stdlib_loop/0 Tests
 %%% ============================================================================
 
 start_link_stays_alive_on_message_test_() ->
@@ -541,7 +541,7 @@ start_link_handles_unknown_message_test() ->
     end.
 
 %%% ============================================================================
-%%% load_protocol_modules/0 Tests (BT-1983)
+%%% load_protocol_modules/0 Tests
 %%% ============================================================================
 
 load_protocol_modules_test_() ->
@@ -586,7 +586,7 @@ load_protocol_modules_unset_env_test() ->
     end.
 
 %%% ============================================================================
-%%% discover_and_load_fallback/1 Tests (BT-1983)
+%%% discover_and_load_fallback/1 Tests
 %%% ============================================================================
 
 discover_and_load_fallback_missing_dir_test() ->

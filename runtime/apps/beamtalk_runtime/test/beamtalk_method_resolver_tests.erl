@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Unit tests for beamtalk_method_resolver module (BT-623).
+Unit tests for beamtalk_method_resolver module.
 
 Tests method resolution from various class reference formats:
 pid, atom, class object tuple, and invalid inputs.
@@ -110,7 +110,7 @@ test_resolve_with_integer() ->
         beamtalk_method_resolver:resolve(42, '+')
     ).
 
-%% BT-2195: Metaclass receivers (class = 'Metaclass') route to the
+%% Metaclass receivers (class = 'Metaclass') route to the
 %% class-side method dictionary instead of the instance-side one. A
 %% `SystemNavigation class >> #default` lookup must return a CompiledMethod
 %% map whose `__selector__` is `default` — that selector is defined on the
@@ -136,7 +136,7 @@ test_resolve_with_metaclass_missing() ->
     ?assertEqual(nil, Result).
 
 %%====================================================================
-%% BT-2786: MAX_HIERARCHY_DEPTH boundary tests
+%% MAX_HIERARCHY_DEPTH boundary tests
 %%
 %% resolve_with_hierarchy/2 checks the receiver's own class "for free"
 %% (outside the depth-counted walk), then walks up to ?MAX_HIERARCHY_DEPTH

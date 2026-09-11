@@ -38,7 +38,7 @@ class_of_non_atom_class_test() ->
     ?assertEqual(undefined, beamtalk_tagged_map:class_of(Map)).
 
 class_of_old_class_key_test() ->
-    %% BT-324: Maps with old '__class__' key are NOT tagged maps
+    %% Maps with old '__class__' key are NOT tagged maps
     Map = #{'__class__' => 'Counter', value => 0},
     ?assertEqual(undefined, beamtalk_tagged_map:class_of(Map)).
 

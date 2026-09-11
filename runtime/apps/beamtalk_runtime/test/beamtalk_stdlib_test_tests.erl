@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Unit tests for beamtalk_stdlib_test module (BT-2236).
+Unit tests for beamtalk_stdlib_test module.
 
 Covers format_result/1, matches_pattern/2, and run_and_assert/2 — the
 core functions of the stdlib expression test runner that had no direct
@@ -43,7 +43,7 @@ format_result_float_test() ->
 format_result_float_whole_test() ->
     ?assertEqual(<<"1.0">>, beamtalk_stdlib_test:format_result(1.0)).
 
-%% BT-3082: format_result/1 delegates float rendering to
+%% format_result/1 delegates float rendering to
 %% beamtalk_primitive:print_string/1 — the same function the REPL wire
 %% encoder now delegates to via beamtalk_runtime_api — so all three paths
 %% render identically. Covers the values called out in the acceptance
@@ -128,8 +128,7 @@ format_result_pid_inner_matches_pid_to_list_test() ->
     Inner = list_to_binary(lists:sublist(PidStr, 2, length(PidStr) - 2)),
     ?assertEqual(<<"#Actor<", Inner/binary, ">">>, Result).
 
-%% BT-3082: format_result/1 used to render every pid — dead or alive — as
-%% `#Actor<...>`. It now delegates to beamtalk_primitive:pid_label/1 (the
+%% format_result/1 delegates to beamtalk_primitive:pid_label/1 (the
 %% same liveness-probed renderer the REPL wire encoder uses), so a dead pid
 %% must render `#Dead<...>`, never `#Actor<...>`.
 format_result_dead_pid_renders_as_dead_test() ->
