@@ -1,0 +1,129 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Edge-case tests for Set's internal sorted-list algorithms.
+//
+// Covers four branches that the happy-path set_test.bt exercises never reach:
+//
+//   tie_intersection/2  true  — element has `==` tie AND is a strict (=:=) member
+//   tie_difference/2    true  — element has `==` tie AND is a strict member of RHS
+//   strict_is_subset/3  H1<H2 — element cannot appear further in E2 (returns false)
+//   strict_del/2        PastIt — delete target is past its sorted position (no-op)
+//
+// The int/float distinction matters throughout: in Erlang term order 1 < 1.0
+// (integers precede floats of the same numeric value), so a Set containing both
+// 1 and 1.0 exercises the `==` tie path inside each algorithm.
+
+TestCase subclass: SetEdgeCasesTest
+
+  // =========================================================================
+  // tie_intersection — true branch (line 214 in beamtalk_set.erl)
+  //
+  // When sorted merging encounters H1 =:= H2 false but H1 == H2 true (a float
+  // H1=1.0 vs integer H2=1), the algorithm delegates to tie_intersection, which
+  // checks whether H1 is a strict (=:=) member of the right-hand list.
+  //
+  // Setup: A = {1.0}, B = {1, 1.0}
+  //   sorted A = [1.0], sorted B = [1, 1.0]  (integers before floats in term order)
+  //   H1=1.0, H2=1: 1.0 == 1 → tie_intersection([1.0], [1, 1.0])
+  //   strict_member_sorted(1.0, [1, 1.0]) → true (1.0 =:= 1.0 match found)
+  //   → true branch fires → result: {1.0}
+  // =========================================================================
+  testTieIntersectionElementPresentInBothSets =>
+    a := (Set new) add: 1.0
+    b := (Set new add: 1) add: 1.0
+    result := a intersection: b
+    // 1.0 is strictly in both sets — it should appear exactly once
+    self assert: result size equals: 1
+    self assert: (result includes: 1.0)
+    // The integer 1 is NOT in A, so it must not appear in the intersection
+    self deny: (result includes: 1)
+
+  // Symmetric: A = {1, 1.0}, B = {1.0} also reaches the tie true branch for 1.0
+  testTieIntersectionSymmetric =>
+    a := (Set new add: 1) add: 1.0
+    b := (Set new) add: 1.0
+    result := a intersection: b
+    self assert: result size equals: 1
+    self assert: (result includes: 1.0)
+    self deny: (result includes: 1)
+
+  // =========================================================================
+  // tie_difference — true branch (line 234 in beamtalk_set.erl)
+  //
+  // Mirror of tie_intersection: when the tie check finds H1 IS a strict member
+  // of RHS, the element is excluded from the difference (true branch fires).
+  //
+  // Setup: A = {1.0}, B = {1, 1.0}
+  //   H1=1.0, H2=1: tie → tie_difference([1.0], [1, 1.0])
+  //   strict_member_sorted(1.0, [1, 1.0]) → true → 1.0 excluded → result = {}
+  // =========================================================================
+  testTieDifferenceElementRemovedWhenPresentInRhs =>
+    a := (Set new) add: 1.0
+    b := (Set new add: 1) add: 1.0
+    // 1.0 is in B, so A \ B = {}
+    result := a difference: b
+    self assert: result size equals: 0
+    self assert: result isEmpty
+
+  // false branch counterpart (tie_difference false): 1.0 NOT in B → 1.0 stays
+  testTieDifferenceElementKeptWhenAbsentFromRhs =>
+    a := (Set new) add: 1.0
+    b := (Set new) add: 1
+    // 1.0 is NOT in B (only the integer 1 is), so A \ B = {1.0}
+    result := a difference: b
+    self assert: result size equals: 1
+    self assert: (result includes: 1.0)
+
+  // =========================================================================
+  // strict_is_subset — H1 < H2 branch (line 247 in beamtalk_set.erl)
+  //
+  // When H1 < H2 in term order, H1 cannot appear in E2 (E2 is sorted and H2
+  // is the smallest remaining element), so the function returns false
+  // immediately.  Existing isSubsetOf: tests hit the `_E1, []` clause instead.
+  // =========================================================================
+  testIsSubsetOfReturnsFalseWhenAHasElementBeforeNextBElement =>
+    // A = {3}, B = {5}: 3 < 5 and 3 ∉ B → the H1<H2 false branch fires
+    a := (Set new) add: 3
+    b := (Set new) add: 5
+    self deny: (a isSubsetOf: b)
+
+  // A richer case: A = {1, 4}, B = {2, 5}
+  // strict_is_subset([1,4], [2,5]): H1=1, H2=2 → 1 < 2 → false immediately
+  testIsSubsetOfMultiElementSkip =>
+    a := (Set new add: 1) add: 4
+    b := (Set new add: 2) add: 5
+    self deny: (a isSubsetOf: b)
+
+  // Sanity guard: A ⊆ B must still return true for a genuine subset
+  testIsSubsetOfStillTrueForRealSubset =>
+    a := (Set new add: 2) add: 5
+    b := ((Set new add: 2) add: 5) add: 7
+    self assert: (a isSubsetOf: b)
+
+  // =========================================================================
+  // strict_del — PastIt branch (line 286 in beamtalk_set.erl)
+  //
+  // strict_del falls through to `PastIt` when the current head H > target Elem
+  // (Elem absent, remaining elements all larger), returning the tail unchanged.
+  // Triggered via Set>>remove: with an element absent from the set.
+  //
+  // In {1, 3, 5} with remove: 2:
+  //   H=1: 1 < 2 → keep, recurse with [3,5]
+  //   H=3: 3 > 2, not =:= or < → PastIt=[3,5], return unchanged.
+  // =========================================================================
+  testRemoveAbsentElementBetweenExistingElements =>
+    // {1, 3, 5} remove: 2 — 2 lies between 1 and 3, never found
+    s := ((Set new add: 1) add: 3) add: 5
+    result := s remove: 2
+    self assert: result size equals: 3
+    self assert: (result includes: 1)
+    self assert: (result includes: 3)
+    self assert: (result includes: 5)
+
+  // Another PastIt case: {1, 2, 10} remove: 5 — 5 lies between 2 and 10
+  testRemoveAbsentElementBetweenNonAdjacentElements =>
+    s := ((Set new add: 1) add: 2) add: 10
+    result := s remove: 5
+    self assert: result size equals: 3
+    self assert: result asList equals: #(1, 2, 10)
