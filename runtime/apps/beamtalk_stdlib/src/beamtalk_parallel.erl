@@ -12,8 +12,9 @@ Beamtalk sends are synchronous by default (ADR 0104): a `.` send blocks the
 caller and types as the method's return value. This module gives that same
 blocking contract to *fan-out* work, instead of exposing an awaitable
 future/promise handle to Beamtalk code (the `Future` stub was deliberately
-removed for exactly this reason). `all/1`, `all/2`, and `any/1` spawn one process per block, block the
-calling process until the combinator is done, and return plain `Result`
+removed for exactly this reason). `all/1`, `all/2`, and `any/1` spawn one
+process per block, block the calling process until the combinator is done,
+and return plain `Result`
 values (`beamtalk_result:t()`) built with `beamtalk_result:from_tagged_tuple/1`
 — no future handle ever escapes to Beamtalk code.
 

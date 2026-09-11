@@ -99,7 +99,7 @@ such a handler.
             %% Connected/shared context: end only THIS session's job, not the
             %% shared node. The tagged `script_exit` signal carries the status; the
             %% session evaluator (`beamtalk_repl_eval`/`beamtalk_repl_shell`) catches
-            %% it, replies with the exit status, and stops the session shell
+            %% it, replies with the exit status, and stops the session shell.
             %% `throw` (not `error`) keeps it distinct from a user-level
             %% `#beamtalk_error{}`, so an ordinary `on:do:` handler does not swallow
             %% it.
