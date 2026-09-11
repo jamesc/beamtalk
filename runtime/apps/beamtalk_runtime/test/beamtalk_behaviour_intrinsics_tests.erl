@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_behaviour_intrinsics module (BT-1088, BT-1959).
+EUnit tests for beamtalk_behaviour_intrinsics module.
 
 Tests intrinsic functions for class reflection: metaclassNew, classClass,
 className, classLocalMethods, classFieldNames, classIncludesSelector,
@@ -67,7 +67,7 @@ register_class(ClassName, FieldSpecs, MethodSpecs) ->
     ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = Pid},
     {ClassObj, Pid}.
 
-%% BT-1635: Create a class with class methods and return {ClassObj, Pid}.
+%% Create a class with class methods and return {ClassObj, Pid}.
 register_class_with_class_methods(ClassName, FieldSpecs, MethodSpecs, ClassMethodSpecs) ->
     State = #{
         className => ClassName,
@@ -204,7 +204,7 @@ class_local_methods_with_methods_test_() ->
         ]
     end}.
 
-%% BT-1635: classLocalMethods on metaclass object returns class methods
+%% classLocalMethods on metaclass object returns class methods
 class_local_methods_metaclass_with_class_methods_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -238,7 +238,7 @@ class_local_methods_metaclass_with_class_methods_test_() ->
         ]
     end}.
 
-%% BT-1635: classLocalMethods on metaclass with no class methods returns []
+%% classLocalMethods on metaclass with no class methods returns []
 class_local_methods_metaclass_no_class_methods_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -271,7 +271,7 @@ class_local_methods_metaclass_no_class_methods_test_() ->
         ]
     end}.
 
-%% BT-1635: classIncludesSelector on metaclass checks class methods
+%% classIncludesSelector on metaclass checks class methods
 class_includes_selector_metaclass_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -360,7 +360,7 @@ class_field_names_with_fields_test_() ->
     end}.
 
 %%% ============================================================================
-%%% classClassVarNames/1 and classAllClassVarNames/1 (BT-2238)
+%%% classClassVarNames/1 and classAllClassVarNames/1
 %%% ============================================================================
 
 %% Dynamic (ClassBuilder) classes carry no static __beamtalk_meta/0, so the
@@ -537,11 +537,11 @@ class_doc_for_nonexistent_method_test_() ->
     end}.
 
 %%% ============================================================================
-%%% metaclassSuperclass/1 — via gen_server:call(Pid, superclass) (BT-1186)
+%%% metaclassSuperclass/1 — via gen_server:call(Pid, superclass)
 %%% ============================================================================
 
-%% BT-1186: metaclassSuperclass/1 now calls gen_server:call(Pid, superclass)
-%% directly (BT-1185 ensures the gen_server always holds the correct superclass).
+%% metaclassSuperclass/1 now calls gen_server:call(Pid, superclass)
+%% directly (apply_class_info/2 ensures the gen_server always holds the correct superclass).
 metaclass_superclass_returns_metaclass_or_nil_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -1152,7 +1152,7 @@ class_conforms_to_unknown_protocol_test_() ->
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1792BiConformsTo', #{}, #{}),
                 try
-                    %% Unknown protocol returns false (BT-2136)
+                    %% Unknown protocol returns false
                     ?assertNot(
                         beamtalk_behaviour_intrinsics:classConformsTo(
                             ClassObj, 'NoSuchProtocol'
@@ -1244,7 +1244,7 @@ class_class_idempotent_test_() ->
     end}.
 
 %%% ============================================================================
-%%% BT-1959: Additional coverage tests
+%%% Additional coverage tests
 %%% ============================================================================
 
 %%% --- classAllSubclasses/1 — multi-level hierarchy ---
@@ -1325,7 +1325,7 @@ class_methods_inherits_from_parent_test_() ->
         ]
     end}.
 
-%% BT-1635: classMethods on metaclass receiver collects class methods
+%% classMethods on metaclass receiver collects class methods
 class_methods_metaclass_receiver_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -1933,7 +1933,7 @@ class_superclass_chain_test_() ->
     end}.
 
 %%% ============================================================================
-%%% BT-1982: Additional coverage for behaviour intrinsics
+%%% Additional coverage for behaviour intrinsics
 %%% ============================================================================
 
 %% classReload/1 on a class with no source file (dynamic class) raises
@@ -2003,7 +2003,7 @@ bt1982_class_remove_rejects_stdlib_test_() ->
     end}.
 
 %% metaclassSuperclass on a root class (superclass=none) grounds the parallel
-%% chain into the instance-side `Class` (ADR 0036 / BT-2217). Covers the none
+%% chain into the instance-side `Class` (ADR 0036). Covers the none
 %% branch of metaclassSuperclass/1.
 bt1982_metaclass_superclass_root_grounds_at_class_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
@@ -2025,7 +2025,7 @@ bt1982_metaclass_superclass_root_grounds_at_class_test_() ->
                 },
                 try
                     Result = beamtalk_behaviour_intrinsics:metaclassSuperclass(MetaObj),
-                    %% BT-2217: parallel chain grounds at `Class` — expect the
+                    %% parallel chain grounds at `Class` — expect the
                     %% instance-side Class class object, not nil.
                     ?assertMatch(
                         #beamtalk_object{class = 'Class class'},
@@ -2125,7 +2125,7 @@ bt1982_class_remove_success_when_registry_absent_test_() ->
     end}.
 
 %%% ============================================================================
-%%% BT-3105: classRemoveFromSystemByName purges derived registries
+%%% classRemoveFromSystemByName purges derived registries
 %%% ============================================================================
 
 %% The observable bug this issue fixes: an extension registered on a class
@@ -2513,13 +2513,13 @@ stop_class_actors_with_registry_test_() ->
     end}.
 
 %%% ============================================================================
-%%% BT-3243: classRemoveFromSystemByName with a real class-spawned live actor
+%%% classRemoveFromSystemByName with a real class-spawned live actor
 %%% ============================================================================
 
 %% Unlike stop_class_actors_with_registry_test_ above (a bare `spawn/1` fun,
 %% never linked to anything), this spawns the actor *through* the class
 %% gen_server's real `{spawn, _}` handler — `erlang:apply(Module, spawn, [])`
-%% inside `handle_call({spawn, _}, ...)` — which is exactly how the BT-3243
+%% inside `handle_call({spawn, _}, ...)` — which is exactly how the now-removed
 %% link used to form (`beamtalk_actor:safe_spawn/2` ran with the class
 %% gen_server as `self()`, and `gen_server:start_link` linked it to the new
 %% actor). Before the fix, `stop_class_actors/1`'s kill below would take the
@@ -2597,7 +2597,7 @@ parse_forms(SourceLines) ->
 %% the ?MAX_HIERARCHY_DEPTH guard halts it and returns the accumulator. We drive
 %% it via classAllSuperclasses/1, which folds class objects up the chain.
 %%
-%% BT-3096: walk_ancestors/3's max_depth_exceeded now carries the last node
+%% walk_ancestors/3's max_depth_exceeded now carries the last node
 %% visited (with its accumulator riding along inside it — see
 %% beamtalk_behaviour_intrinsics:walk_hierarchy/3's moduledoc), so
 %% walk_hierarchy/3 returns the PARTIAL fold built up before the guard
@@ -2687,7 +2687,7 @@ stub_registry_loop(ClassName, ActorPid) ->
     end.
 
 %%% ============================================================================
-%%% classRenameTo/2 (ADR 0114 Phase 2, BT-3278)
+%%% classRenameTo/2 (ADR 0114 Phase 2)
 %%% ============================================================================
 
 %% A dynamic (ClassBuilder) class is the one classification the plain-EUnit
@@ -2718,7 +2718,7 @@ classRenameTo_dynamic_class_reregisters_test_() ->
 
 %% Collision refusal (ADR 0114 § Decision): renaming to an already-loaded
 %% class name raises a structured `class_already_exists` error, matching the
-%% ADR's own worked example's message/hint text exactly (BT-3278's grounding
+%% ADR's own worked example's message/hint text exactly (a literal grounding
 %% em-dash, not an escape, to avoid the encoding mismatch a `\u{...}` escape
 %% would introduce in a plain Erlang string).
 classRenameTo_collision_refused_test_() ->
@@ -2834,7 +2834,7 @@ object_class_rename_toctou_through_public_api_test_() ->
     end}.
 
 %%% ============================================================================
-%%% classRemoveSelector/2 and classRemoveSelectorIfAbsent/3 (ADR 0112, BT-3186)
+%%% classRemoveSelector/2 and classRemoveSelectorIfAbsent/3 (ADR 0112)
 %%%
 %%% The happy-path (local-method removal) is exercised by the REPL-protocol
 %%% suite (`tests/repl-protocol/cases/remove_selector.btscript`) because it
