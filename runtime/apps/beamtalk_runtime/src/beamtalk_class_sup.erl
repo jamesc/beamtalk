@@ -7,7 +7,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-simple_one_for_one supervisor for class gen_server processes (BT-3236).
+simple_one_for_one supervisor for class gen_server processes.
 
 Every `beamtalk_object_class` process is started through this supervisor via
 `start_child/2`, placing class processes in the standard OTP supervision

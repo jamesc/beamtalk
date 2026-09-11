@@ -4,7 +4,7 @@
 -module(beamtalk_class_lifecycle_tests).
 
 -moduledoc """
-EUnit tests for beamtalk_class_lifecycle:class_removed/2 (BT-3105).
+EUnit tests for beamtalk_class_lifecycle:class_removed/2.
 
 Exercises each of the five derived-registry purges directly against
 `class_removed/2` — xref, extensions (both instance- and class-side),

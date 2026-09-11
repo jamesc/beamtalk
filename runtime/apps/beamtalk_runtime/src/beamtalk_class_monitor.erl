@@ -7,7 +7,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Eager crash recovery for class gen_server processes (BT-3236).
+Eager crash recovery for class gen_server processes.
 
 `beamtalk_class_sup` starts class processes as `temporary` children, so OTP
 never auto-restarts them (see that module's doc for why). This monitor owns
@@ -16,7 +16,7 @@ started class here via `watch/2`, and on an abnormal `'DOWN'` the monitor
 eagerly rebuilds the class through
 `beamtalk_class_registry:restart_class/1` — fresh from ETS metadata and the
 module's `__beamtalk_meta/0` — without waiting for the next message send
-(which was the pre-BT-3236 lazy path, kept as a fallback in
+(the lazy path, kept as a fallback in
 `beamtalk_class_dispatch:class_send_with_recovery/3`).
 
 A per-class restart budget (`max_restarts` within `window_ms`) stops a
@@ -100,11 +100,11 @@ Stop monitoring `ClassName` ahead of deliberate removal.
 
 `classRemoveFromSystemByName/1` kills the class's live actors before
 stopping the class gen_server itself (`gen_server:stop/1`, reason
-`normal`/`shutdown`). BT-3243 removed the link that used to exist between an
-actor and the class process it was spawned through: dynamic-dispatch
-`{spawn, _}` and `self spawn`/`self spawnWith:` now spawn unlinked
-(`beamtalk_actor:safe_spawn/2` uses `gen_server:start/3`, not
-`start_link/3`), and `self spawnAs:`/`self spawnWith:as:` unlink
+`normal`/`shutdown`). An actor is never linked to the class process it was
+spawned through: dynamic-dispatch `{spawn, _}` and `self spawn`/`self
+spawnWith:` spawn unlinked (`beamtalk_actor:safe_spawn/2` uses
+`gen_server:start/3`, not `start_link/3`), and `self spawnAs:`/`self
+spawnWith:as:` unlink
 immediately after a successful spawn (`beamtalk_class_instantiation:do_class_self_named_spawn/6`)
 — so an actor kill can no longer take the class process down with it. This
 unwatch stays as defense in depth against the class's own deliberate stop

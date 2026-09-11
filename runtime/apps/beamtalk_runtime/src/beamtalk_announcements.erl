@@ -14,12 +14,12 @@ gen_server, a dedicated `beamtalk_pg` scope, and the ETS subscription table, and
 proves typed dispatch end-to-end: `subscribe/4`, `unsubscribe/1`, and an async
 `announce/2`.
 
-BT-2439 delivered the foundation with exact-class matching; BT-2440 adds the MRO
-(superclass-chain) walk to `announce/2`: an event is delivered to subscribers of
-its class *or any ancestor*, with the walk performed at announce time (live
-hierarchy changes respected) and delivery de-duplicated per subscription.
+`announce/2` matches exact class plus the MRO (superclass-chain) walk: an
+event is delivered to subscribers of its class *or any ancestor*, with the
+walk performed at announce time (live hierarchy changes respected) and
+delivery de-duplicated per subscription.
 
-BT-2441 adds the synchronous, fault-isolated path and the once-only consume:
+The synchronous, fault-isolated path and the once-only consume:
 
 - **`announceAndWait/2,3` — synchronous gather, caller-side.** Walks the same MRO
   chain as `announce/2` to collect matching subscriptions, then `spawn_monitor`s
@@ -59,7 +59,7 @@ is NOT in the dispatch path):
   multiple distinct subscriptions to the same class (Pharo's rule): a second
   `subscribe` adds a row, it never replaces the first. The `AnnouncerRef`
   dimension scopes each subscription to one announcer namespace so distinct
-  `Announcer` instances are isolated (BT-2454): a `reference()` per
+  `Announcer` instances are isolated: a `reference()` per
   `Announcer new`, or the `?SYSTEM_ANNOUNCER_REF` atom for the system bus and the
   raw Layer 1 API. A secondary by-class index (`ordered_set` on
   `{AnnouncerRef, AnnouncementClass, SubRef}`) lets `announce/2` fetch the
@@ -84,11 +84,11 @@ is NOT in the dispatch path):
   `{heir, SupervisorPid, ...}` so they survive a bus crash (the
   `beamtalk_trace_store` pattern). On restart the gen_server re-arms monitors
   from the surviving rows and eagerly prunes any *local* subscriber that died
-  during the crash→restart gap via `subscriber_alive/1` (BT-2442); a remote
-  subscriber is re-monitored and left to the cross-node `DOWN` (BT-2530).
+  during the crash→restart gap via `subscriber_alive/1`; a remote
+  subscriber is re-monitored and left to the cross-node `DOWN`.
 
 Out of scope here (later issues): the stdlib typed veneer classes — `Announcer` /
-`Announcement` / `Subscription` (BT-2444).
+`Announcement` / `Subscription`.
 
 See also: docs/ADR/0093-announcements-event-substrate.md §1
 """.
@@ -122,7 +122,7 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
     subscribers_of/1
 ]).
 
-%% FFI shims — introspection / navigation veneer (BT-2444 / BT-2454)
+%% FFI shims — introspection / navigation veneer
 -export([
     'subscriptionNodes'/1,
     'subscriptionNodesFor'/2,
@@ -133,7 +133,7 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
     'navAnnouncedClasses'/1
 ]).
 
-%% FFI shims for stdlib veneer (BT-2443)
+%% FFI shims for stdlib veneer
 -export([
     'newAnnouncer'/0,
     'systemAnnouncer'/0,
@@ -180,7 +180,7 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 -define(DEFAULT_ANNOUNCE_TIMEOUT, 5000).
 
 %% The well-known announcer namespace shared by the runtime system bus and the
-%% raw Layer 1 API (BT-2454). Per-instance `Announcer new` handles each get a
+%% raw Layer 1 API. Per-instance `Announcer new` handles each get a
 %% unique `reference()` namespace, isolated from this and from each other; the
 %% atom-keyed system namespace is where `SystemAnnouncer` and `system_announce/2`
 %% publish, and where the low-level `subscribe/4` / `announce/2` primitives
@@ -195,16 +195,16 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 -type sub_ref() :: reference().
 %% An announcer namespace: a unique `reference()` for a per-instance `Announcer`,
 %% or the well-known `?SYSTEM_ANNOUNCER_REF` atom for the system bus / Layer 1
-%% (BT-2454).
+%%
 -type announcer_ref() :: reference() | atom().
 -type handler() :: term().
 
-%% Beamtalk object types for FFI type inference (BT-2443).
+%% Beamtalk object types for FFI type inference.
 -type announcer() :: #{'$beamtalk_class' := 'Announcer', atom() => term()}.
 -type system_announcer() :: #{'$beamtalk_class' := 'SystemAnnouncer', atom() => term()}.
 -type subscription() :: #{'$beamtalk_class' := 'Subscription', atom() => term()}.
 
-%% An immutable `SubscriptionNode` snapshot record (BT-2444 / ADR 0093 §7). A
+%% An immutable `SubscriptionNode` snapshot record (ADR 0093 §7). A
 %% tagged map minted here so the Beamtalk type checker infers FFI results as
 %% `SubscriptionNode`. Fields mirror the `sealed typed Value subclass`
 %% declaration: the subscribed-to event class (a class object), the announcer
@@ -212,7 +212,7 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 %% (`#do | #send | #doOnce`), and the `once` flag.
 -type subscription_node() :: #{'$beamtalk_class' := 'SubscriptionNode', atom() => term()}.
 
-%% An `AnnouncementNavigation` handle (BT-2454): a tagged map carrying the
+%% An `AnnouncementNavigation` handle: a tagged map carrying the
 %% announcer scope it navigates, minted by `navigationFor/1`. Tagged so the
 %% Beamtalk type checker infers FFI results as `AnnouncementNavigation`.
 -type announcement_navigation() :: #{
@@ -221,7 +221,7 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 
 %% A subscription row in the primary `set` table, keyed by the unique `SubRef`.
 %% The `AnnouncerRef` dimension scopes the row to one announcer namespace so
-%% distinct announcers are isolated (BT-2454).
+%% distinct announcers are isolated.
 -type sub_row() :: {
     sub_ref(),
     announcer_ref(),
@@ -269,8 +269,8 @@ start_link() ->
 Register a subscription: deliver announcements of exactly `AnnouncementClass`
 to `SubscriberPid`, carrying `Handler` (an opaque term the stdlib veneer
 interprets — a block ref, `{send, Sel, Receiver}`, etc.). `OnceFlag` marks a
-`doOnce` subscription (consumed atomically on first delivery — the consume path
-lands in BT-2441; Phase 1 stores the flag).
+`doOnce` subscription (consumed atomically on first delivery; this call
+stores the flag — see `announce/2`/`announceAndWait/2,3` for the consume path).
 
 Returns `{ok, SubRef}` where `SubRef` is the unique reference the stdlib
 `Subscription` object wraps. Each call mints a *distinct* `SubRef`, so a process
@@ -289,7 +289,7 @@ subscribe(AnnouncementClass, SubscriberPid, Handler, OnceFlag) ->
 
 -doc """
 As `subscribe/4`, but scoped to the announcer namespace `AnnouncerRef`
-(BT-2454) — a `reference()` for a per-instance `Announcer`, or the
+a `reference()` for a per-instance `Announcer`, or the
 `?SYSTEM_ANNOUNCER_REF` atom for the system bus. A subscription registered under
 one announcer is never matched by an `announce` on another.
 """.
@@ -320,7 +320,7 @@ unsubscribe(_SubRef) ->
 Remove every subscription held by `SubscriberPid` to exactly `AnnouncementClass`
 on the shared system announcer namespace (`?SYSTEM_ANNOUNCER_REF`).
 
-The stream→class detach primitive for `beamtalk_repl_subscriptions` (BT-2531): a
+The stream→class detach primitive for `beamtalk_repl_subscriptions`: a
 workspace push-stream consumer subscribes its pid to each of a stream's
 announcement classes with an inert handler, and unsubscribing a single stream
 removes exactly that pid's rows for the stream's classes. Reads the primary table
@@ -385,7 +385,7 @@ matching subscriptions from the by-class index at each level, and sends a direct
 `Pid ! {beamtalk_announcement, SubRef, EventClass, Handler, Event}` to each live
 subscriber. Returns `ok` immediately (fire-and-forget).
 
-MRO matching (BT-2440): subscribe to `UIEvent` and you receive `ButtonClicked`.
+MRO matching: subscribe to `UIEvent` and you receive `ButtonClicked`.
 The walk happens at announce time, so live hierarchy changes are respected. Each
 delivered message carries `EventClass` — the *announced* class — not the ancestor
 the subscription matched on.
@@ -406,7 +406,7 @@ A local subscriber whose process has already died (its `DOWN` not yet processed
 by the bus) is skipped via the `subscriber_alive/1` guard, so a stale row never
 produces a send to a dead pid. A remote subscriber is always sent to —
 `is_process_alive/1` is local-only — and relies on the cross-node monitor for
-cleanup (BT-2530).
+cleanup.
 """.
 -spec announce(announcement_class(), term()) -> ok.
 announce(EventClass, Event) when is_atom(EventClass) ->
@@ -414,7 +414,7 @@ announce(EventClass, Event) when is_atom(EventClass) ->
     announce(?SYSTEM_ANNOUNCER_REF, EventClass, Event).
 
 -doc """
-As `announce/2`, but scoped to the announcer namespace `AnnouncerRef` (BT-2454):
+As `announce/2`, but scoped to the announcer namespace `AnnouncerRef`:
 only subscriptions registered on that announcer (or an ancestor class within it)
 are delivered to. Fire-and-forget, caller-side.
 """.
@@ -472,7 +472,7 @@ announceAndWait(EventClass, Event, Timeout) when is_atom(EventClass) ->
     do_announce_and_wait(?SYSTEM_ANNOUNCER_REF, EventClass, Event, Timeout).
 
 -doc """
-The announcer-scoped core of the synchronous path (BT-2454): gather the matching
+The announcer-scoped core of the synchronous path: gather the matching
 subscriptions for `AnnouncerRef`+`EventClass` (MRO), spawn one monitored handler
 process per surviving claim, and gather every reply under `Timeout`. Shared by
 the Layer 1 `announceAndWait/2,3` (system namespace) and the per-instance veneer
@@ -515,7 +515,7 @@ do_announce_and_wait(AnnouncerRef, EventClass, Event, Timeout) ->
 
 -doc """
 Collect the `SubRef`s of every subscription on `AnnouncerRef` matching
-`EventClass` *or any of its ancestors* (BT-2454 — scoped to the announcer
+`EventClass` *or any of its ancestors* (scoped to the announcer
 namespace), de-duplicated per `SubRef`, by walking the event class's superclass
 chain (`beamtalk_class_metadata:lookup_superclass/1`) and reading the by-class
 index (keyed `{AnnouncerRef, Class, SubRef}`) at each level. Caller-side; no bus
@@ -607,7 +607,7 @@ deliver(SubRef, EventClass, Event) ->
     end.
 
 -doc """
-Whether a subscriber pid should still be delivered to (BT-2530).
+Whether a subscriber pid should still be delivered to.
 `erlang:is_process_alive/1` is local-only — it raises `badarg` for a pid on
 another node — so it is used as a fast-path skip for **local** pids only. A
 **remote** pid (a dist-attached subscriber registered by explicit pid, e.g. the
@@ -845,7 +845,7 @@ subscribers_of(AnnouncementClass) when is_atom(AnnouncementClass) ->
 
 -doc """
 The `SubRef`s subscribed to exactly `AnnouncementClass` within the announcer
-namespace `AnnouncerRef` (BT-2454). Direct ETS read of the by-class index.
+namespace `AnnouncerRef`. Direct ETS read of the by-class index.
 """.
 -spec subscribers_of(announcer_ref(), announcement_class()) -> [sub_ref()].
 subscribers_of(AnnouncerRef, AnnouncementClass) when is_atom(AnnouncementClass) ->
@@ -862,12 +862,12 @@ subscribers_of(AnnouncerRef, AnnouncementClass) when is_atom(AnnouncementClass) 
     end.
 
 %%====================================================================
-%% FFI shims — introspection / navigation veneer (BT-2444 / BT-2454)
+%% FFI shims — introspection / navigation veneer
 %%
 %% Read-only snapshots of the subscription graph as `SubscriptionNode` value
 %% records (ADR 0093 §7). All reads are direct ETS reads off the live tables —
 %% never routed through the gen_server — and never mutate. Each read is scoped to
-%% the announcer's own namespace (BT-2454): a per-instance `Announcer` reports
+%% the announcer's own namespace: a per-instance `Announcer` reports
 %% only its own subscriptions, and the system bus reports only the system
 %% namespace.
 %%====================================================================
@@ -875,7 +875,7 @@ subscribers_of(AnnouncerRef, AnnouncementClass) when is_atom(AnnouncementClass) 
 -doc """
 Snapshot of `Announcer`'s own live subscriptions as a list of `SubscriptionNode`
 value records, each stamped with `Announcer` as its `announcer` field. Scoped to
-the announcer's namespace (BT-2454). Backs `Announcer subscriptions`
+the announcer's namespace. Backs `Announcer subscriptions`
 (self-inspection) and `AnnouncementNavigation subscriptions`. Direct read of the
 primary `set` table; `[]` when the bus has never started.
 """.
@@ -897,7 +897,7 @@ primary `set` table; `[]` when the bus has never started.
 -doc """
 Snapshot of `Announcer`'s subscriptions to exactly `ClassRef` as
 `SubscriptionNode` records, each stamped with `Announcer`. Scoped to the
-announcer's namespace (BT-2454). Backs `Announcer subscribersOf:` and
+announcer's namespace. Backs `Announcer subscribersOf:` and
 `AnnouncementNavigation subscribersOf:`. `ClassRef` is resolved to its class-name
 atom the same way subscribe does (`class_name/1`), so a class object or a bare
 atom both work. Reads the by-class index for the `SubRef`s, then the primary
@@ -933,7 +933,7 @@ table for each row; `[]` for an unknown / never-subscribed class.
 -doc """
 The distinct event classes subscribed to within the announcer namespace
 `AnnouncerRef`, as class objects — the "announced classes" in active use on that
-announcer (ADR 0093 §7, scoped per BT-2454). Reads the by-class index, filters to
+announcer (ADR 0093 §7, scoped to the announcer namespace). Reads the by-class index, filters to
 `AnnouncerRef`, dedupes the class atoms, and resolves each to its class object
 (atoms with no live class are dropped). `[]` when the bus has never started.
 """.
@@ -959,7 +959,7 @@ announced_classes(AnnouncerRef) ->
     end.
 
 -doc """
-Number of live subscriptions on `Announcer` (its own namespace, BT-2454) — backs
+Number of live subscriptions on `Announcer` (its own namespace) — backs
 `Announcer subscriptionCount`. Direct ETS read of the primary table filtered to
 the announcer's ref.
 """.
@@ -977,7 +977,7 @@ the announcer's ref.
     end.
 
 %%====================================================================
-%% FFI shims — AnnouncementNavigation (BT-2444 / BT-2454)
+%% FFI shims — AnnouncementNavigation
 %%
 %% The navigation is an FFI-minted handle that carries the announcer scope it
 %% navigates (mirroring how `Announcer` carries its ref). `default` wraps the
@@ -1062,7 +1062,7 @@ init([]) ->
     ensure_tables(SupPid),
 
     %% Re-arm monitors for subscriptions that survived a crash via heir;
-    %% prune any subscriber that died during the crash→restart gap (BT-2442).
+    %% prune any subscriber that died during the crash→restart gap.
     RowsBefore = ets:info(?SUBS_TABLE, size),
     Monitors = rearm_monitors(),
     RowsAfter = ets:info(?SUBS_TABLE, size),
@@ -1206,9 +1206,9 @@ Re-arm one monitor per distinct subscriber pid found in the surviving primary
 table (after a crash→restart with heir-preserved rows). Returns the monitor
 bookkeeping map. A *local* pid that died during the crash→restart gap is pruned
 eagerly via `subscriber_alive/1` — its rows are removed from both tables
-immediately so no stale pids accumulate (BT-2442). Live local pids and all
+immediately so no stale pids accumulate. Live local pids and all
 remote pids get a fresh `erlang:monitor/2` (cross-node monitors work; a remote
-pid that died during the gap is pruned when its `DOWN` arrives, BT-2530).
+pid that died during the gap is pruned when its `DOWN` arrives).
 """.
 -spec rearm_monitors() -> #{pid() => {reference(), pos_integer()}}.
 rearm_monitors() ->
@@ -1343,7 +1343,7 @@ bad_subscribe_args(AnnouncementClass, SubscriberPid, OnceFlag) ->
     }.
 
 %%====================================================================
-%% FFI shims — stdlib veneer (BT-2443)
+%% FFI shims — stdlib veneer
 %%====================================================================
 
 -doc """
@@ -1433,14 +1433,14 @@ An **inert / opaque handler** (anything `run_handler/2` would treat as a no-op �
 a bare atom, a tuple that is not `{send, ...}`, etc.) is instead delivered the
 native `{beamtalk_announcement, SubRef, EventClass, Handler, Event}` message to
 its mailbox, exactly as the raw `deliver/3` async path does. This is the contract
-the workspace push-stream consumers rely on (BT-2531): `beamtalk_repl_subscriptions`
+the workspace push-stream consumers rely on: `beamtalk_repl_subscriptions`
 registers external subscribers (the browser WS handler, the dist-attached
 LiveView) with an inert handler term and receives the announcement tuple natively,
 re-encoding it downstream. A Beamtalk veneer subscriber never registers an inert
 handler, so this branch only ever serves those external consumers.
 
 Shared by `announceOn/2` (per-instance announcers) and `system_announce/2` (the
-system bus). Scoped to `AnnouncerRef` (BT-2454): only subscriptions on that
+system bus). Scoped to `AnnouncerRef`: only subscriptions on that
 announcer match.
 """.
 -spec dispatch_veneer_async(announcer_ref(), announcement_class(), term()) -> ok.
@@ -1468,7 +1468,7 @@ Dispatch a single claimed subscription on the async veneer path. A runnable
 handler (block / `{send, ...}`) runs in its own transient fire-and-forget
 process; an inert / opaque handler is delivered the native announcement message
 to the subscriber's mailbox (the raw `deliver/3` contract — used by the workspace
-push-stream consumers, BT-2531).
+push-stream consumers).
 """.
 -spec dispatch_one_veneer(sub_ref(), announcement_class(), term(), pid(), handler()) -> ok.
 dispatch_one_veneer(SubRef, EventClass, Event, SubscriberPid, Handler) ->
@@ -1544,7 +1544,7 @@ Called from `Announcer announceAndWait: anEvent timeout: ms`.
 
 -doc """
 Remove all subscriptions held by a specific receiver pid *on this announcer*
-(BT-2454 — scoped to the announcer's namespace, so a receiver's subscriptions on
+(scoped to the announcer's namespace, so a receiver's subscriptions on
 other announcers are untouched). Called from `Announcer unsubscribe: receiver`.
 """.
 -spec 'unsubscribeReceiver'(announcer(), term()) -> nil.
@@ -1681,7 +1681,7 @@ class_object(_) ->
     nil.
 
 -doc """
-Extract the announcer namespace ref from an announcer handle (BT-2454). A
+Extract the announcer namespace ref from an announcer handle. A
 per-instance `Announcer` / `SystemAnnouncer` map carries its ref under the `ref`
 key (a `reference()`, or the `?SYSTEM_ANNOUNCER_REF` atom for the system bus).
 Anything else (a bare atom passed directly, or an unrecognised term) falls back

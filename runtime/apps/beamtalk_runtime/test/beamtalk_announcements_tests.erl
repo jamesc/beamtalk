@@ -4,19 +4,18 @@
 -module(beamtalk_announcements_tests).
 
 -moduledoc """
-EUnit tests for `beamtalk_announcements` (BT-2439 / BT-2440 / BT-2441 / BT-2442 /
-ADR 0093 Phase 1).
+EUnit tests for `beamtalk_announcements` (ADR 0093 Phase 1).
 
-Covers the Phase-1 acceptance criteria: deliver to a subscriber of the exact
+Covers the acceptance criteria: deliver to a subscriber of the exact
 class, a dead subscriber pruned automatically via monitor `DOWN`, an unrelated
 class delivering nothing, distinct subscriptions to the same class (Pharo's
 multi-subscription rule), idempotent unsubscribe, and the introspection reads.
 
-BT-2440 adds the MRO (superclass-chain) matching: delivery to subscribers of an
+The MRO (superclass-chain) matching: delivery to subscribers of an
 ancestor class, per-subscription de-duplication across the walk, and graceful
 truncation when a class's metadata row is removed mid-hierarchy.
 
-BT-2441 adds the synchronous + once-only + message-send forms with fault
+The synchronous + once-only + message-send forms with fault
 isolation: `announceAndWait/2,3` running each handler in its own monitored
 process; a `doOnce` subscription consumed atomically (exactly-once under N
 concurrent announcers); the `{send, Sel, Receiver}` (`when:send:to:`) handler
@@ -24,7 +23,7 @@ form; per-handler fault isolation (a crashing handler is caught and the caller
 still returns, siblings unaffected); a per-handler timeout that ejects a wedged
 handler; and reentrant `announceAndWait/2` from inside a handler (no deadlock).
 
-BT-2442 adds the heir crash-survival dead-pid prune: on restart after a bus crash,
+The heir crash-survival dead-pid prune: on restart after a bus crash,
 the gen_server re-reads the heir-preserved ETS table, re-arms monitors for live
 subscribers, and eagerly prunes any subscriber that died during the crash→restart
 gap (whose `DOWN` was lost to the dead bus process).
@@ -887,7 +886,7 @@ do_once_sync_path_test_() ->
     end}.
 
 %%====================================================================
-%% Introspection / navigation veneer (BT-2444)
+%% Introspection / navigation veneer
 %%
 %% Placed before the destructive heir tests (which kill and restart the bus) so
 %% they run against a healthy, table-backed gen_server.
@@ -905,7 +904,7 @@ subscription_nodes_snapshot_test_() ->
                 Announcer = #{'$beamtalk_class' => 'Announcer', ref => make_ref()},
                 #{ref := Ref} = Announcer,
                 try
-                    %% Subscribe under the announcer's own namespace (BT-2454), so
+                    %% Subscribe under the announcer's own namespace, so
                     %% the scoped `subscriptionNodes/1` read sees it.
                     {ok, _SubRef} = beamtalk_announcements:subscribe(Ref, 'E', Sub, h1, false),
                     Nodes = beamtalk_announcements:'subscriptionNodes'(Announcer),
@@ -935,7 +934,7 @@ subscription_nodes_for_class_test_() ->
                 Announcer = #{'$beamtalk_class' => 'Announcer', ref => make_ref()},
                 #{ref := Ref} = Announcer,
                 try
-                    %% All subscriptions on this announcer's namespace (BT-2454).
+                    %% All subscriptions on this announcer's namespace.
                     {ok, _R1} = beamtalk_announcements:subscribe(Ref, 'E', Sub, h1, false),
                     {ok, _R2} = beamtalk_announcements:subscribe(
                         Ref, 'E', Sub, {send, 'sel:', Sub}, false
@@ -964,7 +963,7 @@ subscription_nodes_for_class_test_() ->
         ]
     end}.
 
-%% `subscriptionCountOn/1` counts an announcer's own subscriptions (BT-2454);
+%% `subscriptionCountOn/1` counts an announcer's own subscriptions;
 %% the navigation's `navAnnouncedClasses/1` returns class objects for the
 %% distinct subscribed classes (here `nil`, since the synthetic test classes are
 %% not loaded in the registry) without crashing.
@@ -1011,7 +1010,7 @@ introspection_empty_bus_test_() ->
     end}.
 
 %%====================================================================
-%% Per-instance isolation: distinct announcers don't cross-talk (BT-2454)
+%% Per-instance isolation: distinct announcers don't cross-talk
 %%====================================================================
 
 %% A subscription registered on announcer A is never matched by an `announce` on
@@ -1042,7 +1041,7 @@ distinct_announcers_isolated_test_() ->
     end}.
 
 %%====================================================================
-%% Remote subscriber pids: no is_process_alive badarg on any path (BT-2530)
+%% Remote subscriber pids: no is_process_alive badarg on any path
 %%====================================================================
 
 %% A subscription whose subscriber pid lives on another node must not crash any
@@ -1143,7 +1142,7 @@ system_announce_with_remote_subscriber_test_() ->
     end}.
 
 %%====================================================================
-%% Veneer async path: inert handler is delivered the native message (BT-2531)
+%% Veneer async path: inert handler is delivered the native message
 %%====================================================================
 
 %% A subscriber registered with an inert / opaque handler term (not a block or
@@ -1199,7 +1198,7 @@ system_announce_runnable_handler_is_invoked_not_delivered_test_() ->
     end}.
 
 %%====================================================================
-%% Heir crash-survival: live subscriptions survive, dead-in-gap pruned (BT-2442)
+%% Heir crash-survival: live subscriptions survive, dead-in-gap pruned
 %%====================================================================
 
 %% Simulates a bus crash→restart with heir-preserved tables: subscriptions created
@@ -1308,7 +1307,7 @@ heir_crash_survival_impl() ->
         end)}.
 
 %%====================================================================
-%% Heir crash-survival: dead subscriber monitor fires after restart (BT-2442)
+%% Heir crash-survival: dead subscriber monitor fires after restart
 %%====================================================================
 
 %% Verifies that a subscriber which dies *after* restart is still auto-pruned via
@@ -1380,7 +1379,7 @@ heir_rearm_monitor_fires_on_later_death_impl() ->
         end)}.
 
 %%====================================================================
-%% Heir crash-survival: remote subscriber row must not crash re-arm (BT-2530)
+%% Heir crash-survival: remote subscriber row must not crash re-arm
 %%====================================================================
 
 %% A remote-subscriber row that survives a bus crash via heir must not crash the
@@ -1721,7 +1720,7 @@ stop_heir_process({fake, Pid}) ->
     %% leaving the last restarted bus alive but tableless. That would crash the
     %% next downstream suite that subscribes. Stop the stale bus and delete any
     %% leftover tables so the next `setup/0` (or a bus consumer in another suite)
-    %% starts a fresh, healthy bus (BT-2531).
+    %% starts a fresh, healthy bus.
     stop_existing_bus(),
     ok.
 
