@@ -6,8 +6,8 @@
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
-EUnit tests for `beamtalk_repl_ops_eval` — the `eval` op handler (BT-2399,
-ADR 0017 Phase 3).
+EUnit tests for `beamtalk_repl_ops_eval` — the `eval` op handler
+(ADR 0017 Phase 3).
 
 Covers:
 * empty code → `{error, #beamtalk_error{kind=empty_expression}}` (no session
@@ -15,10 +15,10 @@ Covers:
 * non-empty expression that succeeds → `{ok, Value, Output, Warnings}`;
 * non-empty expression that fails at runtime → `{error, #beamtalk_error{}, Output, Warnings}`
   (verify `beamtalk_repl_errors:ensure_structured_error/1` wrapping);
-* `Program exit: N` in non-trace mode → `{script_exit, N, Output, Warnings}` (BT-2688);
+* `Program exit: N` in non-trace mode → `{script_exit, N, Output, Warnings}`;
 * trace mode success → `{trace, Steps, Output, Warnings}`;
 * trace mode error → `{error, #beamtalk_error{}, Output, Warnings}` (ensure_structured_error wrap);
-* `Program exit: N` in trace mode → `{script_exit, N, Output, Warnings}` (BT-2688);
+* `Program exit: N` in trace mode → `{script_exit, N, Output, Warnings}`;
 * `handle/4` WebSocket edge wrapper → encodes the term result to a JSON binary.
 """.
 
@@ -112,14 +112,14 @@ handle_term_eval_error_wraps_in_beamtalk_error_test_() ->
     end}.
 
 %%====================================================================
-%% handle_term/4 — non-trace script_exit path (BT-2688)
+%% handle_term/4 — non-trace script_exit path
 %%
 %% `Program exit: N` in a non-node-owning session throws a tagged
 %% `{beamtalk_script_exit, N}` signal that the shell catches and
 %% converts to `{script_exit, N, Output, Warnings}`. This covers the
 %% uncovered branch at line 72 of beamtalk_repl_ops_eval.erl.
 %% Each script_exit test uses a fresh session because the shell
-%% terminates after surfacing the exit status (BT-2688, ADR 0099 §3).
+%% terminates after surfacing the exit status (ADR 0099 §3).
 %%====================================================================
 
 handle_term_non_trace_script_exit_test_() ->
@@ -183,7 +183,7 @@ handle_term_trace_mode_script_exit_test_() ->
                 ?_test(begin
                     Msg = make_msg(<<"eval">>),
                     %% `Program exit: N` in trace mode also surfaces as
-                    %% `{script_exit, N, Output, Warnings}` (BT-2688).
+                    %% `{script_exit, N, Output, Warnings}`.
                     %% Covers the uncovered branch at line 61 of
                     %% beamtalk_repl_ops_eval.erl.
                     Result = beamtalk_repl_ops_eval:handle_term(

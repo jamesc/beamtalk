@@ -15,7 +15,7 @@ Used by protocol handlers and op modules.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
-%% BT-3084: {Tag, Arity} pairs recognized by ensure_structured_error/1's
+%% {Tag, Arity} pairs recognized by ensure_structured_error/1's
 %% specific clauses (excluding the map/#beamtalk_error{}/eval_error wrapper
 %% shapes handled by earlier, more specific clauses). Shared by
 %% is_known_error_reason/1 so a `{eval_error, Class, Reason}` whose Reason is
@@ -104,7 +104,7 @@ safe_to_existing_atom(_) ->
 Ensure an error reason is a structured #beamtalk_error{} record.
 If already structured (or a wrapped exception), passes through unchanged.
 
-BT-3084: this is the single canonical dispatch table for the REPL's raw
+This is the single canonical dispatch table for the REPL's raw
 error-tuple vocabulary — compile/eval failures, undefined variables, file and
 module I/O, class/method lookups, actor ops, and session/request errors.
 `beamtalk_repl_json:format_error_message/1` derives from this table rather
@@ -131,7 +131,7 @@ ensure_structured_error({eval_error, Class, Reason}) ->
             %% the generic wrapper below.
             ensure_structured_error(Reason);
         false ->
-            %% BT-3084: opaque/unrecognized Reason — preserve the exception
+            %% opaque/unrecognized Reason — preserve the exception
             %% class in the message. Previously this clause dropped `Class`
             %% entirely, which diverged from beamtalk_repl_json's separate
             %% "Evaluation error: Class:Reason" wording for the same shape;
@@ -148,7 +148,7 @@ ensure_structured_error({eval_error, Class, Reason}) ->
             )
     end;
 ensure_structured_error({compile_error, [#{message := Msg} = Diag | _]}) ->
-    %% BT-1235: structured diagnostic list — extract message and hint from first diagnostic
+    %% structured diagnostic list — extract message and hint from first diagnostic
     % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(hint, Diag) of
         {ok, Hint} when is_binary(Hint) -> make(compile_error, 'Compiler', Msg, Hint);
@@ -200,7 +200,7 @@ ensure_structured_error({parse_error, Details}) ->
     make(compile_error, 'Compiler', iolist_to_binary([<<"Parse error: ">>, format_name(Details)]));
 ensure_structured_error({invalid_request, Reason}) ->
     make(internal_error, 'REPL', iolist_to_binary([<<"Invalid request: ">>, format_name(Reason)]));
-%% BT-3084: the remaining clauses below were previously only handled by
+%% the remaining clauses below were previously only handled by
 %% beamtalk_repl_json:format_error_message/1's separate dispatch table —
 %% absent here, they fell through to the generic `~p` wrapper just below
 %% (silently dropping the vocabulary, e.g. `{registration_error, ...}` was
@@ -248,7 +248,7 @@ ensure_structured_error({class_not_found, ClassName}) ->
         ])
     );
 ensure_structured_error({method_not_found, ClassName, Selector}) ->
-    %% BT-3084: canonical DNU message — call beamtalk_error:generate_message/3
+    %% canonical DNU message — call beamtalk_error:generate_message/3
     %% (via with_selector/2 when Selector is an atom) instead of hand-rolling
     %% the "does not understand" text a third time.
     Err0 = beamtalk_error:new(does_not_understand, ClassName),
@@ -404,7 +404,7 @@ is_known_error_reason(Reason) when is_tuple(Reason), tuple_size(Reason) > 0 ->
 is_known_error_reason(_) ->
     false.
 
-%% BT-3090: delegates to the canonical `beamtalk_text:to_binary/1` — was a
+%% delegates to the canonical `beamtalk_text:to_binary/1` — was a
 %% byte-identical copy of `beamtalk_repl_protocol:to_binary/1`.
 -doc "Format a name for error messages.".
 -spec format_name(term()) -> binary().
