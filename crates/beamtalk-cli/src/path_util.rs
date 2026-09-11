@@ -69,9 +69,7 @@ pub fn normalize_path(path: &Utf8Path) -> Utf8PathBuf {
 /// Resolve the filesystem checkout root for a single dependency.
 ///
 /// - Path deps: joins `declaring_root` with the declared relative path and
-///   normalises `.`/`..` components without filesystem access. Returns `None`
-///   if the declared path is not valid UTF-8 — the caller decides whether to
-///   warn-and-skip (library) or return an error (binary).
+///   normalises `.`/`..` components without filesystem access.
 /// - Git / Registry deps: returns the build-layout checkout directory
 ///   (`_build/deps/<name>/`) where the resolved checkout lives after a
 ///   `beamtalk build`.
@@ -81,19 +79,25 @@ pub fn normalize_path(path: &Utf8Path) -> Utf8PathBuf {
 /// full dependency resolution (`commands/deps/mod.rs`), replacing the
 /// identical `match &spec.source { DependencySource::Path { .. } => ... }`
 /// blocks that previously had to be kept in sync by hand.
-pub fn dep_root_for_source(
+///
+/// # Errors
+///
+/// Returns `Err(&Path)` carrying the non-UTF-8 path if `source` is a
+/// `Path` dependency whose declared path cannot be represented as UTF-8.
+/// The caller decides whether to warn-and-skip (library) or surface an
+/// error (binary). Git and Registry sources always succeed.
+pub fn dep_root_for_source<'s>(
     declaring_root: &Utf8Path,
     dep_name: &str,
-    source: &DependencySource,
+    source: &'s DependencySource,
     layout: &BuildLayout,
-) -> Option<Utf8PathBuf> {
+) -> Result<Utf8PathBuf, &'s std::path::Path> {
     match source {
-        DependencySource::Path { path } => {
-            let relative = Utf8Path::from_path(path)?;
-            Some(normalize_path(&declaring_root.join(relative)))
-        }
+        DependencySource::Path { path } => Utf8Path::from_path(path)
+            .map(|relative| normalize_path(&declaring_root.join(relative)))
+            .ok_or(path.as_path()),
         DependencySource::Git { .. } | DependencySource::Registry { .. } => {
-            Some(layout.dep_checkout_dir(dep_name))
+            Ok(layout.dep_checkout_dir(dep_name))
         }
     }
 }
@@ -110,7 +114,7 @@ mod tests {
             path: std::path::PathBuf::from("../my-dep"),
         };
         let result = dep_root_for_source(Utf8Path::new("/project/pkg"), "my-dep", &source, &layout);
-        assert_eq!(result, Some(Utf8PathBuf::from("/project/my-dep")));
+        assert_eq!(result, Ok(Utf8PathBuf::from("/project/my-dep")));
     }
 
     #[test]
@@ -123,7 +127,7 @@ mod tests {
         let result = dep_root_for_source(Utf8Path::new("/project"), "my-git-dep", &source, &layout);
         assert_eq!(
             result,
-            Some(Utf8PathBuf::from("/project/_build/deps/my-git-dep"))
+            Ok(Utf8PathBuf::from("/project/_build/deps/my-git-dep"))
         );
     }
 
@@ -136,7 +140,7 @@ mod tests {
         let result = dep_root_for_source(Utf8Path::new("/project"), "my-reg-dep", &source, &layout);
         assert_eq!(
             result,
-            Some(Utf8PathBuf::from("/project/_build/deps/my-reg-dep"))
+            Ok(Utf8PathBuf::from("/project/_build/deps/my-reg-dep"))
         );
     }
 

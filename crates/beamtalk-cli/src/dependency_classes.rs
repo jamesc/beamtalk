@@ -136,10 +136,13 @@ pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<Cla
             // authored by the project owner, not untrusted input. Path deps
             // are relative to `declaring_root` (the package whose manifest
             // declared them), not necessarily `project_root`.
-            let Some(dep_root) = dep_root_for_source(&declaring_root, &name, &spec.source, &layout)
-            else {
-                warn!(dep = %name, "Dependency path is not valid UTF-8; skipping");
-                continue;
+            let dep_root = match dep_root_for_source(&declaring_root, &name, &spec.source, &layout)
+            {
+                Ok(root) => root,
+                Err(path) => {
+                    warn!(dep = %name, path = %path.display(), "Dependency path is not valid UTF-8; skipping");
+                    continue;
+                }
             };
 
             if !dep_root.is_dir() {

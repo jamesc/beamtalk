@@ -222,11 +222,7 @@ fn discover_all_dep_roots(
 
             let is_path_dep = matches!(spec.source, DependencySource::Path { .. });
             let dep_root = dep_root_for_source(&parent_root, dep_name, &spec.source, &layout)
-                .ok_or_else(|| {
-                    // dep_root_for_source returns None only for Path deps with a non-UTF-8 path.
-                    let DependencySource::Path { path } = &spec.source else {
-                        unreachable!("dep_root_for_source only returns None for Path sources")
-                    };
+                .map_err(|path| {
                     miette::miette!(
                         "Dependency '{dep_name}' has a non-UTF-8 path: {}",
                         path.display()
