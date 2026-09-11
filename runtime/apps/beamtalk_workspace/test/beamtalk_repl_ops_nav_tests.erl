@@ -6,7 +6,7 @@
 %%% **DDD Context:** REPL Session Context (Navigation bridge)
 
 -moduledoc """
-EUnit tests for beamtalk_repl_ops_nav (BT-2311, BT-2309).
+EUnit tests for beamtalk_repl_ops_nav.
 
 Covers: describe_ops/0 map shape, all validate_params/1 error branches,
 success paths via handle/4 for senders, implementors, and references
@@ -50,11 +50,11 @@ describe_ops_nav_query_optional_includes_selector_and_class_test() ->
     Optional = maps:get(<<"optional">>, Info),
     ?assert(lists:member(<<"selector">>, Optional)),
     ?assert(lists:member(<<"class">>, Optional)),
-    %% BT-2669: callers_of_native_module takes a `module` param.
+    %% callers_of_native_module takes a `module` param.
     ?assert(lists:member(<<"module">>, Optional)).
 
 %%====================================================================
-%% handle/4 — callers_of_native_module validation (BT-2669)
+%% handle/4 — callers_of_native_module validation
 %%====================================================================
 
 handle_callers_missing_module_returns_error_mentioning_module_test() ->
@@ -177,7 +177,7 @@ handle_references_empty_class_returns_error_test() ->
     assert_error_response(Response).
 
 %%====================================================================
-%% handle/4 — protocol kinds validation (BT-2639)
+%% handle/4 — protocol kinds validation
 %%====================================================================
 
 handle_required_methods_missing_class_returns_error_mentioning_class_test() ->
@@ -503,7 +503,7 @@ nav_tests(_Pid) ->
             ?assertEqual(<<"NavTestClass">>, maps:get(<<"class">>, Row))
         end},
         {"atom table stable under flood of unknown selectors", fun() ->
-            %% Atom-safety sentinel (BT-2239 follow-up): a flood of unique,
+            %% Atom-safety sentinel: a flood of unique,
             %% never-seen-before selectors must not grow the VM atom table,
             %% because the handler uses binary_to_existing_atom/2 and falls
             %% back to a single shared sentinel atom on badarg.
@@ -676,7 +676,7 @@ nav_tests(_Pid) ->
     ].
 
 %%====================================================================
-%% handle/4 — protocol kinds success paths (BT-2639)
+%% handle/4 — protocol kinds success paths
 %%====================================================================
 
 protocol_setup() ->
@@ -765,7 +765,7 @@ protocol_tests(_) ->
     ].
 
 %%====================================================================
-%% handle/4 — callers_of_native_module merges self delegate callers (BT-2732)
+%% handle/4 — callers_of_native_module merges self delegate callers
 %%====================================================================
 
 native_delegate_callers_test_() ->
@@ -775,8 +775,8 @@ native_delegate_callers_test_() ->
 %% A live class backed by `beamtalk_test_native_facade` (backing module
 %% `bt_test_native_backing`), carrying two `self delegate` instance methods plus
 %% one explicit `(Erlang bt_test_native_backing) …` FFI caller — so the merged nav
-%% op must surface all three: the delegate rows (BT-2732) alongside the FFI row
-%% (BT-2669, no regression). Unique class name + isolated cleanup.
+%% op must surface all three: the delegate rows alongside the FFI row
+%% (no regression). Unique class name + isolated cleanup.
 delegate_callers_setup() ->
     XrefPid =
         case whereis(beamtalk_xref) of
@@ -813,7 +813,7 @@ delegate_callers_setup() ->
         %% `self delegate` methods → delegate caller rows anchored at their header.
         delegate_method_row('increment', 61, []),
         delegate_method_row('incrementBy:', 71, []),
-        %% An explicit FFI caller into the SAME backing module → BT-2669 row.
+        %% An explicit FFI caller into the SAME backing module → row.
         delegate_method_row('rawPoke', 90, [
             #{
                 selector => 'poke',
@@ -884,7 +884,7 @@ delegate_callers_tests(#{class := {ClassName, _Pid, _Owned}}) ->
 %%====================================================================
 
 %% Minimal xref payload: one instance-side method 'increment' that sends '+'
-%% and references 'Integer'. Mirrors the shape codegen will emit (BT-2239).
+%% and references 'Integer'. Mirrors the shape codegen will emit.
 nav_test_xref() ->
     [
         #{
@@ -903,7 +903,7 @@ nav_test_xref() ->
     ].
 
 %% Minimal xref payload with an Erlang-FFI send into the `lists` module
-%% (BT-2669). Mirrors what codegen emits for `(Erlang lists) reverse: xs`.
+%% Mirrors what codegen emits for `(Erlang lists) reverse: xs`.
 nav_ffi_xref() ->
     [
         #{

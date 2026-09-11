@@ -55,14 +55,14 @@ children_count_test() ->
     %% transcript_stream, actor_registry, workspace_bootstrap, repl_server,
     %% idle_monitor, actor_sup, session_sup.
     %% BeamtalkInterface and WorkspaceInterface are value singletons (no gen_server).
-    %% BT-2531: the class_events / bindings_events / flush_events pub/sub
+    %% the class_events / bindings_events / flush_events pub/sub
     %% gen_servers were retired — those push streams now ride the SystemAnnouncer
     %% bus (`beamtalk_announcements`, supervised under `beamtalk_runtime_sup`).
-    %% ADR 0105 Phase 1 (BT-2777): workspace_signature_store added.
-    %% ADR 0105 Phase 1 (BT-2779): workspace_findings_store added.
-    %% ADR 0105 Phase 2 (BT-2780): workspace_shape_store and
+    %% ADR 0105 Phase 1: workspace_signature_store added.
+    %% ADR 0105 Phase 1: workspace_findings_store added.
+    %% ADR 0105 Phase 2: workspace_shape_store and
     %% workspace_shape_recheck_worker added.
-    %% ADR 0108 hot-reload re-check trigger (BT-2899): beamtalk_alias_xref added.
+    %% ADR 0108 hot-reload re-check trigger: beamtalk_alias_xref added.
     ?assertEqual(14, length(ChildSpecs)).
 
 children_ids_test() ->
@@ -78,13 +78,13 @@ children_ids_test() ->
     ?assert(lists:member(beamtalk_workspace_shape_store, Ids)),
     ?assert(lists:member(beamtalk_workspace_shape_recheck_worker, Ids)),
     ?assert(lists:member(beamtalk_workspace_findings_store, Ids)),
-    %% ADR 0108 hot-reload re-check trigger (BT-2899).
+    %% ADR 0108 hot-reload re-check trigger.
     ?assert(lists:member(beamtalk_alias_xref, Ids)),
     ?assert(lists:member(beamtalk_transcript_stream, Ids)),
     ?assertNot(lists:member('bt@stdlib@beamtalk_interface', Ids)),
     ?assertNot(lists:member('bt@stdlib@workspace_interface', Ids)),
     ?assert(lists:member(beamtalk_actor_registry, Ids)),
-    %% BT-2531: class_events / bindings_events / flush_events retired.
+    %% class_events / bindings_events / flush_events retired.
     ?assertNot(lists:member(beamtalk_class_events, Ids)),
     ?assertNot(lists:member(beamtalk_bindings_events, Ids)),
     ?assertNot(lists:member(beamtalk_flush_events, Ids)),
@@ -214,7 +214,7 @@ bootstrap_spec_test() ->
     [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_bootstrap],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
-    %% ProjectPath from test_config is propagated to bootstrap start args (BT-739 module activation)
+    %% ProjectPath from test_config is propagated to bootstrap start args (module activation)
     ?assertEqual(
         {beamtalk_workspace_bootstrap, start_link, [test_project_path()]}, maps:get(start, Spec)
     ).
@@ -236,7 +236,7 @@ session_sup_before_repl_server_test() ->
     %% readiness signal) before returning; if session_sup is not yet up when a
     %% client connects, beamtalk_ws_handler:create_session exits with `noproc` and
     %% the connection is dropped, surfacing as the flaky "port accepting TCP but
-    %% WebSocket health check failed" CI failure (BT-2532).
+    %% WebSocket health check failed" CI failure.
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
     Ids = [maps:get(id, S) || S <- ChildSpecs],
@@ -267,7 +267,7 @@ all_children_alive_test() ->
     %% module (`rebar3 eunit --module=…`) the beamtalk_workspace app — and thus its
     %% cowboy dependency — is not started, so the child would fail with
     %% `{noproc, ranch_sup …}`. Starting cowboy here makes the single-module run
-    %% deterministic (BT-2523).
+    %% deterministic.
     {ok, _} = application:ensure_all_started(cowboy),
 
     %% Set trap_exit before start_link
@@ -296,19 +296,19 @@ all_children_alive_test() ->
 
         %% Verify each child has correct ID and is alive.
         %% BeamtalkInterface and WorkspaceInterface are value singletons — not children.
-        %% BT-2531: class_events / bindings_events / flush_events retired (those
+        %% class_events / bindings_events / flush_events retired (those
         %% push streams now ride the SystemAnnouncer bus).
         ExpectedIds = [
             beamtalk_workspace_meta,
             beamtalk_workspace_changelog,
-            %% ADR 0105 Phase 1 (BT-2777).
+            %% ADR 0105 Phase 1.
             beamtalk_workspace_signature_store,
-            %% ADR 0105 Phase 2 (BT-2780).
+            %% ADR 0105 Phase 2.
             beamtalk_workspace_shape_store,
             beamtalk_workspace_shape_recheck_worker,
-            %% ADR 0105 Phase 1 (BT-2779).
+            %% ADR 0105 Phase 1.
             beamtalk_workspace_findings_store,
-            %% ADR 0108 hot-reload re-check trigger (BT-2899).
+            %% ADR 0108 hot-reload re-check trigger.
             beamtalk_alias_xref,
             beamtalk_transcript_stream,
             beamtalk_actor_registry,
@@ -508,7 +508,7 @@ workspace_meta_config_test() ->
     ?assertEqual(5555, maps:get(repl_port, MetaConfig)),
     ?assert(is_integer(maps:get(created_at, MetaConfig))).
 
-%%% Run mode tests (repl=false, BT-1317)
+%%% Run mode tests (repl=false)
 
 run_mode_config() ->
     #{
@@ -525,9 +525,9 @@ run_mode_children_count_test() ->
     %% workspace_signature_store — all REPL-only).
     %% workspace_meta, workspace_changelog, transcript_stream, actor_registry,
     %% workspace_bootstrap, actor_sup.
-    %% BT-2531: class_events / bindings_events / flush_events retired (those push
+    %% class_events / bindings_events / flush_events retired (those push
     %% streams now ride the SystemAnnouncer bus).
-    %% ADR 0105 Phase 1 (BT-2777): workspace_signature_store is REPL-only (run
+    %% ADR 0105 Phase 1: workspace_signature_store is REPL-only (run
     %% mode has no live-edit path to feed it) — see run_mode_no_signature_store_test.
     ?assertEqual(6, length(ChildSpecs)).
 
@@ -549,7 +549,7 @@ run_mode_no_session_sup_test() ->
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     ?assertNot(lists:member(beamtalk_session_sup, Ids)).
 
-%% ADR 0105 Phase 1 (BT-2777): run mode executes a precompiled artifact with
+%% ADR 0105 Phase 1: run mode executes a precompiled artifact with
 %% no live-edit path (no session, no way to reach
 %% beamtalk_repl_loader:install_method/9), so the signature-generation store
 %% — REPL-only, like session_sup/repl_server/idle_monitor above — must not
@@ -560,7 +560,7 @@ run_mode_no_signature_store_test() ->
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     ?assertNot(lists:member(beamtalk_workspace_signature_store, Ids)).
 
-%% ADR 0105 Phase 1 (BT-2779): the findings store is downstream of the
+%% ADR 0105 Phase 1: the findings store is downstream of the
 %% signature store (a re-check needs a classified signature diff first, and
 %% run mode never produces one — see `run_mode_no_signature_store_test`'s
 %% doc) — REPL-only, same as the store it publishes from.

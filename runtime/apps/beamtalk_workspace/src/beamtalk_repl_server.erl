@@ -19,10 +19,10 @@ and protocol request dispatch.
 
 The Phase-1 vanilla-JS browser workspace (static HTML/JS/CSS served from
 `priv/`, the `/` and `/static/[...]` routes, and the optional separate `--web`
-HTTP listener) was removed in BT-2415; it is superseded by the Phoenix LiveView
+HTTP listener) has been removed; it is superseded by the Phoenix LiveView
 IDE (ADR 0017 Phase 3). Only the `/ws` protocol transport remains.
 
-Op handlers are delegated to domain-specific modules (BT-705):
+Op handlers are delegated to domain-specific modules:
 - beamtalk_repl_ops_eval: eval, clear, bindings
 - beamtalk_repl_ops_load: load-source, load-project, unload
 - beamtalk_repl_ops_actors: actors, inspect, kill, interrupt
@@ -30,8 +30,8 @@ Op handlers are delegated to domain-specific modules (BT-705):
 - beamtalk_repl_ops_dev: complete, describe, show-codegen
 - beamtalk_repl_ops_perf: enable-tracing, get-traces, actor-stats, export-traces (ADR 0069)
 
-The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed
-in BT-2091. Use the Beamtalk-native message sends instead:
+The deprecated ops `docs`, `load-file`, `reload`, and `modules` have been
+removed. Use the Beamtalk-native message sends instead:
 - `docs` → `Beamtalk help: ClassName` (optionally `selector: #sel`)
 - `load-file` → `Workspace load: "path"`
 - `reload` → `ClassName reload`
@@ -108,7 +108,7 @@ get_port() ->
 
 -doc """
 Get the nonce for this server instance.
-Used for stale port file detection (BT-611).
+Used for stale port file detection.
 """.
 -spec get_nonce() -> {ok, binary()}.
 get_nonce() ->
@@ -121,16 +121,16 @@ init(Config) ->
     Port = maps:get(port, Config),
     WorkspaceId = maps:get(workspace_id, Config, undefined),
     BindAddr = maps:get(bind_addr, Config, {127, 0, 0, 1}),
-    %% Generate a random nonce for stale port file detection (BT-611)
+    %% Generate a random nonce for stale port file detection
     Nonce = generate_nonce(),
-    %% BT-666: Session registry for interrupt routing.
+    %% Session registry for interrupt routing.
     beamtalk_session_table:new(),
     %% ADR 0020: Start cowboy WebSocket listener.
     %% Default: bind to 127.0.0.1 so only local processes can connect.
-    %% --bind flag allows binding to other addresses (BT-691).
+    %% --bind flag allows binding to other addresses.
     %% Cookie handshake in beamtalk_ws_handler provides auth on shared machines.
     %% Only the `/ws` protocol route remains; the Phase-1 browser static routes
-    %% (`/`, `/static/[...]`) were removed in BT-2415 (ADR 0017 Phase 3).
+    %% (`/`, `/static/[...]`) have been removed (ADR 0017 Phase 3).
     Dispatch = cowboy_router:compile([
         {'_', [
             {"/ws", beamtalk_ws_handler, []}
@@ -167,7 +167,7 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info(shutdown_requested, State) ->
-    %% Shutdown endpoint (BT-611): initiate OTP-level graceful teardown.
+    %% Shutdown endpoint: initiate OTP-level graceful teardown.
     ?LOG_INFO("Executing requested shutdown", #{domain => [beamtalk, runtime]}),
     init:stop(),
     {noreply, State};
@@ -213,7 +213,7 @@ write_port_file(WorkspaceId, Port, Nonce) ->
             ]),
             case filelib:ensure_dir(PortFilePath) of
                 ok ->
-                    %% Format: PORT\nNONCE (two lines for stale detection, BT-611)
+                    %% Format: PORT\nNONCE (two lines for stale detection)
                     Content = [integer_to_list(Port), "\n", binary_to_list(Nonce)],
                     %% Write atomically via tmp + rename(2) so the Rust CLI never
                     %% reads a partially-written port file (file:write_file/2 is
@@ -280,7 +280,7 @@ write_port_file(WorkspaceId, Port, Nonce) ->
 %%% Nonce Generation
 
 -doc """
-Generate a random nonce for stale port file detection (BT-611).
+Generate a random nonce for stale port file detection.
 Returns a 16-character hex string.
 """.
 -spec generate_nonce() -> binary().
@@ -335,14 +335,14 @@ Dispatch a protocol op and encode the result for the WebSocket transport.
 
 Routing and term-result production live in `beamtalk_repl_ops:dispatch/4`; JSON
 encoding happens at this transport edge via `beamtalk_repl_ops:encode/2`
-(BT-2399, ADR 0017 Phase 3). The browser wire format is unchanged. Dist-attached
+(ADR 0017 Phase 3). The browser wire format is unchanged. Dist-attached
 clients (Phoenix LiveView, runtime-attached LSP / MCP) call
 `beamtalk_repl_ops:dispatch/4` directly and consume the live term result without
 this JSON step.
 
-The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed in
-BT-2091 (protocol 2.0); sending them now returns `unknown_op`. The `bindings`
-and `clear` ops were removed in BT-2369 (ADR 0081 Phase 6) — session state is
+The deprecated ops `docs`, `load-file`, `reload`, and `modules` have been
+removed (protocol 2.0); sending them now returns `unknown_op`. The `bindings`
+and `clear` ops have also been removed (ADR 0081 Phase 6) — session state is
 now read and mutated through the Beamtalk-native `Session` API
 (`Session current bindings`, `Session current clear`) via `eval`, so sending
 `bindings`/`clear` now returns `unknown_op`.
@@ -352,7 +352,7 @@ handle_op(Op, Params, Msg, SessionPid) ->
         beamtalk_repl_ops:dispatch(Op, Params, Msg, SessionPid), Msg
     ).
 
-%%% Delegated helpers (BT-705)
+%%% Delegated helpers
 %%%
 %%% These functions have been extracted to domain-specific ops modules.
 %%% Thin delegates are kept here so existing TEST exports and callers
@@ -376,7 +376,7 @@ get_completions(Prefix) -> beamtalk_repl_ops_dev:get_completions(Prefix).
 make_class_not_found_error(ClassName) ->
     beamtalk_repl_ops_dev:make_class_not_found_error(ClassName).
 
--doc "Delegate to beamtalk_repl_errors (extracted BT-865).".
+-doc "Delegate to beamtalk_repl_errors .".
 ensure_structured_error(Reason, Class) ->
     beamtalk_repl_errors:ensure_structured_error(Reason, Class).
 format_name(Name) -> beamtalk_repl_errors:format_name(Name).
@@ -384,14 +384,14 @@ format_name(Name) -> beamtalk_repl_errors:format_name(Name).
 
 -doc """
 Safely convert a binary to an existing atom, returning error instead of creating new atoms.
-Implementation lives in beamtalk_repl_errors (extracted BT-865).
+Implementation lives in beamtalk_repl_errors .
 """.
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
 safe_to_existing_atom(Bin) -> beamtalk_repl_errors:safe_to_existing_atom(Bin).
 
 -doc """
 Ensure an error reason is a structured #beamtalk_error{} record.
-Implementation lives in beamtalk_repl_errors (extracted BT-865).
+Implementation lives in beamtalk_repl_errors .
 """.
 -spec ensure_structured_error(term()) -> #beamtalk_error{}.
 ensure_structured_error(Reason) -> beamtalk_repl_errors:ensure_structured_error(Reason).
