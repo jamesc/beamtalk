@@ -151,8 +151,7 @@ is_module_loaded_with_new(_) ->
     false.
 
 -doc """
-Look up a class's `is_abstract` flag by name for the generic `new` path
-.
+Look up a class's `is_abstract` flag by name for the generic `new` path.
 
 Unlike `resolve_is_abstract_or_raise/2`, this does not raise on a metadata
 miss: `handle_new_generic/2` is reached from the external `X new` gen_server
