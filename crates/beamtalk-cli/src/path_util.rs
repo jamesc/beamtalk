@@ -3,6 +3,8 @@
 
 //! Shared path utilities for the Beamtalk CLI.
 
+use crate::build_layout::BuildLayout;
+use beamtalk_core::compilation::DependencySource;
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 
 /// Render a path string as forward-slash-separated text regardless of host OS.
@@ -64,9 +66,94 @@ pub fn normalize_path(path: &Utf8Path) -> Utf8PathBuf {
     result
 }
 
+/// Resolve the filesystem checkout root for a single dependency.
+///
+/// - Path deps: joins `declaring_root` with the declared relative path and
+///   normalises `.`/`..` components without filesystem access. Returns `None`
+///   if the declared path is not valid UTF-8 — the caller decides whether to
+///   warn-and-skip (library) or return an error (binary).
+/// - Git / Registry deps: returns the build-layout checkout directory
+///   (`_build/deps/<name>/`) where the resolved checkout lives after a
+///   `beamtalk build`.
+///
+/// This is the single shared resolution primitive used by the library's
+/// offline dependency-class walk (`dependency_classes.rs`) and the binary's
+/// full dependency resolution (`commands/deps/mod.rs`), replacing the
+/// identical `match &spec.source { DependencySource::Path { .. } => ... }`
+/// blocks that previously had to be kept in sync by hand.
+pub fn dep_root_for_source(
+    declaring_root: &Utf8Path,
+    dep_name: &str,
+    source: &DependencySource,
+    layout: &BuildLayout,
+) -> Option<Utf8PathBuf> {
+    match source {
+        DependencySource::Path { path } => {
+            let relative = Utf8Path::from_path(path)?;
+            Some(normalize_path(&declaring_root.join(relative)))
+        }
+        DependencySource::Git { .. } | DependencySource::Registry { .. } => {
+            Some(layout.dep_checkout_dir(dep_name))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use beamtalk_core::compilation::{DependencySource, GitReference};
+
+    #[test]
+    fn dep_root_for_source_path_dep_is_normalized() {
+        let layout = BuildLayout::new("/project");
+        let source = DependencySource::Path {
+            path: std::path::PathBuf::from("../my-dep"),
+        };
+        let result = dep_root_for_source(
+            Utf8Path::new("/project/pkg"),
+            "my-dep",
+            &source,
+            &layout,
+        );
+        assert_eq!(result, Some(Utf8PathBuf::from("/project/my-dep")));
+    }
+
+    #[test]
+    fn dep_root_for_source_git_dep_uses_checkout_dir() {
+        let layout = BuildLayout::new("/project");
+        let source = DependencySource::Git {
+            url: "https://example.com/repo.git".into(),
+            reference: GitReference::Tag("v1.0.0".into()),
+        };
+        let result = dep_root_for_source(
+            Utf8Path::new("/project"),
+            "my-git-dep",
+            &source,
+            &layout,
+        );
+        assert_eq!(
+            result,
+            Some(Utf8PathBuf::from("/project/_build/deps/my-git-dep"))
+        );
+    }
+
+    #[test]
+    fn dep_root_for_source_registry_dep_uses_checkout_dir() {
+        let layout = BuildLayout::new("/project");
+        let source = DependencySource::Registry {
+            version: "1.2.3".into(),
+        };
+        let result = dep_root_for_source(
+            Utf8Path::new("/project"),
+            "my-reg-dep",
+            &source,
+            &layout,
+        );
+        assert_eq!(
+            result,
+            Some(Utf8PathBuf::from("/project/_build/deps/my-reg-dep"))
+        );
+    }
 
     #[test]
     fn normalize_path_resolves_parent() {

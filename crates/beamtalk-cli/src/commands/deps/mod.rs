@@ -183,17 +183,18 @@ struct DiscoveredDep {
 /// Used by both `deps_are_fresh` and `collect_fresh_deps` to handle the full
 /// transitive graph rather than just direct deps.
 ///
-/// Note: `dependency_classes.rs`'s offline MCP
-/// `lint`/`diagnostic_summary` dependency-class resolution needs the same
-/// transitive-walk reachability but cannot call this function directly — it
-/// lives in the library crate (`lib.rs`) while this module is compiled only
-/// into the `beamtalk-cli` binary (`mod commands;` in `main.rs`). It
-/// reimplements an equivalent walk instead; keep the two in sync if this
-/// algorithm changes.
+/// Note: `dependency_classes.rs`'s offline MCP `lint`/`diagnostic_summary`
+/// dependency-class resolution performs a similar BFS but cannot call this
+/// function directly (it lives in the library crate while this module is
+/// binary-only). The checkout-path resolution step — the shared primitive
+/// that determines *where* each dep lives on disk — is extracted into
+/// [`beamtalk_cli::path_util::dep_root_for_source`] and called by both
+/// walkers, so that piece cannot drift between them.
 fn discover_all_dep_roots(
     project_root: &Utf8Path,
     manifest: &manifest::ParsedManifest,
 ) -> Result<Vec<DiscoveredDep>> {
+    use beamtalk_cli::path_util::dep_root_for_source;
     use beamtalk_core::compilation::DependencySource;
 
     let layout = BuildLayout::new(project_root);
@@ -219,25 +220,18 @@ fn discover_all_dep_roots(
                 continue; // Already discovered (diamond deps)
             }
 
-            let (dep_root, is_path_dep) = match &spec.source {
-                DependencySource::Path { path } => {
-                    let relative_utf8 = camino::Utf8Path::from_path(path).ok_or_else(|| {
-                        miette::miette!(
-                            "Dependency '{dep_name}' has a non-UTF-8 path: {}",
-                            path.display()
-                        )
-                    })?;
-                    (
-                        path::canonicalize_dep_path(&parent_root, relative_utf8),
-                        true,
+            let is_path_dep = matches!(spec.source, DependencySource::Path { .. });
+            let dep_root = dep_root_for_source(&parent_root, dep_name, &spec.source, &layout)
+                .ok_or_else(|| {
+                    // dep_root_for_source returns None only for Path deps with a non-UTF-8 path.
+                    let DependencySource::Path { path } = &spec.source else {
+                        unreachable!("dep_root_for_source only returns None for Path sources")
+                    };
+                    miette::miette!(
+                        "Dependency '{dep_name}' has a non-UTF-8 path: {}",
+                        path.display()
                     )
-                }
-                // Registry deps are fetched into the same checkout directory
-                // as git deps — they *are* git deps once resolved.
-                DependencySource::Git { .. } | DependencySource::Registry { .. } => {
-                    (layout.dep_checkout_dir(dep_name), false)
-                }
-            };
+                })?;
 
             let is_direct = direct_names.contains(dep_name.as_str());
 
