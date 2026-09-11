@@ -38,7 +38,7 @@ class_of_string_test() ->
     ?assertEqual('String', beamtalk_primitive:class_of(<<"Unicode: 你好"/utf8>>)).
 
 class_of_non_utf8_binary_is_binary_test() ->
-    %% BT-2999: bytes that can't be valid UTF-8 can't be a String either.
+    %% Bytes that can't be valid UTF-8 can't be a String either.
     ?assertEqual('Binary', beamtalk_primitive:class_of(<<255, 254, 253>>)),
     ?assertEqual('Binary', beamtalk_primitive:class_of(<<"prefix", 16#C3>>)),
     ?assertEqual('Binary', beamtalk_primitive:class_of(crypto:strong_rand_bytes(64))).
@@ -52,7 +52,7 @@ is_utf8_test() ->
     ?assertNot(beamtalk_primitive:is_utf8(<<16#E4, 16#BD>>)).
 
 %%% ============================================================================
-%%% BT-3033: selector-aware UTF-8 scan skip — send/3 and responds_to/2 on a
+%%% Selector-aware UTF-8 scan skip — send/3 and responds_to/2 on a
 %%% non-UTF-8 binary must still answer correctly for the "shared" selectors
 %%% (String and Binary agree), even though the scan that would normally prove
 %%% the receiver is Binary is skipped for them.
@@ -122,8 +122,7 @@ send_string_only_selector_dnu_on_non_utf8_binary_test_() ->
 %% extension registry *before* delegating to `'bt@stdlib@binary'`, so the
 %% fast path must not route a genuinely non-UTF-8 binary through it when a
 %% String extension shadows the selector — that would let String-only logic
-%% run against raw bytes `class_of/1` still reports as Binary (caught in
-%% review of the initial BT-3033 patch).
+%% run against raw bytes `class_of/1` still reports as Binary.
 send_shared_selector_with_string_extension_test_() ->
     {setup,
         fun() ->
@@ -172,7 +171,7 @@ class_of_dictionary_test() ->
     ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{a => 1})),
     ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{key => value, x => 42})).
 
-%% BT-324: Dictionary with user '__class__' key must NOT be misclassified
+%% Dictionary with user '__class__' key must NOT be misclassified
 class_of_dictionary_with_old_class_key_collision_test() ->
     %% A user Dictionary that happens to have '__class__' key (old tag)
     %% must still be treated as Dictionary, not as a tagged map
@@ -236,17 +235,17 @@ class_of_unknown_test() ->
 %%% ============================================================================
 
 send_to_integer_test() ->
-    %% Integer dispatch now implemented (BT-166)
+    %% Integer dispatch
     ?assertEqual(50, beamtalk_primitive:send(42, '+', [8])),
     ?assertEqual('Integer', beamtalk_primitive:send(42, 'class', [])).
 
 send_to_string_test() ->
-    %% String dispatch now implemented (BT-167)
+    %% String dispatch
     ?assertEqual(<<"helloworld">>, beamtalk_primitive:send(<<"hello">>, '++', [<<"world">>])),
     ?assertEqual('String', beamtalk_primitive:send(<<"hello">>, 'class', [])).
 
 send_to_float_test() ->
-    %% Float dispatch implemented (BT-277)
+    %% Float dispatch
     Result = beamtalk_primitive:send(3.14, '+', [2.0]),
     ?assert(is_float(Result)),
     % Floating point tolerance
@@ -267,7 +266,7 @@ responds_to_beamtalk_object_test() ->
     },
     ?assertEqual(false, beamtalk_primitive:responds_to(Obj, 'increment')).
 
-%% BT-735: responds_to for actor instances now delegates to beamtalk_dispatch:responds_to
+%% responds_to for actor instances delegates to beamtalk_dispatch:responds_to
 %% which walks the full hierarchy, so inherited methods are detected correctly.
 responds_to_actor_inherited_method_test_() ->
     {setup,
@@ -298,7 +297,7 @@ responds_to_actor_inherited_method_test_() ->
 
 responds_to_integer_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Integer class now implemented (BT-166)
+        %% Integer class
         ?assertEqual(true, beamtalk_primitive:responds_to(42, '+')),
         ?assertEqual(true, beamtalk_primitive:responds_to(42, 'class')),
         ?assertEqual(false, beamtalk_primitive:responds_to(42, 'unknownMethod'))
@@ -306,7 +305,7 @@ responds_to_integer_test_() ->
 
 responds_to_string_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% String class now implemented (BT-167)
+        %% String class
         ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, '++')),
         ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, 'length')),
         ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, 'class')),
@@ -315,7 +314,7 @@ responds_to_string_test_() ->
 
 responds_to_boolean_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Boolean class now implemented (BT-168)
+        %% Boolean class
         ?assertEqual(true, beamtalk_primitive:responds_to(true, 'not')),
         ?assertEqual(true, beamtalk_primitive:responds_to(false, 'not')),
         ?assertEqual(true, beamtalk_primitive:responds_to(true, 'ifTrue:')),
@@ -324,7 +323,7 @@ responds_to_boolean_test_() ->
 
 responds_to_nil_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Nil class now implemented (BT-168)
+        %% Nil class
         ?assertEqual(true, beamtalk_primitive:responds_to(nil, 'isNil')),
         ?assertEqual(true, beamtalk_primitive:responds_to(nil, 'ifNil:')),
         ?assertEqual(false, beamtalk_primitive:responds_to(nil, 'unknownMethod'))
@@ -332,7 +331,7 @@ responds_to_nil_test_() ->
 
 responds_to_block_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Block class now implemented (BT-168)
+        %% Block class
         Block = fun() -> ok end,
         ?assertEqual(true, beamtalk_primitive:responds_to(Block, 'value')),
         ?assertEqual(true, beamtalk_primitive:responds_to(Block, 'arity')),
@@ -341,7 +340,7 @@ responds_to_block_test_() ->
 
 responds_to_tuple_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Tuple class now implemented (BT-168)
+        %% Tuple class
         ?assertEqual(true, beamtalk_primitive:responds_to({a, b}, 'size')),
         ?assertEqual(true, beamtalk_primitive:responds_to({ok, 42}, 'isOk')),
         ?assertEqual(false, beamtalk_primitive:responds_to({a, b}, 'unknownMethod'))
@@ -359,7 +358,7 @@ responds_to_other_primitives_test() ->
     ?assertEqual(true, beamtalk_primitive:responds_to([], 'size')).
 
 %%% ============================================================================
-%%% List and Map dispatch routing (BT-296)
+%%% List and Map dispatch routing
 %%% ============================================================================
 
 send_list_size_test() ->
@@ -396,7 +395,7 @@ class_of_nested_structures_test() ->
     ?assertEqual('Tuple', beamtalk_primitive:class_of({{a, b}, {c, d}})).
 
 %%% ============================================================================
-%%% BT-163: Reflection methods (class, respondsTo)
+%%% Reflection methods (class, respondsTo)
 %%% ============================================================================
 
 %% Test class reflection directly via dispatch
@@ -523,7 +522,7 @@ reflection_responds_to_float_test_() ->
     end}.
 
 %%% ============================================================================
-%%% perform: dynamic message send tests (BT-165)
+%%% perform: dynamic message send tests
 %%% ============================================================================
 
 perform_on_integer_test() ->
@@ -565,7 +564,7 @@ perform_withArgs_invalid_args_type_on_primitive_test() ->
     ).
 
 %%% ============================================================================
-%%% Value Type Dispatch Tests (BT-354)
+%%% Value Type Dispatch Tests
 %%% ============================================================================
 
 %% --- class_name_to_module/1 tests (ADR 0016: bt@ prefix) ---
@@ -641,7 +640,7 @@ plain_map_still_routes_to_dictionary_test() ->
     Result = beamtalk_primitive:send(Self, 'size', []),
     ?assertEqual(2, Result).
 
-%% BT-324: Dictionary with user '__class__' key dispatches as Dictionary
+%% Dictionary with user '__class__' key dispatches as Dictionary
 dictionary_with_old_class_key_dispatches_as_dictionary_test() ->
     %% A user Dictionary with '__class__' (old tag) must route to bt@stdlib@dictionary,
     %% not to whatever class name the key contains
@@ -685,7 +684,7 @@ value_type_responds_to_object_methods_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-359: fieldAt: / fieldAt:put: on value types
+%%% fieldAt: / fieldAt:put: on value types
 %%% ============================================================================
 
 value_type_inst_var_at_put_raises_immutable_value_test() ->
@@ -710,7 +709,7 @@ value_type_inst_var_at_put_raises_immutable_value_test() ->
     end.
 
 value_type_inst_var_at_reads_slot_test() ->
-    %% BT-924: fieldAt: on a user-defined value type reads from the underlying map.
+    %% fieldAt: on a user-defined value type reads from the underlying map.
     %% Value objects store their slots as map keys, so reflection is read-only.
     Self = #{'$beamtalk_class' => 'MockVtIvar2', x => 42},
     create_mock_value_type_module('bt@mock_vt_ivar2', 'MockVtIvar2', []),
@@ -766,7 +765,7 @@ print_string_string_test() ->
     ?assertEqual(<<"\"hello\"">>, beamtalk_primitive:print_string(<<"hello">>)).
 
 print_string_non_utf8_binary_is_hex_test() ->
-    %% BT-2999: raw bytes render as `Binary printString` hex, never inline.
+    %% Raw bytes render as `Binary printString` hex, never inline.
     ?assertEqual(<<"<<FF FE FD>>">>, beamtalk_primitive:print_string(<<255, 254, 253>>)),
     ?assertEqual(<<"<<00 C8>>">>, beamtalk_primitive:print_string(<<0, 200>>)).
 
@@ -802,7 +801,7 @@ print_string_nil_test() ->
     ?assertEqual(<<"nil">>, beamtalk_primitive:print_string(nil)).
 
 print_string_metaclass_test() ->
-    %% ADR 0036 (BT-802): 'Metaclass' atom is no longer a sentinel with special print_string.
+    %% ADR 0036: 'Metaclass' atom is no longer a sentinel with special print_string.
     %% It prints as a Symbol (atom) with '#' prefix, like any other atom.
     ?assertEqual(<<"#Metaclass">>, beamtalk_primitive:print_string('Metaclass')).
 
@@ -858,7 +857,7 @@ print_string_plain_map_test_() ->
         end}.
 
 print_string_pid_test() ->
-    %% BT-3082: raw pids (the `Pid` class, ADR-documented in pid.bt) render
+    %% Raw pids (the `Pid` class, ADR-documented in pid.bt) render
     %% `#Pid<X.Y.Z>` — liveness-agnostic, distinct from pid_label/1's
     %% liveness-probed `#Actor<>`/`#Dead<>` wire/test-only rendering.
     Result = beamtalk_primitive:print_string(self()),
@@ -870,13 +869,13 @@ print_string_reference_test() ->
     ?assertMatch(<<"#Ref<", _/binary>>, Result).
 
 print_string_block_test() ->
-    %% BT-3082: a Block reached via direct recursion (e.g. nested inside a
+    %% A Block reached via direct recursion (e.g. nested inside a
     %% collection) previously fell into the ~p catch-all as a raw `#Fun<...>`.
     ?assertEqual(<<"Block/0">>, beamtalk_primitive:print_string(fun() -> ok end)),
     ?assertEqual(<<"Block/2">>, beamtalk_primitive:print_string(fun(_, _) -> ok end)).
 
 print_string_supervisor_tuple_test() ->
-    %% BT-3082: without a dedicated clause, a supervisor tuple nested inside a
+    %% Without a dedicated clause, a supervisor tuple nested inside a
     %% collection (printed via direct recursion) fell into the generic
     %% is_tuple/1 clause and rendered as a raw Erlang tuple.
     Result = beamtalk_primitive:print_string({beamtalk_supervisor, 'MySup', mysup_mod, self()}),
@@ -887,7 +886,7 @@ print_string_supervisor_tuple_test() ->
 %%% ============================================================================
 
 class_of_object_metaclass_sentinel_test() ->
-    %% ADR 0036 (BT-802): 'Metaclass' atom is no longer a sentinel.
+    %% ADR 0036: 'Metaclass' atom is no longer a sentinel.
     %% class_of_object('Metaclass') treats it as a Symbol (atom), returning its class object.
     Result = beamtalk_primitive:class_of_object('Metaclass'),
     ?assertMatch({beamtalk_object, _, _, _}, Result).
@@ -920,7 +919,7 @@ class_of_object_primitive_test_() ->
                     class = 'Integer class', class_mod = beamtalk_object_class, pid = IntegerPid
                 },
                 Result = beamtalk_primitive:class_of_object(ClassObj),
-                %% ADR 0036 (BT-802): Returns real metaclass object (not sentinel atom).
+                %% ADR 0036: Returns real metaclass object (not sentinel atom).
                 ?assertMatch(
                     {beamtalk_object, 'Metaclass', beamtalk_metaclass_bt, IntegerPid}, Result
                 )
@@ -954,7 +953,7 @@ class_of_object_by_name_test_() ->
             end},
             {"resolves module via beamtalk_class_metadata, matching the metadata row (BT-3052)",
                 fun() ->
-                    %% BT-3052: class_of_object_by_name/1 used to resolve the module via
+                    %% class_of_object_by_name/1 resolves the module via
                     %% beamtalk_object_class:module_name/1 (a gen_server:call to the class's
                     %% own pid), which deadlocks when called from a process that class's pid
                     %% is itself synchronously blocked waiting on (e.g. `self new class`
@@ -1052,7 +1051,7 @@ display_string_list_of_strings_test() ->
     ?assertEqual(<<"#(a, b)">>, Result).
 
 display_string_pid_test() ->
-    %% BT-3082: display_string/1 had no is_pid/1 clause at all, so a raw pid
+    %% display_string/1 had no is_pid/1 clause at all, so a raw pid
     %% fell into the ~p catch-all and rendered as the bare Erlang `<0.123.0>`
     %% instead of matching print_string/1's `#Pid<0.123.0>`.
     Result = beamtalk_primitive:display_string(self()),
@@ -1068,7 +1067,7 @@ display_string_block_test() ->
     ?assertEqual(<<"Block/1">>, beamtalk_primitive:display_string(fun(_) -> ok end)).
 
 display_string_tuple_test() ->
-    %% BT-3082: display_string/1 had no is_tuple/1 clause at all, so a plain
+    %% display_string/1 had no is_tuple/1 clause at all, so a plain
     %% tuple fell into the ~p catch-all instead of recursing via display_string.
     Result = beamtalk_primitive:display_string({1, <<"two">>, 3}),
     ?assertEqual(<<"{1, two, 3}">>, Result).
@@ -1323,7 +1322,7 @@ send_dnu_unknown_method_on_float_test() ->
     ).
 
 %%% ============================================================================
-%%% Future selector recognition — tested via responds_to/2 on pids (BT-813)
+%%% Future selector recognition — tested via responds_to/2 on pids
 %%% ============================================================================
 
 responds_to_pid_all_future_selectors_test() ->
@@ -1342,12 +1341,12 @@ responds_to_pid_non_future_selectors_test() ->
     ?assertEqual(true, beamtalk_primitive:responds_to(Pid, 'printString')).
 
 %%% ============================================================================
-%%% Immutable value type — fieldAt:put: blocked (BT-359)
+%%% Immutable value type — fieldAt:put: blocked
 %%% Tests is_ivar_method/1 indirectly through value type dispatch.
 %%% ============================================================================
 
 value_type_field_at_read_allowed_test() ->
-    %% fieldAt: is NOT blocked — read-only reflection is allowed (BT-924)
+    %% fieldAt: is NOT blocked — read-only reflection is allowed
     Self = #{'$beamtalk_class' => 'MockVtFieldRead', x => 42},
     create_mock_value_type_module('bt@mock_vt_field_read', 'MockVtFieldRead', []),
     try
@@ -1827,7 +1826,7 @@ display_string_float_zero_test() ->
     ?assertEqual(<<"0.0">>, Result).
 
 %%% ============================================================================
-%%% BT-1981: Future auto-await across dispatch/reflection API
+%%% Future auto-await across dispatch/reflection API
 %%% ============================================================================
 
 class_of_future_autoawait_test() ->
@@ -1887,7 +1886,7 @@ responds_to_future_autoawait_test_() ->
         end}.
 
 %%% ============================================================================
-%%% BT-1981: send_pid Future protocol selectors (BT-813)
+%%% send_pid Future protocol selectors
 %%% ============================================================================
 
 send_pid_await_test() ->
@@ -1910,7 +1909,7 @@ send_pid_await_with_timeout_test() ->
     ?assertEqual(123, beamtalk_primitive:send(Pid, 'await:', [5000])).
 
 responds_to_pid_future_selector_test() ->
-    %% A bare pid responds to the Future protocol selectors (BT-813).
+    %% A bare pid responds to the Future protocol selectors.
     ?assert(beamtalk_primitive:responds_to(self(), await)),
     ?assert(beamtalk_primitive:responds_to(self(), awaitForever)),
     ?assert(beamtalk_primitive:responds_to(self(), 'await:')),
@@ -1918,7 +1917,7 @@ responds_to_pid_future_selector_test() ->
     ?assert(beamtalk_primitive:responds_to(self(), 'whenRejected:')).
 
 %%% ============================================================================
-%%% BT-1981: send/3 — tuple fallback path (4-tuple with beamtalk_object tag
+%%% send/3 — tuple fallback path (4-tuple with beamtalk_object tag
 %%% but not matching #beamtalk_object{} record pattern)
 %%% ============================================================================
 
@@ -1935,7 +1934,7 @@ send_non_record_beamtalk_object_tuple_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-1981: dispatch_via_module — undefined module raises DNU
+%%% dispatch_via_module — undefined module raises DNU
 %%% ============================================================================
 
 dispatch_via_module_undefined_test() ->
@@ -1959,7 +1958,7 @@ responds_via_module_undefined_test() ->
     ?assertNot(beamtalk_primitive:responds_to(Tagged, anySelector)).
 
 %%% ============================================================================
-%%% BT-1981: class_name_to_module fallback
+%%% class_name_to_module fallback
 %%% ============================================================================
 
 class_name_to_module_unknown_class_test() ->
@@ -1969,7 +1968,7 @@ class_name_to_module_unknown_class_test() ->
     ?assertEqual('bt@some_unknown_test_class', Mod).
 
 %%% ============================================================================
-%%% BT-1981: value_type_responds_to — module with no has_method/1 fallback
+%%% value_type_responds_to — module with no has_method/1 fallback
 %%% ============================================================================
 
 value_type_responds_to_via_exports_test_() ->
@@ -1989,7 +1988,7 @@ value_type_responds_to_via_exports_test_() ->
         end}.
 
 %%% ============================================================================
-%%% BT-1981: module_for_value — tagged map variants (BT-1981)
+%%% module_for_value — tagged map variants
 %%%
 %%% Each tagged-map class has its own clause in module_for_value/1; exercise
 %%% them via responds_to which routes through module_for_value.
@@ -2031,7 +2030,7 @@ module_for_value_tagged_variants_test_() ->
         end}.
 
 %%% ============================================================================
-%%% BT-1981: print_string_map — Set / Array / Stream
+%%% print_string_map — Set / Array / Stream
 %%% ============================================================================
 
 print_string_map_set_test() ->
@@ -2048,7 +2047,7 @@ print_string_map_array_test() ->
     ?assertMatch(<<"#[", _/binary>>, Result).
 
 %%% ============================================================================
-%%% BT-1981: responds_to — beamtalk_object records with non-class tag
+%%% responds_to — beamtalk_object records with non-class tag
 %%% ============================================================================
 
 responds_to_beamtalk_object_non_class_test_() ->
@@ -2068,7 +2067,7 @@ responds_to_beamtalk_object_non_class_test_() ->
         end}.
 
 %%% ============================================================================
-%%% BT-2462 / ADR 0094: process_label/1 — kind-headed positional labels
+%%% ADR 0094: process_label/1 — kind-headed positional labels
 %%% ============================================================================
 
 process_label_actor_pid_test() ->
@@ -2103,7 +2102,7 @@ process_label_supervisor_test() ->
     ?assert(binary:match(Result, <<"DynamicSupervisor">>) =:= nomatch).
 
 %%% ============================================================================
-%%% BT-3082: pid_label/1 — canonical liveness-probed pid label, shared by the
+%%% pid_label/1 — canonical liveness-probed pid label, shared by the
 %%% REPL wire encoder (via beamtalk_runtime_api) and format_result/1.
 %%% ============================================================================
 
@@ -2117,7 +2116,7 @@ pid_label_live_pid_test() ->
     ?assertEqual(<<"#Actor<", Inner/binary, ">">>, Result).
 
 pid_label_dead_pid_test() ->
-    %% BT-3082: format_result/1 previously rendered every pid — dead or alive
+    %% format_result/1 previously rendered every pid — dead or alive
     %% — as `#Actor<...>`. pid_label/1 is the shared fix: a dead pid must
     %% never be reported as a live actor.
     Pid = spawn(fun() -> ok end),
