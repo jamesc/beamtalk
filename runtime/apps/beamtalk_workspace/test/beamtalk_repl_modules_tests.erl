@@ -273,7 +273,7 @@ full_lifecycle_test() ->
     ?assertEqual([], beamtalk_repl_modules:list_modules(Tracker5)).
 
 %% ===================================================================
-%% format_time_ago/1 tests (BT-627)
+%% format_time_ago/1 tests
 %% ===================================================================
 
 format_time_ago_seconds_test() ->

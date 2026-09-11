@@ -6,16 +6,16 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Pure shape-diff classification (ADR 0105 Phase 2, BT-2780).
+Pure shape-diff classification (ADR 0105 Phase 2).
 
-The `state:`/`field:` counterpart to `beamtalk_signature_diff` (BT-2777):
+The `state:`/`field:` counterpart to `beamtalk_signature_diff`:
 given a class's previous-generation `state:`/`field:` slot set (name ->
 declared type) and its newly-installed one, classifies the change as
 `shape_change` (at least one slot was added, removed, or retyped) or
 `no_op` (nothing comparable changed, including "no previous generation to
 compare against"). Unlike `beamtalk_signature_diff:diff/2`, which only
 needs to *say* what happened, this also reports exactly *which* slots
-changed and how: `beamtalk_recheck:trigger_shape/2` (BT-2780) needs the
+changed and how: `beamtalk_recheck:trigger_shape/2` needs the
 per-field detail to pick the right dependent selectors to re-check
 (`spawnWith:` for every change; a removed/retyped slot's own compiler-
 generated accessor selectors only for `removed`/`retyped`, never `added` —

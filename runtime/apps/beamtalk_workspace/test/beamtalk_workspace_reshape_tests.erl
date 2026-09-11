@@ -12,7 +12,7 @@
 %% (`beamtalk_compiler:reindent_method_source/2`) and proven byte-identical to
 %% the on-disk span by the Rust corpus round-trip tests
 %% (`corpus_methods_round_trip_byte_identical`). This module only holds the
-%% pure string helpers shared by the install hook and flush (BT-2594).
+%% pure string helpers shared by the install hook and flush.
 %%====================================================================
 
 leading_ws_test() ->

@@ -8,7 +8,7 @@ Unit tests for beamtalk_session_table.
 
 Covers new/0 (including idempotency), insert/2, lookup/1 (found and
 missing branches), and delete/1. The resolve_pid/2 branches are already
-exercised in beamtalk_repl_server_tests (BT-1045).
+exercised in beamtalk_repl_server_tests.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -79,7 +79,7 @@ delete_missing_is_safe(_) ->
     %% ets:delete/2 on a missing key returns true — must not raise.
     [?_assertEqual(true, beamtalk_session_table:delete(<<"ghost">>))].
 
-%%% lookup_alive/1 tests (BT-2366)
+%%% lookup_alive/1 tests
 
 lookup_alive_returns_live_pid(_) ->
     Pid = self(),

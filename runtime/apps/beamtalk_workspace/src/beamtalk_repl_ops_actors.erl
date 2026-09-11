@@ -8,9 +8,9 @@
 -moduledoc """
 Op handlers for actors, inspect, kill, and interrupt operations.
 
-Extracted from beamtalk_repl_server (BT-705). These are the actor read-surface
+Extracted from beamtalk_repl_server. These are the actor read-surface
 ops; `handle_term/4` returns native `beamtalk_repl_ops:op_result()` terms
-(BT-2399, ADR 0017 Phase 3) so dist-attached clients receive live actor pids
+(ADR 0017 Phase 3) so dist-attached clients receive live actor pids
 and field maps rather than flattened JSON. `handle/4` is the WebSocket-edge
 wrapper that encodes the term result via `beamtalk_repl_ops:encode/2`.
 """.
@@ -108,8 +108,8 @@ handle_term(<<"kill">>, Params, _Msg, _SessionPid) ->
             {status, ok}
     end;
 handle_term(<<"interrupt">>, _Params, Msg, SessionPid) ->
-    %% BT-666: Interrupt a running evaluation.
-    %% BT-1045: session is stripped from Params by the protocol decoder — use get_session(Msg).
+    %% Interrupt a running evaluation.
+    %% Session is stripped from Params by the protocol decoder — use get_session(Msg).
     TargetPid =
         case beamtalk_repl_protocol:get_session(Msg) of
             undefined ->

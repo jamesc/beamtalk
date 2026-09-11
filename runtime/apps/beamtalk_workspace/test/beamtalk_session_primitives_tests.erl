@@ -4,7 +4,7 @@
 -module(beamtalk_session_primitives_tests).
 
 -moduledoc """
-Unit tests for beamtalk_session_primitives (BT-2366, ADR 0081 Phase 3).
+Unit tests for beamtalk_session_primitives (ADR 0081 Phase 3).
 
 Covers the factory primitives (current/0, withId/1, id/1), the session
 operations (bindings/1, resolve/2, clear/1), the workspace-globals
@@ -278,7 +278,7 @@ bindings_view_read_unknown_name_is_safe_test_() ->
     end}.
 
 %%====================================================================
-%% includesKey/2 — O(1) membership, atom + String key parity (BT-2380)
+%% includesKey/2 — O(1) membership, atom + String key parity
 %%====================================================================
 
 %% Session scope: present/absent for both atom and String keys. The String key
@@ -517,7 +517,7 @@ session_id_type_error_test_() ->
 
 %%====================================================================
 %% Class-method dispatch propagates the caller's session context
-%% (ADR 0081 / BT-2367): `Session current` is a class method, so dispatch
+%% (ADR 0081): `Session current` is a class method, so dispatch
 %% hops from the eval worker to the Session class gen_server. The worker's
 %% seeded session context must be mirrored there for the duration of the call.
 %%====================================================================
@@ -544,7 +544,7 @@ class_current_sees_caller_session_context_test_() ->
         ]
     end}.
 
-%% BT-2379: the explicit 4-tuple message shape carries the caller's session
+%% The explicit 4-tuple message shape carries the caller's session
 %% context in the message itself (no `process_info` dictionary copy). The class
 %% gen_server must seed from the tuple, resolve `current` correctly, and still
 %% not leak the mirrored context to a later call that carries no context.
@@ -576,7 +576,7 @@ class_current_explicit_context_no_leak_test_() ->
         ]
     end}.
 
-%% BT-2379: a malformed explicit context (a non-pair 4th element) must degrade
+%% A malformed explicit context (a non-pair 4th element) must degrade
 %% to "no context" (nil), not crash the class gen_server. The 4-tuple clause has
 %% no `is_tuple` guard; `seed_session_context_from/1` no-ops on unrecognised
 %% shapes. We assert the gen_server survives and still serves a later call.
@@ -598,7 +598,7 @@ class_current_malformed_context_degrades_test_() ->
     end}.
 
 %%====================================================================
-%% liveSessions/0 (Workspace sessions, ADR 0081 Phase 7 / BT-2368)
+%% liveSessions/0 (Workspace sessions, ADR 0081 Phase 7)
 %%====================================================================
 
 %% No session supervisor running → empty list, never a crash.

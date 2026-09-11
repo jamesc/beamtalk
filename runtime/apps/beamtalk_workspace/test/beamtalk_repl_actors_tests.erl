@@ -193,7 +193,7 @@ registry_termination_kills_all_actors_test() ->
     process_flag(trap_exit, OldTrapExit).
 
 %%% ===========================================================================
-%%% Callback Failure Tests (BT-391)
+%%% Callback Failure Tests
 %%% ===========================================================================
 
 on_actor_spawned_succeeds_with_running_registry_test() ->
@@ -268,7 +268,7 @@ on_actor_spawned_returns_error_on_registry_failure_test() ->
         end
     end),
 
-    %% Returns {error, _} since BT-391 surfaces registry failures
+    %% Returns {error, _} since register_spawned surfaces registry failures
     ?assertMatch(
         {error, {registry_failed, _}},
         beamtalk_repl_actors:on_actor_spawned(RegistryPid, ActorPid, 'Counter', test_counter)

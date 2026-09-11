@@ -16,7 +16,7 @@ column-0 `unparse_method` body to the on-disk indentation — is done by the
 compiler port (`beamtalk_compiler:reindent_method_source/2`). The port
 re-lays-out the body so width-sensitive lines re-break at the target indent,
 matching what `bt fmt` produces on disk; a pure-Erlang whitespace shift cannot
-re-break a line and so would reformat such methods on flush (BT-2594). The
+re-break a line and so would reformat such methods on flush. The
 install hook already calls the port to compile the method, so the reshape adds
 no new port round-trip.
 """.

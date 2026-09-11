@@ -4,7 +4,7 @@
 -module(beamtalk_workspace_signature_store_tests).
 
 -moduledoc """
-Unit tests for beamtalk_workspace_signature_store (ADR 0105 Phase 1, BT-2777).
+Unit tests for beamtalk_workspace_signature_store (ADR 0105 Phase 1).
 
 Covers:
 - capture-before-install ordering (the store update itself, independent of any
@@ -194,7 +194,7 @@ different_sides_are_independent(_Pid) ->
     ].
 
 %%====================================================================
-%% rollback/4 (ADR 0105 Phase 1, BT-2777 — undo a failed install/removal)
+%% rollback/4 (ADR 0105 Phase 1 — undo a failed install/removal)
 %%====================================================================
 
 %% Rolling back to a prior signature restores it as "previous" for the next

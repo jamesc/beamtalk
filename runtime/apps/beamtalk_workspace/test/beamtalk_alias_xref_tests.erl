@@ -5,7 +5,7 @@
 
 -moduledoc """
 Unit tests for beamtalk_alias_xref — the alias-name → dependent-class index
-(ADR 0108, BT-2899).
+(ADR 0108).
 
 Covers uncovered paths from the 2026-07-16 coverage report (CI run 29535121541,
 54.5% line coverage):
