@@ -195,6 +195,46 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
     expect((resolved?.tooltip as { value: string }).value).toContain("Account");
   });
 
+  // BT-3497: unlike methods/state vars, a class-item tooltip previously had
+  // no doc-comment-read fallback at all — an LSP hover miss (the position is
+  // found via the fast text-search offset, but `executeHoverProvider` itself
+  // returns nothing, and the document-symbol fallback also comes up empty)
+  // fell straight to the hardcoded name+instance-count fallback, losing the
+  // class's real `///` documentation even though it's sitting right there in
+  // the same source file `_resolveClassDocument` already opened.
+  it("BT-3497: falls back to the class's /// doc comment when LSP hover returns nothing", async () => {
+    const src = [
+      "/// Holds a customer's balance and supports deposits.",
+      "Object subclass: Account",
+      "  state: balance :: Integer = 0",
+      "",
+      "  deposit: amount =>",
+      "    balance := balance + amount",
+      "",
+    ].join("\n");
+    openTextDocumentMock.mockResolvedValue(makeDoc(src));
+    executeCommandMock.mockImplementation(() => Promise.resolve(undefined));
+
+    const node: ClassItemNode = { kind: "class-item", info: classInfo };
+    const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
+    const tooltip = (resolved?.tooltip as { value: string }).value;
+    expect(tooltip).toBe("Holds a customer's balance and supports deposits.");
+    expect(tooltip).not.toContain("**Account**");
+  });
+
+  it("BT-3497: falls back to the plain name+count tooltip when there's no doc comment either", async () => {
+    executeCommandMock.mockImplementation(() => Promise.resolve(undefined));
+    const node: ClassItemNode = {
+      kind: "class-item",
+      info: { ...classInfo, actor_count: 2 },
+    };
+    const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
+    const tooltip = (resolved?.tooltip as { value: string }).value;
+    // SOURCE (the default fixture) has no /// comment above `class Account`.
+    expect(tooltip).toContain("Account");
+    expect(tooltip).toContain("2 running instances");
+  });
+
   it("BT-3440: distinguishes an instance-side and class-side method sharing a selector via the declared-line fast path", async () => {
     openTextDocumentMock.mockResolvedValue(makeDoc(SOURCE_BOTH_SIDES));
     executeCommandMock.mockImplementation((cmd: string, _uri: unknown, pos?: { line: number }) => {

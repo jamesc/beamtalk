@@ -267,6 +267,47 @@ export function parseAliasSourceUriPath(uriPath: string): {
 }
 
 /**
+ * Extract `///` doc comment lines immediately preceding a class declaration
+ * (`SuperClass subclass: ClassName`, optionally generic —
+ * `subclass: Collection(E)`). Mirrors `findClassDeclaration`'s pattern, and
+ * `extractMethodDocComment`/`extractStateVarDocComment`'s doc-comment-walk
+ * shape (BT-3497): classes previously had no doc-comment read fallback at
+ * all, so a class-item hover whose LSP hover came back empty (e.g. a generic
+ * class, a `Self class` metaclass reference, or a class compiled before the
+ * file was reindexed) fell straight to the hardcoded name+instance-count
+ * fallback instead of showing the class's real `///` documentation.
+ *
+ * Returns the comment text with `///` prefixes stripped, or undefined if no
+ * doc comment is found.
+ */
+export function extractClassDocComment(text: string, className: string): string | undefined {
+  const esc = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const declRe = new RegExp(`\\bsubclass:\\s+${esc}(?=[\\s(]|$)`);
+  const lines = text.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
+    if (trimmed.startsWith("//")) continue;
+    if (!declRe.test(trimmed)) continue;
+
+    // Collect /// lines immediately above, stopping at blank lines or non-/// lines
+    const docLines: string[] = [];
+    for (let j = i - 1; j >= 0; j--) {
+      const t = lines[j].trimStart();
+      if (t.startsWith("/// ")) {
+        docLines.unshift(t.slice(4));
+      } else if (t === "///") {
+        docLines.unshift("");
+      } else {
+        break;
+      }
+    }
+    return docLines.length > 0 ? docLines.join("\n") : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Extract `///` doc comment lines immediately preceding a state variable
  * declaration. Mirrors `extractMethodDocComment` for methods — state vars
  * previously had no equivalent, so a `///` comment above a `state:` line
