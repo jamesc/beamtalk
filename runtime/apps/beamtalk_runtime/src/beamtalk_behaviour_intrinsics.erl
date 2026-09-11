@@ -22,7 +22,7 @@ that the Behaviour/Class libraries can rely on.
 
 | Erlang function             | Backing data source / derivation                          |
 |-----------------------------|------------------------------------------------------------|
-| classSuperclass/1           | Direct superclass from unified class metadata (ETS, BT-3107) |
+| classSuperclass/1           | Direct superclass from unified class metadata (ETS) |
 | classAllSuperclasses/1      | Recursively walks the superclass chain from classSuperclass/1 |
 | classSubclasses/1           | Direct subclasses from class registry                     |
 | classAllSubclasses/1        | All subclasses from class registry                        |
@@ -38,17 +38,17 @@ that the Behaviour/Class libraries can rely on.
 | classDoc/1                  | Class doc string from class gen_server state (ADR 0033)   |
 | classSetDoc/2               | Set class doc string (ADR 0033)                           |
 | classSetMethodDoc/3         | Set method doc string for a selector (ADR 0033)           |
-| classDocForMethod/2         | Get method doc string for a selector, or nil (BT-991)     |
+| classDocForMethod/2         | Get method doc string for a selector, or nil               |
 | classRemoveFromSystem/1     | Remove class and cleanup runtime state                    |
 | classRemoveSelector/2       | Remove a method selector, raising if absent (ADR 0112)    |
 | classRemoveSelectorIfAbsent/3 | Remove a method selector, running a fallback block if absent (ADR 0112) |
-| classSourceFile/1           | Source file path from beamtalk_source module attr (BT-845)|
-| classReload/1               | Recompile from sourceFile + hot-swap (BT-845)             |
+| classSourceFile/1           | Source file path from beamtalk_source module attr          |
+| classReload/1               | Recompile from sourceFile + hot-swap                        |
 | classConformsTo/2           | Check if class conforms to a protocol (ADR 0068 Phase 2c) |
 | classProtocols/1            | List protocols the class conforms to (ADR 0068 Phase 2c)  |
-| classRenameTo/2             | Rename the class + rewrite reference sites (ADR 0114 Phase 2, BT-3278) |
-| classRenameSelector/3       | Rename a selector + rewrite safe self/super sites (ADR 0114 Phase 3, BT-3279) |
-| classRenameSelectorIfAbsent/4 | Rename a selector, running a fallback block if absent (ADR 0114 Phase 3, BT-3279) |
+| classRenameTo/2             | Rename the class + rewrite reference sites (ADR 0114 Phase 2) |
+| classRenameSelector/3       | Rename a selector + rewrite safe self/super sites (ADR 0114 Phase 3) |
+| classRenameSelectorIfAbsent/4 | Rename a selector, running a fallback block if absent (ADR 0114 Phase 3) |
 """.
 
 -include("beamtalk.hrl").
@@ -65,7 +65,7 @@ that the Behaviour/Class libraries can rely on.
     classCanUnderstandFromName/2,
     classFieldNames/1,
     classAllFieldNames/1,
-    %% BT-2238: class-side field (class variable) reflection
+    %% class-side field (class variable) reflection
     classClassVarNames/1,
     classAllClassVarNames/1,
     className/1,
@@ -83,32 +83,32 @@ that the Behaviour/Class libraries can rely on.
     classSetDoc/2,
     classSetMethodDoc/3,
     classDocForMethod/2,
-    %% BT-785: Class removal
+    %% Class removal
     classRemoveFromSystem/1,
-    %% BT-1239: Programmatic class removal by name (for workspace/MCP unload)
+    %% Programmatic class removal by name (for workspace/MCP unload)
     classRemoveFromSystemByName/1,
-    %% ADR 0112 Phase 2 (BT-3186): method-level removal primitives
+    %% ADR 0112 Phase 2: method-level removal primitives
     classRemoveSelector/2,
     classRemoveSelectorIfAbsent/3,
-    %% BT-845: ADR 0040 Phase 2 — class-based reload
+    %% ADR 0040 Phase 2 — class-based reload
     classSourceFile/1,
     classReload/1,
-    %% ADR 0082 Phase 1 (BT-2283): live method patch primitives
+    %% ADR 0082 Phase 1: live method patch primitives
     classCompileSource/3,
     classTryCompileSource/3,
-    %% ADR 0105 Phase 3 (BT-2782): pre-save advisory precheck
+    %% ADR 0105 Phase 3: pre-save advisory precheck
     classPrecheckCompileSource/3,
     %% ADR 0068 Phase 2c: Runtime protocol queries
     classConformsTo/2,
     classProtocols/1,
-    %% ADR 0114 Phase 2 (BT-3278): class rename primitive
+    %% ADR 0114 Phase 2: class rename primitive
     classRenameTo/2,
-    %% ADR 0114 Phase 3 (BT-3279): method rename primitives
+    %% ADR 0114 Phase 3: method rename primitives
     classRenameSelector/3,
     classRenameSelectorIfAbsent/4,
-    %% ADR 0079 / BT-1988: exposed for cross-module hierarchy checks
+    %% ADR 0079: exposed for cross-module hierarchy checks
     walk_hierarchy/3,
-    %% ADR 0114 Phase 4 (BT-3274): `Workspace changes revert:`'s
+    %% ADR 0114 Phase 4: `Workspace changes revert:`'s
     %% `'rename-class'` undo needs the SAME identity-move-then-retire
     %% sequence `classRenameTo/2`'s own forward path uses (`beamtalk_
     %% repl_loader:finish_rename_class_revert/1` calls this directly —
@@ -131,9 +131,9 @@ ADR 0032: Returns a proper #beamtalk_object{} instead of a bare atom,
 fixing the inconsistency where `Counter class` returned an object but
 `Counter superclass` returned an atom.
 
-BT-942: Uses __beamtalk_meta/0 when available; falls back to the
-deadlock-safe metadata lookup (`beamtalk_object_class:superclass_safe/1`,
-BT-3107) for dynamic classes created via beamtalk_class_builder — the same
+Uses __beamtalk_meta/0 when available; falls back to the
+deadlock-safe metadata lookup (`beamtalk_object_class:superclass_safe/1`)
+for dynamic classes created via beamtalk_class_builder — the same
 ETS source `beamtalk_class_dispatch` reads, instead of a separate
 `gen_server:call` that could disagree with it mid-reload.
 """.
@@ -202,15 +202,15 @@ Return the local method selectors of the receiver (non-inherited).
 Returns only methods defined directly in this class, not inherited ones.
 Full chain walk for all methods is implemented in Behaviour.methods (pure Beamtalk).
 
-BT-942: Uses __beamtalk_meta/0 when available; falls back to gen_server
+Uses __beamtalk_meta/0 when available; falls back to gen_server
 for dynamic classes created via beamtalk_class_builder.
 
-BT-1635: When called on a metaclass object (Foo class methods), returns
+When called on a metaclass object (Foo class methods), returns
 user-defined class methods instead of instance methods.
 """.
 -spec classLocalMethods(#beamtalk_object{}) -> [atom()].
 classLocalMethods(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
-    %% BT-1635: Metaclass receiver — return user-defined class methods.
+    %% Metaclass receiver — return user-defined class methods.
     maps:keys(beamtalk_object_class:local_class_methods_map(ClassPid));
 classLocalMethods(Self) ->
     ClassPid = erlang:element(4, Self),
@@ -225,7 +225,7 @@ classLocalMethods(Self) ->
 -doc """
 Return all superclasses of the receiver in order (immediate parent to root).
 
-BT-2194/BT-2217: For metaclass receivers (objects tagged `'Metaclass'`)
+For metaclass receivers (objects tagged `'Metaclass'`)
 walks the *parallel* metaclass hierarchy and then grounds into the
 instance-side `Class → Behaviour → Object → ProtoObject` tower (ADR 0036).
 For `Counter class` this yields
@@ -236,8 +236,8 @@ the same Class/Behaviour/Object protocol).
 """.
 -spec classAllSuperclasses(#beamtalk_object{}) -> [#beamtalk_object{}].
 classAllSuperclasses(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
-    %% BT-2194: walk the parallel metaclass hierarchy (returns metaclass objects).
-    %% BT-3107: deadlock-safe metadata lookup, same source dispatch reads.
+    %% walk the parallel metaclass hierarchy (returns metaclass objects).
+    %% deadlock-safe metadata lookup, same source dispatch reads.
     SuperName = beamtalk_object_class:superclass_safe(ClassPid),
     MetaSupers = walk_hierarchy(
         SuperName,
@@ -249,7 +249,7 @@ classAllSuperclasses(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
         end,
         []
     ),
-    %% BT-2217: Ground the parallel chain into the instance-side `Class` tower
+    %% Ground the parallel chain into the instance-side `Class` tower
     %% so the metaclass hierarchy merges with `Class → Behaviour → Object →
     %% ProtoObject` (ADR 0036). `Class` may be absent during early bootstrap;
     %% walk_hierarchy/3 returns the initial accumulator in that case.
@@ -266,7 +266,7 @@ classAllSuperclasses(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     lists:reverse(MetaSupers) ++ lists:reverse(InstanceSupers);
 classAllSuperclasses(Self) ->
     ClassPid = erlang:element(4, Self),
-    %% BT-3107: deadlock-safe metadata lookup, same source dispatch reads.
+    %% deadlock-safe metadata lookup, same source dispatch reads.
     SuperName = beamtalk_object_class:superclass_safe(ClassPid),
     Supers = walk_hierarchy(
         SuperName,
@@ -283,16 +283,16 @@ classAllSuperclasses(Self) ->
 -doc """
 Return all method selectors understood by instances (full inheritance chain).
 
-BT-942: Uses __beamtalk_meta/0 at each hierarchy level when available;
+Uses __beamtalk_meta/0 at each hierarchy level when available;
 falls back to gen_server for dynamic classes.
 
-BT-1635: When called on a metaclass object (Foo class allMethods), walks
+When called on a metaclass object (Foo class allMethods), walks
 the hierarchy collecting user-defined class methods at each level instead
 of instance methods.
 """.
 -spec classMethods(#beamtalk_object{}) -> [atom()].
 classMethods(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
-    %% BT-1635: Metaclass receiver — collect class methods up the hierarchy.
+    %% Metaclass receiver — collect class methods up the hierarchy.
     ClassName = gen_server:call(ClassPid, class_name),
     Acc = walk_hierarchy(
         ClassName,
@@ -348,7 +348,7 @@ classCanUnderstandFromName(ClassName, Selector) ->
 -doc """
 Return all field names including inherited, in slot order.
 
-BT-942: Uses __beamtalk_meta/0 at each hierarchy level when available;
+Uses __beamtalk_meta/0 at each hierarchy level when available;
 falls back to gen_server for dynamic classes.
 """.
 -spec classAllFieldNames(#beamtalk_object{}) -> [atom()].
@@ -378,10 +378,10 @@ Does NOT check superclasses — local containment only.
 Full chain walk for `canUnderstand:` is implemented in pure Beamtalk
 (`Behaviour>>canUnderstand:`) on top of `classMethods/1`.
 
-BT-1635: When called on a metaclass object, checks class methods instead
+When called on a metaclass object, checks class methods instead
 of instance methods.
 
-BT-2189: Uses __beamtalk_meta/0 fast path when available — mirrors the
+Uses __beamtalk_meta/0 fast path when available — mirrors the
 fast path already in `classLocalMethods/1` and avoids a gen_server
 round-trip per call, which matters for the bulk iteration done by
 `SystemNavigation implementorsOf:`. Falls back to gen_server for dynamic
@@ -389,8 +389,8 @@ classes built via ClassBuilder.
 """.
 -spec classIncludesSelector(#beamtalk_object{}, atom()) -> boolean().
 classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Selector) ->
-    %% BT-1635: Metaclass receiver — check class methods.
-    %% BT-2189: Use __beamtalk_meta/0 fast path when available, matching the
+    %% Metaclass receiver — check class methods.
+    %% Use __beamtalk_meta/0 fast path when available, matching the
     %% instance-side clause below. Avoids per-call gen_server hops during the
     %% bulk iteration done by `SystemNavigation implementorsOf:`.
     Module = beamtalk_object_class:module_name_safe(ClassPid),
@@ -415,7 +415,7 @@ classIncludesSelector(Self, Selector) ->
 -doc """
 Return the names of fields declared in this class (not inherited).
 
-BT-942: Uses __beamtalk_meta/0 when available; falls back to gen_server
+Uses __beamtalk_meta/0 when available; falls back to gen_server
 for dynamic classes created via beamtalk_class_builder.
 """.
 -spec classFieldNames(#beamtalk_object{}) -> [atom()].
@@ -432,7 +432,7 @@ classFieldNames(Self) ->
 -doc """
 Return the class-side field (class variable) names declared in this class.
 
-BT-2238: Backs `@primitive "classClassVarNames"` (`Behaviour>>classVarNames`)
+Backs `@primitive "classClassVarNames"` (`Behaviour>>classVarNames`)
 — the class-side counterpart to `classFieldNames/1`. Reads the `class_fields`
 key emitted into `__beamtalk_meta/0` from `classState:` declarations. Returns
 `[]` for dynamic classes built via ClassBuilder (no static meta) and for
@@ -456,7 +456,7 @@ classClassVarNames(Self) ->
 -doc """
 Return all class-side field names including inherited, in slot order.
 
-BT-2238: Backs `@primitive "classAllClassVarNames"`
+Backs `@primitive "classAllClassVarNames"`
 (`Behaviour>>allClassVarNames`) — the class-side counterpart to
 `classAllFieldNames/1`. Walks the superclass chain collecting each level's
 `class_fields`, mirroring the slot order of `classAllFieldNames/1` (ancestor
@@ -544,7 +544,7 @@ classSetMethodDoc(Self, Selector, DocBinary) ->
 -doc """
 Get the documentation string for a specific method selector, or nil.
 
-BT-991: Completes the documentation API symmetry on Behaviour.
+Completes the documentation API symmetry on Behaviour.
 Returns the doc binary if set, nil if the method does not exist or has no
 documentation. Walks the superclass chain via beamtalk_method_resolver.
 """.
@@ -561,7 +561,7 @@ classDocForMethod(Self, Selector) ->
 -doc """
 Remove this class from the system, performing full cleanup.
 
-BT-785: Implements `removeFromSystem` for class objects (Smalltalk convention).
+Implements `removeFromSystem` for class objects (Smalltalk convention).
 
 Delegates to classRemoveFromSystemByName/1 after extracting the class name.
 """.
@@ -574,7 +574,7 @@ classRemoveFromSystem(Self) ->
 -doc """
 Remove a class from the system by name, performing full cleanup.
 
-BT-1239: Programmatic variant of removeFromSystem — used by the MCP/REPL
+Programmatic variant of removeFromSystem — used by the MCP/REPL
 unload op so workspace code can trigger removal without a Beamtalk object.
 
 Safety checks (raises errors for):
@@ -587,7 +587,7 @@ Cleanup sequence:
   2. Stop the class gen_server (terminate/2 removes ETS entry and pg group)
   3. Purge the BEAM module (code:soft_purge + code:delete)
   4. Purge derived registries — xref, extensions, protocol registry,
-     compiler cache, workspace class_sources (BT-3105, via
+     compiler cache, workspace class_sources (via
      beamtalk_class_lifecycle:class_removed/2)
   5. Notify the workspace layer / REPL sessions (publish_class_removed/2)
 """.
@@ -628,7 +628,7 @@ classRemoveFromSystemByName(ClassName) ->
                     %% Safety: refuse if class has direct subclasses
                     case beamtalk_class_registry:direct_subclasses(ClassName) of
                         [] ->
-                            %% BT-3206: snapshot the class's current full
+                            %% snapshot the class's current full
                             %% source and its on-disk flushability
                             %% classification BEFORE any teardown step below
                             %% runs — beamtalk_class_lifecycle:class_removed/2
@@ -640,9 +640,9 @@ classRemoveFromSystemByName(ClassName) ->
                             %% uses).
                             ClassNameBin = atom_to_binary(ClassName, utf8),
                             RemovalSnapshot = capture_class_removal_snapshot(ClassNameBin),
-                            %% BT-3236: stop eager crash recovery for this
-                            %% class BEFORE killing its actors. BT-3243
-                            %% removed the link that used to exist between an
+                            %% stop eager crash recovery for this
+                            %% class BEFORE killing its actors. There is no
+                            %% longer a link between an
                             %% actor and its class gen_server, so the kills
                             %% below can no longer take the class process
                             %% down with them — this unwatch is now defense
@@ -680,7 +680,7 @@ classRemoveFromSystemByName(ClassName) ->
                                 soft_purge_after_delete,
                                 code:soft_purge(Module)
                             ),
-                            %% BT-3105: Purge every derived registry (xref,
+                            %% Purge every derived registry (xref,
                             %% extensions, protocol registry, compiler cache,
                             %% workspace class_sources) — the single teardown
                             %% path, run before the workspace/REPL notification
@@ -711,7 +711,7 @@ classRemoveFromSystemByName(ClassName) ->
     end.
 
 %%% ============================================================================
-%%% Method Removal Primitives (ADR 0112 Phase 2, BT-3186)
+%%% Method Removal Primitives (ADR 0112 Phase 2)
 %%% ============================================================================
 
 -doc """
@@ -810,7 +810,7 @@ remove_selector(Self, Selector) ->
     end.
 
 %% Remove an extension method and best-effort log its removal (ADR 0112 § Extension
-%% methods, § ChangeLog interaction; BT-3187). Captures the extension's owner +
+%% methods, § ChangeLog interaction). Captures the extension's owner +
 %% stored source BEFORE unregistering — both are gone from `beamtalk_extensions`'s
 %% ETS tables the instant `unregister/3` returns — so the ChangeLog entry can
 %% still attribute the removal and record what was removed for the audit trail.
@@ -865,7 +865,7 @@ removal_target(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
 removal_target(Self) ->
     {instance, erlang:element(4, Self)}.
 
-%% The `beamtalk_extensions` ETS key for `Side` — BT-3185's established
+%% The `beamtalk_extensions` ETS key for `Side` — the established
 %% convention: an instance-side extension is keyed under the bare class name,
 %% a class-side one under the metaclass tag (`unregister/3`'s own `ClassSide`
 %% resolution, mirrored here so a lookup and its matching removal always
@@ -875,16 +875,16 @@ extension_ets_class(ClassName, instance) -> ClassName;
 extension_ets_class(ClassName, class) -> beamtalk_class_registry:class_object_tag(ClassName).
 
 %% Remove `Selector` from `ClassName`'s own (non-extension) method table via
-%% the existing revert-of-add removal mechanism (ADR 0082/BT-2663, generalized
+%% the existing revert-of-add removal mechanism (ADR 0082, generalized
 %% by ADR 0112 rather than duplicated — see the ADR's *Implementation*
-%% section), with the stdlib gate relaxed (BT-3184's `allow_stdlib` policy)
+%% section), with the stdlib gate relaxed (the `allow_stdlib` policy)
 %% since `removeSelector:` installs unconditionally. Routed via
 %% `erlang:apply/3` to avoid a compile-time dependency from `beamtalk_runtime`
 %% to `beamtalk_workspace` — the same indirection `do_compile_source/4` uses.
 %% Raises a structured `runtime_error` if the removal itself fails (recompile
 %% error, or no running workspace to route it through). Best-effort logs a
 %% `"remove-method"` ChangeLog entry after a successful removal (ADR 0112
-%% Phase 3, BT-3187) — see log_local_removal/3.
+%% Phase 3) — see log_local_removal/3.
 -spec remove_local_method(atom(), atom(), instance | class) -> ok.
 remove_local_method(ClassName, Selector, Side) ->
     ClassNameBin = atom_to_binary(ClassName, utf8),
@@ -917,7 +917,7 @@ remove_local_method(ClassName, Selector, Side) ->
     end.
 
 %% Best-effort ChangeLog append after a successful local-method removal (ADR
-%% 0112 Phase 3, BT-3187) — the install already succeeded above, so a logging
+%% 0112 Phase 3) — the install already succeeded above, so a logging
 %% failure must never surface to the caller. `emit_remove_change_entry/5`
 %% already self-swallows every internal failure (mirrors `emit_change_entry/1`
 %% for a patch); the `error:undef` catch here only guards the degenerate case
@@ -936,7 +936,7 @@ log_local_removal(ClassNameBin, Selector, Side) ->
     end,
     ok.
 
-%% BT-3206: best-effort snapshot of a class's current full source and its
+%% best-effort snapshot of a class's current full source and its
 %% on-disk flushability classification, taken by
 %% classRemoveFromSystemByName/1 before its teardown begins (see that call
 %% site's comment for why the ordering matters). Routed via `erlang:apply/3`
@@ -974,7 +974,7 @@ capture_class_removal_snapshot(ClassNameBin) ->
             #{flushable => false, not_flushable_reason => <<"dynamic">>}
     end.
 
-%% Best-effort ChangeLog append after a successful class removal (BT-3206),
+%% Best-effort ChangeLog append after a successful class removal,
 %% called at classRemoveFromSystemByName/1's existing success point
 %% (immediately after publish_class_removed/2) with the snapshot captured
 %% before teardown. Mirrors log_local_removal/3's placement and
@@ -994,7 +994,7 @@ log_class_removal(ClassNameBin, Snapshot) ->
     ok.
 
 %%% ============================================================================
-%%% Class Rename Primitive (ADR 0114 Phase 2, BT-3278)
+%%% Class Rename Primitive (ADR 0114 Phase 2)
 %%% ============================================================================
 
 -doc """
@@ -1011,7 +1011,7 @@ dependency class is refused BEFORE any memory mutation (the xref index only
 covers in-project source, so site discovery for either could never be
 complete), while a dynamic (`ClassBuilder`) class is allowed with
 `flushable: false` (`"dynamic"`), same as a project class's disk half
-(BT-3271, out of scope here — this primitive is in-memory only).
+(out of scope here — this primitive is in-memory only).
 
 ## Ordering
 
@@ -1027,8 +1027,8 @@ complete), while a dynamic (`ClassBuilder`) class is allowed with
    union of `referencesTo:`/`direct_subclasses/1` translated into
    `beamtalk_repl_loader:rewrite_site()` maps, plus the class's own
    declaration-header span as the definition site.
-5. Mutate: for an ordinary (project) class, `rewrite_sites/2` (shared
-   mechanism, BT-3270) installs every site transactionally and that same
+5. Mutate: for an ordinary (project) class, `rewrite_sites/2` (the shared
+   mechanism) installs every site transactionally and that same
    install is what publishes the new pid, so `install_class_rename/3` only
    retires the old registry identity afterward. For a dynamic class, the
    two mutations are unrelated calls into different subsystems with no
@@ -1336,7 +1336,7 @@ subclass_header_rewrite_site(Sub, OldNameBin, NewNameBin) ->
     end.
 
 %% Resolve `ClassNameBin`'s declaration-header + state-declaration span
-%% (`beamtalk_compiler:resolve_class_span/2`, ADR 0082/BT-3248 — deliberately
+%% (`beamtalk_compiler:resolve_class_span/2`, ADR 0082 — deliberately
 %% never a method body) and search `Pattern` WITHIN that slice only, not the
 %% whole file — a doc comment example mentioning the identical header text
 %% (common in stdlib doc comments) must never be mistaken for the real
@@ -1469,7 +1469,7 @@ current_class_source(ClassNameBin) ->
 %% `ClassNameBin`'s on-disk source file, for a `rewrite_site()`'s
 %% `source_file` ChangeLog-attribution field only (see that type's doc) —
 %% reuses `beamtalk_repl_loader:class_source_file/1` (already exported for
-%% exactly this kind of cross-module reuse, BT-3238) rather than re-deriving
+%% exactly this kind of cross-module reuse) rather than re-deriving
 %% it. `undefined` for a class with no backing file.
 -spec class_source_file_for(binary()) -> binary() | undefined.
 class_source_file_for(ClassNameBin) ->
@@ -1485,7 +1485,7 @@ class_source_file_for(ClassNameBin) ->
 %%% ----------------------------------------------------------------------------
 
 %% Thin `erlang:apply/3` forwarding to the shared multi-site rewrite
-%% mechanism (BT-3270) — same indirection every other cross-app call in this
+%% mechanism — same indirection every other cross-app call in this
 %% module already uses. A dynamic class with neither a definition site nor
 %% any reference site (never mentioned anywhere in-project) has nothing to
 %% rewrite at all; `rewrite_sites/2` itself refuses that shape
@@ -1542,7 +1542,7 @@ Move the class registry identity from `OldName` to `NewName` after a
 successful `rewrite_sites/2` install, returning the pid now serving
 `NewName`.
 
-Exported (ADR 0114 Phase 4, BT-3274) beyond `classRenameTo/2`'s own forward
+Exported (ADR 0114 Phase 4) beyond `classRenameTo/2`'s own forward
 path: reverting a pending `'rename-class'` ChangeEntry re-splices the
 definition site's `prev_source_ref` back in, which makes `rewrite_sites/2`'s
 own install pipeline register a fresh pid under `old_class` exactly the same
@@ -1565,8 +1565,7 @@ name) and purge the four name-keyed derived registries
 (`beamtalk_class_lifecycle:purge_class_registries/1`, reused rather than
 `class_removed/2`'s full teardown — see that function's doc for why
 `purge_protocol/1`'s module-keyed purge must NOT run here: the SAME BEAM
-module atom still backs the renamed class, in-memory-only, no disk flush
-(BT-3271)).
+module atom still backs the renamed class, in-memory-only, no disk flush).
 
 Dynamic (`ClassBuilder`) class: nothing above ever ran (no source, no
 `rewrite_sites/2` recompile) — `beamtalk_object_class:rename/2` moves the
@@ -1679,7 +1678,7 @@ selector_not_found_error(Self, Selector) ->
 -doc """
 Return the source file path for this class, or nil if not set.
 
-BT-845/BT-860: Reads `beamtalk_source` module attribute embedded at compile time.
+Reads `beamtalk_source` module attribute embedded at compile time.
 This is the definitive source-of-truth (survives workspace restarts).
 Returns nil for stdlib/bootstrap/ClassBuilder-created classes.
 """.
@@ -1692,7 +1691,7 @@ classSourceFile(Self) ->
 -doc """
 Recompile from sourceFile and hot-swap the BEAM module.
 
-BT-845: ADR 0040 Phase 2.
+ADR 0040 Phase 2.
 Raises an error if sourceFile is nil (stdlib / dynamic class).
 Delegates compilation to beamtalk_repl_eval:reload_class_file/1 via
 erlang:apply/3 to avoid a compile-time dep from beamtalk_runtime to
@@ -1714,7 +1713,7 @@ classReload(Self) ->
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg));
         SourcePath ->
             SourcePathStr = binary_to_list(SourcePath),
-            %% BT-1719: Demand-driven native .erl compilation before reload.
+            %% Demand-driven native .erl compilation before reload.
             %% Uses dynamic dispatch to avoid compile-time dep on beamtalk_workspace.
             try
                 ProjectRoot = erlang:apply(
@@ -1764,7 +1763,7 @@ classReload(Self) ->
     end.
 
 %%% ============================================================================
-%%% Live Method Patch Primitives (ADR 0082 Phase 1, BT-2283)
+%%% Live Method Patch Primitives (ADR 0082 Phase 1)
 %%% ============================================================================
 
 -doc """
@@ -1838,7 +1837,7 @@ do_compile_source(Self, Selector, Source, Intent) ->
 
 -doc """
 Compile a pending method edit and report would-be-stale dependents,
-**without installing** (ADR 0105 Phase 3, BT-2782).
+**without installing** (ADR 0105 Phase 3).
 
 Backs `@primitive "classPrecheckCompileSource"' (`Behaviour>>precheckCompile:
 source:') — the editor/LSP's "check before save" hook (ADR 0105's Phase 3
@@ -2010,7 +2009,7 @@ current_author_context() ->
     end.
 
 %%% ============================================================================
-%%% Method Rename Primitives (ADR 0114 Phase 3, BT-3279)
+%%% Method Rename Primitives (ADR 0114 Phase 3)
 %%% ============================================================================
 
 -doc """
@@ -2032,7 +2031,7 @@ Unlike `classRemoveSelector/2` (which checks the extension registry, ADR
 `OldSelector`/`NewSelector` resolution here goes straight to
 `classIncludesSelector/2` — local method table only. ADR 0114's text never
 mentions extensions for rename, and an extension method has a different
-owner/attribution model entirely (BT-3185) that this primitive's
+owner/attribution model entirely that this primitive's
 site-discovery (keyed on `Self`'s own class only) has no way to reason
 about safely. A class whose `OldSelector` is only an extension (no local
 override) is therefore reported `absent` here — exactly like
@@ -2069,7 +2068,7 @@ to rename an extension method can still do so manually via `compile:source:`
    function's own doc for the full override-freedom mechanics (ADR 0114 §
    "`renameSelector:to:` auto-rewrites only `self`/`super` sends").
 5. Mutate: `rewrite_class_sites/4` (the SAME shared multi-site rewrite
-   mechanism `classRenameTo/2` already uses, BT-3270) installs the
+   mechanism `classRenameTo/2` already uses) installs the
    definition + confirmed reference sites transactionally. Unlike class
    rename, there is no separate registry-identity move — a method rename
    never changes what a class is registered under — so there is no
@@ -2140,7 +2139,7 @@ rename_selector(Self, OldSelector, NewSelector) ->
             ClassNameBin = atom_to_binary(ClassName, utf8),
             OldSelectorBin = atom_to_binary(OldSelector, utf8),
             NewSelectorBin = atom_to_binary(NewSelector, utf8),
-            %% BT-3279: classification feeds `rewrite_class_sites/4`'s
+            %% classification feeds `rewrite_class_sites/4`'s
             %% existing dynamic-class trivial-success gate for the rare edge
             %% case where a class WITH real tracked source still classifies
             %% "dynamic" (see that function's own doc on why the two can
@@ -2352,7 +2351,7 @@ that subclass tree can intercept a same-hierarchy `self`/`super` send
 before it ever reaches `ClassName`'s own implementation (late-bound
 dispatch starts at the runtime receiver's actual class, not at
 `ClassName`). The only structurally sound closure: `beamtalk_xref:
-implementors_of/1` (already shipped, ADR 0087/BT-2300) filtered to this
+implementors_of/1` (already shipped, ADR 0087) filtered to this
 rename's own `Side`, intersected with `ClassName`'s subclass closure
 (`beamtalk_class_registry:all_subclasses/1` — the TRANSITIVE closure, unlike
 `classRenameTo/2`'s one-level-only `direct_subclasses/1` use for its
@@ -2384,7 +2383,7 @@ real interpretation call the ADR text does not spell out byte-for-byte.
 
 `senders_of/1`'s `other`/`erlang_ffi` rows (and any self/super row demoted
 to candidate) carry no byte span — only a `line`. Since `candidate_sites`
-are NEVER spliced by flush (BT-3271, `beamtalk_workspace_changelog.erl`'s
+are NEVER spliced by flush (`beamtalk_workspace_changelog.erl`'s
 own doc comment), the OWNING METHOD's own whole span
 (`resolve_method_span`, via `method_token_span/4`) is used as the
 candidate's `span` — a "somewhere in this method" pointer for human/agent
@@ -2823,15 +2822,15 @@ ADR 0036: Backs `@primitive "metaclassSuperclass"` in metaclass.bt.
 The superclass of Counter's metaclass is the metaclass of Counter's superclass.
 Example: `Counter class superclass == Actor class`.
 
-BT-1186: Previously used gen_server:call(Pid, superclass) directly (BT-1185
-fixed apply_class_info/2 to update the gen_server superclass from
+Previously used gen_server:call(Pid, superclass) directly (a fix to
+apply_class_info/2 made it update the gen_server superclass from
 __beamtalk_meta/0, so the gen_server always held the correct superclass).
 
-BT-3107: Now uses `beamtalk_object_class:superclass_safe/1` — the same
+Now uses `beamtalk_object_class:superclass_safe/1` — the same
 unified-metadata ETS source `beamtalk_class_dispatch` reads — instead of a
 separate `gen_server:call`, so this and dispatch can never disagree mid-reload.
 
-BT-2217: Grounds the parallel chain at `ProtoObject class superclass == Class`
+Grounds the parallel chain at `ProtoObject class superclass == Class`
 (ADR 0036). When the lookup reports no superclass, return the instance-side
 `Class` class object. From there, subsequent `superclass` sends route through
 the regular instance-side dispatch (`classSuperclass`), unfolding
@@ -2855,7 +2854,7 @@ metaclassSuperclass(Self) ->
 -doc """
 Return all selectors callable on the described class object (class-side + Behaviour protocol).
 
-BT-1169: Backs `@primitive "metaclassAllMethods"` in metaclass.bt.
+Backs `@primitive "metaclassAllMethods"` in metaclass.bt.
 Combines class-side selectors of the described class (via metaclassClassMethods/1)
 with all instance methods of the 'Class' hierarchy (Behaviour protocol: reload,
 superclass, etc.). Result is deduplicated and sorted.
@@ -2863,8 +2862,8 @@ superclass, etc.). Result is deduplicated and sorted.
 We walk the instance method chain of 'Class' directly in Erlang to avoid
 dispatching through the Metaclass chain (which would recurse into this method).
 
-BT-1186: Now uses walk_hierarchy/3 directly. BT-1185 fixed apply_class_info/2
-to update the gen_server superclass from __beamtalk_meta/0, so walk_hierarchy/3
+Now uses walk_hierarchy/3 directly, since apply_class_info/2 updates the
+gen_server superclass from __beamtalk_meta/0, so walk_hierarchy/3
 correctly traverses Class → Behaviour → Object.
 """.
 -spec metaclassAllMethods(#beamtalk_object{}) -> [atom()].
@@ -2955,7 +2954,7 @@ metaclassNew() ->
 -doc """
 Try to retrieve reflection metadata from a compiled module's __beamtalk_meta/0.
 
-BT-942: Returns `{ok, Meta}` if the module exports `__beamtalk_meta/0` and
+Returns `{ok, Meta}` if the module exports `__beamtalk_meta/0` and
 the call succeeds; returns `not_available` otherwise (dynamic classes from
 beamtalk_class_builder, or any module that doesn't export the function).
 
@@ -2988,19 +2987,19 @@ folded accumulator built up through every ancestor visited.
 
 When the walk instead exhausts `?MAX_HIERARCHY_DEPTH` (a hierarchy cycle),
 returns the partial accumulator folded up through every ancestor actually
-visited before the guard tripped (BT-3096) — not the original `Acc` passed
+visited before the guard tripped — not the original `Acc` passed
 into this call — and logs a `?LOG_WARNING` naming the ancestor where the
 cycle was detected. This matches the hand-rolled recursion this function
 replaced, which also returned the partial fold on depth exhaustion. Only
 reachable via an actual hierarchy cycle or a legitimately
 `?MAX_HIERARCHY_DEPTH`-level-deep hierarchy.
 
-BT-3087: The walk itself (depth guard, cycle warning, advance-to-superclass)
+The walk itself (depth guard, cycle warning, advance-to-superclass)
 is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
 per-ancestor registry lookup and threads Acc through the walk. Since
 `walk_ancestors/3` only threads a bare node id between steps (not a
 separate accumulator), Acc rides along inside the node as `{ClassName, Acc}`.
-BT-3096: this is also why `max_depth_exceeded` carries `LastNode` back to
+this is also why `max_depth_exceeded` carries `LastNode` back to
 the caller — it's the only way to recover the partial `Acc` folded up to
 that point, since it rode along inside the node the whole time.
 """.
@@ -3018,7 +3017,7 @@ walk_hierarchy(ClassName, Fun, Acc) ->
                     {halt, Result} ->
                         {found, {result, Result}};
                     {cont, NewAcc} ->
-                        %% BT-3107: deadlock-safe metadata lookup, same source
+                        %% deadlock-safe metadata lookup, same source
                         %% dispatch reads, instead of a separate gen_server:call.
                         case beamtalk_object_class:superclass_safe(ClassPid) of
                             none -> {found, {result, NewAcc}};
@@ -3068,7 +3067,7 @@ atom_to_class_object(ClassName) ->
 -doc """
 Notify workspace layer that a class was successfully removed.
 
-BT-1242: Cleans up stale entries in workspace_meta and REPL session trackers.
+Cleans up stale entries in workspace_meta and REPL session trackers.
 Uses registered-name tricks to avoid a hard DDD dep from beamtalk_runtime →
 beamtalk_workspace (same pattern as stop_class_actors/1 and classReload/1).
 
@@ -3109,9 +3108,9 @@ ensure_code_step(ClassName, Module, Step, false) ->
 
 -doc """
 Check if a module name belongs to the Beamtalk stdlib.
-BT-785: Stdlib modules have the prefix `bt@stdlib@`.
+Stdlib modules have the prefix `bt@stdlib@`.
 
-BT-3081: delegates to `beamtalk_module_name:is_stdlib_module/1`, the single
+delegates to `beamtalk_module_name:is_stdlib_module/1`, the single
 authority for this check (was byte-identical to
 `beamtalk_class_registry:is_stdlib_module/1`).
 """.
@@ -3122,7 +3121,7 @@ is_stdlib_module_name(Module) ->
 -doc """
 Stop all live actors of a given class.
 
-BT-785: Queries the actor registry (if available) for all actors belonging
+Queries the actor registry (if available) for all actors belonging
 to the class, then kills each one. The registry is accessed by its
 registered name to avoid a module-level dependency on beamtalk_workspace.
 """.
