@@ -9,7 +9,7 @@
 Shared boilerplate for the hand-coded bootstrap `_bt.erl` stub modules
 (`beamtalk_class_bt`, `beamtalk_metaclass_bt`, `beamtalk_class_builder_bt`).
 
-BT-2788: Each stub duplicated (a) a generic `does_not_understand` dispatch
+Each stub duplicated (a) a generic `does_not_understand` dispatch
 tail and (b) a `register_class/0` body that starts the class process and,
 on `{already_started, _}`, either refreshes it via `update_class/2` or does
 nothing — plus matching `?LOG_INFO`/`?LOG_WARNING` calls. This module
