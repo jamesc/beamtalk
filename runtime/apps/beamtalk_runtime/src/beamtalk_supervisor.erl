@@ -66,7 +66,7 @@ functions that call OTP APIs from the caller's process context.
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
-%% ETS table name for the OTP application root supervisor registry (BT-1191).
+%% ETS table name for the OTP application root supervisor registry.
 %% Stores `{root, SupervisorTuple}` where SupervisorTuple is a
 %% `{beamtalk_supervisor, ClassName, Module, Pid}` value.
 -define(ROOT_SUPERVISOR_TABLE, beamtalk_root_supervisor).
@@ -81,7 +81,7 @@ Start (or return) the running supervisor for the given class.
 Called from `class supervise` on Supervisor and DynamicSupervisor subclasses.
 Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
 
-## Return shape (ADR 0080 Phase 0a — Option 2 probe, BT-1994)
+## Return shape (ADR 0080 Phase 0a — Option 2 probe)
 
 Returns `{ok, {beamtalk_supervisor_new, ClassName, Module, Pid}}` on a
 fresh start, `{ok, {beamtalk_supervisor, ClassName, Module, Pid}}` on
@@ -103,7 +103,7 @@ The hook matches two shapes:
 
 In both cases the hook rewrites the inner tag to
 `{beamtalk_supervisor, ...}`, runs `class initialize:` in the caller's
-process (preserving the BT-1285 / ADR 0059 guarantee), and returns the
+process (preserving the ADR 0059 guarantee), and returns the
 rewritten shape (bare tuple or re-wrapped Result) to the caller.
 """.
 -spec startLink(beamtalk_object()) ->
@@ -118,7 +118,7 @@ startLink(Self) ->
             ?LOG_INFO("Supervisor started", #{
                 supervisor => ClassName, module => Module, pid => Pid, domain => [beamtalk, runtime]
             }),
-            %% BT-1542 + BT-1994 (ADR 0080 Phase 0a, option 2): use the
+            %% ADR 0080 Phase 0a, option 2: use the
             %% beamtalk_supervisor_new tag to signal to the post-dispatch
             %% hook in beamtalk_class_dispatch that this is a fresh start.
             %% The hook unpacks the Result tagged map produced by FFI
@@ -161,7 +161,7 @@ We use ETS for the class hierarchy walk (no gen_server needed for lookup).
 -spec static_init(module(), atom()) -> {ok, {map(), [map()]}}.
 static_init(Module, ClassName) ->
     ClassSelf = make_init_class_self(ClassName, Module),
-    %% BT-3407: read the class's live classState snapshot instead of a
+    %% Read the class's live classState snapshot instead of a
     %% hardcoded empty map, so a value set via an ordinary class-method call
     %% before `supervise` (e.g. `configure:`) is visible to `class children`
     %% here.
@@ -193,7 +193,7 @@ Same deadlock avoidance rationale as `static_init/2`.
 -spec dynamic_init(module(), atom()) -> {ok, {map(), [map()]}}.
 dynamic_init(Module, ClassName) ->
     ClassSelf = make_init_class_self(ClassName, Module),
-    %% BT-3407: see static_init/2's identical comment.
+    %% See static_init/2's identical comment on reading the live classState.
     ClassVars = class_vars_snapshot(ClassSelf),
     ChildClass = call_class_method_direct(
         ClassName, Module, class_childClass, ClassSelf, ClassVars
@@ -236,7 +236,7 @@ Called from `children` on Supervisor instances.
 Returns `{ok, [Id]}` with a list of child id atoms (class name atoms by
 default, or custom ids when `withId:` was used in `SupervisionSpec`).
 Dead or restarting children are excluded. Returns `{error, BtError}` with
-`kind = stale_handle` when the supervisor process is dead (BT-1997).
+`kind = stale_handle` when the supervisor process is dead.
 """.
 -spec whichChildren(term()) -> {ok, [atom()]} | {error, #beamtalk_error{}}.
 whichChildren(Self) ->
@@ -263,7 +263,7 @@ so that custom ids set via `withId:` in SupervisionSpec still resolve correctly.
 Returns `{ok, {beamtalk_supervisor, ...}}` for supervisor subclasses or
 `{ok, {beamtalk_object, ...}}` for worker children; `{ok, nil}` when no
 running child matches. Returns `{error, BtError}` with `kind = stale_handle`
-when the supervisor process is dead (BT-1997).
+when the supervisor process is dead.
 """.
 -spec whichChild(term(), Class :: beamtalk_object()) ->
     {ok, tuple() | nil} | {error, #beamtalk_error{}}.
@@ -299,7 +299,7 @@ class name, which is the OTP child id.
 For DynamicSupervisor (dynamic): Arg is an actor or supervisor instance —
 terminates child by its process pid (simple_one_for_one semantics).
 
-## Return shape (ADR 0080 Phase 1 — BT-1998)
+## Return shape (ADR 0080 Phase 1)
 
 Returns `{ok, nil}` on success. Returns `{ok, nil}` on
 `{error, not_found}` (idempotent: "child is already gone" is the
@@ -418,7 +418,7 @@ Called from `startChild` on DynamicSupervisor instances.
 Calls `Module:'childClass'()` to determine the child class and module,
 then starts the child via OTP simple_one_for_one.
 
-## Return shape (ADR 0080 Phase 1 — BT-1997)
+## Return shape (ADR 0080 Phase 1)
 
 Returns `{ok, {beamtalk_supervisor, ChildClass, ChildModule, ChildPid}}`
 for supervisor subclasses, or `{ok, {beamtalk_object, ...}}` for workers.
@@ -476,7 +476,7 @@ Called from `startChild: args` on DynamicSupervisor instances.
 Args is passed as the extra argument to OTP simple_one_for_one,
 which appends it to the child start function's argument list.
 
-## Return shape (ADR 0080 Phase 1 — BT-1997)
+## Return shape (ADR 0080 Phase 1)
 
 Returns `{ok, {beamtalk_supervisor, ChildClass, ChildModule, ChildPid}}`
 for supervisor subclasses, or `{ok, {beamtalk_object, ...}}` for workers.
@@ -530,7 +530,7 @@ startChild(Self, Args) ->
 Start a new child with args, registered under a name, under a DynamicSupervisor.
 
 Called from `startChild: args name: aName` on DynamicSupervisor instances
-(ADR 0079 amendment, BT-3376). Combines args-replay (BT-3365) with named
+(ADR 0079 amendment). Combines args-replay with named
 registration: `Name` is appended as a third extra argument that
 `supervisor:start_child/2` threads onto the shared `simple_one_for_one`
 template, landing on `start_dynamic_child/4`, which spawns the child via
@@ -541,7 +541,7 @@ child's own start args (now including `Name`) on automatic OTP restart, a
 crashed named child re-registers under the same name every time, with no
 supervisor-side bookkeeping.
 
-## Return shape (ADR 0080 Phase 1 — BT-1997)
+## Return shape (ADR 0080 Phase 1)
 
 Returns `{ok, {beamtalk_supervisor, ChildClass, ChildModule, ChildPid}}`
 for supervisor subclasses, or `{ok, {beamtalk_object, ...}}` for workers.
@@ -615,7 +615,7 @@ Uses `supervisor:count_children/1` which returns a proplist with
 `active` (running), `workers`, `supervisors`, `specs` counts.
 
 Returns `{ok, Count}` on success; `{error, BtError}` with
-`kind = stale_handle` when the supervisor process is dead (BT-1997).
+`kind = stale_handle` when the supervisor process is dead.
 """.
 -spec countChildren(term()) -> {ok, non_neg_integer()} | {error, #beamtalk_error{}}.
 countChildren(Self) ->
@@ -633,7 +633,7 @@ Called from `stop` on Supervisor and DynamicSupervisor instances.
 Uses gen_server:stop/1 since supervisors are OTP gen_servers.
 
 Returns `{ok, nil}` on success; `{error, BtError}` with `kind = stale_handle`
-when the supervisor process is already dead (BT-1997).
+when the supervisor process is already dead.
 """.
 -spec stop(term()) -> {ok, nil} | {error, #beamtalk_error{}}.
 stop(Self) ->
@@ -668,10 +668,10 @@ Build OTP child specs, threading `Mode` through to `spec_to_otp/2`.
 `simple_one_for_one` template): its default (`#spawn`) worker child spec
 gets a **zero**-static-arg MFA that routes through `start_dynamic_child/2,3`
 instead of baking `[#{}]` directly into `{ChildModule, start_link, _}` —
-see `spec_to_otp/2` and BT-3365. `Mode = static` (the default, used by
+see `spec_to_otp/2`. `Mode = static` (the default, used by
 `static_init/2` via `build_child_specs/1`) is unchanged: a static
 Supervisor's children start immediately at supervisor-init time and never
-receive appended `supervisor:start_child/2` args, so the pre-BT-3365
+receive appended `supervisor:start_child/2` args, so the original
 `[#{}]` shape is still correct there.
 """.
 -spec build_child_specs([term()], static | dynamic) -> [map()].
@@ -691,7 +691,7 @@ is_supervisor(ClassName) ->
         beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor').
 
 -doc """
-Register the OTP application root supervisor (BT-1191).
+Register the OTP application root supervisor.
 
 Called from the generated `beamtalk_{appname}_app:start/2` callback after
 the root supervisor has started. SupervisorTuple must be a
@@ -748,7 +748,7 @@ initial `class_initialize:` method lookup (same pattern as `static_init/2`).
 -spec run_initialize(term()) -> ok.
 run_initialize({beamtalk_supervisor, ClassName, Module, _Pid} = SupTuple) ->
     ClassSelf = make_init_class_self(ClassName, Module),
-    %% BT-3407: see static_init/2's identical comment.
+    %% See static_init/2's identical comment on reading the live classState.
     ClassVars = class_vars_snapshot(ClassSelf),
     call_class_method_direct(ClassName, Module, 'class_initialize:', ClassSelf, ClassVars, [
         SupTuple
@@ -767,7 +767,7 @@ make_init_class_self(ClassName, Module) ->
     {beamtalk_object, ClassTag, Module, ClassPid}.
 
 -doc """
-Read a class's live classState snapshot (BT-3407), given the `ClassSelf`
+Read a class's live classState snapshot, given the `ClassSelf`
 tuple `make_init_class_self/2` already built for the same call site.
 
 Reuses `ClassSelf`'s own `ClassPid` (position 4) rather than re-resolving
@@ -822,7 +822,7 @@ call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, Ext
         not_found ->
             error({supervisor_init_method_not_found, FunName});
         {ok, SuperclassName} ->
-            %% BT-1285: Look up the ancestor module via ETS instead of gen_server:call.
+            %% Look up the ancestor module via ETS instead of gen_server:call.
             %% If the ancestor is itself a Supervisor subclass currently being initialised,
             %% its class gen_server is blocked inside startLink/1 waiting for OTP
             %% supervisor:start_link to return.  A gen_server:call to it would deadlock.
@@ -898,7 +898,7 @@ to_otp_strategy(S) -> S.
 -doc """
 Start a supervised child by dispatching through its keyword class method.
 
-BT-1862: When a SupervisionSpec uses `withClassMethod:`, the supervisor must
+When a SupervisionSpec uses `withClassMethod:`, the supervisor must
 route starts/restarts through the actor's keyword class method (e.g.,
 `start:linearClient:`) instead of calling `start_link/init` directly. The class
 method transforms raw constructor args into properly shaped state before calling
@@ -917,7 +917,7 @@ identity from the process dictionary (e.g. `handle_class_self_call/1`'s
 deadlock-diagnostic hint) when the class method runs correctly in the
 supervisor process instead of the class's own gen_server.
 
-BT-3243 (supervisor-restart follow-up): `?BT_SUPERVISOR_SPAWN_CONTEXT_KEY` is
+`?BT_SUPERVISOR_SPAWN_CONTEXT_KEY` is
 also set here (and only here). Unlike `beamtalk_class_name`/
 `beamtalk_class_module` — which `beamtalk_object_class`'s `init/1` *also*
 sets, in the class's own gen_server process — this key is exclusive to this
@@ -926,7 +926,7 @@ function, so `beamtalk_actor:safe_spawn/2` and
 tell "running a supervised child's factory in the real supervisor process"
 (stay linked — that link is the restart mechanism) apart from "running a
 class method inside the class's own gen_server, or a plain unsupervised
-spawn" (unlink — the original BT-3243 fix). This is a plain process
+spawn" (unlink — the original fix for this distinction). This is a plain process
 dictionary read with no process boundary crossed between here and
 `safe_spawn/2`: `call_class_method_direct` below reaches the class method via
 `erlang:apply/3`, and the compiled `self spawn`/`self spawnWith:` body
@@ -935,10 +935,10 @@ reaches `safe_spawn/2` via further direct calls
 spawn, Args)` → the generated `spawn/1` wrapper) — all synchronous, same
 process, so the key set here is still visible when `safe_spawn/2` checks it.
 
-BT-3106: `beamtalk_class_is_abstract` is deliberately **not** seeded here.
+`beamtalk_class_is_abstract` is deliberately **not** seeded here.
 `self spawnWith:`/`self spawnAs:`/`self spawnWith:as:` in a compiled class
 method resolve `is_abstract` by class name via
-`beamtalk_class_instantiation:resolve_is_abstract_or_raise/2` (BT-3047 / ADR
+`beamtalk_class_instantiation:resolve_is_abstract_or_raise/2` (ADR
 0109 amendment), and `self new`/`self new:` resolve it via a name-keyed
 `beamtalk_class_metadata:lookup_is_abstract/1` lookup inside
 `beamtalk_class_instantiation:handle_new_generic/2` — neither reads this PD
@@ -959,10 +959,10 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
     %% These are normally set by the class gen_server during init;
     %% we replicate them here so the class method runs correctly
     %% in the supervisor process. `beamtalk_class_is_abstract` is intentionally
-    %% excluded — see the doc comment above (BT-3106).
+    %% excluded — see the doc comment above.
     put(beamtalk_class_name, ClassName),
     put(beamtalk_class_module, Module),
-    %% BT-3243 (supervisor-restart follow-up): mark this process as running a
+    %% Mark this process as running a
     %% withClassMethod: child's factory directly in the real OTP supervisor
     %% process, so that any `self spawn`/`self spawnWith:`/`self spawnAs:`/
     %% `self spawnWith:as:` the factory calls (beamtalk_actor:safe_spawn/2,
@@ -972,7 +972,7 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
     put(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY, true),
     try
         ClassSelf = make_init_class_self(ClassName, Module),
-        %% BT-3407: see static_init/2's identical comment.
+        %% See static_init/2's identical comment on reading the live classState.
         ClassVars = class_vars_snapshot(ClassSelf),
         RawResult = call_class_method_direct(
             ClassName, Module, Selector, ClassSelf, ClassVars, Args
@@ -1009,7 +1009,7 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
     end.
 
 -doc """
-Start a DynamicSupervisor's default (no per-call args) child (BT-3365).
+Start a DynamicSupervisor's default (no per-call args) child.
 
 This is the arity-2 half of the zero-static-arg MFA `spec_to_otp/2` builds
 for a DynamicSupervisor's `simple_one_for_one` template (`{beamtalk_supervisor,
@@ -1035,7 +1035,7 @@ start_dynamic_child(ChildModule, DefaultArgs) ->
     ChildModule:start_link(DefaultArgs).
 
 -doc """
-Start a DynamicSupervisor child with caller-supplied init args (BT-3365).
+Start a DynamicSupervisor child with caller-supplied init args.
 
 This is the arity-3 half of the zero-static-arg MFA `spec_to_otp/2` builds
 for a DynamicSupervisor's `simple_one_for_one` template. `startChild: args`
@@ -1062,7 +1062,7 @@ start_dynamic_child(ChildModule, _DefaultArgs, Args) ->
 
 -doc """
 Start a DynamicSupervisor child with caller-supplied init args, registered
-under a name (BT-3376, ADR 0079 amendment).
+under a name (ADR 0079 amendment).
 
 The arity-4 entry point `startChild: args name: aName` lands on:
 `supervisor:start_child/2` appends `[Args, Name]` to the template's
@@ -1101,7 +1101,7 @@ worker children use start_link/1 with an init-args map instead of spawn/0.
 
 `Mode` selects between a static Supervisor's immediate-start semantics and
 a DynamicSupervisor's extensible `simple_one_for_one` template — see the
-`spawn` case below and BT-3365.
+`spawn` case below.
 """.
 -spec spec_to_otp(map()) -> map().
 spec_to_otp(BtSpec) ->
@@ -1129,7 +1129,7 @@ spec_to_otp(BtSpec, Mode) ->
                 StartFn = lists:nth(2, StartElems),
                 case StartFn of
                     spawn when Mode =:= dynamic ->
-                        %% BT-3365: a DynamicSupervisor's simple_one_for_one template
+                        %% A DynamicSupervisor's simple_one_for_one template
                         %% must NOT bake a static arg here. OTP appends whatever extra
                         %% args supervisor:start_child/2 was given to this MFA's args —
                         %% baking `[#{}]` meant `startChild: args` landed as
@@ -1152,7 +1152,7 @@ spec_to_otp(BtSpec, Mode) ->
                         %% have extra args appended, so a single baked arg is correct.
                         {ChildModule, start_link, [#{}]};
                     'spawnWith:' when Mode =:= dynamic ->
-                        %% BT-3365 (review follow-up): a DynamicSupervisor childClass
+                        %% A DynamicSupervisor childClass
                         %% can override `class supervisionSpec` to bake default args via
                         %% `withArgs:` (supervision_spec.bt childSpec), which also compiles
                         %% to startFn #spawnWith:. That hits the exact same arity-mismatch
@@ -1168,7 +1168,7 @@ spec_to_otp(BtSpec, Mode) ->
                         InitArgs = lists:nth(3, StartElems),
                         {ChildModule, start_link, InitArgs};
                     'spawnAs:' ->
-                        %% ADR 0079 / BT-1990: SupervisionSpec withName: routes
+                        %% ADR 0079: SupervisionSpec withName: routes
                         %% named children through `beamtalk_actor:spawnAs/2,3`
                         %% so the child registers under `Name` atomically inside
                         %% gen_server:start_link({local, Name}, ...). The startArgs
@@ -1178,7 +1178,7 @@ spec_to_otp(BtSpec, Mode) ->
                         [Name] = SpawnAsArgs,
                         {beamtalk_actor, 'spawnAs', [Name, ChildModule]};
                     'spawnWith:as:' ->
-                        %% ADR 0079 / BT-1990: spawn-with-args under a registered
+                        %% ADR 0079: spawn-with-args under a registered
                         %% name. startArgs are `#(args, name)` → Erlang `[Args, Name]`.
                         %% Translates to `beamtalk_actor:spawnAs/3` so the child is
                         %% registered atomically with init args at start time.
@@ -1186,7 +1186,7 @@ spec_to_otp(BtSpec, Mode) ->
                         [InitArgsMap, NameAtom] = SpawnAsArgs2,
                         {beamtalk_actor, 'spawnAs', [NameAtom, ChildModule, InitArgsMap]};
                     classMethod ->
-                        %% BT-1862: Route through the actor's keyword class method.
+                        %% Route through the actor's keyword class method.
                         %% StartArgs is #(selector, argsList) — compiled as an
                         %% Erlang list [Selector, ArgsList]. The selector is stored
                         %% in source form (e.g., 'create:value:'); we prepend 'class_'
@@ -1242,7 +1242,7 @@ wrap_child(ChildClass, ChildModule, ChildPid) ->
 
 -doc """
 Announce `SupervisionChildAdded` on the `SystemAnnouncer` bus after a
-DynamicSupervisor successfully starts a child (ADR 0093 §2 / ADR 0092, BT-2445).
+DynamicSupervisor successfully starts a child (ADR 0093 §2 / ADR 0092).
 Best-effort and fault-isolated — see `announce_supervision/2`.
 """.
 -spec announce_child_added(atom(), atom(), pid()) -> ok.
@@ -1253,7 +1253,7 @@ announce_child_added(SupClass, ChildClass, ChildPid) ->
 
 -doc """
 Announce `SupervisionChildCrashed` on the `SystemAnnouncer` bus when a
-DynamicSupervisor child fails to start (ADR 0093 §2 / ADR 0092, BT-2445). The
+DynamicSupervisor child fails to start (ADR 0093 §2 / ADR 0092). The
 arbitrary OTP failure `Reason` is normalised to a Symbol for the typed event
 payload. Best-effort and fault-isolated — see `announce_supervision/2`.
 """.
@@ -1268,8 +1268,8 @@ announce_child_crashed(SupClass, ChildClass, Reason) ->
 
 -doc """
 Normalise an OTP `supervisor:start_child/2` failure reason to a stable Symbol
-for the `SupervisionChildCrashed` event payload (BT-2445): a `#beamtalk_error{}`
-(e.g. from `startChild:name:`'s `'spawnAs'/3` path, BT-3376) yields its `kind`
+for the `SupervisionChildCrashed` event payload: a `#beamtalk_error{}`
+(e.g. from `startChild:name:`'s `'spawnAs'/3` path) yields its `kind`
 (e.g. `name_registered`), a leading atom is kept (e.g. `already_present`),
 anything else collapses to `child_start_failed`. Keeps the typed
 `reason :: Symbol` field flat (the full reason is in the returned
@@ -1314,17 +1314,17 @@ Two distinct exit shapes are handled:
   `{noproc, MFA}` (tuple) when the target process is not alive.
 * `gen_server:stop/1` exits with the bare atom `noproc` (no MFA wrapper).
 
-## Inner fun contract (BT-1997)
+## Inner fun contract
 
-After BT-1997, each inner fun returns `{ok, Value}` on success and
+Each inner fun returns `{ok, Value}` on success and
 `{error, #beamtalk_error{}}` on application-level failure.
 `with_live_supervisor/3` returns whichever tagged tuple Fun produced, or
 intercepts the raw OTP `noproc` exit and returns
 `{error, #beamtalk_error{kind = stale_handle, ...}}`. FFI coercion in
 `beamtalk_erlang_proxy:coerce_ffi_result/2` wraps the tagged tuple into
-a Beamtalk `Result` for the stdlib method body. (`terminateChild/2`
-migrates in the sibling BT-1998 issue; until then its Fun still calls
-`error/1` on failure, which passes through the try/catch here unchanged.)
+a Beamtalk `Result` for the stdlib method body. (`terminateChild/2` still
+calls `error/1` on failure on one path, which passes through the try/catch
+here unchanged.)
 """.
 -spec with_live_supervisor(atom(), atom(), fun(() -> term())) ->
     term() | {error, #beamtalk_error{}}.
