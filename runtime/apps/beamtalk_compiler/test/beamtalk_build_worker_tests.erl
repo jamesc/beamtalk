@@ -63,7 +63,7 @@ compile_core_erlang_compile_error_test() ->
     Result = beamtalk_build_worker:compile_core_erlang(CoreErlang),
     ?assertMatch({error, {core_compile_error, _}}, Result).
 
-%% BT-3115: Core Erlang that scans, parses, and passes compile:forms'
+%% Core Erlang that scans, parses, and passes compile:forms'
 %% earlier passes, but fails core_lint — 'State' is referenced in 'foo'/1
 %% without ever being bound. Demonstrates the failure is caught (core_lint
 %% already runs unconditionally on the from_core pipeline — see
@@ -81,15 +81,14 @@ compile_core_erlang_unbound_var_test() ->
     ?assertNotEqual(nomatch, binary:match(Message, <<"'State'">>)),
     ?assertNotEqual(nomatch, binary:match(Message, <<"foo/1">>)).
 
-%% BT-3126: Core Erlang that compiles *successfully* but produces a
+%% Core Erlang that compiles *successfully* but produces a
 %% compile:forms warning (sys_core_fold's "ignored result of a call"
 %% warning, triggered by a `do' whose first expression's value is
-%% discarded). Before the fix, `compile_core_forms/1' passed
-%% `report_warnings' — which prints via `io:fwrite' to the compiling
-%% process's default group leader (stdout), not stderr — so this warning
-%% was silently dropped. Demonstrates the batch build-worker backend now
-%% reaches stderr, matching compile.escript's `return_warnings' fix from
-%% BT-3115.
+%% discarded). Demonstrates the batch build-worker backend's warning
+%% reaches stderr via `return_warnings', matching compile.escript's
+%% handling — `report_warnings' would print via `io:fwrite' to the
+%% compiling process's default group leader (stdout), not stderr, and
+%% silently drop it here.
 compile_core_erlang_warning_reaches_stderr_test() ->
     CoreErlang = warning_core_erlang_source(),
     Captured = beamtalk_stderr_capture:capture(fun() ->
@@ -268,10 +267,10 @@ valid_core_erlang_source() ->
         "end\n"
     >>.
 
-%% BT-3115: Core Erlang whose 'foo'/1 references an unbound variable
+%% Core Erlang whose 'foo'/1 references an unbound variable
 %% ('State' is never a parameter or let-bound) — a genuine core_lint
-%% unbound_var failure, the historical codegen failure mode this issue
-%% targets (docs/development/debugging.md § Codegen Debugging).
+%% unbound_var failure, a real codegen failure mode
+%% (docs/development/debugging.md § Codegen Debugging).
 unbound_var_core_erlang_source() ->
     <<
         "module 'bt_bw_unbound_var' ['foo'/1]\n"
@@ -282,7 +281,7 @@ unbound_var_core_erlang_source() ->
         "end\n"
     >>.
 
-%% BT-3126: 'foo'/1 discards the result of `erlang:+/2' via a `do' sequence
+%% 'foo'/1 discards the result of `erlang:+/2' via a `do' sequence
 %% — a genuine `sys_core_fold' "ignored result of a call" warning, while
 %% still compiling successfully (the module returns X unchanged).
 warning_core_erlang_source() ->

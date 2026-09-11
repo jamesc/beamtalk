@@ -119,7 +119,7 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
         module => ModuleName,
         known_vars => KnownVars
     },
-    %% BT-907: Include superclass index only when non-empty to keep the
+    %% Include superclass index only when non-empty to keep the
     %% protocol backward-compatible with older port binaries.
     Request1 =
         case map_size(SuperclassIndex) of
@@ -139,7 +139,7 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
             0 -> Request2;
             _ -> Request2#{class_hierarchy => ClassHierarchy}
         end,
-    %% BT-3477: forward the ambient protocol cache alongside `class_hierarchy'
+    %% Forward the ambient protocol cache alongside `class_hierarchy'
     %% above — see `beamtalk_compiler_server:handle_call/3`'s
     %% `{compile_expression, ...}` clause for why both ride the same
     %% unconditional injection.
@@ -149,7 +149,7 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
             0 -> Request3;
             _ -> Request3#{protocol_registry => ProtocolRegistry}
         end,
-    %% BT-1670: Forward module_name override for inline class definitions
+    %% Forward module_name override for inline class definitions
     %% so package-mode produces consistent module names across all paths.
     ModuleNameOverride = maps:get(module_name, Options, undefined),
     Request4 =
@@ -157,7 +157,7 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
             undefined -> Request3a;
             _ -> Request3a#{module_name => ModuleNameOverride}
         end,
-    %% ADR 0108 Phase 8 (BT-2902): forward earlier-turn alias declarations.
+    %% ADR 0108 Phase 8: forward earlier-turn alias declarations.
     KnownTypeAliases = maps:get(known_type_aliases, Options, []),
     Request =
         case KnownTypeAliases of
@@ -246,7 +246,7 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
             0 -> Request2;
             _ -> Request2#{class_hierarchy => ClassHierarchy}
         end,
-    %% BT-3477: forward the ambient protocol cache, mirroring
+    %% Forward the ambient protocol cache, mirroring
     %% `compile_expression/5` above.
     ProtocolRegistry = maps:get(protocol_registry, Options, #{}),
     Request3a =
@@ -254,7 +254,7 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
             0 -> Request3;
             _ -> Request3#{protocol_registry => ProtocolRegistry}
         end,
-    %% ADR 0108 Phase 8 (BT-2902), BT-2956: forward earlier-turn/ambient alias
+    %% ADR 0108 Phase 8: forward earlier-turn/ambient alias
     %% declarations, mirroring `compile_expression/5` above — without this,
     %% `::` annotations in traced expressions can never resolve an alias
     %% declared in an earlier REPL turn.
@@ -1285,15 +1285,12 @@ handle_categorize_methods_response(Other) ->
     }),
     {error, port_error, <<"Unexpected compiler response">>}.
 
-%% Review finding (BT-3238): `normalize_category/1`/`normalize_categorized_method/1`
-%% used to have no catch-all clause, unlike this function's own `Other ->
-%% {error, port_error, ...}` fallback above — a category or method map
-%% missing an expected key (or an unrecognized `side`) raised `function_clause`
-%% instead of degrading, crashing the calling `beamtalk_compiler_server`
-%% `gen_server:call` for every caller sharing that process rather than
-%% returning a structured error to just this one. Wrapping the comprehension
-%% in a `try` and giving both normalizers a catch-all that throws a tagged
-%% term converts that crash into the same `{error, port_error, _}` shape
+%% A category or method map missing an expected key (or carrying an
+%% unrecognized `side`) must not raise `function_clause` — that would crash
+%% the calling `beamtalk_compiler_server` `gen_server:call` for every caller
+%% sharing that process. Wrapping the comprehension in a `try` and giving
+%% both normalizers a catch-all that throws a tagged term converts that
+%% crash into the same `{error, port_error, _}` shape
 %% `handle_categorize_methods_response/1`'s own catch-all already returns.
 -spec normalize_categories([map()]) -> {ok, [map()]} | {error, port_error, binary()}.
 normalize_categories(Categories) ->
@@ -1602,7 +1599,7 @@ handle_reindent_response(Other) ->
 
 %% Normalise an atom-or-binary identifier to a binary.
 %%
-%% BT-3090: this is the same two-clause shape as `beamtalk_text:to_binary/1`
+%% This is the same two-clause shape as `beamtalk_text:to_binary/1`
 %% (the runtime-side canonical helper covering atom/binary/list/other), but it
 %% deliberately stays local rather than delegating: `beamtalk_compiler` is a
 %% peer of `beamtalk_runtime`, not a dependent (ADR 0022 — "the compiler has
@@ -1627,9 +1624,9 @@ close(Port) ->
 
 -doc """
 Handle ETF response from the compiler port.
-BT-571: Extended to handle class_definition and method_definition responses.
-BT-1235: Diagnostics in error responses are maps with `message', `line', and optional `hint'.
-BT-2902: Extended to handle type_alias_definition responses (ADR 0108 Phase 8).
+Handles class_definition, method_definition, and type_alias_definition
+responses (ADR 0108 Phase 8). Diagnostics in error responses are maps with
+`message', `line', and optional `hint'.
 """.
 -spec handle_response(map()) ->
     {ok, binary(), [binary()]}
@@ -1649,11 +1646,11 @@ handle_response(
     } = Response
 ) ->
     PrettyCore = maybe_pretty_core(CoreErlang),
-    %% ADR 0108 hot-reload re-check trigger (BT-2899 / BT-2952 follow-up):
-    %% the alias names this REPL-inline class definition's annotations
-    %% transitively referenced — `[]` when omitted (an older compiler-port
-    %% binary predating BT-2952). Forwarded so `beamtalk_repl_compiler` can
-    %% register `beamtalk_alias_xref` dependency edges for it, mirroring
+    %% ADR 0108 hot-reload re-check trigger: the alias names this REPL-inline
+    %% class definition's annotations transitively referenced — `[]` when
+    %% omitted (an older compiler-port binary predating this field). Forwarded
+    %% so `beamtalk_repl_compiler` can register `beamtalk_alias_xref`
+    %% dependency edges for it, mirroring
     %% `beamtalk_compiler_server:handle_compile_response/1`'s identical field.
     ReferencedAliases = maps:get(referenced_aliases, Response, []),
     BaseInfo = #{
@@ -1663,7 +1660,7 @@ handle_response(
         warnings => Warnings,
         referenced_aliases => ReferencedAliases
     },
-    %% BT-903: Forward trailing_core_erlang when present (inline class + trailing expressions)
+    %% Forward trailing_core_erlang when present (inline class + trailing expressions)
     ClassInfo =
         % elp:fixme W0032 maps:find with complex branch logic
         case maps:find(trailing_core_erlang, Response) of
@@ -1684,11 +1681,10 @@ handle_response(
         warnings := Warnings
     } = Response
 ) ->
-    %% ADR 0105 Phase 1 (BT-2777): return_type/param_types carry the compiled
+    %% ADR 0105 Phase 1: return_type/param_types carry the compiled
     %% method's declared signature so the workspace can capture it into the
     %% signature-generation store before the patch installs. Defaulted so an
-    %% older compiler-port binary (pre-BT-2777) that omits these keys still
-    %% decodes.
+    %% older compiler-port binary that omits these keys still decodes.
     ReturnType = maps:get(return_type, Response, <<"Dynamic">>),
     ParamTypes = maps:get(param_types, Response, []),
     {ok, method_definition, #{
@@ -1700,7 +1696,7 @@ handle_response(
         param_types => ParamTypes,
         warnings => Warnings
     }};
-%% BT-1612: Protocol definition response
+%% Protocol definition response
 handle_response(
     #{
         status := ok,
@@ -1712,8 +1708,7 @@ handle_response(
     } = Response
 ) ->
     PrettyCore = maybe_pretty_core(CoreErlang),
-    %% ADR 0108 hot-reload re-check trigger (BT-2899 / BT-2917 / BT-2952
-    %% follow-up): see the class-definition clause above's identical field —
+    %% ADR 0108 hot-reload re-check trigger: see the class-definition clause above's identical field —
     %% a REPL-inline protocol definition's own method-signature annotations
     %% get the same forwarding so `beamtalk_repl_compiler` can register the
     %% same `beamtalk_alias_xref` dependency edges a class-defining compile
@@ -1726,7 +1721,7 @@ handle_response(
         warnings => Warnings,
         referenced_aliases => ReferencedAliases
     }};
-%% ADR 0108 Phase 8 (BT-2902): type alias definition response — no
+%% ADR 0108 Phase 8: type alias definition response — no
 %% core_erlang, since an alias erases entirely at resolution time and has no
 %% runtime representation to compile (ADR 0108 Semantics).
 handle_response(#{

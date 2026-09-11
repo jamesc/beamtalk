@@ -30,15 +30,12 @@ compile_core_erlang_with_warnings_test() ->
     Result = beamtalk_compiler_server:compile_core_erlang(CoreErlang),
     ?assertMatch({ok, _, _}, Result).
 
-%% BT-3126: this is the actual Port-owning gen_server (ADR 0022 Phase 1,
-%% see moduledoc) backing the REPL/LSP/in-memory compile path. Before the
-%% fix, compile_core_forms/2 passed neither report_warnings nor
-%% return_warnings at all, so compile:forms computed warnings and then
-%% discarded them unconditionally -- not printed anywhere, not even to
-%% stdout. Core Erlang that discards the result of erlang:+/2 via a `do'
-%% sequence triggers sys_core_fold's "ignored result of a call" warning
-%% while still compiling successfully; demonstrates the warning now
-%% reaches stderr.
+%% This is the actual Port-owning gen_server (ADR 0022 Phase 1,
+%% see moduledoc) backing the REPL/LSP/in-memory compile path. Core Erlang
+%% that discards the result of erlang:+/2 via a `do' sequence triggers
+%% sys_core_fold's "ignored result of a call" warning while still compiling
+%% successfully; demonstrates the warning reaches stderr via
+%% `return_warnings'.
 compile_core_erlang_warning_reaches_stderr_test() ->
     CoreErlang = warning_core_erlang(),
     Captured = beamtalk_stderr_capture:capture(fun() ->
@@ -60,7 +57,7 @@ compile_core_erlang_empty_test() ->
     Result = beamtalk_compiler_server:compile_core_erlang(<<>>),
     ?assertMatch({error, _}, Result).
 
-%% BT-3115: 'State' is referenced in 'foo'/1 without ever being bound — a
+%% 'State' is referenced in 'foo'/1 without ever being bound — a
 %% genuine core_lint unbound_var failure. core_lint already runs
 %% unconditionally on the from_core pipeline this call takes (see
 %% beamtalk_compile_diagnostics' moduledoc); this test demonstrates the
@@ -101,7 +98,7 @@ handle_compile_response_ok_test() ->
         Result
     ).
 
-%% ADR 0108 hot-reload re-check trigger (BT-2899): a class-defining
+%% ADR 0108 hot-reload re-check trigger: a class-defining
 %% compile's `referenced_aliases` field must survive this response
 %% reshaping, defaulting to `[]` for an older compiler-port binary that
 %% omits the key.
@@ -120,14 +117,10 @@ handle_compile_response_ok_forwards_referenced_aliases_test() ->
         Result
     ).
 
-%% BT-2917 (BT-2899 follow-up): the protocol_definition clause is a
+%% The protocol_definition clause is a
 %% *separate* reshaping match arm from the class-definition one above — it
-%% must forward `referenced_aliases` too. Confirmed missing by inspection
-%% before this fix: the port response carried the field, but this reshaping
-%% step silently dropped it (rebuilds the reply map by hand instead of
-%% forwarding `Response` verbatim), so nothing downstream ever saw it, even
-%% though `crates/beamtalk-compiler-port/src/main.rs`'s
-%% `protocol_definition_ok_response` had already started sending it.
+%% must forward `referenced_aliases` too, since it rebuilds the reply map
+%% by hand instead of forwarding `Response` verbatim.
 handle_compile_response_protocol_definition_forwards_referenced_aliases_test() ->
     Response = #{
         status => ok,
@@ -145,7 +138,7 @@ handle_compile_response_protocol_definition_forwards_referenced_aliases_test() -
     ).
 
 %% Defensive default: a protocol_definition response omitting the field
-%% entirely (an older compiler-port binary predating BT-2917) must still
+%% entirely (an older compiler-port binary) must still
 %% decode, with `referenced_aliases => []` rather than crashing.
 handle_compile_response_protocol_definition_defaults_referenced_aliases_test() ->
     Response = #{
@@ -279,7 +272,7 @@ register_when_down() ->
     ?assertEqual(ok, beamtalk_compiler_server:register_class('TestDown', #{class => 'TestDown'})),
     application:start(beamtalk_compiler).
 
-%% BT-3105: remove_class/1 drops a class from the ambient cache.
+%% remove_class/1 drops a class from the ambient cache.
 remove_class_removes() ->
     beamtalk_compiler_server:clear_classes(),
     Meta = #{class => 'TestBT3105', superclass => 'Object', fields => []},
@@ -317,7 +310,7 @@ remove_class_when_down() ->
     application:start(beamtalk_compiler).
 
 %%% ---------------------------------------------------------------
-%%% BT-3473: Protocol cache (register_protocol, remove_protocol,
+%%% Protocol cache (register_protocol, remove_protocol,
 %%% get_protocols), mirroring the class_cache_test_ suite above.
 %%% ---------------------------------------------------------------
 
@@ -343,17 +336,17 @@ protocol_cache_test_() ->
         },
         {
             "compile/2 threads protocol_registry so a runtime-seeded protocol "
-            "class entry doesn't shadow the protocol (BT-3477)",
+            "class entry doesn't shadow the protocol",
             fun api_compile_protocol_registry_suppresses_false_protocol_mismatch/0
         },
         {
             "compile_method/3 threads protocol_registry so a runtime-seeded protocol "
-            "class entry doesn't shadow the protocol (BT-3477)",
+            "class entry doesn't shadow the protocol",
             fun api_compile_method_protocol_registry_suppresses_false_protocol_mismatch/0
         }
     ]}.
 
-%% BT-3473: exercises the real cross-app entry point
+%% Exercises the real cross-app entry point
 %% (`beamtalk_protocol_registry:register_protocol/1`, in `beamtalk_runtime`)
 %% rather than `beamtalk_compiler_server:register_protocol/2` directly, so a
 %% regression in the notification hook itself (not just this module's own
@@ -375,8 +368,8 @@ protocol_registry_register_notifies_compiler_server() ->
     Protocols = beamtalk_compiler_server:get_protocols(),
     ?assertMatch(#{name := 'TestBT3473Registry'}, maps:get('TestBT3473Registry', Protocols)).
 
-%% BT-3473: `unregister_protocol/1` matches by the `module` metadata field
-%% (BT-3105's convention for `remove_class/1` too), so the registered `Info`
+%% `unregister_protocol/1` matches by the `module` metadata field
+%% (the same convention `remove_class/1` uses), so the registered `Info`
 %% must carry one for this test to purge it.
 protocol_registry_unregister_notifies_compiler_server() ->
     beamtalk_protocol_registry:init(),
@@ -463,16 +456,15 @@ remove_protocol_when_down() ->
     ?assertEqual(ok, beamtalk_compiler_server:remove_protocol('TestBT3473Down')),
     application:start(beamtalk_compiler).
 
-%% BT-3473: `diagnostics/3`'s ambient `class_hierarchy => true` opt-in used to
+%% `diagnostics/3`'s ambient `class_hierarchy => true` opt-in used to
 %% surface a runtime-seeded protocol only as a zero-method class-cache entry
 %% — the actual wire shape `beamtalk_protocol_registry:create_protocol_class/2`
 %% produces (no `superclass`, no `method_info`; see that function and
 %% `beamtalk_object_class:init/1`'s `CompilerMeta` handling) — defeating the
-%% BT-2088/BT-3472 nominal-mismatch escape hatch and making every selector on
+%% nominal-mismatch escape hatch and making every selector on
 %% a protocol-typed receiver look unresolved. Proves both halves: the false
-%% positives reproduce with only `class_hierarchy` seeded (the pre-fix
-%% shape), and disappear once `protocol_registry` carries the same name —
-%% exactly the `TimeoutToken`/`NullTimer` scenario this issue tracks.
+%% positives reproduce with only `class_hierarchy` seeded, and disappear
+%% once `protocol_registry` carries the same name.
 api_diagnostics_protocol_registry_suppresses_false_protocol_mismatch() ->
     ok = beamtalk_compiler_server:clear_classes(),
     Source = <<
@@ -524,14 +516,14 @@ any_message_contains(Diagnostics, Needle) ->
 any_warning_contains(Warnings, Needle) ->
     lists:any(fun(W) -> binary:match(W, Needle) =/= nomatch end, Warnings).
 
-%% BT-3477: the `compile/2` sibling of
+%% The `compile/2` sibling of
 %% `api_diagnostics_protocol_registry_suppresses_false_protocol_mismatch` above
-%% — `compile/2` (unlike `diagnostics/3`) runs codegen, which enforces BT-1666's
+%% — `compile/2` (unlike `diagnostics/3`) runs codegen, which enforces the
 %% one-class-per-file rule, so `NullTimer` can't be defined inline alongside
 %% `Pool` the way the diagnostics test does it. Instead `NullTimer` is seeded
 %% into the ambient class cache with a real `method_info` (the wire shape a
 %% class compiled in an earlier REPL turn/another file actually has), standing
-%% in for the cross-file class the issue describes; `compile/2` threads
+%% in for a cross-file class; `compile/2` threads
 %% `class_hierarchy`/`protocol_registry` unconditionally (see
 %% `handle_call({compile, ...})`'s doc), so no opt-in flag is needed here.
 api_compile_protocol_registry_suppresses_false_protocol_mismatch() ->
@@ -583,7 +575,7 @@ api_compile_protocol_registry_suppresses_false_protocol_mismatch() ->
     ?assertNot(any_warning_contains(WarningsAfter, <<"declares return type TimeoutToken">>)),
     ?assertNot(any_warning_contains(WarningsAfter, <<"does not understand">>)).
 
-%% BT-3477: the `compile_method/3` sibling of the test above — the live-image
+%% The `compile_method/3` sibling of the test above — the live-image
 %% write surface (IDE save / `compile:source:` / REPL `>>`) hits the same
 %% false positive when patching a method onto an already-installed class.
 %% `ClassSource` carries the pre-fix type-mismatch (`make`); the patched
@@ -638,7 +630,7 @@ api_compile_method_protocol_registry_suppresses_false_protocol_mismatch() ->
     ?assertNot(any_warning_contains(WarningsAfter, <<"does not understand">>)).
 
 %%% ---------------------------------------------------------------
-%%% ADR 0108 hot-reload re-check trigger (BT-2899): ambient alias cache
+%%% ADR 0108 hot-reload re-check trigger: ambient alias cache
 %%% (register_aliases, get_aliases)
 %%% ---------------------------------------------------------------
 
@@ -702,10 +694,10 @@ register_aliases_when_down() ->
     ?assertEqual(ok, beamtalk_compiler_server:register_aliases([<<"type Down = Integer">>])),
     application:start(beamtalk_compiler).
 
-%% BT-2956: `compile_expression/3` (no explicit `known_type_aliases`) must
+%% `compile_expression/3` (no explicit `known_type_aliases`) must
 %% still resolve an earlier-turn alias via the ambient cache — proving the
-%% `{compile_expression}` handler now defaults `known_type_aliases` the same
-%% way `{compile}`/`{compile_method}` already do, instead of only ever
+%% `{compile_expression}` handler defaults `known_type_aliases` the same
+%% way `{compile}`/`{compile_method}` do, instead of only ever
 %% seeing whatever (if anything) the caller happened to pass in `Options`.
 compile_expression_ambient_alias_backstop() ->
     beamtalk_compiler_server:clear_classes(),
@@ -880,7 +872,7 @@ unknown_info() ->
     ?assert(is_pid(whereis(beamtalk_compiler_server))).
 
 %%% ---------------------------------------------------------------
-%%% BT-2832: inject_diagnostics_failure/1 (test-only fault injection)
+%%% inject_diagnostics_failure/1 (test-only fault injection)
 %%%
 %%% Direct, isolated coverage of the mechanism itself — one-shot consumption
 %%% and self-clearing — independent of `beamtalk_repl_loader_recheck_tests`'s
@@ -916,9 +908,9 @@ no_fault_reaches_port() ->
     ?assertMatch({ok, _}, Result).
 
 %%% ---------------------------------------------------------------
-%%% BT-2806: inject_diagnostics_exit/0 (test-only fault injection)
+%%% inject_diagnostics_exit/0 (test-only fault injection)
 %%%
-%%% Sibling to BT-2832's inject_diagnostics_failure/1 above: that mechanism
+%%% Sibling to inject_diagnostics_failure/1 above: that mechanism
 %%% only forces an ordinary `{error, _}' *return*, which cannot reach
 %%% `beamtalk_recheck:recheck_image_class/2''s (and
 %%% `recheck_owner_for_leaf_change/3''s) additional `catch' clause guarding
@@ -1021,7 +1013,7 @@ api_version() ->
     Result = beamtalk_compiler_server:version(),
     ?assertMatch({ok, _}, Result).
 
-%% BT-3109: passing a map() as `class_hierarchy` threads it as this one
+%% Passing a map() as `class_hierarchy` threads it as this one
 %% request's class-hierarchy context, verbatim, without ever writing it into
 %% `beamtalk_compiler_server`'s ambient `classes` cache — the overlay the
 %% request actually saw (`#{'ApiOverlayCounter' => ...}`, a class never
@@ -1112,7 +1104,7 @@ valid_core_erlang() ->
         "end\n"
     >>.
 
-%% BT-3115: 'foo'/1 references 'State', which is never a parameter or
+%% 'foo'/1 references 'State', which is never a parameter or
 %% let-bound — a genuine core_lint unbound_var failure.
 unbound_var_core_erlang() ->
     <<
@@ -1124,7 +1116,7 @@ unbound_var_core_erlang() ->
         "end\n"
     >>.
 
-%% BT-3126: 'foo'/1 discards the result of `erlang:+/2' via a `do'
+%% 'foo'/1 discards the result of `erlang:+/2' via a `do'
 %% sequence -- a genuine `sys_core_fold' "ignored result of a call"
 %% warning, while still compiling successfully.
 warning_core_erlang() ->
