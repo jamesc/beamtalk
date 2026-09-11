@@ -8,7 +8,7 @@
 -moduledoc """
 EUnit tests for beamtalk_interface module.
 
-Tests log_compiler_diagnostics/2 (BT-2219): verifies that an OTP logger call
+Tests log_compiler_diagnostics/2: verifies that an OTP logger call
 fires at the appropriate level when the compiler port returns {error, Diagnostics}
 in findSendersIn/2 and findReferencesToIn/2, while [] is still returned
 (per-method fault-tolerance contract unchanged).
@@ -77,7 +77,7 @@ collect_log_until(Level, Deadline) ->
     end.
 
 %%% ============================================================================
-%%% BT-2219: log_compiler_diagnostics/2 — warning for parse failure
+%%% log_compiler_diagnostics/2 — warning for parse failure
 %%% ============================================================================
 
 log_compiler_diagnostics_warning_test() ->
@@ -100,7 +100,7 @@ log_compiler_diagnostics_warning_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-2219: log_compiler_diagnostics/2 — error for port unavailability
+%%% log_compiler_diagnostics/2 — error for port unavailability
 %%% ============================================================================
 
 log_compiler_diagnostics_error_on_port_unavailable_test() ->
@@ -122,7 +122,7 @@ log_compiler_diagnostics_error_on_port_unavailable_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-2219: log_compiler_diagnostics/2 — error for port timeout
+%%% log_compiler_diagnostics/2 — error for port timeout
 %%% ============================================================================
 
 log_compiler_diagnostics_error_on_timeout_test() ->
@@ -143,7 +143,7 @@ log_compiler_diagnostics_error_on_timeout_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-2219: findSendersIn/2 — still returns a list (happy path)
+%%% findSendersIn/2 — still returns a list (happy path)
 %%% ============================================================================
 
 find_senders_in_returns_list_test() ->
@@ -159,7 +159,7 @@ find_senders_in_returns_list_test() ->
     ?assert(is_list(Result)).
 
 %%% ============================================================================
-%%% BT-2219: findReferencesToIn/2 — still returns a list (happy path)
+%%% findReferencesToIn/2 — still returns a list (happy path)
 %%% ============================================================================
 
 find_references_to_in_returns_list_test() ->
@@ -169,7 +169,7 @@ find_references_to_in_returns_list_test() ->
     ?assert(is_list(Result)).
 
 %%% ============================================================================
-%%% Navigation FFI type-error and degrade-to-[] paths (BT-2384)
+%%% Navigation FFI type-error and degrade-to-[] paths
 %%%
 %%% These exercise the navigation FFI exports without a running class registry:
 %%% the input-validation error clauses and (where the compiler port is not
@@ -231,7 +231,7 @@ ffi_sites_in_rejects_bad_args_test() ->
     ).
 
 %%% ============================================================================
-%%% version/0 fallback (BT-2384)
+%%% version/0 fallback
 %%%
 %%% Under EUnit the beamtalk_runtime app is typically not started, so version/0
 %%% takes the <<"unknown">> fallback. Either way it must return a binary.
@@ -268,7 +268,7 @@ dispatch_unknown_selector_raises_dnu_test() ->
     ).
 
 %%% ============================================================================
-%%% Live registry tests (BT-2384)
+%%% Live registry tests
 %%%
 %%% Load the full stdlib so the class registry is populated with real classes
 %%% (Integer, Object, etc.) and exercise allClasses/0, classNamed/1, findClass/1,
@@ -282,9 +282,9 @@ fake_self() ->
     {beamtalk_object, 'BeamtalkInterface class', 'bt@stdlib@beamtalk_interface', self()}.
 
 live_setup() ->
-    %% BT-3400: boot through the shared beamtalk_test_boot helper rather than
+    %% Boot through the shared beamtalk_test_boot helper rather than
     %% an ad hoc pg/bootstrap/init sequence — see beamtalk_test_runner_tests's
-    %% live_setup/0 for why the old sequence here was the flake's root cause.
+    %% live_setup/0 for the ordering this must preserve.
     beamtalk_test_boot:boot_real_stdlib('Object'),
     ok.
 
@@ -550,7 +550,7 @@ live_registry_test_() ->
     end}.
 
 %%% ============================================================================
-%%% BT-3084: make_method_not_found_error/2 renders the canonical (quoted) DNU
+%%% make_method_not_found_error/2 renders the canonical (quoted) DNU
 %%% message instead of hand-rolling its own unquoted copy.
 %%% ============================================================================
 

@@ -7,17 +7,17 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Handle-registry for `File open:mode:` (BT-3020).
+Handle-registry for `File open:mode:`.
 
 `open:mode:` hands the caller a `FileHandle` it must close itself — see
 `beamtalk_file:'open:mode:'/2`. Without this registry an unclosed handle
 survives the caller's death and stays open for the lifetime of the node,
 because the descriptor is owned by the long-lived `File` class process
 rather than the caller. This server is the reclamation and diagnostics
-substrate BT-3020 adds: it tracks every outstanding `open:mode:` handle
+substrate this server adds: it tracks every outstanding `open:mode:` handle
 against an *owner*, and closes an owner's handles when the owner dies.
 
-## Ownership tiers (BT-3020 decision (a))
+## Ownership tiers
 
 `beamtalk_file:'open:mode:'/2` resolves an owner via a three-tier rule before
 calling `register/2`:
@@ -40,8 +40,8 @@ closed handle never lingers and a later owner death can never double-close it.
 
 The bookkeeping half of that reclamation is synchronous — the dead owner's
 handles are gone from `open_handles/0` the moment the `'DOWN'` is handled —
-but the `file:close/1` calls themselves are handed to a transient process
-(BT-3050). Each close is a round-trip to that handle's `file_io_server`, and
+but the `file:close/1` calls themselves are handed to a transient process.
+Each close is a round-trip to that handle's `file_io_server`, and
 `register/2`, `unregister/1` and `open_handles/0` are all calls to *this*
 process; doing the closes inline would block the registry's mailbox — and so
 every concurrent `File open:mode:` / `close` / `openHandles` node-wide — until
@@ -53,7 +53,7 @@ crashes and restarts, all bookkeeping is lost and every previously-registered
 handle becomes untracked (still open, no longer reclaimed on owner death, no
 longer listed). Handles opened after the restart are tracked normally.
 `terminate/2` logs a warning on an abnormal exit so this loss is at least
-observable, rather than a silent regression back to BT-3020's original leak.
+observable, rather than a silent regression back to the original leak.
 
 `register/2` and `unregister/1` never let a registry failure (crashed
 mid-call, or too slow to reply) propagate out of `open:mode:` / `close` — a
@@ -311,7 +311,7 @@ demonitor_owner(Owner, Monitors) ->
 %% round-trip to that handle's `file_io_server` process, so closing inline
 %% would hold this gen_server's mailbox — blocking every concurrent register /
 %% unregister / open_handles call node-wide — for as long as one dying owner's
-%% descriptors take, and indefinitely for a wedged one (BT-3050).
+%% descriptors take, and indefinitely for a wedged one.
 -spec handle_owner_down(reference(), pid(), #state{}) -> #state{}.
 handle_owner_down(MonRef, Owner, State) ->
     #state{handles = Handles, by_owner = ByOwner, monitors = Monitors} = State,

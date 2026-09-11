@@ -28,13 +28,13 @@ Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
     run_single_structured/2,
     find_test_classes/0,
     spawn_test_execution/6,
-    %% BT-762: Exported for beamtalk_test_runner
+    %% Exported for beamtalk_test_runner
     run_test_method/4,
     run_test_method/5,
     run_suite_lifecycle/5,
     structure_results/3,
     resolve_module/1,
-    %% BT-1293: Exported for testing
+    %% Exported for testing
     is_valid_setUp_result/2
 ]).
 
@@ -42,7 +42,7 @@ Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
 -export([should/2, runAll/1, runClass/2, skipTest/1, suiteFixture/1]).
 
 -ifdef(TEST).
-%% BT-1743: Exported for testing stack trace formatting
+%% Exported for testing stack trace formatting
 -export([format_stacktrace/1, ensure_test_context/4]).
 -endif.
 
@@ -152,7 +152,7 @@ skip(Reason) ->
     throw({bunit_skip, beamtalk_primitive:print_string(Reason)}).
 
 -doc """
-Execute tests from class-side dispatch (BT-440).
+Execute tests from class-side dispatch.
 
 Called from beamtalk_object_class handle_call via spawned process.
 Receives Selector (runAll | 'run:'), Args, ClassName, Module, and
@@ -211,7 +211,7 @@ execute_tests('run:', [TestMethodName], ClassName, Module, FlatMethods) ->
     end.
 
 -doc """
-Run all test methods (BT-440 — BIF fallback path).
+Run all test methods (BIF fallback path).
 WARNING: May deadlock if called from within a class gen_server handle_call.
 Prefer execute_tests/5 which receives gen_server state directly and avoids
 any gen_server:call back to the class process.
@@ -247,7 +247,7 @@ run_all(ClassName) ->
     end.
 
 -doc """
-Run a single test method (BT-440 — BIF fallback path).
+Run a single test method (BIF fallback path).
 WARNING: May deadlock if called from within a class gen_server handle_call.
 """.
 -spec run_single(atom(), atom()) -> binary().
@@ -268,7 +268,7 @@ run_single(ClassName, TestMethodName) when is_atom(TestMethodName) ->
     format_results(Results, Duration).
 
 -doc """
-Run all tests for a class and return structured results (BT-699).
+Run all tests for a class and return structured results.
 
 Returns a map with per-test results suitable for JSON encoding.
 Uses the BIF fallback path (safe outside gen_server).
@@ -324,7 +324,7 @@ run_all_structured(ClassName) ->
             structure_results(ClassName, Results, Duration)
     end.
 
--doc "Run a single test method and return structured results (BT-699).".
+-doc "Run a single test method and return structured results.".
 -spec run_single_structured(atom(), atom()) ->
     #{
         class := atom(),
@@ -360,7 +360,7 @@ run_single_structured(ClassName, TestMethodName) when is_atom(TestMethodName) ->
     structure_results(ClassName, Results, Duration).
 
 -doc """
-Find all loaded TestCase subclasses (BT-699).
+Find all loaded TestCase subclasses.
 
 Uses the class hierarchy ETS table to find all classes that inherit
 from TestCase. Returns class names as atoms.
@@ -646,12 +646,12 @@ and raw Erlang atom errors (e.g., badarith, badarg).
 """.
 -spec extract_error_kind(term()) -> atom().
 extract_error_kind({future_rejected, Reason}) ->
-    %% BT-838: Futures rejected by actor errors wrap the error.
+    %% Futures rejected by actor errors wrap the error.
     %% Recursively extract so both #beamtalk_error{} and {error, Map} wrappers
     %% are handled consistently.
     extract_error_kind(Reason);
 extract_error_kind({error, Wrapped}) when is_map(Wrapped) ->
-    %% BT-838: Actor gen_server exits wrap errors as {error, #{error => ...}}.
+    %% Actor gen_server exits wrap errors as {error, #{error => ...}}.
     extract_error_kind(Wrapped);
 extract_error_kind(#beamtalk_error{kind = Kind}) ->
     Kind;
@@ -689,7 +689,7 @@ discover_test_methods(FlatMethods) ->
 -doc """
 Discover test methods from module exports (BIF fallback path).
 
-BT-3251: uses `beamtalk_module_activation:safe_module_exports/1` rather than
+Uses `beamtalk_module_activation:safe_module_exports/1` rather than
 `Module:module_info(exports)`. `Module` here is a real Beamtalk-compiled
 `bt@`-prefixed test class, and Beamtalk's Core Erlang codegen compiles
 straight to Core Erlang via `compile:forms(..., [from_core | Opts])`
@@ -718,7 +718,7 @@ Resolve the BEAM module atom for a class name (no gen_server call).
 Uses the beamtalk compiler naming convention: bt@snake_case_name.
 Falls back to bt@stdlib@snake_case_name for stdlib classes.
 
-BT-3081: the CamelCase→snake_case conversion delegates to
+The CamelCase→snake_case conversion delegates to
 `beamtalk_module_name:camel_to_snake/1`, the single Erlang-side authority
 for the `ClassName ⇄ bt@[pkg@]snake_case` convention (ADR 0016).
 """.
@@ -752,10 +752,10 @@ resolve_module(ClassName) ->
     end.
 
 -doc """
-Run a single test method with setUp/tearDown lifecycle (BT-440).
+Run a single test method with setUp/tearDown lifecycle.
 
 FlatMethods is either a map (from gen_server state) or 'none' (BIF fallback).
-When 'none', uses safe_module_exports/1 (BT-3251) to check for setUp/tearDown.
+When 'none', uses safe_module_exports/1 to check for setUp/tearDown.
 Creates fresh instance, runs lifecycle, returns pass/fail.
 tearDown always runs, even if the test fails.
 """.
@@ -765,7 +765,7 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
     run_test_method(ClassName, Module, MethodName, FlatMethods, nil).
 
 -doc """
-Run a single test method with setUp/tearDown lifecycle and suite fixture (BT-1549).
+Run a single test method with setUp/tearDown lifecycle and suite fixture.
 
 Like run_test_method/4 but injects `suiteFixture => SuiteFixture` into the
 instance map after setUp, so test methods can access `self.suiteFixture`.
@@ -776,9 +776,9 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
     try
         Instance = Module:new(),
         {HasSetUp, HasTearDown} = check_lifecycle_methods(Module, FlatMethods),
-        %% BT-900: Value objects are immutable maps — setUp returns a new instance
+        %% Value objects are immutable maps — setUp returns a new instance
         %% with fields set. We must use that return value, not the original Instance.
-        %% BT-1293: But only when setUp returns a valid instance map of the same
+        %% But only when setUp returns a valid instance map of the same
         %% class. If setUp ends with an untaken conditional (e.g. false ifTrue: [...]),
         %% it returns false/nil rather than self — using that as the receiver would
         %% corrupt all test method dispatches with a DNU error.
@@ -793,7 +793,7 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                 false ->
                     Instance
             end,
-        %% BT-1549: Inject suite fixture so test methods can access self.suiteFixture
+        %% Inject suite fixture so test methods can access self.suiteFixture
         SetUpInstance = inject_suite_fixture(SetUpInstance0, SuiteFixture),
         TestResult =
             try
@@ -870,7 +870,7 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
 -doc """
 Check for setUp/tearDown methods, using FlatMethods map or module exports.
 
-BT-3251: the `none` clause reads exports via
+The `none` clause reads exports via
 `beamtalk_module_activation:safe_module_exports/1`, not
 `Module:module_info(exports)` — see `discover_test_methods_from_module/1`
 for why the BIF-fallback path can never rely on `module_info/1`.
@@ -885,10 +885,10 @@ check_lifecycle_methods(Module, none) ->
 -doc """
 Return true when setUp's result is a valid instance of the same class.
 
-BT-1293: Prevents setUp's accidental non-instance return (e.g. `false` from
+Prevents setUp's accidental non-instance return (e.g. `false` from
 an untaken `ifTrue:` branch) from replacing `self` in test method dispatch.
 A valid result is a map carrying the same `'$beamtalk_class'` tag as the
-original instance — i.e. the normal BT-900 value-object case where setUp
+original instance — i.e. the normal value-object case where setUp
 assignments return an updated copy of self.
 """.
 -spec is_valid_setUp_result(term(), term()) -> boolean().
@@ -903,7 +903,7 @@ is_valid_setUp_result(_Instance, _Result) ->
     false.
 
 -doc """
-Inject suite fixture into instance map (BT-1549).
+Inject suite fixture into instance map.
 
 Adds `suiteFixture => Value` to the instance so test methods and tearDown
 can access it via `self.suiteFixture`. Always injects (even nil) so access
@@ -916,7 +916,7 @@ inject_suite_fixture(Instance, _SuiteFixture) ->
     Instance.
 
 -doc """
-Run a batch of tests wrapped with setUpOnce/tearDownOnce lifecycle (BT-1549).
+Run a batch of tests wrapped with setUpOnce/tearDownOnce lifecycle.
 
 1. Creates temp instance, dispatches setUpOnce, captures return as Fixture
 2. Calls TestFun(Fixture) which returns [{pass|fail|skip, ...}]
@@ -963,9 +963,9 @@ run_suite_lifecycle(_ClassName, Module, FlatMethods, TestMethods, TestFun) ->
     end.
 
 -doc """
-Check for setUpOnce/tearDownOnce methods (BT-1549).
+Check for setUpOnce/tearDownOnce methods.
 
-BT-3251: the `none` clause reads exports via
+The `none` clause reads exports via
 `beamtalk_module_activation:safe_module_exports/1`, not
 `Module:module_info(exports)` — see `discover_test_methods_from_module/1`
 for why the BIF-fallback path can never rely on `module_info/1`.
@@ -977,7 +977,7 @@ check_suite_lifecycle_methods(Module, none) ->
     Exports = beamtalk_module_activation:safe_module_exports(Module),
     {lists:keymember(setUpOnce, 1, Exports), lists:keymember(tearDownOnce, 1, Exports)}.
 
--doc "Run tearDownOnce, swallowing errors to avoid masking test results (BT-1549).".
+-doc "Run tearDownOnce, swallowing errors to avoid masking test results.".
 -spec run_teardown_once(atom(), term(), boolean()) -> ok.
 run_teardown_once(Module, Fixture, true) ->
     try
@@ -1034,7 +1034,7 @@ format_results(Results, Duration) ->
         end,
     unicode:characters_to_binary(IoList).
 
--doc "Convert raw test results to structured map (BT-699).".
+-doc "Convert raw test results to structured map.".
 -spec structure_results(
     atom(), [{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}], float()
 ) ->
@@ -1084,7 +1084,7 @@ structure_results(ClassName, Results, Duration) ->
 -doc """
 Spawn test execution in a separate process to avoid gen_server deadlock.
 
-BT-440/BT-704: Test execution calls back into the class system,
+Test execution calls back into the class system,
 so it must run outside the class process.
 """.
 -spec spawn_test_execution(atom(), list(), atom(), atom(), map(), {pid(), term()}) -> pid().
@@ -1145,7 +1145,7 @@ skipTest(Reason) when is_atom(Reason) ->
 skipTest(Reason) ->
     skipTest(beamtalk_primitive:print_string(Reason)).
 
-%% suiteFixture: → suiteFixture/1 (BT-1549)
+%% suiteFixture: → suiteFixture/1
 %%
 %% Returns the suite fixture from the instance map, or nil if not present.
 %% The BUnit runner injects `suiteFixture => Value` into the instance map

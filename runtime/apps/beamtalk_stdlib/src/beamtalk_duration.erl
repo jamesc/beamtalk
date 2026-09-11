@@ -36,7 +36,7 @@ the first keyword of the Beamtalk selector. Operator selectors (`+`, `<`, …)
 are not valid Erlang function names, so the Beamtalk operators dispatch
 through named shims (`add`, `subtract`, `multiply`, `lt`, `gt`, `lte`,
 `gte`). The equality operators have no shim — codegen lowers them to the
-Erlang BIFs without dispatching (ADR 0002, BT-2997).
+Erlang BIFs without dispatching (ADR 0002).
 """.
 
 %% Class methods (canonical colon forms)
@@ -328,7 +328,7 @@ gte(Self, Other) -> '>='(Self, Other).
 
 %% No `eql`/`neq`/`sneq` shims: the `=:=`, `/=` and `=/=` operators are lowered
 %% directly to the Erlang BIFs by codegen and never dispatch to a method (ADR
-%% 0002, BT-2997), so nothing could reach them. Duration canonicalises to a
+%% 0002), so nothing could reach them. Duration canonicalises to a
 %% single `millis` field, which makes raw term equality already correct.
 
 %%% ============================================================================

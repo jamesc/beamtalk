@@ -39,11 +39,11 @@ keyword of the Beamtalk selector (stripping the trailing colon). The class-side
 shims (`nextInteger/1`, `seed/1`) bridge the gap so that
 `Random nextInteger: max` dispatches to the canonical `'nextInteger:'/1`
 implementation. The instance-side `next`/`nextInteger:` selectors delegate
-directly to `next/1` / `nextInteger/2` (ADR 0101 / BT-2731).
+directly to `next/1` / `nextInteger/2` (ADR 0101).
 """.
 
 -export(['next'/0, 'nextInteger:'/1, 'new'/0, 'seed:'/1]).
-%% Instance-side `native:` delegation targets (ADR 0101 / BT-2731): the first
+%% Instance-side `native:` delegation targets (ADR 0101): the first
 %% keyword + self-threading rule maps `rng next` → `next/1` and
 %% `rng nextInteger: n` → `nextInteger/2`. They coexist with the arity-0/1
 %% class-side `next/0` / `nextInteger/1` (arity disambiguates).
@@ -175,7 +175,7 @@ Used by List atRandom and Tuple atRandom.
 %%% The class-side `next`/`new` and the instance-side `next`/`nextInteger:`
 %%% delegations need no shim: their first keyword already names an exported
 %%% function (`next/0`, `new/0`, `next/1`, `nextInteger/2` — see the `native:`
-%%% `self delegate` methods on the Random class, ADR 0101 / BT-2731).
+%%% `self delegate` methods on the Random class, ADR 0101).
 %%% ============================================================================
 
 -doc "FFI shim: `(Erlang beamtalk_random) nextInteger: max`".

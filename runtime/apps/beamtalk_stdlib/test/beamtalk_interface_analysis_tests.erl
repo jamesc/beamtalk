@@ -8,7 +8,7 @@
 -moduledoc ""
 "\n"
 "EUnit tests for beamtalk_interface: erlangHelp paths and source-analysis\n"
-"degradation paths (BT-2248).\n"
+"degradation paths.\n"
 "\n"
 "Tests cover:\n"
 "- erlangHelp/1,2 and dispatch('erlangHelp:', ...) — happy path and error paths\n"
@@ -356,7 +356,7 @@ ffi_sites_in_negative_arity_raises_type_error_test() ->
     end.
 
 %%====================================================================
-%% log_compiler_diagnostics/2 — TEST export (BT-2219)
+%% log_compiler_diagnostics/2 — TEST export
 %%
 %% Verifies the function returns ok without crashing on all diagnostic shapes.
 %% The actual log level (ERROR vs WARNING) is not asserted — we verify
@@ -396,9 +396,8 @@ log_compiler_diagnostics_non_binary_message_returns_ok_test() ->
     ?assertEqual(ok, Result).
 
 %%====================================================================
-%% instance_selectors/1, validated_own_categories/2, method_sig_line/2
-%% (BT-3239, partial-trust reconciliation BT-3258) — grouped
-%% `Instance methods:` rendering for `:help`/`docs`.
+%% instance_selectors/1, validated_own_categories/2, method_sig_line/2 —
+%% grouped `Instance methods:` rendering for `:help`/`docs`.
 %%====================================================================
 
 instance_selectors_filters_to_instance_side_test() ->
@@ -432,7 +431,7 @@ validated_own_categories_groups_when_selectors_match_test() ->
 
 validated_own_categories_drops_class_side_methods_test() ->
     %% `format_class_help/2`'s "Instance methods:" section is instance-only
-    %% (BT-3087 `collect_flattened_methods` never walks class-side) —
+    %% (`collect_flattened_methods` never walks class-side) —
     %% grouping must preserve that scope even though the Rust categorizer
     %% interleaves both sides.
     Categories = [
@@ -452,7 +451,7 @@ validated_own_categories_drops_class_side_methods_test() ->
 
 validated_own_categories_no_dividers_falls_back_to_undefined_test() ->
     %% A single implicit, unnamed category (no dividers in the source at
-    %% all) must render exactly as it did before BT-3239 — no lone
+    %% all) must render flat — no lone
     %% "(uncategorized)" header.
     Categories = [
         #{methods => [#{selector => <<"foo">>, side => instance}]}
@@ -476,7 +475,7 @@ validated_own_categories_single_named_category_is_kept_test() ->
     ).
 
 validated_own_categories_uncovered_live_selector_becomes_trailing_bucket_test() ->
-    %% BT-3258: the on-disk source and the live image have diverged (e.g. an
+    %% The on-disk source and the live image have diverged (e.g. an
     %% unflushed `>>` patch, or — same root cause — a `Value subclass:`'s
     %% compiler-generated accessor / an in-file standalone `ClassName >>
     %% selector` extension method that the AST-based categorizer can never
@@ -493,7 +492,7 @@ validated_own_categories_uncovered_live_selector_becomes_trailing_bucket_test() 
     ).
 
 validated_own_categories_uncovered_selectors_fold_into_leading_unnamed_bucket_test() ->
-    %% BT-3258: when a leading implicit (unnamed) bucket already exists —
+    %% When a leading implicit (unnamed) bucket already exists —
     %% hand-written methods declared before the first divider — uncovered
     %% live selectors fold into that same bucket rather than duplicating a
     %% second unnamed one.
@@ -508,7 +507,7 @@ validated_own_categories_uncovered_selectors_fold_into_leading_unnamed_bucket_te
     ).
 
 validated_own_categories_all_uncovered_collapses_to_flat_undefined_test() ->
-    %% BT-3258: a `Value subclass:` with slots but no hand-written instance
+    %% A `Value subclass:` with slots but no hand-written instance
     %% methods at all (nothing in the AST to categorize) has every live
     %% selector uncovered; that folds into a single implicit unnamed
     %% bucket, which is identical to the flat rendering, so this still
@@ -567,7 +566,7 @@ method_sig_line_unsealed_is_unchanged_test() ->
     ?assertEqual(<<"foo">>, beamtalk_interface:method_sig_line(<<"foo">>, false)).
 
 %%====================================================================
-%% render_own_methods_part/2 (BT-3239) — the actual `Instance methods:`
+%% render_own_methods_part/2 — the actual `Instance methods:`
 %% string `format_class_help/2` emits, deterministic and independent of a
 %% live class or compiler-port round trip (a dropped indentation prefix in
 %% either branch would fail one of these directly, unlike a live end-to-end
@@ -584,7 +583,7 @@ render_own_methods_part_flat_indents_every_line_test() ->
     ?assertEqual(<<"\nInstance methods:\n  bar\n  foo">>, Result).
 
 render_own_methods_part_flat_sealed_suffix_is_indented_too_test() ->
-    %% Regression guard (BT-3239 review): the flat-fallback branch must
+    %% Regression guard: the flat-fallback branch must
     %% indent every rendered line, sealed or not — a prior version of this
     %% function rendered the flat branch flush at column 0.
     OwnDocs = [{foo, <<"foo">>, true}],

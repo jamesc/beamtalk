@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_tuple module (BT-1173).
+EUnit tests for beamtalk_tuple module.
 
 Tests at, as_string, do, and error paths.
 """.

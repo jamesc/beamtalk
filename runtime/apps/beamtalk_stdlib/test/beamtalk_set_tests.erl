@@ -5,7 +5,7 @@
 
 -moduledoc """
 Tests for beamtalk_set helper module and compiled
-bt@stdlib@set stdlib dispatch (BT-73).
+bt@stdlib@set stdlib dispatch.
 
 Tests cover:
 - beamtalk_set: tagged map operations using ordsets
@@ -368,7 +368,7 @@ do_type_error_test() ->
     ).
 
 %%% ============================================================================
-%%% Merge-based set operations, mixed `==` runs — BT-2997
+%%% Merge-based set operations, mixed `==` runs
 %%% ============================================================================
 %%%
 %%% `intersection/2`, `difference/2` and `is_subset_of/2` walk two term-order

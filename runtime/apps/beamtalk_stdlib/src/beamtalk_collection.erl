@@ -8,20 +8,20 @@
 -moduledoc """
 Runtime infrastructure for Collection iteration.
 
-BT-505: Provides `to_list/1` — a helper used by compiler-generated
+Provides `to_list/1` — a helper used by compiler-generated
 Core Erlang (list_ops.rs) to convert non-list collection receivers
 to Erlang lists before passing them to `lists:foldl`.
 
-BT-815: Provides `inject_into/3` — called by the `@primitive "inject:into:"`
-body on the abstract Collection class.  Most other collection methods
+Provides `inject_into/3` — called by the `@primitive "inject:into:"`
+body on the abstract Collection class. Most other collection methods
 (collect:, select:, reject:, includes:, detect:, anySatisfy:, allSatisfy:)
-are now self-hosted as pure Beamtalk on collection.bt and no longer need
+are self-hosted as pure Beamtalk on collection.bt and no longer need
 Erlang helpers.
 
-BT-2695: Provides the numeric aggregates `sum/1`, `maximum/1`, `minimum/1`,
+Provides the numeric aggregates `sum/1`, `maximum/1`, `minimum/1`,
 and `average/1` — backing the `@primitive` `sum`/`max`/`min`/`average` on
 Collection. They fold over `to_list/1`; `max`/`min`/`average` raise
-`empty_collection` on an empty collection (BT-3021).
+`empty_collection` on an empty collection.
 """.
 
 -export([
@@ -58,7 +58,7 @@ wrapper, the loop deliberately threads the accumulator as its *last*
 argument (`fold_block(List, Block, Acc)`, not `(List, Acc, Block)`). On the
 BEAM JIT (OTP 28) that layout folds ~1.6x faster — close to native
 `lists:foldl` — than the accumulator-in-the-middle shape, with no change to
-the block call itself (BT-2713). See `runtime/perf/bench_collect_selfhost.escript`.
+the block call itself. See `runtime/perf/bench_collect_selfhost.escript`.
 """.
 -spec inject_into(term(), term(), function()) -> term().
 inject_into(Self, Initial, Block) ->
@@ -122,7 +122,7 @@ average(Self) ->
         List -> lists:sum(List) / length(List)
     end.
 
-%% BT-3021: `empty_collection`, not `user_error` — this is the same condition as
+%% `empty_collection`, not `user_error` — this is the same condition as
 %% `#() first`, and callers need to discriminate it from an arbitrary
 %% `self error:` raised by user code inside the same `on:do:` block.
 -spec raise_empty(atom()) -> no_return().
@@ -137,12 +137,12 @@ raise_empty(Selector) ->
 -doc """
 Raise `empty_collection` naming `Class` and `Selector`.
 
-BT-3021: pure Beamtalk has no way to raise a *named* error kind — `self error:`
+Pure Beamtalk has no way to raise a *named* error kind — `self error:`
 always yields `user_error` — so collection classes written in Beamtalk (e.g.
 `Interval`) call this to report empty-collection access with the same kind the
 `@primitive` accessors on `List`/`String` raise. This is `empty_collection`-specific
 sugar with an auto-generated hint; for any other kind, or a hint specific to
-the call site, use `Exception class >> signalKind:class:selector:hint:` (BT-3042)
+the call site, use `Exception class >> signalKind:class:selector:hint:`
 directly from Beamtalk.
 """.
 -spec raiseEmpty(atom(), atom()) -> no_return().
@@ -158,7 +158,7 @@ raiseEmpty(Class, Selector) ->
 -doc """
 Raise `index_out_of_bounds` naming `Class` and `Selector`.
 
-BT-3027: pure Beamtalk has no way to raise a *named* error kind (`self
+Pure Beamtalk has no way to raise a *named* error kind (`self
 error:` always yields `user_error`), so collection classes written in
 Beamtalk (e.g. `Interval`) call this to report an out-of-range index with
 the same kind the `@primitive` accessors on `List`/`Array`/`String` raise.
@@ -176,7 +176,7 @@ raiseIndexOutOfBounds(Class, Selector) ->
 -doc """
 Raise `not_found` for a `detect:` that ran to completion without matching.
 
-BT-3028: `Collection>>detect:` answers `E`, so there is no in-band way to say
+`Collection>>detect:` answers `E`, so there is no in-band way to say
 "nothing matched" — it raises, matching the `@primitive` `List>>detect:`. Pure
 Beamtalk cannot raise a *named* kind (`self error:` always yields `user_error`),
 so the generic implementation calls this. `Class` is the receiver's own class,
@@ -202,7 +202,7 @@ the receiver's representation:
 - Array receiver → `Array` (`beamtalk_array:from_list/1`)
 - anything else (already an Erlang list, or another collection) → the list as-is
 
-Called from compiler-generated Core Erlang (`list_ops`) — see BT-2342.
+Called from compiler-generated Core Erlang (`list_ops`).
 """.
 -spec from_list_like(term(), list()) -> term().
 from_list_like(Recv, List) when is_binary(Recv) ->
@@ -219,7 +219,7 @@ Called from compiler-generated Core Erlang for `do:`, `collect:`,
 `select:`, `reject:`, and `inject:into:` when the receiver is not
 already an Erlang list.
 
-BT-3022: the accumulator is the *caller's mailbox*, not its process dictionary.
+The accumulator is the *caller's mailbox*, not its process dictionary.
 A `Collection` subclass may implement `do:` by delegating to a class-side method,
 and class-method dispatch runs the callee in the class gen_server process
 (`beamtalk_class_dispatch:class_send/3`). The iteration block is a plain fun, so

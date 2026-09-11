@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_time module (BT-1551).
+EUnit tests for beamtalk_time module.
 
 Tests the Time class backing functions: nowS/0, nowMs/0, nowUs/0.
 """.

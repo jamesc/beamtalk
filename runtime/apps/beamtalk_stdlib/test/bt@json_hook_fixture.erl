@@ -2,7 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 %% Minimal stub mimicking a compiled Beamtalk Value class that implements
-%% the `asJson` JSON conversion hook (BT-2818).
+%% the `asJson` JSON conversion hook.
 %%
 %% Named 'bt@json_hook_fixture' so beamtalk_primitive:class_name_to_module/1
 %% resolves class 'JsonHookFixture' to this module via the bt@<snake_case>

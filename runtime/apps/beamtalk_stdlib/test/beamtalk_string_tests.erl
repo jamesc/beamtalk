@@ -58,7 +58,7 @@ at_negative_index_test() ->
         beamtalk_string:at(<<"hi">>, -1)
     ).
 
-%% BT-3021: indexing an *empty* String is `empty_collection`, matching
+%% Indexing an *empty* String is `empty_collection`, matching
 %% `List at:`; an index below 1 stays `index_out_of_bounds` even when empty,
 %% since it is malformed either way.
 at_empty_string_test() ->
@@ -80,7 +80,7 @@ at_empty_string_zero_index_test() ->
     ).
 
 %%% ============================================================================
-%%% first/1, last/1 (BT-3021)
+%%% first/1, last/1
 %%%
 %%% Grapheme-aware element accessors. On `<<>>` they raise `empty_collection` —
 %%% the same kind `List first` raises — so a single `on:do:` clause handles both.

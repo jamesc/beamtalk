@@ -53,7 +53,7 @@ All operations are grapheme-aware and handle UTF-8 correctly.
 -doc """
 1-based grapheme access. Returns the grapheme at the given index.
 
-BT-3021: mirrors `beamtalk_list:at/2` — indexing an empty String is
+Mirrors `beamtalk_list:at/2` — indexing an empty String is
 `empty_collection`, any other out-of-range index is `index_out_of_bounds`. An
 index below 1 is malformed whether or not the String is empty, so that clause
 is reached first (it is listed last, but `Idx >= 1` excludes it above).
@@ -82,7 +82,7 @@ at(Str, Idx) when is_binary(Str), is_integer(Idx) ->
 -doc """
 First grapheme cluster, as a String.
 
-BT-3021: raises `empty_collection` on `""` — the same kind `List first` raises,
+Raises `empty_collection` on `""` — the same kind `List first` raises,
 so `on:do:` can handle both with one clause.
 """.
 -spec first(binary()) -> binary().
@@ -97,7 +97,7 @@ first(Str) when is_binary(Str) ->
 -doc """
 Last grapheme cluster, as a String.
 
-BT-3021: raises `empty_collection` on `""` (see `first/1`).
+Raises `empty_collection` on `""` (see `first/1`).
 """.
 -spec last(binary()) -> binary().
 last(<<>>) ->

@@ -55,7 +55,7 @@ dictionary or ETS state is required.
 ]).
 
 -ifdef(TEST).
-%% Expose internal helpers for EUnit testing (BT-2219, BT-2467, BT-3084, BT-3239).
+%% Expose internal helpers for EUnit testing.
 -export([
     log_compiler_diagnostics/2,
     class_object_for_pid/2,
@@ -205,7 +205,7 @@ version() ->
     end.
 
 -doc """
-Find call sites of a selector within a single method's source (BT-2190).
+Find call sites of a selector within a single method's source.
 
 Backs `SystemNavigation sendersOf:`. Delegates to `beamtalk_compiler:find_senders_in_source/2`,
 which parses the source via the OTP-port compiler and walks the AST for
@@ -249,7 +249,7 @@ findSendersIn(_Source, _Selector) ->
     beamtalk_error:raise(Err2).
 
 -doc """
-Find every message send within a single method's source (BT-2206).
+Find every message send within a single method's source.
 
 Backs `SystemNavigation unimplementedSelectors`. Single-pass companion to
 `findSendersIn/2`: delegates to `beamtalk_compiler:find_all_sends_in_source/1`,
@@ -297,7 +297,7 @@ allSendsIn(_Source) ->
     beamtalk_error:raise(Err2).
 
 -doc """
-Find every `announce:' emission within a single method's source (BT-2475).
+Find every `announce:' emission within a single method's source.
 
 Backs `SystemNavigation announcementsSentBy:' — the static dual of
 `AnnouncementNavigation' (ADR 0093 §7). Delegates to
@@ -345,7 +345,7 @@ announceSitesIn(_Source) ->
     beamtalk_error:raise(Err2).
 
 -doc """
-Find references to a class within a single method's source (BT-2203).
+Find references to a class within a single method's source.
 
 Backs `SystemNavigation referencesTo:'. Delegates to
 `beamtalk_compiler:find_references_to_in_source/2', which parses the source
@@ -390,7 +390,7 @@ findReferencesToIn(_Source, _ClassName) ->
     beamtalk_error:raise(Err2).
 
 -doc """
-Find reads of an field within a single method's source (BT-2208).
+Find reads of an field within a single method's source.
 
 Backs `SystemNavigation fieldReadersOf:in:`. Delegates to
 `beamtalk_compiler:find_field_readers_in_source/2`, which parses the source
@@ -408,7 +408,7 @@ findFieldReadersIn(Source, Field) ->
     find_field_access(Source, Field, readers, 'findFieldReadersIn:field:').
 
 -doc """
-Find writes of an field within a single method's source (BT-2208).
+Find writes of an field within a single method's source.
 
 Backs `SystemNavigation fieldWritersOf:in:`. Delegates to
 `beamtalk_compiler:find_field_writers_in_source/2`, which parses the source
@@ -426,7 +426,7 @@ findFieldWritersIn(Source, Field) ->
     find_field_access(Source, Field, writers, 'findFieldWritersIn:field:').
 
 -doc """
-Shared driver for the field reader/writer FFI calls (BT-2208).
+Shared driver for the field reader/writer FFI calls.
 
 `Kind` selects the underlying compiler query (`readers' or `writers'); both
 take a binary source and an field name and return a list of
@@ -469,7 +469,7 @@ find_field_access(_Source, _IVar, _Kind, Selector) ->
     beamtalk_error:raise(Err2).
 
 -doc """
-Find Erlang FFI call sites within a single method's source (BT-2211).
+Find Erlang FFI call sites within a single method's source.
 
 Backs `SystemNavigation ffiSitesFor:`. Delegates to
 `beamtalk_compiler:find_ffi_sites_in_source/4`, which parses the source via the
@@ -521,8 +521,9 @@ ffiSitesIn(_Source, _Module, _Function, _Arity) ->
     ),
     beamtalk_error:raise(Err2).
 
-%% BT-3090: delegates to the canonical `beamtalk_text:to_binary/1` — was an
-%% atom/binary-only copy (would raise `function_clause` on a list input).
+%% Delegates to the canonical `beamtalk_text:to_binary/1` rather than
+%% hand-rolling an atom/binary-only copy that would raise `function_clause`
+%% on a list input.
 -spec to_binary(term()) -> binary().
 to_binary(Name) -> beamtalk_text:to_binary(Name).
 
@@ -719,7 +720,7 @@ handle_class_named(_ClassName) ->
 
 -doc """
 Build the class object tuple for a resolved class `Pid`, tolerating a class
-object process that is transiently unavailable (BT-2467).
+object process that is transiently unavailable.
 
 `beamtalk_object_class:module_name/1` is a `gen_server:call` to the class
 object process. A race between `whereis_class/1` handing back a live pid and
@@ -756,7 +757,7 @@ class_object_for_pid(ClassName, Pid) ->
 Resolve a metaclass display tag (`'Foo class'`) to the `Foo class` metaclass
 object, or nil when the tag is not a metaclass tag or names no live class.
 
-BT-2223: The extension registry keys class-side extensions under the metaclass
+The extension registry keys class-side extensions under the metaclass
 display tag (`className ++ " class"`), produced by
 `beamtalk_class_registry:class_object_tag/1`. `whereis_class/1` has no entry
 for that tag, so `findClass:`/`classNamed:` would otherwise return nil for a
@@ -833,7 +834,7 @@ handle_help(ClassArg) ->
 -doc """
 Format method documentation for help:selector:.
 
-BT-2091: Walks both the instance-side and class-side method tables, mirroring
+Walks both the instance-side and class-side method tables, mirroring
 the deprecated `docs` op's behaviour so `:help ClassName <classSideMethod>`
 keeps working after that op was removed. The lookup order is:
 
@@ -879,7 +880,7 @@ handle_help_selector(ClassArg, SelectorArg) ->
             end
     end.
 
-%% BT-2091: Walk instance side first, then class side, then Class protocol.
+%% Walk instance side first, then class side, then Class protocol.
 -spec resolve_help_method(atom(), pid(), atom()) -> binary() | {error, #beamtalk_error{}}.
 resolve_help_method(ClassName, ClassPid, SelectorAtom) ->
     case beamtalk_method_resolver:resolve(ClassPid, SelectorAtom) of
@@ -912,18 +913,17 @@ resolve_help_method(ClassName, ClassPid, SelectorAtom) ->
             end
     end.
 
-%% BT-2091: Walk the class hierarchy looking at *class-side* method tables
+%% Walk the class hierarchy looking at *class-side* method tables
 %% so the help header attributes the method to the class that actually
 %% defines it (mirrors find_defining_class/2 for the instance side).
-%% BT-3087: Delegates to beamtalk_hierarchy_docs:find_defining_class_method/2,
+%% Delegates to beamtalk_hierarchy_docs:find_defining_class_method/2,
 %% the implementation shared with beamtalk_repl_docs.
 -spec find_defining_class_method(pid(), atom()) -> atom().
 find_defining_class_method(ClassPid, Selector) ->
     beamtalk_hierarchy_docs:find_defining_class_method(ClassPid, Selector).
 
-%% BT-2091: Hardcoded Metaclass method docs.
-%% BT-3087: metaclass_method_doc/1 itself is shared with beamtalk_repl_docs
-%% via beamtalk_hierarchy_docs.
+%% Hardcoded Metaclass method docs. metaclass_method_doc/1 itself is shared
+%% with beamtalk_repl_docs via beamtalk_hierarchy_docs.
 %% Caller must normalise SelectorArg via ensure_atom/1 first so a binary
 %% selector cannot reach this path; that keeps make_method_not_found_error
 %% unable to crash on a binary input.
@@ -1159,19 +1159,18 @@ format_method_help(ClassName, SelectorAtom, DefiningClass, MethodObj) ->
     iolist_to_binary([Header, SealedLine, InheritedPart, SignatureLine, DocPart]).
 
 -doc """
-Compute BT-3239 source-divider method categories for `ClassName''s own
+Compute source-divider method categories for `ClassName''s own
 (non-inherited) instance methods, or `undefined' when no such grouping is
 available or safely usable.
 
 Returns `undefined' when: `ClassPid''s module carries no `beamtalk_source'
-attribute (a purely runtime-loaded class — BT-2601's documented boundary,
-`format_class_help/2' then renders exactly as it did before this function
-existed); the on-disk file can't be read; the compiler port can't
-parse/find the class in it (stale/renamed source); the class's source has
-no `// === Name ===' dividers at all (nothing to group by — the flat,
-alphabetical rendering *is* the BT-3239-compliant output here, per its
-"class with no dividers is unaffected" acceptance criterion); or the whole
-resulting grouping (after `validated_own_categories/2''s BT-3258
+attribute (a purely runtime-loaded class — `format_class_help/2' then
+renders exactly as it did before this function existed); the on-disk file
+can't be read; the compiler port can't parse/find the class in it
+(stale/renamed source); the class's source has no `// === Name ===' dividers
+at all (nothing to group by — the flat, alphabetical rendering is the
+correct output here: a class with no dividers is unaffected); or the whole
+resulting grouping (after `validated_own_categories/2''s
 partial-trust reconciliation, see its doc) collapses to a single implicit
 unnamed bucket covering every own selector — which renders identically to
 the flat listing anyway, so there is no point in a lone "(uncategorized)"
@@ -1214,7 +1213,7 @@ own_method_categories(ClassName, ClassPid, SealedMap) ->
         _:_ -> undefined
     end.
 
-%% BT-3258: partial-trust reconciliation between the on-disk categorized
+%% Partial-trust reconciliation between the on-disk categorized
 %% selectors and the live `SealedMap`. Filters the raw compiler-port
 %% `Categories` shape to instance-side methods, converts each selector to
 %% its atom, and — the safety property that matters — keeps a
@@ -1234,11 +1233,11 @@ own_method_categories(ClassName, ClassPid, SealedMap) ->
 %% exists, else appended as a synthesized trailing unnamed bucket, via
 %% `fold_uncovered/2`. This is what lets a `Value subclass:` or a class with
 %% standalone extensions still group everything the source *does*
-%% categorize instead of the pre-BT-3258 all-or-nothing fallback.
+%% categorize instead of falling back to an all-or-nothing rendering.
 %%
 %% Finally, a single, unnamed bucket (no dividers found at all, or every
 %% own selector ended up uncovered) returns `undefined` so the caller falls
-%% back to the identical pre-BT-3239 flat rendering rather than printing a
+%% back to the identical flat rendering rather than printing a
 %% lone "(uncategorized)" header no one asked for.
 -spec validated_own_categories([map()], map()) ->
     undefined | [{binary() | undefined, [atom()]}].
@@ -1316,11 +1315,11 @@ method_sig_line(Sig, false) ->
     Sig.
 
 -doc """
-Render `format_class_help/2''s `Instance methods:' section (BT-3239).
+Render `format_class_help/2''s `Instance methods:' section.
 
 `OwnDocs' is `[{Selector, Sig, Sealed}]` (own instance methods, sorted
-alphabetically). `OwnCategories' is `undefined' (render flat, exactly as
-before BT-3239) or `[{Name :: binary() | undefined, [atom()]}]` from
+alphabetically). `OwnCategories' is `undefined' (render flat) or
+`[{Name :: binary() | undefined, [atom()]}]` from
 `own_method_categories/3` (render grouped, source order). Every method
 line — flat or grouped — is indented two spaces under the `Instance
 methods:` header, matching this repo's documented `:help` output
@@ -1340,15 +1339,15 @@ render_own_methods_part([], _OwnCategories) ->
     <<>>;
 render_own_methods_part(OwnDocs, undefined) ->
     %% No source-backed category grouping available (no on-disk file, no
-    %% dividers, or a disk/live-image mismatch) — render exactly as before
-    %% BT-3239: one flat, alphabetical list.
+    %% dividers, or a disk/live-image mismatch) — render exactly as before:
+    %% one flat, alphabetical list.
     Lines = [
         iolist_to_binary([<<"  ">>, method_sig_line(Sig, Sealed)])
      || {_Sel, Sig, Sealed} <- OwnDocs
     ],
     iolist_to_binary([<<"\nInstance methods:\n">>, lists:join(<<"\n">>, Lines)]);
 render_own_methods_part(OwnDocs, Categories) ->
-    %% BT-3239: grouped by the class's `// === Name ===` source dividers,
+    %% Grouped by the class's `// === Name ===` source dividers,
     %% in source order — `Categories` is already validated
     %% (own_method_categories/3) to cover exactly `OwnDocs`'s selectors, so
     %% every `maps:get/2` below is total.
@@ -1391,7 +1390,7 @@ get_method_sig(ClassPid, Selector) ->
 -doc """
 Walk the class hierarchy to collect flattened method map.
 
-BT-3087: Delegates to `beamtalk_hierarchy_docs:collect_flattened_methods/2`,
+Delegates to `beamtalk_hierarchy_docs:collect_flattened_methods/2`,
 the implementation shared with `beamtalk_repl_docs` (both apps depend on
 `beamtalk_runtime`).
 """.
@@ -1402,7 +1401,7 @@ collect_flattened_methods(ClassName, ClassPid) ->
 -doc """
 Find which class in the hierarchy defines a selector.
 
-BT-3087: Delegates to `beamtalk_hierarchy_docs:find_defining_class/2`.
+Delegates to `beamtalk_hierarchy_docs:find_defining_class/2`.
 """.
 -spec find_defining_class(pid(), atom()) -> atom().
 find_defining_class(ClassPid, Selector) ->
@@ -1447,7 +1446,7 @@ make_class_not_found_error(ClassName) ->
 -spec make_method_not_found_error(atom(), atom()) -> #beamtalk_error{}.
 make_method_not_found_error(ClassName, Selector) ->
     NameBin = atom_to_binary(ClassName, utf8),
-    %% BT-3084: don't hand-roll (and unquote) the DNU message — with_selector/2
+    %% Don't hand-roll (and unquote) the DNU message — with_selector/2
     %% already regenerates it via the canonical beamtalk_error:generate_message/3,
     %% which quotes the selector (e.g. "Counter does not understand 'increment'").
     Err0 = beamtalk_error:new(does_not_understand, ClassName),

@@ -206,7 +206,7 @@ Result tryDo: [1 / 0]                           // => Result error: <RuntimeErro
         Value ->
             from_tagged_tuple({ok, Value})
     catch
-        %% BT-754/BT-761: Non-local returns (^ inside blocks) use throw({'$bt_nlr', ...}).
+        %% Non-local returns (^ inside blocks) use throw({'$bt_nlr', ...}).
         %% Re-raise so the enclosing method's NLR handler can intercept them.
         throw:NLR when ?IS_NLR(NLR) ->
             throw(NLR);

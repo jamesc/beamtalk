@@ -7,7 +7,7 @@
 %%% **DDD Context:** Actor System Context
 
 -moduledoc """
-OTP gen_server for push-mode subprocess delivery (BT-1187).
+OTP gen_server for push-mode subprocess delivery.
 
 Each `beamtalk_reactive_subprocess` process owns one port to the
 `beamtalk_exec` Rust helper binary and manages exactly one child subprocess
@@ -51,7 +51,6 @@ The `notify` actor must implement:
 
 == References ==
 
-* BT-1187 — ReactiveSubprocess feature
 * ADR 0051 "Subprocess Execution" — push tier design
 """.
 
@@ -226,7 +225,7 @@ init(Config) ->
 
 -doc "Dispatch sync calls.".
 -spec handle_call(term(), term(), map()) -> {reply, term(), map()}.
-%% BT-1604: Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
+%% Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
 handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
     beamtalk_actor:restore_propagated_ctx(PropCtx),
     handle_call({Selector, Args}, From, State);

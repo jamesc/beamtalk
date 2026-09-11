@@ -5,7 +5,7 @@
 %%
 %% Named 'bt@tc_stub' so that beamtalk_test_case:resolve_module('TcStub')
 %% finds this module via the bt@<snake_case> naming convention.
-%% Used by BT-2404 tests of run_all/1, run_single/2, run_all_structured/1,
+%% Used by tests of run_all/1, run_single/2, run_all_structured/1,
 %% and run_single_structured/2 (the BIF-fallback paths).
 -module('bt@tc_stub').
 

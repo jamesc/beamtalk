@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_queue module (BT-1250).
+EUnit tests for beamtalk_queue module.
 
 Tests cover:
 - new/0 — empty queue creation

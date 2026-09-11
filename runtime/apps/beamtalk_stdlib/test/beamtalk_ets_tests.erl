@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_ets module (BT-1189).
+EUnit tests for beamtalk_ets module.
 
 Tests cover:
 - new:type:/2 — table creation (all four types, type errors, duplicate name)

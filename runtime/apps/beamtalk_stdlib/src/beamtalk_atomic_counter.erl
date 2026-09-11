@@ -45,7 +45,6 @@ AtomicCounter objects are represented as tagged maps:
 
 ## References
 
-- BT-1250: stdlib: mutable collections — Queue and AtomicCounter
 - `ets:update_counter/3` for atomic increment
 - Existing FFI pattern: `beamtalk_ets.erl`
 """.
