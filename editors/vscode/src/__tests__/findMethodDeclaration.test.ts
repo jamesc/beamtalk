@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   aliasSourceUriString,
   classNameToStdlibFilename,
+  extractClassDocComment,
   extractMethodDocComment,
   extractStateVarDocComment,
   extractStateVarInfo,
@@ -696,6 +697,58 @@ describe("extractStateVarDocComment", () => {
       "  state: baz = nil",
     ].join("\n");
     expect(extractStateVarDocComment(src, "baz")).toBeUndefined();
+  });
+});
+
+// BT-3497: classes previously had no doc-comment-read fallback at all in the
+// sidebar hover (unlike methods/state vars) — extractClassDocComment closes
+// that gap. Mirrors extractStateVarDocComment/extractMethodDocComment's
+// doc-comment-walk shape, and findClassDeclaration's declaration pattern
+// (SuperClass subclass: ClassName, optionally generic).
+describe("extractClassDocComment", () => {
+  it("extracts a /// doc comment above a class declaration", () => {
+    const src = [
+      "/// A supervised background worker.",
+      "Actor subclass: Worker",
+      "  run => nil",
+    ].join("\n");
+    expect(extractClassDocComment(src, "Worker")).toBe("A supervised background worker.");
+  });
+
+  it("extracts a multi-line doc comment", () => {
+    const src = [
+      "/// Line one.",
+      "///",
+      "/// Line two.",
+      "Object subclass: Foo",
+      "  run => nil",
+    ].join("\n");
+    expect(extractClassDocComment(src, "Foo")).toBe("Line one.\n\nLine two.");
+  });
+
+  it("extracts a doc comment above a generic class declaration (stdlib: Collection(E))", () => {
+    const src = [
+      "/// Base class for all ordered collections.",
+      "abstract typed Value subclass: Collection(E)",
+    ].join("\n");
+    expect(extractClassDocComment(src, "Collection")).toBe(
+      "Base class for all ordered collections."
+    );
+  });
+
+  it("returns undefined when there is no doc comment", () => {
+    const src = "Object subclass: Foo\n  run => nil\n";
+    expect(extractClassDocComment(src, "Foo")).toBeUndefined();
+  });
+
+  it("returns undefined for a class that isn't declared in the source", () => {
+    const src = "/// Some doc.\nObject subclass: Foo\n";
+    expect(extractClassDocComment(src, "Bar")).toBeUndefined();
+  });
+
+  it("does not match a doc comment belonging to a different class", () => {
+    const src = ["/// Doc for Foo.", "Object subclass: Foo", "", "Object subclass: Bar"].join("\n");
+    expect(extractClassDocComment(src, "Bar")).toBeUndefined();
   });
 });
 

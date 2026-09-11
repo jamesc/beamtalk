@@ -10,6 +10,7 @@ import {
   resolveDeclarationOffsetSync,
 } from "./symbolLookup";
 import {
+  extractClassDocComment,
   extractMethodDocComment,
   extractStateVarDocComment,
   extractStateVarInfo,
@@ -606,6 +607,7 @@ export class WorkspaceTreeDataProvider
     if (element.kind === "class-item") {
       item.tooltip =
         (await this._lspHoverTooltip(element.info, element.info.name, "class")) ??
+        (await this._classDocCommentTooltip(element.info)) ??
         this._classTooltipFallback(element.info);
       return item;
     }
@@ -804,6 +806,27 @@ export class WorkspaceTreeDataProvider
       md.appendMarkdown(`\n\n${method.doc}`);
     }
     return md;
+  }
+
+  /**
+   * BT-3497: read source text and extract `///` doc comment for the class.
+   * Used as a fallback when LSP hover is unavailable or comes back empty
+   * (e.g. a generic class, a `Self class` metaclass reference, or a class
+   * compiled before the file was reindexed) — mirrors
+   * `_methodDocCommentTooltip`'s shape.
+   */
+  private async _classDocCommentTooltip(
+    info: ClassInfo
+  ): Promise<vscode.MarkdownString | undefined> {
+    try {
+      const doc = await this._resolveClassDocument(info);
+      if (!doc) return undefined;
+      const comment = extractClassDocComment(doc.getText(), info.name);
+      if (!comment) return undefined;
+      return new vscode.MarkdownString(comment);
+    } catch {
+      return undefined;
+    }
   }
 
   /**
