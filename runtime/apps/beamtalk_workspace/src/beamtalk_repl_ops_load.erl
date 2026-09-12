@@ -19,10 +19,10 @@ respectively.
 
 -export([handle/4, handle_term/4, resolve_class_to_module/1, resolve_module_atoms/2]).
 
-%% BT-1723: Shared sync logic callable from both protocol handler and primitives.
+%% Shared sync logic callable from both protocol handler and primitives.
 -export([sync_project/2]).
 
-%% BT-1719: Exported for demand-driven native .erl compilation from classReload.
+%% Exported for demand-driven native .erl compilation from classReload.
 -export([find_project_root/1, maybe_recompile_native_deps/2]).
 
 %% Export internals for white-box testing of load-project helpers.
@@ -54,7 +54,7 @@ respectively.
     finish_section_write/4,
     atomic_write_file/2,
     atomic_write_file/3,
-    %% BT-3336: white-box coverage for the pure load-result-shape helpers
+    %% White-box coverage for the pure load-result-shape helpers
     %% behind sync_project/2 and handle_term/4's `load-source` clause.
     collect_load_warnings/1,
     build_incremental_summary/4
@@ -885,8 +885,8 @@ save_section(ClassBin, NewName, OldName, BeforeSelector, BeforeSide) when
             end
     end.
 
-%% Review finding (BT-3238): `new_name` used to be spliced verbatim into the
-%% divider line with only an empty-binary check — a name containing `\n`/`\r`
+%% Without this check, `new_name` could be spliced verbatim into the
+%% divider line — a name containing `\n`/`\r`
 %% would inject arbitrary extra source lines (corrupting the file, defeating
 %% the whole "comment-only edit" premise this op's direct-write bypass of
 %% ADR 0082 rests on), and a whitespace-only name composes into a line
@@ -1094,7 +1094,7 @@ leading_indent(Bin, N) when N < byte_size(Bin) ->
 leading_indent(Bin, N) ->
     binary:part(Bin, 0, N).
 
-%% Review finding (BT-3238): re-read `Path` immediately before writing and
+%% Re-read `Path` immediately before writing and
 %% require it to still byte-match `Source` (the content this write's
 %% `NewSource` was spliced from, read at the start of the op) — mirrors the
 %% ADR 0082 flush pipeline's `prev_source` check
@@ -2469,7 +2469,7 @@ build_incremental_summary(ChangedCount, TotalFiles, UnchangedCount, DeletedCount
 %%% same toolchain now running the workspace. mtime cannot detect a toolchain
 %%% change — the build stamp (`beamtalk_version` + compound OTP version, ADR 0098
 %%% Phase 1) is the authoritative signal. A miss forces a full recompile so the
-%%% workspace never serves stale modules (the BT-2653 cascade generalized).
+%%% workspace never serves stale modules (generalizing that same cascade).
 
 %% Provenance-stamp schema understood by this reader. A newer stamp (or anything
 %% unrecognised) is treated as a miss, never an error.
