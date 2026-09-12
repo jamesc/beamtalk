@@ -1467,7 +1467,7 @@ header. The header is written to `_build/dev/native/include/beamtalk_classes.hrl
 """.
 -spec regenerate_native_class_header(string()) -> boolean().
 regenerate_native_class_header(ProjectRoot) ->
-    %% BT-2671: Union the source-AST-derived index (complete on a cold load)
+    %% Union the source-AST-derived index (complete on a cold load)
     %% with the live registry (canonical module atoms on the warm path). The
     %% registry wins on conflict via the second arg to maps:merge/2.
     SourceIndex = build_source_class_module_index(ProjectRoot),
@@ -1579,7 +1579,7 @@ build_source_class_module_index(ProjectRoot) ->
     end.
 
 %% Index one `src/**/*.bt` file's classes into `Acc` via the compiler port
-%% (BT-3441). Best-effort: an unreadable file, an indexing failure, or a
+%% Best-effort: an unreadable file, an indexing failure, or a
 %% compiler-port transport failure is logged and skipped rather than failing
 %% the whole cold-load index.
 -spec index_bt_file(string(), string(), binary(), #{binary() => binary()}) ->
