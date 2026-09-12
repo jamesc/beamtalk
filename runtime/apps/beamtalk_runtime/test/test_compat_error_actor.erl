@@ -7,7 +7,7 @@
 -moduledoc """
 Test actor that simulates backward-compatible error tuples.
 
-Compiled actors generated before BT-1822 return {error, {ErlType, ErrorValue}}
+Older compiled actors return {error, {ErlType, ErrorValue}}
 from safe_dispatch (without stacktrace). This actor simulates that pattern
 to verify the backward-compat paths in beamtalk_actor preserve the exception
 class (ErlType) instead of discarding it.
@@ -93,7 +93,7 @@ terminate(Reason, State) -> beamtalk_actor:terminate(Reason, State).
 -doc """
 Backward-compat safe_dispatch/3 that returns 2-tuple errors.
 
-This simulates the old compiled actor pattern (pre-BT-1822) where
+This simulates an older compiled actor pattern where
 safe_dispatch catches exceptions and returns {error, {Type, Value}, State}
 without the stacktrace third element.
 """.

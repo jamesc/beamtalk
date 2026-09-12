@@ -4,7 +4,7 @@
 -module(beamtalk_character_tests).
 
 -moduledoc """
-Unit tests for beamtalk_character module (BT-622).
+Unit tests for beamtalk_character module.
 
 Tests edge cases and error paths in the character runtime module
 that can't be easily reached from Beamtalk stdlib tests:

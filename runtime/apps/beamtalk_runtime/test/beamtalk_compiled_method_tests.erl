@@ -4,7 +4,7 @@
 -module(beamtalk_compiled_method_tests).
 
 -moduledoc """
-Unit tests for beamtalk_compiled_method_ops module (BT-346).
+Unit tests for beamtalk_compiled_method_ops module.
 
 Tests dispatch, introspection, and error handling for CompiledMethod objects.
 """.

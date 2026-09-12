@@ -4,7 +4,7 @@
 -module(beamtalk_native_docs_tests).
 
 -moduledoc """
-Unit tests for beamtalk_native_docs module (BT-1851, BT-1876).
+Unit tests for beamtalk_native_docs module.
 
 Tests the EEP-48 documentation reader against real OTP modules.
 Uses `lists` and `maps` as known-good sources of EEP-48 docs.

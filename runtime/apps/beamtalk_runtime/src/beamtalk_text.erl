@@ -7,7 +7,7 @@
 
 -moduledoc """
 Single authority for normalising a name-like term (atom, binary, string, or
-arbitrary term) to a UTF-8 binary (BT-3090).
+arbitrary term) to a UTF-8 binary.
 
 Before this module, `to_binary/1` was re-typed five times: the complete
 atom/binary/list/other version in `beamtalk_repl_protocol` and (as

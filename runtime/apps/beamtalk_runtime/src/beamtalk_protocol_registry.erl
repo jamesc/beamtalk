@@ -23,7 +23,7 @@ Each protocol is stored as a map:
   extending => undefined}
 ```
 
-The `module` key records the BEAM module the protocol was defined in (BT-2615).
+The `module` key records the BEAM module the protocol was defined in.
 A protocol class object is dispatched by the shared `beamtalk_protocol_object`
 module, so this is the only place that retains the protocol's true origin —
 the System Browser reads it to badge a protocol stdlib vs project.
@@ -49,7 +49,7 @@ via `beamtalk_behaviour_intrinsics:classCanUnderstandFromName/2`.
 See also: docs/ADR/0068-parametric-types-and-protocols.md — Stage 2
 See also: beamtalk_behaviour_intrinsics — backs the class-side primitives
 
-## Conformance Cache (BT-3222)
+## Conformance Cache
 
 `conforms_to/2` is a structural check: for every required selector it walks
 the ancestor chain via `classCanUnderstandFromName/2`, which is a
@@ -82,7 +82,7 @@ ran. Clearing rows can't prevent that: the write simply happens after the
 clear. Stamping the generation *before* the compute and checking it *after*
 means a bump anywhere in between is always visible to the reader: the stored
 generation is behind, so it's a permanent miss for that entry, not a
-resurrected stale value (BT-3222 review round 2). A repeated `{ClassName,
+resurrected stale value. A repeated `{ClassName,
 ProtocolName}` pair's entry is overwritten in place, never duplicated, so
 the table doesn't grow from re-querying the same pair across generations —
 but unlike the old whole-table flush, a bump never removes rows for a pair
@@ -141,11 +141,11 @@ Initialize the protocol registry ETS table.
 Called during application startup (beamtalk_runtime_app:start/2) before
 any compiled modules load their protocol definitions.
 
-BT-3105: Carries `beamtalk_class_registry:heir_option/0` (the runtime
+Carries `beamtalk_class_registry:heir_option/0` (the runtime
 supervisor, once it is alive) so an owner crash hands the table off instead
 of destroying every registered protocol.
 
-BT-3222: Also creates the `conforms_to/2` result cache table (see this
+Also creates the `conforms_to/2` result cache table (see this
 module's "Conformance Cache" doc), heir-protected the same way.
 """.
 -spec init() -> ok.
@@ -173,7 +173,7 @@ ensure_protocol_table() ->
     end.
 
 -doc """
-Idempotently create the `conforms_to/2` result cache ETS table (BT-3222).
+Idempotently create the `conforms_to/2` result cache ETS table.
 
 Keyed by `{ClassName, ProtocolName}` -> `boolean()`. Separate from
 `?PROTOCOL_TABLE` so a whole-cache flush (`invalidate_conforms_cache/0`) never
@@ -210,7 +210,7 @@ protocols. The `Info` map must contain:
 - `type_params` (list of atoms): Type parameter names, or `[]`
 - `extending` (atom or `undefined`): Parent protocol name
 
-It may also carry (BT-2615):
+It may also carry:
 - `module` (atom): the BEAM module the protocol was defined in (e.g.
   `bt@stdlib@printable`), used to resolve the protocol class object's origin.
 
@@ -240,16 +240,15 @@ register_protocol(BadInfo) ->
     ok.
 
 -doc """
-Unregister every protocol whose `module` metadata field matches `Module`
-(BT-3105).
+Unregister every protocol whose `module` metadata field matches `Module`.
 
 Called from `beamtalk_class_lifecycle:class_removed/2` when the class
 defining a protocol is removed from the system — until now there was no
 unregister path at all, so a protocol whose defining module was purged
 stayed registered (and conformance-checkable) forever. A no-op when the
 table has not been initialised, or when no registered protocol carries a
-`module` field matching `Module` (protocols registered before BT-2615 have
-no `module` field and are never matched).
+`module` field matching `Module` (older registrations predate this field
+and are never matched).
 
 Does not tear down the protocol's own sealed class object (created by
 `maybe_create_protocol_class/2`) — that is a separate class removal, out of
@@ -314,7 +313,7 @@ unregister_protocol(Module) when is_atom(Module) ->
     invalidate_conforms_cache().
 
 -doc """
-Notify the compiler server of a protocol (re-)registration (BT-3473).
+Notify the compiler server of a protocol (re-)registration.
 
 Mirrors `beamtalk_object_class`'s own `register_class/2` notification: a
 fire-and-forget cast, silently dropped if `beamtalk_compiler` is not running
@@ -338,8 +337,8 @@ notify_compiler_server(Name, Info) ->
     ok.
 
 -doc """
-Notify the compiler server that `Name` is no longer a registered protocol
-(BT-3473), mirroring `notify_compiler_server/2`'s degrade-silently contract.
+Notify the compiler server that `Name` is no longer a registered protocol,
+mirroring `notify_compiler_server/2`'s degrade-silently contract.
 
 Unlike `notify_compiler_server/2` above, this bypasses
 `beamtalk_compiler_server:remove_protocol/1`'s own exported wrapper in favour
@@ -371,7 +370,7 @@ Check if a class conforms to a protocol.
 
 Structural conformance: a class conforms if it responds to all required
 selectors of the protocol (including inherited requirements from
-`extending` protocols), and all required class methods (BT-1611).
+`extending` protocols), and all required class methods.
 
 Returns `true` if:
 - The class responds to all required instance selectors
@@ -381,7 +380,7 @@ Returns `false` if:
 - The protocol is not registered (unknown or non-protocol names)
 - The class is missing one or more required selectors (instance or class)
 
-BT-3222: Results are cached in `?CONFORMS_CACHE_TABLE`, keyed by
+Results are cached in `?CONFORMS_CACHE_TABLE`, keyed by
 `{ClassName, ProtocolName}` — a repeated pair is a plain ETS lookup with no
 `gen_server:call` to any class process. See this module's "Conformance
 Cache" doc for the full invalidation list and why a generation-stamped entry,
@@ -523,7 +522,7 @@ current_generation() ->
     end.
 
 -doc """
-Invalidate every cached `conforms_to/2` result (BT-3222) by bumping the
+Invalidate every cached `conforms_to/2` result by bumping the
 generation counter — see the "Conformance Cache" moduledoc for why a
 counter bump, not `ets:delete_all_objects/1`, is what makes this race-free.
 Call sites are listed there.
@@ -558,7 +557,7 @@ protocols_for_class(ClassName) ->
 Return the required method selectors for a protocol.
 
 Returns a list of selector atoms. Includes methods from extended protocols.
-BT-1611: Class method selectors are included with a `class ` prefix atom
+Class method selectors are included with a `class ` prefix atom
 (e.g., `'class fromString:'`) to distinguish them from instance methods.
 Returns `[]` if the protocol is not registered.
 """.
@@ -668,7 +667,7 @@ all_required_methods(_) ->
     [].
 
 -doc """
-Collect all required class methods including from extending protocols (BT-1611).
+Collect all required class methods including from extending protocols.
 """.
 -spec all_required_class_methods(map()) -> [map()].
 all_required_class_methods(Info) ->
@@ -693,7 +692,7 @@ all_required_class_methods(Info) ->
     ClassMethods ++ FilteredParent.
 
 -doc """
-Check if a class has a class-side method (walks hierarchy + extensions) (BT-1611/BT-1617).
+Check if a class has a class-side method (walks hierarchy + extensions).
 
 Walks the superclass chain checking each class's local class methods map.
 Falls back to the extensions ETS table for class-side extensions registered
@@ -738,7 +737,7 @@ class_has_class_method_in_chain(ClassName, Selector) ->
     end.
 
 -doc """
-Safe extension registry lookup for class-side methods (BT-1617).
+Safe extension registry lookup for class-side methods.
 
 Guards against the ETS table not existing (e.g., during early bootstrap).
 """.
@@ -854,7 +853,7 @@ create_protocol_class(Name, Info) ->
 
 -doc """
 Build a single `unindexed_runtime_fun` method_xref entry for a protocol class
-object's class-side method (BT-2385).
+object's class-side method.
 
 Protocol class objects share the Erlang dispatch module
 `beamtalk_protocol_object`, so `requiredMethods` / `conformingClasses` have no

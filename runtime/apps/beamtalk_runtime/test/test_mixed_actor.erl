@@ -5,7 +5,7 @@
 -behaviour(gen_server).
 
 -moduledoc """
-Test actor with mixed old-style (Fun/2) and new-style (Fun/4) methods for BT-159 testing
+Test actor with mixed old-style (Fun/2) and new-style (Fun/4) methods.
 """.
 
 -include("beamtalk.hrl").

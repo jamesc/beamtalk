@@ -34,7 +34,7 @@ setup() ->
 
 -doc """
 `setup/0` plus the scaffolding needed to start real class gen_server
-processes (BT-3222 cache tests exercise class registration/hot-reload/
+processes (the cache tests exercise class registration/hot-reload/
 put_method/removal, which `setup/0` alone doesn't need). Mirrors
 `beamtalk_object_class_tests:setup/0`.
 """.

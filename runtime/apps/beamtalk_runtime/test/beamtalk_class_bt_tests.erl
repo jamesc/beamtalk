@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_class_bt module (BT-2262).
+EUnit tests for beamtalk_class_bt module.
 
 Tests Class bootstrap stub dispatch error handling, has_method/1 queries,
 and class registration. Models beamtalk_metaclass_bt_tests.erl.

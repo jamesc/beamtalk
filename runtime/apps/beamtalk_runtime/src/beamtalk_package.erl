@@ -14,8 +14,8 @@ environment and the `bt@{pkg}@{class}` BEAM module naming convention.
 Packages map 1:1 to OTP applications whose env contains a non-empty
 `classes` key (the metadata format defined by ADR 0070 Phase 4) *or* a
 non-empty `type_aliases` key (ADR 0108 Phase 8) — the latter covers a
-"types-only" package with `type` alias declarations and zero classes
-(BT-2915), which has no class entry to derive a package name from, so its
+"types-only" package with `type` alias declarations and zero classes,
+which has no class entry to derive a package name from, so its
 name is instead taken from the OTP application's own atom name (app name
 == package name by construction for `beamtalk build`'s generated `.app`
 files).
@@ -54,7 +54,7 @@ See also: docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
 Returns a list of loaded package names (binaries).
 
 A "package" is any OTP application whose env includes a non-empty
-`{classes, [...]}` list, or (BT-2915) a non-empty `{type_aliases, [...]}`
+`{classes, [...]}` list, or a non-empty `{type_aliases, [...]}`
 list with no classes. The stdlib package is always present; user packages
 appear after their OTP application is loaded.
 """.
@@ -117,8 +117,8 @@ Returns `nil` if the class is not found or has no package.
 Caveat: this calls `beamtalk_object_class:module_name_safe/1` rather than
 `module_name/1` because this function is reachable from inside an ADR 0109
 foreign-process block (directly, or via the unrestricted `Erlang <module>`
-FFI gateway), and an unsafe `gen_server:call` here would risk the deadlock
-shape BT-3052/BT-3054 fixed. That means the `noproc`/`timeout` catch clauses
+FFI gateway), and an unsafe `gen_server:call` here would risk the same
+deadlock shape a prior fix here addressed. That means the `noproc`/`timeout` catch clauses
 below cannot detect a class process killed via an untrappable `kill` signal
 before `terminate/2` ran — see `module_name_safe/1`'s doc for the full
 explanation.
@@ -231,7 +231,7 @@ if it is not a Beamtalk package.
 
 Prefers a non-empty `classes` env key (ADR 0070), deriving the name from
 the class entries via `package_name_from_classes/1`. Falls back to a
-non-empty `type_aliases` env key (BT-2915) when there are no classes to
+non-empty `type_aliases` env key when there are no classes to
 derive a name from — a types-only package has no class entry at all, so
 the OTP application's own atom name is used instead (app name == package
 name by construction for `beamtalk build`'s generated `.app` files).

@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_metaclass_bt module (BT-1975).
+EUnit tests for beamtalk_metaclass_bt module.
 
 Tests metaclass identity predicates, dispatch error handling,
 has_method/1 queries, and class registration.

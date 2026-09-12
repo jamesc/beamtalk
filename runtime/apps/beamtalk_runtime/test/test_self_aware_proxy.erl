@@ -4,7 +4,7 @@
 -module(test_self_aware_proxy).
 -behaviour(gen_server).
 
--moduledoc "Test actor with new-style (Fun/3) doesNotUnderstand handler for BT-159 testing".
+-moduledoc "Test actor with new-style (Fun/3) doesNotUnderstand handler.".
 
 -include("beamtalk.hrl").
 

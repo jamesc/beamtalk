@@ -12,12 +12,12 @@ This module acts as the implementation module for the 'Class' class,
 enabling ADR 0032 Phase 0 wire check: proving that class-side messages not
 found in user-defined class methods can dispatch through the Class chain.
 
-## Phase 0 (BT-732): Wire Check
+## Phase 0: Wire Check
 
 Registered 'Class' during bootstrap to prove that class-side messages not
 found in user-defined class methods can dispatch through the Class chain.
 The testClassProtocol probe was used during the spike and removed once the
-mechanism was verified (BT-732 acceptance criteria met).
+mechanism was verified.
 
 ## Future (ADR 0032 Phase 2)
 
@@ -47,11 +47,11 @@ Dispatch instance messages on Class objects.
 Class objects (e.g., Counter, Object, Actor as first-class objects)
 respond to these messages via the Class chain.
 
-ADR 0032 Phase 0 wire check confirmed (BT-732): testClassProtocol was
+ADR 0032 Phase 0 wire check confirmed: testClassProtocol was
 used as a probe to verify the dispatch fallthrough mechanism works.
 The probe method has been removed; the dispatch mechanism remains.
 
-ADR 0038 Phase 1 (BT-835): Exposes `classBuilder` as an instance method so
+ADR 0038 Phase 1: Exposes `classBuilder` as an instance method so
 that `Class respondsTo: #classBuilder` returns true (post-bootstrap assertion).
 The full implementation (`ClassBuilder new superclass: self`) is in Phase 2
 (class.bt stdlib source). This stub makes the method discoverable.
@@ -77,7 +77,7 @@ Check if Class has an instance method.
 Used by beamtalk_object_class:has_method/2 to detect methods before
 looking up in the flattened table.
 
-ADR 0038 Phase 1 (BT-835): Returns true for `classBuilder` so that
+ADR 0038 Phase 1: Returns true for `classBuilder` so that
 `Class respondsTo: #classBuilder` returns true post-bootstrap.
 
 ADR 0032 Phase 2: Will be replaced by compiled class.bt exports.

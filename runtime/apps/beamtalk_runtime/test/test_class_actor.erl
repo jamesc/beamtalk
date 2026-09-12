@@ -5,7 +5,7 @@
 -behaviour(gen_server).
 
 -moduledoc """
-BT-3243: Minimal actor fixture wired the way generated `spawn/0` class
+Minimal actor fixture wired the way generated `spawn/0` class
 methods are (`beamtalk_actor:safe_spawn/2`), for tests that need to spawn a
 real actor *through* a class gen_server's `{spawn, _}` handler
 (`beamtalk_class_instantiation:handle_spawn/4` does
@@ -30,7 +30,7 @@ suites keep registered for their own duration.
     terminate/2
 ]).
 
--doc "Mirrors generated `spawn/0`: beamtalk_actor:safe_spawn/2, unlinked (BT-3243).".
+-doc "Mirrors generated `spawn/0`: beamtalk_actor:safe_spawn/2, unlinked.".
 spawn() ->
     beamtalk_actor:safe_spawn(?MODULE, #{}).
 

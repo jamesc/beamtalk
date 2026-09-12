@@ -4,7 +4,7 @@
 -module(beamtalk_test_gen_server).
 
 -moduledoc """
-Minimal gen_server for use as a test double in EUnit tests (BT-1967).
+Minimal gen_server for use as a test double in EUnit tests.
 """.
 
 -behaviour(gen_server).

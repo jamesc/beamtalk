@@ -158,7 +158,7 @@ Returns the value if resolved, throws {future_rejected, Reason} if rejected,
 or throws #beamtalk_error{kind = timeout} if the timeout expires.
 Accepts both tagged futures and raw pids (for internal actor use).
 
-BT-918 / ADR 0043: With sync-by-default, actor sends return values directly
+ADR 0043: With sync-by-default, actor sends return values directly
 (not futures). To preserve backward compat during the migration period, any
 non-future, non-pid value is returned as-is rather than crashing.
 """.

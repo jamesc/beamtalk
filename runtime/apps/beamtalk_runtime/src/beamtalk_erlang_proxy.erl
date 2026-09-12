@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-ErlangModule proxy dispatch for BEAM interop (BT-676, BT-679).
+ErlangModule proxy dispatch for BEAM interop.
 
 Forwards Beamtalk messages to Erlang function calls via `erlang:apply/3`.
 ErlangModule proxies are tagged maps of the form:
@@ -25,7 +25,7 @@ ErlangModule proxies are tagged maps of the form:
 - Unary selectors (no colon) → zero-arg function call
   `node` → `erlang:node()`
 
-**Export introspection (BT-679):**
+**Export introspection:**
 Before dispatch, validates function existence and arity via
 `Module:module_info(exports)`. Provides actionable error messages for:
 - Wrong arity: "lists:reverse/1 exists but was called with 2 arguments"
@@ -61,7 +61,7 @@ Dispatch a Beamtalk message to the proxied Erlang module.
 
 Handles Object protocol messages (class, printString, methods) locally,
 validates export existence/arity before dispatch, and provides
-actionable error messages (BT-679).
+actionable error messages.
 """.
 -spec dispatch(atom(), list(), map()) -> term().
 dispatch('class', _Args, _Self) ->
@@ -150,13 +150,13 @@ Actual validation (arity, existence) happens at dispatch time.
 has_method(_Selector) -> true.
 
 -doc """
-Entry point for direct Erlang calls (BT-1127).
+Entry point for direct Erlang calls.
 
 The codegen emits `call 'beamtalk_erlang_proxy':'direct_call'(M, F, [args])`
 for all `Erlang M fn: arg` expressions, routing through the proxy instead
 of calling `call 'M':'F'(args)` directly. This enables:
-- Export validation and actionable error messages (BT-679)
-- Automatic binary→charlist coercion on badarg (BT-1127)
+- Export validation and actionable error messages
+- Automatic binary→charlist coercion on badarg
 - Charlist→binary result coercion for consistent string types
 
 Wrapping policy is unified across all apply paths via `apply_with_coercion/5`
@@ -182,7 +182,7 @@ direct_call(Module, FunName, Args) ->
     end.
 
 -doc """
-Entry point for `native:` Object delegation (ADR 0101 Part 1, BT-2720).
+Entry point for `native:` Object delegation (ADR 0101 Part 1).
 
 `native:` Object methods lower to
 `beamtalk_erlang_proxy:native_call(Mod, Fn, [Self | Args], {Class, Sel})`.
@@ -212,7 +212,7 @@ native_call(Module, FunName, Args, {Class, Selector}) ->
 The single, unified apply path for all FFI (ADR 0101 Part 2).
 
 Calls `Module:FunName(Args)`, coercing ok/error → `Result` (ADR 0076) on the
-happy path and retrying with charlist-coerced args on `badarg` (BT-1127).
+happy path and retrying with charlist-coerced args on `badarg`.
 
 Exception policy — converged across `direct_call/3`, `validate_and_apply/4`,
 and `native_call/4`:
@@ -255,7 +255,7 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
     end.
 
 -doc """
-BT-1127: auto-coerce binary args to charlists and retry once on `badarg`.
+Auto-coerce binary args to charlists and retry once on `badarg`.
 
 Many Erlang functions (os:cmd/1, file:read_file/1, …) expect charlists but
 Beamtalk strings are binaries. Applies the same unified catch policy on the
@@ -300,8 +300,7 @@ raise_badarg_terminal(Module, FunName, _Args, OrigSelector, Context, Stack) ->
     raise_badarg_error(Module, FunName, OrigSelector, Context, Stack).
 
 -doc """
-The single FFI exception classifier shared by the apply and badarg-retry paths
-(BT-2730).
+The single FFI exception classifier shared by the apply and badarg-retry paths.
 
 Both `apply_with_coercion/5` and `maybe_retry_badarg/6` used to inline a copy of
 this clause set; they only differed in what `badarg` does (retry vs. raise). That
@@ -437,7 +436,7 @@ get_exports(Module) ->
 Validate function existence and arity, then apply.
 
 Checks module_info(exports) before calling erlang:apply/3 to provide
-actionable error messages (BT-679). No caching — hot code reload must work.
+actionable error messages. No caching — hot code reload must work.
 
 Once validated, delegates to the unified `apply_with_coercion/5` so the
 `call:args:` / dispatch path shares the **same** exception policy as inline FFI
@@ -462,7 +461,7 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
     end.
 
 -doc """
-Raise an error for missing function or wrong arity (BT-679).
+Raise an error for missing function or wrong arity.
 
 Shared by `direct_call/3` and `validate_and_apply/4`.
 """.
@@ -586,7 +585,7 @@ leaking a raw Erlang fault to the user/REPL.
 Delegates to the canonical classifier `beamtalk_exception_handler:ensure_wrapped/4`
 (AC: "via ensure_wrapped"), so unclassified BEAM shapes get readable, bucketed
 messages: `{badkey, K}` → key_error "key not found: K", `{badmap, M}`,
-`{badmatch, V}`, `noproc`, `timeout`, … (BT-2704/2707). The `{Class, Selector}`
+`{badmatch, V}`, `noproc`, `timeout`, …. The `{Class, Selector}`
 breadcrumb locates the message (e.g. `Stream>>take:`). This reuses the existing
 classifier rather than re-deriving FFI error text in the proxy.
 """.
@@ -605,8 +604,8 @@ raise_generic_error(_Module, _FunName, OrigSelector, Context, Reason, Stack) ->
 
 -doc """
 Merge the FFI `details` contract keys (`erlang_error` + `erlang_stacktrace`) into
-a generically-wrapped error so its details shape matches the specific clauses
-(BT-2730). Passing the backfill keys as `maps:merge/2`'s *first* argument and the
+a generically-wrapped error so its details shape matches the specific clauses.
+Passing the backfill keys as `maps:merge/2`'s *first* argument and the
 classifier's own `Details` as the *second* means `Details` wins on any key clash
 (the second map takes precedence), so a pre-existing `erlang_error`/
 `erlang_stacktrace` (there is none today, but stay defensive) is never overwritten.
@@ -658,7 +657,7 @@ raise_wrapped_error(Kind, ErlangError, Module, FunName, OrigSelector, Context, S
     ).
 
 -doc """
-Coerce all binary values in a list to charlists (BT-1127).
+Coerce all binary values in a list to charlists.
 
 Beamtalk strings are UTF-8 binaries. Many Erlang functions (os:cmd/1,
 file:read_file/1, io:format/1) expect charlists. This converts each
@@ -689,7 +688,7 @@ coerce_arg(Arg) ->
     Arg.
 
 -doc """
-Convert a charlist result to a binary (BT-1127, BT-1398).
+Convert a charlist result to a binary.
 
 Erlang functions may return charlists (e.g., os:cmd/1, calendar:system_time_to_rfc3339/1).
 Convert those back to binaries for consistent Beamtalk string representation.
@@ -697,7 +696,7 @@ Applied on both the direct success path and the badarg retry path.
 
 Uses `io_lib:printable_unicode_list/1` rather than `io_lib:char_list/1` to avoid
 false positives on lists of small integers (e.g., [1,2,3]) that are valid codepoints
-but not printable text (BT-1398).
+but not printable text.
 """.
 -spec coerce_charlist_result(term()) -> term().
 coerce_charlist_result([]) ->
@@ -717,7 +716,7 @@ coerce_charlist_result(Result) ->
 
 -doc """
 Apply both charlist and result coercion, skipping charlist coercion
-for Beamtalk's own modules (BT-1839).
+for Beamtalk's own modules.
 
 Beamtalk runtime modules (beamtalk_*) and compiled classes (bt@*) already
 return properly-typed values — their lists are genuine Beamtalk lists, not

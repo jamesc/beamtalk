@@ -7,7 +7,7 @@
 
 -moduledoc """
 Unit tests for `beamtalk_hierarchy:walk_ancestors/3` — the generic
-depth-guarded ancestor-chain walker (BT-2786).
+depth-guarded ancestor-chain walker.
 
 Every current caller (`beamtalk_dispatch`, `beamtalk_class_dispatch`,
 `beamtalk_method_resolver`, `beamtalk_behaviour_intrinsics`, `beamtalk_xref`,

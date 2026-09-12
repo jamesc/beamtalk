@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Unit tests for beamtalk_hierarchy_docs (coverage improvement, BT-3087).
+Unit tests for beamtalk_hierarchy_docs (coverage improvement).
 
 Covers all four public functions:
 

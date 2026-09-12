@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Erlang class-side dispatch (BT-676, BT-871).
+Erlang class-side dispatch.
 
 Dispatches messages to the `Erlang` class object — a tagged map used as
 the entry point for Erlang module interop. Unary selectors become

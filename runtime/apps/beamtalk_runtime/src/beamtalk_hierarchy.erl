@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Generic depth-guarded ancestor-chain walker (BT-2786).
+Generic depth-guarded ancestor-chain walker.
 
 Before this module existed, `beamtalk_dispatch`, `beamtalk_method_resolver`,
 and `beamtalk_class_dispatch` each hand-rolled their own "walk up the
@@ -41,7 +41,7 @@ contextual `?LOG_WARNING` naming the selector) inspect the
 `{max_depth_exceeded, LastNode}` return and build their own error/log line;
 this module only owns the depth guard itself, not the logging.
 
-## Recovering state on `max_depth_exceeded` (BT-3096)
+## Recovering state on `max_depth_exceeded`
 
 `max_depth_exceeded` carries the node the walk was about to visit when the
 guard tripped — `LastNode` in `{max_depth_exceeded, LastNode}`. Two things

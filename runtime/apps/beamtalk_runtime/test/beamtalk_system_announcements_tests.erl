@@ -5,7 +5,7 @@
 
 -moduledoc """
 EUnit tests for the system Announcement subclasses + runtime emit points
-(BT-2445 / ADR 0093 Phase 3 §2).
+(ADR 0093 Phase 3 §2).
 
 Covers the acceptance criterion "subscribing to each system event receives it on
 the triggering action":

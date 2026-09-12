@@ -7,7 +7,7 @@
 Tests for compiler-generated code patterns using real compiled Beamtalk.
 
 These tests verify runtime behavior by using the counter module compiled
-from tests/repl-protocol/fixtures/counter.bt (unified fixture - BT-239). This tests
+from tests/repl-protocol/fixtures/counter.bt (unified fixture). This tests
 the actual code generation, not simulated patterns.
 
 **Note:** These are NOT true end-to-end tests. For real E2E tests that
@@ -17,27 +17,28 @@ Test categories:
 - spawn/0 tests (Counter spawn) - returns #beamtalk_object{}
 - spawn/1 tests (Counter spawnWith: #{...})
 - State merging behavior (InitArgs override defaults)
-- Async future-cast protocol (BT-79) - futures, awaits, errors, concurrency
+- Async future-cast protocol - futures, awaits, errors, concurrency
   (runtime-only path — see the section header below for why it cannot
   migrate onto compiled `.bt` output)
 - Block Evaluation Tests (value, value:, value:value:, closures)
 - Control Flow Tests (whileTrue:, whileFalse:, repeat)
 - Boolean control flow tests (ifTrue:ifFalse:, and:, or:, not) - migrated
-  (BT-3093) onto stdlib/bootstrap-test/booleans.btscript and
+  onto stdlib/bootstrap-test/booleans.btscript and
   stdlib/test/boolean_short_circuit_test.bt; see the section header below
-- Cascade message sends (BT-133)
-- Multi-keyword messages (BT-133)
-- Actor interaction patterns (BT-133)
-- Error handling (BT-133)
-- Instance variable access patterns (BT-133)
-- Nested message sends and binary operators (BT-133)
+- Cascade message sends
+- Multi-keyword messages
+- Actor interaction patterns
+- Error handling
+- Instance variable access patterns
+- Nested message sends and binary operators
 
-BT-3093: Migrated the hand-simulated Counter/Rectangle/Box/Spawner/
+Migrated the hand-simulated Counter/Rectangle/Box/Spawner/
 instance-var fixtures that stood in for "as the compiler would generate"
 output onto real `.bt` fixtures compiled by
 runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript
 (arithmetic_actor.bt, rectangle_actor.bt, box_actor.bt, spawner_actor.bt,
-shadow_actor.bt, coordinate_actor.bt), following the BT-239 precedent.
+shadow_actor.bt, coordinate_actor.bt), following the same real-fixture
+precedent used elsewhere in this module.
 The async future-cast protocol section is documented in place as staying
 simulated: it exercises a `beamtalk_actor:handle_cast/2` code path
 (`{Selector, Args, FuturePid}`) that generated per-class `handle_cast/2`

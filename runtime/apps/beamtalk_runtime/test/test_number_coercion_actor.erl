@@ -6,7 +6,7 @@
 
 -moduledoc """
 Test actor for beamtalk_message_dispatch:send_number_coercion/4 tests
-(BT-3262, ADR 0116).
+(ADR 0116).
 
 Exposes a present `plusFromNumber:`-style reflected method whose own body
 DNUs on an unrelated selector (simulating a bug inside the method, not a

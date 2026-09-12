@@ -27,7 +27,7 @@ Table: `beamtalk_extensions`
 - Key: `{Class, Selector}`
 - Value: `{{Class, Selector}, Fun, Owner}`
 
-Sources table: `beamtalk_extension_sources` (BT-2196)
+Sources table: `beamtalk_extension_sources`
 - Type: set (unique keys)
 - Key: `{Class, Selector}`
 - Value: `{{Class, Selector}, Source}` where Source is the method body text
@@ -101,13 +101,13 @@ Initialize the extension registry ETS tables.
 
 Creates three tables:
 - beamtalk_extensions: Current method registrations
-- beamtalk_extension_sources: Method body source text (BT-2196) — populated
+- beamtalk_extension_sources: Method body source text — populated
   only by `register/5` so source-text navigation queries can scan extensions.
 - beamtalk_extension_conflicts: History of conflicting registrations
 
 This should be called once during application startup.
 
-BT-3105: All three tables carry `beamtalk_class_registry:heir_option/0` (the
+All three tables carry `beamtalk_class_registry:heir_option/0` (the
 runtime supervisor, once it is alive) so an owner crash hands the tables off
 instead of destroying every registered extension — the same survival pattern
 `beamtalk_class_metadata`/`beamtalk_class_registry` already use.
@@ -180,7 +180,7 @@ Register an extension method on a class, with the method body source text.
 Same as `register/4` but also stores `Source` (a binary holding the method's
 body text) in the extension sources table. Powers source-text navigation
 queries (`SystemNavigation sendersOf:`, `referencesTo:`, `methodsMatching:`)
-that need to scan extension methods (BT-2196).
+that need to scan extension methods.
 
 `Source` may be `undefined` to register without source (equivalent to
 `register/4`); pass a binary to enable scanning.
@@ -243,7 +243,7 @@ Unregister an instance-side extension method from a class (ADR 0066 open
 classes).
 
 Equivalent to `unregister/3` with `ClassSide = false` — the original
-contract, unchanged (BT-3185). See `unregister/3` for the full doc (dispatch
+contract, unchanged. See `unregister/3` for the full doc (dispatch
 entry, source body, conflict history, and xref row removal; idempotent).
 """.
 -spec unregister(atom(), atom()) -> ok.
@@ -252,7 +252,7 @@ unregister(Class, Selector) when is_atom(Class), is_atom(Selector) ->
 
 -doc """
 Unregister an extension method from a class, given which side it was
-registered on (ADR 0066 open classes; BT-3185).
+registered on (ADR 0066 open classes).
 
 `Class` is always the bare class *name* atom (e.g. `'Counter'`) — never
 pre-tagged by the caller. `ClassSide` is `false` for an instance-side
@@ -265,13 +265,13 @@ class-side — so a caller (e.g. the `removeSelector:` primitive) does not have
 to duplicate that tagging.
 
 Removes the dispatch entry, any stored source body, this selector's
-`?CONFLICTS_TABLE` history (BT-3185 — previously only the whole-class sweep
+`?CONFLICTS_TABLE` history (previously only the whole-class sweep
 `purge_class/1` did this, so removing one contested extension left stale
 conflict rows that `conflicts/0` kept surfacing for a method that no longer
 existed), and the method's xref index rows. Idempotent — unregistering an
 unknown extension is a no-op.
 
-ADR 0087 Phase 4 (BT-2301) / BT-3185: the matching `beamtalk_xref:purge_method/3`
+ADR 0087 Phase 4: the matching `beamtalk_xref:purge_method/3`
 call always passes `ClassSide = false`, regardless of this function's own
 `ClassSide` argument — `index_extension_xref/3` (the write side, unchanged by
 this fix) indexes *every* extension, instance- or class-side, under
@@ -304,7 +304,7 @@ unregister(Class, Selector, ClassSide) when
     ok.
 
 -doc """
-Purge every extension registered under the class key `Class` (BT-3105).
+Purge every extension registered under the class key `Class`.
 
 Called from `beamtalk_class_lifecycle:class_removed/2` when a class is
 removed from the system, so its extensions stop being dispatchable and do
@@ -476,7 +476,7 @@ has(Class, Selector) when is_atom(Class), is_atom(Selector) ->
 
 -doc """
 Return the registered source body for an extension, if `register/5`
-was used to register it (BT-2196).
+was used to register it.
 
 Returns `{ok, Source}` when a source was stored, or `not_found` when no
 source is recorded (either the extension does not exist, or it was
@@ -499,7 +499,7 @@ getSource(Class, Selector) when is_atom(Class), is_atom(Selector) ->
     end.
 
 -doc """
-Return all extension entries that have an associated source body (BT-2196).
+Return all extension entries that have an associated source body.
 
 Powers source-text navigation queries on `SystemNavigation` that need to
 scan extension methods. Extensions registered via `register/4` (without
@@ -567,7 +567,7 @@ maybe_store_source(Key, Source) when is_binary(Source) ->
     ok.
 
 -doc """
-Update the xref index for a (re)registered extension method (BT-2301).
+Update the xref index for a (re)registered extension method.
 
 A sourced extension (`Source` is a binary) is re-parsed via
 `beamtalk_xref:build_method_entry/5` and indexed as `source_status = indexed`,
@@ -578,10 +578,10 @@ be scanned. Provenance is `extension` for both.
 
 `ClassSide` is always `false` here, for *every* extension — instance-side
 (`Class` is the bare class name) and class-side (`Class` is already the
-metaclass tag, e.g. `'Counter class'`, per ADR 0066/BT-1617's registration
+metaclass tag, e.g. `'Counter class'`, per ADR 0066's registration
 convention) alike. The class-side/instance-side distinction lives entirely in
 which `Class` atom the caller passed to `register/4,5`, never in the xref
-boolean — `unregister/3` (BT-3185) mirrors this exactly so its
+boolean — `unregister/3` mirrors this exactly so its
 `beamtalk_xref:purge_method/3` call finds the row this function wrote.
 
 **Key-collision caveat (ADR 0112, not a blocker, documented so it isn't
@@ -618,7 +618,7 @@ index_extension_xref(Class, Selector, Source) ->
     safe_xref(fun() -> beamtalk_xref:put_method(Class, false, Selector, Entry) end).
 
 -doc """
-Run a `beamtalk_xref` gen_server call best-effort (BT-2301).
+Run a `beamtalk_xref` gen_server call best-effort.
 
 The xref index is advisory tooling state; extension register/unregister must
 not crash if it is unavailable. Catches the `noproc`/`{noproc, _}` /

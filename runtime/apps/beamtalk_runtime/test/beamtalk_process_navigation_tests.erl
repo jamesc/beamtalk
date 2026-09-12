@@ -9,7 +9,7 @@
 Unit tests for `beamtalk_process_navigation` — the ADR 0092 supervision-tree
 introspection shim.
 
-Phase 1 (BT-2426) coverage:
+Phase 1 coverage:
 - snapshot of a known small tree (root + worker, adjacency via parent_pid)
 - a Beamtalk actor child classified `#beamtalkActor` with its behaviour class
 - a deny-listed process excluded from `default` but present in `system`
@@ -18,7 +18,7 @@ Phase 1 (BT-2426) coverage:
 - a worker pid (not a supervisor) walked without crashing
 - the infra deny-list contents and `is_infra/1` predicate
 
-Phase 2 (BT-2428) coverage:
+Phase 2 coverage:
 - foreign supervisor `#otpSupervisor` / foreign worker `#otpProcess`
 - the dynamic-supervisor child cap (truncation marker + opt-in full expansion)
 - `from/1,2` accepting a pid and a Supervisor handle, a non-supervisor pid

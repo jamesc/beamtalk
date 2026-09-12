@@ -4,7 +4,7 @@
 -module(beamtalk_tuple_tests).
 
 -moduledoc """
-Tests for beamtalk_tuple runtime helper (BT-417).
+Tests for beamtalk_tuple runtime helper.
 
 Tests the runtime helper module that provides complex Tuple operations
 (bounds-checked at:, unwrap*, asString). The compiled Tuple class

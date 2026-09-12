@@ -689,8 +689,7 @@ extract_class_info_from_beam(EbinDir, ModuleName) ->
     end.
 
 -doc """
-Read a module's exports without depending on `Module:module_info/1`
-(BT-3242, BT-3251).
+Read a module's exports without depending on `Module:module_info/1`.
 
 Beamtalk's Core Erlang codegen compiles straight to Core Erlang and feeds it
 to `compile:forms(..., [from_core | Opts])` (CLAUDE.md), which never runs the
@@ -719,8 +718,8 @@ neither path resolves the module (not loaded and not on the code path,
 or the Exports chunk can't be read), so callers get an honest "no exports
 found" rather than a crash.
 
-Shared by `beamtalk_repl_ops_browse` (native-delegate callers, BT-3242) and
-`beamtalk_test_case` (BIF-fallback test/lifecycle-method discovery, BT-3251)
+Shared by `beamtalk_repl_ops_browse` (native-delegate callers) and
+`beamtalk_test_case` (BIF-fallback test/lifecycle-method discovery)
 so the read-exports-safely rule has one implementation instead of two copies
 that could drift.
 """.

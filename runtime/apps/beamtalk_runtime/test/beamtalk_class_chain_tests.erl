@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Wire check tests for ADR 0032 Phase 0 (BT-732).
+Wire check tests for ADR 0032 Phase 0.
 
 Proves the core assumption of the Early Class Protocol:
 a class-side message not found in user-defined class methods

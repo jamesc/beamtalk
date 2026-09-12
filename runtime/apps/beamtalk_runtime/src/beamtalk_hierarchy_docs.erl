@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Shared hierarchy-walking helpers for documentation/reflection lookups (BT-3087).
+Shared hierarchy-walking helpers for documentation/reflection lookups.
 
 `beamtalk_stdlib`'s `beamtalk_interface` (backs the programmatic `Beamtalk
 help:` / `Beamtalk help:selector:` reflection API) and `beamtalk_workspace`'s
@@ -25,7 +25,7 @@ mirrored copies + "mirrors ..." comments that used to stand in for a test.
 Each helper delegates its walk (depth guard, cycle warning, advance-to-
 superclass) to `beamtalk_hierarchy:walk_ancestors/3`, supplying only the
 per-ancestor probe. Depth-exhaustion is intentionally uniform across all of
-them: BT-3087 found `beamtalk_interface`'s copies silently swallowing a
+them: an audit found `beamtalk_interface`'s copies silently swallowing a
 hierarchy cycle (returning the receiver's own class / an empty map) while
 `beamtalk_repl_docs`'s copies warned via `?LOG_WARNING` — a hierarchy cycle
 was diagnosable via `:help` in the REPL but invisible via the programmatic
@@ -146,7 +146,7 @@ a selector redefined by a subclass is tagged with the subclass as its
 
 If the walk exhausts `?MAX_HIERARCHY_DEPTH` (a hierarchy cycle), returns the
 partial map folded up through the ancestors actually visited before the
-guard tripped (BT-3096) — not an empty map — and logs a `?LOG_WARNING`
+guard tripped — not an empty map — and logs a `?LOG_WARNING`
 naming the ancestor where the cycle was detected.
 """.
 -spec collect_flattened_methods(atom(), pid()) -> map().
@@ -193,13 +193,13 @@ Returns #{Selector => DefiningClass} — local methods shadow inherited ones.
 
 On depth exhaustion (`?MAX_HIERARCHY_DEPTH`, a hierarchy cycle) returns the
 partial map folded up through the ancestors actually visited before the
-guard tripped (BT-3096) — not `#{}` — and logs a `?LOG_WARNING` naming the
+guard tripped — not `#{}` — and logs a `?LOG_WARNING` naming the
 ancestor where the cycle was detected.
 
-BT-3478: Moved here from `beamtalk_repl_docs` (its only prior caller) so
+Moved here from `beamtalk_repl_docs` (its only prior caller) so
 `beamtalk_repl_ops_dev`'s "inherited-methods" ws op can reuse the same
 class-side walk instead of a second copy — mirrors `collect_flattened_methods/2`
-above, which made the same move for the instance side under BT-3087.
+above, which made the same move for the instance side earlier.
 """.
 -spec collect_flattened_class_methods(atom(), pid()) -> #{atom() => atom()}.
 collect_flattened_class_methods(ClassName, ClassPid) ->
